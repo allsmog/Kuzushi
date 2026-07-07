@@ -97,6 +97,21 @@ fn broadcast_sink_writes_to_inner_and_channel() {
 }
 
 #[test]
+fn broadcast_sink_counts_dropped_live_sends() {
+    let inner = Arc::new(VecSink::default());
+    let inner_dyn: Arc<dyn TraceSink> = inner.clone();
+    let (tx, rx) = mpsc::channel::<RunTraceStep>();
+    drop(rx);
+    let broadcast = Arc::new(BroadcastSink::new(inner_dyn, tx));
+    let handle = TraceHandle::new(broadcast.clone()).for_module("semgrep");
+
+    let _ = handle.step("tool", "scan", "started").emit();
+
+    assert_eq!(inner.steps.lock().unwrap().len(), 1);
+    assert_eq!(broadcast.dropped_live_sends(), 1);
+}
+
+#[test]
 fn drop_emits_step_when_emit_is_not_called() {
     let sink = Arc::new(VecSink::default());
     let handle = TraceHandle::new(sink.clone()).for_module("verify");

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn transcript_model_splits_multiline_log_entries() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.log = vec![log_line("tool", "first\nsecond", 42)];
+    app.replace_log_for_test(vec![log_line("tool", "first\nsecond", 42)]);
 
     let model = transcript_model(&app, 10);
 
@@ -29,10 +29,10 @@ fn transcript_model_splits_multiline_log_entries() {
 #[test]
 fn transcript_model_tails_visible_rows_after_expansion() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.log = vec![
+    app.replace_log_for_test(vec![
         log_line("scan", "one", 1),
         log_line("agent", "two\nthree", 2),
-    ];
+    ]);
 
     let model = transcript_model(&app, 2);
 
@@ -58,10 +58,10 @@ fn transcript_model_tails_visible_rows_after_expansion() {
 #[test]
 fn transcript_model_from_log_index_expands_entries_after_start() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.log = vec![
+    app.replace_log_for_test(vec![
         log_line("system", "before", 1),
         log_line("tool", "first\nsecond", 2),
-    ];
+    ]);
 
     let model = transcript_model_from_log_index(&app, 1);
 
@@ -87,11 +87,11 @@ fn transcript_model_from_log_index_expands_entries_after_start() {
 #[test]
 fn plain_command_result_model_formats_command_and_log_rows() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.log = vec![
+    app.replace_log_for_test(vec![
         log_line("old", "ignore", 1),
         log_line(">", "show me", 2),
         log_line("run", "first\nsecond", 3),
-    ];
+    ]);
 
     let model = plain_command_result_model(&app, "/run demo", 1);
 
@@ -112,7 +112,7 @@ fn plain_command_result_model_formats_command_and_log_rows() {
 #[test]
 fn transcript_model_keeps_empty_log_body_as_one_row() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.log = vec![log_line("system", "", 0)];
+    app.replace_log_for_test(vec![log_line("system", "", 0)]);
 
     let model = transcript_model(&app, 10);
 

@@ -41,7 +41,7 @@ pub(in crate::renderer::views::workbench) fn terrain_attack_surface_lines(
     lines.push(Line::styled(
         format!(
             "{} findings · {} modules",
-            app.findings.len(),
+            app.findings().len(),
             risk.modules.len()
         ),
         theme::muted(),
@@ -70,7 +70,7 @@ pub(in crate::renderer::views::workbench) fn terrain_material_lines(
 
 fn harness_material_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled("HARNESS", theme::accent())];
-    let Some(target) = app.target.as_ref() else {
+    let Some(target) = app.target_path_buf() else {
         lines.push(Line::styled("  no target selected", theme::muted()));
         lines.push(command_hint("target <path>", "select workspace", width));
         return lines;
@@ -139,10 +139,11 @@ fn empty_recommendation_material_lines(width: usize) -> Vec<Line<'static>> {
 
 fn seed_material_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled("MATERIALS", theme::accent())];
-    if app.kb_view.attachments.is_empty() {
+    let kb_view = app.domain().kb_view();
+    if kb_view.attachments.is_empty() {
         lines.extend(empty_seed_material_lines(width));
     } else {
-        for record in app.kb_view.attachments.iter().take(5) {
+        for record in kb_view.attachments.iter().take(5) {
             lines.push(Line::styled(
                 fit(
                     &format!("  {}  {}  {}", record.id, record.status, record.source),

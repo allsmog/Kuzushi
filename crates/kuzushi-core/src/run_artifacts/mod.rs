@@ -56,7 +56,8 @@ pub use trace_handle::{
     TraceSink, TraceStepBuilder,
 };
 pub use write_run_artifact_json::{
-    append_run_trace_step, next_run_trace_step_number, write_run_artifact_json,
+    append_run_trace_step, append_run_trace_step_with_next_number, next_run_trace_step_number,
+    write_run_artifact_json,
 };
 pub(crate) use write_run_artifact_text::write_run_artifact_text;
 

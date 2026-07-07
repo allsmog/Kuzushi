@@ -76,8 +76,8 @@ pub(crate) struct RunDiffDecisionSummary {
 }
 
 pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiffModel {
-    let left_dir = ui_run_dir(app.target.as_deref(), left);
-    let right_dir = ui_run_dir(app.target.as_deref(), right);
+    let left_dir = ui_run_dir(app.target(), left);
+    let right_dir = ui_run_dir(app.target(), right);
     let mut warnings = Vec::new();
     let left_metadata = run_metadata(app, &left_dir);
     let right_metadata = run_metadata(app, &right_dir);
@@ -153,12 +153,12 @@ fn run_diff_decision_summary(
     app: &ShellApp,
     right_findings: &BTreeMap<String, RunDiffFindingRow>,
 ) -> Option<RunDiffDecisionSummary> {
-    if app.findings.is_empty() {
+    if app.findings().is_empty() {
         return None;
     }
     let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
-        &app.findings,
-        &app.review_decisions,
+        app.findings(),
+        app.review_decisions(),
     );
     let mut summary = RunDiffDecisionSummary::default();
     for (identity_id, row) in right_findings

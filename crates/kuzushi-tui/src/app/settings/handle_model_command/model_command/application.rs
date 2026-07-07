@@ -7,8 +7,8 @@ impl ShellApp {
         }
         model_command_default_scopes_to_module(
             command.force_global,
-            self.focused_module.is_some(),
-            self.config.model.is_some(),
+            self.focused_module().is_some(),
+            self.config().model.is_some(),
         )
     }
 
@@ -16,22 +16,22 @@ impl ShellApp {
         &mut self,
         model: String,
         thinking_level: Option<String>,
-    ) {
-        let Some(module_id) = self.focused_module.clone() else {
+    ) -> Vec<ShellEffect> {
+        let Some(module_id) = self.focused_module_owned() else {
             self.log(
                 "error",
                 "model module requires a focused module. Next: use <module>, then model module <choice>",
             );
-            return;
+            return Vec::new();
         };
-        self.option_store.set_value(
+        self.option_store_mut().set_value(
             OptionScope::Session,
             OptionTarget::Module(module_id.clone()),
             "model",
             serde_json::json!(model.clone()),
         );
         if let Some(level) = &thinking_level {
-            self.option_store.set_value(
+            self.option_store_mut().set_value(
                 OptionScope::Session,
                 OptionTarget::Module(module_id.clone()),
                 "effort",
@@ -49,17 +49,17 @@ impl ShellApp {
                     .unwrap_or_default()
             ),
         );
+        Vec::new()
     }
 
     pub(super) fn apply_global_model_command(
         &mut self,
         model: String,
         thinking_level: Option<String>,
-    ) {
-        self.config.model = Some(model.clone());
-        self.session_thinking_level = thinking_level.clone();
+    ) -> Vec<ShellEffect> {
+        self.config_mut().model = Some(model.clone());
+        self.set_session_thinking_level(thinking_level.clone());
         self.sync_selected_model_index();
-        self.persist_global_model_choice(&model, thinking_level.as_deref());
         self.log(
             "model",
             format!(
@@ -70,17 +70,23 @@ impl ShellApp {
                     .unwrap_or_default()
             ),
         );
+        vec![global_model_selection_persist_effect(
+            &model,
+            thinking_level.as_deref(),
+        )]
     }
 
-    pub(crate) fn persist_global_model_choice(
+    pub(crate) fn persist_global_model_selection_effect(
         &mut self,
-        model: &str,
-        thinking_level: Option<&str>,
+        selection: GlobalModelSelectionPersist,
     ) {
         if !model_persistence_enabled_for_build() {
             return;
         }
-        match kuzushi_core::config::persist_global_model_selection(model, thinking_level) {
+        match kuzushi_core::config::persist_global_model_selection(
+            &selection.model,
+            selection.thinking_level.as_deref(),
+        ) {
             Ok(path) => self.log("model", format!("saved global model to {}", path.display())),
             Err(error) => self.log(
                 "warn",
@@ -88,6 +94,16 @@ impl ShellApp {
             ),
         }
     }
+}
+
+pub(crate) fn global_model_selection_persist_effect(
+    model: &str,
+    thinking_level: Option<&str>,
+) -> ShellEffect {
+    ShellEffect::PersistGlobalModelSelection(GlobalModelSelectionPersist {
+        model: model.to_string(),
+        thinking_level: thinking_level.map(ToString::to_string),
+    })
 }
 
 fn model_command_default_scopes_to_module(

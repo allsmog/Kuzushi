@@ -7,22 +7,28 @@ mod tests {
     fn start_planner_reports_empty_running_and_missing_model_without_spawning() {
         let mut app = ShellApp::new(V2Config::default(), None);
 
-        app.start_planner("   ");
-        assert!(app.log.iter().any(|line| line.prefix == "error"));
+        update_and_execute_effects(&mut app, Msg::Cmd(ShellCommand::Plan("   ".to_string())));
+        assert!(app.log_lines().iter().any(|line| line.prefix == "error"));
 
-        app.log.clear();
-        app.planner_running = true;
-        app.start_planner("check auth");
+        app.clear_log();
+        app.set_planner_running(true);
+        update_and_execute_effects(
+            &mut app,
+            Msg::Cmd(ShellCommand::Plan("check auth".to_string())),
+        );
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("planner already running")));
 
-        app.log.clear();
-        app.planner_running = false;
-        app.start_planner("check auth");
+        app.clear_log();
+        app.set_planner_running(false);
+        update_and_execute_effects(
+            &mut app,
+            Msg::Cmd(ShellCommand::Plan("check auth".to_string())),
+        );
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("requires an explicit model")));
     }

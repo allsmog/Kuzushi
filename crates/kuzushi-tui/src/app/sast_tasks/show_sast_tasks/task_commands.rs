@@ -2,41 +2,50 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn show_sast_tasks(&mut self) {
-        if self.registry.resolve_tool("sast:scan").is_none() {
+        if self.registry().resolve_tool("sast:scan").is_none() {
             self.log("error", "SAST module is not loaded. Next: modules");
             return;
         }
-        self.focused_module = Some("sast".to_string());
+        self.set_focused_module(Some("sast".to_string()));
         self.shell_view = ShellView::SastTasks;
         self.log("tasks", self.sast_task_summary_line());
     }
 
-    pub(crate) fn handle_sast_task_command(&mut self, command: SastTaskCommand) {
-        if !self.ensure_sast_module_loaded() {
-            return;
+    pub(crate) fn reduce_sast_task_command(
+        &mut self,
+        command: SastTaskCommand,
+    ) -> Vec<ShellEffect> {
+        match self.plan_sast_task_command(command) {
+            Ok(apply) => vec![ShellEffect::ApplySastTaskOptions(apply)],
+            Err(error) => vec![ShellEffect::FinalizeSastTaskCommand(
+                SastTaskCommandFinalize {
+                    outcome: SastTaskCommandOutcome::Error(error.to_string()),
+                },
+            )],
         }
-        let result = self.apply_sast_task_command(command);
-        self.finish_sast_task_command(result);
     }
 
-    fn ensure_sast_module_loaded(&mut self) -> bool {
-        if self.registry.resolve_tool("sast:scan").is_some() {
-            return true;
-        }
-        self.log("error", "SAST module is not loaded. Next: modules");
-        false
-    }
-
-    fn apply_sast_task_command(&mut self, command: SastTaskCommand) -> anyhow::Result<String> {
+    fn plan_sast_task_command(
+        &self,
+        command: SastTaskCommand,
+    ) -> anyhow::Result<SastTaskOptionsApply> {
+        self.ensure_sast_module_loaded()?;
         match command {
-            SastTaskCommand::Block(raw_id) => self.block_sast_task(&raw_id),
-            SastTaskCommand::Allow(raw_id) => self.allow_sast_task(&raw_id),
+            SastTaskCommand::Block(raw_id) => self.plan_block_sast_task(&raw_id),
+            SastTaskCommand::Allow(raw_id) => self.plan_allow_sast_task(&raw_id),
             SastTaskCommand::Toggle(raw_id) => {
-                self.toggle_sast_task(&self.toggle_sast_task_id(raw_id))
+                self.plan_toggle_sast_task(&self.toggle_sast_task_id(raw_id))
             }
-            SastTaskCommand::Mode(mode) => self.set_sast_task_mode(mode),
-            SastTaskCommand::Reset => self.reset_sast_tasks(),
+            SastTaskCommand::Mode(mode) => self.plan_sast_task_mode(mode),
+            SastTaskCommand::Reset => Ok(self.plan_reset_sast_tasks()),
         }
+    }
+
+    fn ensure_sast_module_loaded(&self) -> anyhow::Result<()> {
+        if self.registry().resolve_tool("sast:scan").is_some() {
+            return Ok(());
+        }
+        anyhow::bail!("SAST module is not loaded. Next: modules");
     }
 
     fn toggle_sast_task_id(&self, raw_id: Option<String>) -> String {
@@ -51,12 +60,12 @@ impl ShellApp {
             .unwrap_or_else(|| "semgrep".to_string())
     }
 
-    fn finish_sast_task_command(&mut self, result: anyhow::Result<String>) {
+    pub(crate) fn finalize_sast_task_command_effect(&mut self, finalize: SastTaskCommandFinalize) {
         self.shell_view = ShellView::SastTasks;
-        self.focused_module = Some("sast".to_string());
-        match result {
-            Ok(message) => self.log("tasks", message),
-            Err(error) => self.log("error", error.to_string()),
+        self.set_focused_module(Some("sast".to_string()));
+        match finalize.outcome {
+            SastTaskCommandOutcome::Applied(message) => self.log("tasks", message),
+            SastTaskCommandOutcome::Error(error) => self.log("error", error),
         }
     }
 }

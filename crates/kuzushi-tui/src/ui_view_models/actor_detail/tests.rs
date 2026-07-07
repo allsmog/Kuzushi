@@ -3,11 +3,11 @@ use super::*;
 #[test]
 fn actor_detail_model_tails_visible_transcript_rows() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.log = vec![
+    app.replace_log_for_test(vec![
         log_line("scan", "started"),
         log_line("tool", "semgrep"),
         log_line("finding", "sql injection"),
-    ];
+    ]);
 
     let model = actor_detail_model(&app, 2);
 
@@ -31,8 +31,13 @@ fn actor_detail_model_tails_visible_transcript_rows() {
 #[test]
 fn actor_detail_model_applies_active_filter() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.actor_detail_filter = ActorDetailFilter::Errors;
-    app.log = vec![log_line("scan", "started"), log_line("error", "failed")];
+    app.router
+        .actor_detail_mut()
+        .set_filter(ActorDetailFilter::Errors);
+    app.replace_log_for_test(vec![
+        log_line("scan", "started"),
+        log_line("error", "failed"),
+    ]);
 
     let model = actor_detail_model(&app, 10);
 

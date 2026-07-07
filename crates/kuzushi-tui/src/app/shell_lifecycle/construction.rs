@@ -36,9 +36,12 @@ fn read_auto_open_viz_pref(option_store: &ToolOptionStore) -> bool {
 }
 
 pub(crate) fn refresh_auto_open_prefs_from_store(app: &mut ShellApp) {
-    app.auto_open_activity = read_auto_open_activity_pref(&app.option_store);
-    app.auto_open_viz = read_auto_open_viz_pref(&app.option_store);
-    app.workbench_depth_stack = read_workbench_depth_stack_pref(&app.option_store);
+    let auto_open_activity = read_auto_open_activity_pref(app.option_store());
+    let auto_open_viz = read_auto_open_viz_pref(app.option_store());
+    let depth_stack = read_workbench_depth_stack_pref(app.option_store());
+    app.ui_mut().set_auto_open_activity(auto_open_activity);
+    app.ui_mut().set_auto_open_viz(auto_open_viz);
+    app.router.workbench_mut().set_depth_stack(depth_stack);
 }
 
 fn read_bool_pref(option_store: &ToolOptionStore, option_name: &str, env_key: &str) -> bool {
@@ -124,6 +127,7 @@ impl ShellApp {
             session_budget_usd,
             trusted_workflow_auto_accept
         );
+        refresh_auto_open_prefs_from_store(&mut app);
         app.hydrate_persisted_scene_snapshots(target.map(|target| target.root()));
         app.refresh_program_scope();
         app.announce_startup(
@@ -166,7 +170,7 @@ impl ShellApp {
 
     fn apply_session_model(&mut self, selected_model_index: usize, ready_default: Option<usize>) {
         if let Some(choice) = model_choices().get(selected_model_index) {
-            self.session_thinking_level = Some(choice.thinking_level.to_string());
+            self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
         }
         if let Some(choice) = ready_default.and_then(|index| model_choices().get(index)) {
             self.log(

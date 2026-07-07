@@ -174,8 +174,14 @@ mod tests {
         let analysis = parse_vuln_analysis(&outcome);
         assert!(!analysis.triggerable);
         assert!(analysis.confidence < 0.5);
+        assert!(
+            analysis.rationale.contains("synthesized fallback"),
+            "fallback rationale must make parse failure visible: {}",
+            analysis.rationale
+        );
         let triage = build_triage_outcome(&analysis, &outcome);
         assert_eq!(triage.verdict, TriageVerdict::NeedsReview);
+        assert!(triage.rationale.contains("synthesized fallback"));
     }
 
     #[test]

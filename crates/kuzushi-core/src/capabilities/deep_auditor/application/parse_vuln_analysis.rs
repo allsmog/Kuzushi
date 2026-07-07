@@ -1,28 +1,45 @@
 use super::*;
 
+const SYNTHESIZED_FALLBACK_PREFIX: &str =
+    "[deep-auditor synthesized fallback: could not parse structured verdict]";
+
 pub(crate) fn parse_vuln_analysis(outcome: &AgentLoopOutcome) -> VulnAnalysis {
-    if let Some(ref structured) = outcome.structured {
-        if let Ok(analysis) = serde_json::from_value::<VulnAnalysis>(structured.clone()) {
-            return clamp(analysis);
-        }
+    structured_vuln_analysis(outcome)
+        .or_else(|| text_vuln_analysis(outcome))
+        .unwrap_or_else(|| fallback_vuln_analysis(outcome))
+}
+
+fn structured_vuln_analysis(outcome: &AgentLoopOutcome) -> Option<VulnAnalysis> {
+    outcome
+        .structured
+        .as_ref()
+        .and_then(|structured| serde_json::from_value::<VulnAnalysis>(structured.clone()).ok())
+        .map(clamp)
+}
+
+fn text_vuln_analysis(outcome: &AgentLoopOutcome) -> Option<VulnAnalysis> {
+    if outcome.text.is_empty() {
+        return None;
     }
-    if !outcome.text.is_empty() {
-        if let Some(parsed) = try_parse_loose_json::<VulnAnalysis>(&outcome.text) {
-            return clamp(parsed);
-        }
-    }
+    try_parse_loose_json::<VulnAnalysis>(&outcome.text).map(clamp)
+}
+
+fn fallback_vuln_analysis(outcome: &AgentLoopOutcome) -> VulnAnalysis {
     // Conservative fallback: not triggerable, low confidence, attach the
     // raw text so an operator can review.
     VulnAnalysis {
         triggerable: false,
-        rationale: if outcome.text.is_empty() {
-            "deep auditor returned no structured verdict".to_string()
-        } else {
-            outcome.text.clone()
-        },
+        rationale: synthesized_fallback_rationale(&outcome.text),
         confidence: 0.25,
         evidence: collect_implicit_evidence(&outcome.transcript),
     }
+}
+
+fn synthesized_fallback_rationale(text: &str) -> String {
+    if text.trim().is_empty() {
+        return format!("{SYNTHESIZED_FALLBACK_PREFIX} no model text returned");
+    }
+    format!("{SYNTHESIZED_FALLBACK_PREFIX} raw model text: {}", text.trim())
 }
 
 pub(crate) fn collect_implicit_evidence(transcript: &[LoopHistoryEntry]) -> Vec<EvidenceCitation> {

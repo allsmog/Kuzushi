@@ -57,7 +57,7 @@ impl ScanCancellation {
         }
     }
 
-    pub(in crate::scan) fn register_child(
+    pub fn register_child(
         &self,
         child: Child,
         process_group_id: Option<u32>,
@@ -82,7 +82,7 @@ impl ScanCancellation {
 }
 
 #[derive(Debug)]
-pub(in crate::scan) struct RegisteredChild {
+pub struct RegisteredChild {
     pub(in crate::scan) id: u64,
     pub(in crate::scan) children: Arc<Mutex<HashMap<u64, ManagedChild>>>,
 }

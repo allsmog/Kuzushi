@@ -11,16 +11,19 @@ impl ShellApp {
     /// The implicit options target when none is named: the open Options view,
     /// else the focused module's tool, else the SAST umbrella, else any tool.
     fn default_options_tool(&self) -> Result<String> {
-        if let ShellView::Options(view) = &self.shell_view {
-            return Ok(view.tool_name.clone());
+        if matches!(self.shell_view, ShellView::Options) {
+            let tool_name = &self.router.options().tool_name;
+            if !tool_name.is_empty() {
+                return Ok(tool_name.clone());
+            }
         }
         self.default_tool_for_focused_module()
             .or_else(|| {
-                self.registry
+                self.registry()
                     .resolve_tool("sast:scan")
                     .map(|_| "sast:scan".to_string())
             })
-            .or_else(|| self.registry.tools().next().map(|tool| tool.name.clone()))
+            .or_else(|| self.registry().tools().next().map(|tool| tool.name.clone()))
             .context("no tools are loaded. Next: modules")
     }
 
@@ -42,19 +45,20 @@ impl ShellApp {
     /// id, or a bare module id resolved to its primary tool.
     fn lookup_options_tool(&self, tool_name: &str) -> Option<String> {
         let resolved = self.resolve_focused_tool_name(tool_name.to_string());
-        if self.registry.resolve_tool(&resolved).is_some() {
+        if self.registry().resolve_tool(&resolved).is_some() {
             return Some(resolved);
         }
-        if self.registry.resolve_tool(tool_name).is_some() {
+        if self.registry().resolve_tool(tool_name).is_some() {
             return Some(tool_name.to_string());
         }
         self.default_tool_for_module(tool_name)
     }
 
     pub(crate) fn current_options_filter(&self) -> OptionsFilter {
-        match &self.shell_view {
-            ShellView::Options(view) => view.filter,
-            _ => OptionsFilter::Standard,
+        if matches!(self.shell_view, ShellView::Options) {
+            self.router.options().filter
+        } else {
+            OptionsFilter::Standard
         }
     }
 }

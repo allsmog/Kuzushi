@@ -23,7 +23,7 @@ pub(in crate::renderer::views::workbench) fn ship_patch_lines(
     width: usize,
 ) -> Vec<Line<'static>> {
     let patchable = app
-        .findings
+        .findings()
         .iter()
         .filter(|finding| {
             finding.verification.as_ref().is_some_and(|verification| {

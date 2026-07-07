@@ -35,11 +35,11 @@ pub(crate) fn module_progress_model(
     app: &ShellApp,
     summary: &ModuleRunSummary,
 ) -> ModuleProgressModel {
-    let focused_module = app.focused_module.as_deref();
+    let focused_module = app.focused_module();
     let show_sast_tasks = selected_sast_tasks_are_visible(app, summary, focused_module);
 
     if show_sast_tasks {
-        if let Some(progress) = app.scan_progress.as_ref() {
+        if let Some(progress) = app.domain().scan_progress() {
             return ModuleProgressModel {
                 section: ModuleProgressSection::RealScan {
                     rows: real_scan_rows(app, progress, summary.findings),
@@ -144,7 +144,7 @@ fn selected_sast_row(label: &'static str, scan_done: bool) -> ModuleProgressRow 
 /// "0 queued after scan" that survived triage completing.
 fn triage_row(app: &ShellApp, findings: usize) -> ModuleProgressRow {
     let done = app
-        .findings
+        .findings()
         .iter()
         .filter(|finding| finding.triage.is_some())
         .count()
@@ -197,9 +197,9 @@ mod tests {
     #[test]
     fn module_progress_model_prefers_real_scan_rows() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.focused_module = Some("sast".to_string());
-        app.scan = Some(scan_panel(true, 2));
-        app.scan_progress = Some(scan_progress());
+        app.set_focused_module(Some("sast".to_string()));
+        app.set_scan_panel(Some(scan_panel(true, 2)));
+        app.domain_mut().set_scan_progress(scan_progress());
         let summary = super::super::module_run_summary(&app);
 
         let model = module_progress_model(&app, &summary);
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn module_progress_model_selects_context_build_section() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.focused_module = Some("context".to_string());
+        app.set_focused_module(Some("context".to_string()));
         let summary = super::super::module_run_summary(&app);
 
         let model = module_progress_model(&app, &summary);
@@ -225,8 +225,8 @@ mod tests {
     #[test]
     fn module_progress_model_uses_selected_sast_placeholders() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.focused_module = Some("sast".to_string());
-        app.scan = Some(scan_panel(true, 0));
+        app.set_focused_module(Some("sast".to_string()));
+        app.set_scan_panel(Some(scan_panel(true, 0)));
         let summary = super::super::module_run_summary(&app);
 
         let model = module_progress_model(&app, &summary);
@@ -243,7 +243,7 @@ mod tests {
         // Regression: the row hardcoded done=0/"queued after scan", so a fully
         // triaged workspace still claimed triage hadn't started.
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.findings = vec![triaged_finding(), triaged_finding()];
+        *app.findings_mut() = vec![triaged_finding(), triaged_finding()];
         let row = triage_row(&app, 2);
         assert_eq!(row.done, 2);
         assert_eq!(row.status, "done");
@@ -253,8 +253,8 @@ mod tests {
     #[test]
     fn triage_row_shows_running_while_triage_tool_is_in_flight() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.findings = vec![triaged_finding()];
-        app.tool_running = Some("triage:run".to_string());
+        *app.findings_mut() = vec![triaged_finding()];
+        app.set_running_tool_for_test("triage:run");
         let row = triage_row(&app, 3);
         assert_eq!(row.status, "running…");
         assert_eq!(row.kind, ModuleProgressKind::Active);
@@ -267,7 +267,7 @@ mod tests {
         assert_eq!(triage_row(&app, 0).status, "waiting for findings");
         assert_eq!(triage_row(&app, 4).status, "queued after scan");
         assert_eq!(triage_row(&app, 4).kind, ModuleProgressKind::Queued);
-        app.findings = vec![triaged_finding()];
+        *app.findings_mut() = vec![triaged_finding()];
         let partial = triage_row(&app, 4);
         assert_eq!(partial.status, "partially triaged");
         assert_eq!(partial.done, 1);

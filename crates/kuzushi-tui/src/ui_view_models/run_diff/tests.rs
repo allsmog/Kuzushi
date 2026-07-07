@@ -70,8 +70,8 @@ fn run_diff_model_compares_findings_by_stable_identity() {
         ]),
     );
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.findings = vec![
+    app.set_target(Some(temp.path().to_path_buf()));
+    *app.findings_mut() = vec![
         reviewed_finding("fi_shared", TriageVerdict::TruePositive),
         reviewed_finding("fi_changed", TriageVerdict::FalsePositive),
     ];
@@ -133,7 +133,7 @@ fn run_diff_model_separates_unique_uncertain_identity_matches() {
         )]),
     );
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_diff_model(&app, "run-left", "run-right");
 
@@ -185,8 +185,8 @@ fn run_diff_model_does_not_carry_decisions_to_uncertain_matches() {
         )]),
     );
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.findings = vec![reviewed_finding(
+    app.set_target(Some(temp.path().to_path_buf()));
+    *app.findings_mut() = vec![reviewed_finding(
         "fi_reviewed_left",
         TriageVerdict::TruePositive,
     )];
@@ -244,7 +244,7 @@ fn run_diff_model_leaves_ambiguous_uncertain_matches_unpaired() {
         )]),
     );
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_diff_model(&app, "run-left", "run-right");
 
@@ -317,7 +317,7 @@ fn reviewed_finding(identity_id: &str, verdict: TriageVerdict) -> Finding {
 fn run_diff_model_warns_for_missing_snapshots() {
     let temp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_diff_model(&app, "missing-a", "missing-b");
 
@@ -356,7 +356,7 @@ fn run_diff_model_warns_when_comparison_run_is_partial_or_failed() {
         json!([]),
     );
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_diff_model(&app, "run-left", "run-right");
 
@@ -389,7 +389,7 @@ fn run_diff_model_preserves_completed_status() {
         json!([]),
     );
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_diff_model(&app, "run-left", "run-right");
 

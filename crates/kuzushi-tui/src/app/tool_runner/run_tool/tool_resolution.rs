@@ -3,7 +3,7 @@ use super::*;
 impl ShellApp {
     pub(crate) fn unknown_module_message(&self, module: &str) -> String {
         let module_ids = self
-            .registry
+            .registry()
             .modules()
             .map(|entry| entry.metadata().id.clone())
             .collect::<Vec<_>>();
@@ -18,7 +18,7 @@ impl ShellApp {
     }
 
     pub(crate) fn default_tool_for_focused_module(&self) -> Option<String> {
-        let module = self.focused_module.as_ref()?;
+        let module = self.focused_module()?;
         self.default_tool_for_module(module)
     }
 
@@ -26,11 +26,11 @@ impl ShellApp {
     /// `semgrep:scan`. Lets command surfaces accept a module id where a tool id
     /// is expected, matching how operators think.
     pub(crate) fn default_tool_for_module(&self, module: &str) -> Option<String> {
-        if module == "verify" && self.registry.resolve_tool("verify:finding").is_some() {
+        if module == "verify" && self.registry().resolve_tool("verify:finding").is_some() {
             return Some("verify:finding".to_string());
         }
         if let Some(tool_name) = self
-            .registry
+            .registry()
             .modules()
             .find(|entry| entry.metadata().id == module)
             .and_then(|entry| entry.tools().iter().find(|tool| !tool.hidden))
@@ -39,7 +39,7 @@ impl ShellApp {
             return Some(tool_name);
         }
         let prefix = format!("{module}:");
-        self.registry
+        self.registry()
             .tools()
             .find(|tool| tool.name.starts_with(&prefix))
             .map(|tool| tool.name.clone())
@@ -47,7 +47,7 @@ impl ShellApp {
 
     pub(crate) fn default_tool_for_run_command(&self) -> Option<String> {
         self.default_tool_for_focused_module().or_else(|| {
-            self.registry
+            self.registry()
                 .resolve_tool("sast:scan")
                 .map(|_| "sast:scan".to_string())
         })
@@ -57,11 +57,11 @@ impl ShellApp {
         if tool_name.contains(':') {
             return tool_name;
         }
-        let Some(module) = self.focused_module.as_ref() else {
+        let Some(module) = self.focused_module() else {
             return tool_name;
         };
         let candidate = format!("{module}:{tool_name}");
-        if self.registry.resolve_tool(&candidate).is_some() {
+        if self.registry().resolve_tool(&candidate).is_some() {
             candidate
         } else {
             tool_name

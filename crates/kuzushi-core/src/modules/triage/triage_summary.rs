@@ -94,7 +94,7 @@ fn select_referenced_triage_findings(
     for reference in references {
         match store.get_finding_by_reference(reference)? {
             Some(finding) if finding_matches_triage_scope(&finding, scan_id) => {
-                push_triage_candidate(findings, seen, finding, input.retriage);
+                push_triage_candidate(store, findings, seen, finding, input.retriage)?;
             }
             _ => missing.push(reference.clone()),
         }
@@ -111,7 +111,7 @@ fn select_all_triage_findings(
 ) -> Result<()> {
     for finding in store.list_findings(FindingListFilter::MAX_LIMIT)? {
         if finding_matches_triage_scope(&finding, scan_id) {
-            push_triage_candidate(findings, seen, finding, input.retriage);
+            push_triage_candidate(store, findings, seen, finding, input.retriage)?;
         }
     }
     Ok(())
@@ -132,15 +132,31 @@ fn finding_matches_triage_scope(finding: &Finding, scan_id: Option<&str>) -> boo
 }
 
 fn push_triage_candidate(
+    store: &FindingStore,
     findings: &mut Vec<Finding>,
     seen: &mut BTreeSet<String>,
     finding: Finding,
     retriage: bool,
-) {
-    if finding.triage.is_some() && !retriage {
-        return;
+) -> Result<()> {
+    if !retriage && finding_has_review_decision(store, &finding)? {
+        return Ok(());
     }
     if seen.insert(finding.fingerprint.clone()) {
         findings.push(finding);
     }
+    Ok(())
+}
+
+fn finding_has_review_decision(store: &FindingStore, finding: &Finding) -> Result<bool> {
+    if finding.triage.is_some() {
+        return Ok(true);
+    }
+    if let Some(identity_id) = finding.identity_id.as_deref() {
+        return Ok(store.latest_review_decision_for_identity(identity_id)?.is_some());
+    }
+    finding
+        .id
+        .map(|finding_id| store.latest_review_decision(finding_id))
+        .transpose()
+        .map(|decision| decision.flatten().is_some())
 }

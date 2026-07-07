@@ -10,11 +10,11 @@ pub(crate) fn render_plain_scripted_session(
         if index > 0 {
             output.push('\n');
         }
-        let log_start = app.log.len();
+        let log_start = app.log_len();
         submit_plain_scripted_command(app, command);
-        app.drain_background_events();
+        app_background_changed(app);
         output.push_str(&render_plain_command_result(app, width, command, log_start));
-        if app.should_quit {
+        if app.should_quit() {
             break;
         }
     }
@@ -23,9 +23,24 @@ pub(crate) fn render_plain_scripted_session(
 
 fn submit_plain_scripted_command(app: &mut ShellApp, command: &str) {
     match crate::commands::parse_command(command) {
-        ShellCommand::Scan(target) => app.start_umbrella_sast_scan(target),
-        _ => app.submit_line(command),
+        ShellCommand::Scan(target) => {
+            update_and_execute_effects(app, Msg::Cmd(ShellCommand::ScriptedScan(target)));
+        }
+        _ => {
+            submit_plain_line(app, command);
+        }
     }
+}
+
+fn submit_plain_line(app: &mut ShellApp, command: &str) {
+    app.set_input(command);
+    update_and_execute_effects(
+        app,
+        Msg::Term(TermEvent::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::empty(),
+        ))),
+    );
 }
 
 #[cfg(test)]
@@ -39,7 +54,7 @@ mod tests {
 
         submit_plain_scripted_command(&mut app, &format!("scan {}", temp.path().display()));
 
-        assert!(app.scan.as_ref().is_some_and(|scan| scan.running));
+        assert!(app.scan().is_some_and(|scan| scan.running));
         assert_eq!(app.shell_view, ShellView::Activity);
         assert_ne!(app.shell_view, ShellView::PlanningPicker);
     }

@@ -8,7 +8,7 @@ use crate::app::compact_secs;
 use crate::{ActivitySession, DagTaskState, ShellApp};
 
 pub(crate) fn ambient_progress_chip(app: &ShellApp) -> Option<String> {
-    let session = app.activity.as_ref()?;
+    let session = app.activity()?;
     let subject = live_subject(app, session)?;
     let background = if app.tool_is_ambient(&subject.name) {
         " (background)"
@@ -97,7 +97,7 @@ mod tests {
         let mut done = crate::DagTaskRow::queued("x:run".into(), "x".into(), Vec::new());
         done.state = DagTaskState::Done;
         session.tasks.insert("x:run".into(), done);
-        app.activity = Some(session);
+        app.set_activity(Some(session));
         app.task_durations.record_secs("cpg:build", 379);
 
         let chip = ambient_progress_chip(&app).expect("chip while a task is active");
@@ -112,15 +112,15 @@ mod tests {
         assert_eq!(ambient_progress_chip(&app), None);
         // A session whose tasks are all done and with no running tool is
         // finished work — the chip must clear.
-        app.activity = Some(ActivitySession::new("r-1"));
+        app.set_activity(Some(ActivitySession::new("r-1")));
         assert_eq!(ambient_progress_chip(&app), None);
     }
 
     #[test]
     fn chip_names_the_tool_for_taskless_runs() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.activity = Some(ActivitySession::new("tool-1"));
-        app.tool_running = Some("threat-model:build".to_string());
+        app.set_activity(Some(ActivitySession::new("tool-1")));
+        app.set_running_tool_for_test("threat-model:build");
         let chip = ambient_progress_chip(&app).expect("chip while a tool runs");
         assert!(chip.contains("threat-model:build"), "{chip}");
         assert!(!chip.contains("(background)"), "{chip}");
@@ -131,9 +131,9 @@ mod tests {
         // The recommender is shell work, not operator work — the chip says so
         // instead of presenting it like a run the operator started.
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.activity = Some(ActivitySession::new("tool-1"));
-        app.tool_running = Some("module-recommender:recommend".to_string());
-        app.ambient_tool = Some("module-recommender:recommend".to_string());
+        app.set_activity(Some(ActivitySession::new("tool-1")));
+        app.set_running_tool_for_test("module-recommender:recommend");
+        app.set_ambient_tool_for_test("module-recommender:recommend");
         let chip = ambient_progress_chip(&app).expect("chip while a tool runs");
         assert!(
             chip.contains("module-recommender:recommend (background)"),

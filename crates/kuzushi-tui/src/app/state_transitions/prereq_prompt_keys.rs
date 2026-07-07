@@ -1,15 +1,14 @@
 use super::*;
 
 impl ShellApp {
-    pub(super) fn handle_prereq_prompt_key(&mut self, key: KeyEvent) -> bool {
+    pub(super) fn handle_prereq_prompt_key(&mut self, key: KeyEvent) -> InputUpdate {
         if !self.engagement.has_pending_prereq_prompt() || !key.modifiers.is_empty() {
-            return false;
+            return InputUpdate::ignored();
         }
         let Some(action) = prereq_prompt_action(key.code) else {
-            return false;
+            return InputUpdate::ignored();
         };
-        self.resolve_prereq_plan(action);
-        true
+        InputUpdate::handled_with_effects(self.resolve_prereq_plan(action))
     }
 }
 

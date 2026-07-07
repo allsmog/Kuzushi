@@ -8,6 +8,8 @@ use std::time::Instant;
 /// to per-task aggregates (`steps_done`, `last_label`, `cost_usd`) survives.
 pub const ACTIVITY_FEED_RING_CAPACITY: usize = 2000;
 const ACTIVITY_TASK_DETAIL_CAPACITY: usize = 6;
+const ACTIVITY_TASK_ROW_CAPACITY: usize = 2048;
+const ACTIVITY_HIDDEN_TASK_STATE_CAPACITY: usize = 2048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneFocus {
@@ -167,6 +169,7 @@ pub struct SubsystemAggregate {
     pub last_label: String,
     pub state: DagTaskState,
     pub(crate) hidden_task_states: BTreeMap<String, DagTaskState>,
+    observed_task_count: usize,
 }
 
 impl Default for SubsystemAggregate {
@@ -177,6 +180,7 @@ impl Default for SubsystemAggregate {
             last_label: String::new(),
             state: DagTaskState::Queued,
             hidden_task_states: BTreeMap::new(),
+            observed_task_count: 0,
         }
     }
 }
@@ -192,6 +196,7 @@ impl SubsystemAggregate {
             total_count,
             last_label: last_label.into(),
             state,
+            observed_task_count: total_count,
             ..Self::default()
         }
     }
@@ -207,6 +212,19 @@ pub struct ActivitySession {
     pub step_task_ids: BTreeMap<usize, String>,
     pub subsystem_aggregate: SubsystemAggregate,
     pub events: VecDeque<RecordedTraceEvent>,
+}
+
+struct VisibleStepTask {
+    task_id: String,
+    rolled_up_child: bool,
+}
+
+/// Route-local UI state for the Activity surface. The paired `ActivitySession`
+/// owns run/DAG/event data; this type owns the operator's current projection of
+/// that data: focused task, pane, pause/filter flags, scroll positions, and
+/// generated-output deck selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityRouteState {
     pub focus_task: Option<String>,
     pub pane_focus: PaneFocus,
     pub verbose_subsystems: bool,
@@ -225,20 +243,24 @@ pub struct ActivitySession {
     pub feed_auto_tail: bool,
 }
 
-struct VisibleStepTask {
-    task_id: String,
-    rolled_up_child: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityTerminalContext {
+    Run,
+    Scan,
 }
 
-impl ActivitySession {
-    pub fn new(run_id: impl Into<String>) -> Self {
+impl ActivityTerminalContext {
+    fn noun(self) -> &'static str {
+        match self {
+            ActivityTerminalContext::Run => "run",
+            ActivityTerminalContext::Scan => "scan",
+        }
+    }
+}
+
+impl Default for ActivityRouteState {
+    fn default() -> Self {
         Self {
-            run_id: run_id.into(),
-            started_at: Instant::now(),
-            tasks: BTreeMap::new(),
-            step_task_ids: BTreeMap::new(),
-            subsystem_aggregate: SubsystemAggregate::default(),
-            events: VecDeque::with_capacity(ACTIVITY_FEED_RING_CAPACITY),
             focus_task: None,
             pane_focus: PaneFocus::Left,
             verbose_subsystems: false,
@@ -251,6 +273,19 @@ impl ActivitySession {
             deck_page_pinned_by_user: false,
             paused_event_count: None,
             feed_auto_tail: false,
+        }
+    }
+}
+
+impl ActivitySession {
+    pub fn new(run_id: impl Into<String>) -> Self {
+        Self {
+            run_id: run_id.into(),
+            started_at: Instant::now(),
+            tasks: BTreeMap::new(),
+            step_task_ids: BTreeMap::new(),
+            subsystem_aggregate: SubsystemAggregate::default(),
+            events: VecDeque::with_capacity(ACTIVITY_FEED_RING_CAPACITY),
         }
     }
 
@@ -326,6 +361,7 @@ impl ActivitySession {
 
     fn apply_hidden_module_step(&mut self, step: &RunTraceStep) {
         let task_id = hidden_subsystem_task_id(step);
+        self.reserve_hidden_task_capacity(&task_id);
         let current = self
             .subsystem_aggregate
             .hidden_task_states
@@ -392,6 +428,7 @@ impl ActivitySession {
         step: &RunTraceStep,
     ) -> Option<&mut DagTaskRow> {
         if activity_step_mints_row(step) {
+            self.reserve_visible_task_capacity(task_id);
             return Some(self.tasks.entry(task_id.to_string()).or_insert_with(|| {
                 DagTaskRow::queued(task_id.to_string(), module_id.to_string(), Vec::new())
             }));
@@ -399,50 +436,154 @@ impl ActivitySession {
         self.tasks.get_mut(task_id)
     }
 
+    fn reserve_visible_task_capacity(&mut self, protected_task_id: &str) {
+        if self.tasks.len() < ACTIVITY_TASK_ROW_CAPACITY
+            || self.tasks.contains_key(protected_task_id)
+        {
+            return;
+        }
+        if let Some(evicted_task_id) =
+            visible_task_eviction_candidate(&self.tasks, protected_task_id)
+        {
+            self.tasks.remove(&evicted_task_id);
+            self.step_task_ids
+                .retain(|_, task_id| task_id != &evicted_task_id);
+        }
+    }
+
+    fn reserve_hidden_task_capacity(&mut self, protected_task_id: &str) {
+        if self
+            .subsystem_aggregate
+            .hidden_task_states
+            .contains_key(protected_task_id)
+        {
+            return;
+        }
+        self.subsystem_aggregate.observed_task_count = self
+            .subsystem_aggregate
+            .observed_task_count
+            .saturating_add(1);
+        if self.subsystem_aggregate.hidden_task_states.len() < ACTIVITY_HIDDEN_TASK_STATE_CAPACITY {
+            return;
+        }
+        if let Some(evicted_task_id) =
+            hidden_task_eviction_candidate(&self.subsystem_aggregate, protected_task_id)
+        {
+            self.subsystem_aggregate
+                .hidden_task_states
+                .remove(&evicted_task_id);
+        }
+    }
+
+    /// Pre-populate `tasks` with `Queued` rows for every visible DAG node in
+    /// the registry, plus seed `subsystem_aggregate.total_count` from hidden
+    /// modules. Used at scan start so the DAG pane has rows from the first
+    /// frame instead of "(no DAG tasks yet)" while we wait for the first
+    /// trace event. Idempotent: existing rows aren't overwritten, so calling
+    /// this after some events have already arrived preserves their state.
+    pub fn seed_from_registry(&mut self, registry: &ModuleRegistry) {
+        let hidden_total = registry
+            .all_modules()
+            .map(|module| self.seed_registry_module(module))
+            .sum();
+        self.seed_hidden_subsystem_total(hidden_total);
+    }
+
+    pub fn mark_active_tasks_canceled(&mut self) {
+        let now = Instant::now();
+        for row in self.tasks.values_mut().filter(|row| row_can_cancel(row)) {
+            mark_activity_row_canceled(row, now);
+        }
+        mark_subsystems_canceled(&mut self.subsystem_aggregate);
+    }
+
+    pub fn mark_incomplete_tasks_after_success(&mut self, context: ActivityTerminalContext) {
+        let now = Instant::now();
+        for row in self.tasks.values_mut() {
+            mark_activity_row_success_terminal(row, now, context);
+        }
+    }
+
+    pub fn mark_incomplete_tasks_after_failure(&mut self) {
+        let now = Instant::now();
+        for row in self.tasks.values_mut() {
+            mark_activity_row_failure_terminal(row, now);
+        }
+    }
+
+    fn seed_registry_module(&mut self, module: &BuiltinModule) -> usize {
+        if module.is_hidden() {
+            return module.dag_nodes().len();
+        }
+        for node in module.dag_nodes() {
+            self.seed_visible_dag_node(node);
+        }
+        0
+    }
+
+    fn seed_visible_dag_node(&mut self, node: &DagNodeDescriptor) {
+        let task_id = node.id.clone();
+        let module_id = module_id_for_task_id(&task_id);
+        self.tasks
+            .entry(task_id.clone())
+            .or_insert_with(|| DagTaskRow::queued(task_id, module_id, node.depends_on.clone()));
+    }
+
+    fn seed_hidden_subsystem_total(&mut self, hidden_total: usize) {
+        if !subsystem_aggregate_is_fresh(&self.subsystem_aggregate) {
+            return;
+        }
+        self.subsystem_aggregate.total_count = hidden_total;
+        sync_subsystem_aggregate(&mut self.subsystem_aggregate);
+    }
+}
+
+impl ActivityRouteState {
     pub fn toggle_pane_focus(&mut self) {
         self.pane_focus = self.pane_focus.toggle();
     }
 
-    pub fn selected_task_id(&self) -> Option<&str> {
+    pub fn selected_task_id<'a>(&'a self, session: &'a ActivitySession) -> Option<&'a str> {
         self.focus_task
             .as_deref()
-            .filter(|task_id| self.tasks.contains_key(*task_id))
-            .or_else(|| self.task_id_at_cursor())
+            .filter(|task_id| session.tasks.contains_key(*task_id))
+            .or_else(|| self.task_id_at_cursor(session))
     }
 
-    pub fn task_id_at_cursor(&self) -> Option<&str> {
-        self.tasks
+    pub fn task_id_at_cursor<'a>(&self, session: &'a ActivitySession) -> Option<&'a str> {
+        session
+            .tasks
             .values()
-            .nth(self.task_cursor.min(self.task_cursor_max()))
+            .nth(self.task_cursor.min(self.task_cursor_max(session)))
             .map(|row| row.task_id.as_str())
     }
 
-    pub fn focus_task_at_cursor(&mut self) -> Option<String> {
-        let task_id = self.task_id_at_cursor()?.to_string();
+    pub fn focus_task_at_cursor(&mut self, session: &ActivitySession) -> Option<String> {
+        let task_id = self.task_id_at_cursor(session)?.to_string();
         self.focus_task = Some(task_id.clone());
         Some(task_id)
     }
 
-    pub fn shift_task_cursor(&mut self, amount: isize) {
-        let next = shift_index(self.task_cursor, amount, self.task_cursor_max());
-        self.set_task_cursor(next);
+    pub fn shift_task_cursor(&mut self, session: &ActivitySession, amount: isize) {
+        let next = shift_index(self.task_cursor, amount, self.task_cursor_max(session));
+        self.set_task_cursor(session, next);
     }
 
-    pub fn move_task_cursor_to_top(&mut self) {
-        self.set_task_cursor(0);
+    pub fn move_task_cursor_to_top(&mut self, session: &ActivitySession) {
+        self.set_task_cursor(session, 0);
     }
 
-    pub fn move_task_cursor_to_bottom(&mut self) {
-        self.set_task_cursor(self.task_cursor_max());
+    pub fn move_task_cursor_to_bottom(&mut self, session: &ActivitySession) {
+        self.set_task_cursor(session, self.task_cursor_max(session));
     }
 
-    fn set_task_cursor(&mut self, index: usize) {
-        self.task_cursor = index.min(self.task_cursor_max());
+    fn set_task_cursor(&mut self, session: &ActivitySession, index: usize) {
+        self.task_cursor = index.min(self.task_cursor_max(session));
         self.task_scroll = self.task_cursor;
     }
 
-    fn task_cursor_max(&self) -> usize {
-        self.tasks.len().saturating_sub(1)
+    fn task_cursor_max(&self, session: &ActivitySession) -> usize {
+        session.tasks.len().saturating_sub(1)
     }
 
     pub fn next_deck_page(&mut self) {
@@ -482,45 +623,33 @@ impl ActivitySession {
     /// Focus that accounts for the collapsed TASKS pane: with no DAG tasks
     /// the OUTPUT pane is the only one on screen, so scrolling and the
     /// header label act on it regardless of the stored toggle state.
-    pub fn effective_pane_focus(&self) -> PaneFocus {
-        if self.tasks.is_empty() {
+    pub fn effective_pane_focus(&self, session: &ActivitySession) -> PaneFocus {
+        if session.tasks.is_empty() {
             PaneFocus::Right
         } else {
             self.pane_focus
         }
     }
 
-    /// Pre-populate `tasks` with `Queued` rows for every visible DAG node in
-    /// the registry, plus seed `subsystem_aggregate.total_count` from hidden
-    /// modules. Used at scan start so the DAG pane has rows from the first
-    /// frame instead of "(no DAG tasks yet)" while we wait for the first
-    /// trace event. Idempotent: existing rows aren't overwritten, so calling
-    /// this after some events have already arrived preserves their state.
-    pub fn seed_from_registry(&mut self, registry: &ModuleRegistry) {
-        let hidden_total = registry
-            .all_modules()
-            .map(|module| self.seed_registry_module(module))
-            .sum();
-        self.seed_hidden_subsystem_total(hidden_total);
-    }
-
     pub fn toggle_verbose_subsystems(&mut self) {
         self.verbose_subsystems = !self.verbose_subsystems;
     }
 
-    pub fn toggle_paused(&mut self) {
+    pub fn toggle_paused(&mut self, event_count: usize) {
         if self.paused {
             self.paused = false;
             self.paused_event_count = None;
         } else {
             self.paused = true;
-            self.paused_event_count = Some(self.events.len());
+            self.paused_event_count = Some(event_count);
         }
     }
 
     pub fn reset_presentation_state(&mut self) {
         self.focus_task = None;
         self.pane_focus = PaneFocus::Left;
+        self.paused = false;
+        self.paused_event_count = None;
         self.feed_scroll = 0;
         self.task_scroll = 0;
         self.task_cursor = 0;
@@ -528,40 +657,6 @@ impl ActivitySession {
         self.deck_cursor = 0;
         self.deck_page_pinned_by_user = false;
         self.feed_auto_tail = false;
-    }
-
-    pub fn mark_active_tasks_canceled(&mut self) {
-        let now = Instant::now();
-        for row in self.tasks.values_mut().filter(|row| row_can_cancel(row)) {
-            mark_activity_row_canceled(row, now);
-        }
-        mark_subsystems_canceled(&mut self.subsystem_aggregate);
-    }
-
-    fn seed_registry_module(&mut self, module: &BuiltinModule) -> usize {
-        if module.is_hidden() {
-            return module.dag_nodes().len();
-        }
-        for node in module.dag_nodes() {
-            self.seed_visible_dag_node(node);
-        }
-        0
-    }
-
-    fn seed_visible_dag_node(&mut self, node: &DagNodeDescriptor) {
-        let task_id = node.id.clone();
-        let module_id = module_id_for_task_id(&task_id);
-        self.tasks
-            .entry(task_id.clone())
-            .or_insert_with(|| DagTaskRow::queued(task_id, module_id, node.depends_on.clone()));
-    }
-
-    fn seed_hidden_subsystem_total(&mut self, hidden_total: usize) {
-        if !subsystem_aggregate_is_fresh(&self.subsystem_aggregate) {
-            return;
-        }
-        self.subsystem_aggregate.total_count = hidden_total;
-        sync_subsystem_aggregate(&mut self.subsystem_aggregate);
     }
 }
 
@@ -577,6 +672,42 @@ fn subsystem_aggregate_is_fresh(aggregate: &SubsystemAggregate) -> bool {
     aggregate.total_count == 0 && aggregate.active_count == 0
 }
 
+fn visible_task_eviction_candidate(
+    tasks: &BTreeMap<String, DagTaskRow>,
+    protected_task_id: &str,
+) -> Option<String> {
+    tasks
+        .iter()
+        .find(|(task_id, row)| {
+            task_id.as_str() != protected_task_id && activity_row_is_terminal(row)
+        })
+        .or_else(|| {
+            tasks
+                .iter()
+                .find(|(task_id, _)| task_id.as_str() != protected_task_id)
+        })
+        .map(|(task_id, _)| task_id.clone())
+}
+
+fn hidden_task_eviction_candidate(
+    aggregate: &SubsystemAggregate,
+    protected_task_id: &str,
+) -> Option<String> {
+    aggregate
+        .hidden_task_states
+        .iter()
+        .find(|(task_id, state)| {
+            task_id.as_str() != protected_task_id && terminal_task_state(**state)
+        })
+        .or_else(|| {
+            aggregate
+                .hidden_task_states
+                .iter()
+                .find(|(task_id, _)| task_id.as_str() != protected_task_id)
+        })
+        .map(|(task_id, _)| task_id.clone())
+}
+
 fn row_can_cancel(row: &&mut DagTaskRow) -> bool {
     cancelable_task_state(row.state)
 }
@@ -585,12 +716,59 @@ fn cancelable_task_state(state: DagTaskState) -> bool {
     matches!(state, DagTaskState::Queued | DagTaskState::Active)
 }
 
+fn terminal_task_state(state: DagTaskState) -> bool {
+    matches!(
+        state,
+        DagTaskState::Done | DagTaskState::Failing | DagTaskState::Canceled | DagTaskState::Skipped
+    )
+}
+
 fn mark_activity_row_canceled(row: &mut DagTaskRow, now: Instant) {
     row.state = DagTaskState::Canceled;
     row.started_at.get_or_insert(now);
     row.completed_at = Some(now);
     row.last_label = "cancel requested; waiting for cleanup".to_string();
     mark_active_details_canceled(row);
+}
+
+fn mark_activity_row_success_terminal(
+    row: &mut DagTaskRow,
+    now: Instant,
+    context: ActivityTerminalContext,
+) {
+    match row.state {
+        DagTaskState::Active => {
+            row.state = DagTaskState::Done;
+            row.completed_at = Some(now);
+            finalize_activity_row_details(row);
+        }
+        DagTaskState::Queued => {
+            row.state = DagTaskState::Skipped;
+            row.completed_at = Some(now);
+            row.last_label = format!("not run in this {}", context.noun());
+            finalize_activity_row_details(row);
+        }
+        _ => {}
+    }
+}
+
+fn mark_activity_row_failure_terminal(row: &mut DagTaskRow, now: Instant) {
+    match row.state {
+        DagTaskState::Active => {
+            row.state = DagTaskState::Failing;
+            row.completed_at = Some(now);
+            row.severity = Some("danger".to_string());
+            row.last_label = "run failed".to_string();
+            finalize_activity_row_details(row);
+        }
+        DagTaskState::Queued => {
+            row.state = DagTaskState::Skipped;
+            row.completed_at = Some(now);
+            row.last_label = "skipped after failure".to_string();
+            finalize_activity_row_details(row);
+        }
+        _ => {}
+    }
 }
 
 fn mark_active_details_canceled(row: &mut DagTaskRow) {
@@ -866,7 +1044,7 @@ fn next_activity_row_state(
     match (step.severity.as_deref(), step.kind.as_str(), current) {
         (_, _, DagTaskState::Canceled) => DagTaskState::Canceled,
         (_, _, DagTaskState::Skipped) => DagTaskState::Skipped,
-        (Some("danger"), _, _) => DagTaskState::Failing,
+        (Some("danger"), _, _) if !rolled_up_child => DagTaskState::Failing,
         (_, _, DagTaskState::Failing) => DagTaskState::Failing,
         (_, "done" | "tool-complete", _) if !rolled_up_child => DagTaskState::Done,
         (_, _, DagTaskState::Queued) => DagTaskState::Active,
@@ -906,7 +1084,9 @@ fn hidden_subsystem_task_id(step: &RunTraceStep) -> String {
 
 fn sync_subsystem_aggregate(aggregate: &mut SubsystemAggregate) {
     let seeded_total = aggregate.total_count;
-    let observed_total = aggregate.hidden_task_states.len();
+    let observed_total = aggregate
+        .observed_task_count
+        .max(aggregate.hidden_task_states.len());
     aggregate.total_count = seeded_total.max(observed_total);
     aggregate.active_count = aggregate
         .hidden_task_states
@@ -1171,21 +1351,23 @@ mod tests {
 
     #[test]
     fn deck_page_changes_reset_cursor_and_feed_scroll() {
-        let mut session = ActivitySession::new("r-1");
-        session.feed_scroll = 12;
-        session.deck_cursor = 5;
+        let mut route = ActivityRouteState {
+            feed_scroll: 12,
+            deck_cursor: 5,
+            ..ActivityRouteState::default()
+        };
 
-        session.next_deck_page();
+        route.next_deck_page();
 
-        assert_eq!(session.deck_page, ActivityDeckPage::AttackSurface);
-        assert_eq!(session.deck_cursor, 0);
-        assert_eq!(session.feed_scroll, 0);
-        assert!(!session.feed_auto_tail);
+        assert_eq!(route.deck_page, ActivityDeckPage::AttackSurface);
+        assert_eq!(route.deck_cursor, 0);
+        assert_eq!(route.feed_scroll, 0);
+        assert!(!route.feed_auto_tail);
 
-        session.prev_deck_page();
+        route.prev_deck_page();
 
-        assert_eq!(session.deck_page, ActivityDeckPage::Findings);
-        assert!(!session.feed_auto_tail);
+        assert_eq!(route.deck_page, ActivityDeckPage::Findings);
+        assert!(!route.feed_auto_tail);
     }
 
     #[test]
@@ -1207,6 +1389,69 @@ mod tests {
         // Per-task aggregates survive eviction.
         let row = session.tasks.get("semgrep:scan").unwrap();
         assert_eq!(row.steps_done, ACTIVITY_FEED_RING_CAPACITY + 5);
+    }
+
+    #[test]
+    fn task_rows_are_capped_and_evict_terminal_rows_first() {
+        let mut session = ActivitySession::new("r-1");
+        for i in 0..ACTIVITY_TASK_ROW_CAPACITY {
+            session.apply_step(
+                RunTraceStep::new(i, "tool", format!("tool {i} started"))
+                    .with_module_id(format!("tool-{i:04}"))
+                    .with_verb("scan"),
+            );
+        }
+        session.tasks.get_mut("tool-0000:scan").unwrap().state = DagTaskState::Done;
+
+        session.apply_step(
+            RunTraceStep::new(ACTIVITY_TASK_ROW_CAPACITY, "tool", "new tool started")
+                .with_module_id("tool-new")
+                .with_verb("scan"),
+        );
+
+        assert_eq!(session.tasks.len(), ACTIVITY_TASK_ROW_CAPACITY);
+        assert!(!session.tasks.contains_key("tool-0000:scan"));
+        assert!(session.tasks.contains_key("tool-new:scan"));
+        assert!(!session
+            .step_task_ids
+            .values()
+            .any(|task_id| task_id == "tool-0000:scan"));
+    }
+
+    #[test]
+    fn hidden_subsystem_states_are_capped_but_total_tracks_observed_tasks() {
+        let mut session = ActivitySession::new("r-1");
+        for i in 0..ACTIVITY_HIDDEN_TASK_STATE_CAPACITY {
+            session.apply_step(
+                RunTraceStep::new(i, "done", format!("hidden {i} done"))
+                    .with_module_id("pipeline")
+                    .with_verb(format!("task-{i:04}")),
+            );
+        }
+
+        session.apply_step(
+            RunTraceStep::new(
+                ACTIVITY_HIDDEN_TASK_STATE_CAPACITY,
+                "tool",
+                "new hidden task",
+            )
+            .with_module_id("pipeline")
+            .with_verb("task-new"),
+        );
+
+        assert_eq!(
+            session.subsystem_aggregate.hidden_task_states.len(),
+            ACTIVITY_HIDDEN_TASK_STATE_CAPACITY
+        );
+        assert_eq!(
+            session.subsystem_aggregate.total_count,
+            ACTIVITY_HIDDEN_TASK_STATE_CAPACITY + 1
+        );
+        assert_eq!(session.subsystem_aggregate.active_count, 1);
+        assert!(session
+            .subsystem_aggregate
+            .hidden_task_states
+            .contains_key("pipeline:task-new"));
     }
 
     #[test]
@@ -1277,6 +1522,102 @@ mod tests {
         assert!(row.details.iter().any(|detail| {
             detail.label == "final answer" && detail.state == DagTaskDetailState::Done
         }));
+    }
+
+    #[test]
+    fn rolled_up_child_danger_step_does_not_fail_parent_task() {
+        let mut session = ActivitySession::new("r-1");
+        session.apply_step(
+            RunTraceStep::new(1, "tool", "agentic-sast start")
+                .with_module_id("agentic-sast")
+                .with_verb("scan"),
+        );
+        session.apply_step(
+            RunTraceStep::new(2, "reasoning", "agent loop")
+                .with_module_id("agentic-sast")
+                .with_verb("scan")
+                .with_parent_step(1),
+        );
+        session.apply_step(
+            RunTraceStep::new(3, "refused", "retryable model call failed")
+                .with_module_id("agentic-sast")
+                .with_verb("query")
+                .with_parent_step(2)
+                .with_severity("danger"),
+        );
+
+        let row = session.tasks.get("agentic-sast:scan").unwrap();
+        assert_eq!(row.state, DagTaskState::Active);
+        assert!(row.details.iter().any(|detail| {
+            detail.label == "retryable model call failed"
+                && detail.state == DagTaskDetailState::Failing
+        }));
+    }
+
+    #[test]
+    fn terminal_success_sweeps_incomplete_rows() {
+        let mut session = ActivitySession::new("r-1");
+        session.tasks.insert(
+            "triage:run".to_string(),
+            DagTaskRow::queued("triage:run".to_string(), "triage".to_string(), Vec::new()),
+        );
+        session.tasks.insert(
+            "verify:finding".to_string(),
+            DagTaskRow::queued(
+                "verify:finding".to_string(),
+                "verify".to_string(),
+                vec!["triage:run".to_string()],
+            ),
+        );
+        session.apply_step(
+            RunTraceStep::new(1, "tool", "triage start")
+                .with_module_id("triage")
+                .with_verb("run"),
+        );
+
+        session.mark_incomplete_tasks_after_success(ActivityTerminalContext::Run);
+
+        assert_eq!(
+            session.tasks.get("triage:run").unwrap().state,
+            DagTaskState::Done
+        );
+        assert_eq!(
+            session.tasks.get("verify:finding").unwrap().state,
+            DagTaskState::Skipped
+        );
+    }
+
+    #[test]
+    fn terminal_failure_sweeps_incomplete_rows() {
+        let mut session = ActivitySession::new("r-1");
+        session.tasks.insert(
+            "triage:run".to_string(),
+            DagTaskRow::queued("triage:run".to_string(), "triage".to_string(), Vec::new()),
+        );
+        session.tasks.insert(
+            "verify:finding".to_string(),
+            DagTaskRow::queued(
+                "verify:finding".to_string(),
+                "verify".to_string(),
+                vec!["triage:run".to_string()],
+            ),
+        );
+        session.apply_step(
+            RunTraceStep::new(1, "tool", "triage start")
+                .with_module_id("triage")
+                .with_verb("run"),
+        );
+
+        session.mark_incomplete_tasks_after_failure();
+
+        assert_eq!(
+            session.tasks.get("triage:run").unwrap().state,
+            DagTaskState::Failing
+        );
+        assert_eq!(
+            session.tasks.get("verify:finding").unwrap().state,
+            DagTaskState::Skipped
+        );
     }
 
     #[test]

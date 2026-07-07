@@ -15,17 +15,16 @@ pub(crate) struct ActorTranscriptRow {
 }
 
 pub(crate) fn actor_detail_model(app: &ShellApp, visible_count: usize) -> ActorDetailModel {
-    let filter = app.actor_detail_filter;
+    let filter = app.router.actor_detail().filter();
     ActorDetailModel {
         status: actor_status(app),
         filter_label: filter.label().to_string(),
-        transcript: visible_transcript_rows(&app.log, filter, visible_count),
+        transcript: visible_transcript_rows(app.log_lines(), filter, visible_count),
     }
 }
 
 fn actor_status(app: &ShellApp) -> String {
-    app.scan
-        .as_ref()
+    app.scan()
         .map(scan_status)
         .unwrap_or_else(|| "idle".to_string())
 }

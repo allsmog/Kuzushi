@@ -19,30 +19,17 @@ impl WorkerGeneration {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct StampedEvent<T> {
-    pub(crate) generation: WorkerGeneration,
-    pub(crate) payload: T,
-}
-
-impl<T> StampedEvent<T> {
-    pub(crate) fn new(generation: WorkerGeneration, payload: T) -> Self {
-        Self {
-            generation,
-            payload,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub(crate) struct LiveTraceBudget {
     pending: Arc<AtomicUsize>,
+    dropped_live: Arc<AtomicUsize>,
 }
 
 impl LiveTraceBudget {
     pub(crate) fn new() -> Self {
         Self {
             pending: Arc::new(AtomicUsize::new(0)),
+            dropped_live: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -62,6 +49,15 @@ impl LiveTraceBudget {
         false
     }
 
+    fn record_dropped_live_copy(&self) {
+        let dropped = self.dropped_live.fetch_add(1, Ordering::AcqRel) + 1;
+        if dropped == 1 || dropped.is_power_of_two() {
+            eprintln!(
+                "[activity] dropped {dropped} live trace UI frame(s); trace.jsonl remains authoritative"
+            );
+        }
+    }
+
     pub(crate) fn release(&self) {
         let _ = self
             .pending
@@ -78,6 +74,11 @@ impl LiveTraceBudget {
     #[cfg(test)]
     pub(crate) fn pending(&self) -> usize {
         self.pending.load(Ordering::Acquire)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn dropped_live(&self) -> usize {
+        self.dropped_live.load(Ordering::Acquire)
     }
 }
 
@@ -105,6 +106,7 @@ impl kuzushi_core::TraceSink for StampedTraceSink {
     fn record(&self, step: &RunTraceStep) {
         self.inner.record(step);
         if !self.budget.try_reserve() {
+            self.budget.record_dropped_live_copy();
             return;
         }
         if !self.sink.send(ShellEvent::Trace(step.clone())) {
@@ -148,12 +150,13 @@ mod tests {
         for _ in 0..LIVE_TRACE_CHANNEL_CAPACITY {
             assert!(budget.try_reserve());
         }
-        let sink = StampedTraceSink::new(inner_sink, ticket.sink(), budget);
+        let sink = StampedTraceSink::new(inner_sink, ticket.sink(), budget.clone());
 
         sink.record(&RunTraceStep::new(1, "reasoning", "kept"));
         sink.record(&RunTraceStep::new(2, "reasoning", "dropped-live-copy"));
 
         assert_eq!(inner.steps.lock().unwrap().len(), 2);
+        assert_eq!(budget.dropped_live(), 2);
         assert!(hub.drain(1).is_empty());
     }
 

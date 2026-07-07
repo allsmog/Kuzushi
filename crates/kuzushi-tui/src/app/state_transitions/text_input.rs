@@ -1,72 +1,89 @@
 use super::*;
 
 impl ShellApp {
-    pub(super) fn handle_text_key(&mut self, key: KeyEvent) -> bool {
+    pub(super) fn handle_text_key(&mut self, key: KeyEvent) -> InputUpdate {
         match key.code {
             KeyCode::Char(ch) => self.insert_printable_key(ch),
             KeyCode::Backspace => self.backspace(),
             KeyCode::Tab => self.apply_completion(),
-            KeyCode::PageDown if self.input.is_empty() && key.modifiers.is_empty() => {
+            KeyCode::PageDown if self.input().is_empty() && key.modifiers.is_empty() => {
                 self.page_down_current_view();
             }
-            KeyCode::PageUp if self.input.is_empty() && key.modifiers.is_empty() => {
+            KeyCode::PageUp if self.input().is_empty() && key.modifiers.is_empty() => {
                 self.page_up_current_view();
             }
-            KeyCode::Enter => self.handle_enter_key(),
-            KeyCode::Esc => return self.esc_clear_input_or_completion(),
-            _ => return false,
+            KeyCode::Enter => return self.handle_enter_key(),
+            KeyCode::Esc => return InputUpdate::handled_if(self.esc_clear_input_or_completion()),
+            _ => return InputUpdate::ignored(),
         }
-        true
+        InputUpdate::handled()
     }
 
     pub(super) fn insert_printable_key(&mut self, ch: char) {
         self.insert_char_at_cursor(ch);
-        self.last_char_at = Some(Instant::now());
+        self.ui_mut().record_operator_interaction(Instant::now());
     }
 
-    pub(super) fn handle_enter_key(&mut self) {
+    pub(super) fn handle_enter_key(&mut self) -> InputUpdate {
         let raw = self.take_input();
-        if self.submit_catalog_cursor_for_empty_enter(&raw) {
-            return;
+        if let Some(update) = self.submit_catalog_cursor_for_empty_enter(&raw) {
+            return update;
         }
-        self.submit_line(&raw);
+        let update = self.reduce_submitted_line(&raw);
+        InputUpdate {
+            handled: update.handled,
+            effects: update.effects,
+        }
     }
 
-    pub(super) fn submit_catalog_cursor_for_empty_enter(&mut self, raw: &str) -> bool {
+    pub(super) fn submit_catalog_cursor_for_empty_enter(
+        &mut self,
+        raw: &str,
+    ) -> Option<InputUpdate> {
         if !raw.is_empty()
             || !matches!(self.shell_view, ShellView::Catalog)
-            || !self.catalog_route.is_expanded()
+            || !self.router.catalog().is_expanded()
         {
-            return false;
+            return None;
         }
         let Some(id) = self.catalog_cursor_module_id() else {
-            return false;
+            return None;
         };
-        self.submit_line(&format!("use {id}"));
-        true
+        let update = self.reduce_submitted_line(&format!("use {id}"));
+        Some(InputUpdate {
+            handled: update.handled,
+            effects: update.effects,
+        })
     }
 
     pub(super) fn clear_conversation_preserving_input(&mut self) {
-        let saved_input = std::mem::take(&mut self.input);
-        let saved_cursor = self.cursor;
+        let (saved_input, saved_cursor) = self.editor().snapshot_input();
         self.clear_conversation();
-        self.input = saved_input;
-        self.cursor = saved_cursor.min(self.input.chars().count());
+        self.editor_mut()
+            .restore_input_snapshot(saved_input, saved_cursor);
     }
 
-    pub fn handle_paste(&mut self, text: &str) {
+    pub(crate) fn reduce_paste(&mut self, text: &str) -> InputUpdate {
         if text.is_empty() {
-            return;
+            return InputUpdate::ignored();
         }
         let normalised = normalise_paste_text(text);
-        if self.handle_routed_paste(&normalised) || self.handle_multiline_paste(&normalised) {
-            return;
+        if let Some(update) = self.handle_routed_paste(&normalised) {
+            return update;
+        }
+        if self.handle_multiline_paste(&normalised) {
+            return InputUpdate::handled();
         }
         self.insert_str_at_cursor(&normalised);
+        InputUpdate::handled()
     }
 
-    fn handle_routed_paste(&mut self, text: &str) -> bool {
-        self.capture_auth_key_paste(text) || self.attach_workspace_files_from_paste(text)
+    fn handle_routed_paste(&mut self, text: &str) -> Option<InputUpdate> {
+        if self.capture_auth_key_paste(text) {
+            return Some(InputUpdate::handled());
+        }
+        self.attachment_effects_from_paste(text)
+            .map(InputUpdate::handled_with_effects)
     }
 
     fn handle_multiline_paste(&mut self, text: &str) -> bool {
@@ -88,8 +105,8 @@ impl ShellApp {
     }
 
     fn capture_auth_key_paste(&mut self, text: &str) -> bool {
-        if !matches!(self.shell_view, ShellView::AuthMethodPicker(_))
-            || !self.auth_picker_route.is_api_key_row()
+        if !matches!(self.shell_view, ShellView::AuthMethodPicker)
+            || !self.router.auth_picker().is_api_key_row()
         {
             return false;
         }
@@ -97,7 +114,7 @@ impl ShellApp {
         if key.is_empty() {
             return true;
         }
-        self.auth_picker_route.push_key_str(key);
+        self.router.auth_picker_mut().push_key_str(key);
         if text.contains('\n') {
             self.set_warn_notice(
                 "paste",
@@ -111,66 +128,80 @@ impl ShellApp {
     /// pane focused and there are findings; everywhere else it scrolls lines.
     fn mouse_scrolls_findings(&self) -> bool {
         matches!(self.shell_view, ShellView::Workbench)
-            && self.workbench_focus == crate::app::WorkbenchPane::Findings
-            && !self.findings.is_empty()
+            && self.router.workbench().focus() == crate::app::WorkbenchPane::Findings
+            && !self.findings().is_empty()
     }
 
-    pub fn handle_mouse(&mut self, mouse: MouseEvent) {
+    pub(crate) fn reduce_mouse(&mut self, mouse: MouseEvent) -> InputUpdate {
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                self.handle_left_mouse_down(mouse.column, mouse.row);
+                InputUpdate::handled_if(self.handle_left_mouse_down(mouse.column, mouse.row))
             }
             MouseEventKind::ScrollUp => self.handle_mouse_scroll(-1),
             MouseEventKind::ScrollDown => self.handle_mouse_scroll(1),
-            _ => {}
+            _ => InputUpdate::ignored(),
         }
     }
 
-    fn handle_left_mouse_down(&mut self, column: u16, row: u16) {
+    pub(crate) fn reduce_resize(&mut self, columns: u16, rows: u16) -> InputUpdate {
+        self.set_viewport(TerminalViewport::new(columns, rows));
+        InputUpdate::handled()
+    }
+
+    fn handle_left_mouse_down(&mut self, column: u16, row: u16) -> bool {
         if let Some(pane) = self.workbench_pane_for_mouse(column, row) {
-            self.workbench_focus = pane;
-            return;
+            self.router.workbench_mut().set_focus(pane);
+            return true;
         }
-        if let (Some(focus), Some(session)) = (
-            self.activity_pane_for_mouse(column, row),
-            self.activity.as_mut(),
-        ) {
-            session.pane_focus = focus;
+        if let (Some(focus), Some(_)) = (self.activity_pane_for_mouse(column, row), self.activity())
+        {
+            self.router.activity_mut().pane_focus = focus;
+            return true;
         }
+        false
     }
 
-    fn handle_mouse_scroll(&mut self, amount: i32) {
+    fn handle_mouse_scroll(&mut self, amount: i32) -> InputUpdate {
         if self.mouse_scrolls_findings() {
             self.move_findings_cursor(amount);
-        } else if amount.is_negative() {
+            return InputUpdate::handled();
+        }
+        if amount.is_negative() {
             self.scroll_up(1);
         } else {
             self.scroll_down(1);
         }
+        InputUpdate::handled()
     }
 
     fn move_findings_cursor(&mut self, amount: i32) {
-        self.findings_route.step_direction(
-            amount as isize,
-            crate::ui_view_models::visible_findings_len(self),
-        );
+        let len = crate::ui_view_models::visible_findings_len(self);
+        self.router
+            .findings_mut()
+            .step_direction(amount as isize, len);
     }
 
     fn workbench_pane_for_mouse(&self, column: u16, row: u16) -> Option<crate::app::WorkbenchPane> {
         if !matches!(self.shell_view, ShellView::Workbench) {
             return None;
         }
-        let (width, height) = crossterm::terminal::size().unwrap_or((160, 40));
-        workbench_pane_for_click(column, row, width, height)
+        let viewport = self.viewport();
+        workbench_pane_for_click(column, row, viewport.columns, viewport.rows)
     }
 
     fn activity_pane_for_mouse(&self, column: u16, row: u16) -> Option<crate::app::PaneFocus> {
         if !matches!(self.shell_view, ShellView::Activity) {
             return None;
         }
-        let session = self.activity.as_ref()?;
-        let (width, height) = crossterm::terminal::size().unwrap_or((160, 40));
-        activity_pane_for_click(column, row, width, height, session.tasks.is_empty())
+        let session = self.activity()?;
+        let viewport = self.viewport();
+        activity_pane_for_click(
+            column,
+            row,
+            viewport.columns,
+            viewport.rows,
+            session.tasks.is_empty(),
+        )
     }
 }
 

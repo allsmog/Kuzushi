@@ -69,8 +69,8 @@ impl ShellApp {
         ticket: JobTicket,
     ) -> BackgroundToolDispatch {
         prepare_background_tool_dispatch(
-            &self.registry,
-            &self.config,
+            self.registry(),
+            self.config(),
             workspace,
             tool_name,
             input,
@@ -101,7 +101,7 @@ impl ShellApp {
     }
 
     fn reject_background_tool_overlap(&mut self, tool_name: &str) -> bool {
-        let Some(active) = self.tool_running.as_deref() else {
+        let Some(active) = self.running_tool_name() else {
             return false;
         };
         self.log(
@@ -121,7 +121,7 @@ impl ShellApp {
             Ok(Some(mutation))
                 if mutation.status == kuzushi_core::PromptMutationStatus::Pending =>
             {
-                self.focused_module = Some(module_id.to_string());
+                self.set_focused_module(Some(module_id.to_string()));
                 self.shell_view = ShellView::PromptsEditor;
                 self.log(
                     "prompt",
@@ -149,10 +149,10 @@ impl ShellApp {
         tool_name: &str,
         input: &serde_json::Value,
     ) -> Option<String> {
-        if !self.registry.tool_needs_runtime(tool_name, input) {
+        if !self.registry().tool_needs_runtime(tool_name, input) {
             return None;
         }
-        langgraph_bridge_preflight_error(&self.config, tool_name)
+        langgraph_bridge_preflight_error(self.config(), tool_name)
     }
 
     fn open_activity_for_started_background_tool(&mut self) {
@@ -160,7 +160,7 @@ impl ShellApp {
         // before the worker existed, so a fast dispatch error could strand the
         // operator on an empty Activity view. Flipping after thread::spawn
         // guarantees the run is in flight before the view becomes visible.
-        if self.auto_open_activity {
+        if self.ui().auto_open_activity() {
             self.shell_view = ShellView::Activity;
             self.log(
                 "view",
@@ -172,24 +172,20 @@ impl ShellApp {
     fn attach_background_tool_run(
         &mut self,
         run: &BackgroundToolRun,
-        generation: WorkerGeneration,
         cancel: ScanCancellation,
         tool_name: &str,
         status: &str,
         activity: Option<LiveActivity>,
         model_override: Option<String>,
     ) {
-        self.target = Some(run.target.clone());
-        self.tool_generation = Some(generation);
-        self.tool_rx = None;
-        self.trace_generation = Some(generation);
-        self.trace_rx = None;
-        self.activity = Some(ActivitySession::new(run.run_id.clone()));
-        self.tool_running = Some(tool_name.to_string());
-        self.tool_cancel = Some(cancel);
-        self.tool_run_id = Some(run.run_id.clone());
-        self.active_model_override = model_override;
-        self.tool_abort_requested = false;
+        self.set_target(Some(run.target.clone()));
+        self.set_activity(Some(ActivitySession::new(run.run_id.clone())));
+        self.start_tool_run(
+            tool_name.to_string(),
+            cancel,
+            run.run_id.clone(),
+            model_override,
+        );
         self.log(
             "tool",
             format!(

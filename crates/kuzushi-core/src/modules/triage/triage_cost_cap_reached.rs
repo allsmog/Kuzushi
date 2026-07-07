@@ -1,4 +1,54 @@
 use super::*;
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::{Mutex, OnceLock};
+
+const TRIAGE_RUNTIME_CACHE_CAPACITY: usize = 4096;
+
+#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct TriageRuntimeCacheKey {
+    model: String,
+    cwd: String,
+    fingerprint: String,
+    prompt_hash: String,
+}
+
+#[derive(Clone)]
+pub(in crate::modules) struct TriageRuntimeOutcome {
+    pub(in crate::modules) outcome: TriageOutcome,
+    pub(in crate::modules) cached: bool,
+}
+
+#[derive(Default)]
+struct TriageRuntimeCache {
+    entries: BTreeMap<TriageRuntimeCacheKey, TriageOutcome>,
+    order: VecDeque<TriageRuntimeCacheKey>,
+}
+
+impl TriageRuntimeCache {
+    fn get(&self, key: &TriageRuntimeCacheKey) -> Option<TriageOutcome> {
+        self.entries.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: TriageRuntimeCacheKey, outcome: TriageOutcome) {
+        if !self.entries.contains_key(&key) {
+            self.order.push_back(key.clone());
+        }
+        self.entries.insert(key, outcome);
+        self.evict_oldest();
+    }
+
+    fn evict_oldest(&mut self) {
+        while self.entries.len() > TRIAGE_RUNTIME_CACHE_CAPACITY {
+            if let Some(oldest) = self.order.pop_front() {
+                self.entries.remove(&oldest);
+            } else {
+                break;
+            }
+        }
+    }
+}
+
+static TRIAGE_RUNTIME_CACHE: OnceLock<Mutex<TriageRuntimeCache>> = OnceLock::new();
 
 pub(in crate::modules) fn triage_cost_cap_reached(
     cost_cap_usd: Option<f64>,
@@ -12,32 +62,98 @@ pub(in crate::modules) fn call_triage_runtime(
     config: &TriageExecutionConfig,
     input: &TriageRunInput,
     finding: &Finding,
-) -> Result<TriageOutcome> {
-    runtime.triage_finding_blocking(TriageRequest {
+) -> Result<TriageRuntimeOutcome> {
+    let request = TriageRequest {
         model: config.stage2_model.clone(),
         cwd: config.cwd.clone(),
         finding: finding.clone(),
         prompt_template: input.prompt_template.clone(),
+    };
+    let key = triage_runtime_cache_key(&request);
+    if !input.retriage {
+        if let Some(outcome) = cached_triage_outcome(&key) {
+            return Ok(TriageRuntimeOutcome {
+                outcome,
+                cached: true,
+            });
+        }
+    }
+    let outcome = runtime.triage_finding_blocking(request)?;
+    cache_triage_outcome(key, outcome.clone());
+    Ok(TriageRuntimeOutcome {
+        outcome,
+        cached: false,
     })
+}
+
+fn cached_triage_outcome(key: &TriageRuntimeCacheKey) -> Option<TriageOutcome> {
+    let cache = TRIAGE_RUNTIME_CACHE.get_or_init(|| Mutex::new(TriageRuntimeCache::default()));
+    let guard = cache.lock().unwrap_or_else(|poison| poison.into_inner());
+    guard.get(key)
+}
+
+fn cache_triage_outcome(key: TriageRuntimeCacheKey, outcome: TriageOutcome) {
+    let cache = TRIAGE_RUNTIME_CACHE.get_or_init(|| Mutex::new(TriageRuntimeCache::default()));
+    let mut guard = cache.lock().unwrap_or_else(|poison| poison.into_inner());
+    guard.insert(key, outcome);
+}
+
+fn triage_runtime_cache_key(request: &TriageRequest) -> TriageRuntimeCacheKey {
+    TriageRuntimeCacheKey {
+        model: request.model.clone(),
+        cwd: request.cwd.display().to_string(),
+        fingerprint: request.finding.fingerprint.clone(),
+        prompt_hash: triage_runtime_prompt_hash(request),
+    }
+}
+
+fn triage_runtime_prompt_hash(request: &TriageRequest) -> String {
+    stable_triage_prompt_hash(&[
+        request.prompt_template.as_deref().unwrap_or(""),
+        &request.finding.fingerprint,
+        &request.finding.title,
+        &request.finding.file_path,
+    ])
+}
+
+fn stable_triage_prompt_hash(parts: &[&str]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for part in parts {
+        hash = fnv1a_update(hash, part.as_bytes());
+        hash = fnv1a_update(hash, &[0xff]);
+    }
+    format!("fnv1a64:{hash:016x}")
+}
+
+fn fnv1a_update(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 pub(in crate::modules) fn persist_triage_outcome(
     store: &FindingStore,
     stats: &mut TriageRunStats,
     finding: Finding,
-    outcome: TriageOutcome,
+    runtime_outcome: TriageRuntimeOutcome,
 ) {
     let Some(_finding_id) = finding.id else {
-        stats.record_unpersisted_outcome(finding, outcome);
+        stats.record_unpersisted_outcome(finding, runtime_outcome.outcome);
         return;
     };
-    if let Err(error) = store.save_triage_for_fingerprint(&finding.fingerprint, &outcome) {
+    if let Err(error) = store.save_triage_for_fingerprint(&finding.fingerprint, &runtime_outcome.outcome) {
         eprintln!(
             "[triage:run] could not persist triage for finding {}: {error}",
             finding.fingerprint
         );
     }
-    stats.record_persisted_outcome(finding, outcome);
+    if runtime_outcome.cached {
+        stats.record_cached_outcome(finding, runtime_outcome.outcome);
+    } else {
+        stats.record_persisted_outcome(finding, runtime_outcome.outcome);
+    }
 }
 
 pub(in crate::modules) fn high_confidence_false_positive(result: &Value) -> bool {

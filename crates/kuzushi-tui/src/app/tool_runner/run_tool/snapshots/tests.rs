@@ -24,14 +24,14 @@ fn hydrate_reloads_persisted_taint_and_exploit_snapshots() {
     .expect("save chains");
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    assert!(app.taint_flow.is_none());
-    assert!(app.exploit_chains.is_empty());
+    assert!(app.domain().taint_flow().is_none());
+    assert!(app.domain().exploit_chains().is_empty());
 
     app.hydrate_persisted_scene_snapshots(Some(dir.path()));
 
-    assert_eq!(app.taint_flow.as_ref().expect("taint flow").cwe, "CWE-89");
-    assert_eq!(app.exploit_chains.len(), 1);
-    assert_eq!(app.exploit_chains[0].title, "SQLi");
+    assert_eq!(app.domain().taint_flow().expect("taint flow").cwe, "CWE-89");
+    assert_eq!(app.domain().exploit_chains().len(), 1);
+    assert_eq!(app.domain().exploit_chains()[0].title, "SQLi");
 }
 
 #[test]

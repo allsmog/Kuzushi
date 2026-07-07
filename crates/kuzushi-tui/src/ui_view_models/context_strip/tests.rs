@@ -17,7 +17,7 @@ fn context_strip_model_reports_idle_shell_state() {
     assert_eq!(model.findings, "0 findings");
     assert_eq!(model.view, "modules");
     assert_eq!(model.phase, None);
-    assert_eq!(model.cost, None);
+    assert_eq!(model.cost, Some("$0.00".to_string()));
     assert_eq!(
         model.compact_segments(),
         [
@@ -25,7 +25,8 @@ fn context_strip_model_reports_idle_shell_state() {
             "view:modules",
             "target:none",
             "model:unconfigured",
-            "ctx:not built"
+            "ctx:not built",
+            "cost:$0.00"
         ]
     );
 }
@@ -33,10 +34,10 @@ fn context_strip_model_reports_idle_shell_state() {
 #[test]
 fn context_strip_model_formats_target_model_context_and_cost() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(PathBuf::from("/tmp/acme"));
-    app.context_view.exists = true;
-    app.config.model = Some("openai:gpt-5.2".to_string());
-    app.session_cost_usd = 0.42;
+    app.set_target(Some(PathBuf::from("/tmp/acme")));
+    app.domain_mut().context_view_mut().exists = true;
+    app.config_mut().model = Some("openai:gpt-5.2".to_string());
+    app.session_mut().set_session_cost_usd_for_test(0.42);
 
     let model = context_strip_model(&app);
 
@@ -54,7 +55,8 @@ fn context_strip_model_formats_target_model_context_and_cost() {
 #[test]
 fn context_strip_model_reports_malformed_context_snapshot() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+    app.domain_mut().context_view_mut().status =
+        "malformed context snapshot. Next: context build".to_string();
 
     let model = context_strip_model(&app);
 
@@ -68,7 +70,7 @@ fn context_strip_model_reports_malformed_context_snapshot() {
 #[test]
 fn context_strip_model_reports_active_scan_stage() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.scan = Some(ScanPanelState {
+    app.set_scan_panel(Some(ScanPanelState {
         run_id: None,
         target: PathBuf::from("."),
         stage: "semgrep".to_string(),
@@ -76,7 +78,7 @@ fn context_strip_model_reports_active_scan_stage() {
         running: true,
         abort_requested: false,
         error: None,
-    });
+    }));
 
     let model = context_strip_model(&app);
 

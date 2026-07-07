@@ -67,15 +67,28 @@ pub fn append_run_trace_step(
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let mut line = serde_json::to_string(step)?;
-    line.push('\n');
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("Could not open {}", path.display()))?;
-    file.write_all(line.as_bytes())
-        .with_context(|| format!("Could not write {}", path.display()))?;
+    append_trace_step_locked(&path, step)?;
+    Ok(path)
+}
+
+pub fn append_run_trace_step_with_next_number(
+    target: impl AsRef<Path>,
+    run_id: &str,
+    step: &RunTraceStep,
+) -> Result<PathBuf> {
+    let dir = run_dir(&target, run_id);
+    fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
+    let path = run_artifact_path(&target, run_id, run_trace_spec().leaf);
+    reject_non_file_trace_target(&path)?;
+
+    let append_lock = trace_append_lock(&path);
+    let _guard = append_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    let mut numbered = step.clone();
+    numbered.n = next_trace_step_number_from_path(&path);
+    append_trace_step_locked(&path, &numbered)?;
     Ok(path)
 }
 
@@ -96,10 +109,29 @@ fn trace_append_lock(path: &Path) -> Arc<Mutex<()>> {
 
 pub fn next_run_trace_step_number(target: impl AsRef<Path>, run_id: &str) -> usize {
     let path = run_artifact_path(target, run_id, run_trace_spec().leaf);
-    let Ok(text) = fs::read_to_string(path) else {
-        return 1;
-    };
-    crate::run_artifacts::jsonl_numbering::next_jsonl_number::<RunTraceStep>(&text, |step| step.n)
+    next_trace_step_number_from_path(&path)
+}
+
+fn next_trace_step_number_from_path(path: &Path) -> usize {
+    fs::read_to_string(path)
+        .map(|text| {
+            crate::run_artifacts::jsonl_numbering::next_jsonl_number::<RunTraceStep>(&text, |step| {
+                step.n
+            })
+        })
+        .unwrap_or(1)
+}
+
+fn append_trace_step_locked(path: &Path, step: &RunTraceStep) -> Result<()> {
+    let mut line = serde_json::to_string(step)?;
+    line.push('\n');
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("Could not open {}", path.display()))?;
+    file.write_all(line.as_bytes())
+        .with_context(|| format!("Could not write {}", path.display()))
 }
 
 fn run_trace_spec() -> &'static CanonicalRunArtifactSpec {

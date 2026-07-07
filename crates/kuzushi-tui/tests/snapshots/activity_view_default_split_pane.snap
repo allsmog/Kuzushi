@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI › activity · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › activity · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- ACTIVITY  run r-snapshot  ·  2/3 done  ·  1 running ----------------------------------------------------------------
  -- TASKS                                    |  -- OUTPUT

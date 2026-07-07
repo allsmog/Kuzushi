@@ -12,7 +12,7 @@ fn routing_mode_defaults_to_shell() {
 #[test]
 fn routing_mode_reports_module_for_focused_module() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.focused_module = Some("sast".to_string());
+    app.set_focused_module(Some("sast".to_string()));
 
     assert_eq!(routing_mode(&app), RoutingMode::Module);
 }
@@ -20,8 +20,8 @@ fn routing_mode_reports_module_for_focused_module() {
 #[test]
 fn routing_mode_prioritizes_run_over_plan_and_module() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.focused_module = Some("sast".to_string());
-    app.planner_running = true;
+    app.set_focused_module(Some("sast".to_string()));
+    app.set_planner_running(true);
     app.set_running_tool_for_test("triage:run");
 
     assert_eq!(routing_mode(&app), RoutingMode::Run);
@@ -39,7 +39,7 @@ fn module_run_transcript_does_not_count_as_live_activity() {
 #[test]
 fn routing_mode_prioritizes_agent_over_plan() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.planner_running = true;
+    app.set_planner_running(true);
     app.shell_view = ShellView::AgentChat;
 
     assert_eq!(routing_mode(&app), RoutingMode::Agent);
@@ -55,6 +55,23 @@ fn uses_activity_frame_only_for_activity_view() {
 
     app.shell_view = ShellView::ModuleRun;
     assert!(!uses_activity_frame(&app));
+}
+
+#[test]
+fn uses_scene_frame_reads_route_page() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router
+        .scene_mut()
+        .set_page(crate::scene3d::VizPage::AttackPath);
+    app.shell_view = ShellView::Scene;
+
+    assert!(!uses_scene_frame(&app));
+
+    app.router
+        .scene_mut()
+        .set_page(crate::scene3d::VizPage::AttackSurface);
+
+    assert!(uses_scene_frame(&app));
 }
 
 #[test]
@@ -76,10 +93,11 @@ fn plain_render_mode_selects_specialized_plain_views() {
     app.shell_view = ShellView::StrategyQueue;
     assert_eq!(plain_render_mode(&app), PlainRenderMode::StrategyQueue);
 
-    app.shell_view = ShellView::Options(crate::OptionsView {
+    app.router.set_options(crate::OptionsView {
         tool_name: "sast:scan".to_string(),
         filter: crate::OptionsFilter::Standard,
     });
+    app.shell_view = ShellView::Options;
     assert!(matches!(
         plain_render_mode(&app),
         PlainRenderMode::Options(view) if view.tool_name == "sast:scan"

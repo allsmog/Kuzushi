@@ -42,8 +42,8 @@ fn patch_empty_state_names_runtime_verification_not_exploit() {
 #[test]
 fn export_preview_uses_active_review_completeness_filter() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.active_findings_filter = Some("completeness:open".to_string());
-    app.findings = vec![
+    app.set_active_findings_filter(Some("completeness:open".to_string()));
+    *app.findings_mut() = vec![
         kuzushi_core::Finding::new_tool(
             "semgrep",
             "demo/open",

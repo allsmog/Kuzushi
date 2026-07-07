@@ -1,11 +1,11 @@
 use super::*;
 
 impl ShellApp {
-    pub fn apply_pending_plan(&mut self) {
+    pub(crate) fn reduce_apply_pending_plan(&mut self) -> Vec<ShellEffect> {
         let Some(plan) = self.take_pending_plan_for_apply() else {
-            return;
+            return Vec::new();
         };
-        self.apply_plan(plan);
+        self.reduce_apply_plan(plan)
     }
 
     fn take_pending_plan_for_apply(&mut self) -> Option<PlanProposal> {
@@ -18,25 +18,32 @@ impl ShellApp {
         }
     }
 
-    fn apply_plan(&mut self, plan: PlanProposal) {
+    fn reduce_apply_plan(&mut self, plan: PlanProposal) -> Vec<ShellEffect> {
         let total = plan.changes.len();
-        let applied = self.apply_supported_plan_changes(plan.changes);
+        let (applied, effects) = self.reduce_supported_plan_changes(plan.changes);
         self.log("plan", format!("applied {applied}/{total} change(s)"));
         self.reset_plan_review_state();
         self.log_unsupported_plan_changes(plan.unsupported);
+        effects
     }
 
-    fn apply_supported_plan_changes(&mut self, changes: Vec<PlanChange>) -> usize {
+    fn reduce_supported_plan_changes(
+        &mut self,
+        changes: Vec<PlanChange>,
+    ) -> (usize, Vec<ShellEffect>) {
         let mut applied = 0usize;
+        let mut effects = Vec::new();
         for (idx, change) in changes.into_iter().enumerate() {
             if self.engagement.plan_change_skipped(idx) {
                 continue;
             }
-            if self.apply_plan_change(change) {
+            let (did_apply, mut change_effects) = self.reduce_plan_change(change);
+            if did_apply {
                 applied += 1;
             }
+            effects.append(&mut change_effects);
         }
-        applied
+        (applied, effects)
     }
 
     fn reset_plan_review_state(&mut self) {
@@ -49,57 +56,55 @@ impl ShellApp {
         }
     }
 
-    fn apply_plan_change(&mut self, change: PlanChange) -> bool {
+    fn reduce_plan_change(&mut self, change: PlanChange) -> (bool, Vec<ShellEffect>) {
         match change {
             PlanChange::SetOption {
                 global,
                 tool,
                 name,
                 value,
-            } => self.apply_set_option_plan_change(global, tool, name, value),
+            } => self.reduce_set_option_plan_change(global, tool, name, value),
             PlanChange::Ask { question } => {
-                update_and_execute_effects(self, Msg::Cmd(ShellCommand::Ask(question)));
-                true
+                let update = self.reduce_command_message(ShellCommand::Ask(question));
+                (true, update.effects)
             }
             PlanChange::Note { text } => {
                 self.log("plan-note", text);
-                true
+                (true, Vec::new())
             }
         }
     }
 
-    fn apply_set_option_plan_change(
+    fn reduce_set_option_plan_change(
         &mut self,
         global: bool,
         tool: Option<String>,
         name: String,
         value: String,
-    ) -> bool {
+    ) -> (bool, Vec<ShellEffect>) {
+        let mut effects = Vec::new();
         if let Some(tool_name) = tool {
-            update_and_execute_effects(
-                self,
-                Msg::Cmd(ShellCommand::Options {
-                    tool: Some(tool_name),
-                    filter: OptionsFilter::Standard,
-                }),
-            );
+            let mut update = self.reduce_command_message(ShellCommand::Options {
+                tool: Some(tool_name),
+                filter: OptionsFilter::Standard,
+            });
+            effects.append(&mut update.effects);
         }
-        update_and_execute_effects(
-            self,
-            Msg::Cmd(ShellCommand::SetOption {
-                global,
-                name,
-                value,
-            }),
-        );
-        true
+        let mut update = self.reduce_command_message(ShellCommand::SetOption {
+            global,
+            name,
+            value,
+        });
+        effects.append(&mut update.effects);
+        (true, effects)
     }
 
-    pub fn discard_pending_plan(&mut self) {
+    pub(crate) fn reduce_discard_pending_plan(&mut self) -> Vec<ShellEffect> {
         if self.engagement.discard_pending_plan() {
             self.log("plan", "discarded pending plan");
         } else {
             self.log("plan", "nothing to discard - no plan is pending");
         }
+        Vec::new()
     }
 }

@@ -17,7 +17,10 @@ fn primary_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Workbench => Some("workbench".to_string()),
         ShellView::ModelPicker => Some("model-picker".to_string()),
         ShellView::TargetPicker => Some("target-picker".to_string()),
-        ShellView::AuthMethodPicker(provider) => Some(format!("auth-picker:{provider}")),
+        ShellView::AuthMethodPicker => Some(format!(
+            "auth-picker:{}",
+            app.router.auth_picker().provider()
+        )),
         ShellView::PlanningPicker => Some("planning".to_string()),
         _ => None,
     }
@@ -26,14 +29,17 @@ fn primary_view_status(app: &ShellApp) -> Option<String> {
 fn threat_view_status(app: &ShellApp) -> Option<String> {
     match &app.shell_view {
         ShellView::Tune => Some("tune".to_string()),
-        ShellView::Threat(view) => Some(format!("threats:{}", threat_view_slug(*view))),
+        ShellView::Threat => Some(format!(
+            "threats:{}",
+            threat_view_slug(app.router.threat().view())
+        )),
         ShellView::ThreatEditor => Some("threats:edit".to_string()),
         ShellView::PromptsEditor => Some("prompts".to_string()),
-        ShellView::ActorDetail(index) => Some(format!("actor:{}", index + 1)),
+        ShellView::ActorDetail => Some(format!("actor:{}", app.router.actor_detail().index() + 1)),
         ShellView::Runs => Some("run-timeline".to_string()),
-        ShellView::RunDiff { .. } => Some("run-diff".to_string()),
-        ShellView::Replay(_) => Some("replay".to_string()),
-        ShellView::Trace(_) => Some("trace".to_string()),
+        ShellView::RunDiff => Some("run-diff".to_string()),
+        ShellView::Replay => Some("replay".to_string()),
+        ShellView::Trace => Some("trace".to_string()),
         ShellView::Activity => Some("activity".to_string()),
         _ => None,
     }
@@ -47,7 +53,17 @@ fn system_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Config => Some("config".to_string()),
         ShellView::Health => Some("health".to_string()),
         ShellView::Tools => Some("tools".to_string()),
-        ShellView::Options(view) => Some(format!("options[{}]", view.tool_name)),
+        ShellView::BootSplash => Some("boot".to_string()),
+        ShellView::QuitConfirm => Some("quit".to_string()),
+        ShellView::ConfirmDialog => Some("confirm".to_string()),
+        ShellView::ThemePicker => Some("theme".to_string()),
+        ShellView::Keymap => Some("keymap".to_string()),
+        ShellView::UpdateAvailable => Some("update".to_string()),
+        ShellView::Interruption => Some(format!(
+            "blocked:{}",
+            interruption_slug(app.router.interruption().view())
+        )),
+        ShellView::Options => Some(format!("options[{}]", app.router.options().tool_name)),
         ShellView::SastTasks => Some("tasks".to_string()),
         _ => None,
     }
@@ -66,21 +82,19 @@ fn workspace_view_status(app: &ShellApp) -> String {
         ShellView::Story => "story".to_string(),
         ShellView::Auth => "auth".to_string(),
         ShellView::Cost => "cost".to_string(),
-        ShellView::Patch(alias) => format!("patch:{alias}"),
+        ShellView::Patch => format!("patch:{}", app.router.patch().alias()),
         ShellView::Pwn => "pwn".to_string(),
         _ => "modules".to_string(),
     }
 }
 
 fn focused_or_default(app: &ShellApp, default: &str) -> String {
-    app.focused_module
-        .clone()
+    app.focused_module_owned()
         .unwrap_or_else(|| default.to_string())
 }
 
 fn module_run_status(app: &ShellApp) -> String {
-    app.focused_module
-        .as_ref()
+    app.focused_module()
         .map(|module| format!("{module}/run"))
         .unwrap_or_else(|| "run".to_string())
 }
@@ -91,6 +105,18 @@ fn threat_view_slug(view: ThreatView) -> &'static str {
         ThreatView::Stories => "stories",
         ThreatView::Scope => "scope",
         ThreatView::Summary => "summary",
+    }
+}
+
+fn interruption_slug(view: crate::app::InterruptionView) -> &'static str {
+    match view {
+        crate::app::InterruptionView::BudgetHardStop => "budget-hard-stop",
+        crate::app::InterruptionView::BudgetStop => "budget-stop",
+        crate::app::InterruptionView::NoBinary => "no-binary",
+        crate::app::InterruptionView::NoModel => "no-model",
+        crate::app::InterruptionView::NoPlugin => "no-plugin",
+        crate::app::InterruptionView::NetworkDown => "network-down",
+        crate::app::InterruptionView::RateLimited => "rate-limited",
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::{ActivitySession, DagTaskState};
+use crate::{ActivityRouteState, ActivitySession, DagTaskState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityHeaderModel {
@@ -41,6 +41,7 @@ pub(crate) struct ActivityLiveTool {
 
 pub(crate) fn activity_header_model(
     session: &ActivitySession,
+    route: &ActivityRouteState,
     outcome: Option<ActivityRunOutcome>,
     live_tool: Option<&ActivityLiveTool>,
 ) -> ActivityHeaderModel {
@@ -48,7 +49,7 @@ pub(crate) fn activity_header_model(
     let cost_usd = session.tasks.values().map(|row| row.cost_usd).sum::<f64>();
     let progress = progress_segment(&outcome, counts, live_tool);
     ActivityHeaderModel {
-        detailed_title: detailed_title(session, &progress, cost_usd),
+        detailed_title: detailed_title(session, route, &progress, cost_usd),
         summary_title: format!(
             "ACTIVITY  run {run_id}  ·  {progress}",
             run_id = session.run_id
@@ -188,12 +189,17 @@ fn task_count(session: &ActivitySession, state: DagTaskState) -> usize {
         .count()
 }
 
-fn detailed_title(session: &ActivitySession, progress: &str, cost_usd: f64) -> String {
+fn detailed_title(
+    session: &ActivitySession,
+    route: &ActivityRouteState,
+    progress: &str,
+    cost_usd: f64,
+) -> String {
     format!(
         "ACTIVITY  run {run}  ·  {progress}  ·  cost ${cost_usd:.4}{paused}{verbose}",
         run = compact_activity_run_id(&session.run_id),
-        paused = paused_segment(session.paused),
-        verbose = verbose_segment(session.verbose_subsystems),
+        paused = paused_segment(route.paused),
+        verbose = verbose_segment(route.verbose_subsystems),
     )
 }
 
@@ -229,10 +235,11 @@ mod tests {
             "triage:run".to_string(),
             task("triage:run", DagTaskState::Active, 0.25),
         );
-        session.paused = true;
-        session.verbose_subsystems = true;
+        let mut route = ActivityRouteState::default();
+        route.paused = true;
+        route.verbose_subsystems = true;
 
-        let model = activity_header_model(&session, None, None);
+        let model = activity_header_model(&session, &route, None, None);
 
         assert_eq!(
             model.summary_title,
@@ -248,7 +255,8 @@ mod tests {
         // Single-tool runs never register DAG tasks; "0/0 done · 0 running"
         // reads as a broken pipeline rather than a normal tool run.
         let session = ActivitySession::new("tool-1");
-        let model = activity_header_model(&session, None, None);
+        let route = ActivityRouteState::default();
+        let model = activity_header_model(&session, &route, None, None);
         assert!(model
             .summary_title
             .contains("no task rows — streaming tool output"));
@@ -265,7 +273,8 @@ mod tests {
             ambient: false,
             queued_plan_steps: 0,
         };
-        let model = activity_header_model(&session, None, Some(&live));
+        let route = ActivityRouteState::default();
+        let model = activity_header_model(&session, &route, None, Some(&live));
         assert!(model
             .summary_title
             .contains("⠷ threat-model:build · running 42s"));
@@ -286,7 +295,8 @@ mod tests {
             ambient: true,
             queued_plan_steps: 4,
         };
-        let model = activity_header_model(&session, None, Some(&live));
+        let route = ActivityRouteState::default();
+        let model = activity_header_model(&session, &route, None, Some(&live));
         assert!(
             model
                 .summary_title
@@ -313,6 +323,7 @@ mod tests {
 
         let model = activity_header_model(
             &session,
+            &ActivityRouteState::default(),
             Some(ActivityRunOutcome::Failed {
                 subject: "sast:scan".to_string(),
             }),
@@ -335,6 +346,7 @@ mod tests {
 
         let model = activity_header_model(
             &session,
+            &ActivityRouteState::default(),
             Some(ActivityRunOutcome::Terminal {
                 status: "completed".to_string(),
                 findings: Some(0),
@@ -357,6 +369,7 @@ mod tests {
 
         let model = activity_header_model(
             &session,
+            &ActivityRouteState::default(),
             Some(ActivityRunOutcome::Terminal {
                 status: "completed".to_string(),
                 findings: Some(3),
@@ -378,6 +391,7 @@ mod tests {
 
         let model = activity_header_model(
             &session,
+            &ActivityRouteState::default(),
             Some(ActivityRunOutcome::Terminal {
                 status: "partial".to_string(),
                 findings: Some(7),
@@ -402,6 +416,7 @@ mod tests {
 
         let model = activity_header_model(
             &session,
+            &ActivityRouteState::default(),
             Some(ActivityRunOutcome::Terminal {
                 status: "cancelled".to_string(),
                 findings: None,
@@ -440,7 +455,7 @@ mod tests {
             task("patch:finding", DagTaskState::Skipped, 0.0),
         );
 
-        let model = activity_header_model(&session, None, None);
+        let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
 
         assert!(
             model

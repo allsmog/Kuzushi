@@ -1,46 +1,49 @@
 use super::*;
 
-pub(crate) const LOG_LINE_CAPACITY: usize = 500;
-
 impl ShellApp {
-    pub fn log(&mut self, prefix: impl Into<String>, body: impl Into<String>) {
-        self.log.push(LogLine::new(prefix, body));
-        if self.log.len() > LOG_LINE_CAPACITY {
-            let overflow = self.log.len() - LOG_LINE_CAPACITY;
-            self.log.drain(0..overflow);
-        }
-    }
-
     pub fn scroll_up(&mut self, amount: u16) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.scroll_active_activity_pane(-(amount as isize)),
-            ScrollTarget::WorkbenchPane => self
-                .workbench_scroll
-                .shift(self.workbench_focus, -(amount as i32)),
+            ScrollTarget::WorkbenchPane => {
+                let focus = self.router.workbench().focus();
+                self.router
+                    .workbench_mut()
+                    .scroll_mut()
+                    .shift(focus, -(amount as i32));
+            }
             ScrollTarget::Logs => self.router.logs_mut().scroll_up(amount as usize),
-            ScrollTarget::Default => self.scroll_offset = self.scroll_offset.saturating_sub(amount),
+            ScrollTarget::Default => self.router.default_scroll_mut().scroll_up(amount),
         }
     }
 
     pub fn scroll_down(&mut self, amount: u16) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.scroll_active_activity_pane(amount as isize),
-            ScrollTarget::WorkbenchPane => self
-                .workbench_scroll
-                .shift(self.workbench_focus, amount as i32),
+            ScrollTarget::WorkbenchPane => {
+                let focus = self.router.workbench().focus();
+                self.router
+                    .workbench_mut()
+                    .scroll_mut()
+                    .shift(focus, amount as i32);
+            }
             ScrollTarget::Logs => self.router.logs_mut().scroll_down(amount as usize),
-            ScrollTarget::Default => self.scroll_offset = self.scroll_offset.saturating_add(amount),
+            ScrollTarget::Default => self.router.default_scroll_mut().scroll_down(amount),
         }
     }
 
     pub fn scroll_to_top(&mut self) {
         match self.scroll_target() {
             ScrollTarget::Activity => {
-                self.activity.as_mut().map(focused_pane_to_top);
+                if let Some(session) = self.domain.activity() {
+                    focused_pane_to_top(session, self.router.activity_mut());
+                }
             }
-            ScrollTarget::WorkbenchPane => self.workbench_scroll.set(self.workbench_focus, 0),
+            ScrollTarget::WorkbenchPane => {
+                let focus = self.router.workbench().focus();
+                self.router.workbench_mut().scroll_mut().set(focus, 0);
+            }
             ScrollTarget::Logs => self.router.logs_mut().open(),
-            ScrollTarget::Default => self.scroll_offset = 0,
+            ScrollTarget::Default => self.router.default_scroll_mut().reset(),
         }
     }
 
@@ -48,10 +51,14 @@ impl ShellApp {
         match self.scroll_target() {
             ScrollTarget::Activity => self.focused_activity_pane_to_bottom(),
             ScrollTarget::WorkbenchPane => {
-                self.workbench_scroll.set(self.workbench_focus, u16::MAX)
+                let focus = self.router.workbench().focus();
+                self.router
+                    .workbench_mut()
+                    .scroll_mut()
+                    .set(focus, u16::MAX);
             }
             ScrollTarget::Logs => self.router.logs_mut().set_scroll(usize::MAX),
-            ScrollTarget::Default => self.scroll_offset = u16::MAX,
+            ScrollTarget::Default => self.router.default_scroll_mut().tail(),
         }
     }
 
@@ -61,38 +68,40 @@ impl ShellApp {
     /// from the bottom, auto-tail is paused for that session.
     fn scroll_active_activity_pane(&mut self, amount: isize) {
         let deck_cursor_max = self.activity_deck_cursor_max();
-        let Some(session) = self.activity.as_mut() else {
+        let Some(session) = self.domain.activity() else {
             return;
         };
-        match session.effective_pane_focus() {
-            PaneFocus::Left => session.shift_task_cursor(amount),
+        let route = self.router.activity_mut();
+        match route.effective_pane_focus(session) {
+            PaneFocus::Left => route.shift_task_cursor(session, amount),
             PaneFocus::Right => {
-                session.feed_auto_tail = false;
-                session.deck_cursor = shift_clamped(session.deck_cursor, amount, deck_cursor_max);
+                route.feed_auto_tail = false;
+                route.deck_cursor = shift_clamped(route.deck_cursor, amount, deck_cursor_max);
             }
         }
     }
 
     fn focused_activity_pane_to_bottom(&mut self) {
         let deck_cursor_max = self.activity_deck_cursor_max();
-        let Some(session) = self.activity.as_mut() else {
+        let Some(session) = self.domain.activity() else {
             return;
         };
-        match session.effective_pane_focus() {
-            PaneFocus::Left => session.move_task_cursor_to_bottom(),
+        let route = self.router.activity_mut();
+        match route.effective_pane_focus(session) {
+            PaneFocus::Left => route.move_task_cursor_to_bottom(session),
             PaneFocus::Right => {
-                session.deck_cursor = deck_cursor_max;
-                session.feed_auto_tail = false;
+                route.deck_cursor = deck_cursor_max;
+                route.feed_auto_tail = false;
             }
         }
     }
 
     fn activity_deck_cursor_max(&self) -> usize {
-        let Some(session) = self.activity.as_ref() else {
+        if self.activity().is_none() {
             return 0;
         };
-        match session.deck_page {
-            ActivityDeckPage::Findings => self.findings.len().saturating_sub(1),
+        match self.router.activity().deck_page {
+            ActivityDeckPage::Findings => self.findings().len().saturating_sub(1),
             ActivityDeckPage::AttackSurface => crate::ui_view_models::cached_risk_by_module(self)
                 .modules
                 .len()
@@ -104,19 +113,24 @@ impl ShellApp {
                 .min(10)
                 .saturating_sub(1),
             ActivityDeckPage::AttackPath => self
-                .taint_flow
-                .as_ref()
+                .domain()
+                .taint_flow()
                 .map(|flow| flow.stages.len().min(6))
                 .unwrap_or_default()
                 .saturating_sub(1),
-            ActivityDeckPage::ExploitChain => self.exploit_chains.len().min(3).saturating_sub(1),
+            ActivityDeckPage::ExploitChain => self
+                .domain()
+                .exploit_chains()
+                .len()
+                .min(3)
+                .saturating_sub(1),
         }
     }
 
     fn scroll_target(&self) -> ScrollTarget {
         match self.shell_view {
             ShellView::Activity => ScrollTarget::Activity,
-            ShellView::Workbench if self.workbench_focus != WorkbenchPane::Findings => {
+            ShellView::Workbench if self.router.workbench().focus() != WorkbenchPane::Findings => {
                 ScrollTarget::WorkbenchPane
             }
             ShellView::Logs => ScrollTarget::Logs,
@@ -125,41 +139,18 @@ impl ShellApp {
     }
 
     pub(crate) fn sync_view_change(&mut self) -> bool {
-        let current = Some(self.shell_view.clone());
-        if self.prev_shell_view != current {
-            self.scroll_offset = 0;
-            if let Some(prev) = self.prev_shell_view.take() {
-                self.push_nav_history(prev);
-            }
-            self.prev_shell_view = current;
-            true
-        } else {
-            false
+        let changed = self
+            .router
+            .navigation_mut()
+            .sync_view_change(self.shell_view.clone());
+        if changed {
+            self.router.default_scroll_mut().reset();
         }
+        changed
     }
 
     pub(crate) fn push_nav_history(&mut self, view: ShellView) {
-        const NAV_HISTORY_DEPTH: usize = 16;
-        // Onboarding pickers are transient — `back` should never drop the user
-        // back into a model/auth/planning picker they already dismissed.
-        if matches!(
-            view,
-            ShellView::CommandPalette
-                | ShellView::ModelPicker
-                | ShellView::AuthMethodPicker(_)
-                | ShellView::PlanningPicker
-                | ShellView::TargetPicker
-        ) {
-            return;
-        }
-        if self.nav_history.last() == Some(&view) {
-            return;
-        }
-        self.nav_history.push(view);
-        if self.nav_history.len() > NAV_HISTORY_DEPTH {
-            let excess = self.nav_history.len() - NAV_HISTORY_DEPTH;
-            self.nav_history.drain(..excess);
-        }
+        self.router.navigation_mut().push_history(view);
     }
 }
 
@@ -171,10 +162,10 @@ enum ScrollTarget {
     Default,
 }
 
-fn focused_pane_to_top(session: &mut ActivitySession) {
-    match session.effective_pane_focus() {
-        PaneFocus::Left => session.move_task_cursor_to_top(),
-        PaneFocus::Right => session.deck_cursor = 0,
+fn focused_pane_to_top(session: &ActivitySession, route: &mut ActivityRouteState) {
+    match route.effective_pane_focus(session) {
+        PaneFocus::Left => route.move_task_cursor_to_top(session),
+        PaneFocus::Right => route.deck_cursor = 0,
     }
 }
 

@@ -19,7 +19,7 @@ impl ShellApp {
     /// the entire buffer and is scrollable via `j`/`k`/`g`/`G`/`PgUp`/`PgDn`.
     pub fn show_logs(&mut self) {
         self.shell_view = ShellView::Logs;
-        self.scroll_offset = u16::MAX; // start tailing
+        self.router.logs_mut().set_scroll(usize::MAX); // start tailing
     }
 
     /// Reload `.kuzushi/scope.toml` from the active target (M2 §2.1). Called
@@ -27,60 +27,106 @@ impl ShellApp {
     /// dispatchers see a fresh allow/deny list. Logs a transcript line on
     /// load errors but does not panic — operators see "scope: load failed".
     pub fn refresh_program_scope(&mut self) {
-        let Some(target) = self.target.as_ref() else {
-            self.program_scope = None;
+        let Some(target) = self.target_path_buf() else {
+            self.domain_mut().set_program_scope(None);
             return;
         };
         let workspace = match kuzushi_core::WorkspaceTarget::new(target) {
             Ok(workspace) => workspace,
             Err(_) => {
-                self.program_scope = None;
+                self.domain_mut().set_program_scope(None);
                 return;
             }
         };
         match kuzushi_core::load_program_scope(&workspace) {
-            Ok(scope) => self.program_scope = scope,
+            Ok(scope) => self.domain_mut().set_program_scope(scope),
             Err(error) => {
-                self.program_scope = None;
+                self.domain_mut().set_program_scope(None);
                 self.log("error", format!("scope.toml load failed: {error}"));
             }
         }
     }
 
-    pub fn handle_target_command(&mut self, raw: Option<&str>) {
+    pub(crate) fn reduce_target_command(&mut self, raw: Option<&str>) -> Vec<ShellEffect> {
         let Some(raw) = target_argument(raw) else {
             self.log_current_target();
-            return;
+            return Vec::new();
         };
-        let path = PathBuf::from(raw);
-        match WorkspaceTarget::new(&path) {
+        vec![ShellEffect::ActivateTarget(TargetActivation {
+            path: PathBuf::from(raw),
+            selected_scope: None,
+            source: TargetActivationSource::Command,
+        })]
+    }
+
+    pub(crate) fn activate_target_effect(
+        &mut self,
+        activation: TargetActivation,
+    ) -> Vec<ShellEffect> {
+        let label = activation.path.display().to_string();
+        match WorkspaceTarget::new(&activation.path) {
             Ok(workspace) => {
-                self.activate_target(workspace);
+                let effects = self.activate_target(workspace);
                 self.apply_initial_onboarding_phase();
+                self.finish_target_activation(activation);
+                effects
             }
-            Err(error) => self.log("error", format!("invalid target {raw:?}: {error}")),
+            Err(error) => {
+                self.log("error", format!("invalid target {label:?}: {error}"));
+                Vec::new()
+            }
         }
     }
 
     fn log_current_target(&mut self) {
         let current = self
-            .target
-            .as_ref()
+            .target()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "<unset>".to_string());
         self.log("target", format!("current target: {current}"));
     }
 
-    pub(crate) fn activate_target(&mut self, workspace: WorkspaceTarget) {
+    pub(crate) fn activate_target(&mut self, workspace: WorkspaceTarget) -> Vec<ShellEffect> {
         let root = workspace.root().to_path_buf();
-        self.target = Some(root.clone());
+        self.set_target(Some(root.clone()));
         if self.ensure_target_state_dir(&workspace, &root) {
             self.record_active_target(&root);
             self.refresh_active_scope_tree(&root);
         }
-        self.refresh_findings(false);
-        self.refresh_program_scope();
         self.apply_ready_default_model_after_target_activation();
+        vec![
+            ShellEffect::RefreshFindings(FindingsRefresh {
+                announce: false,
+                filter: None,
+            }),
+            ShellEffect::RefreshProgramScope,
+        ]
+    }
+
+    fn finish_target_activation(&mut self, activation: TargetActivation) {
+        if let Some(scope) = activation.selected_scope {
+            self.set_active_scope(Some(scope.clone()));
+            self.log(
+                "target",
+                format!(
+                    "entered {} scope {} ({})",
+                    scope.kind.label(),
+                    scope.rel_path,
+                    scope.id
+                ),
+            );
+        }
+        if activation.source == TargetActivationSource::Picker
+            && self.shell_view == ShellView::TargetPicker
+        {
+            self.shell_view = ShellView::Workbench;
+            self.router
+                .workbench_mut()
+                .set_focus(WorkbenchPane::Findings);
+            let center_mode = self.default_workbench_center_mode(WorkbenchPane::Findings);
+            self.router.workbench_mut().set_center_mode(center_mode);
+            self.clamp_findings_cursor();
+        }
     }
 
     fn ensure_target_state_dir(&mut self, workspace: &WorkspaceTarget, root: &Path) -> bool {
@@ -107,70 +153,113 @@ impl ShellApp {
 
     fn refresh_active_scope_tree(&mut self, root: &Path) {
         if let Some(tree) = self.refresh_nested_project_scopes(root) {
-            self.active_scope = active_scope_from_tree(&tree, None);
+            self.set_active_scope(active_scope_from_tree(&tree, None));
         }
     }
 
-    pub fn handle_target_revision_command(&mut self, reference: &str) {
-        let Some(target) = self.target.clone() else {
+    pub(crate) fn reduce_target_revision_command(&mut self, reference: &str) -> Vec<ShellEffect> {
+        let Some(target) = self.target_owned() else {
             self.log(
                 "target",
                 "revision switch requires an active target; run target <path> first",
             );
-            return;
+            return Vec::new();
         };
-        match kuzushi_core::switch_target_revision(&target, reference) {
-            Ok(outcome) => {
-                *self.workbench_cache.borrow_mut() = WorkbenchCache::default();
-                let preferred_scope = self.active_scope.as_ref().map(|scope| scope.id.clone());
-                if let Some(tree) = self.refresh_nested_project_scopes(&target) {
-                    self.active_scope = active_scope_from_tree(&tree, preferred_scope.as_deref());
-                }
-                self.refresh_findings(false);
-                self.refresh_program_scope();
-                self.log(
-                    "target",
-                    format!(
-                        "switched revision {} -> {}",
-                        short_revision(&outcome.previous.sha),
-                        short_revision(&outcome.current.sha)
-                    ),
-                );
-            }
-            Err(error) => self.log(
-                "target",
-                format!("revision switch blocked for {reference:?}: {error}"),
+        vec![ShellEffect::SwitchTargetRevision(TargetRevisionSwitch {
+            target,
+            reference: reference.to_string(),
+        })]
+    }
+
+    pub(crate) fn switch_target_revision_effect(
+        &mut self,
+        switch: TargetRevisionSwitch,
+    ) -> Vec<ShellEffect> {
+        match kuzushi_core::switch_target_revision(&switch.target, &switch.reference) {
+            Ok(outcome) => self.apply_target_revision_switch(
+                &switch.target,
+                &outcome.previous.sha,
+                &outcome.current.sha,
             ),
+            Err(error) => {
+                self.log_target_revision_switch_error(&switch.reference, error);
+                Vec::new()
+            }
         }
     }
 
-    pub(crate) fn apply_component_selection(&mut self, raw: Option<&str>) {
+    fn apply_target_revision_switch(
+        &mut self,
+        target: &Path,
+        previous_sha: &str,
+        current_sha: &str,
+    ) -> Vec<ShellEffect> {
+        *self.workbench_cache.borrow_mut() = WorkbenchCache::default();
+        self.refresh_target_scope_after_revision_switch(target);
+        self.log_target_revision_switch(previous_sha, current_sha);
+        target_revision_refresh_effects()
+    }
+
+    fn refresh_target_scope_after_revision_switch(&mut self, target: &Path) {
+        let preferred_scope = self.active_scope().map(|scope| scope.id.clone());
+        if let Some(tree) = self.refresh_nested_project_scopes(target) {
+            self.set_active_scope(active_scope_from_tree(&tree, preferred_scope.as_deref()));
+        }
+    }
+
+    fn log_target_revision_switch(&mut self, previous_sha: &str, current_sha: &str) {
+        self.log(
+            "target",
+            format!(
+                "switched revision {} -> {}",
+                short_revision(previous_sha),
+                short_revision(current_sha)
+            ),
+        );
+    }
+
+    fn log_target_revision_switch_error(&mut self, reference: &str, error: anyhow::Error) {
+        self.log(
+            "target",
+            format!("revision switch blocked for {reference:?}: {error}"),
+        );
+    }
+
+    pub(crate) fn reduce_component_selection(&self, raw: Option<&str>) -> Vec<ShellEffect> {
+        vec![ShellEffect::SelectComponent(ComponentSelection {
+            target: self.target_owned(),
+            raw: raw.map(ToString::to_string),
+        })]
+    }
+
+    pub(crate) fn select_component_effect(
+        &mut self,
+        selection: ComponentSelection,
+    ) -> Vec<ShellEffect> {
+        let target = selection.target;
+        let raw = selection.raw.as_deref();
         let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
             self.log(
                 "component",
                 "select a component path or id; use `recommend` to inspect candidates",
             );
-            self.open_workbench(crate::app::WorkbenchPane::Findings);
-            return;
+            return self.open_workbench_effects(crate::app::WorkbenchPane::Findings);
         };
         if matches!(raw, "all" | "clear" | "root" | ".") {
-            self.active_scope = None;
-            self.findings_route.reset();
-            self.open_workbench(crate::app::WorkbenchPane::Findings);
+            self.set_active_scope(None);
+            self.router.findings_mut().reset();
             self.log("component", "cleared component filter");
-            return;
+            return self.open_workbench_effects(crate::app::WorkbenchPane::Findings);
         }
-        let Some(scope) = self.find_component_scope(raw) else {
+        let Some(scope) = self.find_component_scope(target.as_deref(), raw) else {
             self.log(
                 "component",
                 format!("no component matches {raw:?}; run `recommend` or `project`"),
             );
-            self.open_workbench(crate::app::WorkbenchPane::Findings);
-            return;
+            return self.open_workbench_effects(crate::app::WorkbenchPane::Findings);
         };
-        self.active_scope = Some(scope.clone());
-        self.findings_route.reset();
-        self.open_workbench(crate::app::WorkbenchPane::Findings);
+        self.set_active_scope(Some(scope.clone()));
+        self.router.findings_mut().reset();
         self.log(
             "component",
             format!(
@@ -179,14 +268,19 @@ impl ShellApp {
                 scope.kind.label()
             ),
         );
+        self.open_workbench_effects(crate::app::WorkbenchPane::Findings)
     }
 
-    fn find_component_scope(&mut self, raw: &str) -> Option<TargetCandidateScope> {
-        let target = self.target.clone()?;
+    fn find_component_scope(
+        &mut self,
+        target: Option<&std::path::Path>,
+        raw: &str,
+    ) -> Option<TargetCandidateScope> {
+        let target = target?;
         let state = self
             .workbench_cache
             .borrow_mut()
-            .project_scope_tree(Some(target.as_path()))?;
+            .project_scope_tree(Some(target))?;
         component_scope_from_state(&state, raw)
     }
 
@@ -219,21 +313,29 @@ impl ShellApp {
         if matches!(self.shell_view, ShellView::Story) {
             return;
         }
-        self.story_return_view = Some(self.shell_view.clone());
+        self.router
+            .navigation_mut()
+            .push_overlay_origin(self.shell_view.clone());
         self.shell_view = ShellView::Story;
     }
 
     pub fn toggle_story_overlay(&mut self) {
         if matches!(self.shell_view, ShellView::Story) {
-            if let Some(previous) = self.story_return_view.take() {
-                self.shell_view = previous;
-            } else {
-                self.shell_view = ShellView::Catalog;
-            }
+            self.go_back();
         } else {
             self.show_story();
         }
     }
+}
+
+fn target_revision_refresh_effects() -> Vec<ShellEffect> {
+    vec![
+        ShellEffect::RefreshFindings(FindingsRefresh {
+            announce: false,
+            filter: None,
+        }),
+        ShellEffect::RefreshProgramScope,
+    ]
 }
 
 fn target_argument(raw: Option<&str>) -> Option<&str> {

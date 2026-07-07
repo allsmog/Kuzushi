@@ -1,46 +1,103 @@
 use super::confirmation_keys::{
     confirm_key_action, confirm_key_is_consumed_without_action, ConfirmKeyAction,
 };
-use super::control_keys::control_key_handler;
+use super::control_keys::control_key_action;
 use super::*;
 
 impl ShellApp {
-    pub fn handle_key(&mut self, key: KeyEvent) {
-        if self.handle_modal_key(key) {
+    pub(crate) fn reduce_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let update = self.reduce_key_without_recording(key);
+        if update.handled {
             self.record_operator_interaction();
-            return;
+        }
+        update
+    }
+
+    fn reduce_key_without_recording(&mut self, key: KeyEvent) -> InputUpdate {
+        if let Some(update) = self.reduce_modal_key(key) {
+            return update;
         }
 
         self.update_quit_chord_arm(key);
         if self.handle_story_toggle_key(key) {
-            self.record_operator_interaction();
-            return;
+            return InputUpdate::handled();
         }
 
+        self.reduce_non_modal_key(key)
+    }
+
+    fn reduce_modal_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        let update = self.handle_modal_key(key);
+        if update.handled {
+            return Some(update);
+        }
+        None
+    }
+
+    fn reduce_non_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
         let modifiers = KeyModifierState::new(key);
         self.reset_completion_cycle_for_key(key);
 
-        if self.handle_input_mode_key(key, modifiers)
-            || self.handle_control_key(key, modifiers)
-            || self.handle_empty_input_view_key(key, modifiers)
-            || self.handle_unhandled_navigation_key(key, modifiers)
-            || self.handle_cursor_key(key, modifiers)
-            || self.handle_history_key(key, modifiers)
-            || self.handle_text_key(key)
-        {
-            self.record_operator_interaction();
-            return;
+        let update = self.handle_mode_or_control_key(key, modifiers);
+        if update.handled {
+            return update;
         }
+        self.reduce_navigation_or_text_key(key, modifiers)
+    }
+
+    fn handle_mode_or_control_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> InputUpdate {
+        if self.handle_input_mode_key(key, modifiers) {
+            return InputUpdate::handled();
+        }
+        self.handle_control_key(key, modifiers)
+    }
+
+    fn reduce_navigation_or_text_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> InputUpdate {
+        let update = self.handle_empty_input_view_key(key, modifiers);
+        if update.handled {
+            return update;
+        }
+        if self.handle_navigation_or_history_key(key, modifiers) {
+            return InputUpdate::handled();
+        }
+        self.handle_text_key(key)
+    }
+
+    fn handle_navigation_or_history_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> bool {
+        if self.handle_unhandled_navigation_key(key, modifiers) {
+            return true;
+        }
+        if self.handle_cursor_key(key, modifiers) {
+            return true;
+        }
+        self.handle_history_key(key, modifiers)
     }
 
     fn record_operator_interaction(&mut self) {
-        self.last_char_at = Some(Instant::now());
+        self.ui_mut().record_operator_interaction(Instant::now());
     }
 
-    pub(super) fn handle_modal_key(&mut self, key: KeyEvent) -> bool {
-        self.handle_prereq_prompt_key(key)
-            || self.handle_overlay_key(key)
-            || self.handle_shared_modal_key(key)
+    pub(super) fn handle_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let prereq_update = self.handle_prereq_prompt_key(key);
+        if prereq_update.handled {
+            return prereq_update;
+        }
+        if self.handle_overlay_key(key) {
+            return InputUpdate::handled();
+        }
+        self.handle_shared_modal_key(key)
     }
 
     /// Command palette and Ctrl+R reverse search both fully capture input while
@@ -49,7 +106,7 @@ impl ShellApp {
         if matches!(self.shell_view, ShellView::CommandPalette) {
             return self.handle_command_palette_key(key);
         }
-        if self.history_search.is_some() {
+        if self.history_search().is_some() {
             return self.handle_history_search_key(key);
         }
         false
@@ -105,31 +162,101 @@ impl ShellApp {
         true
     }
 
-    fn handle_shared_modal_key(&mut self, key: KeyEvent) -> bool {
-        self.handle_confirm_key(key)
-            || self.handle_retry_key(key)
-            || self.handle_budget_key(key)
-            || self.handle_pending_plan_key(key)
-            || self.handle_picker_key(key)
-            || self.handle_notice_dismiss_key(key)
+    fn handle_shared_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let update = self.handle_confirm_or_budget_key(key);
+        if update.handled {
+            return update;
+        }
+        let update = self.handle_deferred_modal_key(key);
+        if update.handled {
+            return update;
+        }
+        InputUpdate::handled_if(self.handle_notice_dismiss_key(key))
+    }
+
+    fn handle_confirm_or_budget_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let update = self.handle_confirm_key(key);
+        if update.handled {
+            return update;
+        }
+        self.handle_budget_key(key)
+    }
+
+    fn handle_deferred_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let update = self.handle_primary_deferred_modal_key(key);
+        if update.handled {
+            return update;
+        }
+        self.handle_secondary_deferred_modal_key(key)
+    }
+
+    fn handle_primary_deferred_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let update = self.handle_pending_plan_key(key);
+        if update.handled {
+            return update;
+        }
+        self.handle_system_overlay_modal_key(key)
+    }
+
+    fn handle_secondary_deferred_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let update = self.handle_retry_key(key);
+        if update.handled {
+            return update;
+        }
+        let update = self.handle_picker_key(key);
+        if update.handled {
+            return update;
+        }
+        InputUpdate::ignored()
+    }
+
+    fn handle_system_overlay_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
+        match self.shell_view {
+            ShellView::QuitConfirm => self.handle_quit_confirm_key(key),
+            _ => InputUpdate::ignored(),
+        }
+    }
+
+    fn handle_quit_confirm_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if !key.modifiers.is_empty() {
+            return InputUpdate::ignored();
+        }
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                InputUpdate::handled_with_effects(vec![ShellEffect::Quit])
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                self.go_back();
+                InputUpdate::handled()
+            }
+            KeyCode::Char('p') | KeyCode::Char('P') => {
+                self.log(
+                    "quit",
+                    "detach from quit-confirm is not available in this shell",
+                );
+                self.go_back();
+                InputUpdate::handled()
+            }
+            KeyCode::Enter => InputUpdate::handled(),
+            _ => InputUpdate::handled(),
+        }
     }
 
     /// The end-of-engagement retry gate: `y`/Enter retries the failed tasks
     /// (with auto-adjustments), `n`/Esc skips them.
-    fn handle_retry_key(&mut self, key: KeyEvent) -> bool {
+    fn handle_retry_key(&mut self, key: KeyEvent) -> InputUpdate {
         if self.advisory.pending_retry.is_none() || !key.modifiers.is_empty() {
-            return false;
+            return InputUpdate::ignored();
         }
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                self.retry_failed_tasks();
-                true
+                InputUpdate::handled_with_effects(self.retry_failed_tasks())
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 self.decline_retry();
-                true
+                InputUpdate::handled()
             }
-            _ => false,
+            _ => InputUpdate::ignored(),
         }
     }
 
@@ -143,43 +270,65 @@ impl ShellApp {
         true
     }
 
-    pub(super) fn handle_confirm_key(&mut self, key: KeyEvent) -> bool {
+    pub(super) fn handle_confirm_key(&mut self, key: KeyEvent) -> InputUpdate {
         if !self.confirm_key_ready(key) {
-            return false;
+            return InputUpdate::ignored();
         }
         let Some(action) = confirm_key_action(key.code) else {
-            return confirm_key_is_consumed_without_action(key.code);
+            return InputUpdate::handled_if(confirm_key_is_consumed_without_action(key.code));
         };
-        self.apply_confirm_key_action(action);
-        true
+        self.apply_confirm_key_action(action)
     }
 
     fn confirm_key_ready(&self, key: KeyEvent) -> bool {
         self.advisory.pending_confirm.is_some() && key.modifiers.is_empty()
     }
 
-    fn apply_confirm_key_action(&mut self, action: ConfirmKeyAction) {
-        self.resolve_confirm(action.outcome, action.remember);
+    fn apply_confirm_key_action(&mut self, action: ConfirmKeyAction) -> InputUpdate {
+        let resolved = self.resolve_confirm(action.outcome, action.remember);
+        let launch = self.confirmed_run_launch(action, resolved.as_ref());
+        self.advisory.pending_confirm_launch = None;
+        match launch {
+            Some(launch) => {
+                InputUpdate::handled_with_effects(vec![ShellEffect::DispatchRunTool(launch)])
+            }
+            None => InputUpdate::handled(),
+        }
     }
 
-    pub(super) fn handle_budget_key(&mut self, key: KeyEvent) -> bool {
+    fn confirmed_run_launch(
+        &mut self,
+        action: ConfirmKeyAction,
+        resolved: Option<&PendingConfirm>,
+    ) -> Option<RunToolLaunch> {
+        if !action.outcome {
+            return None;
+        }
+        let request = resolved?;
+        if !request.kind.allows_yes() {
+            return None;
+        }
+        self.advisory.pending_confirm_launch.take()
+    }
+
+    pub(super) fn handle_budget_key(&mut self, key: KeyEvent) -> InputUpdate {
         if !self.is_budget_halted() || !key.modifiers.is_empty() {
-            return false;
+            return InputUpdate::ignored();
         }
         let KeyCode::Char(ch) = key.code else {
-            return false;
+            return InputUpdate::ignored();
         };
-        match ch.to_ascii_lowercase() {
-            'c' => self.continue_past_budget(),
-            'a' => self.abort_for_budget(),
-            _ => return false,
-        }
-        true
+        let effect = match ch.to_ascii_lowercase() {
+            'c' => ShellEffect::ContinuePastBudget,
+            'a' => ShellEffect::AbortForBudget,
+            _ => return InputUpdate::ignored(),
+        };
+        InputUpdate::handled_with_effects(vec![effect])
     }
 
     pub(super) fn update_quit_chord_arm(&mut self, key: KeyEvent) {
         if !is_quit_chord(key) {
-            self.ctrl_c_armed_at = None;
+            self.set_ctrl_c_armed_at(None);
         }
     }
 
@@ -208,15 +357,14 @@ impl ShellApp {
         &mut self,
         key: KeyEvent,
         modifiers: KeyModifierState,
-    ) -> bool {
+    ) -> InputUpdate {
         if !modifiers.ctrl {
-            return false;
+            return InputUpdate::ignored();
         }
-        let Some(handler) = control_key_handler(key.code) else {
-            return false;
+        let Some(action) = control_key_action(key.code) else {
+            return InputUpdate::ignored();
         };
-        handler(self);
-        true
+        action.apply(self)
     }
 
     fn handle_input_mode_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
@@ -225,33 +373,33 @@ impl ShellApp {
         }
         match key.code {
             KeyCode::F(2) => self.toggle_input_mode(),
-            KeyCode::Esc if self.input_mode == InputMode::Navigate => self.enter_prompt_mode(),
+            KeyCode::Esc if self.input_mode() == InputMode::Navigate => self.enter_prompt_mode(),
             _ => return false,
         }
         true
     }
 
     fn toggle_input_mode(&mut self) {
-        match self.input_mode {
+        match self.input_mode() {
             InputMode::Prompt => self.enter_navigate_mode(),
             InputMode::Navigate => self.enter_prompt_mode(),
         }
     }
 
     fn enter_navigate_mode(&mut self) {
-        if !self.input.is_empty() {
+        if !self.input().is_empty() {
             self.log(
                 "input",
                 "finish or clear the prompt before entering navigation mode",
             );
             return;
         }
-        self.input_mode = InputMode::Navigate;
+        self.set_input_mode(InputMode::Navigate);
         self.log("input", "navigation mode — Esc returns to prompt");
     }
 
     fn enter_prompt_mode(&mut self) {
-        self.input_mode = InputMode::Prompt;
+        self.set_input_mode(InputMode::Prompt);
         self.log("input", "prompt mode — F2 returns to navigation");
     }
 
@@ -260,7 +408,8 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> bool {
-        if self.input_mode != InputMode::Navigate || !self.input.is_empty() || !modifiers.plain {
+        if self.input_mode() != InputMode::Navigate || !self.input().is_empty() || !modifiers.plain
+        {
             return false;
         }
         match key.code {
@@ -274,5 +423,39 @@ impl ShellApp {
             _ => return false,
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    fn plain_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn quit_confirm_y_is_consumed_as_quit_effect_not_text_input() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::QuitConfirm;
+
+        let update = app.reduce_key(plain_key(KeyCode::Char('y')));
+
+        assert!(update.handled);
+        assert!(matches!(update.effects.as_slice(), [ShellEffect::Quit]));
+        assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn quit_confirm_n_is_consumed_as_close_not_text_input() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = ShellView::QuitConfirm;
+
+        let update = app.reduce_key(plain_key(KeyCode::Char('n')));
+
+        assert!(update.handled);
+        assert!(update.effects.is_empty());
+        assert!(app.input().is_empty());
     }
 }

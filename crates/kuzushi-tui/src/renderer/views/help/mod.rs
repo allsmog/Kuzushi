@@ -159,7 +159,7 @@ pub(crate) fn logs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("LOGS", area.width));
-    let total = app.log.len();
+    let total = app.log_len();
     let hint =
         format!("{total} log lines · j/k scroll · g/G jump · PgUp/PgDn page · back to return");
     lines.push(muted(&fit(&hint, area.width as usize)));

@@ -122,10 +122,10 @@ fn export_preview_candidates(
     app: &ShellApp,
 ) -> Vec<(Finding, Option<WorkspaceFindingReviewContext>)> {
     let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
-        &app.findings,
-        &app.review_decisions,
+        app.findings(),
+        app.review_decisions(),
     );
-    app.findings
+    app.findings()
         .iter()
         .cloned()
         .map(|finding| {
@@ -141,7 +141,7 @@ fn export_preview_run_contexts(
     app: &ShellApp,
     findings: &[Finding],
 ) -> HashMap<String, WorkspaceRunExportContext> {
-    let Some(target) = app.target.as_deref() else {
+    let Some(target) = app.target() else {
         return HashMap::new();
     };
     finding_run_ids(findings)
@@ -213,7 +213,7 @@ fn report_preview_counts(
 }
 
 fn latest_run_id(app: &ShellApp) -> Option<String> {
-    let target = app.target.as_deref()?;
+    let target = app.target()?;
     let latest_path = ui_latest_run_path(Some(target));
     std::fs::read_to_string(latest_path)
         .ok()

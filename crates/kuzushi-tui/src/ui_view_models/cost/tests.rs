@@ -26,9 +26,10 @@ fn cost_model_uses_default_budget_when_unset() {
 #[test]
 fn cost_model_reports_last_tool_and_budget_status() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.session_cost_usd = 1.42;
-    app.last_tool_cost_usd = Some(0.18);
-    app.session_budget_usd = Some(5.0);
+    app.session_mut().set_session_cost_usd_for_test(1.42);
+    app.session_mut()
+        .set_last_tool_cost_usd_for_test(Some(0.18));
+    app.session_mut().set_session_budget_usd(Some(5.0));
 
     let model = cost_model(&app);
 

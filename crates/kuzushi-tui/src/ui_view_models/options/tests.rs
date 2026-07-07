@@ -11,7 +11,7 @@ fn options_view(tool_name: &str, filter: OptionsFilter) -> OptionsView {
 #[test]
 fn options_model_formats_stored_option_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.option_store.set_value(
+    app.option_store_mut().set_value(
         OptionScope::Session,
         OptionTarget::Tool("sast:scan".to_string()),
         "triage",

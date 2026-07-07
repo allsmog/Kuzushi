@@ -103,13 +103,12 @@ fn bounded_failure_text(value: &str) -> String {
 }
 
 fn live_failure_context(app: &ShellApp) -> Option<FailureToLlmContext> {
-    app.agent_chat
-        .as_ref()
+    app.agent_chat()
         .and_then(|agent| agent.failure_context.clone())
 }
 
 fn persisted_failure_model(app: &ShellApp) -> Option<FailureHandoffModel> {
-    let root = app.target.as_deref()?;
+    let root = app.target()?;
     let latest = failure_latest_run_id(root);
     if latest.invalid {
         return Some(invalid_latest_pointer_model());
@@ -376,7 +375,7 @@ mod tests {
         record_tool_run_failed(record, "bridge failed");
 
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = failure_handoff_model(&app).unwrap();
 
@@ -401,7 +400,7 @@ mod tests {
         std::fs::write(run_dir.join(failures_artifact_leaf()), "{not-json").unwrap();
 
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = failure_handoff_model(&app).unwrap();
 
@@ -429,7 +428,7 @@ mod tests {
         std::fs::create_dir(run_dir.join(failures_artifact_leaf())).unwrap();
 
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = failure_handoff_model(&app).unwrap();
 
@@ -451,7 +450,7 @@ mod tests {
         std::fs::create_dir_all(ui_latest_run_path(Some(temp.path()))).unwrap();
 
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = failure_handoff_model(&app).unwrap();
 
@@ -468,7 +467,7 @@ mod tests {
         std::fs::write(latest_path, "\n").unwrap();
 
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = failure_handoff_model(&app).unwrap();
 

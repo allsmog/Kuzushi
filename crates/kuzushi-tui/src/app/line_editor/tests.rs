@@ -6,15 +6,15 @@ mod tests {
     #[test]
     fn word_boundary_right_skips_current_word_then_separator() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.input = "./path/to foo".to_string();
-        app.cursor = 0;
+        app.set_input("./path/to foo");
+        app.set_cursor(0);
 
         app.move_cursor_word_right();
-        assert_eq!(app.cursor, 2);
+        assert_eq!(app.cursor(), 2);
         app.move_cursor_word_right();
-        assert_eq!(app.cursor, 7);
+        assert_eq!(app.cursor(), 7);
         app.move_cursor_word_right();
-        assert_eq!(app.cursor, 10);
+        assert_eq!(app.cursor(), 10);
     }
 
     #[test]

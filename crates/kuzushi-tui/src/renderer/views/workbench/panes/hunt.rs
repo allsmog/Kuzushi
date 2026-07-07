@@ -42,26 +42,22 @@ fn engine_chip(app: &ShellApp, label: &str, artifact: &str) -> String {
 }
 
 fn target_artifact_exists(app: &ShellApp, relative: &str) -> bool {
-    app.target
-        .as_ref()
+    app.target()
         .map(|target| target.join(relative).exists())
         .unwrap_or(false)
 }
 
 fn hunt_budget_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
-    let Some(cap) = app.session_budget_usd.filter(|cap| *cap > 0.0) else {
+    let spent = app.session().session_cost_usd().max(0.0);
+    let Some(cap) = app.session().session_budget_usd().filter(|cap| *cap > 0.0) else {
         return vec![Line::styled(
             fit(
-                &format!(
-                    "budget  no session cap · spent ${:.4}",
-                    app.session_cost_usd
-                ),
+                &format!("budget  no session cap · spent ${spent:.4}"),
                 width,
             ),
             theme::muted(),
         )];
     };
-    let spent = app.session_cost_usd.max(0.0);
     let ratio = (spent / cap).clamp(0.0, 1.0);
     vec![Line::from(vec![
         Span::styled("budget  ", theme::muted()),
@@ -147,7 +143,7 @@ fn proposal_style(status: &str) -> ratatui::style::Style {
 }
 
 fn coverage_summary_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
-    let rows = coverage_rows(&app.findings);
+    let rows = coverage_rows(app.findings());
     if rows.is_empty() {
         return vec![command_hint(
             "scan",

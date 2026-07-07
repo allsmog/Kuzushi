@@ -7,6 +7,7 @@ pub(crate) struct ModuleDetailModel {
     pub(crate) name: String,
     pub(crate) summary: String,
     pub(crate) primary_tool: String,
+    pub(crate) availability_section: Option<ModuleKeyValueSection>,
     pub(crate) tools_section: ModuleToolsSection,
     pub(crate) options_section: Option<ModuleKeyValueSection>,
     pub(crate) prompts_section: Option<ModuleKeyValueSection>,
@@ -38,15 +39,16 @@ pub(crate) struct ModuleToolRow {
 }
 
 pub(crate) fn focused_module_detail_model(app: &ShellApp) -> Option<ModuleDetailModel> {
-    let module_id = app.focused_module.as_deref()?;
+    let module_id = app.focused_module()?;
     module_detail_model(app, module_id)
 }
 
 pub(crate) fn module_detail_model(app: &ShellApp, module_id: &str) -> Option<ModuleDetailModel> {
     let module = app
-        .registry
-        .modules()
+        .registry()
+        .all_modules()
         .find(|module| module.metadata().id == module_id)?;
+    let hidden = module.is_hidden();
     let visible_tools = visible_module_tools(module);
     let primary_tool = visible_tools
         .first()
@@ -60,10 +62,21 @@ pub(crate) fn module_detail_model(app: &ShellApp, module_id: &str) -> Option<Mod
         name: module.metadata().name.clone(),
         summary: module.metadata().description.clone(),
         primary_tool,
+        availability_section: module_availability_section(hidden),
         tools_section: module_tools_section(&visible_tools),
         options_section: module_options_section(&stored_options),
         prompts_section: module_prompts_section(&prompts),
         stats_section: module_stats_section(module_id, log_count, visible_tools.len()),
+    })
+}
+
+fn module_availability_section(hidden: bool) -> Option<ModuleKeyValueSection> {
+    hidden.then(|| ModuleKeyValueSection {
+        header: "AVAILABILITY".to_string(),
+        rows: vec![(
+            "status".to_string(),
+            "deferred or gated; direct execution requires explicit operator setup".to_string(),
+        )],
     })
 }
 
@@ -95,8 +108,7 @@ fn invalid_prompt_root(app: &ShellApp, root: &Path, reason: &str) -> ModulePromp
 }
 
 fn prompt_root(app: &ShellApp, module_id: &str) -> PathBuf {
-    app.target
-        .as_deref()
+    app.target()
         .map(|target| kuzushi_core::module_prompt_root(target, module_id))
         .unwrap_or_else(|| kuzushi_core::relative_module_prompt_root(module_id))
 }
@@ -122,7 +134,7 @@ fn display_prompt_path(app: &ShellApp, path: &Path) -> String {
 }
 
 fn workspace_root(app: &ShellApp) -> &Path {
-    app.target.as_deref().unwrap_or_else(|| Path::new("."))
+    app.target().unwrap_or_else(|| Path::new("."))
 }
 
 fn visible_module_tools(module: &kuzushi_core::BuiltinModule) -> Vec<ModuleToolRow> {
@@ -196,7 +208,7 @@ fn module_stored_options(app: &ShellApp, tools: &[ModuleToolRow]) -> Vec<(String
     let mut out = Vec::new();
     for tool in tools {
         let tool_name = &tool.cells[0];
-        let stored = app.option_store.effective_stored_values(tool_name);
+        let stored = app.option_store().effective_stored_values(tool_name);
         for (name, value) in stored.iter() {
             out.push((format!("{tool_name}::{name}"), format_json_value(value)));
         }
@@ -206,7 +218,7 @@ fn module_stored_options(app: &ShellApp, tools: &[ModuleToolRow]) -> Vec<(String
 }
 
 fn module_log_count(app: &ShellApp, module_id: &str) -> usize {
-    app.log
+    app.log_lines()
         .iter()
         .filter(|line| is_module_log_line(line, module_id))
         .count()
@@ -234,7 +246,7 @@ mod tests {
     #[test]
     fn focused_module_detail_model_uses_current_focus() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.focused_module = Some("sast".to_string());
+        app.set_focused_module(Some("sast".to_string()));
 
         let model = focused_module_detail_model(&app).expect("focused module detail");
 
@@ -257,11 +269,29 @@ mod tests {
     }
 
     #[test]
+    fn module_detail_model_can_explain_hidden_registry_modules() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_focused_module(Some("deep-audit".to_string()));
+
+        let model = focused_module_detail_model(&app).expect("hidden module detail");
+
+        let availability = model.availability_section.expect("availability section");
+        assert_eq!(model.id, "deep-audit");
+        assert_eq!(availability.header, "AVAILABILITY");
+        assert_eq!(availability.rows[0].0, "status");
+        assert!(availability.rows[0].1.contains("deferred or gated"));
+        assert_eq!(
+            model.tools_section.empty_message,
+            Some("No shell tools are exposed by this module.")
+        );
+    }
+
+    #[test]
     fn module_detail_model_shapes_options_section() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.option_store = ToolOptionStore::new();
-        app.focused_module = Some("sast".to_string());
-        app.option_store.set_value(
+        app.replace_option_store_for_test(ToolOptionStore::new());
+        app.set_focused_module(Some("sast".to_string()));
+        app.option_store_mut().set_value(
             kuzushi_core::OptionScope::Session,
             kuzushi_core::OptionTarget::Tool("sast:scan".to_string()),
             "triage",
@@ -286,8 +316,8 @@ mod tests {
         std::fs::write(prompt_root.join("triage.md"), "triage").unwrap();
         std::fs::write(prompt_root.join("system.md"), "system").unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
-        app.focused_module = Some("sast".to_string());
+        app.set_target(Some(temp.path().to_path_buf()));
+        app.set_focused_module(Some("sast".to_string()));
 
         let model = focused_module_detail_model(&app).expect("focused module detail");
         let prompts = model.prompts_section.expect("prompts section");
@@ -304,8 +334,8 @@ mod tests {
         std::fs::create_dir_all(prompt_root.parent().unwrap()).unwrap();
         std::fs::write(&prompt_root, "not a directory").unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
-        app.focused_module = Some("sast".to_string());
+        app.set_target(Some(temp.path().to_path_buf()));
+        app.set_focused_module(Some("sast".to_string()));
 
         let model = focused_module_detail_model(&app).expect("focused module detail");
         let prompts = model.prompts_section.expect("prompts section");

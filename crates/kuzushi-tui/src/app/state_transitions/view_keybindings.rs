@@ -28,9 +28,9 @@ impl ShellApp {
             ShellView::Home => home_keybindings(),
             ShellView::Workbench => workbench_keybindings(),
             ShellView::Recommend => recommend_keybindings(),
-            ShellView::Threat(_) => threat_keybindings(),
+            ShellView::Threat => threat_keybindings(),
             ShellView::ModuleRun => self.module_run_keybindings(),
-            ShellView::ActorDetail(_) => actor_detail_keybindings(),
+            ShellView::ActorDetail => actor_detail_keybindings(),
             ShellView::PromptsEditor => prompts_editor_keybindings(),
             ShellView::Tune => tune_keybindings(),
             ShellView::Activity => self.activity_view_keybindings(),
@@ -69,7 +69,7 @@ impl ShellApp {
             self.shell_view,
             ShellView::CommandPalette
                 | ShellView::ModelPicker
-                | ShellView::AuthMethodPicker(_)
+                | ShellView::AuthMethodPicker
                 | ShellView::PlanningPicker
                 | ShellView::TargetPicker
         )
@@ -96,14 +96,14 @@ impl ShellApp {
     }
 
     pub(super) fn can_pause_scan_hotkey(&self) -> bool {
-        self.scan.as_ref().is_some_and(|scan| scan.running)
-            && self.scan_cancel.is_some()
+        self.scan().is_some_and(|scan| scan.running)
+            && self.scan_cancel_token().is_some()
             && !self.is_scan_paused()
     }
 
     pub(super) fn can_resume_scan_hotkey(&self) -> bool {
-        self.scan.as_ref().is_some_and(|scan| scan.running)
-            && self.scan_cancel.is_some()
+        self.scan().is_some_and(|scan| scan.running)
+            && self.scan_cancel_token().is_some()
             && self.is_scan_paused()
     }
 }

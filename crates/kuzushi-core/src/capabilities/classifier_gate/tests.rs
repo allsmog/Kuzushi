@@ -201,6 +201,7 @@ mod tests {
         let s = gate.score(&synth_finding("r"), Path::new(".")).unwrap();
         // Neutral fallback so a junk response doesn't auto-reject a real bug.
         assert!((s - 0.5).abs() < 1e-6, "got {s}");
+        assert_eq!(gate.observed_score_count_for_test(), 0);
     }
 
     #[test]

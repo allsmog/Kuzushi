@@ -1,14 +1,15 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn set_sast_task_mode(&mut self, mode: SastTaskModeCommand) -> Result<String> {
+    pub(crate) fn plan_sast_task_mode(
+        &self,
+        mode: SastTaskModeCommand,
+    ) -> Result<SastTaskOptionsApply> {
         let next_mode = self.next_sast_task_mode(mode);
-        self.apply_sast_task_mode(next_mode)?;
-        Ok(format!(
-            "SAST task mode: {}. {}",
-            sast_task_mode_label(next_mode),
-            self.sast_task_summary_line()
-        ))
+        Ok(SastTaskOptionsApply {
+            mutations: self.sast_task_mode_mutations(next_mode)?,
+            message_prefix: format!("SAST task mode: {}", sast_task_mode_label(next_mode)),
+        })
     }
 
     fn next_sast_task_mode(&self, mode: SastTaskModeCommand) -> SastTaskMode {
@@ -19,21 +20,15 @@ impl ShellApp {
         }
     }
 
-    fn apply_sast_task_mode(&mut self, next_mode: SastTaskMode) -> Result<()> {
+    fn sast_task_mode_mutations(
+        &self,
+        next_mode: SastTaskMode,
+    ) -> Result<Vec<SastTaskOptionMutation>> {
         match next_mode {
-            SastTaskMode::Auto => {
-                self.option_store.set_value(
-                    OptionScope::Session,
-                    OptionTarget::Tool("sast:scan".to_string()),
-                    "taskMode",
-                    serde_json::json!("auto"),
-                );
-                self.option_store.unset_value(
-                    OptionScope::Session,
-                    &OptionTarget::Tool("sast:scan".to_string()),
-                    "tasks",
-                );
-            }
+            SastTaskMode::Auto => Ok(vec![
+                Self::set_sast_task_option_mutation("taskMode", serde_json::json!("auto")),
+                Self::unset_sast_task_option_mutation("tasks"),
+            ]),
             SastTaskMode::Manual => {
                 let manual = self.manual_tasks_or_current_auto_selection();
                 if manual.is_empty() {
@@ -42,16 +37,12 @@ impl ShellApp {
                         valid_sast_task_ids().join(", ")
                     );
                 }
-                self.option_store.set_value(
-                    OptionScope::Session,
-                    OptionTarget::Tool("sast:scan".to_string()),
-                    "taskMode",
-                    serde_json::json!("manual"),
-                );
-                self.write_sast_task_list_option("tasks", manual);
+                Ok(vec![
+                    Self::set_sast_task_option_mutation("taskMode", serde_json::json!("manual")),
+                    Self::set_sast_task_list_option_mutation("tasks", manual),
+                ])
             }
         }
-        Ok(())
     }
 }
 

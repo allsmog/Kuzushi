@@ -24,11 +24,14 @@ mod agent_chat;
 mod ambient_progress;
 mod attack_surface;
 mod auth;
+mod boot_splash;
 mod catalog;
 mod chrome_layout;
 mod code_context;
+mod command_palette;
 mod config;
 mod confirm_card;
+mod confirm_dialog;
 mod context_snapshot;
 mod context_strip;
 mod cost;
@@ -42,6 +45,7 @@ mod help;
 mod home_cockpit;
 mod journey;
 mod keybindings;
+mod keymap;
 mod knowledge_base;
 mod live_activity;
 mod module_detail;
@@ -56,6 +60,7 @@ mod project_model;
 mod prompt;
 mod prompt_tuning;
 mod pwn;
+mod quit_confirm;
 mod recent_module_activity;
 mod recommendation;
 mod report_preview;
@@ -76,6 +81,7 @@ mod severity_tone;
 mod source_tree;
 mod status_footer;
 mod strategy_queue;
+mod theme_picker;
 mod threat_dfd_diagram;
 mod threat_impact;
 mod threat_model;
@@ -86,6 +92,7 @@ mod threat_stories;
 mod threat_stride;
 mod tools;
 mod transcript;
+mod update_available;
 mod view_status;
 mod viz_data;
 mod workbench;
@@ -113,6 +120,7 @@ pub(crate) use auth::{
     auth_env_summary, auth_login_model, auth_provider_rows, model_auth_status, oauth_summary,
     AuthLoginModel, AuthProviderRow, AuthProviderTone,
 };
+pub(crate) use boot_splash::{boot_splash_model, BootSplashModel};
 pub(crate) use catalog::{
     catalog_default_action_hint, catalog_model, catalog_uses_collapsed_layout, CatalogModel,
     CatalogModuleGroup,
@@ -121,11 +129,13 @@ pub(crate) use chrome_layout::{
     keybind_footer_chrome_height, status_footer_chrome_height, transcript_chrome_height,
 };
 pub(crate) use code_context::{selected_finding_code_model, CodePaneModel, CodePaneRow};
+pub(crate) use command_palette::{command_palette_model, CommandPaletteModel};
 pub(crate) use config::{
     config_model, plain_config_model, ConfigModel, ConfigModelRow, ConfigModelTable,
     ConfigSummaryRow, PlainConfigModel, PlainConfigModelRow,
 };
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
+pub(crate) use confirm_dialog::{confirm_dialog_model, ConfirmDialogModel};
 pub(crate) use context_snapshot::{
     context_snapshot_model, context_snapshot_relative_path, context_snapshot_state,
     plain_context_model, ContextSnapshotDetails, ContextSnapshotModel, PlainContextModel,
@@ -137,7 +147,8 @@ pub(crate) use display_text::{
 };
 pub(crate) use failure_handoff::{failure_handoff_model, FailureHandoffModel};
 pub(crate) use finding_summary::{
-    ci_result_findings_summary, findings_count_summary, status_footer_findings_summary,
+    ci_result_findings_summary, findings_count_summary_with_total, status_footer_findings_summary,
+    status_footer_findings_summary_from_counts, status_footer_findings_summary_with_total,
     SeverityCounts,
 };
 pub(crate) use findings::{
@@ -147,7 +158,9 @@ pub(crate) use findings::{
     FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow, FindingListRow,
     FindingsEmptyState, FindingsModel, ProofTier, TriageSummaryModel,
 };
-pub(crate) use health::{health_model, HealthModel, HealthRow, HealthTone};
+pub(crate) use health::{
+    health_display_model, health_model, HealthDisplayModel, HealthModel, HealthRow, HealthTone,
+};
 pub(crate) use help::{
     help_model, plain_help_model, quickstart_model, HelpCommandRow, PlainHelpCategoryModel,
     PlainHelpModel,
@@ -161,6 +174,7 @@ pub(crate) use journey::{
     JourneyPhaseStatus, JourneyPhaseTone,
 };
 pub(crate) use keybindings::footer_keybindings;
+pub(crate) use keymap::{keymap_model, KeymapModel};
 pub(crate) use knowledge_base::{
     knowledge_base_model, plain_knowledge_base_model, KnowledgeBaseArtifactRow,
     KnowledgeBaseAttachmentRow, KnowledgeBaseModel, KnowledgeBaseSummaryRow,
@@ -202,6 +216,7 @@ pub(crate) use prompt_tuning::{
 pub(crate) use pwn::{
     pwn_dashboard_model, PwnDashboardModel, PwnPrimitiveRow, PwnReverseObservationRow, PwnRoundRow,
 };
+pub(crate) use quit_confirm::{quit_confirm_model, QuitConfirmModel};
 pub(crate) use recent_module_activity::{
     recent_module_activity_model, ModuleActivityKind, ModuleActivityModel, ModuleActivityRow,
     ModuleActivityTone,
@@ -252,6 +267,7 @@ pub(crate) use strategy_queue::{
     strategy_queue_model, StrategyQueueDetailRow, StrategyQueueEmptyState, StrategyQueueModel,
     StrategyQueueRow,
 };
+pub(crate) use theme_picker::{theme_picker_model, ThemePickerModel};
 pub(crate) use threat_dfd_diagram::{
     threat_dfd_diagram_lines, threat_dfd_view, DfdDiagramLine, DfdLineKind,
 };
@@ -274,6 +290,7 @@ pub(crate) use transcript::{
     plain_command_result_model, transcript_model, transcript_model_from_log_index,
     PlainCommandResultModel,
 };
+pub(crate) use update_available::{update_available_model, UpdateAvailableModel};
 pub(crate) use view_status::view_status_segment;
 pub(crate) use viz_data::{
     attack_tree, cached_findings_heatmap, cached_findings_heatmap_with_selection,
@@ -297,6 +314,6 @@ pub(crate) use workspace::{
 };
 
 pub use crate::{
-    ActivitySession, OptionsFilter, OptionsView, PaneFocus, ReconSnapshot, ScanPanelState,
-    ShellView, ThreatView,
+    ActivityRouteState, ActivitySession, OptionsFilter, OptionsView, PaneFocus, ReconSnapshot,
+    ScanPanelState, ShellView, ThreatView,
 };

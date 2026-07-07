@@ -128,12 +128,29 @@ fn wait_with_output_deadline(
     drop(child.stdin.take());
     let stdout = spawn_pipe_reader(child.stdout.take());
     let stderr = spawn_pipe_reader(child.stderr.take());
-    let status = wait_status_deadline(&mut child, label, timeout, cancellation)?;
+    let registered = register_bridge_child(child, cancellation)?;
+    let status = wait_status_deadline(&registered, label, timeout, cancellation)?;
     Ok(Output {
         status,
         stdout: join_pipe_reader(stdout),
         stderr: join_pipe_reader(stderr),
     })
+}
+
+fn register_bridge_child(
+    child: Child,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+) -> Result<kuzushi_core::scan::RegisteredChild> {
+    let process_group_id = bridge_process_group_id(&child);
+    let local_cancellation;
+    let registry = match cancellation {
+        Some(cancellation) => cancellation,
+        None => {
+            local_cancellation = kuzushi_core::ScanCancellation::default();
+            &local_cancellation
+        }
+    };
+    registry.register_child(child, process_group_id)
 }
 
 fn spawn_pipe_reader<R: Read + Send + 'static>(
@@ -155,30 +172,33 @@ fn join_pipe_reader(handle: Option<std::thread::JoinHandle<Vec<u8>>>) -> Vec<u8>
 }
 
 fn wait_status_deadline(
-    child: &mut Child,
+    child: &kuzushi_core::scan::RegisteredChild,
     label: &str,
     timeout: Duration,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<ExitStatus> {
     let deadline = Instant::now() + timeout;
     loop {
+        kill_cancelled_bridge(child, label, cancellation)?;
         if let Some(status) = poll_bridge_status(child, label)? {
             return Ok(status);
         }
-        kill_cancelled_bridge(child, label, cancellation)?;
         kill_expired_bridge(child, label, deadline, timeout)?;
         std::thread::sleep(Duration::from_millis(50));
     }
 }
 
-fn poll_bridge_status(child: &mut Child, label: &str) -> Result<Option<ExitStatus>> {
+fn poll_bridge_status(
+    child: &kuzushi_core::scan::RegisteredChild,
+    label: &str,
+) -> Result<Option<ExitStatus>> {
     child
         .try_wait()
         .with_context(|| format!("could not poll {label} process"))
 }
 
 fn kill_cancelled_bridge(
-    child: &mut Child,
+    child: &kuzushi_core::scan::RegisteredChild,
     label: &str,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<()> {
@@ -190,7 +210,7 @@ fn kill_cancelled_bridge(
 }
 
 fn kill_expired_bridge(
-    child: &mut Child,
+    child: &kuzushi_core::scan::RegisteredChild,
     label: &str,
     deadline: Instant,
     timeout: Duration,
@@ -206,9 +226,8 @@ fn kill_expired_bridge(
     );
 }
 
-fn kill_child(child: &mut Child) {
-    let _ = child.kill();
-    let _ = child.wait();
+fn kill_child(child: &kuzushi_core::scan::RegisteredChild) {
+    let _ = child.kill_and_wait();
 }
 
 fn configured_bridge_command(command: &[String]) -> Command {
@@ -217,10 +236,38 @@ fn configured_bridge_command(command: &[String]) -> Command {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    configure_bridge_process_group(&mut cmd);
     for (env, path) in mcp_binary_env_defaults() {
         cmd.env(env, path);
     }
     cmd
+}
+
+#[cfg(unix)]
+fn configure_bridge_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setpgid(0, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_bridge_process_group(_command: &mut Command) {}
+
+#[cfg(unix)]
+fn bridge_process_group_id(child: &Child) -> Option<u32> {
+    Some(child.id())
+}
+
+#[cfg(not(unix))]
+fn bridge_process_group_id(_child: &Child) -> Option<u32> {
+    None
 }
 
 fn parse_bridge_output<R: DeserializeOwned>(output: Output, label: &str) -> Result<R> {

@@ -30,8 +30,8 @@ pub(crate) fn write_missing_report_marker(
 ) -> Result<()> {
     let marker = missing_report(run_id, status);
     if !marker_target_exists_as_file(&path)? || is_missing_report_marker(&path, run_id) {
-        return fs::write(&path, marker)
-            .with_context(|| format!("Could not write {}", path.display()));
+            return crate::fs_atomic::write_atomic(&path, &marker)
+                .with_context(|| format!("Could not write {}", path.display()));
     }
     Ok(())
 }
@@ -107,5 +107,6 @@ fn read_json(path: &Path) -> Option<Value> {
 
 fn write_json(path: PathBuf, value: Value) -> Result<()> {
     let body = format!("{}\n", serde_json::to_string_pretty(&value)?);
-    fs::write(&path, body).with_context(|| format!("Could not write {}", path.display()))
+    crate::fs_atomic::write_atomic(&path, &body)
+        .with_context(|| format!("Could not write {}", path.display()))
 }

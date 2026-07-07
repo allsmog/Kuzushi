@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI › modules · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › modules · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
 MODULES · 38 modules
 
