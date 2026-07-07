@@ -101,7 +101,12 @@ fn parse_run_summary_body(body: &str, path: &Path) -> Result<RunSummary> {
     if !value.is_object() {
         anyhow::bail!("Run metadata is not a JSON object: {}", path.display());
     }
-    serde_json::from_value(value).with_context(|| format!("Could not parse {}", path.display()))
+    serde_json::from_value(value).map_err(|error| {
+        anyhow::anyhow!(
+            "Run metadata is not canonical: {error}: {}",
+            path.display()
+        )
+    })
 }
 
 fn readable_summary_path(target: impl AsRef<Path>, run_id: &str) -> Result<PathBuf> {

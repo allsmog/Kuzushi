@@ -425,6 +425,8 @@ mod tests {
         assert_serialized_fields_are_declared(&schema, &value);
         assert_run_summary_llm_entries_match_schema(&schema, &value);
         assert_schema_requires_fields(&schema, &["runId", "startedAtUnix"]);
+        assert_additional_properties_disabled(&schema);
+        assert_additional_properties_disabled(&schema["definitions"]["llmCall"]);
         assert_schema_declares_no_fields(
             &schema,
             &[
@@ -1013,7 +1015,7 @@ mod tests {
     }
 
     #[test]
-    fn load_run_summary_rejects_obsolete_metadata_aliases() {
+    fn load_run_summary_rejects_unknown_metadata_fields() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-snake-metadata";
         write_run_summary(
@@ -1025,33 +1027,34 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "run.json"),
             serde_json::to_string_pretty(&serde_json::json!({
+                "runId": run_id,
                 "run_id": run_id,
                 "kind": "tool",
                 "status": "completed",
                 "tool": "agentic:test",
                 "target": "target",
-                "started_at_unix": 1,
-                "completed_at_unix": 2,
+                "startedAtUnix": 1,
+                "completedAtUnix": 2,
                 "findings": 3,
-                "cost_usd": 0.5,
-                "process_id": 99,
-                "kuzushi_version": "1.2.3-test",
-                "git_sha": "abc123",
-                "git_branch": "main",
+                "costUsd": 0.5,
+                "processId": 99,
+                "kuzushiVersion": "1.2.3-test",
+                "gitSha": "abc123",
+                "gitBranch": "main",
                 "model": "openai:gpt-test",
-                "config_hash": "sha256:def456",
+                "configHash": "sha256:def456",
                 "platform": "darwin-arm64",
-                "loaded_module_specifiers": ["builtin:agentic-sast", "builtin:context"],
-                "llm_calls": [
+                "loadedModules": ["builtin:agentic-sast", "builtin:context"],
+                "llmCalls": [
                     {
                         "n": 1,
                         "kind": "reasoning",
                         "verb": "query",
                         "model": "openai:gpt-test",
                         "provider": "openai",
-                        "prompt_hash": "fnv1a64:abc123",
-                        "latency_ms": 42,
-                        "cost_usd": 0.25
+                        "promptHash": "fnv1a64:abc123",
+                        "latencyMs": 42,
+                        "costUsd": 0.25
                     }
                 ],
                 "artifacts": []
@@ -1061,9 +1064,10 @@ mod tests {
         .unwrap();
 
         let error = load_run_summary(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
 
-        assert!(error.to_string().contains("Could not parse"));
-        assert!(format!("{error:#}").contains("missing field `runId`"));
+        assert!(message.contains("Run metadata is not canonical"));
+        assert!(message.contains("unknown field `run_id`"));
     }
 
     #[test]
@@ -4103,6 +4107,13 @@ mod tests {
                 "schema still declares obsolete field {field}"
             );
         }
+    }
+
+    fn assert_additional_properties_disabled(schema: &serde_json::Value) {
+        assert_eq!(
+            schema.get("additionalProperties"),
+            Some(&serde_json::Value::Bool(false))
+        );
     }
 
     fn assert_canonical_artifact_schema(schema: &serde_json::Value) {

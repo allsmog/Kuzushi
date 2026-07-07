@@ -4,7 +4,7 @@
   "title": "Kuzushi Run Summary",
   "description": "Canonical schema for .kuzushi/v3/runs/<runId>/run.json metadata.",
   "type": "object",
-  "additionalProperties": true,
+  "additionalProperties": false,
   "required": [
     "runId",
     "kind",
@@ -226,7 +226,7 @@
     },
     "llmCall": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": [
         "n",
         "kind",
