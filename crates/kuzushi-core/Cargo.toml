@@ -57,7 +57,7 @@ toml.workspace = true
 # access, subscript, etc.). Adding a grammar here transparently extends
 # the syntactic-narrowing pass to that language; absence of a grammar
 # means the language gets the previous "raw match" behavior.
-tree-sitter = "0.25"
+tree-sitter = "0.26"
 tree-sitter-c = "0.23"
 tree-sitter-go = "0.23"
 tree-sitter-java = "0.23"
