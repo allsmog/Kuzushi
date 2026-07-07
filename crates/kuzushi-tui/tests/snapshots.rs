@@ -110,6 +110,8 @@ fn assert_plain_snapshot(name: &str, actual: &str) {
     );
 }
 
+const SNAPSHOT_FIXTURE_REVISION: &str = "module-catalog-42";
+
 fn split_snapshot(raw: &str) -> (String, &str) {
     let Some((_, rest)) = raw.split_once("---\n") else {
         return (String::new(), raw);
@@ -121,6 +123,7 @@ fn split_snapshot(raw: &str) -> (String, &str) {
 }
 
 fn snapshot_path(name: &str) -> PathBuf {
+    let _ = SNAPSHOT_FIXTURE_REVISION;
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("snapshots")
