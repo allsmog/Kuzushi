@@ -91,7 +91,7 @@ impl EventLog {
         })
     }
 
-    pub fn append(
+    pub(crate) fn append(
         &self,
         event_kind: EventKind,
         actor: impl Into<String>,
@@ -165,7 +165,7 @@ impl EventLog {
         Ok(self.head()?.map(|event| event.seq).unwrap_or(0))
     }
 
-    pub fn write_checkpoint(&self, event: &EventEnvelope) -> Result<PathBuf> {
+    pub(crate) fn write_checkpoint(&self, event: &EventEnvelope) -> Result<PathBuf> {
         let path = self.checkpoint_path(event.seq)?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -179,7 +179,7 @@ impl EventLog {
         Ok(path)
     }
 
-    pub fn roll_segment(&self) -> Result<PathBuf> {
+    pub(crate) fn roll_segment(&self) -> Result<PathBuf> {
         let next = self.active_segment_index()?.saturating_add(1);
         let path = self.segment_path(next);
         OpenOptions::new()
