@@ -357,6 +357,45 @@ mod tests {
     }
 
     #[test]
+    fn autonomy_chip_is_target_gated() {
+        use kuzushi_core::V2Config;
+        let app = ShellApp::new(V2Config::default(), None);
+        // No target, no engagement — no dial chip (matches the phase chip).
+        assert_eq!(autonomy_footer_segment(&app), None);
+    }
+
+    #[test]
+    fn autonomy_chip_reads_only_from_the_posture() {
+        use kuzushi_core::{AutonomyPosture, V2Config, WorkspaceTarget};
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        app.set_autonomy(AutonomyPosture::Fix);
+        let chip = autonomy_footer_segment(&app).expect("target app has a dial chip");
+        // Signifier-honest: glyph + word come straight from the posture.
+        assert!(chip.starts_with("⛭ 掛 fix"), "{chip}");
+        // Fix ceiling never sits below the journey phase → no throttle marker.
+        assert!(!chip.contains('⚠'), "{chip}");
+    }
+
+    #[test]
+    fn autonomy_chip_warns_when_posture_throttles_the_walker() {
+        use kuzushi_core::{AutonomyPosture, V2Config, WorkspaceTarget};
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        // Journey sits at confirm, but the dial is capped at recon (ceiling
+        // map) — the chip must flag that it is throttling the walker.
+        app.engagement.set_phase(WorkflowPhase::Confirm);
+        app.set_autonomy(AutonomyPosture::ReconOnly);
+        let chip = autonomy_footer_segment(&app).expect("target app has a dial chip");
+        assert!(chip.starts_with("⛭ 組 recon"), "{chip}");
+        assert!(chip.ends_with('⚠'), "{chip}");
+    }
+
+    #[test]
     fn artifacts_without_findings_is_hunt() {
         assert_eq!(progress(true, 0, 0, 0).current_phase(), WorkflowPhase::Hunt);
     }

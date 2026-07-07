@@ -462,6 +462,38 @@ mod tests {
         KeyEvent::new(code, KeyModifiers::NONE)
     }
 
+    fn ctrl_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn ctrl_arrows_move_the_autonomy_dial_without_typing_into_the_prompt() {
+        use kuzushi_core::AutonomyPosture;
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_autonomy(AutonomyPosture::ReconOnly);
+
+        let update = app.reduce_key(ctrl_key(KeyCode::Up));
+        assert!(update.handled);
+        assert_eq!(app.autonomy(), AutonomyPosture::Hunt);
+        // The chord must never leak into the input line (regression against
+        // handle_text_key inserting the keystroke).
+        assert!(app.input().is_empty());
+
+        let update = app.reduce_key(ctrl_key(KeyCode::Down));
+        assert!(update.handled);
+        assert_eq!(app.autonomy(), AutonomyPosture::ReconOnly);
+        assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn plain_arrows_do_not_move_the_autonomy_dial() {
+        use kuzushi_core::AutonomyPosture;
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_autonomy(AutonomyPosture::Hunt);
+        app.reduce_key(plain_key(KeyCode::Up));
+        assert_eq!(app.autonomy(), AutonomyPosture::Hunt);
+    }
+
     #[test]
     fn quit_confirm_y_is_consumed_as_quit_effect_not_text_input() {
         let mut app = ShellApp::new(V2Config::default(), None);

@@ -9,7 +9,6 @@
 //! cap.
 
 use super::ShellApp;
-use crate::ui_view_models::journey_model;
 use kuzushi_core::AutonomyPosture;
 
 impl ShellApp {
@@ -34,19 +33,6 @@ impl ShellApp {
         let applied = posture.capped_by(self.autonomy_cap());
         self.config_mut().autonomy = applied;
         applied
-    }
-
-    /// Align the dial to where the engagement actually is (reality-derived
-    /// journey phase), never above the cap. A fresh, target-less or
-    /// artifact-less workspace lands on `ReconOnly` — a project can never
-    /// *ship* a posture that auto-authorizes patching. Called once at startup;
-    /// posture is otherwise operator-driven and never silently elevated.
-    pub(crate) fn initialize_default_autonomy(&mut self) {
-        let derived = journey_model(self).map(|journey| journey.current);
-        let base = derived
-            .map(AutonomyPosture::from_phase)
-            .unwrap_or(AutonomyPosture::ReconOnly);
-        self.set_autonomy(base);
     }
 
     /// Ctrl+↑ — raise one rung (saturating, then capped).
@@ -107,5 +93,56 @@ impl ShellApp {
                 applied.ceiling().word()
             ),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::ShellApp;
+    use kuzushi_core::{AutonomyPosture, GuidedPhase, V2Config};
+
+    #[test]
+    fn default_posture_is_fix_behavior_preserving() {
+        // The dial defaults to the most-permissive rung so existing dispatch
+        // behavior is unchanged — the operator opts *into* constraint.
+        let app = ShellApp::new(V2Config::default(), None);
+        assert_eq!(app.autonomy(), AutonomyPosture::Fix);
+    }
+
+    #[test]
+    fn raise_and_lower_saturate_within_bounds() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_autonomy(AutonomyPosture::ReconOnly);
+        app.raise_autonomy();
+        assert_eq!(app.autonomy(), AutonomyPosture::Hunt);
+        app.lower_autonomy();
+        app.lower_autonomy();
+        assert_eq!(app.autonomy(), AutonomyPosture::ReconOnly);
+        app.lower_autonomy();
+        assert_eq!(app.autonomy(), AutonomyPosture::ReconOnly);
+    }
+
+    #[test]
+    fn stop_after_caps_the_dial() {
+        let mut config = V2Config::default();
+        config.phases.stop_after = Some(GuidedPhase::Hunt);
+        let mut app = ShellApp::new(config, None);
+        // Requesting Fix is clamped to the project cap.
+        let applied = app.set_autonomy(AutonomyPosture::Fix);
+        assert_eq!(applied, AutonomyPosture::Hunt);
+        assert_eq!(app.autonomy(), AutonomyPosture::Hunt);
+        // Raising cannot exceed the cap either.
+        app.raise_autonomy();
+        assert_eq!(app.autonomy(), AutonomyPosture::Hunt);
+    }
+
+    #[test]
+    fn verb_sets_and_reads_without_panicking() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.reduce_autonomy_command(Some(AutonomyPosture::Confirm));
+        assert_eq!(app.autonomy(), AutonomyPosture::Confirm);
+        // Reading (None) leaves the posture unchanged.
+        app.reduce_autonomy_command(None);
+        assert_eq!(app.autonomy(), AutonomyPosture::Confirm);
     }
 }
