@@ -15,7 +15,7 @@ pub(super) struct ModelCommand {
 
 impl ShellApp {
     pub(crate) fn reduce_model_command(&mut self, raw: &Option<String>) -> Vec<ShellEffect> {
-        self.shell_view = ShellView::Config;
+        self.set_shell_view(ShellView::Config);
         let Some(command) = parsing::parse_model_command(raw.clone()) else {
             self.show_model_catalog();
             return Vec::new();

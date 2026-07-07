@@ -53,7 +53,7 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
     }];
     *app.findings_mut() = vec![finding.clone()];
     *app.selected_finding_mut() = Some(finding);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.router.workbench_mut().set_focus(WorkbenchPane::Details);
     app.set_scan_panel(Some(ScanPanelState {
         run_id: Some("scan-run-1".to_string()),

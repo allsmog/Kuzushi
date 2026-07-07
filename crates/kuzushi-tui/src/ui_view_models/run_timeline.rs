@@ -85,7 +85,7 @@ fn active_scan_row(scan: &ScanPanelState) -> RunTimelineRow {
 }
 
 fn active_scan_findings_label(scan: &ScanPanelState) -> String {
-    if scan.running {
+    if scan.running && scan.findings_count == 0 {
         "—".to_string()
     } else {
         scan.findings_count.to_string()

@@ -20,7 +20,7 @@ fn status_footer_model_reports_idle_shell_segments() {
 #[test]
 fn status_footer_uses_projected_findings_count_on_workbench() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     let mut semgrep = Finding::new_semgrep(
         "demo.sql",
         "src/search.ts",

@@ -9,7 +9,7 @@ impl ShellApp {
     pub(crate) fn reduce_auth_status(&mut self) -> Vec<ShellEffect> {
         // `/auth` now lands on the dedicated Auth surface
         // (`design/mockups/auth.jsx`) instead of the generic Config panel.
-        self.shell_view = ShellView::Auth;
+        self.set_shell_view(ShellView::Auth);
         vec![ShellEffect::ShowAuthStatus(AuthStatusShow {
             api_key_env: self.config().runtime.api_key_env.clone(),
         })]
@@ -54,7 +54,7 @@ impl ShellApp {
         provider: Option<&str>,
         continue_after_success: bool,
     ) -> Vec<ShellEffect> {
-        self.shell_view = ShellView::Auth;
+        self.set_shell_view(ShellView::Auth);
         let Some((provider, method)) = self.auth_login_provider_and_method(provider) else {
             return Vec::new();
         };

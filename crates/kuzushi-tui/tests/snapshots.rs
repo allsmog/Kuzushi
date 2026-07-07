@@ -143,14 +143,14 @@ fn _silence_unused() {
 #[test]
 fn catalog_view_default() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     assert_plain_snapshot("catalog_view_default", &render_at_120(&mut app));
 }
 
 #[test]
 fn home_view_default() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
     assert_plain_snapshot("home_view_default", &render_at_120(&mut app));
 }
 
@@ -199,7 +199,7 @@ fn recommend_view_with_artifact() {
 
     let mut app = fresh_app();
     app.set_target(Some(root));
-    app.shell_view = ShellView::Recommend;
+    app.set_shell_view(ShellView::Recommend);
     assert_plain_snapshot("recommend_view_with_artifact", &render_at_120(&mut app));
 }
 
@@ -241,7 +241,7 @@ fn module_view_focused_on_sast() {
 #[test]
 fn sast_tasks_view_default() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::SastTasks;
+    app.set_shell_view(ShellView::SastTasks);
     assert_plain_snapshot("sast_tasks_default", &render_at_120(&mut app));
 }
 
@@ -249,21 +249,21 @@ fn sast_tasks_view_default() {
 fn tune_view_for_focused_module() {
     let mut app = fresh_app();
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::Tune;
+    app.set_shell_view(ShellView::Tune);
     assert_plain_snapshot("tune_view_sast", &render_at_120(&mut app));
 }
 
 #[test]
 fn help_view_default() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Help;
+    app.set_shell_view(ShellView::Help);
     assert_plain_snapshot("help_view_default", &render_at_120(&mut app));
 }
 
 #[test]
 fn workbench_empty_view_default() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     assert_plain_snapshot("workbench_empty_view_default", &render_at_120(&mut app));
 }
 
@@ -294,7 +294,7 @@ fn workbench_list_view_with_two_findings() {
         "path traversal in /assets/<file>",
     );
     app.set_findings(vec![critical, untriaged]);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     assert_plain_snapshot("workbench_list_two_findings", &render_at_120(&mut app));
 }
 
@@ -318,7 +318,7 @@ fn run_timeline_view_with_past_runs() {
 
     let mut app = fresh_app();
     app.set_target(Some(root));
-    app.shell_view = ShellView::Runs;
+    app.set_shell_view(ShellView::Runs);
     assert_plain_snapshot("run_timeline_view_with_past_runs", &render_at_120(&mut app));
 }
 
@@ -357,7 +357,7 @@ fn failure_handoff_view_with_artifact() {
 
     let mut app = fresh_app();
     app.set_target(Some(root));
-    app.shell_view = ShellView::FailureHandoff;
+    app.set_shell_view(ShellView::FailureHandoff);
     assert_plain_snapshot(
         "failure_handoff_view_with_artifact",
         &render_at_120(&mut app),
@@ -391,35 +391,35 @@ fn module_run_view_with_findings_and_active_scan() {
         abort_requested: false,
         error: None,
     }));
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     assert_plain_snapshot("module_run_with_findings", &render_at_120(&mut app));
 }
 
 #[test]
 fn workspace_view_default() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Workspace;
+    app.set_shell_view(ShellView::Workspace);
     assert_plain_snapshot("workspace_view_default", &render_at_120(&mut app));
 }
 
 #[test]
 fn knowledge_base_view_default() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::KnowledgeBase;
+    app.set_shell_view(ShellView::KnowledgeBase);
     assert_plain_snapshot("knowledge_base_view_default", &render_at_120(&mut app));
 }
 
 #[test]
 fn agent_chat_view_default() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::AgentChat;
+    app.set_shell_view(ShellView::AgentChat);
     assert_plain_snapshot("agent_chat_view_default", &render_at_120(&mut app));
 }
 
 #[test]
 fn story_view_default() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Story;
+    app.set_shell_view(ShellView::Story);
     assert_plain_snapshot("story_view_default", &render_at_120(&mut app));
 }
 
@@ -506,7 +506,7 @@ fn activity_view_default_split_pane() {
         }
     }
     app.set_activity(Some(session));
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
 
     assert_plain_snapshot("activity_view_default_split_pane", &render_at_120(&mut app));
 }
@@ -525,7 +525,7 @@ fn auth_view_default_with_rotate_section() {
     // that carried an expired credential file).
     let _home = ScopedHome::empty();
     let mut app = fresh_app();
-    app.shell_view = ShellView::Auth;
+    app.set_shell_view(ShellView::Auth);
     assert_plain_snapshot("auth_view_default", &render_at_120(&mut app));
 }
 
@@ -536,7 +536,7 @@ fn footer_wrapped_narrow_terminal() {
     // footer so nothing truncates. This snapshot pins the wrap shape
     // at width 60 — the chrome rule plus two keybinding rows.
     let mut app = fresh_app();
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
     for line in app.log_lines_mut_for_test() {
         if line.time_secs != 0 {
             line.time_secs = SNAPSHOT_LOG_TIME;
@@ -622,7 +622,7 @@ fn every_shell_view_produces_non_empty_plain_output() {
         if let Some(patch_alias) = patch_alias {
             app.open_patch_for_test(patch_alias);
         }
-        app.shell_view = view;
+        app.set_shell_view(view);
         let rendered = render_plain_app(&app, SNAPSHOT_WIDTH);
         assert!(
             !rendered.trim().is_empty(),
@@ -643,7 +643,7 @@ fn home_view_high_contrast_is_renderable_without_panic() {
     // spinner; this test covers the rendering side, the spinner cadence
     // gate is unit-tested in `state_transitions::ticking`.
     let mut app = fresh_app();
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
     let rendered = render_plain_app(&app, SNAPSHOT_WIDTH);
     assert!(rendered.contains("HOME"));
     // Locked in: plain output never carries ANSI escapes regardless of

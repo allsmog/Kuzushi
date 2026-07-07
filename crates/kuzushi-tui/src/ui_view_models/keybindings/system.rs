@@ -2,7 +2,7 @@ use super::{bind, push_view_keybindings, FooterKeybinding};
 use crate::{ShellApp, ShellView};
 
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
-    match app.shell_view {
+    match app.shell_view() {
         ShellView::History => Some(history_keybindings(app)),
         ShellView::Story => Some(story_keybindings(app)),
         ShellView::Help => Some(help_keybindings(app)),
@@ -71,7 +71,7 @@ fn choice_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 }
 
 fn choice_picker_prompt_focused(app: &ShellApp) -> bool {
-    match app.shell_view {
+    match app.shell_view() {
         ShellView::ModelPicker => {
             app.router.model_picker().focus() == crate::app::PickerFocus::Prompt
         }

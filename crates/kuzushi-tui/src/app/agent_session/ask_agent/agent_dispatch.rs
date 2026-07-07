@@ -74,7 +74,7 @@ impl ShellApp {
         question: &str,
         message: String,
     ) {
-        self.shell_view = ShellView::AgentChat;
+        self.set_shell_view(ShellView::AgentChat);
         let mut next = prior.fold_for_next_turn(question.to_string());
         next.failure_context = prior.failure_context.clone();
         next.pending_failure_context = prior.pending_failure_context.clone();
@@ -151,7 +151,7 @@ impl ShellApp {
         next.failure_context = dispatch.failure_context.clone();
         self.set_agent_chat(Some(next));
         self.set_agent_cancel(Some(cancel));
-        self.shell_view = ShellView::AgentChat;
+        self.set_shell_view(ShellView::AgentChat);
     }
 
     pub(crate) fn set_pending_failure_context(&mut self, context: FailureToLlmContext) {

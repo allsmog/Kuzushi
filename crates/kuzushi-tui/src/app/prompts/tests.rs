@@ -135,7 +135,7 @@ mod tests {
     fn prompts_hotkey_returns_effect_without_executing_it() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        app.shell_view = ShellView::PromptsEditor;
+        app.set_shell_view(ShellView::PromptsEditor);
         let path = kuzushi_core::prompt_override_path(temp.path(), "sast", "scan");
 
         let update = app.reduce_key(key(KeyCode::Char('s')));
@@ -156,7 +156,7 @@ mod tests {
     fn tune_hotkey_returns_effect_without_executing_it() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        app.shell_view = ShellView::Tune;
+        app.set_shell_view(ShellView::Tune);
         let path = house_rule_path(temp.path());
 
         let update = app.reduce_key(key(KeyCode::Enter));

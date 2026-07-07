@@ -48,8 +48,8 @@ impl ShellApp {
 
     fn apply_planning_dispatch_view(&mut self, view: Option<PlanningDispatchView>) {
         match view {
-            Some(PlanningDispatchView::Activity) => self.shell_view = ShellView::Activity,
-            Some(PlanningDispatchView::Catalog) => self.shell_view = ShellView::Catalog,
+            Some(PlanningDispatchView::Activity) => self.set_shell_view(ShellView::Activity),
+            Some(PlanningDispatchView::Catalog) => self.set_shell_view(ShellView::Catalog),
             None => {}
         }
     }
@@ -310,7 +310,7 @@ impl ShellApp {
         if !tasks.is_empty() {
             let count = tasks.len();
             self.engagement.set_model_recommendations(tasks);
-            if matches!(self.shell_view, ShellView::PlanningPicker) {
+            if matches!(self.shell_view(), ShellView::PlanningPicker) {
                 if let Some(phase) = self.engagement.current_phase() {
                     self.refine_open_picker_with_model(phase);
                 }
@@ -531,7 +531,7 @@ impl ShellApp {
 
     fn should_auto_open_next_phase(&self) -> bool {
         matches!(
-            self.shell_view,
+            self.shell_view(),
             ShellView::Activity | ShellView::PlanningPicker
         )
     }

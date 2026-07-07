@@ -42,7 +42,7 @@ impl ShellApp {
         self.router
             .model_picker_mut()
             .open(selected_index, visible.len());
-        self.shell_view = ShellView::ModelPicker;
+        self.set_shell_view(ShellView::ModelPicker);
         self.log(
             "onboarding",
             "no model configured — pick one with ↑/↓/Enter (Esc to defer)",
@@ -55,7 +55,7 @@ impl ShellApp {
             "onboarding",
             format!("{provider} supports multiple auth methods — paste an API key or pick OAuth"),
         );
-        self.shell_view = ShellView::AuthMethodPicker;
+        self.set_shell_view(ShellView::AuthMethodPicker);
     }
 
     /// Open the launch picker at the first phase (組 KUMI-KATA · map).
@@ -75,7 +75,7 @@ impl ShellApp {
         self.router
             .target_picker_mut()
             .open(crate::app::discover_target_candidates(&cwd));
-        self.shell_view = ShellView::TargetPicker;
+        self.set_shell_view(ShellView::TargetPicker);
         self.log(
             "onboarding",
             "no target set — pick what to scan with ↑/↓/Enter (Esc to browse without one)",
@@ -103,7 +103,7 @@ impl ShellApp {
         self.drop_model_backed_without_model(&rows, &mut selected);
         self.engagement.planning_picker_mut().open(rows, selected);
         self.engagement.set_phase(phase);
-        self.shell_view = ShellView::PlanningPicker;
+        self.set_shell_view(ShellView::PlanningPicker);
         self.log(
             "phase",
             format!(

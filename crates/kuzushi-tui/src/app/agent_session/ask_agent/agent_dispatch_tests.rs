@@ -55,7 +55,7 @@ fn question_is_unchanged_when_no_failure_context_is_pending() {
 #[test]
 fn screen_context_is_injected_as_untrusted_data_before_operator_question() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);

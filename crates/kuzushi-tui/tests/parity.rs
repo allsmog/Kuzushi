@@ -234,7 +234,7 @@ fn push_wrapped_word(lines: &mut Vec<String>, current: &mut String, word: &str, 
 }
 
 fn view(app: &mut ShellApp, shell_view: ShellView) {
-    app.shell_view = shell_view;
+    app.set_shell_view(shell_view);
 }
 
 fn threat_view(app: &mut ShellApp, view: ThreatView) {
@@ -263,12 +263,12 @@ fn interruption_view(app: &mut ShellApp, view: InterruptionView) {
 
 fn module(app: &mut ShellApp, id: &str) {
     app.set_focused_module(Some(id.to_string()));
-    app.shell_view = ShellView::Module;
+    app.set_shell_view(ShellView::Module);
 }
 
 fn module_run(app: &mut ShellApp, id: &str) {
     app.set_focused_module(Some(id.to_string()));
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
 }
 
 fn show_options(app: &mut ShellApp, tool_name: &str) {

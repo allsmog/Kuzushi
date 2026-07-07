@@ -298,7 +298,7 @@ fn cache_patch_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::
         let alias = patch.alias.clone();
         app.engagement.set_pending_patch(patch);
         app.router.patch_mut().open(alias);
-        app.shell_view = ShellView::Patch;
+        app.set_shell_view(ShellView::Patch);
     }
     true
 }

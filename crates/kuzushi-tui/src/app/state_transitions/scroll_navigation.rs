@@ -20,7 +20,8 @@ impl ShellApp {
     }
 
     fn handle_catalog_row_hotkey(&mut self, key: KeyEvent) -> bool {
-        if !matches!(self.shell_view, ShellView::Catalog) || !self.router.catalog().is_expanded() {
+        if !matches!(self.shell_view(), ShellView::Catalog) || !self.router.catalog().is_expanded()
+        {
             return false;
         }
         match key.code {
@@ -41,7 +42,8 @@ impl ShellApp {
         if self.page_findings_down() {
             return;
         }
-        if let Some(kind) = page_scroll_kind(&self.shell_view, self.router.catalog().is_expanded())
+        if let Some(kind) =
+            page_scroll_kind(&self.shell_view(), self.router.catalog().is_expanded())
         {
             self.add_page_scroll(kind, step);
             return;
@@ -56,7 +58,8 @@ impl ShellApp {
         if self.page_findings_up() {
             return;
         }
-        if let Some(kind) = page_scroll_kind(&self.shell_view, self.router.catalog().is_expanded())
+        if let Some(kind) =
+            page_scroll_kind(&self.shell_view(), self.router.catalog().is_expanded())
         {
             self.subtract_page_scroll(kind, step);
             return;
@@ -90,7 +93,7 @@ impl ShellApp {
     /// PgUp/PgDn page the FINDINGS list only while the Workbench has that pane
     /// focused; otherwise paging falls through to line/section scrolling.
     fn workbench_findings_paging(&self) -> bool {
-        matches!(self.shell_view, ShellView::Workbench)
+        matches!(self.shell_view(), ShellView::Workbench)
             && self.router.workbench().focus() == crate::app::WorkbenchPane::Findings
     }
 
@@ -116,7 +119,7 @@ impl ShellApp {
     }
 
     pub(super) fn is_scrollable_view(&self) -> bool {
-        match &self.shell_view {
+        match &self.shell_view() {
             ShellView::Catalog => self.router.catalog().is_expanded(),
             ShellView::Help
             | ShellView::Quickstart

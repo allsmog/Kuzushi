@@ -24,7 +24,7 @@ impl ShellApp {
     }
 
     fn view_specific_keybindings(&self) -> Vec<ViewKeybinding> {
-        match self.shell_view {
+        match self.shell_view() {
             ShellView::Home => home_keybindings(),
             ShellView::Workbench => workbench_keybindings(),
             ShellView::Recommend => recommend_keybindings(),
@@ -54,7 +54,7 @@ impl ShellApp {
     /// focus own their keys).
     fn view_uses_scroll_base(&self) -> bool {
         self.is_scrollable_view()
-            && !matches!(self.shell_view, ShellView::Catalog | ShellView::Workbench)
+            && !matches!(self.shell_view(), ShellView::Catalog | ShellView::Workbench)
     }
 
     /// Esc goes back everywhere except views that already own Esc
@@ -66,7 +66,7 @@ impl ShellApp {
 
     fn view_owns_esc(&self) -> bool {
         matches!(
-            self.shell_view,
+            self.shell_view(),
             ShellView::CommandPalette
                 | ShellView::ModelPicker
                 | ShellView::AuthMethodPicker

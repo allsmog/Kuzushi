@@ -41,7 +41,7 @@ impl ShellApp {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
         });
-        self.shell_view = ShellView::Options;
+        self.set_shell_view(ShellView::Options);
         self.log(
             prefix,
             format!(
@@ -78,7 +78,7 @@ impl ShellApp {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
         });
-        self.shell_view = ShellView::Options;
+        self.set_shell_view(ShellView::Options);
         self.log(
             prefix,
             removed_tool_option_message(&option, removed || legacy_removed),

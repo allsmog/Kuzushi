@@ -114,7 +114,9 @@ fn plain_workspace_model_projects_active_workspace_rows() {
     assert!(model
         .summary_rows
         .contains(&"target: ./kuzushi-demo".to_string()));
-    assert!(model.summary_rows.contains(&"findings: 3".to_string()));
+    assert!(model
+        .summary_rows
+        .contains(&"findings: 3 in db (not loaded)".to_string()));
     assert!(model.empty_rows.is_empty());
 }
 

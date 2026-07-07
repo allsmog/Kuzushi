@@ -2,7 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn reduce_pwn_command(&mut self, command: &PwnCommand) -> Vec<ShellEffect> {
-        self.shell_view = ShellView::Pwn;
+        self.set_shell_view(ShellView::Pwn);
         if let Some(effects) = self.reduce_pwn_local_command(command) {
             return effects;
         }

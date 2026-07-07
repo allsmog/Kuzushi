@@ -55,8 +55,8 @@ mod tests {
         submit_plain_scripted_command(&mut app, &format!("scan {}", temp.path().display()));
 
         assert!(app.scan().is_some_and(|scan| scan.running));
-        assert_eq!(app.shell_view, ShellView::Activity);
-        assert_ne!(app.shell_view, ShellView::PlanningPicker);
+        assert_eq!(app.shell_view(), ShellView::Activity);
+        assert_ne!(app.shell_view(), ShellView::PlanningPicker);
     }
 }
 

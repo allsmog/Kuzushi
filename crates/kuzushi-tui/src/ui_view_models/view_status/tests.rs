@@ -13,10 +13,10 @@ fn view_status_uses_focused_module_for_module_views() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_focused_module(Some("semgrep".to_string()));
 
-    app.shell_view = ShellView::Module;
+    app.set_shell_view(ShellView::Module);
     assert_eq!(view_status_segment(&app), "semgrep");
 
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     assert_eq!(view_status_segment(&app), "semgrep/run");
 }
 
@@ -25,13 +25,13 @@ fn view_status_reflects_actual_view_before_focused_module() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_focused_module(Some("semgrep".to_string()));
 
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     assert_eq!(view_status_segment(&app), "tools");
 
     app.router.threat_mut().open(ThreatView::Stride);
-    app.shell_view = ShellView::Threat;
+    app.set_shell_view(ShellView::Threat);
     assert_eq!(view_status_segment(&app), "threats:stride");
 
-    app.shell_view = ShellView::FailureHandoff;
+    app.set_shell_view(ShellView::FailureHandoff);
     assert_eq!(view_status_segment(&app), "failure-handoff");
 }

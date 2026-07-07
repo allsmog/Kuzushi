@@ -99,7 +99,7 @@ impl ShellApp {
             return;
         };
         self.record_task_duration_secs(tool_name, secs);
-        if matches!(self.shell_view, ShellView::Activity) {
+        if matches!(self.shell_view(), ShellView::Activity) {
             return;
         }
         self.set_success_notice(

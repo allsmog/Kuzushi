@@ -14,7 +14,7 @@ impl ShellApp {
             tool_name: tool_name.clone(),
             filter,
         });
-        self.shell_view = ShellView::Options;
+        self.set_shell_view(ShellView::Options);
         self.log(
             "options",
             format!("showing {} for {tool_name}", options_filter_label(filter)),
