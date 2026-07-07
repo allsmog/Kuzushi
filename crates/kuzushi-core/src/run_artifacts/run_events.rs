@@ -2,7 +2,7 @@ use super::*;
 use crate::artifact_contract::{canonical_run_artifact_spec, CanonicalRunArtifactSpec};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunEvent {
     pub n: usize,
     pub kind: String,

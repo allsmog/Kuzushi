@@ -206,7 +206,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(obsolete.to_string().contains("missing field `atUnix`"));
+        assert!(obsolete.to_string().contains("unknown field `at_unix`"));
         assert_eq!(canonical.tool.as_deref(), Some("sast:scan"));
     }
 
