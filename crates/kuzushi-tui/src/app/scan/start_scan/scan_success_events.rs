@@ -135,7 +135,7 @@ impl ShellApp {
             .map(completed_task_durations)
             .unwrap_or_default();
         for (task_id, secs) in durations {
-            self.task_durations.record_secs(&task_id, secs);
+            self.record_task_duration_secs(&task_id, secs);
         }
     }
 

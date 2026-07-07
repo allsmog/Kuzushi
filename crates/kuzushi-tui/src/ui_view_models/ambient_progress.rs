@@ -73,7 +73,7 @@ fn task_progress(session: &ActivitySession) -> Option<String> {
 }
 
 fn eta_segment(app: &ShellApp, subject: &LiveSubject) -> Option<String> {
-    let estimate = app.task_durations.estimate_secs(&subject.name)?;
+    let estimate = app.estimate_task_duration_secs(&subject.name)?;
     let remaining = estimate.saturating_sub(subject.elapsed_secs);
     if remaining == 0 {
         return Some("~any moment".to_string());
@@ -98,7 +98,7 @@ mod tests {
         done.state = DagTaskState::Done;
         session.tasks.insert("x:run".into(), done);
         app.set_activity(Some(session));
-        app.task_durations.record_secs("cpg:build", 379);
+        app.record_task_duration_secs("cpg:build", 379);
 
         let chip = ambient_progress_chip(&app).expect("chip while a task is active");
         assert!(chip.contains("cpg:build"), "{chip}");
