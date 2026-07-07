@@ -454,7 +454,7 @@ fn raw_result_hash(scan_id: &str, finding: &Finding) -> Result<String> {
 fn run_snapshot_hash(scan_id: &str) -> String {
     format!(
         "snapshot_{}",
-        hash_parts("legacy-scan-snapshot", &[scan_id.as_bytes()]).as_str()
+        hash_parts("run-snapshot", &[scan_id.as_bytes()]).as_str()
     )
 }
 

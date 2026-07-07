@@ -23,7 +23,7 @@ impl ShellApp {
         let events = self.jobs.drain(JOB_DRAIN_LIMIT);
         let changed = !events.is_empty();
         for event in events {
-            update(self, Msg::Job(event));
+            update_and_execute_effects(self, Msg::Job(event));
         }
         changed
     }
