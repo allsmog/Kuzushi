@@ -13,13 +13,7 @@ pub struct RunEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(alias = "toolName", alias = "tool_name")]
     pub tool: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        alias = "artifactPath",
-        alias = "artifact_path",
-        deserialize_with = "deserialize_event_artifact"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact: Option<RunArtifact>,
 }
 
@@ -89,19 +83,5 @@ fn reject_non_file_event_target(path: &Path) -> Result<()> {
         Ok(_) => anyhow::bail!("Run event log target is not a file: {}", path.display()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error).with_context(|| format!("Could not inspect {}", path.display())),
-    }
-}
-
-fn deserialize_event_artifact<'de, D>(deserializer: D) -> std::result::Result<Option<RunArtifact>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let Some(value) = Option::<Value>::deserialize(deserializer)? else {
-        return Ok(None);
-    };
-    match value {
-        Value::String(path) => Ok(RunArtifact::from_declared("artifact", &path, None)),
-        Value::Object(_) => serde_json::from_value(value).map(Some).map_err(serde::de::Error::custom),
-        _ => Ok(None),
     }
 }

@@ -5,96 +5,114 @@
   "description": "Canonical schema for each JSON line in .kuzushi/runs/<runId>/events.jsonl.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["n", "kind", "status", "message"],
+  "required": [
+    "n",
+    "kind",
+    "status",
+    "message"
+  ],
   "allOf": [
-    { "anyOf": [{ "required": ["atUnix"] }, { "required": ["at_unix"] }] }
+    {
+      "anyOf": [
+        {
+          "required": [
+            "atUnix"
+          ]
+        },
+        {
+          "required": [
+            "at_unix"
+          ]
+        }
+      ]
+    }
   ],
   "properties": {
-    "n": { "type": "integer", "minimum": 0 },
-    "kind": { "$ref": "#/definitions/eventKind" },
-    "status": { "$ref": "#/definitions/eventStatus" },
-    "message": { "type": "string" },
-    "atUnix": { "type": "integer", "minimum": 0 },
-    "at_unix": { "type": "integer", "minimum": 0 },
-    "tool": { "type": "string" },
-    "toolName": { "type": "string" },
-    "tool_name": { "type": "string" },
-    "artifact": { "$ref": "#/definitions/artifact" },
-    "artifactPath": { "type": "string", "minLength": 1 },
-    "artifact_path": { "type": "string", "minLength": 1 }
+    "n": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kind": {
+      "$ref": "#/definitions/eventKind"
+    },
+    "status": {
+      "$ref": "#/definitions/eventStatus"
+    },
+    "message": {
+      "type": "string"
+    },
+    "atUnix": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "at_unix": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "tool": {
+      "type": "string"
+    },
+    "toolName": {
+      "type": "string"
+    },
+    "tool_name": {
+      "type": "string"
+    },
+    "artifact": {
+      "$ref": "#/definitions/artifact"
+    }
   },
   "definitions": {
     "eventKind": {
       "type": "string",
-      "enum": ["tool"]
+      "enum": [
+        "tool"
+      ]
     },
     "eventStatus": {
       "type": "string",
-      "enum": ["started", "running", "completed", "failed", "partial", "skipped", "paused"]
+      "enum": [
+        "started",
+        "running",
+        "completed",
+        "failed",
+        "partial",
+        "skipped",
+        "paused"
+      ]
     },
     "artifact": {
       "type": "object",
       "additionalProperties": false,
-      "allOf": [
-        {
-          "anyOf": [
-            { "required": ["label"] },
-            { "required": ["name"] },
-            { "required": ["title"] }
-          ]
-        },
-        {
-          "anyOf": [
-            { "required": ["path"] },
-            { "required": ["file"] },
-            { "required": ["filePath"] },
-            { "required": ["file_path"] },
-            { "required": ["reportPath"] },
-            { "required": ["report_path"] },
-            { "required": ["reportJsonPath"] },
-            { "required": ["report_json_path"] },
-            { "required": ["scopePath"] },
-            { "required": ["scope_path"] },
-            { "required": ["dir"] },
-            { "required": ["outputDir"] },
-            { "required": ["output_dir"] },
-            { "required": ["promptsDir"] },
-            { "required": ["prompts_dir"] }
-          ]
-        },
-        {
-          "anyOf": [
-            { "required": ["kind"] },
-            { "required": ["type"] }
-          ]
-        }
+      "required": [
+        "label",
+        "path",
+        "kind"
       ],
       "properties": {
-        "label": { "type": "string" },
-        "name": { "type": "string" },
-        "title": { "type": "string" },
-        "path": { "type": "string" },
-        "file": { "type": "string" },
-        "filePath": { "type": "string" },
-        "file_path": { "type": "string" },
-        "reportPath": { "type": "string" },
-        "report_path": { "type": "string" },
-        "reportJsonPath": { "type": "string" },
-        "report_json_path": { "type": "string" },
-        "scopePath": { "type": "string" },
-        "scope_path": { "type": "string" },
-        "dir": { "type": "string" },
-        "outputDir": { "type": "string" },
-        "output_dir": { "type": "string" },
-        "promptsDir": { "type": "string" },
-        "prompts_dir": { "type": "string" },
-        "kind": { "$ref": "#/definitions/artifactKind" },
-        "type": { "$ref": "#/definitions/artifactKind" }
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/definitions/artifactKind"
+        }
       }
     },
     "artifactKind": {
       "type": "string",
-      "enum": ["json", "jsonl", "markdown", "sarif", "directory", "artifact"]
+      "enum": [
+        "json",
+        "jsonl",
+        "markdown",
+        "sarif",
+        "directory",
+        "artifact"
+      ]
     }
   }
 }

@@ -397,22 +397,22 @@ fn report_summarizes_event_tool_name_aliases() {
 }
 
 #[test]
-fn report_counts_event_artifact_path_aliases() {
+fn report_counts_event_artifact_objects() {
     let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-event-artifact-aliases", "sast:scan");
+    let source = completed_summary(temp.path(), "run-event-artifacts", "sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-event-artifact-aliases");
+    let dir = run_dir(temp.path(), "run-event-artifacts");
     fs::write(
         dir.join("events.jsonl"),
         [
-            r#"{"n":1,"kind":"tool","status":"started","message":"scan","atUnix":1,"tool":"sast:scan","artifactPath":"input.json"}"#,
-            r#"{"n":2,"kind":"tool","status":"completed","message":"done","at_unix":2,"tool":"sast:scan","artifact_path":"result.json"}"#,
+            r#"{"n":1,"kind":"tool","status":"started","message":"scan","atUnix":1,"tool":"sast:scan","artifact":{"label":"tool input","path":"input.json","kind":"json"}}"#,
+            r#"{"n":2,"kind":"tool","status":"completed","message":"done","at_unix":2,"tool":"sast:scan","artifact":{"label":"tool result","path":"result.json","kind":"json"}}"#,
         ]
         .join("\n"),
     )
     .unwrap();
 
-    let report = build_run_report(temp.path(), Some("run-event-artifact-aliases")).unwrap();
+    let report = build_run_report(temp.path(), Some("run-event-artifacts")).unwrap();
 
     assert!(report.report_markdown.contains(
         "events.jsonl: present - 2 event(s), kinds tool=2, status completed=1, started=1, tools sast:scan, span 1s, artifacts 2"
@@ -420,7 +420,7 @@ fn report_counts_event_artifact_path_aliases() {
 }
 
 #[test]
-fn report_ignores_empty_event_artifact_aliases() {
+fn report_ignores_empty_event_artifacts() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-event-empty-artifacts", "sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
@@ -429,8 +429,8 @@ fn report_ignores_empty_event_artifact_aliases() {
         dir.join("events.jsonl"),
         [
             r#"{"n":1,"kind":"tool","status":"started","message":"scan","atUnix":1,"tool":"sast:scan","artifact":null}"#,
-            r#"{"n":2,"kind":"tool","status":"completed","message":"done","atUnix":2,"tool":"sast:scan","artifactPath":"  "}"#,
-            r#"{"n":3,"kind":"tool","status":"completed","message":"result","atUnix":3,"tool":"sast:scan","artifact_path":"result.json"}"#,
+            r#"{"n":2,"kind":"tool","status":"completed","message":"done","atUnix":2,"tool":"sast:scan","artifact":{}}"#,
+            r#"{"n":3,"kind":"tool","status":"completed","message":"result","atUnix":3,"tool":"sast:scan","artifact":{"label":"tool result","path":"result.json","kind":"json"}}"#,
         ]
         .join("\n"),
     )
@@ -888,7 +888,7 @@ fn report_summarizes_run_metadata_and_artifact_manifest() {
 }
 
 #[test]
-fn report_summarizes_snake_case_run_metadata_and_manifest() {
+fn report_summarizes_snake_case_run_metadata_and_canonical_manifest() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-metadata-snake", "agentic-sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
@@ -896,7 +896,7 @@ fn report_summarizes_snake_case_run_metadata_and_manifest() {
     fs::write(
         dir.join("run.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-metadata-snake",
+            "runId": "run-metadata-snake",
             "kind": "tool",
             "status": "completed",
             "tool": "agentic-sast:scan",
@@ -927,7 +927,7 @@ fn report_summarizes_snake_case_run_metadata_and_manifest() {
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-metadata-snake",
+            "runId": "run-metadata-snake",
             "artifacts": [
                 {"label": "run metadata", "path": "run.json", "kind": "json"},
                 {"label": "run events", "path": "events.jsonl", "kind": "jsonl"},
@@ -953,33 +953,33 @@ fn report_summarizes_snake_case_run_metadata_and_manifest() {
 }
 
 #[test]
-fn report_summarizes_artifact_manifest_field_aliases() {
+fn report_summarizes_canonical_artifact_manifest_fields() {
     let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-manifest-aliases", "agentic-sast:scan");
+    let source = completed_summary(temp.path(), "run-manifest-canonical", "agentic-sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-manifest-aliases");
+    let dir = run_dir(temp.path(), "run-manifest-canonical");
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-manifest-aliases",
+            "runId": "run-manifest-canonical",
             "artifacts": [
-                {"name": "run metadata", "filePath": "run.json", "type": "json"},
-                {"title": "runtime trace", "report_json_path": "trace.jsonl", "type": "jsonl"},
-                {"label": "prompt overrides", "prompts_dir": ".kuzushi/prompts", "type": "directory"},
-                {"label": "SARIF report", "reportPath": "report.sarif", "type": "sarif"},
-                {"label": "tool input", "path": "input.json", "type": "json"},
-                {"label": "tool result", "path": "result.json", "type": "json"}
+                {"label": "run metadata", "path": "run.json", "kind": "json"},
+                {"label": "runtime trace", "path": "trace.jsonl", "kind": "jsonl"},
+                {"label": "prompt overrides", "path": ".kuzushi/prompts", "kind": "directory"},
+                {"label": "SARIF report", "path": "report.sarif", "kind": "sarif"},
+                {"label": "tool input", "path": "input.json", "kind": "json"},
+                {"label": "tool result", "path": "result.json", "kind": "json"}
             ]
         }))
         .unwrap(),
     )
     .unwrap();
 
-    let report = build_run_report(temp.path(), Some("run-manifest-aliases")).unwrap();
+    let report = build_run_report(temp.path(), Some("run-manifest-canonical")).unwrap();
 
     assert!(
         report.report_markdown.contains(
-            "artifacts.json: present - 6 artifact(s), kinds directory=1, json=3, jsonl=1, sarif=1, canonical 2, optional SARIF report, tool inputs tool input, tool results tool result, aliases labels=2, paths=4, kinds=6, labels run metadata, runtime trace, prompt overrides, SARIF report"
+            "artifacts.json: present - 6 artifact(s), kinds directory=1, json=3, jsonl=1, sarif=1, canonical 2, optional SARIF report, tool inputs tool input, tool results tool result, labels run metadata, runtime trace, prompt overrides, SARIF report"
         ),
         "{}",
         report.report_markdown
@@ -1056,22 +1056,22 @@ fn report_summarizes_artifact_manifest_field_aliases() {
 }
 
 #[test]
-fn report_artifact_manifest_alias_counts_exclude_canonical_fields() {
+fn report_artifact_manifest_summary_uses_only_canonical_fields() {
     let temp = tempdir().unwrap();
     let source = completed_summary(
         temp.path(),
-        "run-manifest-canonical-alias-exclusions",
+        "run-manifest-canonical-fields-only",
         "agentic-sast:scan",
     );
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-manifest-canonical-alias-exclusions");
+    let dir = run_dir(temp.path(), "run-manifest-canonical-fields-only");
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-manifest-canonical-alias-exclusions",
+            "runId": "run-manifest-canonical-fields-only",
             "artifacts": [
                 {"label": "run metadata", "path": "run.json", "kind": "json"},
-                {"name": "runtime trace", "file_path": "trace.jsonl", "type": "jsonl"}
+                {"label": "runtime trace", "path": "trace.jsonl", "kind": "jsonl"}
             ]
         }))
         .unwrap(),
@@ -1080,12 +1080,12 @@ fn report_artifact_manifest_alias_counts_exclude_canonical_fields() {
 
     let report = build_run_report(
         temp.path(),
-        Some("run-manifest-canonical-alias-exclusions"),
+        Some("run-manifest-canonical-fields-only"),
     )
     .unwrap();
 
     assert!(report.report_markdown.contains(
-        "artifacts.json: present - 2 artifact(s), kinds json=1, jsonl=1, canonical 2, aliases labels=1, paths=1, kinds=1, labels run metadata, runtime trace"
+        "artifacts.json: present - 2 artifact(s), kinds json=1, jsonl=1, canonical 2, labels run metadata, runtime trace"
     ));
 }
 
@@ -1135,7 +1135,7 @@ fn report_fails_on_non_array_manifest_artifacts() {
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-non-array-manifest-artifacts",
+            "runId": "run-non-array-manifest-artifacts",
             "artifacts": {}
         }))
         .unwrap(),
@@ -1162,7 +1162,7 @@ fn report_fails_on_manifest_missing_artifacts() {
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-missing-manifest-artifacts"
+            "runId": "run-missing-manifest-artifacts"
         }))
         .unwrap(),
     )
@@ -1229,19 +1229,19 @@ fn report_fails_on_manifest_blank_run_id() {
 }
 
 #[test]
-fn report_fails_on_manifest_blank_snake_case_run_id() {
+fn report_fails_on_obsolete_manifest_run_id_field() {
     let temp = tempdir().unwrap();
     let source = completed_summary(
         temp.path(),
-        "run-blank-snake-manifest-run-id",
+        "run-obsolete-manifest-run-id",
         "agentic-sast:scan",
     );
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-blank-snake-manifest-run-id");
+    let dir = run_dir(temp.path(), "run-obsolete-manifest-run-id");
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "   ",
+            "run_id": "run-obsolete-manifest-run-id",
             "artifacts": []
         }))
         .unwrap(),
@@ -1249,10 +1249,10 @@ fn report_fails_on_manifest_blank_snake_case_run_id() {
     .unwrap();
 
     let error =
-        build_run_report(temp.path(), Some("run-blank-snake-manifest-run-id")).unwrap_err();
+        build_run_report(temp.path(), Some("run-obsolete-manifest-run-id")).unwrap_err();
     let message = error.to_string();
 
-    assert!(message.contains("Artifact manifest run_id is not a non-empty string"));
+    assert!(message.contains("Artifact manifest uses obsolete run_id alias; use runId"));
     assert!(message.contains("artifacts.json"));
 }
 
@@ -1284,19 +1284,19 @@ fn report_fails_on_manifest_run_id_mismatch() {
 }
 
 #[test]
-fn report_fails_on_conflicting_manifest_run_id_aliases() {
+fn report_fails_on_obsolete_manifest_run_id_even_when_run_id_exists() {
     let temp = tempdir().unwrap();
     let source = completed_summary(
         temp.path(),
-        "run-conflicting-manifest-run-id-aliases",
+        "run-obsolete-manifest-run-id-with-run-id",
         "agentic-sast:scan",
     );
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-conflicting-manifest-run-id-aliases");
+    let dir = run_dir(temp.path(), "run-obsolete-manifest-run-id-with-run-id");
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "runId": "run-conflicting-manifest-run-id-aliases",
+            "runId": "run-obsolete-manifest-run-id-with-run-id",
             "run_id": "other-run",
             "artifacts": []
         }))
@@ -1306,32 +1306,29 @@ fn report_fails_on_conflicting_manifest_run_id_aliases() {
 
     let error = build_run_report(
         temp.path(),
-        Some("run-conflicting-manifest-run-id-aliases"),
+        Some("run-obsolete-manifest-run-id-with-run-id"),
     )
     .unwrap_err();
     let message = error.to_string();
 
-    assert!(message.contains("Artifact manifest runId and run_id disagree"));
+    assert!(message.contains("Artifact manifest uses obsolete run_id alias; use runId"));
     assert!(message.contains("artifacts.json"));
 }
 
 #[test]
-fn report_fails_on_conflicting_manifest_artifact_path_aliases() {
+fn report_fails_on_obsolete_manifest_artifact_path_field() {
     let temp = tempdir().unwrap();
     let source = completed_summary(
         temp.path(),
-        "run-conflicting-manifest-artifact-path-aliases",
+        "run-obsolete-manifest-artifact-path-field",
         "agentic-sast:scan",
     );
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(
-        temp.path(),
-        "run-conflicting-manifest-artifact-path-aliases",
-    );
+    let dir = run_dir(temp.path(), "run-obsolete-manifest-artifact-path-field");
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-conflicting-manifest-artifact-path-aliases",
+            "runId": "run-obsolete-manifest-artifact-path-field",
             "artifacts": [
                 {
                     "label": "run metadata",
@@ -1347,32 +1344,32 @@ fn report_fails_on_conflicting_manifest_artifact_path_aliases() {
 
     let error = build_run_report(
         temp.path(),
-        Some("run-conflicting-manifest-artifact-path-aliases"),
+        Some("run-obsolete-manifest-artifact-path-field"),
     )
     .unwrap_err();
     let message = error.to_string();
 
-    assert!(message.contains("Artifact manifest artifact at index 0 has conflicting path aliases"));
+    assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete filePath alias"));
     assert!(message.contains("artifacts.json"));
 }
 
 #[test]
-fn report_fails_on_non_string_manifest_artifact_path_alias() {
+fn report_fails_on_obsolete_non_string_manifest_artifact_path_field() {
     let temp = tempdir().unwrap();
     let source = completed_summary(
         temp.path(),
-        "run-non-string-manifest-artifact-path-alias",
+        "run-obsolete-non-string-manifest-artifact-path-field",
         "agentic-sast:scan",
     );
     write_run_summary(temp.path(), &source).unwrap();
     let dir = run_dir(
         temp.path(),
-        "run-non-string-manifest-artifact-path-alias",
+        "run-obsolete-non-string-manifest-artifact-path-field",
     );
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-non-string-manifest-artifact-path-alias",
+            "runId": "run-obsolete-non-string-manifest-artifact-path-field",
             "artifacts": [
                 {
                     "label": "run metadata",
@@ -1387,29 +1384,29 @@ fn report_fails_on_non_string_manifest_artifact_path_alias() {
 
     let error = build_run_report(
         temp.path(),
-        Some("run-non-string-manifest-artifact-path-alias"),
+        Some("run-obsolete-non-string-manifest-artifact-path-field"),
     )
     .unwrap_err();
     let message = error.to_string();
 
-    assert!(message.contains("Artifact manifest artifact at index 0 filePath is not a string"));
+    assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete filePath alias"));
     assert!(message.contains("artifacts.json"));
 }
 
 #[test]
-fn report_fails_on_missing_manifest_artifact_path_alias() {
+fn report_fails_on_missing_manifest_artifact_path() {
     let temp = tempdir().unwrap();
     let source = completed_summary(
         temp.path(),
-        "run-missing-manifest-artifact-path-alias",
+        "run-missing-manifest-artifact-path",
         "agentic-sast:scan",
     );
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-missing-manifest-artifact-path-alias");
+    let dir = run_dir(temp.path(), "run-missing-manifest-artifact-path");
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-missing-manifest-artifact-path-alias",
+            "runId": "run-missing-manifest-artifact-path",
             "artifacts": [
                 {
                     "label": "run metadata",
@@ -1423,29 +1420,29 @@ fn report_fails_on_missing_manifest_artifact_path_alias() {
 
     let error = build_run_report(
         temp.path(),
-        Some("run-missing-manifest-artifact-path-alias"),
+        Some("run-missing-manifest-artifact-path"),
     )
     .unwrap_err();
     let message = error.to_string();
 
-    assert!(message.contains("Artifact manifest artifact at index 0 is missing path alias"));
+    assert!(message.contains("Artifact manifest artifact at index 0 is missing path"));
     assert!(message.contains("artifacts.json"));
 }
 
 #[test]
-fn report_fails_on_blank_manifest_artifact_path_alias() {
+fn report_fails_on_blank_manifest_artifact_path() {
     let temp = tempdir().unwrap();
     let source = completed_summary(
         temp.path(),
-        "run-blank-manifest-artifact-path-alias",
+        "run-blank-manifest-artifact-path",
         "agentic-sast:scan",
     );
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-blank-manifest-artifact-path-alias");
+    let dir = run_dir(temp.path(), "run-blank-manifest-artifact-path");
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-blank-manifest-artifact-path-alias",
+            "runId": "run-blank-manifest-artifact-path",
             "artifacts": [
                 {
                     "label": "run metadata",
@@ -1460,29 +1457,29 @@ fn report_fails_on_blank_manifest_artifact_path_alias() {
 
     let error = build_run_report(
         temp.path(),
-        Some("run-blank-manifest-artifact-path-alias"),
+        Some("run-blank-manifest-artifact-path"),
     )
     .unwrap_err();
     let message = error.to_string();
 
-    assert!(message.contains("Artifact manifest artifact at index 0 path alias is empty"));
+    assert!(message.contains("Artifact manifest artifact at index 0 path is not a non-empty string"));
     assert!(message.contains("artifacts.json"));
 }
 
 #[test]
-fn report_fails_on_blank_manifest_artifact_kind_alias() {
+fn report_fails_on_blank_manifest_artifact_kind() {
     let temp = tempdir().unwrap();
     let source = completed_summary(
         temp.path(),
-        "run-blank-manifest-artifact-kind-alias",
+        "run-blank-manifest-artifact-kind",
         "agentic-sast:scan",
     );
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-blank-manifest-artifact-kind-alias");
+    let dir = run_dir(temp.path(), "run-blank-manifest-artifact-kind");
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-blank-manifest-artifact-kind-alias",
+            "runId": "run-blank-manifest-artifact-kind",
             "artifacts": [
                 {
                     "label": "run metadata",
@@ -1497,12 +1494,12 @@ fn report_fails_on_blank_manifest_artifact_kind_alias() {
 
     let error = build_run_report(
         temp.path(),
-        Some("run-blank-manifest-artifact-kind-alias"),
+        Some("run-blank-manifest-artifact-kind"),
     )
     .unwrap_err();
     let message = error.to_string();
 
-    assert!(message.contains("Artifact manifest artifact at index 0 kind alias is empty"));
+    assert!(message.contains("Artifact manifest artifact at index 0 kind is not a non-empty string"));
     assert!(message.contains("artifacts.json"));
 }
 
@@ -1522,7 +1519,7 @@ fn report_fails_on_manifest_canonical_artifact_kind_mismatch() {
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-canonical-manifest-artifact-kind-mismatch",
+            "runId": "run-canonical-manifest-artifact-kind-mismatch",
             "artifacts": [
                 {
                     "label": "run metadata",
@@ -1561,7 +1558,7 @@ fn report_fails_on_non_object_manifest_artifact_entry() {
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "run_id": "run-non-object-manifest-artifact-entry",
+            "runId": "run-non-object-manifest-artifact-entry",
             "artifacts": [
                 {
                     "label": "run metadata",
@@ -2748,10 +2745,10 @@ fn report_fails_on_non_file_failure_handoff() {
 }
 
 #[test]
-fn report_normalizes_failure_handoff_artifact_aliases() {
+fn report_reads_failure_handoff_canonical_available_artifacts() {
     let temp = tempdir().unwrap();
     let source = RunSummary::running(
-        "run-failed-artifact-aliases",
+        "run-failed-canonical-artifacts",
         "tool",
         Some("triage:run".to_string()),
         "target",
@@ -2760,11 +2757,11 @@ fn report_normalizes_failure_handoff_artifact_aliases() {
     write_run_summary(temp.path(), &source).unwrap();
     write_run_artifact_json(
         temp.path(),
-        "run-failed-artifact-aliases",
+        "run-failed-canonical-artifacts",
         "failures.json",
         "failure handoff",
         &json!({
-            "run_id": "run-failed-artifact-aliases",
+            "run_id": "run-failed-canonical-artifacts",
             "status": "failed",
             "failures": [{
                 "tool": "triage:run",
@@ -2775,9 +2772,9 @@ fn report_normalizes_failure_handoff_artifact_aliases() {
                     "cause": "triage failed",
                     "what_failed": "triage did not complete successfully",
                     "artifacts_available": [{
-                        "name": "triage transcript",
-                        "report_json_path": "triage/transcript.json",
-                        "type": "json"
+                        "label": "triage transcript",
+                        "path": "triage/transcript.json",
+                        "kind": "json"
                     }],
                     "missing_artifacts": ["proof.json"],
                     "allowed_proof_level": "artifact-review-only",
@@ -2791,7 +2788,7 @@ fn report_normalizes_failure_handoff_artifact_aliases() {
     )
     .unwrap();
 
-    let report = build_run_report(temp.path(), Some("run-failed-artifact-aliases")).unwrap();
+    let report = build_run_report(temp.path(), Some("run-failed-canonical-artifacts")).unwrap();
     let artifact = &report.failure_handoffs[0].artifacts_available[0];
 
     assert_eq!(artifact.label, "triage transcript");

@@ -1,8 +1,5 @@
 import { readFileSync } from "node:fs";
-import {
-  rustCanonicalRunArtifactSpecs,
-  rustStringArrayConstant,
-} from "./rust-source-contracts.mjs";
+import { rustCanonicalRunArtifactSpecs } from "./rust-source-contracts.mjs";
 
 const artifactContractSource = readFileSync(
   new URL("../crates/kuzushi-core/src/artifact_contract.rs", import.meta.url),
@@ -21,15 +18,6 @@ export const toolResultArtifacts = toolResultArtifactSpecs.map((artifact) => art
 export const toolInputArtifactSpecs = rustArtifactSpecs("TOOL_INPUT_ARTIFACTS");
 export const toolInputArtifacts = toolInputArtifactSpecs.map((artifact) => artifact.path);
 
-export const artifactLabelAliasFields = rustArtifactAliasFields("ARTIFACT_LABEL_KEYS");
-export const artifactPathAliasFields = rustArtifactAliasFields("ARTIFACT_PATH_KEYS");
-export const artifactKindAliasFields = rustArtifactAliasFields("ARTIFACT_KIND_KEYS");
-export const artifactAliasFields = [
-  ...artifactLabelAliasFields,
-  ...artifactPathAliasFields,
-  ...artifactKindAliasFields,
-];
-
 export function checkCanonicalRunArtifactInvariants() {
   return [
     ...artifactSpecInvariantFailures("canonical run artifact", requiredRunArtifactSpecs),
@@ -37,10 +25,6 @@ export function checkCanonicalRunArtifactInvariants() {
     ...artifactSpecInvariantFailures("tool-result artifact", toolResultArtifactSpecs),
     ...artifactSpecInvariantFailures("tool-input artifact", toolInputArtifactSpecs),
     ...artifactInventoryOverlapFailures(),
-    ...artifactAliasInvariantFailures("artifact label alias", artifactLabelAliasFields),
-    ...artifactAliasInvariantFailures("artifact path alias", artifactPathAliasFields),
-    ...artifactAliasInvariantFailures("artifact kind alias", artifactKindAliasFields),
-    ...artifactAliasGroupOverlapFailures(),
   ];
 }
 
@@ -48,7 +32,6 @@ export function checkCanonicalRunArtifactInvariantHelpers() {
   return [
     artifactSpecInvariantRegressionFailure(),
     artifactInventoryOverlapRegressionFailure(),
-    artifactAliasInvariantRegressionFailure(),
   ].filter(Boolean);
 }
 
@@ -58,14 +41,6 @@ function rustArtifactSpecs(name) {
     throw new Error(`canonical artifact contract missing Rust ${name}`);
   }
   return specs;
-}
-
-function rustArtifactAliasFields(name) {
-  const aliases = rustStringArrayConstant(artifactContractSource, name);
-  if (aliases === null || aliases.length === 0) {
-    throw new Error(`canonical artifact contract missing Rust ${name}`);
-  }
-  return aliases;
 }
 
 function artifactSpecInvariantRegressionFailure() {
@@ -105,28 +80,6 @@ function artifactInventoryOverlapRegressionFailure() {
   return failures.includes(expected)
     ? null
     : `canonical artifact inventory overlap helper drift: got ${failures.join(", ")}`;
-}
-
-function artifactAliasInvariantRegressionFailure() {
-  const failures = [
-    ...artifactAliasInvariantFailures("artifact label alias", ["label", "label"]),
-    ...artifactAliasInvariantFailures("artifact path alias", ["path", "bad-path"]),
-    ...artifactAliasInvariantFailures("artifact kind alias", ["kind", "bad kind"]),
-    ...artifactAliasGroupOverlapFailures({
-      label: ["label", "sharedAlias"],
-      path: ["path", "sharedAlias"],
-      kind: ["kind", "sharedAlias"],
-    }),
-  ];
-  const expected = [
-    "artifact label alias duplicates alias label",
-    "artifact path alias has invalid alias: bad-path",
-    "artifact kind alias has invalid alias: bad kind",
-    "artifact alias sharedAlias appears in multiple alias groups: label, path, kind",
-  ];
-  return includesAll(failures, expected)
-    ? null
-    : `canonical artifact alias invariant helper drift: got ${failures.join(", ")}`;
 }
 
 function artifactSpecInvariantFailures(label, specs) {
@@ -178,43 +131,6 @@ function artifactLocationsByPath(groups) {
     }
   }
   return locationsByArtifact;
-}
-
-function artifactAliasInvariantFailures(label, aliases) {
-  return [
-    ...duplicateEntries(aliases).map((alias) => `${label} duplicates alias ${alias}`),
-    ...aliases
-      .filter((alias) => !/^[a-z][A-Za-z0-9_]*$/.test(alias))
-      .map((alias) => `${label} has invalid alias: ${alias}`),
-  ];
-}
-
-function artifactAliasGroupOverlapFailures(groups = currentAliasGroups()) {
-  const locationsByAlias = aliasLocationsByAlias(groups);
-  return Object.entries(locationsByAlias)
-    .filter(([, locations]) => locations.length > 1)
-    .map(
-      ([alias, locations]) =>
-        `artifact alias ${alias} appears in multiple alias groups: ${locations.join(", ")}`,
-    );
-}
-
-function currentAliasGroups() {
-  return {
-    label: artifactLabelAliasFields,
-    path: artifactPathAliasFields,
-    kind: artifactKindAliasFields,
-  };
-}
-
-function aliasLocationsByAlias(groups) {
-  const locationsByAlias = {};
-  for (const [group, aliases] of Object.entries(groups)) {
-    for (const alias of aliases) {
-      locationsByAlias[alias] = [...(locationsByAlias[alias] ?? []), group];
-    }
-  }
-  return locationsByAlias;
 }
 
 function duplicateEntries(entries) {

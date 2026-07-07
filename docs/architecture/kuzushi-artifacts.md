@@ -75,12 +75,11 @@ Published npm packages expose these files through `kuzushi/schemas/*`, for examp
 `kuzushi/schemas/run.summary.schema.json`.
 `schemas/run.artifacts.schema.json` is the machine-readable contract for
 `artifacts.json`, including the run id and each artifact's label, path, and
-kind. Rust readers also accept compatibility aliases such as `name`/`title`,
-`report_json_path`, and `type` when loading older or producer-authored
-manifests, then normalize them back to label/path/kind in memory.
-The same artifact-field aliases are accepted when loading available artifacts
-inside `failures.json`, so failure handoff and follow-up agent prompts can
-consume legacy or producer-authored sidecar pointers.
+kind. Persisted artifact objects use only canonical `"label"`, `"path"`, and
+`"kind"` fields; obsolete aliases are rejected instead of normalized.
+The same canonical artifact object shape is used for available artifacts inside
+`failures.json`, so failure handoff and follow-up agent prompts cite the same
+artifact contract as the run manifest.
 `schemas/run.failures.schema.json` is the machine-readable contract for
 `failures.json`, including each failed tool, the bounded failure-to-LLM context,
 available/missing artifacts, recovery options, fallback prompt, and forbidden
@@ -89,11 +88,10 @@ claims.
 JSON line in `events.jsonl`, including sequence number, kind, status, message,
 timestamp, optional tool, and optional artifact pointer.
 Report readers accept `toolName` and `tool_name` compatibility spellings when
-summarizing older or producer-authored event streams. They also count
-`artifactPath` and `artifact_path` as artifact pointers in event summaries.
+summarizing older or producer-authored event streams.
 Rust event readers also normalize `toolName` and `tool_name` back to `tool`
-for replay and TUI consumers, and normalize `artifactPath`/`artifact_path`
-strings into canonical artifact pointers.
+for replay and TUI consumers. Event artifacts use the canonical `artifact`
+object with `"label"`, `"path"`, and `"kind"` fields.
 `schemas/run.trace.schema.json` is the machine-readable contract for each JSON
 line in `trace.jsonl`, including trace step identity, optional module/verb
 metadata, parent-step linkage, severity, timing, and LLM audit metadata.
@@ -235,14 +233,11 @@ Every module result must include:
 }
 ```
 
-`artifacts` may be an array of paths or objects with `path`, `label`, and
-`kind`. Path fields may use the canonical `path` key or compatibility aliases
-such as `filePath`/`file_path`, `reportJsonPath`/`report_json_path`,
-`outputDir`/`output_dir`, and `promptsDir`/`prompts_dir`. Label fields may use
-`name` or `title`, and kind fields may use `type`. Compatibility output under
-`data.artifacts` may also be an object map of label to path or label to artifact
-object. The run recorder ignores malformed or empty artifact entries instead of
-failing the run.
+`artifacts` may be an array of paths or objects with `"label"`, `"path"`, and
+`"kind"`. `data.artifacts` may also be an object map of label to path or label
+to canonical artifact object. Object entries with obsolete path, label, or kind
+aliases are ignored rather than normalized. The run recorder ignores malformed
+or empty artifact entries instead of failing the run.
 
 Allowed status values:
 

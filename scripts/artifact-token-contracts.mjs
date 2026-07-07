@@ -3,14 +3,7 @@ import {
   forbiddenFailureClaims,
   reportJsonlAliasFields,
 } from "./artifact-contract-fields.mjs";
-import {
-  artifactAliasFields,
-  artifactKindAliasFields,
-  artifactLabelAliasFields,
-  artifactPathAliasFields,
-  requiredRunArtifacts,
-  toolInputArtifacts,
-} from "./canonical-run-artifacts.mjs";
+import { requiredRunArtifacts, toolInputArtifacts } from "./canonical-run-artifacts.mjs";
 
 const failureReportFollowUpRustFields = [
   "report_artifact_spec().leaf",
@@ -18,24 +11,8 @@ const failureReportFollowUpRustFields = [
   "OPTIONAL_RUN_ARTIFACTS",
 ];
 const failureReportFollowUpDocFields = ["report.md", "report.sarif"];
-const canonicalArtifactAliasFields = ["label", "path", "kind"];
-const artifactCompatibilityPathAliasFields = ["report_json_path", "prompts_dir"];
-const artifactCompatibilityAliasFields = artifactCompatibilityAliasesFromGroups({
-  labelAliases: artifactLabelAliasFields,
-  pathAliases: artifactPathAliasFields,
-  kindAliases: artifactKindAliasFields,
-  canonicalAliases: canonicalArtifactAliasFields,
-  compatibilityPathAliases: artifactCompatibilityPathAliasFields,
-});
-const selectedArtifactCompatibilityAliasFields = selectArtifactCompatibilityAliases(
-  artifactAliasFields,
-  artifactCompatibilityAliasFields,
-);
-const declaredArtifactAliasFields = [
-  ...selectedArtifactCompatibilityAliasFields,
-  "ARTIFACT_PATH_KEYS",
-  "ARTIFACT_LABEL_KEYS",
-  "ARTIFACT_KIND_KEYS",
+const canonicalArtifactFields = ["label", "path", "kind"];
+const declaredArtifactFields = [
   "CanonicalRunArtifactSpec",
   "CANONICAL_RUN_ARTIFACTS",
   "OPTIONAL_RUN_ARTIFACTS",
@@ -52,31 +29,12 @@ const runArtifactNormalizationFields = [
   "normalize_artifact_label",
   "normalize_artifact_kind",
   "infer_artifact_kind",
-  ...selectedArtifactCompatibilityAliasFields,
+  ...canonicalArtifactFields,
 ];
-const artifactBoundaryNormalizationTokens = ["RunArtifact::from_declared", "artifact.normalized()"];
+const artifactBoundaryNormalizationTokens = ["artifact.normalized()"];
 
 export function checkArtifactTokenContractInvariants() {
-  return [
-    ...includedCanonicalArtifactAliases().map(
-      (alias) =>
-        `artifact token contract: canonical alias ${alias} must stay out of compatibility alias tokens`,
-    ),
-    ...missingGroupedCompatibilityAliases().map(
-      (alias) =>
-        `artifact token contract: grouped compatibility alias ${alias} is missing from compatibility alias tokens`,
-    ),
-    ...missingArtifactCompatibilityAliases().map(
-      (alias) =>
-        `artifact token contract: compatibility alias ${alias} is not in shared artifact aliases`,
-    ),
-    ...duplicateArtifactCompatibilityAliases().map(
-      (alias) => `artifact token contract: compatibility alias ${alias} is duplicated`,
-    ),
-    selectedArtifactCompatibilityAliasFields.length === artifactCompatibilityAliasFields.length
-      ? null
-      : `artifact token contract: selected compatibility alias count ${selectedArtifactCompatibilityAliasFields.length} does not match requested count ${artifactCompatibilityAliasFields.length}`,
-  ].filter(Boolean);
+  return [];
 }
 
 export const tokenChecks = [
@@ -99,7 +57,7 @@ export const tokenChecks = [
     ],
   },
   {
-    label: "report JSONL compatibility aliases",
+    label: "report JSONL reader aliases",
     file: "crates/kuzushi-core/src/report/artifact_summary/jsonl.rs",
     tokens: reportJsonlAliasFields,
   },
@@ -163,16 +121,9 @@ export const tokenChecks = [
     tokens: ["/data/document", "trustBoundaries", "trust_boundaries"],
   },
   {
-    label: "report artifact manifest uses shared aliases",
+    label: "report artifact manifest uses canonical artifact fields",
     file: "crates/kuzushi-core/src/report/artifact_summary/artifact_manifest.rs",
-    tokens: [
-      "use crate::artifact_contract::{",
-      "first_nonempty_value_string",
-      "ARTIFACT_KIND_KEYS",
-      "ARTIFACT_LABEL_KEYS",
-      "ARTIFACT_PATH_KEYS",
-      "CANONICAL_RUN_ARTIFACTS",
-    ],
+    tokens: ["CANONICAL_RUN_ARTIFACTS", "nonempty_value_string", ...canonicalArtifactFields],
   },
   {
     label: "report reader and writer resolve required artifact labels from shared specs",
@@ -291,34 +242,23 @@ export const tokenChecks = [
     ],
   },
   {
-    label: "shared declared artifact compatibility aliases",
+    label: "shared declared artifact fields",
     file: "crates/kuzushi-core/src/artifact_contract.rs",
-    tokens: declaredArtifactAliasFields,
+    tokens: declaredArtifactFields,
   },
   {
-    label: "tool output declared artifact uses shared aliases",
+    label: "tool output declared artifact uses canonical fields",
     file: "crates/kuzushi-core/src/run_artifacts/output_declared_artifacts.rs",
     tokens: [
-      "use crate::artifact_contract::{",
-      "first_nonempty_string",
-      "ARTIFACT_KIND_KEYS",
-      "ARTIFACT_LABEL_KEYS",
-      "ARTIFACT_PATH_KEYS",
+      'nonempty_object_string(object, "path")',
+      'nonempty_object_string(object, "label")',
+      'nonempty_object_string(object, "kind")',
     ],
   },
   {
     label: "tool output declared artifact architecture doc",
     file: "docs/architecture/kuzushi-artifacts.md",
-    tokens: [
-      "data.artifacts",
-      "name",
-      "title",
-      "type",
-      "reportJsonPath",
-      "report_json_path",
-      "promptsDir",
-      "prompts_dir",
-    ],
+    tokens: ["data.artifacts", '"label"', '"path"', '"kind"'],
   },
   {
     label: "mode parity doc names canonical run bundle for shell and run",
@@ -335,15 +275,9 @@ export const tokenChecks = [
     ],
   },
   {
-    label: "run event reader compatibility aliases",
+    label: "run event reader canonical artifact object",
     file: "crates/kuzushi-core/src/run_artifacts/run_events.rs",
-    tokens: [
-      "toolName",
-      "tool_name",
-      "artifactPath",
-      "artifact_path",
-      "deserialize_event_artifact",
-    ],
+    tokens: ["toolName", "tool_name", "pub artifact: Option<RunArtifact>"],
   },
   {
     label: "report JSONL alias architecture doc",
@@ -410,60 +344,3 @@ export const tokenChecks = [
     ],
   },
 ];
-
-function missingArtifactCompatibilityAliases() {
-  return artifactCompatibilityAliasFields.filter(
-    (alias) => !selectedArtifactCompatibilityAliasFields.includes(alias),
-  );
-}
-
-function includedCanonicalArtifactAliases() {
-  return canonicalArtifactAliasFields.filter((alias) =>
-    artifactCompatibilityAliasFields.includes(alias),
-  );
-}
-
-function missingGroupedCompatibilityAliases() {
-  return expectedGroupedCompatibilityAliases().filter(
-    (alias) => !artifactCompatibilityAliasFields.includes(alias),
-  );
-}
-
-function expectedGroupedCompatibilityAliases() {
-  return [
-    ...withoutAliases(artifactLabelAliasFields, canonicalArtifactAliasFields),
-    ...withoutAliases(artifactKindAliasFields, canonicalArtifactAliasFields),
-    ...selectArtifactCompatibilityAliases(
-      artifactPathAliasFields,
-      artifactCompatibilityPathAliasFields,
-    ),
-  ];
-}
-
-function duplicateArtifactCompatibilityAliases() {
-  return artifactCompatibilityAliasFields.filter(
-    (alias, index) => artifactCompatibilityAliasFields.indexOf(alias) !== index,
-  );
-}
-
-function artifactCompatibilityAliasesFromGroups({
-  labelAliases,
-  pathAliases,
-  kindAliases,
-  canonicalAliases,
-  compatibilityPathAliases,
-}) {
-  return [
-    ...withoutAliases(labelAliases, canonicalAliases),
-    ...withoutAliases(kindAliases, canonicalAliases),
-    ...selectArtifactCompatibilityAliases(pathAliases, compatibilityPathAliases),
-  ];
-}
-
-function selectArtifactCompatibilityAliases(aliases, compatibilityAliases) {
-  return aliases.filter((alias) => compatibilityAliases.includes(alias));
-}
-
-function withoutAliases(aliases, excludedAliases) {
-  return aliases.filter((alias) => !excludedAliases.includes(alias));
-}

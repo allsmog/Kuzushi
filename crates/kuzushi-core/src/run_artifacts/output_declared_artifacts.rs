@@ -1,8 +1,5 @@
 use super::artifact_manifest::record_run_artifact;
 use super::RunArtifact;
-use crate::artifact_contract::{
-    first_nonempty_string, ARTIFACT_KIND_KEYS, ARTIFACT_LABEL_KEYS, ARTIFACT_PATH_KEYS,
-};
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -67,12 +64,20 @@ fn artifact_from_value(label: &str, value: &Value) -> Option<RunArtifact> {
 }
 
 fn artifact_from_object(label: &str, object: &Map<String, Value>) -> Option<RunArtifact> {
-    let path = first_nonempty_string(object, &ARTIFACT_PATH_KEYS)?;
-    let label = first_nonempty_string(object, &ARTIFACT_LABEL_KEYS).unwrap_or(label);
-    let kind = first_nonempty_string(object, &ARTIFACT_KIND_KEYS);
+    let path = nonempty_object_string(object, "path")?;
+    let label = nonempty_object_string(object, "label").unwrap_or(label);
+    let kind = nonempty_object_string(object, "kind");
     artifact_from_path(label, path, kind)
 }
 
 pub(crate) fn artifact_from_path(label: &str, path: &str, kind: Option<&str>) -> Option<RunArtifact> {
     RunArtifact::from_declared(label, path, kind)
+}
+
+fn nonempty_object_string<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }

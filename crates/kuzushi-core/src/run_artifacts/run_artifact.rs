@@ -3,31 +3,11 @@ use super::*;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RunArtifact {
-    #[serde(
-        alias = "name",
-        alias = "title",
-        deserialize_with = "deserialize_artifact_label"
-    )]
+    #[serde(deserialize_with = "deserialize_artifact_label")]
     pub label: String,
-    #[serde(
-        alias = "file",
-        alias = "filePath",
-        alias = "file_path",
-        alias = "reportPath",
-        alias = "report_path",
-        alias = "reportJsonPath",
-        alias = "report_json_path",
-        alias = "scopePath",
-        alias = "scope_path",
-        alias = "dir",
-        alias = "outputDir",
-        alias = "output_dir",
-        alias = "promptsDir",
-        alias = "prompts_dir",
-        deserialize_with = "deserialize_trimmed_string"
-    )]
+    #[serde(deserialize_with = "deserialize_trimmed_string")]
     pub path: String,
-    #[serde(alias = "type", deserialize_with = "deserialize_artifact_kind")]
+    #[serde(deserialize_with = "deserialize_artifact_kind")]
     pub kind: String,
 }
 

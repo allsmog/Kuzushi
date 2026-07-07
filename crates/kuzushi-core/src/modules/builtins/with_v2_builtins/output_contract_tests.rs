@@ -124,25 +124,12 @@ fn lifts_nested_artifact_map_to_contract_artifacts() {
 }
 
 #[test]
-fn normalizes_artifact_path_aliases() {
-    let output = normalize_output_value(json!({
-        "artifacts": [{"label": "report", "reportPath": "/tmp/report.md"}]
-    }));
-
-    assert_eq!(output["artifacts"][0]["label"], "report");
-    assert_eq!(output["artifacts"][0]["path"], "/tmp/report.md");
-    assert_eq!(output["artifacts"][0]["reportPath"], "/tmp/report.md");
-}
-
-#[test]
-fn normalizes_snake_case_artifact_path_aliases() {
+fn drops_artifact_objects_without_canonical_path() {
     let output = normalize_output_value(json!({
         "artifacts": [{"label": "report", "report_path": "/tmp/report.md"}]
     }));
 
-    assert_eq!(output["artifacts"][0]["label"], "report");
-    assert_eq!(output["artifacts"][0]["path"], "/tmp/report.md");
-    assert_eq!(output["artifacts"][0]["report_path"], "/tmp/report.md");
+    assert!(output["artifacts"].as_array().unwrap().is_empty());
 }
 
 #[test]

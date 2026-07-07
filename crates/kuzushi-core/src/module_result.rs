@@ -1,4 +1,3 @@
-use crate::artifact_contract::ARTIFACT_PATH_KEYS;
 use serde_json::{json, Map, Value};
 
 mod envelope;
@@ -239,16 +238,11 @@ fn artifact_path(label: &str, path: &str) -> Option<Value> {
 }
 
 fn has_path_key(object: &Map<String, Value>) -> bool {
-    ARTIFACT_PATH_KEYS
-        .iter()
-        .any(|key| object.get(*key).and_then(Value::as_str).is_some())
+    object.get("path").and_then(Value::as_str).is_some()
 }
 
 fn first_path_string<'a>(object: &'a Map<String, Value>) -> Option<&'a str> {
-    ARTIFACT_PATH_KEYS
-        .iter()
-        .filter_map(|key| object.get(*key))
-        .find_map(Value::as_str)
+    object.get("path").and_then(Value::as_str)
 }
 
 fn preserve_domain_status(object: &mut Map<String, Value>, status: Option<&Value>) {

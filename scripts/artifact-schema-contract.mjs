@@ -3,9 +3,6 @@ import path from "node:path";
 import { checkFieldShapeSpecs } from "./artifact-schema-shapes.mjs";
 import { checkThreatModelNarrativeFlowAliases } from "./artifact-schema-threat-model.mjs";
 import {
-  artifactKindAliasFields,
-  artifactLabelAliasFields,
-  artifactPathAliasFields,
   optionalRunArtifactSpecs,
   requiredRunArtifactSpecs,
   toolInputArtifactSpecs,
@@ -15,10 +12,8 @@ import { canonicalRunSchemaFiles } from "./canonical-run-schema-files.mjs";
 
 export { canonicalRunSchemaFiles };
 
-const artifactAliasGroups = [
-  { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactLabelAliasFields },
-  { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactPathAliasFields },
-  { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactKindAliasFields },
+const artifactFieldGroups = [
+  { path: ["definitions", "artifact"], kind: "required", fields: ["label", "path", "kind"] },
 ];
 const reservedArtifactMetadataSpecs = [
   ...requiredRunArtifactSpecs,
@@ -29,12 +24,12 @@ const reservedArtifactMetadataSpecs = [
 
 const requiredAliasGroupsBySchema = {
   "schemas/run.artifacts.schema.json": [
-    { path: [], kind: "anyOf", fields: ["runId", "run_id"] },
-    ...artifactAliasGroups,
+    { path: [], kind: "required", fields: ["runId", "artifacts"] },
+    ...artifactFieldGroups,
   ],
   "schemas/run.events.schema.json": [
     { path: [], kind: "allOfAnyOf", fields: ["atUnix", "at_unix"] },
-    ...artifactAliasGroups,
+    ...artifactFieldGroups,
   ],
   "schemas/run.failures.schema.json": [
     { path: [], kind: "anyOf", fields: ["runId", "run_id"] },
@@ -88,7 +83,7 @@ const requiredAliasGroupsBySchema = {
       kind: "allOfAnyOf",
       fields: ["claimsForbidden", "claims_forbidden"],
     },
-    ...artifactAliasGroups,
+    ...artifactFieldGroups,
   ],
   "schemas/run.summary.schema.json": [
     { path: [], kind: "allOfAnyOf", fields: ["runId", "run_id"] },
@@ -100,7 +95,7 @@ const requiredAliasGroupsBySchema = {
       kind: "declared",
       fields: ["latencyMs", "latency_ms", "costUsd", "cost_usd"],
     },
-    ...artifactAliasGroups,
+    ...artifactFieldGroups,
   ],
   "schemas/run.trace.schema.json": [
     {
@@ -294,20 +289,14 @@ const traceKindValues = ["tool", "reasoning", "tool-progress", "done", "refused"
 
 const schemaEnumSpecs = {
   "schemas/run.artifacts.schema.json": [
-    artifactKindSpec([
-      ["definitions", "artifact", "properties", "kind"],
-      ["definitions", "artifact", "properties", "type"],
-    ]),
+    artifactKindSpec([["definitions", "artifact", "properties", "kind"]]),
   ],
   "schemas/run.attack-surface.schema.json": attackSurfaceEnumSpecs,
   "schemas/run.context.schema.json": [
     routeMethodSpec([["definitions", "appRoute", "properties", "method"]]),
   ],
   "schemas/run.failures.schema.json": [
-    artifactKindSpec([
-      ["definitions", "artifact", "properties", "kind"],
-      ["definitions", "artifact", "properties", "type"],
-    ]),
+    artifactKindSpec([["definitions", "artifact", "properties", "kind"]]),
     runStatusSpec([
       ["properties", "status"],
       ["definitions", "failure", "properties", "status"],
@@ -335,10 +324,7 @@ const schemaEnumSpecs = {
       values: ["started", "running", "completed", "failed", "partial", "skipped", "paused"],
       refs: [["properties", "status"]],
     },
-    artifactKindSpec([
-      ["definitions", "artifact", "properties", "kind"],
-      ["definitions", "artifact", "properties", "type"],
-    ]),
+    artifactKindSpec([["definitions", "artifact", "properties", "kind"]]),
   ],
   "schemas/run.trace.schema.json": [
     {
@@ -368,10 +354,7 @@ const schemaEnumSpecs = {
       values: traceKindValues,
       refs: [["definitions", "llmCall", "properties", "kind"]],
     },
-    artifactKindSpec([
-      ["definitions", "artifact", "properties", "kind"],
-      ["definitions", "artifact", "properties", "type"],
-    ]),
+    artifactKindSpec([["definitions", "artifact", "properties", "kind"]]),
   ],
   "schemas/run.threat-model.schema.json": [
     {
@@ -568,6 +551,8 @@ function checkRequiredAliasGroup(relativeFile, schema, group) {
 function aliasGroupIsRequired(schema, group) {
   return group.kind === "declared"
     ? true
+    : group.kind === "required"
+      ? group.fields.every((field) => requiredFields(schema).includes(field))
     : group.kind === "anyOf"
       ? anyOfRequiresFields(schema.anyOf, group.fields)
       : allOfContainsAnyOfRequirement(schema.allOf, group.fields);
@@ -661,41 +646,22 @@ function checkRunArtifactManifestReservedMetadata(relativeFile, schema) {
     return [`${relativeFile}: missing canonical artifact metadata rules`];
   }
   return reservedArtifactMetadataSpecs.flatMap((spec) => {
-    const rule = rules.find((candidate) =>
-      ruleMatchesPathAlias(candidate, "path", artifactPathPattern(spec.path)),
-    );
+    const rule = rules.find((candidate) => ruleMatchesPath(candidate, artifactPathPattern(spec.path)));
     if (!rule) return [`${relativeFile}: missing reserved metadata rule for ${spec.path}`];
-    return [
-      ...missingArtifactPathAliasRules(relativeFile, rule, spec),
-      ...missingArtifactMetadataConsts(relativeFile, rule, spec),
-    ];
+    return missingArtifactMetadataConsts(relativeFile, rule, spec);
   });
 }
 
-function missingArtifactPathAliasRules(relativeFile, rule, spec) {
-  const pattern = artifactPathPattern(spec.path);
-  return artifactPathAliasFields
-    .filter((alias) => !ruleMatchesPathAlias(rule, alias, pattern))
-    .map((alias) => `${relativeFile}: reserved metadata rule for ${spec.path} must cover ${alias}`);
-}
-
-function ruleMatchesPathAlias(rule, alias, pattern) {
+function ruleMatchesPath(rule, pattern) {
   return (
-    Array.isArray(rule?.if?.anyOf) &&
-    rule.if.anyOf.some((branch) => {
-      return (
-        requiredFields(branch).includes(alias) && branch?.properties?.[alias]?.pattern === pattern
-      );
-    })
+    requiredFields(rule?.if).includes("path") &&
+    rule?.if?.properties?.path?.pattern === pattern
   );
 }
 
 function missingArtifactMetadataConsts(relativeFile, rule, spec) {
   const properties = rule?.then?.properties;
-  const expected = {
-    ...Object.fromEntries(artifactLabelAliasFields.map((field) => [field, spec.label])),
-    ...Object.fromEntries(artifactKindAliasFields.map((field) => [field, spec.kind])),
-  };
+  const expected = { label: spec.label, kind: spec.kind };
   return Object.entries(expected)
     .filter(([field, value]) => properties?.[field]?.const !== value)
     .map(([field]) => `${relativeFile}: reserved metadata rule for ${spec.path} must set ${field}`);

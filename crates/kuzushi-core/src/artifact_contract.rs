@@ -1,26 +1,3 @@
-use serde_json::{Map, Value};
-
-pub(crate) const ARTIFACT_PATH_KEYS: [&str; 15] = [
-    "path",
-    "file",
-    "filePath",
-    "file_path",
-    "reportPath",
-    "report_path",
-    "reportJsonPath",
-    "report_json_path",
-    "scopePath",
-    "scope_path",
-    "dir",
-    "outputDir",
-    "output_dir",
-    "promptsDir",
-    "prompts_dir",
-];
-
-pub(crate) const ARTIFACT_LABEL_KEYS: [&str; 3] = ["label", "name", "title"];
-pub(crate) const ARTIFACT_KIND_KEYS: [&str; 2] = ["kind", "type"];
-
 pub(crate) struct CanonicalRunArtifactSpec {
     pub(crate) leaf: &'static str,
     pub(crate) label: &'static str,
@@ -131,18 +108,4 @@ pub(crate) fn tool_result_artifact_spec(leaf: &str) -> Option<&'static Canonical
 
 pub(crate) fn tool_input_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
     TOOL_INPUT_ARTIFACTS.iter().find(|spec| spec.leaf == leaf)
-}
-
-pub(crate) fn first_nonempty_string<'a>(
-    object: &'a Map<String, Value>,
-    keys: &[&str],
-) -> Option<&'a str> {
-    keys.iter()
-        .filter_map(|key| object.get(*key))
-        .find_map(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-}
-
-pub(crate) fn first_nonempty_value_string<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    first_nonempty_string(value.as_object()?, keys)
 }

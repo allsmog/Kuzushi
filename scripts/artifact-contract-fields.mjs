@@ -1,10 +1,9 @@
-import { artifactAliasFields } from "./canonical-run-artifacts.mjs";
-
 export const runArtifactManifestSchemaFields = [
   "runId",
-  "run_id",
   "artifacts",
-  ...artifactAliasFields,
+  "label",
+  "path",
+  "kind",
 ];
 
 export const forbiddenFailureClaims = [
@@ -49,8 +48,6 @@ export const schemaAliasContractFields = [
 export const reportJsonlAliasFields = [
   "toolName",
   "tool_name",
-  "artifactPath",
-  "artifact_path",
   "moduleId",
   "module_id",
   "costUsd",
@@ -220,9 +217,9 @@ export const runEventsSchemaFields = [
   "toolName",
   "tool_name",
   "artifact",
-  "artifactPath",
-  "artifact_path",
-  ...artifactAliasFields,
+  "label",
+  "path",
+  "kind",
 ];
 
 export const runFailuresSchemaFields = [
@@ -253,7 +250,9 @@ export const runFailuresSchemaFields = [
   "fallback_prompt",
   "claimsForbidden",
   "claims_forbidden",
-  ...artifactAliasFields,
+  "label",
+  "path",
+  "kind",
 ];
 
 export const runFindingsSchemaFields = [
@@ -380,7 +379,9 @@ export const runSummarySchemaFields = [
   "latencyMs",
   "latency_ms",
   "artifacts",
-  ...artifactAliasFields,
+  "label",
+  "path",
+  "kind",
   "cliArgs",
   "cli_args",
   "scanArgs",

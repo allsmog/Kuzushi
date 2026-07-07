@@ -143,18 +143,16 @@ fn artifact_count_segment(events: &[Value]) -> Option<String> {
 }
 
 fn event_has_artifact(event: &Value) -> bool {
-    event
-        .get("artifact")
-        .is_some_and(artifact_value_present)
-        || string_at(event, &["artifactPath", "artifact_path"]).is_some()
+    event.get("artifact").is_some_and(artifact_value_present)
 }
 
 fn artifact_value_present(value: &Value) -> bool {
     match value {
-        Value::Null => false,
-        Value::String(path) => !path.trim().is_empty(),
-        Value::Object(object) => !object.is_empty(),
-        _ => true,
+        Value::Object(object) => object
+            .get("path")
+            .and_then(Value::as_str)
+            .is_some_and(|path| !path.trim().is_empty()),
+        _ => false,
     }
 }
 
