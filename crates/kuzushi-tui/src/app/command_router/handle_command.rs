@@ -3,17 +3,28 @@ use super::*;
 impl ShellApp {
     pub fn handle_command(&mut self, command: ShellCommand) {
         let previous_view = self.shell_view.clone();
+        let update = self.reduce_command_without_effect_execution(command);
+        self.execute_effects(update.effects);
+        self.discard_stashed_input_after_view_change(&previous_view);
+    }
+
+    pub(crate) fn reduce_command_message(&mut self, command: ShellCommand) -> CommandUpdate {
+        let previous_view = self.shell_view.clone();
+        let update = self.reduce_command_without_effect_execution(command);
+        self.discard_stashed_input_after_view_change(&previous_view);
+        update
+    }
+
+    fn reduce_command_without_effect_execution(&mut self, command: ShellCommand) -> CommandUpdate {
         if let Some(effects) = self.reduce_command_effects(&command) {
-            self.execute_effects(effects);
-            self.discard_stashed_input_after_view_change(&previous_view);
-            return;
+            return CommandUpdate::handled(effects);
         }
         for handler in COMMAND_HANDLERS {
             if handler(self, &command) {
-                self.discard_stashed_input_after_view_change(&previous_view);
-                return;
+                return CommandUpdate::handled(Vec::new());
             }
         }
+        CommandUpdate::unhandled()
     }
 
     pub fn submit_line(&mut self, raw: &str) {
@@ -34,7 +45,7 @@ impl ShellApp {
         if self.handle_editor_local_command(trimmed) {
             return;
         }
-        self.handle_command(parse_command(raw));
+        update_and_execute_effects(self, Msg::Cmd(parse_command(raw)));
     }
 
     /// `<group-verb> ?` lists the verb's sub-verbs inline. Editor-local so it
@@ -108,6 +119,27 @@ impl ShellApp {
     fn discard_stashed_input_after_view_change(&mut self, previous_view: &ShellView) {
         if &self.shell_view != previous_view {
             self.last_cleared_input = None;
+        }
+    }
+}
+
+pub(crate) struct CommandUpdate {
+    pub(crate) handled: bool,
+    pub(crate) effects: Vec<ShellEffect>,
+}
+
+impl CommandUpdate {
+    fn handled(effects: Vec<ShellEffect>) -> Self {
+        Self {
+            handled: true,
+            effects,
+        }
+    }
+
+    fn unhandled() -> Self {
+        Self {
+            handled: false,
+            effects: Vec::new(),
         }
     }
 }

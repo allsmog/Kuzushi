@@ -267,17 +267,23 @@ impl ShellApp {
             return;
         };
         let input = serde_json::json!({ "fingerprint": finding.fingerprint }).to_string();
-        self.handle_command(ShellCommand::RunTool {
-            tool: Some("verify:exploit".to_string()),
-            input: Some(input),
-        });
+        update_and_execute_effects(
+            self,
+            Msg::Cmd(ShellCommand::RunTool {
+                tool: Some("verify:exploit".to_string()),
+                input: Some(input),
+            }),
+        );
     }
 
     fn order_workbench_chain(&mut self) {
-        self.handle_command(ShellCommand::RunTool {
-            tool: Some("exploit-chain:scan".to_string()),
-            input: None,
-        });
+        update_and_execute_effects(
+            self,
+            Msg::Cmd(ShellCommand::RunTool {
+                tool: Some("exploit-chain:scan".to_string()),
+                input: None,
+            }),
+        );
     }
 
     fn open_workbench_coverage_clusters(&mut self) {
@@ -449,13 +455,13 @@ impl ShellApp {
                 self.shell_view = ShellView::Threat(view);
             }
             ViewHotkeyAction::PauseScan => {
-                self.handle_command(ShellCommand::Pause);
+                update_and_execute_effects(self, Msg::Cmd(ShellCommand::Pause));
             }
             ViewHotkeyAction::ResumeScan => {
-                self.handle_command(ShellCommand::Resume(None));
+                update_and_execute_effects(self, Msg::Cmd(ShellCommand::Resume(None)));
             }
             ViewHotkeyAction::OpenNextPhase => {
-                self.handle_command(ShellCommand::Next);
+                update_and_execute_effects(self, Msg::Cmd(ShellCommand::Next));
             }
             ViewHotkeyAction::Back => self.go_back(),
             _ => return false,

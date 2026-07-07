@@ -58,11 +58,19 @@ pub(crate) struct RunToolLaunch {
     pub(crate) thinking_level: Option<String>,
 }
 
+pub(crate) struct EffectRuntime;
+
+impl EffectRuntime {
+    pub(crate) fn execute(app: &mut ShellApp, effects: Vec<ShellEffect>) {
+        for effect in effects {
+            app.execute_effect(effect);
+        }
+    }
+}
+
 impl ShellApp {
     pub(crate) fn execute_effects(&mut self, effects: Vec<ShellEffect>) {
-        for effect in effects {
-            self.execute_effect(effect);
-        }
+        EffectRuntime::execute(self, effects);
     }
 
     fn execute_effect(&mut self, effect: ShellEffect) {
@@ -260,4 +268,19 @@ fn applied_patch_message(
         )
     };
     format!("applied reviewed patch for {alias} to {files}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn effect_runtime_executes_lifecycle_effects() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        EffectRuntime::execute(&mut app, vec![ShellEffect::Quit]);
+
+        assert!(app.should_quit);
+    }
 }

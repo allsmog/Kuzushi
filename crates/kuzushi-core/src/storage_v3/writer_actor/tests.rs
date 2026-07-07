@@ -70,7 +70,7 @@ fn verification(stable_fp: &str) -> VerificationWrite {
 fn patch_attempt(stable_fp: &str) -> PatchAttemptWrite {
     PatchAttemptWrite {
         stable_fp: stable_fp.to_string(),
-        fingerprint: "legacy-fp".to_string(),
+        fingerprint: "external-fp".to_string(),
         patch_run_id: "patch-run-1".to_string(),
         repo: "/repo".to_string(),
         diff_object: Some("diff-object-hash".to_string()),
