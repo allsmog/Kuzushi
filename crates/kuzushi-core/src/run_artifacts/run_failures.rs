@@ -124,7 +124,7 @@ fn output_with_fallback_context(mut output: Value, context: FailureToLlmContext)
     let Value::Object(object) = &mut output else {
         return output;
     };
-    if object.contains_key("fallback_context") || object.contains_key("fallbackContext") {
+    if object.contains_key("fallback_context") {
         return output;
     }
     if let Ok(context) = serde_json::to_value(context) {

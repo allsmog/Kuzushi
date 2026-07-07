@@ -3696,6 +3696,7 @@ mod tests {
                 "status": "partial",
                 "summary": "semgrep binary missing",
                 "warnings": ["scanner unavailable"],
+                "fallbackContext": {"legacy": true},
             }),
         );
 
