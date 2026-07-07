@@ -574,7 +574,7 @@ fn report_summarizes_canonical_attack_surface_total_shape() {
 }
 
 #[test]
-fn report_summarizes_attack_surface_snake_case_aliases() {
+fn report_ignores_attack_surface_snake_case_fields() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-attack-surface-aliases", "context:build");
     write_run_summary(temp.path(), &source).unwrap();
@@ -597,9 +597,12 @@ fn report_summarizes_attack_surface_snake_case_aliases() {
 
     let report = build_run_report(temp.path(), Some("run-attack-surface-aliases")).unwrap();
 
-    assert!(report.report_markdown.contains(
-        "attack-surface.json: present - 3 surface(s), 1 high risk, max 82, tiers high=1, low=2, kinds file_upload_parse_path=1, http_route=2"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("attack-surface.json: present - 1 top-level field(s)"));
+    assert!(!report.report_markdown.contains("3 surface(s)"));
+    assert!(!report.report_markdown.contains("max 82"));
+    assert!(!report.report_markdown.contains("file_upload_parse_path=1"));
 }
 
 #[test]
@@ -613,11 +616,11 @@ fn report_summarizes_root_level_attack_surface_snapshot_fields() {
         "attack-surface.json",
         "attack surface",
         &json!({
-            "surface_count": 2,
-            "high_risk": 1,
-            "max_risk_score": 88,
-            "by_risk_tier": {"high": 1, "medium": 1},
-            "entries": [
+            "surfaceCount": 2,
+            "highRisk": 1,
+            "maxRiskScore": 88,
+            "byRiskTier": {"high": 1, "medium": 1},
+            "surfaces": [
                 {"framework": "FastAPI", "kind": "http_route"},
                 {"framework": "Tonic", "kind": "rpc_handler"}
             ]
@@ -633,7 +636,7 @@ fn report_summarizes_root_level_attack_surface_snapshot_fields() {
 }
 
 #[test]
-fn report_summarizes_attack_surface_array_aliases() {
+fn report_ignores_attack_surface_array_aliases() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-attack-surface-array-aliases", "context:build");
     write_run_summary(temp.path(), &source).unwrap();
@@ -658,9 +661,11 @@ fn report_summarizes_attack_surface_array_aliases() {
 
     let report = build_run_report(temp.path(), Some("run-attack-surface-array-aliases")).unwrap();
 
-    assert!(report.report_markdown.contains(
-        "attack-surface.json: present - 2 surface(s), 0 high risk, kinds file_upload_parse_path=1, rpc_handler=1, frameworks Laravel=1, Tonic=1"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("attack-surface.json: present - 2 top-level field(s)"));
+    assert!(!report.report_markdown.contains("2 surface(s)"));
+    assert!(!report.report_markdown.contains("frameworks Laravel"));
 }
 
 #[test]

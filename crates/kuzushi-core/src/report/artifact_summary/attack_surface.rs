@@ -5,7 +5,7 @@ pub(super) fn attack_surface_summary(value: &Value) -> Option<String> {
     let summary = summary_object(value)?;
     let surfaces = surface_array(value);
     let total = surface_total(summary).or_else(|| surface_count(surfaces))?;
-    let high = summary_u64(summary, &["highRisk", "high_risk"])
+    let high = summary_u64(summary, "highRisk")
         .or_else(|| high_risk_surface_count(surfaces))
         .unwrap_or(0);
     Some(attack_surface_segments(summary, surfaces, total, high).join(", "))
@@ -19,18 +19,15 @@ fn summary_object(value: &Value) -> Option<&serde_json::Map<String, Value>> {
 }
 
 fn surface_total(summary: &serde_json::Map<String, Value>) -> Option<u64> {
-    summary_u64(summary, &["surfaceCount", "surface_count", "total"])
+    summary_u64(summary, "surfaceCount").or_else(|| summary_u64(summary, "total"))
 }
 
-fn summary_u64(summary: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<u64> {
-    summary_value(summary, keys).and_then(Value::as_u64)
+fn summary_u64(summary: &serde_json::Map<String, Value>, key: &str) -> Option<u64> {
+    summary_value(summary, key).and_then(Value::as_u64)
 }
 
-fn summary_value<'a>(
-    summary: &'a serde_json::Map<String, Value>,
-    keys: &[&str],
-) -> Option<&'a Value> {
-    keys.iter().find_map(|key| summary.get(*key))
+fn summary_value<'a>(summary: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a Value> {
+    summary.get(key)
 }
 
 fn attack_surface_segments(
@@ -43,15 +40,12 @@ fn attack_surface_segments(
     parts.extend(max_risk_segment(summary).or_else(|| max_surface_risk_segment(surfaces)));
     parts.extend(named_segment(
         "tiers",
-        risk_tier_summary(summary_value(summary, &["byRiskTier", "by_risk_tier"]))
+        risk_tier_summary(summary_value(summary, "byRiskTier"))
             .or_else(|| surface_risk_tier_summary(surfaces)),
     ));
     parts.extend(named_segment(
         "kinds",
-        attack_surface_kind_summary(
-            summary_value(summary, &["byKind", "by_kind"]),
-            surfaces,
-        ),
+        attack_surface_kind_summary(summary_value(summary, "byKind"), surfaces),
     ));
     parts.extend(named_segment("frameworks", attack_surface_framework_summary(surfaces)));
     parts.extend(named_segment("languages", attack_surface_language_summary(surfaces)));
@@ -61,7 +55,7 @@ fn attack_surface_segments(
 }
 
 fn max_risk_segment(summary: &serde_json::Map<String, Value>) -> Option<String> {
-    summary_u64(summary, &["maxRiskScore", "max_risk_score"]).map(|max| format!("max {max}"))
+    summary_u64(summary, "maxRiskScore").map(|max| format!("max {max}"))
 }
 
 fn max_surface_risk_segment(value: Option<&Value>) -> Option<String> {
@@ -113,11 +107,7 @@ fn attack_surface_boundary_summary(value: Option<&Value>) -> Option<String> {
 }
 
 fn surface_array(value: &Value) -> Option<&Value> {
-    value
-        .get("surfaces")
-        .or_else(|| value.get("entries"))
-        .or_else(|| value.get("attackSurfaces"))
-        .or_else(|| value.get("attack_surfaces"))
+    value.get("surfaces")
 }
 
 fn surface_count(value: Option<&Value>) -> Option<u64> {

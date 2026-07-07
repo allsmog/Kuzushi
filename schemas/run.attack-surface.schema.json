@@ -26,36 +26,17 @@
       "items": { "type": "string" }
     },
     "rootName": { "type": "string" },
-    "root_name": { "type": "string" },
     "surfaces": {
       "type": "array",
       "items": { "$ref": "#/definitions/surface" }
     },
-    "entries": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/surface" }
-    },
-    "attackSurfaces": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/surface" }
-    },
-    "attack_surfaces": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/surface" }
-    },
     "surfaceCount": { "type": "integer", "minimum": 0 },
-    "surface_count": { "type": "integer", "minimum": 0 },
     "total": { "type": "integer", "minimum": 0 },
     "highRisk": { "type": "integer", "minimum": 0 },
-    "high_risk": { "type": "integer", "minimum": 0 },
     "maxRiskScore": { "type": "integer", "minimum": 0 },
-    "max_risk_score": { "type": "integer", "minimum": 0 },
     "byRiskTier": { "type": "object" },
-    "by_risk_tier": { "type": "object" },
     "byKind": { "type": "object" },
-    "by_kind": { "type": "object" },
     "byFile": { "type": "object" },
-    "by_file": { "type": "object" },
     "risk": { "type": "object" },
     "rank": { "type": "integer", "minimum": 0 },
     "score": { "type": "integer", "minimum": 0 },
@@ -86,15 +67,10 @@
       "properties": {
         "total": { "type": "integer", "minimum": 0 },
         "byKind": { "type": "object" },
-        "by_kind": { "type": "object" },
         "byFile": { "type": "object" },
-        "by_file": { "type": "object" },
         "highRisk": { "type": "integer", "minimum": 0 },
-        "high_risk": { "type": "integer", "minimum": 0 },
         "maxRiskScore": { "type": "integer", "minimum": 0 },
-        "max_risk_score": { "type": "integer", "minimum": 0 },
-        "byRiskTier": { "type": "object" },
-        "by_risk_tier": { "type": "object" }
+        "byRiskTier": { "type": "object" }
       }
     },
     "surface": {

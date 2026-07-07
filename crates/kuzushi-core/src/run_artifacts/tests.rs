@@ -4156,9 +4156,7 @@ mod tests {
                     "tier": "high",
                     "reasons": ["auth boundary"]
                 }
-            }],
-            "attackSurfaces": [],
-            "attack_surfaces": []
+            }]
         })
     }
 
