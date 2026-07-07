@@ -27,6 +27,7 @@ pub(super) fn project_finding_observation(
     }
     let observation = FindingObservationProjection::from_event(event)?;
     let current = project_current_finding(tx, event)?;
+    project_identity_link(tx, event, current.as_ref())?;
     insert_finding_observation(tx, event, &observation, current.as_ref())?;
     project_stable_finding(tx, event, &observation)?;
     project_observation_search(tx, event, &observation)?;
@@ -102,6 +103,7 @@ fn insert_finding_observation(
 struct CurrentFindingProjection {
     id: i64,
     finding_json: String,
+    created_at: Option<String>,
 }
 
 fn project_current_finding(
@@ -117,6 +119,7 @@ fn project_current_finding(
     set_json_i64(&mut finding, "id", projected_id)?;
     let projection = CurrentFindingProjection {
         id: projected_id,
+        created_at: json_optional_non_empty_str(&finding, "created_at").map(str::to_string),
         finding_json: serde_json::to_string(&finding)
             .context("Could not serialize current finding projection")?,
     };
@@ -173,6 +176,98 @@ fn upsert_current_finding(
     Ok(())
 }
 
+fn project_identity_link(
+    tx: &Transaction<'_>,
+    event: &EventEnvelope,
+    current: Option<&CurrentFindingProjection>,
+) -> Result<()> {
+    let Some(identity_id) = payload_str(&event.payload, "identityId") else {
+        return Ok(());
+    };
+    let run_id = require_payload_str(&event.payload, "runId")?;
+    let run = identity_run_context(tx, run_id)?;
+    let created_at = current
+        .and_then(|projection| projection.created_at.as_deref())
+        .unwrap_or(run.started_at.as_str());
+    insert_identity(
+        tx,
+        &IdentityProjection {
+            identity_id,
+            target_id: &run.target_id,
+            alias: require_payload_str(&event.payload, "identityAlias")?,
+            fingerprint: require_payload_str(&event.payload, "identityFingerprint")?,
+            match_basis: require_payload_str(&event.payload, "identityMatchBasis")?,
+            run_id,
+            created_at,
+        },
+    )
+}
+
+struct IdentityRunContext {
+    target_id: String,
+    started_at: String,
+}
+
+fn identity_run_context(tx: &Transaction<'_>, run_id: &str) -> Result<IdentityRunContext> {
+    tx.query_row(
+        "select target, updated_at from run_states where run_id = ?1",
+        params![run_id],
+        |row| {
+            Ok(IdentityRunContext {
+                target_id: row.get(0)?,
+                started_at: row.get(1)?,
+            })
+        },
+    )
+    .with_context(|| format!("finding identity projection requires run {run_id:?}"))
+}
+
+struct IdentityProjection<'a> {
+    identity_id: &'a str,
+    target_id: &'a str,
+    alias: &'a str,
+    fingerprint: &'a str,
+    match_basis: &'a str,
+    run_id: &'a str,
+    created_at: &'a str,
+}
+
+fn insert_identity(tx: &Transaction<'_>, identity: &IdentityProjection<'_>) -> Result<()> {
+    tx.execute(
+        r#"
+        insert into finding_identities(
+          identity_id, target_id, alias, fingerprint_current,
+          first_seen_run_id, created_at
+        )
+        values (?1, ?2, ?3, ?4, ?5, ?6)
+        on conflict(identity_id) do nothing
+        "#,
+        params![
+            identity.identity_id,
+            identity.target_id,
+            identity.alias,
+            identity.fingerprint,
+            identity.run_id,
+            identity.created_at,
+        ],
+    )?;
+    tx.execute(
+        r#"
+        insert or ignore into finding_identity_fingerprints(
+          identity_id, fingerprint, match_basis, created_at
+        )
+        values (?1, ?2, ?3, ?4)
+        "#,
+        params![
+            identity.identity_id,
+            identity.fingerprint,
+            identity.match_basis,
+            identity.created_at,
+        ],
+    )?;
+    Ok(())
+}
+
 fn json_str<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
     value
         .get(key)
@@ -182,6 +277,10 @@ fn json_str<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
 
 fn json_optional_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
+}
+
+fn json_optional_non_empty_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    json_optional_str(value, key).filter(|value| !value.trim().is_empty())
 }
 
 fn project_stable_finding(
