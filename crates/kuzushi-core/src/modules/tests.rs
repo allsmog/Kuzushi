@@ -56,7 +56,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .last()
-                .is_some_and(|query| query.system_prompt.contains("security patch generator"));
+                .is_some_and(|query| query.system_prompt.contains("security patch planner"));
             if is_patch_request {
                 return Ok(AgentQueryResponse {
                     text: String::new(),
