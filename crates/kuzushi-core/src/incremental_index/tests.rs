@@ -1,4 +1,8 @@
 use super::*;
+use notify::{
+    event::{AccessKind, CreateKind, ModifyKind, RenameMode},
+    Event, EventKind,
+};
 use std::process::Command;
 
 #[test]
@@ -174,6 +178,47 @@ fn watcher_classifies_moves_without_leaking_ignored_paths() {
                 to: "src/new.rs".into(),
             },
         ]
+    );
+}
+
+#[test]
+fn notify_rename_event_maps_to_workspace_move() {
+    let changes = classify_notify_event(
+        Path::new("/repo"),
+        Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+            .add_path("/repo/src/old.rs".into())
+            .add_path("/repo/src/new.rs".into()),
+    );
+
+    assert_eq!(
+        changes,
+        vec![WorkspaceChange::FileMoved {
+            from: "src/old.rs".into(),
+            to: "src/new.rs".into(),
+        }]
+    );
+}
+
+#[test]
+fn notify_access_events_do_not_mark_workspace_stale() {
+    let changes = classify_notify_event(
+        Path::new("/repo"),
+        Event::new(EventKind::Access(AccessKind::Read)).add_path("/repo/src/lib.rs".into()),
+    );
+
+    assert!(changes.is_empty());
+}
+
+#[test]
+fn notify_create_events_use_existing_path_classification() {
+    let changes = classify_notify_event(
+        Path::new("/repo"),
+        Event::new(EventKind::Create(CreateKind::File)).add_path("/repo/Cargo.toml".into()),
+    );
+
+    assert_eq!(
+        changes,
+        vec![WorkspaceChange::ManifestChanged("Cargo.toml".into())]
     );
 }
 

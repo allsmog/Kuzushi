@@ -1,4 +1,9 @@
 use super::{coalesce_changes, should_ignore_path, WorkspaceChange};
+use anyhow::{Context, Result};
+use notify::{
+    event::{ModifyKind, RenameMode},
+    Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +20,37 @@ pub enum WatchEvent {
     Moved { from: PathBuf, to: PathBuf },
 }
 
+pub struct LiveWorkspaceWatcher {
+    _watcher: RecommendedWatcher,
+    scope: WatchScope,
+}
+
+impl LiveWorkspaceWatcher {
+    pub fn start(
+        root: impl AsRef<Path>,
+        mut sink: impl FnMut(Vec<WorkspaceChange>) + Send + 'static,
+    ) -> Result<Self> {
+        let scope = workspace_watch_scope(root);
+        let classifier_root = scope.root.clone();
+        let mut watcher = notify::recommended_watcher(move |event| {
+            let changes = classify_notify_result(&classifier_root, event);
+            if !changes.is_empty() {
+                sink(changes);
+            }
+        })
+        .context("could not start workspace watcher")?;
+        watch_scope_roots(&mut watcher, &scope)?;
+        Ok(Self {
+            _watcher: watcher,
+            scope,
+        })
+    }
+
+    pub fn scope(&self) -> &WatchScope {
+        &self.scope
+    }
+}
+
 pub fn workspace_watch_scope(root: impl AsRef<Path>) -> WatchScope {
     let root = root.as_ref().to_path_buf();
     WatchScope {
@@ -26,6 +62,10 @@ pub fn workspace_watch_scope(root: impl AsRef<Path>) -> WatchScope {
         ],
         root,
     }
+}
+
+pub fn classify_notify_event(root: &Path, event: Event) -> Vec<WorkspaceChange> {
+    classify_watcher_events(root, notify_event_to_watch_events(event))
 }
 
 pub fn classify_watcher_events(
@@ -171,4 +211,55 @@ fn clean_relative_path(path: &Path) -> Option<PathBuf> {
         }
     }
     (!clean.as_os_str().is_empty()).then_some(clean)
+}
+
+fn classify_notify_result(
+    root: &Path,
+    event: notify::Result<Event>,
+) -> Vec<WorkspaceChange> {
+    match event {
+        Ok(event) => classify_notify_event(root, event),
+        Err(_) => vec![WorkspaceChange::GitHeadChanged],
+    }
+}
+
+fn watch_scope_roots(watcher: &mut RecommendedWatcher, scope: &WatchScope) -> Result<()> {
+    for root in &scope.roots {
+        if root.exists() {
+            watcher
+                .watch(root, RecursiveMode::Recursive)
+                .with_context(|| format!("could not watch {}", root.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn notify_event_to_watch_events(event: Event) -> Vec<WatchEvent> {
+    match event.kind {
+        EventKind::Create(_) => paths_to_events(event.paths, WatchEvent::Created),
+        EventKind::Remove(_) => paths_to_events(event.paths, WatchEvent::Deleted),
+        EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if event.paths.len() >= 2 => {
+            vec![WatchEvent::Moved {
+                from: event.paths[0].clone(),
+                to: event.paths[1].clone(),
+            }]
+        }
+        EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+            paths_to_events(event.paths, WatchEvent::Deleted)
+        }
+        EventKind::Modify(ModifyKind::Name(RenameMode::To)) => {
+            paths_to_events(event.paths, WatchEvent::Created)
+        }
+        EventKind::Modify(_) | EventKind::Any | EventKind::Other => {
+            paths_to_events(event.paths, WatchEvent::Modified)
+        }
+        EventKind::Access(_) => Vec::new(),
+    }
+}
+
+fn paths_to_events(
+    paths: Vec<PathBuf>,
+    event: impl Fn(PathBuf) -> WatchEvent,
+) -> Vec<WatchEvent> {
+    paths.into_iter().map(event).collect()
 }
