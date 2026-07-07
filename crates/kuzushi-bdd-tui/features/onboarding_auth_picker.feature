@@ -13,6 +13,7 @@ Feature: Auth-method picker
     Then I see "CHOOSE AUTH METHOD"
     And I see "API key (ANTHROPIC_API_KEY)"
     And I see "Claude.ai OAuth login"
+    And I see "Offline demo"
     And the status segment shows "auth-picker:anthropic"
 
   Scenario: Esc on the auth picker defers and goes to Workbench
