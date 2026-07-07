@@ -114,7 +114,7 @@ fn review_queue_row_line(row: &ReviewQueueRow, width: usize) -> Line<'static> {
 /// signals. Full word (`CONFIRMED`) at readable widths, a one-char marker
 /// (`✓ ◇ ? !`) when the row is too narrow to spend on a word.
 fn review_queue_confidence_chip(row: &ReviewQueueRow, width: usize) -> String {
-    if width < REVIEW_FULL_SIGNAL_MIN_WIDTH {
+    if width < REVIEW_FULL_METADATA_MIN_WIDTH {
         return proof_confidence_marker(row.proof_confidence).to_string();
     }
     row.proof_confidence_label.clone()
@@ -316,10 +316,10 @@ mod tests {
     #[test]
     fn row_shows_confidence_chip_after_severity_glyph() {
         let row = review_row();
-        let wide = line_text(review_queue_row_line(&row, 140));
-        // At readable widths the full band word sits right after the severity glyph.
+        let wide = line_text(review_queue_row_line(&row, 220));
+        // At metadata widths the full band word sits right after the severity glyph.
         assert!(wide.contains("CONFIRMED"), "{wide}");
-        assert!(wide.contains("H CONFIRMED") || wide.contains("HCONFIRMED"), "{wide}");
+        assert!(wide.contains("H CONFIRMED"), "{wide}");
     }
 
     #[test]

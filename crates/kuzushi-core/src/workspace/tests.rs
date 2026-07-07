@@ -811,7 +811,8 @@ mod tests {
         assert!(readme.contains("**Completeness:** `all`"));
         assert!(readme.contains("**Included:** 2 of 2 finding(s)"));
         assert!(readme.contains("**Review decisions:** needs_review=2"));
-        assert!(readme.contains("| Alias | Severity | Decision | Lifecycle | Evidence | Location |"));
+        assert!(readme
+            .contains("| Alias | Severity | Confidence | Decision | Lifecycle | Evidence | Location |"));
 
         let manifest: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(output.join("manifest.json")).unwrap())
