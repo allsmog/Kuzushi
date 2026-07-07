@@ -193,7 +193,7 @@ const expectedPnpmLockfileRootDependencyVersions = {
   },
   devDependencies: {
     "@biomejs/biome": "2.4.12",
-    "@commitlint/cli": "19.8.1(@types/node@22.19.11)(typescript@5.9.3)",
+    "@commitlint/cli": "21.2.0(@types/node@22.19.11)(typescript@5.9.3)",
     "@commitlint/config-conventional": "19.8.1",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "22.19.11",
@@ -218,7 +218,7 @@ const expectedPnpmLockfileRootDependencyVersions = {
 };
 const expectedPackageDevDependencies = {
   "@biomejs/biome": "^2.4.12",
-  "@commitlint/cli": "^19.8.1",
+  "@commitlint/cli": "^21.2.0",
   "@commitlint/config-conventional": "^19.8.1",
   "@types/better-sqlite3": "^7.6.13",
   "@types/node": "^22.13.4",
