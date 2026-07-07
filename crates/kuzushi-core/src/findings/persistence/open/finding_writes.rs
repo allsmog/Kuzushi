@@ -3,7 +3,7 @@ use crate::content_store::ContentStore;
 use crate::identity::{compute_observation_hash_v3, hash_parts, ObservationHashInput};
 use crate::storage_v3::writer_actor::{
     FileFactWrite, ObservationWrite, SnapshotWrite, StorageWriterActor, WatcherCommand,
-    WriterCommand,
+    WriteReceipt, WriterCommand,
 };
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -33,16 +33,9 @@ enum ProjectionEvidence {
 
 impl FindingStore {
     pub fn insert_finding(&self, scan_id: &str, finding: &Finding) -> Result<i64> {
-        // The collision-check → upsert → source/identity → projection
-        // sequence must commit as one unit: a crash or error partway through
-        // must never leave a header row without its dependent source rows.
-        //
-        // We open one transaction and thread its connection handle (`tx`)
-        // through every write below, so participation in the transaction is
-        // explicit at each call site rather than relying on ambient
-        // connection state. `unchecked_transaction` is required because the
-        // store is reached behind `&self`; the returned guard still rolls back
-        // on drop and only persists on the explicit `commit()`.
+        // Identity bookkeeping stays transactional while the mutable finding
+        // view is projected by the v3 writer after the observation event is
+        // appended. This keeps current finding state behind the event log.
         let tx = self
             .conn
             .unchecked_transaction()
@@ -50,38 +43,14 @@ impl FindingStore {
         let outcome = self.insert_finding_statements(&tx, scan_id, finding)?;
         tx.commit()
             .context("Could not commit findings write transaction")?;
-        let id = outcome.id;
-        self.record_v3_observation(scan_id, finding, outcome)?;
-        Ok(id)
+        self.record_v3_observation(scan_id, finding, outcome)
     }
 
     pub fn insert_findings(&self, scan_id: &str, findings: &[Finding]) -> Result<Vec<i64>> {
-        if findings.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let outcomes = self.insert_findings_transaction(scan_id, findings)?;
-        let ids = outcomes.iter().map(|outcome| outcome.id).collect();
-        self.record_v3_observations(scan_id, findings, outcomes)?;
-        Ok(ids)
-    }
-
-    fn insert_findings_transaction(
-        &self,
-        scan_id: &str,
-        findings: &[Finding],
-    ) -> Result<Vec<FindingInsertOutcome>> {
-        let tx = self
-            .conn
-            .unchecked_transaction()
-            .context("Could not open findings write transaction")?;
-        let outcomes = findings
+        findings
             .iter()
-            .map(|finding| self.insert_finding_statements(&tx, scan_id, finding))
-            .collect::<Result<Vec<_>>>()?;
-        tx.commit()
-            .context("Could not commit findings write transaction")?;
-        Ok(outcomes)
+            .map(|finding| self.insert_finding(scan_id, finding))
+            .collect()
     }
 
     fn insert_finding_statements(
@@ -104,80 +73,14 @@ impl FindingStore {
         }
 
         let identity = self.identity_assignment_for_finding(tx, scan_id, finding)?;
-        let id = self.upsert_current_finding_seed(tx, scan_id, finding, &identity)?;
+        let id = projected_finding_id(scan_id, &finding.fingerprint);
         let projected = projected_seed(scan_id, id, finding, &identity);
-        self.update_current_finding(tx, id, &projected)?;
         let evidence = self.verified_finding_evidence(tx, scan_id, &finding.evidence)?;
         Ok(FindingInsertOutcome {
             id,
             projected,
             evidence: ProjectionEvidence::Replace(evidence),
         })
-    }
-
-    fn upsert_current_finding_seed(
-        &self,
-        tx: &Connection,
-        scan_id: &str,
-        finding: &Finding,
-        identity: &FindingIdentityAssignment,
-    ) -> Result<i64> {
-        let seed = current_finding_seed(scan_id, finding, identity);
-        let finding_json = current_finding_json(&seed)?;
-        tx.execute(
-            UPSERT_CURRENT_FINDING_SQL,
-            params![
-                scan_id,
-                finding.fingerprint,
-                identity.identity_id,
-                identity.match_tier.as_str(),
-                finding.created_at,
-                finding.dedup_key,
-                finding.source_signature,
-                finding_json,
-            ],
-        )?;
-        self.current_finding_id(tx, scan_id, &finding.fingerprint)
-    }
-
-    fn current_finding_id(&self, tx: &Connection, scan_id: &str, fingerprint: &str) -> Result<i64> {
-        tx.query_row(
-            "select id from finding_current where run_id = ?1 and fingerprint = ?2",
-            params![scan_id, fingerprint],
-            |row| row.get(0),
-        )
-        .context("Could not load current finding id")
-    }
-
-    fn update_current_finding(
-        &self,
-        tx: &Connection,
-        finding_id: i64,
-        finding: &Finding,
-    ) -> Result<()> {
-        tx.execute(
-            r#"
-            update finding_current
-               set identity_id = ?1,
-                   identity_match_tier = ?2,
-                   updated_at = ?3,
-                   dedup_key = ?4,
-                   source_signature = ?5,
-                   finding_json = ?6
-             where id = ?7
-            "#,
-            params![
-                required_identity_id(finding)?,
-                required_identity_match_tier(finding)?,
-                finding.created_at,
-                finding.dedup_key,
-                finding.source_signature,
-                current_finding_json(finding)?,
-                finding_id,
-            ],
-        )
-        .context("Could not update current v3 finding")?;
-        Ok(())
     }
 
     fn merge_finding_collision(
@@ -205,7 +108,6 @@ impl FindingStore {
             &merged_tool,
             merged_source,
         );
-        self.update_current_finding(tx, merge_id, &projected)?;
         Ok(FindingInsertOutcome {
             id: merge_id,
             projected,
@@ -261,21 +163,9 @@ impl FindingStore {
         scan_id: &str,
         finding: &Finding,
         outcome: FindingInsertOutcome,
-    ) -> Result<()> {
+    ) -> Result<i64> {
         let commit = self.v3_observation_commit(scan_id, finding, outcome)?;
         self.commit_v3_observation(commit)
-    }
-
-    fn record_v3_observations(
-        &self,
-        scan_id: &str,
-        findings: &[Finding],
-        outcomes: Vec<FindingInsertOutcome>,
-    ) -> Result<()> {
-        for (finding, outcome) in findings.iter().zip(outcomes) {
-            self.record_v3_observation(scan_id, finding, outcome)?;
-        }
-        Ok(())
     }
 
     fn v3_observation_commit(
@@ -314,15 +204,15 @@ impl FindingStore {
         Ok(projected)
     }
 
-    fn commit_v3_observation(&self, commit: ObservationCommit) -> Result<()> {
+    fn commit_v3_observation(&self, commit: ObservationCommit) -> Result<i64> {
         let (event_log_dir, db_path) =
             self.required_v3_storage_paths("record finding observation")?;
-        StorageWriterActor::commit_blocking_many(
+        let receipts = StorageWriterActor::commit_blocking_many(
             event_log_dir,
             db_path,
             observation_commands(commit),
         )?;
-        Ok(())
+        projected_finding_id_from_receipts(receipts)
     }
 
     fn observation_provenance(
@@ -419,16 +309,11 @@ fn observation_write(
     provenance: &Option<ObservationProvenance>,
 ) -> Result<ObservationWrite> {
     let raw_result_hash = raw_result_hash(scan_id, finding)?;
-    let snapshot_hash = provenance
-        .as_ref()
-        .map(|provenance| provenance.snapshot.snapshot_hash.clone())
-        .unwrap_or_else(|| run_snapshot_hash(scan_id));
+    let snapshot_hash = observation_snapshot_hash_for(scan_id, provenance);
     let finding_json =
         serde_json::to_string(finding).context("Could not serialize v3 finding projection row")?;
-    let byte_span = provenance
-        .as_ref()
-        .and_then(|provenance| provenance.byte_span);
     Ok(ObservationWrite {
+        projected_finding_id: finding.id,
         observation_hash: observation_hash(scan_id, finding, &snapshot_hash, &raw_result_hash),
         stable_fp,
         snapshot_hash,
@@ -440,17 +325,45 @@ fn observation_write(
         severity: finding.severity.as_str().to_string(),
         title: finding.title.clone(),
         message: finding.message.clone(),
-        blob_hash: provenance
-            .as_ref()
-            .map(|provenance| provenance.blob_hash.clone()),
-        byte_start: byte_span.map(|(start, _)| start),
-        byte_end: byte_span.map(|(_, end)| end),
+        blob_hash: observation_blob_hash(provenance),
+        byte_start: observation_byte_start(provenance),
+        byte_end: observation_byte_end(provenance),
         display_path: Some(finding.file_path.clone()),
         display_line: Some(finding.start_line),
         raw_result_hash,
         finding_json: Some(finding_json),
         actor: "finding-store".to_string(),
     })
+}
+
+fn observation_snapshot_hash_for(
+    scan_id: &str,
+    provenance: &Option<ObservationProvenance>,
+) -> String {
+    provenance
+        .as_ref()
+        .map(|provenance| provenance.snapshot.snapshot_hash.clone())
+        .unwrap_or_else(|| run_snapshot_hash(scan_id))
+}
+
+fn observation_blob_hash(provenance: &Option<ObservationProvenance>) -> Option<String> {
+    provenance
+        .as_ref()
+        .map(|provenance| provenance.blob_hash.clone())
+}
+
+fn observation_byte_start(provenance: &Option<ObservationProvenance>) -> Option<u64> {
+    provenance
+        .as_ref()
+        .and_then(|provenance| provenance.byte_span)
+        .map(|(start, _)| start)
+}
+
+fn observation_byte_end(provenance: &Option<ObservationProvenance>) -> Option<u64> {
+    provenance
+        .as_ref()
+        .and_then(|provenance| provenance.byte_span)
+        .map(|(_, end)| end)
 }
 
 fn observation_hash(
@@ -503,6 +416,14 @@ fn observation_commands(commit: ObservationCommit) -> Vec<WriterCommand> {
     commands
 }
 
+fn projected_finding_id_from_receipts(receipts: Vec<WriteReceipt>) -> Result<i64> {
+    receipts
+        .into_iter()
+        .rev()
+        .find_map(|receipt| receipt.projected_finding_id)
+        .context("finding observation did not project a finding id")
+}
+
 fn source_path_for_finding(root: &Path, file_path: &str) -> Option<PathBuf> {
     let path = Path::new(file_path);
     if path.is_absolute() {
@@ -520,6 +441,15 @@ fn projected_seed(
     let mut projected = finding.clone();
     apply_projection_identity(&mut projected, scan_id, finding_id, identity);
     projected
+}
+
+fn projected_finding_id(scan_id: &str, fingerprint: &str) -> i64 {
+    let hash = hash_parts(
+        "finding-projected-id",
+        &[scan_id.as_bytes(), fingerprint.as_bytes()],
+    );
+    let raw = u64::from_str_radix(&hash.as_str()[..16], 16).unwrap_or(1);
+    ((raw & 0x7fff_ffff_ffff_ffff) as i64).max(1)
 }
 
 fn merged_projection_seed(
@@ -542,18 +472,6 @@ fn merged_projection_seed(
     projected
 }
 
-fn current_finding_seed(
-    scan_id: &str,
-    finding: &Finding,
-    identity: &FindingIdentityAssignment,
-) -> Finding {
-    let mut projected = finding.clone();
-    projected.scan_id = Some(scan_id.to_string());
-    projected.identity_id = Some(identity.identity_id.clone());
-    projected.identity_match_tier = Some(identity.match_tier.as_str().to_string());
-    projected
-}
-
 fn apply_projection_identity(
     projected: &mut Finding,
     scan_id: &str,
@@ -566,27 +484,9 @@ fn apply_projection_identity(
     projected.identity_match_tier = Some(identity.match_tier.as_str().to_string());
 }
 
-fn current_finding_json(finding: &Finding) -> Result<String> {
-    serde_json::to_string(finding).context("Could not serialize current v3 finding")
-}
-
 fn row_to_current_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
     let raw: String = row.get(0)?;
     serde_json::from_str(&raw).map_err(|error| to_sql_error(anyhow::Error::new(error)))
-}
-
-fn required_identity_id(finding: &Finding) -> Result<&str> {
-    finding
-        .identity_id
-        .as_deref()
-        .context("current v3 finding requires identity_id")
-}
-
-fn required_identity_match_tier(finding: &Finding) -> Result<&str> {
-    finding
-        .identity_match_tier
-        .as_deref()
-        .context("current v3 finding requires identity_match_tier")
 }
 
 fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {
@@ -772,18 +672,3 @@ fn dedup_collision_can_merge(existing: &Finding, incoming: &Finding) -> bool {
 fn normalized_collision_text(value: &str) -> String {
     crate::identity::finding_identity::normalize_finding_text(value)
 }
-
-const UPSERT_CURRENT_FINDING_SQL: &str = r#"
-insert into finding_current(
-  run_id, fingerprint, identity_id, identity_match_tier, created_at,
-  updated_at, dedup_key, source_signature, finding_json
-)
-values (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8)
-on conflict(run_id, fingerprint) do update set
-  identity_id = excluded.identity_id,
-  identity_match_tier = excluded.identity_match_tier,
-  updated_at = excluded.updated_at,
-  dedup_key = coalesce(excluded.dedup_key, finding_current.dedup_key),
-  source_signature = coalesce(excluded.source_signature, finding_current.source_signature),
-  finding_json = excluded.finding_json
-"#;

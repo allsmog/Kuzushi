@@ -346,9 +346,10 @@ mod tests {
             .record_run_started(run, Path::new("/tmp"), "running")
             .unwrap();
 
-        // Force the primary projection statement to fail. The v3 observation
-        // event is emitted only after the projection transaction commits, so a
-        // failed projection write must not leak an observation row.
+        // Force the primary projection statement to fail. The writer appends
+        // the observation event first, then projects current finding state and
+        // observation rows in one SQLite transaction; failure must leave the
+        // read model behind the log, not half-updated.
         store
             .conn
             .execute_batch(
@@ -654,12 +655,29 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        let current_id: i64 = conn
+            .query_row("select id from finding_current", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(Some(current_id), stored[0].id);
         assert_eq!(observation, (1, blob_hash.to_string(), 24, 91));
         assert_eq!(
             indexed_file,
             (blob_hash.to_string(), 114, "Rust".to_string())
         );
         assert_eq!(applied_seq, "4");
+
+        crate::storage_v3::writer_actor::StorageWriterActor::commit_blocking(
+            &log_path,
+            temp.path().join(".kuzushi/v3/index.sqlite3"),
+            crate::storage_v3::writer_actor::WriterCommand::Control(
+                crate::storage_v3::writer_actor::ControlCommand::RebuildProjection,
+            ),
+        )
+        .unwrap();
+        let rebuilt_id: i64 = conn
+            .query_row("select id from finding_current", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rebuilt_id, current_id);
     }
 
     #[test]

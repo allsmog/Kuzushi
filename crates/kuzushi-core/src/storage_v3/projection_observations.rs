@@ -1,8 +1,9 @@
 use super::projection_fts::rebuild_fts_if_available;
 use super::projection_payload::{payload_i64, payload_str, require_payload_str};
 use crate::event_log::{EventEnvelope, EventKind};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rusqlite::{params, Transaction};
+use serde_json::Value;
 
 use super::sql_seq;
 
@@ -20,14 +21,16 @@ on conflict(observation_hash) do nothing
 pub(super) fn project_finding_observation(
     tx: &Transaction<'_>,
     event: &EventEnvelope,
-) -> Result<()> {
+) -> Result<Option<i64>> {
     if event.event_kind != EventKind::FindingObserved {
-        return Ok(());
+        return Ok(None);
     }
     let observation = FindingObservationProjection::from_event(event)?;
-    insert_finding_observation(tx, event, &observation)?;
+    let current = project_current_finding(tx, event)?;
+    insert_finding_observation(tx, event, &observation, current.as_ref())?;
     project_stable_finding(tx, event, &observation)?;
-    project_observation_search(tx, event, &observation)
+    project_observation_search(tx, event, &observation)?;
+    Ok(current.map(|current| current.id))
 }
 
 struct FindingObservationProjection<'a> {
@@ -64,6 +67,7 @@ fn insert_finding_observation(
     tx: &Transaction<'_>,
     event: &EventEnvelope,
     observation: &FindingObservationProjection<'_>,
+    current: Option<&CurrentFindingProjection>,
 ) -> Result<()> {
     tx.execute(
         INSERT_FINDING_OBSERVATION_SQL,
@@ -85,12 +89,99 @@ fn insert_finding_observation(
             payload_str(&event.payload, "displayPath"),
             payload_i64(&event.payload, "displayLine"),
             observation.raw_result_hash,
-            payload_str(&event.payload, "findingJson"),
+            current
+                .map(|current| current.finding_json.as_str())
+                .or_else(|| payload_str(&event.payload, "findingJson")),
             sql_seq(event.seq)?,
             event.created_at,
         ],
     )?;
     Ok(())
+}
+
+struct CurrentFindingProjection {
+    id: i64,
+    finding_json: String,
+}
+
+fn project_current_finding(
+    tx: &Transaction<'_>,
+    event: &EventEnvelope,
+) -> Result<Option<CurrentFindingProjection>> {
+    let Some(raw_finding) = payload_str(&event.payload, "findingJson") else {
+        return Ok(None);
+    };
+    let projected_id = payload_i64(&event.payload, "projectedFindingId")
+        .context("finding observation payload requires projectedFindingId")?;
+    let mut finding = parse_finding_json(raw_finding)?;
+    set_json_i64(&mut finding, "id", projected_id)?;
+    let projection = CurrentFindingProjection {
+        id: projected_id,
+        finding_json: serde_json::to_string(&finding)
+            .context("Could not serialize current finding projection")?,
+    };
+    upsert_current_finding(tx, event, &finding, &projection)?;
+    Ok(Some(projection))
+}
+
+fn parse_finding_json(raw: &str) -> Result<Value> {
+    serde_json::from_str(raw).context("Could not parse finding projection JSON")
+}
+
+fn set_json_i64(value: &mut Value, key: &str, next: i64) -> Result<()> {
+    let object = value
+        .as_object_mut()
+        .context("finding projection JSON must be an object")?;
+    object.insert(key.to_string(), Value::from(next));
+    Ok(())
+}
+
+fn upsert_current_finding(
+    tx: &Transaction<'_>,
+    event: &EventEnvelope,
+    finding: &Value,
+    projection: &CurrentFindingProjection,
+) -> Result<()> {
+    tx.execute(
+        r#"
+        insert into finding_current(
+          id, run_id, identity_id, identity_match_tier, fingerprint, created_at,
+          updated_at, dedup_key, source_signature, finding_json
+        )
+        values (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9)
+        on conflict(id) do update set
+          run_id = excluded.run_id,
+          identity_id = excluded.identity_id,
+          identity_match_tier = excluded.identity_match_tier,
+          updated_at = excluded.updated_at,
+          dedup_key = coalesce(excluded.dedup_key, finding_current.dedup_key),
+          source_signature = coalesce(excluded.source_signature, finding_current.source_signature),
+          finding_json = excluded.finding_json
+        "#,
+        params![
+            projection.id,
+            require_payload_str(&event.payload, "runId")?,
+            json_str(finding, "identityId")?,
+            json_str(finding, "identityMatchTier")?,
+            json_str(finding, "fingerprint")?,
+            event.created_at,
+            json_optional_str(finding, "dedup_key"),
+            json_optional_str(finding, "source_signature"),
+            projection.finding_json,
+        ],
+    )?;
+    Ok(())
+}
+
+fn json_str<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .with_context(|| format!("finding projection JSON requires {key}"))
+}
+
+fn json_optional_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(Value::as_str)
 }
 
 fn project_stable_finding(

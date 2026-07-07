@@ -36,6 +36,7 @@ pub struct ProjectionMeta {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProjectionApplyReceipt {
     pub review_decision_id: Option<i64>,
+    pub finding_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,11 +162,11 @@ impl ProjectionDb {
             .unchecked_transaction()
             .context("Could not open projection event transaction")?;
         insert_event_row(&tx, event)?;
-        let review_decision_id = apply_projection_event(&tx, event)?;
+        let receipt = apply_projection_event(&tx, event)?;
         set_meta_u64(&tx, "applied_seq", event.seq)?;
         tx.commit()
             .context("Could not commit projection event transaction")?;
-        Ok(ProjectionApplyReceipt { review_decision_id })
+        Ok(receipt)
     }
 
     pub fn reset_for_rebuild(&self) -> Result<ProjectionMeta> {

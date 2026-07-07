@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservationWrite {
+    pub projected_finding_id: Option<i64>,
     pub observation_hash: String,
     pub stable_fp: String,
     pub snapshot_hash: String,
@@ -30,6 +31,7 @@ pub struct ObservationWrite {
 impl ObservationWrite {
     pub(in crate::storage_v3::writer_actor) fn payload(&self) -> Value {
         json!({
+            "projectedFindingId": self.projected_finding_id,
             "observationHash": self.observation_hash,
             "stableFp": self.stable_fp,
             "snapshotHash": self.snapshot_hash,
@@ -81,6 +83,7 @@ impl CandidateObservationWrite {
         let stable_fp = self.stable_fp();
         let observation_hash = self.observation_hash(&raw_result_hash);
         ObservationWrite {
+            projected_finding_id: None,
             observation_hash,
             stable_fp,
             snapshot_hash: self.snapshot_hash,
