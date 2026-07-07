@@ -6,6 +6,7 @@ use super::projection_fts::rebuild_fts_if_available;
 use super::projection_payload::{
     payload_i64, payload_str, payload_u64, require_payload_i64, require_payload_str,
 };
+use super::sql_seq;
 
 const PATCH_ATTEMPT_SQL: &str = r#"
 insert into patch_attempt_events(
@@ -34,7 +35,7 @@ pub(super) fn project_verification_event(tx: &Transaction<'_>, event: &EventEnve
         "#,
         params![
             event.event_hash.as_str(),
-            event.seq,
+            sql_seq(event.seq)?,
             require_payload_str(&event.payload, "stableFp")?,
             payload_i64(&event.payload, "findingId"),
             payload_str(&event.payload, "identityId"),
@@ -67,7 +68,7 @@ pub(super) fn project_patch_attempt_event(
         PATCH_ATTEMPT_SQL,
         params![
             event.event_hash.as_str(),
-            event.seq,
+            sql_seq(event.seq)?,
             require_payload_str(&event.payload, "stableFp")?,
             require_payload_str(&event.payload, "fingerprint")?,
             require_payload_str(&event.payload, "patchRunId")?,

@@ -3,6 +3,7 @@ use anyhow::Result;
 use rusqlite::{params, Transaction};
 
 use super::projection_payload::{payload_str, require_payload_str};
+use super::sql_seq;
 
 pub(super) fn project_audit_event(tx: &Transaction<'_>, event: &EventEnvelope) -> Result<()> {
     if !is_audit_event(event.event_kind) {
@@ -19,7 +20,7 @@ pub(super) fn project_audit_event(tx: &Transaction<'_>, event: &EventEnvelope) -
         "#,
         params![
             event.event_hash.as_str(),
-            event.seq,
+            sql_seq(event.seq)?,
             event.event_kind.as_str(),
             event.actor,
             event.run_id.as_deref(),

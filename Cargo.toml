@@ -26,7 +26,7 @@ resolver = "2"
 [workspace.package]
 version = "0.24.0-alpha.4"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.96"
 license = "MIT"
 authors = ["Shayaun Nejad"]
 repository = "https://github.com/allsmog/Kuzushi.git"
@@ -96,9 +96,9 @@ same_item_push = "allow"
 should_implement_trait = "allow"
 single_char_add_str = "allow"
 trim_split_whitespace = "allow"
-# Purely stylistic and toolchain-version-sensitive (1.88 flags cases 1.95
-# does not); the codebase mixes inlined and positional format args. Allow it
-# so CI clippy is stable across the pinned and local toolchains.
+# Purely stylistic and toolchain-version-sensitive; the codebase mixes inlined
+# and positional format args. Allow it so CI clippy is stable across the pinned
+# and local toolchains.
 uninlined_format_args = "allow"
 unnecessary_map_or = "allow"
 unnecessary_to_owned = "allow"

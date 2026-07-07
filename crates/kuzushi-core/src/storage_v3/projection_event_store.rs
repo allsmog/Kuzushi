@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use rusqlite::params;
 
 use super::projection_payload::stable_fp_from_payload;
+use super::sql_seq;
 
 pub(super) fn insert_event_row(
     tx: &rusqlite::Transaction<'_>,
@@ -14,7 +15,7 @@ pub(super) fn insert_event_row(
          ) values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             event.event_hash.as_str(),
-            event.seq,
+            sql_seq(event.seq)?,
             stable_fp_from_payload(&event.payload),
             event.event_kind.as_str(),
             serde_json::to_string(&event.payload)

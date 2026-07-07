@@ -9,6 +9,7 @@ use self::inventory::{
 use super::projection_proof::{project_patch_attempt_event, project_verification_event};
 use super::projection_review::project_review_decision;
 use super::projection_runs::project_run_lifecycle_event;
+use super::sql_seq;
 use crate::event_log::{EventEnvelope, EventKind};
 use anyhow::Result;
 use rusqlite::{params, Transaction};
@@ -59,7 +60,7 @@ fn project_finding_rekeyed(tx: &Transaction<'_>, event: &EventEnvelope) -> Resul
         "update stable_findings
             set current_status = 'rekeyed', updated_seq = ?2
           where stable_fp = ?1",
-        params![old_fp, event.seq],
+        params![old_fp, sql_seq(event.seq)?],
     )?;
     Ok(())
 }

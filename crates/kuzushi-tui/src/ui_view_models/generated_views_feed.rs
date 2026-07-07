@@ -735,7 +735,8 @@ fn severity_counts(counts: &[u32; 5]) -> String {
     labels
         .iter()
         .zip(counts)
-        .filter_map(|(label, count)| (*count > 0).then(|| format!("{label} {count}")))
+        .filter(|(_, count)| **count > 0)
+        .map(|(label, count)| format!("{label} {count}"))
         .collect::<Vec<_>>()
         .join(" · ")
 }
