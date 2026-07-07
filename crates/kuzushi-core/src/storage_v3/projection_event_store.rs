@@ -39,6 +39,8 @@ pub(super) fn clear_projection_tables(tx: &rusqlite::Transaction<'_>) -> Result<
         delete from rekey_edges;
         delete from stable_findings;
         delete from finding_current;
+        delete from finding_identity_fingerprints;
+        delete from finding_identities;
         delete from finding_observations;
         delete from attack_surface_snapshots;
         delete from file_deletions;

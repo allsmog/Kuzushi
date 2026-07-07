@@ -118,6 +118,31 @@ create table if not exists finding_observations (
 create index if not exists idx_finding_observations_stable_fp
   on finding_observations(stable_fp, created_seq desc);
 
+create table if not exists finding_identities (
+  identity_id text primary key,
+  target_id text not null,
+  alias text not null,
+  fingerprint_current text not null,
+  first_seen_run_id text not null,
+  created_at text not null,
+  retired_at text,
+  unique(target_id, alias)
+);
+create index if not exists idx_finding_identities_target
+  on finding_identities(target_id, created_at asc);
+create index if not exists idx_finding_identities_fingerprint_current
+  on finding_identities(fingerprint_current);
+
+create table if not exists finding_identity_fingerprints (
+  identity_id text not null references finding_identities(identity_id) on delete cascade,
+  fingerprint text not null,
+  match_basis text not null,
+  created_at text not null,
+  primary key(identity_id, fingerprint)
+);
+create index if not exists idx_finding_identity_fingerprints_fingerprint
+  on finding_identity_fingerprints(fingerprint);
+
 create table if not exists finding_current (
   id integer primary key,
   run_id text not null,

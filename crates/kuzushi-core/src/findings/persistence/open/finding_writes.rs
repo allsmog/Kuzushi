@@ -12,6 +12,7 @@ struct FindingInsertOutcome {
     id: i64,
     projected: Finding,
     evidence: ProjectionEvidence,
+    identity_link: ProjectionIdentityLink,
 }
 
 struct ObservationCommit {
@@ -29,6 +30,40 @@ struct ObservationProvenance {
 enum ProjectionEvidence {
     Replace(Vec<FindingEvidence>),
     KeepExisting,
+}
+
+#[derive(Clone)]
+struct ProjectionIdentityLink {
+    identity_id: String,
+    fingerprint: String,
+    match_basis: FindingIdentityMatchTier,
+}
+
+impl ProjectionIdentityLink {
+    fn from_assignment(assignment: &FindingIdentityAssignment, fingerprint: &str) -> Self {
+        Self {
+            identity_id: assignment.identity_id.clone(),
+            fingerprint: fingerprint.to_string(),
+            match_basis: assignment.match_tier,
+        }
+    }
+
+    fn collision(
+        assignment: &FindingIdentityAssignment,
+        fingerprint: &str,
+        existing_had_identity: bool,
+    ) -> Self {
+        let match_basis = if existing_had_identity {
+            FindingIdentityMatchTier::DedupCollision
+        } else {
+            assignment.match_tier
+        };
+        Self {
+            identity_id: assignment.identity_id.clone(),
+            fingerprint: fingerprint.to_string(),
+            match_basis,
+        }
+    }
 }
 
 impl FindingStore {
@@ -76,10 +111,12 @@ impl FindingStore {
         let id = projected_finding_id(scan_id, &finding.fingerprint);
         let projected = projected_seed(scan_id, id, finding, &identity);
         let evidence = self.verified_finding_evidence(tx, scan_id, &finding.evidence)?;
+        let identity_link = ProjectionIdentityLink::from_assignment(&identity, &finding.fingerprint);
         Ok(FindingInsertOutcome {
             id,
             projected,
             evidence: ProjectionEvidence::Replace(evidence),
+            identity_link,
         })
     }
 
@@ -91,14 +128,16 @@ impl FindingStore {
         finding: &Finding,
     ) -> Result<FindingInsertOutcome> {
         let merge_id = existing.id.expect("existing finding always has id");
+        let existing_had_identity = existing.identity_id.is_some();
         let merged_tool = merge_tool_list(&existing.tool, &finding.tool);
         let merged_source = merge_vuln_source(existing.vuln_source, finding.vuln_source);
         let evidence = self.collision_projection_evidence(tx, scan_id, &existing, finding)?;
-        self.record_collision_identity(tx, &existing, finding)?;
         let identity = match collision_identity_assignment(&existing) {
             Some(identity) => identity,
             None => self.identity_assignment_for_finding(tx, scan_id, finding)?,
         };
+        let identity_link =
+            ProjectionIdentityLink::collision(&identity, &finding.fingerprint, existing_had_identity);
         let projected = merged_projection_seed(
             scan_id,
             merge_id,
@@ -112,6 +151,7 @@ impl FindingStore {
             id: merge_id,
             projected,
             evidence,
+            identity_link,
         })
     }
 
@@ -174,13 +214,20 @@ impl FindingStore {
         finding: &Finding,
         outcome: FindingInsertOutcome,
     ) -> Result<ObservationCommit> {
+        let identity_link = outcome.identity_link.clone();
         let projected = self.projected_observation_finding(scan_id, finding, outcome)?;
         let provenance = self.observation_provenance(scan_id, &projected)?;
         let stable_fp = projected
             .identity_id
             .clone()
             .unwrap_or_else(|| projected.fingerprint.clone());
-        let observation = observation_write(scan_id, &projected, stable_fp, &provenance)?;
+        let observation = observation_write(
+            scan_id,
+            &projected,
+            stable_fp,
+            &identity_link,
+            &provenance,
+        )?;
         Ok(ObservationCommit {
             observation,
             provenance,
@@ -306,6 +353,7 @@ fn observation_write(
     scan_id: &str,
     finding: &Finding,
     stable_fp: String,
+    identity_link: &ProjectionIdentityLink,
     provenance: &Option<ObservationProvenance>,
 ) -> Result<ObservationWrite> {
     let raw_result_hash = raw_result_hash(scan_id, finding)?;
@@ -314,6 +362,10 @@ fn observation_write(
         serde_json::to_string(finding).context("Could not serialize v3 finding projection row")?;
     Ok(ObservationWrite {
         projected_finding_id: finding.id,
+        identity_id: Some(identity_link.identity_id.clone()),
+        identity_alias: Some(finding_identity_alias(&identity_link.identity_id)),
+        identity_fingerprint: Some(identity_link.fingerprint.clone()),
+        identity_match_basis: Some(identity_link.match_basis.as_str().to_string()),
         observation_hash: observation_hash(scan_id, finding, &snapshot_hash, &raw_result_hash),
         stable_fp,
         snapshot_hash,

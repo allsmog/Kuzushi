@@ -406,6 +406,16 @@ mod tests {
             observation_count, 0,
             "v3 observation must not survive a failed insert"
         );
+        let identity_count: i64 = store
+            .conn
+            .query_row("select count(*) from finding_identities", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            identity_count, 0,
+            "identity projection must not survive a failed insert"
+        );
     }
 
     #[test]
@@ -619,6 +629,14 @@ mod tests {
         );
         assert_eq!(events[3].payload["stableFp"].as_str(), Some(stable_fp));
         assert_eq!(
+            events[3].payload["identityId"].as_str(),
+            stored[0].identity_id.as_deref()
+        );
+        assert_eq!(
+            events[3].payload["identityMatchBasis"].as_str(),
+            Some("stable_fp")
+        );
+        assert_eq!(
             events[3].payload["displayPath"].as_str(),
             Some("src/app.rs")
         );
@@ -658,7 +676,13 @@ mod tests {
         let current_id: i64 = conn
             .query_row("select id from finding_current", [], |row| row.get(0))
             .unwrap();
+        let identity_count: i64 = conn
+            .query_row("select count(*) from finding_identities", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert_eq!(Some(current_id), stored[0].id);
+        assert_eq!(identity_count, 1);
         assert_eq!(observation, (1, blob_hash.to_string(), 24, 91));
         assert_eq!(
             indexed_file,
@@ -677,7 +701,13 @@ mod tests {
         let rebuilt_id: i64 = conn
             .query_row("select id from finding_current", [], |row| row.get(0))
             .unwrap();
+        let rebuilt_identity_count: i64 = conn
+            .query_row("select count(*) from finding_identities", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
         assert_eq!(rebuilt_id, current_id);
+        assert_eq!(rebuilt_identity_count, identity_count);
     }
 
     #[test]

@@ -39,7 +39,6 @@ impl FindingStore {
         configure_connection(&self.conn)?;
         create_schema(&self.conn)?;
         crate::storage_v3::create_projection_schema(&self.conn)?;
-        create_finding_identities_schema(&self.conn)?;
         create_static_proof_history_schema(&self.conn)?;
         record_schema_version(&self.conn)?;
         Ok(())
@@ -70,11 +69,6 @@ fn create_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn create_finding_identities_schema(conn: &Connection) -> Result<()> {
-    conn.execute_batch(FINDING_IDENTITIES_SCHEMA)?;
-    Ok(())
-}
-
 fn create_static_proof_history_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(STATIC_PROOF_HISTORY_SCHEMA)?;
     Ok(())
@@ -83,33 +77,6 @@ fn create_static_proof_history_schema(conn: &Connection) -> Result<()> {
 const FINDINGS_SCHEMA: &str = r#"
 pragma foreign_keys = on;
 
-"#;
-
-const FINDING_IDENTITIES_SCHEMA: &str = r#"
-create table if not exists finding_identities (
-  identity_id text primary key,
-  target_id text not null,
-  alias text not null,
-  fingerprint_current text not null,
-  first_seen_run_id text not null,
-  created_at text not null,
-  retired_at text,
-  unique(target_id, alias)
-);
-create index if not exists idx_finding_identities_target
-  on finding_identities(target_id, created_at asc);
-create index if not exists idx_finding_identities_fingerprint_current
-  on finding_identities(fingerprint_current);
-
-create table if not exists finding_identity_fingerprints (
-  identity_id text not null references finding_identities(identity_id) on delete cascade,
-  fingerprint text not null,
-  match_basis text not null,
-  created_at text not null,
-  primary key(identity_id, fingerprint)
-);
-create index if not exists idx_finding_identity_fingerprints_fingerprint
-  on finding_identity_fingerprints(fingerprint);
 "#;
 
 const STATIC_PROOF_HISTORY_SCHEMA: &str = r#"
