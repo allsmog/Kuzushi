@@ -287,6 +287,86 @@ mod tests {
     }
 
     #[test]
+    fn v3_observation_payload_ignores_legacy_projection_row_shape() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run = "run-v3-native-payload";
+        store
+            .record_run_started(run, Path::new("/tmp"), "running")
+            .unwrap();
+        store
+            .conn
+            .execute_batch(
+                r#"
+                create trigger poison_legacy_projection_after_insert
+                after insert on finding_projection_rows
+                begin
+                  update finding_projection_rows
+                     set title = 'legacy poison',
+                         severity = 'low',
+                         file_path = 'legacy/poison.rs',
+                         start_line = 999,
+                         message = 'legacy poison',
+                         tool = 'legacy-tool'
+                   where id = new.id;
+                end;
+                "#,
+            )
+            .unwrap();
+
+        let finding = Finding::new_tool(
+            "semgrep",
+            "rules/cwe-89",
+            "src/app.rs",
+            12,
+            Some(12),
+            Severity::High,
+            "SQL injection reaches raw query, CWE-89",
+        );
+        let id = store.insert_finding(run, &finding).unwrap();
+
+        let legacy: (String, String, String, i64, String, String) = store
+            .conn
+            .query_row(
+                "select title, severity, file_path, start_line, message, tool
+                   from finding_projection_rows
+                  where id = ?1",
+                rusqlite::params![id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            legacy,
+            (
+                "legacy poison".to_string(),
+                "low".to_string(),
+                "legacy/poison.rs".to_string(),
+                999,
+                "legacy poison".to_string(),
+                "legacy-tool".to_string(),
+            ),
+            "test trigger must prove the legacy row is not trustworthy"
+        );
+
+        let rows = store.list_findings_for_scan_id(run).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, finding.title);
+        assert_eq!(rows[0].severity, Severity::High);
+        assert_eq!(rows[0].file_path, "src/app.rs");
+        assert_eq!(rows[0].start_line, 12);
+        assert_eq!(rows[0].message, finding.message);
+        assert_eq!(rows[0].tool, "semgrep");
+    }
+
+    #[test]
     fn insert_finding_does_not_project_observation_when_projection_write_fails() {
         let store = FindingStore::open_in_memory().unwrap();
         let run = "run-rollback";
