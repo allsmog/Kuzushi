@@ -79,7 +79,7 @@ fn wasm_engine() -> Result<Engine> {
 }
 
 fn wasm_store(engine: &Engine, invocation: &WasmPluginInvocation) -> Result<Store<WasmHostState>> {
-    let manifest = plugin_manifest_json(&invocation.grant, false)?;
+    let manifest = wasm_manifest_json(&invocation.grant, invocation.policy.read_snapshot)?;
     let limits = StoreLimitsBuilder::new()
         .memory_size(invocation.policy.memory_limit_bytes as usize)
         .instances(1)
@@ -91,6 +91,7 @@ fn wasm_store(engine: &Engine, invocation: &WasmPluginInvocation) -> Result<Stor
         WasmHostState {
             grant: invocation.grant.clone(),
             manifest: manifest.into_bytes(),
+            read_snapshot: invocation.policy.read_snapshot,
             max_bytes_served: invocation.policy.max_bytes_served,
             bytes_served: 0,
             limits,
@@ -103,6 +104,14 @@ fn wasm_store(engine: &Engine, invocation: &WasmPluginInvocation) -> Result<Stor
     store.set_epoch_deadline(1);
     interrupt_engine_after_timeout(engine.clone(), invocation.policy.timeout_ms);
     Ok(store)
+}
+
+fn wasm_manifest_json(grant: &GrantedSnapshot, read_snapshot: bool) -> Result<String> {
+    if read_snapshot {
+        plugin_manifest_json(grant, false)
+    } else {
+        Ok(r#"{"blobs":[]}"#.to_string())
+    }
 }
 
 fn interrupt_engine_after_timeout(engine: Engine, timeout_ms: u64) {
@@ -163,6 +172,7 @@ fn guest_memory(store: &mut Store<WasmHostState>, instance: &wasmtime::Instance)
 struct WasmHostState {
     grant: GrantedSnapshot,
     manifest: Vec<u8>,
+    read_snapshot: bool,
     max_bytes_served: u64,
     bytes_served: u64,
     limits: StoreLimits,
@@ -179,6 +189,9 @@ fn manifest_read(mut caller: Caller<'_, WasmHostState>, ptr: i32, max_len: i32) 
 }
 
 fn blob_len(mut caller: Caller<'_, WasmHostState>, hash_ptr: i32, hash_len: i32) -> i64 {
+    if !caller.data().read_snapshot {
+        return -1;
+    }
     let Ok(hash) = read_guest_hash(&mut caller, hash_ptr, hash_len) else {
         return -1;
     };
@@ -198,6 +211,9 @@ fn blob_read(
     dst_ptr: i32,
     max_len: i32,
 ) -> i32 {
+    if !caller.data().read_snapshot {
+        return -1;
+    }
     let Ok(hash) = read_guest_hash(&mut caller, hash_ptr, hash_len) else {
         return -1;
     };

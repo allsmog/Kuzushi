@@ -295,6 +295,30 @@ fn wasm_plugin_blob_budget_is_enforced() {
 }
 
 #[test]
+fn wasm_plugin_cannot_read_snapshot_without_capability() {
+    let tmp = tempfile::tempdir().unwrap();
+    let object_path = tmp.path().join("object");
+    let source = b"hello dangerous world\n";
+    std::fs::write(&object_path, source).unwrap();
+    let hash = blob_hash();
+    let module_path = tmp.path().join("plugin.wasm");
+    std::fs::write(&module_path, wasm_plugin_bytes(hash.as_str())).unwrap();
+    let grant = GrantedSnapshot::with_objects([(hash.clone(), source.len() as u64, object_path)]);
+
+    let error = run_wasm_plugin_invocation(WasmPluginInvocation {
+        module_path,
+        policy: SandboxPolicy {
+            read_snapshot: false,
+            ..SandboxPolicy::default()
+        },
+        grant,
+    })
+    .unwrap_err();
+
+    assert!(error.to_string().contains("outside the granted blob"));
+}
+
+#[test]
 fn wasm_plugin_output_budget_is_enforced() {
     let tmp = tempfile::tempdir().unwrap();
     let object_path = tmp.path().join("object");
