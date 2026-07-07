@@ -37,6 +37,9 @@ pub(crate) struct ActivityLiveTool {
     /// Steps of a confirmed planning queue waiting for this tool to finish.
     /// Non-zero exactly when the operator's plan is stalled behind it.
     pub(crate) queued_plan_steps: usize,
+    /// Operator steer-queue depth waiting behind this tool. Rendered as
+    /// pending, never running — only one live Run exists at a time.
+    pub(crate) queued_steer_steps: usize,
 }
 
 pub(crate) fn activity_header_model(
@@ -152,12 +155,13 @@ fn append_terminal_count(parts: &mut Vec<String>, count: usize, label: &str) {
 fn taskless_progress(live_tool: Option<&ActivityLiveTool>) -> String {
     match live_tool {
         Some(tool) => format!(
-            "{} {}{} · running {}s{}",
+            "{} {}{} · running {}s{}{}",
             tool.spinner,
             tool.name,
             ambient_marker(tool),
             tool.elapsed_secs,
             queued_plan_segment(tool),
+            queued_steer_segment(tool),
         ),
         None => "no task rows — streaming tool output".to_string(),
     }
@@ -179,6 +183,13 @@ fn queued_plan_segment(tool: &ActivityLiveTool) -> String {
         " · your plan ({} step(s)) starts after it",
         tool.queued_plan_steps
     )
+}
+
+fn queued_steer_segment(tool: &ActivityLiveTool) -> String {
+    if tool.queued_steer_steps == 0 {
+        return String::new();
+    }
+    format!(" · queued: {} pending", tool.queued_steer_steps)
 }
 
 fn task_count(session: &ActivitySession, state: DagTaskState) -> usize {
@@ -272,6 +283,7 @@ mod tests {
             elapsed_secs: 42,
             ambient: false,
             queued_plan_steps: 0,
+            queued_steer_steps: 0,
         };
         let route = ActivityRouteState::default();
         let model = activity_header_model(&session, &route, None, Some(&live));
@@ -294,6 +306,7 @@ mod tests {
             elapsed_secs: 3,
             ambient: true,
             queued_plan_steps: 4,
+            queued_steer_steps: 0,
         };
         let route = ActivityRouteState::default();
         let model = activity_header_model(&session, &route, None, Some(&live));
@@ -309,6 +322,31 @@ mod tests {
                 .summary_title
                 .contains("your plan (4 step(s)) starts after it"),
             "{}",
+            model.summary_title
+        );
+    }
+
+    #[test]
+    fn queued_steer_items_render_as_pending_behind_the_live_tool() {
+        let session = ActivitySession::new("tool-1");
+        let live = ActivityLiveTool {
+            name: "taint-iris:hunt".to_string(),
+            spinner: "⠷",
+            elapsed_secs: 7,
+            ambient: false,
+            queued_plan_steps: 0,
+            queued_steer_steps: 2,
+        };
+        let route = ActivityRouteState::default();
+        let model = activity_header_model(&session, &route, None, Some(&live));
+        assert!(
+            model.summary_title.contains("queued: 2 pending"),
+            "{}",
+            model.summary_title
+        );
+        assert!(
+            !model.summary_title.contains("running 7s · running"),
+            "queued items must not read as a second running job: {}",
             model.summary_title
         );
     }

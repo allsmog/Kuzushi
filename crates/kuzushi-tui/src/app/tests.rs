@@ -14384,3 +14384,160 @@ fn sample_two_findings() -> Vec<kuzushi_core::Finding> {
         ),
     ]
 }
+
+// ---- Background jobs registry: steer queue, cancel-by-id, background handoff ----
+
+fn running_scan_panel() -> ScanPanelState {
+    ScanPanelState {
+        run_id: Some("scan-1".to_string()),
+        target: PathBuf::from("."),
+        stage: "running".to_string(),
+        findings_count: 0,
+        running: true,
+        abort_requested: false,
+        error: None,
+    }
+}
+
+#[test]
+fn queue_command_enqueues_a_tool_while_a_job_is_running() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_scan_panel(Some(running_scan_panel()));
+
+    run_command(
+        &mut app,
+        ShellCommand::QueueCommand("run taint-iris:hunt".to_string()),
+    );
+
+    assert_eq!(app.steer_queue().len(), 1);
+    assert_eq!(
+        app.steer_queue().peek().map(|cmd| cmd.raw.as_str()),
+        Some("run taint-iris:hunt")
+    );
+}
+
+#[test]
+fn busy_run_submission_is_queued_instead_of_rejected() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_scan_panel(Some(running_scan_panel()));
+
+    // The operator submit path routes a `run` while busy into the steer queue
+    // rather than the old bare rejection.
+    app.reduce_submitted_line("run triage:run");
+
+    assert_eq!(app.steer_queue().len(), 1);
+    assert_eq!(
+        app.steer_queue().peek().map(|cmd| cmd.summary.as_str()),
+        Some("run triage:run")
+    );
+}
+
+#[test]
+fn advance_steer_queue_waits_while_work_runs_then_drains_when_idle() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+
+    // Work still running: steer item must wait, never pre-empt.
+    app.set_scan_panel(Some(running_scan_panel()));
+    let held = app.advance_steer_queue();
+    assert!(held.is_empty());
+    assert_eq!(app.steer_queue().len(), 1);
+
+    // Idle: the queued item drains.
+    app.set_scan_panel(None);
+    let _ = app.advance_steer_queue();
+    assert!(app.steer_queue().is_empty());
+}
+
+#[test]
+fn advance_steer_queue_yields_to_a_pending_prereq_chain() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+    // A prereq chain is pending (chain -> plan -> steer precedence): the steer
+    // item must stay queued for the chain to finish first.
+    app.engagement.set_pending_chain(PrereqChain::new(
+        Vec::new(),
+        "carlini-threat-hunt:run".to_string(),
+        serde_json::Value::Null,
+        None,
+    ));
+
+    let effects = app.advance_steer_queue();
+
+    assert!(effects.is_empty());
+    assert_eq!(app.steer_queue().len(), 1);
+}
+
+#[test]
+fn cancel_job_dequeues_a_pending_steer_item() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run a".to_string(),
+        summary: "run a".to_string(),
+    });
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run b".to_string(),
+        summary: "run b".to_string(),
+    });
+
+    run_command(&mut app, ShellCommand::CancelJob("queued-1".to_string()));
+
+    assert_eq!(app.steer_queue().len(), 1);
+    assert_eq!(
+        app.steer_queue().peek().map(|cmd| cmd.raw.as_str()),
+        Some("run b")
+    );
+}
+
+#[test]
+fn cancel_job_reuses_cancel_effect_for_the_live_run() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _ticket = app.jobs_mut().start(JobKind::Run, "triage:run");
+    app.set_activity(Some(ActivitySession::new("tool-abc")));
+
+    let effects = app
+        .reduce_command_effects(&ShellCommand::CancelJob("tool-abc".to_string()))
+        .expect("cancel-job routes");
+
+    assert!(matches!(
+        effects.as_slice(),
+        [ShellEffect::CancelActiveJobs]
+    ));
+}
+
+#[test]
+fn cancel_job_unknown_id_does_not_fire_a_token() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    let effects = app
+        .reduce_command_effects(&ShellCommand::CancelJob("scan-999".to_string()))
+        .expect("cancel-job routes");
+
+    // Nothing live and no queued item: report honestly, emit no cancel effect.
+    assert!(effects.is_empty());
+}
+
+#[test]
+fn background_handoff_shows_workbench_without_cancelling_live_work() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_scan_panel(Some(running_scan_panel()));
+
+    run_command(&mut app, ShellCommand::Background);
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert!(app.has_running_work());
+    assert!(!app.scan().is_some_and(|scan| scan.abort_requested));
+}
+
+#[test]
+fn jobs_verb_opens_the_jobs_registry_view() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    run_command(&mut app, ShellCommand::ShowJobs);
+    assert_eq!(app.shell_view(), ShellView::Jobs);
+}

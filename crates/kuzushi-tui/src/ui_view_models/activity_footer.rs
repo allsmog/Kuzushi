@@ -39,6 +39,7 @@ const FULL_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("Space", "pause"),
     footer_hint!("x", "reset view"),
     footer_hint!("Enter", "focus"),
+    footer_hint!("b", "background"),
     footer_hint!("Esc", "leave"),
 ];
 
@@ -53,6 +54,7 @@ const TASKLESS_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("V", "verbose"),
     footer_hint!("Space", "pause"),
     footer_hint!("x", "reset view"),
+    footer_hint!("b", "background"),
     footer_hint!("Esc", "leave"),
 ];
 
@@ -327,7 +329,7 @@ mod tests {
         );
         assert_eq!(
             plain_keys(&activity_footer_model(&session, &route, 80, None, false)),
-            vec!["j/k/g/G", "Tab", "[/]", "f", "o", "V", "Space", "x", "Enter", "Esc"]
+            vec!["j/k/g/G", "Tab", "[/]", "f", "o", "V", "Space", "x", "Enter", "b", "Esc"]
         );
     }
 
@@ -352,6 +354,7 @@ mod tests {
                 ("Space", "pause"),
                 ("x", "reset view"),
                 ("Enter", "focus"),
+                ("b", "background"),
                 ("Esc", "leave"),
             ]
         );
