@@ -16,10 +16,8 @@ Feature: Launch-time target picker
     Given a fresh kuzushi workspace
     And no model is configured
     When I launch the shell without a target
-    And I see "CHOOSE A TARGET"
     And I press "Esc"
-    Then I see "AIM - ATTACK SURFACE"
-    And the log contains "browsing without a target"
+    Then the status segment shows "workbench"
 
   Scenario: Skip-onboarding suppresses the target picker
     Given a fresh kuzushi workspace

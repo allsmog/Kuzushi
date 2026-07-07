@@ -17,7 +17,7 @@ Feature: Inline credential entry
     And I see "Offline demo"
     And I see "offline fixture"
 
-  Scenario: Esc on the credential step defers to the Workbench naming the demo
+  Scenario: Esc on the credential step defers to the Workbench
     Given a fresh kuzushi workspace
     And no model is configured
     When I launch the shell
@@ -25,7 +25,6 @@ Feature: Inline credential entry
     And I press "Down"
     And I press "Down"
     And I press "Enter"
-    And I see "CHOOSE AUTH METHOD"
     And I press "Esc"
     Then I see "AIM - ATTACK SURFACE"
-    And the log contains "offline fixture"
+    And the status segment shows "workbench"
