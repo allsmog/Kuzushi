@@ -3,6 +3,7 @@ use anyhow::Result;
 use rusqlite::{params, Transaction};
 
 use super::projection_payload::{payload_i64, payload_str, require_payload_str};
+use super::sql_seq;
 
 pub(super) fn project_run_lifecycle_event(
     tx: &Transaction<'_>,
@@ -27,7 +28,7 @@ fn insert_run_event(tx: &Transaction<'_>, event: &EventEnvelope) -> Result<()> {
         "#,
         params![
             event.event_hash.as_str(),
-            event.seq,
+            sql_seq(event.seq)?,
             require_payload_str(&event.payload, "runId")?,
             event.event_kind.as_str(),
             payload_str(&event.payload, "target"),
@@ -43,12 +44,13 @@ fn insert_run_event(tx: &Transaction<'_>, event: &EventEnvelope) -> Result<()> {
 
 fn fold_run_state(tx: &Transaction<'_>, event: &EventEnvelope) -> Result<()> {
     let run_id = require_payload_str(&event.payload, "runId")?;
-    let started_seq = (event.event_kind == EventKind::RunStarted).then_some(event.seq as i64);
+    let event_seq = sql_seq(event.seq)?;
+    let started_seq = (event.event_kind == EventKind::RunStarted).then_some(event_seq);
     let completed_seq = matches!(
         event.event_kind,
         EventKind::RunCompleted | EventKind::RunFailed
     )
-    .then_some(event.seq as i64);
+    .then_some(event_seq);
     tx.execute(
         r#"
         insert into run_states(
@@ -72,7 +74,7 @@ fn fold_run_state(tx: &Transaction<'_>, event: &EventEnvelope) -> Result<()> {
             payload_i64(&event.payload, "findingsCount"),
             started_seq,
             completed_seq,
-            event.seq,
+            event_seq,
             event.created_at,
         ],
     )?;

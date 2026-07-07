@@ -4,6 +4,8 @@ use crate::event_log::{EventEnvelope, EventKind};
 use anyhow::Result;
 use rusqlite::{params, Transaction};
 
+use super::sql_seq;
+
 const INSERT_FINDING_OBSERVATION_SQL: &str = r#"
 insert into finding_observations(
   observation_hash, stable_fp, snapshot_hash, run_id, tool, tool_version,
@@ -84,7 +86,7 @@ fn insert_finding_observation(
             payload_i64(&event.payload, "displayLine"),
             observation.raw_result_hash,
             payload_str(&event.payload, "findingJson"),
-            event.seq,
+            sql_seq(event.seq)?,
             event.created_at,
         ],
     )?;
@@ -117,7 +119,7 @@ fn project_stable_finding(
             observation.severity,
             observation.title,
             payload_str(&event.payload, "displayPath"),
-            event.seq,
+            sql_seq(event.seq)?,
             observation.observation_hash,
         ],
     )?;

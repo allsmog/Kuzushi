@@ -2,27 +2,6 @@ use serde::{Deserialize, Serialize};
 
 use super::{extract_cwe, normalize_cwe, Finding, FindingEvidence};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct FindingIdentity {
-    pub identity_id: String,
-    pub target_id: String,
-    pub alias: String,
-    pub fingerprint_current: String,
-    pub first_seen_run_id: String,
-    pub created_at: String,
-    pub retired_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct FindingIdentityFingerprint {
-    pub identity_id: String,
-    pub fingerprint: String,
-    pub match_basis: FindingIdentityMatchTier,
-    pub created_at: String,
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingIdentityMatchTier {

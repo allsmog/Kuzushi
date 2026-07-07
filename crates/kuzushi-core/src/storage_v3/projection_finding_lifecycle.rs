@@ -3,6 +3,7 @@ use anyhow::Result;
 use rusqlite::{params, Transaction};
 
 use super::projection_payload::require_payload_str;
+use super::sql_seq;
 
 pub(super) fn project_finding_lifecycle_status(
     tx: &Transaction<'_>,
@@ -18,7 +19,7 @@ pub(super) fn project_finding_lifecycle_status(
         params![
             require_payload_str(&event.payload, "stableFp")?,
             status,
-            event.seq
+            sql_seq(event.seq)?
         ],
     )?;
     Ok(())

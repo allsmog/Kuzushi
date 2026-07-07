@@ -164,7 +164,9 @@ impl ProjectionDb {
               where stable_fp = ?1 and seq > ?2
               order by seq asc",
         )?;
-        let rows = stmt.query_map(params![stable_fp, watermark], |row| row.get(0))?;
+        let rows = stmt.query_map(params![stable_fp, sql_watermark(watermark)?], |row| {
+            sqlite_seq(row, 0)
+        })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not load intervening finding events")
     }
@@ -196,7 +198,7 @@ impl ProjectionDb {
               where stable_fp = ?1 and seq > ?2
               order by seq asc",
         )?;
-        let rows = stmt.query_map(params![stable_fp, watermark], |row| {
+        let rows = stmt.query_map(params![stable_fp, sql_watermark(watermark)?], |row| {
             Ok(ProjectionEventRow {
                 event_hash: row.get(0)?,
                 event_kind: row.get(1)?,
@@ -280,8 +282,8 @@ fn stable_finding_read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StableFi
         canonical_severity: row.get(2)?,
         canonical_title: row.get(3)?,
         canonical_path: row.get(4)?,
-        first_seen_seq: row.get::<_, i64>(5)?.max(0) as u64,
-        last_seen_seq: row.get::<_, i64>(6)?.max(0) as u64,
+        first_seen_seq: sqlite_seq(row, 5)?,
+        last_seen_seq: sqlite_seq(row, 6)?,
         last_observation_hash: row.get(7)?,
     })
 }
@@ -315,6 +317,29 @@ fn set_meta_u64(conn: &Connection, key: &str, value: u64) -> Result<()> {
         params![key, value.to_string()],
     )?;
     Ok(())
+}
+
+fn sql_seq(seq: u64) -> Result<i64> {
+    sql_u64(seq, "event seq")
+}
+
+fn sql_watermark(watermark: u64) -> Result<i64> {
+    sql_u64(watermark, "read watermark")
+}
+
+fn sql_u64(value: u64, label: &str) -> Result<i64> {
+    i64::try_from(value).with_context(|| format!("{label} exceeds SQLite INTEGER range: {value}"))
+}
+
+fn sqlite_seq(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
+    let value = row.get::<_, i64>(index)?;
+    u64::try_from(value).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            index,
+            rusqlite::types::Type::Integer,
+            Box::new(error),
+        )
+    })
 }
 
 fn create_optional_fts(conn: &Connection) -> Result<()> {

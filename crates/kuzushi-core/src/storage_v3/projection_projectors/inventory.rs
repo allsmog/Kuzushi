@@ -1,6 +1,7 @@
 use super::super::projection_payload::{
     payload_i64, payload_str, require_payload_i64, require_payload_str,
 };
+use super::super::sql_seq;
 use crate::event_log::{EventEnvelope, EventKind};
 use anyhow::Result;
 use rusqlite::{params, Transaction};
@@ -100,7 +101,7 @@ pub(super) fn project_file_deleted(tx: &Transaction<'_>, event: &EventEnvelope) 
         "#,
         params![
             event.event_hash.as_str(),
-            event.seq,
+            sql_seq(event.seq)?,
             snapshot_hash,
             path,
             event.actor,
@@ -128,7 +129,7 @@ pub(super) fn project_attack_surface_indexed(
         "#,
         params![
             event.event_hash.as_str(),
-            event.seq,
+            sql_seq(event.seq)?,
             require_payload_str(&event.payload, "snapshotHash")?,
             payload_str(&event.payload, "runId"),
             payload_str(&event.payload, "objectHash"),

@@ -272,7 +272,7 @@ fn projected_event_stable_fp(db: &ProjectionDb, seq: u64) -> String {
     db.conn
         .query_row(
             "select stable_fp from finding_events where seq = ?1",
-            params![seq],
+            params![seq as i64],
             |row| row.get(0),
         )
         .unwrap()
