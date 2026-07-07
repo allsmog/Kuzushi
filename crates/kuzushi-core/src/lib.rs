@@ -16,7 +16,7 @@ public_modules!(
     run_trace, runbooks, runtime, sbom_scan, scan, scanners, secret_scan, semgrep_rule_synthesis, source_span, spend, static_context,
     static_evidence, static_narrative, static_proof_validator, static_ranking, static_registry, storage_v3,
     strategy, systems_hunt, threat_leads, threat_model, triage, variant_ndiff, verification, verify,
-    whitebox_static, whitebox_suppressions, workspace, x_ray,
+    whitebox_static, whitebox_suppressions, worker_protocol, workspace, x_ray,
 );
 
 pub(crate) mod artifact_contract;
