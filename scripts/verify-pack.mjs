@@ -200,7 +200,7 @@ const expectedPnpmLockfileRootDependencyVersions = {
     "@vitest/coverage-v8":
       "3.2.4(vitest@3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))",
     husky: "9.1.7",
-    "lint-staged": "15.5.2",
+    "lint-staged": "17.0.8",
     madge: "8.0.0(typescript@5.9.3)",
     tsx: "4.21.0",
     vitest: "3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)",
@@ -224,7 +224,7 @@ const expectedPackageDevDependencies = {
   "@types/node": "^22.13.4",
   "@vitest/coverage-v8": "^3.0.5",
   husky: "^9.1.7",
-  "lint-staged": "^15.5.2",
+  "lint-staged": "^17.0.8",
   madge: "^8.0.0",
   tsx: "^4.19.2",
   vitest: "^3.0.5",
