@@ -75,19 +75,13 @@ const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "
 
 const reportAliasFields = [
   "reportMarkdown",
-  "report_markdown",
   "data.reportMarkdown",
-  "data.report_markdown",
   "reportSarif",
-  "report_sarif",
   "data.reportSarif",
-  "data.report_sarif",
 ];
 const reportSubstrateAliasFields = [
   "reportMarkdown",
-  "report_markdown",
   "reportSarif",
-  "report_sarif",
 ];
 const schemaArchitectureDocChecks = requiredArtifactSchemaReferences().map((reference) => ({
   label: `run schema architecture doc ${reference.artifactPath}`,
@@ -196,7 +190,7 @@ const checks = [
     artifacts: optionalRunArtifacts,
     functions: [
       "tool_run_complete_promotes_result_snapshots_to_canonical_files",
-      "tool_run_complete_promotes_snake_case_report_artifacts",
+      "tool_run_complete_rejects_snake_case_report_artifacts",
     ],
   },
   {

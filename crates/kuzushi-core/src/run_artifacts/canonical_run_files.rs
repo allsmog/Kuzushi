@@ -96,15 +96,7 @@ fn record_markdown_report_artifact(
     run_id: &str,
     output: &Value,
 ) {
-    if let Some(markdown) = string_at(
-        output,
-        &[
-            "/data/reportMarkdown",
-            "/data/report_markdown",
-            "/reportMarkdown",
-            "/report_markdown",
-        ],
-    ) {
+    if let Some(markdown) = string_at(output, &["/data/reportMarkdown", "/reportMarkdown"]) {
         push_text_artifact(artifacts, target, run_id, report_artifact_spec(), markdown);
     }
 }
@@ -115,15 +107,7 @@ fn record_sarif_report_artifact(
     run_id: &str,
     output: &Value,
 ) {
-    if let Some(sarif) = sarif_at(
-        output,
-        &[
-            "/data/reportSarif",
-            "/data/report_sarif",
-            "/reportSarif",
-            "/report_sarif",
-        ],
-    ) {
+    if let Some(sarif) = sarif_at(output, &["/data/reportSarif", "/reportSarif"]) {
         push_text_artifact(artifacts, target, run_id, sarif_artifact_spec(), &sarif);
     }
 }

@@ -170,10 +170,9 @@ The current Rust substrate already writes:
 - `.kuzushi/v3/runs/<runId>/failures.json`
 - `.kuzushi/v3/runs/<runId>/report.md`; the recorder writes a deterministic
   placeholder when no producer report is available and replaces it when a
-  producer returns `reportMarkdown`, `report_markdown`,
-  `data.reportMarkdown`, or `data.report_markdown`
+  producer returns `reportMarkdown` or `data.reportMarkdown`
 - `.kuzushi/v3/runs/<runId>/report.sarif` when a producer returns
-  `reportSarif`, `report_sarif`, `data.reportSarif`, or `data.report_sarif`
+  `reportSarif` or `data.reportSarif`
 - `.kuzushi/v3/runs/<runId>/artifacts.json`
 
 This is sufficient for current run replay and failure handoff, but it is not

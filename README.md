@@ -479,11 +479,11 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/v3/runs/<runId>/findings.json` | normalized finding snapshot or explicit skipped marker |
 | `.kuzushi/v3/runs/<runId>/proof.json` | proof-state snapshot or explicit skipped marker |
 | `.kuzushi/v3/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
-| `.kuzushi/v3/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown`/`report_markdown` and `data.reportMarkdown`/`data.report_markdown` output aliases |
+| `.kuzushi/v3/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown` and `data.reportMarkdown` output fields |
 | `.kuzushi/v3/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
 | `.kuzushi/v3/runs/<runId>/input.json` | prepared tool input for direct tool runs |
 | `.kuzushi/v3/runs/<runId>/result.json` | tool result envelope for direct tool runs |
-| `.kuzushi/v3/runs/<runId>/report.sarif` | optional SARIF report promoted from `reportSarif`/`report_sarif` and `data.reportSarif`/`data.report_sarif` output aliases |
+| `.kuzushi/v3/runs/<runId>/report.sarif` | optional SARIF report promoted from `reportSarif` and `data.reportSarif` output fields |
 | `.kuzushi/v3/runs/<runId>/triage.jsonl` | `sast:scan --triage` and post-scan triage |
 | `.kuzushi/v3/runs/<runId>/verify.jsonl` | `sast:scan` with verify/auto-patch inputs |
 | `x-ray/` | `x-ray:run` |

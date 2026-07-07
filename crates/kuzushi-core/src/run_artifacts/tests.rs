@@ -3083,7 +3083,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_promotes_snake_case_report_artifacts() {
+    fn tool_run_complete_rejects_snake_case_report_artifacts() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-snake-report";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "report:build");
@@ -3101,27 +3101,21 @@ mod tests {
         );
 
         let dir = run_dir(tmp.path(), run_id);
-        assert!(fs::read_to_string(dir.join("report.md"))
-            .unwrap()
-            .contains("Snake Report"));
-        assert!(fs::read_to_string(dir.join("report.sarif"))
-            .unwrap()
-            .contains("\"version\": \"2.1.0\""));
+        let report = fs::read_to_string(dir.join("report.md")).unwrap();
+        assert!(report.contains("No report was recorded for this run."));
+        assert!(!report.contains("Snake Report"));
+        assert!(!dir.join("report.sarif").exists());
 
         let summary = load_run_summary(tmp.path(), run_id).unwrap();
-        assert!(summary
+        assert!(!summary
             .artifacts
             .iter()
-            .any(|artifact| artifact.path.ends_with("report.md")));
-        assert!(summary.artifacts.iter().any(|artifact| {
-            artifact.path.ends_with("report.sarif") && artifact.kind == "sarif"
-        }));
-        assert!(summary.artifacts.iter().any(|artifact| {
-            artifact.path.ends_with("report.sarif") && artifact.label == "SARIF report"
-        }));
+            .any(|artifact| artifact.path.ends_with("report.sarif")));
 
         let manifest_artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
-        assert_manifest_has_sarif_report_artifact(&manifest_artifacts);
+        assert!(!manifest_artifacts
+            .iter()
+            .any(|artifact| artifact.path.ends_with("report.sarif")));
     }
 
     #[test]
