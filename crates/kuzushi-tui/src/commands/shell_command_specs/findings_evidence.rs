@@ -44,6 +44,15 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "record a human review decision for the selected finding",
     },
     ShellCommandSpec {
+        command: "dismiss <reason> <note>",
+        aliases: &[
+            "dismiss false_positive not reachable in prod",
+            "dismiss used_in_tests test fixture only",
+        ],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "dismiss the selected finding with an auditable reason",
+    },
+    ShellCommandSpec {
         command: "show aliases [prefix]",
         aliases: &["/show aliases [prefix]"],
         category: ShellCommandCategory::FindingsEvidence,

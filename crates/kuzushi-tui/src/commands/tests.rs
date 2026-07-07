@@ -58,6 +58,19 @@ mod tests {
             ))
         );
         assert_eq!(
+            parse_command("dismiss used_in_tests only exercised in fixtures"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Dismiss {
+                reason: "used_in_tests".to_string(),
+                note: "only exercised in fixtures".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_command("dismiss false_positive"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
+                "dismiss false_positive".to_string(),
+            ))
+        );
+        assert_eq!(
             parse_command("findings export /tmp/findings.json"),
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
                 output: PathBuf::from("/tmp/findings.json"),
