@@ -8,6 +8,8 @@ pub enum ShellCommand {
     Modules,
     Recommend,
     Tools(Option<String>),
+    /// Toggle a tool as a favorite on the per-workspace shelf.
+    FavoriteTool(String),
     /// Open the Workbench command center with the given pane focused. The
     /// shell's default landing surface; `findings` and `open` also route here
     /// with the appropriate pane focus / selection.
