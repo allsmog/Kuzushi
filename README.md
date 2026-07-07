@@ -461,19 +461,19 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/context-snapshot.json` | `context:build` |
 | `.kuzushi/threat-model.json` | `threat-model:*`, `randori:*`, and threat-model readers |
 | `.kuzushi/v3/latest` | latest completed, partial, failed, skipped, or running run id |
-| `.kuzushi/v3/runs/<runId>/run.json` | canonical run metadata, status, cost, LLM audit, and artifact list |
+| `.kuzushi/v3/runs/<runId>/run.json` | standard run metadata, status, cost, LLM audit, and artifact list |
 | `.kuzushi/v3/runs/<runId>/events.jsonl` | tool lifecycle events |
 | `.kuzushi/v3/runs/<runId>/trace.jsonl` | ordered trace steps for replay and activity views |
-| `.kuzushi/v3/runs/<runId>/context.json` | run-scoped context snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/attack-surface.json` | run-scoped attack-surface snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/threat-model.json` | run-scoped threat-model snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/recommendations.json` | run-scoped recommendation snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/strategy.json` | run-scoped strategy proposal snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/findings.json` | normalized finding snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/proof.json` | proof-state snapshot or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/context.json` | run-scoped context export or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/attack-surface.json` | run-scoped attack-surface export or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/threat-model.json` | run-scoped threat-model export or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/recommendations.json` | run-scoped recommendation export or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/strategy.json` | run-scoped strategy proposal export or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/findings.json` | normalized finding export or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/proof.json` | proof-state export or explicit skipped marker |
 | `.kuzushi/v3/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
 | `.kuzushi/v3/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown`/`report_markdown` and `data.reportMarkdown`/`data.report_markdown` output aliases |
-| `.kuzushi/v3/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
+| `.kuzushi/v3/runs/<runId>/artifacts.json` | standard artifact manifest for the run, including CAS object refs when available |
 | `.kuzushi/v3/runs/<runId>/input.json` | prepared tool input for direct tool runs |
 | `.kuzushi/v3/runs/<runId>/result.json` | tool result envelope for direct tool runs |
 | `.kuzushi/v3/runs/<runId>/report.sarif` | optional SARIF report promoted from `reportSarif`/`report_sarif` and `data.reportSarif`/`data.report_sarif` output aliases |
@@ -484,7 +484,7 @@ not silently succeed and they do not substitute a different model.
 | `.prompt-armor/` | PromptArmor deterministic config/report tools |
 
 Machine-readable run schemas live under `schemas/run.*.schema.json` and ship
-through the npm subpath `kuzushi/schemas/*`. They document the canonical
+through the npm subpath `kuzushi/schemas/*`. They document the standard
 camelCase artifact fields and the snake_case aliases accepted by Rust readers,
 including `runId`/`run_id`, `startedAtUnix`/`started_at_unix`,
 `promptHash`/`prompt_hash`, and `agentThreadContext`/`agent_thread_context`.
