@@ -87,7 +87,7 @@ impl ShellApp {
     }
 
     fn blocked_by_pending_threat_review(&mut self, tool_name: &str) -> bool {
-        if !threat_dependent_tool(tool_name) || self.pending_threat_patch.is_none() {
+        if !threat_dependent_tool(tool_name) || !self.engagement.has_pending_threat_patch() {
             return false;
         }
         self.shell_view = ShellView::Threat(ThreatView::Summary);

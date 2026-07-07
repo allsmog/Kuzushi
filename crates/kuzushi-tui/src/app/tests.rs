@@ -98,11 +98,11 @@ fn drain_tool(app: &mut ShellApp) {
 #[allow(dead_code)]
 fn drain_chain_with_auto_reuse(app: &mut ShellApp) {
     loop {
-        if app.pending_prereq_prompt.is_some() {
+        if app.engagement.has_pending_prereq_prompt() {
             app.resolve_prereq_prompt(true);
             continue;
         }
-        if app.tool_running.is_none() && app.pending_chain.is_none() {
+        if app.tool_running.is_none() && !app.engagement.has_pending_chain() {
             return;
         }
         app.drain_next_tool_event_for_test(Duration::from_secs(15))
@@ -125,7 +125,7 @@ fn missing_model_backed_prereqs_block_without_auto_accept_or_model_fallback() {
         input: Some(r#"{"maxActors":1,"runsPerActor":1}"#.to_string()),
     });
 
-    let plan = app.pending_prereq_prompt.as_ref().unwrap();
+    let plan = app.engagement.pending_prereq_prompt().unwrap();
     assert_eq!(app.tool_running.as_deref(), None);
     assert_eq!(app.config.model, None);
     assert_eq!(plan.final_tool, "offense-review:threat-hunt");
@@ -173,12 +173,15 @@ fn prereq_plan_cancel_aborts_chain_before_dispatch() {
     );
     app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()));
 
-    assert!(app.pending_chain.is_some(), "c must not mean cancel here");
+    assert!(
+        app.engagement.has_pending_chain(),
+        "c must not mean cancel here"
+    );
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()));
 
-    assert!(app.pending_chain.is_none());
-    assert!(app.pending_prereq_prompt.is_none());
+    assert!(!app.engagement.has_pending_chain());
+    assert!(!app.engagement.has_pending_prereq_prompt());
     assert_eq!(app.tool_running.as_deref(), None);
     assert!(app.log.iter().any(|line| {
         line.prefix == "system" && line.body.contains("prerequisite plan cancelled")
@@ -203,7 +206,7 @@ fn cached_prereq_reuse_skips_prereq_and_dispatches_final_tool() {
     app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty()));
 
     assert_eq!(app.tool_running.as_deref(), Some("findings:list"));
-    assert!(app.pending_prereq_prompt.is_none());
+    assert!(!app.engagement.has_pending_prereq_prompt());
     assert!(app.log.iter().any(|line| {
         line.prefix == "system" && line.body.contains("reusing cached context snapshot")
     }));
@@ -228,7 +231,7 @@ fn cached_prereq_regenerate_runs_prereq_after_approval() {
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
 
     assert_eq!(app.tool_running.as_deref(), Some("context:build"));
-    assert!(app.pending_prereq_prompt.is_none());
+    assert!(!app.engagement.has_pending_prereq_prompt());
     assert!(app.log.iter().any(|line| {
         line.prefix == "system" && line.body.contains("running after prerequisite approval")
     }));
@@ -254,7 +257,7 @@ fn trusted_workflow_auto_accept_explicitly_starts_missing_prereq() {
     );
 
     assert_eq!(app.tool_running.as_deref(), Some("context:build"));
-    assert!(app.pending_prereq_prompt.is_none());
+    assert!(!app.engagement.has_pending_prereq_prompt());
     assert!(app.log.iter().any(|line| {
         line.prefix == "system" && line.body.contains("trusted workflow auto-accepted")
     }));
@@ -393,7 +396,7 @@ fn threat_dependent_run_waits_for_pending_threat_review_decision() {
     });
 
     assert_eq!(app.tool_running.as_deref(), None);
-    assert!(app.pending_chain.is_none());
+    assert!(!app.engagement.has_pending_chain());
     assert!(matches!(
         app.shell_view,
         ShellView::Threat(ThreatView::Summary)
@@ -425,7 +428,7 @@ fn offense_review_threat_hunt_waits_for_pending_threat_review_decision() {
     });
 
     assert_eq!(app.tool_running.as_deref(), None);
-    assert!(app.pending_chain.is_none());
+    assert!(!app.engagement.has_pending_chain());
     assert!(matches!(
         app.shell_view,
         ShellView::Threat(ThreatView::Summary)
@@ -1062,20 +1065,20 @@ fn logs_view_routes_j_k_and_page_keys_to_logs_scroll() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Logs;
     app.scroll_offset = 0;
-    app.logs_route.open();
+    app.router.logs_mut().open();
 
     app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-    assert_eq!(app.logs_route.scroll(), 10);
+    assert_eq!(app.router.logs().scroll(), 10);
     assert_eq!(app.scroll_offset, 0);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
-    assert_eq!(app.logs_route.scroll(), 11);
+    assert_eq!(app.router.logs().scroll(), 11);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
-    assert_eq!(app.logs_route.scroll(), 0);
+    assert_eq!(app.router.logs().scroll(), 0);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
-    assert_eq!(app.logs_route.scroll(), usize::MAX);
+    assert_eq!(app.router.logs().scroll(), usize::MAX);
 }
 
 #[test]
@@ -1658,7 +1661,7 @@ fn threat_apply_reducer_returns_apply_effect_without_writing_artifact() {
         apply.patch.patch.pointer("/trustZones/admin"),
         Some(&serde_json::json!("isolated"))
     );
-    assert!(app.pending_threat_patch.is_some());
+    assert!(app.engagement.has_pending_threat_patch());
     assert!(load_persistent_threat_model(&target).is_none());
 }
 
@@ -1849,8 +1852,8 @@ fn tools_command_applies_filter() {
     app.handle_command(ShellCommand::Tools(Some("semgrep".to_string())));
 
     assert_eq!(app.shell_view, ShellView::Tools);
-    assert_eq!(app.tools_route.filter(), Some("semgrep"));
-    assert_eq!(app.tools_route.scroll(), 0);
+    assert_eq!(app.router.tools().filter(), Some("semgrep"));
+    assert_eq!(app.router.tools().scroll(), 0);
     assert!(app
         .log
         .iter()
@@ -3936,13 +3939,16 @@ fn picker_colon_focuses_prompt_and_esc_returns_to_picker() {
     assert!(app.input.is_empty(), "list-focused picker swallows letters");
 
     app.handle_key(KeyEvent::new(KeyCode::Char(':'), KeyModifiers::empty()));
-    assert_eq!(app.planning_picker_route.focus(), PickerFocus::Prompt);
+    assert_eq!(
+        app.engagement.planning_picker().focus(),
+        PickerFocus::Prompt
+    );
 
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
     assert_eq!(app.input, "j", "prompt-focused picker accepts typing");
 
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
-    assert_eq!(app.planning_picker_route.focus(), PickerFocus::List);
+    assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(
@@ -5600,13 +5606,15 @@ fn map_phase_attach_row_opens_file_picker() {
 
     app.open_phase_picker(WorkflowPhase::Map);
     let cursor = app
-        .planning_picker_route
+        .engagement
+        .planning_picker()
         .tasks()
         .iter()
         .position(|row| row.id == PlanningTaskId::AttachFiles)
         .expect("attach files row");
-    app.planning_picker_route.set_cursor(cursor);
-    app.planning_picker_route
+    app.engagement.planning_picker_mut().set_cursor(cursor);
+    app.engagement
+        .planning_picker_mut()
         .selected_mut()
         .insert(PlanningTaskId::AttachFiles);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -5627,17 +5635,20 @@ fn skipped_map_phase_attach_row_does_not_intercept_enter() {
 
     app.open_phase_picker(WorkflowPhase::Map);
     let cursor = app
-        .planning_picker_route
+        .engagement
+        .planning_picker()
         .tasks()
         .iter()
         .position(|row| row.id == PlanningTaskId::AttachFiles)
         .expect("attach files row");
-    app.planning_picker_route.set_cursor(cursor);
-    app.planning_picker_route.selected_mut().clear();
-    app.planning_picker_route
+    app.engagement.planning_picker_mut().set_cursor(cursor);
+    app.engagement.planning_picker_mut().selected_mut().clear();
+    app.engagement
+        .planning_picker_mut()
         .selected_mut()
         .insert(PlanningTaskId::GatherRepoContext);
-    app.planning_picker_route
+    app.engagement
+        .planning_picker_mut()
         .selected_mut()
         .remove(&PlanningTaskId::AttachFiles);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -6010,7 +6021,8 @@ fn phase_command_opens_requested_phase_picker() {
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Confirm));
     assert!(app
-        .planning_picker_route
+        .engagement
+        .planning_picker()
         .tasks()
         .iter()
         .all(|row| row.id.phase() == WorkflowPhase::Confirm));
@@ -6108,7 +6120,8 @@ fn hunt_phase_hides_systems_rows_for_plain_source_targets() {
     app.open_phase_picker(WorkflowPhase::Hunt);
 
     let tasks: BTreeSet<PlanningTaskId> = app
-        .planning_picker_route
+        .engagement
+        .planning_picker()
         .tasks()
         .iter()
         .map(|row| row.id)
@@ -6129,7 +6142,8 @@ fn hunt_phase_keeps_systems_hunt_for_rust_but_hides_c_uaf() {
     app.open_phase_picker(WorkflowPhase::Hunt);
 
     let tasks: BTreeSet<PlanningTaskId> = app
-        .planning_picker_route
+        .engagement
+        .planning_picker()
         .tasks()
         .iter()
         .map(|row| row.id)
@@ -6153,7 +6167,8 @@ fn hunt_phase_keeps_c_family_specific_hunts_for_cpp_source() {
     app.open_phase_picker(WorkflowPhase::Hunt);
 
     let tasks: BTreeSet<PlanningTaskId> = app
-        .planning_picker_route
+        .engagement
+        .planning_picker()
         .tasks()
         .iter()
         .map(|row| row.id)
@@ -6969,18 +6984,18 @@ fn up_arrow_recalls_command_history() {
 #[test]
 fn page_keys_scroll_view_offset() {
     // Help has its own dedicated scroll field — PageDown/PageUp must
-    // advance/retract it so `viewport_lines(..., app.help_route.scroll())` actually
+    // advance/retract it so `viewport_lines(..., app.router.help().scroll())` actually
     // shows the next page. Other views with their own scroll fields
     // (Tools, History, KnowledgeBase, Catalog when expanded) work the
     // same way; views without dedicated fields fall back to scroll_offset.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Help;
     app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-    assert_eq!(app.help_route.scroll(), 10);
+    assert_eq!(app.router.help().scroll(), 10);
     app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-    assert_eq!(app.help_route.scroll(), 20);
+    assert_eq!(app.router.help().scroll(), 20);
     app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::empty()));
-    assert_eq!(app.help_route.scroll(), 10);
+    assert_eq!(app.router.help().scroll(), 10);
 
     // Views without a dedicated scroll field still use scroll_offset.
     app.shell_view = ShellView::Tune;
@@ -7769,7 +7784,7 @@ fn apply_pending_threat_patch_writes_to_disk() {
             .and_then(|v| v.as_str()),
         Some("isolated")
     );
-    assert!(app.pending_threat_patch.is_none());
+    assert!(!app.engagement.has_pending_threat_patch());
 }
 
 #[test]
@@ -7782,7 +7797,7 @@ fn discard_threat_patch_clears_state() {
         unsupported: vec![],
     });
     app.discard_pending_threat_patch();
-    assert!(app.pending_threat_patch.is_none());
+    assert!(!app.engagement.has_pending_threat_patch());
 }
 
 #[test]
@@ -9792,7 +9807,7 @@ fn planning_test_row(id: PlanningTaskId, state: PlanningArtifactState) -> Planni
 
 fn open_test_planning_picker(app: &mut ShellApp, rows: Vec<PlanningTaskRow>) {
     let selected = rows.iter().map(|row| row.id).collect();
-    app.planning_picker_route.open(rows, selected);
+    app.engagement.planning_picker_mut().open(rows, selected);
     app.engagement.set_phase(WorkflowPhase::Map);
     app.shell_view = ShellView::PlanningPicker;
 }
@@ -9841,7 +9856,7 @@ fn confirming_with_nothing_selected_names_the_skipped_phase() {
             PlanningArtifactState::Missing,
         )],
     );
-    app.planning_picker_route.selected_mut().clear();
+    app.engagement.planning_picker_mut().selected_mut().clear();
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
@@ -9929,16 +9944,17 @@ fn planning_picker_number_keys_jump_directly_to_phases_without_running() {
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Confirm));
     assert!(app.engagement.planning_queues_empty());
-    assert_eq!(app.planning_picker_route.focus(), PickerFocus::List);
+    assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
 
-    app.planning_picker_route
+    app.engagement
+        .planning_picker_mut()
         .set_focus(PickerFocus::OptionsPane);
     app.handle_key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()));
 
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(app.engagement.planning_queues_empty());
-    assert_eq!(app.planning_picker_route.focus(), PickerFocus::List);
+    assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
 }
 
 #[test]
@@ -9955,16 +9971,22 @@ fn planning_picker_tab_and_backtab_cycle_list_and_options_focus() {
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
-    assert_eq!(app.planning_picker_route.focus(), PickerFocus::OptionsPane);
+    assert_eq!(
+        app.engagement.planning_picker().focus(),
+        PickerFocus::OptionsPane
+    );
 
     app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-    assert_eq!(app.planning_picker_route.focus(), PickerFocus::List);
+    assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
 
     app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-    assert_eq!(app.planning_picker_route.focus(), PickerFocus::OptionsPane);
+    assert_eq!(
+        app.engagement.planning_picker().focus(),
+        PickerFocus::OptionsPane
+    );
 
     app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
-    assert_eq!(app.planning_picker_route.focus(), PickerFocus::List);
+    assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
 }
 
 #[test]
@@ -10081,32 +10103,34 @@ fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
             planning_test_row(PlanningTaskId::BuildXRay, PlanningArtifactState::Cached),
         ],
     );
-    app.planning_picker_route.selected_mut().clear();
+    app.engagement.planning_picker_mut().selected_mut().clear();
 
     app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
     assert_eq!(
-        app.planning_picker_route.selected().len(),
+        app.engagement.planning_picker().selected().len(),
         2,
         "A selects all like a"
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT));
     assert!(
-        app.planning_picker_route.selected().is_empty(),
+        app.engagement.planning_picker().selected().is_empty(),
         "N clears like n"
     );
 
-    app.planning_picker_route.set_cursor(1); // the cached row
+    app.engagement.planning_picker_mut().set_cursor(1); // the cached row
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
     assert!(
-        app.planning_picker_route
+        app.engagement
+            .planning_picker()
             .rebuild()
             .contains(&PlanningTaskId::BuildXRay),
         "g marks cached rows for rebuild"
     );
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
     assert!(
-        !app.planning_picker_route
+        !app.engagement
+            .planning_picker()
             .rebuild()
             .contains(&PlanningTaskId::BuildXRay),
         "second g returns cached rows to reuse"
@@ -10114,7 +10138,8 @@ fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
 
     app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
     assert!(
-        !app.planning_picker_route
+        !app.engagement
+            .planning_picker()
             .rebuild()
             .contains(&PlanningTaskId::BuildXRay),
         "G is not an unadvertised rebuild alias"

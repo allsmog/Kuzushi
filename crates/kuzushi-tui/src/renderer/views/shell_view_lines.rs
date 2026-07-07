@@ -60,17 +60,21 @@ fn threat_run_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'s
 
 fn system_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
     Some(match &app.shell_view {
-        ShellView::Help => {
-            viewport_lines(help_lines(app, area), area.height, app.help_route.scroll())
-        }
+        ShellView::Help => viewport_lines(
+            help_lines(app, area),
+            area.height,
+            app.router.help().scroll(),
+        ),
         ShellView::Quickstart => viewport_lines(
             quickstart_lines(app, area),
             area.height,
-            app.help_route.scroll(),
+            app.router.help().scroll(),
         ),
-        ShellView::Logs => {
-            viewport_lines(logs_lines(app, area), area.height, app.logs_route.scroll())
-        }
+        ShellView::Logs => viewport_lines(
+            logs_lines(app, area),
+            area.height,
+            app.router.logs().scroll(),
+        ),
         ShellView::Config => config_lines(app, area),
         ShellView::Health => viewport_lines(
             health_lines(app, area),
@@ -80,7 +84,7 @@ fn system_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'stati
         ShellView::Tools => viewport_lines(
             tools_lines(app, area),
             area.height,
-            app.tools_route.scroll(),
+            app.router.tools().scroll(),
         ),
         ShellView::Auth => auth_lines(app, area),
         ShellView::Cost => cost_lines(app, area),
@@ -105,14 +109,14 @@ fn workspace_session_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<
         ShellView::KnowledgeBase => viewport_lines(
             knowledge_base_lines(app, area),
             area.height,
-            app.kb_route.scroll(),
+            app.router.kb().scroll(),
         ),
         ShellView::FailureHandoff => failure_handoff_lines(app, area),
         ShellView::AgentChat => agent_chat_lines(app, area),
         ShellView::History => viewport_lines(
             history_lines(app, area),
             area.height,
-            app.history_route.scroll(),
+            app.router.history().scroll(),
         ),
         ShellView::Story => story_lines(app, area),
         _ => return None,
@@ -122,7 +126,7 @@ fn workspace_session_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<
 fn catalog_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let lines = catalog_lines(app, area);
     if app.catalog_route.is_expanded() {
-        return viewport_lines(lines, area.height, app.modules_route.scroll());
+        return viewport_lines(lines, area.height, app.router.modules().scroll());
     }
     lines
 }

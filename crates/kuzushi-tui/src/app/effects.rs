@@ -58,11 +58,19 @@ pub(crate) struct RunToolLaunch {
     pub(crate) thinking_level: Option<String>,
 }
 
+pub(crate) struct EffectRuntime;
+
+impl EffectRuntime {
+    pub(crate) fn execute(app: &mut ShellApp, effects: Vec<ShellEffect>) {
+        for effect in effects {
+            app.execute_effect(effect);
+        }
+    }
+}
+
 impl ShellApp {
     pub(crate) fn execute_effects(&mut self, effects: Vec<ShellEffect>) {
-        for effect in effects {
-            self.execute_effect(effect);
-        }
+        EffectRuntime::execute(self, effects);
     }
 
     fn execute_effect(&mut self, effect: ShellEffect) {
@@ -180,7 +188,7 @@ impl ShellApp {
 
     fn apply_threat_patch_effect(&mut self, apply: ThreatPatchApply) {
         let target = threat_patch_target_root(apply.target);
-        self.pending_threat_patch = None;
+        self.engagement.clear_pending_threat_patch();
         let mut document = kuzushi_core::load_persistent_threat_model(&target)
             .unwrap_or_else(|| serde_json::json!({}));
         merge_json(&mut document, &apply.patch.patch);
@@ -260,4 +268,19 @@ fn applied_patch_message(
         )
     };
     format!("applied reviewed patch for {alias} to {files}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn effect_runtime_executes_lifecycle_effects() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        EffectRuntime::execute(&mut app, vec![ShellEffect::Quit]);
+
+        assert!(app.should_quit);
+    }
 }

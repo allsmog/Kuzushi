@@ -59,7 +59,7 @@ impl ShellApp {
 
     pub(crate) fn show_history(&mut self) {
         self.shell_view = ShellView::History;
-        self.history_route.open();
+        self.router.history_mut().open();
         let count = self.command_history.len();
         self.log(
             "history",

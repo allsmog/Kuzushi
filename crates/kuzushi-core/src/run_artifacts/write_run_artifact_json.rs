@@ -32,9 +32,20 @@ pub fn write_run_artifact_json(
         .context("run artifact path must not be empty")?;
     record_run_artifact(target, run_id, &artifact)?;
     let object_ref = ContentStore::open(workspace_objects_dir(target))?
-        .put_bytes(ObjectKind::Blob, body.as_bytes())?;
+        .put_bytes(json_artifact_object_kind(leaf), body.as_bytes())?;
     record_run_artifact_object(target, run_id, &artifact, object_ref)?;
     Ok(artifact)
+}
+
+fn json_artifact_object_kind(leaf: &str) -> ObjectKind {
+    match leaf {
+        "context.json" => ObjectKind::ContextSnapshot,
+        "attack-surface.json" => ObjectKind::AttackSurfaceSnapshot,
+        "findings.json" => ObjectKind::FindingObservationBatch,
+        "proof.json" => ObjectKind::ProofSnapshot,
+        "failures.json" => ObjectKind::DiagnosticBundle,
+        _ => ObjectKind::Blob,
+    }
 }
 
 pub fn append_run_trace_step(

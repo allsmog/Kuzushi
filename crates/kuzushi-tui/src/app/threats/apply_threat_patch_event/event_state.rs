@@ -21,7 +21,7 @@ impl ShellApp {
                         patch.unsupported.len()
                     ),
                 );
-                self.pending_threat_patch = Some(patch);
+                self.engagement.set_pending_threat_patch(patch);
                 self.set_completed_activity("threat model", "patch ready for review");
             }
             ThreatPatchEvent::Answer { text } => {

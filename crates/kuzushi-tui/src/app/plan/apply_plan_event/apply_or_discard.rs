@@ -58,7 +58,7 @@ impl ShellApp {
                 value,
             } => self.apply_set_option_plan_change(global, tool, name, value),
             PlanChange::Ask { question } => {
-                self.handle_command(ShellCommand::Ask(question));
+                update_and_execute_effects(self, Msg::Cmd(ShellCommand::Ask(question)));
                 true
             }
             PlanChange::Note { text } => {
@@ -76,16 +76,22 @@ impl ShellApp {
         value: String,
     ) -> bool {
         if let Some(tool_name) = tool {
-            self.handle_command(ShellCommand::Options {
-                tool: Some(tool_name),
-                filter: OptionsFilter::Standard,
-            });
+            update_and_execute_effects(
+                self,
+                Msg::Cmd(ShellCommand::Options {
+                    tool: Some(tool_name),
+                    filter: OptionsFilter::Standard,
+                }),
+            );
         }
-        self.handle_command(ShellCommand::SetOption {
-            global,
-            name,
-            value,
-        });
+        update_and_execute_effects(
+            self,
+            Msg::Cmd(ShellCommand::SetOption {
+                global,
+                name,
+                value,
+            }),
+        );
         true
     }
 

@@ -46,7 +46,7 @@ impl ShellApp {
             self.log("threats", "regen already running; wait for the proposal");
             return None;
         }
-        if self.pending_threat_patch.is_some() {
+        if self.engagement.has_pending_threat_patch() {
             self.log(
                 "threats",
                 "discard the pending patch first with /threats reject",

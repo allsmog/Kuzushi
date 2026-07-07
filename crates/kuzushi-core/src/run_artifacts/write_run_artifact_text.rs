@@ -24,10 +24,18 @@ pub(crate) fn write_run_artifact_text(
     let artifact = RunArtifact::from_declared(&label, &path, Some(&kind))
         .context("run artifact path must not be empty")?;
     record_run_artifact(target, run_id, &artifact)?;
-    let object_ref =
-        ContentStore::open(workspace_objects_dir(target))?.put_bytes(ObjectKind::Blob, body.as_bytes())?;
+    let object_ref = ContentStore::open(workspace_objects_dir(target))?
+        .put_bytes(text_artifact_object_kind(leaf), body.as_bytes())?;
     record_run_artifact_object(target, run_id, &artifact, object_ref)?;
     Ok(artifact)
+}
+
+fn text_artifact_object_kind(leaf: &str) -> ObjectKind {
+    match leaf {
+        "report.md" => ObjectKind::ReportMarkdown,
+        "report.sarif" => ObjectKind::ReportSarif,
+        _ => ObjectKind::Blob,
+    }
 }
 
 fn body_with_trailing_newline(body: &str) -> String {
