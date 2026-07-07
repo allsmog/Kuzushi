@@ -25,6 +25,27 @@ fn registry_runs_wasm_plugin_and_commits_v3_observation() {
     assert_finding_observed(fixture.target.path());
 }
 
+#[test]
+fn sandbox_policy_preserves_requested_max_findings() {
+    let policy = sandbox_policy_from_input(&json!({
+        "maxFindings": 2_500
+    }))
+    .unwrap();
+
+    assert_eq!(policy.max_findings_returned, 2_500);
+}
+
+#[test]
+fn sandbox_policy_rejects_max_findings_that_cannot_fit_policy_type() {
+    let error = sandbox_policy_from_input(&json!({
+        "maxFindings": u64::from(u32::MAX) + 1
+    }))
+    .unwrap_err();
+
+    assert!(error.to_string().contains("maxFindings"));
+    assert!(error.to_string().contains("u32"));
+}
+
 struct WasmPluginFixture {
     target: tempfile::TempDir,
     _plugin_dir: tempfile::TempDir,

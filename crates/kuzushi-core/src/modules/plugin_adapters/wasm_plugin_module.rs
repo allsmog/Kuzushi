@@ -223,11 +223,15 @@ fn sandbox_policy_from_input(input: &Value) -> Result<SandboxPolicy> {
             &["maxFieldBytes", "max_field_bytes"],
             16 * 1024,
         )?,
-        max_findings_returned: optional_u64_input(input, &["maxFindings", "max_findings"], 100)?
-            .min(1_000)
-            .try_into()
-            .unwrap_or(1_000),
+        max_findings_returned: max_findings_input(input)?,
     })
+}
+
+fn max_findings_input(input: &Value) -> Result<u32> {
+    let value = optional_u64_input(input, &["maxFindings", "max_findings"], 100)?;
+    value
+        .try_into()
+        .context("wasm-plugin:analyze maxFindings must fit in u32")
 }
 
 fn optional_u64_input(input: &Value, keys: &[&str], default: u64) -> Result<u64> {

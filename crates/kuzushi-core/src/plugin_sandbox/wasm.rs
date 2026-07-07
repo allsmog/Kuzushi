@@ -16,6 +16,7 @@ use wasmtime::{
 const ABI_MODULE: &str = "kuzushi";
 const ANALYZE_EXPORT: &str = "kuzushi_analyze";
 const MEMORY_EXPORT: &str = "memory";
+const MAX_BLOB_HASH_BYTES: i32 = 128;
 const WASM_PAGE_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,9 +240,17 @@ fn read_guest_hash(
     hash_ptr: i32,
     hash_len: i32,
 ) -> Result<Blake3Hash> {
+    require_guest_hash_len(hash_len)?;
     let hash = read_guest_bytes(caller, hash_ptr, hash_len)?;
     let text = String::from_utf8(hash).context("blob hash import argument must be UTF-8")?;
     Blake3Hash::new(text)
+}
+
+fn require_guest_hash_len(hash_len: i32) -> Result<()> {
+    if !(1..=MAX_BLOB_HASH_BYTES).contains(&hash_len) {
+        bail!("blob hash import argument length is outside the sandbox limit");
+    }
+    Ok(())
 }
 
 fn read_guest_bytes(caller: &mut Caller<'_, WasmHostState>, ptr: i32, len: i32) -> Result<Vec<u8>> {

@@ -63,6 +63,32 @@ fn default_policy_denies_ambient_capabilities() {
 }
 
 #[test]
+fn policy_rejects_resource_limits_above_caps() {
+    let policy = SandboxPolicy {
+        max_output_bytes: 16 * 1024 * 1024 + 1,
+        ..SandboxPolicy::default()
+    };
+
+    let error = policy_validation::validate_sandbox_policy(&policy).unwrap_err();
+
+    assert!(error.to_string().contains("maxOutputBytes"));
+    assert!(error.to_string().contains("must be <="));
+}
+
+#[test]
+fn policy_rejects_unbounded_finding_count() {
+    let policy = SandboxPolicy {
+        max_findings_returned: 10_001,
+        ..SandboxPolicy::default()
+    };
+
+    let error = policy_validation::validate_sandbox_policy(&policy).unwrap_err();
+
+    assert!(error.to_string().contains("maxFindingsReturned"));
+    assert!(error.to_string().contains("must be <="));
+}
+
+#[test]
 fn candidate_must_reference_granted_blob() {
     let grant = GrantedSnapshot::new(BTreeMap::new());
 
@@ -355,7 +381,7 @@ fn wasm_plugin_timeout_is_enforced() {
         module_path,
         policy: SandboxPolicy {
             timeout_ms: 1,
-            fuel_limit: u64::MAX,
+            fuel_limit: 1_000_000_000,
             ..SandboxPolicy::default()
         },
         grant,
@@ -363,6 +389,26 @@ fn wasm_plugin_timeout_is_enforced() {
     .unwrap_err();
 
     assert!(error.to_string().contains("analyze export trapped"));
+}
+
+#[test]
+fn wasm_plugin_cannot_import_wasi() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hash = blob_hash();
+    let module_path = tmp.path().join("plugin.wasm");
+    std::fs::write(&module_path, wasi_import_wasm_plugin_bytes()).unwrap();
+    let grant = GrantedSnapshot::new(BTreeMap::from([(hash, 11)]));
+
+    let error = run_wasm_plugin_invocation(WasmPluginInvocation {
+        module_path,
+        policy: SandboxPolicy::default(),
+        grant,
+    })
+    .unwrap_err();
+
+    let error_chain = format!("{error:?}");
+    assert!(error_chain.contains("instantiate"));
+    assert!(error_chain.contains("wasi_snapshot_preview1"));
 }
 
 fn wasm_plugin_bytes(hash: &str) -> Vec<u8> {
@@ -421,6 +467,29 @@ fn wasm_plugin_bytes(hash: &str) -> Vec<u8> {
         .replace("__DENIED_OUTPUT_LEN__", &denied_output_len.to_string())
         .replace("__OUTPUT_LEN__", &output_len.to_string());
     wat::parse_str(wat).unwrap()
+}
+
+fn wasi_import_wasm_plugin_bytes() -> Vec<u8> {
+    wat::parse_str(
+        r#"
+        (module
+          (import "wasi_snapshot_preview1" "fd_write"
+            (func $fd_write
+              (param i32 i32 i32 i32)
+              (result i32)))
+          (memory (export "memory") 1)
+          (func (export "kuzushi_analyze") (result i64)
+            i32.const 1
+            i32.const 0
+            i32.const 0
+            i32.const 0
+            call $fd_write
+            drop
+            i64.const 0)
+        )
+        "#,
+    )
+    .unwrap()
 }
 
 fn infinite_wasm_plugin_bytes() -> Vec<u8> {
