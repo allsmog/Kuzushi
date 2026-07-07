@@ -57,7 +57,10 @@ impl CoalescedChanges {
 fn full_snapshot_absorbs(change: &WorkspaceChange) -> bool {
     matches!(
         change,
-        WorkspaceChange::ManifestChanged(_)
+        WorkspaceChange::FileChanged(_)
+            | WorkspaceChange::FileDeleted(_)
+            | WorkspaceChange::FileMoved { .. }
+            | WorkspaceChange::ManifestChanged(_)
             | WorkspaceChange::LockfileChanged(_)
             | WorkspaceChange::GitIndexChanged
     )

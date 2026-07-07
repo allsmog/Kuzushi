@@ -15,11 +15,39 @@ fn repeated_file_changes_keep_latest_state() {
 }
 
 #[test]
+fn deleted_then_changed_file_keeps_latest_state() {
+    let changes = coalesce_changes([
+        WorkspaceChange::FileDeleted("src/main.rs".into()),
+        WorkspaceChange::FileChanged("src/main.rs".into()),
+    ]);
+
+    assert_eq!(
+        changes,
+        vec![WorkspaceChange::FileChanged("src/main.rs".into())]
+    );
+}
+
+#[test]
 fn git_head_absorbs_file_level_work() {
     let changes = coalesce_changes([
         WorkspaceChange::FileChanged("src/main.rs".into()),
         WorkspaceChange::GitHeadChanged,
         WorkspaceChange::GitIndexChanged,
+    ]);
+
+    assert_eq!(changes, vec![WorkspaceChange::GitHeadChanged]);
+}
+
+#[test]
+fn git_head_absorbs_later_file_level_work_in_same_batch() {
+    let changes = coalesce_changes([
+        WorkspaceChange::GitHeadChanged,
+        WorkspaceChange::FileChanged("src/main.rs".into()),
+        WorkspaceChange::FileDeleted("src/lib.rs".into()),
+        WorkspaceChange::FileMoved {
+            from: "src/old.rs".into(),
+            to: "src/new.rs".into(),
+        },
     ]);
 
     assert_eq!(changes, vec![WorkspaceChange::GitHeadChanged]);
