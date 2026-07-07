@@ -99,6 +99,13 @@ impl ToolPhase {
 /// built-in tool is stamped with this at registration time so the descriptor
 /// itself carries the truth.
 pub fn canonical_tool_phase(module_id: &str, kind: ModuleKind, tool_name: &str) -> ToolPhase {
+    // Per-tool overrides for modules that legitimately span phases: a database
+    // build is Map even though the module's scan is Hunt, and binary reversing
+    // is a Map-phase prep step. Keeps the descriptor phase consistent with the
+    // curated planning-task list.
+    if let Some(phase) = tool_phase_override(tool_name) {
+        return phase;
+    }
     match module_id {
         "context" | "context-lite" | "recon" | "threat-model" | "workspace" | "x-ray"
         | "entry-points" | "cpg" | "codeql-db" | "threat-intel" | "randori" | "ndiff" => {
@@ -113,6 +120,13 @@ pub fn canonical_tool_phase(module_id: &str, kind: ModuleKind, tool_name: &str) 
         }
         "patch" | "report" => ToolPhase::Fix,
         _ => fallback_tool_phase(kind, tool_name),
+    }
+}
+
+fn tool_phase_override(tool_name: &str) -> Option<ToolPhase> {
+    match tool_name {
+        "codeql:create-db" | "pwn:reverse" => Some(ToolPhase::Map),
+        _ => None,
     }
 }
 

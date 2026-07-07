@@ -4,8 +4,8 @@ use super::{
     ScanPanelState, ScanState, TaintFlowSnapshot, TaskDurationStore, WorkbenchCache, WorkspaceView,
 };
 use kuzushi_core::{
-    findings::ReviewDecisionRecord, AgenticSastReport, CarliniThreatHuntReport, Finding,
-    ProgramScope, ScanProgress,
+    findings::ReviewDecisionRecord, workspace::ToolShelf, AgenticSastReport,
+    CarliniThreatHuntReport, Finding, ProgramScope, ScanProgress,
 };
 
 #[derive(Debug)]
@@ -32,6 +32,9 @@ pub struct DomainCache {
     findings: Vec<Finding>,
     findings_total: usize,
     review_decisions: Vec<ReviewDecisionRecord>,
+    /// Cached "YOUR TOOLS" shelf (favorites + recents). Loaded from disk on
+    /// target wiring and favorite toggles — never read per frame.
+    tool_shelf: ToolShelf,
 }
 
 impl DomainCache {
@@ -64,7 +67,16 @@ impl DomainCache {
             findings: Vec::new(),
             findings_total: 0,
             review_decisions: Vec::new(),
+            tool_shelf: ToolShelf::default(),
         }
+    }
+
+    pub(crate) fn tool_shelf(&self) -> &ToolShelf {
+        &self.tool_shelf
+    }
+
+    pub(crate) fn set_tool_shelf(&mut self, shelf: ToolShelf) {
+        self.tool_shelf = shelf;
     }
 
     pub(crate) fn context_view(&self) -> &ContextSnapshotView {

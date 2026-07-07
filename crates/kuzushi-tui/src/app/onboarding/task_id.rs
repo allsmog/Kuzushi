@@ -252,4 +252,38 @@ mod tests {
         assert_eq!(PlanningTaskId::ScanSemgrep.required_cli(), Some("semgrep"));
         assert_eq!(PlanningTaskId::TriageFindings.required_cli(), None);
     }
+
+    /// Drift guard: the curated planning-task phase must agree with the
+    /// canonical `ToolPhase` stamped on each task's registry tool. This proves
+    /// the descriptor phase field and the walker's task list are one truth.
+    #[test]
+    fn planning_task_phase_agrees_with_descriptor_phase() {
+        use kuzushi_core::modules::ToolPhase;
+        use kuzushi_core::V2Config;
+
+        let app = crate::ShellApp::new(V2Config::default(), None);
+        let registry = app.registry();
+
+        for task in PlanningTaskId::ALL.iter().copied() {
+            if task.is_inline_action() {
+                continue; // inline actions (e.g. attach) are not registry tools
+            }
+            let Some(descriptor) = registry.resolve_tool(task.tool_name()) else {
+                continue; // tool not registered in this build (optional adapters)
+            };
+            let expected = match task.phase() {
+                WorkflowPhase::Map => ToolPhase::Map,
+                WorkflowPhase::Hunt => ToolPhase::Hunt,
+                WorkflowPhase::Confirm => ToolPhase::Confirm,
+                WorkflowPhase::Fix => ToolPhase::Fix,
+            };
+            assert_eq!(
+                descriptor.phase,
+                expected,
+                "phase drift for task {:?} (tool {})",
+                task,
+                task.tool_name()
+            );
+        }
+    }
 }

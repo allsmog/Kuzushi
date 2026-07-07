@@ -526,6 +526,12 @@ impl ShellApp {
 
     fn open_tools_view(&mut self, filter: Option<String>) {
         self.set_shell_view(ShellView::Tools);
+        self.reload_tool_shelf();
+        if let Some(expr) = filter.as_deref() {
+            if let Err(error) = kuzushi_core::modules::ToolQuery::parse(expr) {
+                self.log("tool", format!("invalid query {expr:?}: {error}"));
+            }
+        }
         self.router.tools_mut().open(filter.clone());
         let model = crate::ui_view_models::tools_model(self);
         let suffix = filter
