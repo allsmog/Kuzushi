@@ -2,13 +2,12 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://kuzushi.dev/schemas/run.proof.schema.json",
   "title": "Kuzushi Run Proof Snapshot",
-  "description": "Canonical schema for .kuzushi/runs/<runId>/proof.json. Rich producer snapshots may be static proof summaries or verification proof results; deterministic absence markers use the shared run snapshot marker fields.",
+  "description": "Derived export schema for .kuzushi/runs/<runId>/proof.json. Producer snapshots may be static proof summaries or verification proof results; the file is absent until a producer emits it.",
   "type": "object",
   "additionalProperties": true,
   "properties": {
     "runId": { "type": "string" },
-    "status": { "$ref": "#/definitions/runStatus" },
-    "runStatus": { "$ref": "#/definitions/runStatus" },
+    "status": { "$ref": "#/definitions/status" },
     "summary": { "type": "string" },
     "artifacts": { "type": "array" },
     "warnings": {
@@ -34,7 +33,7 @@
     "results": { "type": "array" }
   },
   "definitions": {
-    "runStatus": {
+    "status": {
       "type": "string",
       "enum": ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"]
     },

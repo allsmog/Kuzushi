@@ -620,47 +620,39 @@ mod tests {
     }
 
     #[test]
-    fn run_context_schema_covers_marker_and_rich_snapshot_keys() {
+    fn run_context_schema_covers_rich_snapshot_keys() {
         let schema = run_context_schema();
-        let marker = representative_missing_context_snapshot();
         let rich = representative_rich_context_snapshot();
 
-        assert_snapshot_marker_fields_are_declared(&schema);
-        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
         assert_serialized_fields_are_declared(&schema, &rich);
     }
 
     #[test]
-    fn run_attack_surface_schema_covers_marker_and_rich_snapshot_keys() {
+    fn run_attack_surface_schema_covers_rich_snapshot_keys() {
         let schema = run_attack_surface_schema();
-        let marker = representative_missing_attack_surface_snapshot();
         let rich = representative_rich_attack_surface_snapshot();
 
-        assert_snapshot_marker_fields_are_declared(&schema);
-        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
         assert_serialized_fields_are_declared(&schema, &rich);
     }
 
     #[test]
-    fn run_threat_model_schema_covers_marker_and_rich_snapshot_keys() {
+    fn run_threat_model_schema_covers_rich_snapshot_keys() {
         let schema = run_threat_model_schema();
-        let marker = representative_missing_threat_model_snapshot();
         let rich = representative_rich_threat_model_snapshot();
 
-        assert_snapshot_marker_fields_are_declared(&schema);
-        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
         assert_serialized_fields_are_declared(&schema, &rich);
     }
 
     #[test]
-    fn run_recommendations_schema_covers_marker_and_rich_snapshot_keys() {
+    fn run_recommendations_schema_covers_rich_snapshot_keys() {
         let schema = run_recommendations_schema();
-        let marker = representative_missing_recommendations_snapshot();
         let rich = representative_rich_recommendations_snapshot();
         let enveloped = representative_data_wrapped_recommendations_snapshot();
 
-        assert_snapshot_marker_fields_are_declared(&schema);
-        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
         assert_serialized_fields_are_declared(&schema, &rich);
         assert_serialized_fields_are_declared(&schema, &enveloped);
         assert_recommendation_entries_match_schema(&schema, &rich);
@@ -669,37 +661,31 @@ mod tests {
     }
 
     #[test]
-    fn run_strategy_schema_covers_marker_and_rich_snapshot_keys() {
+    fn run_strategy_schema_covers_rich_snapshot_keys() {
         let schema = run_strategy_schema();
-        let marker = representative_missing_strategy_snapshot();
         let rich = representative_rich_strategy_snapshot();
 
-        assert_snapshot_marker_fields_are_declared(&schema);
-        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
         assert_serialized_fields_are_declared(&schema, &rich);
         assert_strategy_proposal_entries_match_schema(&schema, &rich);
     }
 
     #[test]
-    fn run_findings_schema_covers_marker_and_rich_snapshot_keys() {
+    fn run_findings_schema_covers_rich_snapshot_keys() {
         let schema = run_findings_schema();
-        let marker = representative_missing_findings_snapshot();
         let rich = representative_rich_findings_snapshot();
 
-        assert_snapshot_marker_fields_are_declared(&schema);
-        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
         assert_finding_entries_match_schema(&schema, &rich);
     }
 
     #[test]
-    fn run_proof_schema_covers_marker_and_rich_snapshot_keys() {
+    fn run_proof_schema_covers_rich_snapshot_keys() {
         let schema = run_proof_schema();
-        let marker = representative_missing_proof_snapshot();
         let rich = representative_rich_proof_snapshot();
         let verification = representative_verification_proof_snapshot();
 
-        assert_snapshot_marker_fields_are_declared(&schema);
-        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
         assert_serialized_fields_are_declared(&schema, &rich);
         assert_serialized_fields_are_declared(&schema, &verification);
         assert_proof_finding_entries_match_schema(&schema, &rich);
@@ -4056,18 +4042,6 @@ mod tests {
             .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:abc")
     }
 
-    fn representative_missing_context_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "runId": "run-context",
-            "status": "skipped",
-            "runStatus": "completed",
-            "summary": "No context snapshot was recorded for this run.",
-            "artifacts": [],
-            "warnings": ["No context snapshot was recorded for this run."],
-            "errors": []
-        })
-    }
-
     fn representative_rich_context_snapshot() -> serde_json::Value {
         serde_json::json!({
             "filesIndexed": 42,
@@ -4081,18 +4055,6 @@ mod tests {
                 "dataStores": [{"id": "postgres"}],
                 "backgroundJobs": [{"id": "sync"}]
             }
-        })
-    }
-
-    fn representative_missing_attack_surface_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "runId": "run-attack-surface",
-            "status": "skipped",
-            "runStatus": "completed",
-            "summary": "No attack-surface snapshot was recorded for this run.",
-            "artifacts": [],
-            "warnings": ["No attack-surface snapshot was recorded for this run."],
-            "errors": []
         })
     }
 
@@ -4116,18 +4078,6 @@ mod tests {
                     "reasons": ["auth boundary"]
                 }
             }]
-        })
-    }
-
-    fn representative_missing_threat_model_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "runId": "run-threat-model",
-            "status": "skipped",
-            "runStatus": "completed",
-            "summary": "No threat-model snapshot was recorded for this run.",
-            "artifacts": [],
-            "warnings": ["No threat-model snapshot was recorded for this run."],
-            "errors": []
         })
     }
 
@@ -4157,18 +4107,6 @@ mod tests {
             "degradation": {
                 "mode": "deterministic-no-runtime"
             }
-        })
-    }
-
-    fn representative_missing_recommendations_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "runId": "run-recommendations",
-            "status": "skipped",
-            "runStatus": "completed",
-            "summary": "No module recommendations were recorded for this run.",
-            "artifacts": [],
-            "warnings": ["No module recommendations were recorded for this run."],
-            "errors": []
         })
     }
 
@@ -4203,20 +4141,7 @@ mod tests {
     fn representative_data_wrapped_recommendations_snapshot() -> serde_json::Value {
         serde_json::json!({
             "status": "completed",
-            "runStatus": "completed",
             "data": representative_rich_recommendations_snapshot()
-        })
-    }
-
-    fn representative_missing_strategy_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "runId": "run-strategy",
-            "status": "skipped",
-            "runStatus": "completed",
-            "summary": "No strategy proposals were recorded for this run.",
-            "artifacts": [],
-            "warnings": ["No strategy proposals were recorded for this run."],
-            "errors": []
         })
     }
 
@@ -4255,18 +4180,6 @@ mod tests {
         })
     }
 
-    fn representative_missing_findings_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "runId": "run-findings",
-            "status": "skipped",
-            "runStatus": "completed",
-            "summary": "No findings snapshot was recorded for this run.",
-            "artifacts": [],
-            "warnings": ["No findings snapshot was recorded for this run."],
-            "errors": []
-        })
-    }
-
     fn representative_rich_findings_snapshot() -> serde_json::Value {
         serde_json::json!([{
             "id": "F-1",
@@ -4289,18 +4202,6 @@ mod tests {
             "remediation": "parameterize the query",
             "references": ["https://cwe.mitre.org/data/definitions/89.html"]
         }])
-    }
-
-    fn representative_missing_proof_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "runId": "run-proof",
-            "status": "skipped",
-            "runStatus": "completed",
-            "summary": "No proof snapshot was recorded for this run.",
-            "artifacts": [],
-            "warnings": ["No proof snapshot was recorded for this run."],
-            "errors": []
-        })
     }
 
     fn representative_rich_proof_snapshot() -> serde_json::Value {
@@ -4418,11 +4319,6 @@ mod tests {
                 "schema still declares obsolete field {field}"
             );
         }
-    }
-
-    fn assert_snapshot_marker_fields_are_declared(schema: &serde_json::Value) {
-        assert_schema_declares_fields(schema, &["runId", "status", "runStatus"]);
-        assert_schema_declares_no_fields(schema, &["run_id"]);
     }
 
     fn assert_canonical_artifact_schema(schema: &serde_json::Value) {
