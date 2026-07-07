@@ -1100,117 +1100,9 @@ mod tests {
     }
 
     #[test]
-    fn load_run_artifacts_rejects_obsolete_manifest_artifact_fields() {
+    fn load_run_artifacts_rejects_unknown_manifest_artifact_field() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-artifact-aliases";
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
-                .complete(),
-        )
-        .unwrap();
-        fs::write(
-            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "runId": run_id,
-                "artifacts": [
-                    {
-                        "name": " report json ",
-                        "report_json_path": " reports/report.json ",
-                        "type": " JSON "
-                    },
-                    {
-                        "title": " prompts ",
-                        "prompts_dir": " .kuzushi/prompts ",
-                        "type": " Directory "
-                    }
-                ]
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
-        let message = error.to_string();
-
-        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete name alias"));
-        assert!(message.contains("artifacts.json"));
-    }
-
-    #[test]
-    fn load_run_artifacts_rejects_redundant_obsolete_manifest_artifact_fields() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-matching-artifact-aliases";
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
-                .complete(),
-        )
-        .unwrap();
-        fs::write(
-            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "runId": run_id,
-                "artifacts": [
-                    {
-                        "label": " run metadata ",
-                        "name": "run metadata",
-                        "path": " run.json ",
-                        "filePath": "run.json",
-                        "kind": " JSON ",
-                        "type": "json"
-                    }
-                ]
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
-        let message = error.to_string();
-
-        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete name alias"));
-        assert!(message.contains("artifacts.json"));
-    }
-
-    #[test]
-    fn load_run_artifacts_rejects_obsolete_manifest_artifact_label_field() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-conflicting-artifact-label-aliases";
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
-                .complete(),
-        )
-        .unwrap();
-        fs::write(
-            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "runId": run_id,
-                "artifacts": [
-                    {
-                        "label": "run metadata",
-                        "name": "runtime trace",
-                        "path": "run.json",
-                        "kind": "json"
-                    }
-                ]
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
-        let message = error.to_string();
-
-        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete name alias"));
-        assert!(message.contains("artifacts.json"));
-    }
-
-    #[test]
-    fn load_run_artifacts_rejects_obsolete_manifest_artifact_path_field() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-conflicting-artifact-path-aliases";
+        let run_id = "run-manifest-unknown-artifact-field";
         write_run_summary(
             tmp.path(),
             &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
@@ -1237,14 +1129,15 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete filePath alias"));
+        assert!(message.contains("Artifact manifest is not canonical"));
+        assert!(message.contains("unknown field `filePath`"));
         assert!(message.contains("artifacts.json"));
     }
 
     #[test]
-    fn load_run_artifacts_rejects_obsolete_manifest_artifact_kind_field() {
+    fn load_run_artifacts_rejects_unknown_manifest_object_field() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-conflicting-artifact-kind-aliases";
+        let run_id = "run-manifest-unknown-object-field";
         write_run_summary(
             tmp.path(),
             &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
@@ -1255,14 +1148,17 @@ mod tests {
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "runId": run_id,
-                "artifacts": [
-                    {
-                        "label": "run metadata",
-                        "path": "run.json",
-                        "kind": "json",
-                        "type": "jsonl"
-                    }
-                ]
+                "artifacts": [],
+                "objects": [{
+                    "label": "context snapshot",
+                    "path": "context.json",
+                    "objectRef": {
+                        "kind": "ContextSnapshot",
+                        "hash": "blake3:abc",
+                        "sizeBytes": 12
+                    },
+                    "legacy": true
+                }]
             }))
             .unwrap(),
         )
@@ -1271,14 +1167,15 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete type alias"));
+        assert!(message.contains("Artifact manifest is not canonical"));
+        assert!(message.contains("unknown field `legacy`"));
         assert!(message.contains("artifacts.json"));
     }
 
     #[test]
     fn load_run_artifacts_rejects_non_string_manifest_artifact_label() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-non-string-artifact-label-alias";
+        let run_id = "run-manifest-non-string-artifact-label";
         write_run_summary(
             tmp.path(),
             &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
@@ -1309,75 +1206,9 @@ mod tests {
     }
 
     #[test]
-    fn load_run_artifacts_rejects_obsolete_non_string_manifest_artifact_path_field() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-non-string-artifact-path-alias";
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
-                .complete(),
-        )
-        .unwrap();
-        fs::write(
-            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "runId": run_id,
-                "artifacts": [
-                    {
-                        "label": "run metadata",
-                        "filePath": ["run.json"],
-                        "kind": "json"
-                    }
-                ]
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
-        let message = error.to_string();
-
-        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete filePath alias"));
-        assert!(message.contains("artifacts.json"));
-    }
-
-    #[test]
-    fn load_run_artifacts_rejects_obsolete_non_string_manifest_artifact_kind_field() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-non-string-artifact-kind-alias";
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
-                .complete(),
-        )
-        .unwrap();
-        fs::write(
-            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "runId": run_id,
-                "artifacts": [
-                    {
-                        "label": "run metadata",
-                        "path": "run.json",
-                        "type": ["json"]
-                    }
-                ]
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
-        let message = error.to_string();
-
-        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete type alias"));
-        assert!(message.contains("artifacts.json"));
-    }
-
-    #[test]
     fn load_run_artifacts_rejects_missing_manifest_artifact_label() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-missing-artifact-label-alias";
+        let run_id = "run-manifest-missing-artifact-label";
         write_run_summary(
             tmp.path(),
             &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
@@ -1411,7 +1242,7 @@ mod tests {
     #[test]
     fn load_run_artifacts_rejects_missing_manifest_artifact_path() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-missing-artifact-path-alias";
+        let run_id = "run-manifest-missing-artifact-path";
         write_run_summary(
             tmp.path(),
             &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
@@ -1443,7 +1274,7 @@ mod tests {
     #[test]
     fn load_run_artifacts_rejects_missing_manifest_artifact_kind() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-missing-artifact-kind-alias";
+        let run_id = "run-manifest-missing-artifact-kind";
         write_run_summary(
             tmp.path(),
             &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
@@ -1822,9 +1653,9 @@ mod tests {
     }
 
     #[test]
-    fn load_run_artifacts_rejects_obsolete_manifest_run_id_field() {
+    fn load_run_artifacts_rejects_unknown_manifest_field() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-blank-snake-run-id";
+        let run_id = "run-manifest-unknown-field";
         write_run_summary(
             tmp.path(),
             &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
@@ -1834,7 +1665,8 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": "   ",
+                "runId": run_id,
+                "run_id": "other-run",
                 "artifacts": []
             }))
             .unwrap(),
@@ -1844,7 +1676,8 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest uses obsolete run_id alias; use runId"));
+        assert!(message.contains("Artifact manifest is not canonical"));
+        assert!(message.contains("unknown field `run_id`"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1905,34 +1738,6 @@ mod tests {
 
         assert_eq!(artifacts.len(), 1);
         assert_eq!(artifacts[0].label, "run metadata");
-    }
-
-    #[test]
-    fn load_run_artifacts_rejects_obsolete_manifest_run_id_even_when_run_id_exists() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-obsolete-run-id";
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
-                .complete(),
-        )
-        .unwrap();
-        fs::write(
-            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "runId": run_id,
-                "run_id": "other-run",
-                "artifacts": []
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
-        let message = error.to_string();
-
-        assert!(message.contains("Artifact manifest uses obsolete run_id alias; use runId"));
-        assert!(message.contains("artifacts.json"));
     }
 
     #[test]

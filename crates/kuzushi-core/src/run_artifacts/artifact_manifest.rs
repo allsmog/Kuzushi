@@ -8,7 +8,7 @@ use crate::content_store::ObjectRef;
 use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunArtifactManifest {
     pub run_id: String,
     pub artifacts: Vec<RunArtifact>,
@@ -17,7 +17,7 @@ pub struct RunArtifactManifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunArtifactObject {
     pub label: String,
     pub path: String,
@@ -104,13 +104,17 @@ fn parse_manifest_body(text: &str, path: &Path) -> Result<RunArtifactManifest> {
     if !value.is_object() {
         anyhow::bail!("Artifact manifest is not a JSON object: {}", path.display());
     }
-    require_manifest_canonical_only(&value, path)?;
     require_manifest_run_id(&value, path)?;
     require_manifest_artifacts_array(&value, path)?;
     require_manifest_artifact_objects(&value, path)?;
     require_manifest_artifact_fields(&value, path)?;
     require_known_manifest_artifact_metadata(&value, path)?;
-    serde_json::from_value(value).with_context(|| format!("Could not parse {}", path.display()))
+    serde_json::from_value(value).map_err(|error| {
+        anyhow::anyhow!(
+            "Artifact manifest is not canonical: {error}: {}",
+            path.display()
+        )
+    })
 }
 
 fn require_manifest_run_id(value: &Value, path: &Path) -> Result<()> {
@@ -192,58 +196,6 @@ fn require_manifest_artifact_string(
             path.display()
         ),
     }
-}
-
-fn require_manifest_canonical_only(value: &Value, path: &Path) -> Result<()> {
-    let Some(object) = value.as_object() else {
-        return Ok(());
-    };
-    if object.contains_key("run_id") {
-        anyhow::bail!(
-            "Artifact manifest uses obsolete run_id alias; use runId: {}",
-            path.display()
-        );
-    }
-    let Some(artifacts) = object.get("artifacts").and_then(Value::as_array) else {
-        return Ok(());
-    };
-    for (index, artifact) in artifacts.iter().enumerate() {
-        reject_obsolete_artifact_fields(artifact, index, path)?;
-    }
-    Ok(())
-}
-
-fn reject_obsolete_artifact_fields(artifact: &Value, index: usize, path: &Path) -> Result<()> {
-    let Some(object) = artifact.as_object() else {
-        return Ok(());
-    };
-    for field in [
-        "name",
-        "title",
-        "file",
-        "filePath",
-        "file_path",
-        "reportPath",
-        "report_path",
-        "reportJsonPath",
-        "report_json_path",
-        "scopePath",
-        "scope_path",
-        "dir",
-        "outputDir",
-        "output_dir",
-        "promptsDir",
-        "prompts_dir",
-        "type",
-    ] {
-        if object.contains_key(field) {
-            anyhow::bail!(
-                "Artifact manifest artifact at index {index} uses obsolete {field} alias: {}",
-                path.display()
-            );
-        }
-    }
-    Ok(())
 }
 
 fn require_known_manifest_artifact_metadata(value: &Value, path: &Path) -> Result<()> {
