@@ -154,6 +154,7 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@v2
+      - run: cargo clean -p kuzushi-tui
       - run: cargo test --workspace
       - run: cargo build --workspace
       - run: cargo build -p kuzushi-cli --release
