@@ -166,6 +166,10 @@ impl ShellApp {
         }
         self.load_persisted_history();
         self.apply_initial_onboarding_phase();
+        // Align the autonomy dial to where the engagement actually is, never
+        // above the project cap. Must run after findings load so the derived
+        // journey phase reflects workspace reality.
+        self.initialize_default_autonomy();
     }
 
     fn apply_session_model(&mut self, selected_model_index: usize, ready_default: Option<usize>) {

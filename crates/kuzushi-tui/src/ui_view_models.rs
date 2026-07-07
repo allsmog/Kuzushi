@@ -170,8 +170,8 @@ pub(crate) use home_cockpit::{
     HomeRunArtifactChip, HomeRunCard, HomeTopRiskRow,
 };
 pub(crate) use journey::{
-    journey_footer_segment, journey_model, journey_phase_segment, JourneyModel, JourneyPhaseState,
-    JourneyPhaseStatus, JourneyPhaseTone,
+    autonomy_footer_segment, journey_footer_segment, journey_model, journey_phase_segment,
+    JourneyModel, JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use keymap::{keymap_model, KeymapModel};

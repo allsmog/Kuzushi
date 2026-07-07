@@ -88,6 +88,12 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         description: "open a specific engagement phase picker",
     },
     ShellCommandSpec {
+        command: "autonomy [recon|hunt|confirm|fix]",
+        aliases: &["autonomy", "/autonomy", "posture", "/posture"],
+        category: ShellCommandCategory::Navigation,
+        description: "read/set the autonomy dial (also Ctrl+Up/Down) — the tool-dispatch ceiling",
+    },
+    ShellCommandSpec {
         command: "logs",
         aliases: &["/logs", "log", "transcript", "/transcript"],
         category: ShellCommandCategory::Navigation,

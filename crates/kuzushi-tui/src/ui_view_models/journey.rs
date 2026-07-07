@@ -318,6 +318,21 @@ pub fn journey_footer_segment(app: &ShellApp) -> Option<String> {
     Some(journey_phase_segment(journey.current))
 }
 
+/// The always-visible autonomy dial chip. Target-gated exactly like the phase
+/// chip (no engagement, no dial). Signifier-honest: the glyph and word derive
+/// only from `app.autonomy()`; the trailing `⚠` appears only when the posture
+/// ceiling sits below the current journey phase, meaning the dial is actively
+/// throttling how far the walker may run.
+pub fn autonomy_footer_segment(app: &ShellApp) -> Option<String> {
+    let journey = journey_model(app)?;
+    let posture = app.autonomy();
+    let mut segment = format!("⛭ {} {}", posture.kanji(), posture.label());
+    if posture.ceiling() < journey.current {
+        segment.push_str(" ⚠");
+    }
+    Some(segment)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

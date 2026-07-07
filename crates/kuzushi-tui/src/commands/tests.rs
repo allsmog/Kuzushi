@@ -836,6 +836,7 @@ mod tests {
             ShellCommand::Onboarding => "onboarding",
             ShellCommand::Next => "next",
             ShellCommand::Phase(_) => "phase",
+            ShellCommand::Autonomy(_) => "autonomy",
             ShellCommand::Logs => "logs",
             ShellCommand::Target(_) => "target",
             ShellCommand::TargetRevision(_) => "target-revision",
