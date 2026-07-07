@@ -4,7 +4,7 @@ assertion_line: 33
 ---
  KUZUSHI › modules · mode:shell · target:none · ctx:not built · model:unconfigured
 
-MODULES · 42 modules
+MODULES · 38 modules
 
 > NEXT Run sast — Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
 
@@ -17,14 +17,11 @@ MODULES · 42 modules
   iac-scan                Scan IaC manifests for security misconfigurations.
   license-scan            Scan package manifests for missing or copyleft license declarations.
   offense-review          Model-backed offensive review tools over existing threat-model artifacts.
-  prompt-armor            LLM red-team wrapper around promptarmor-plugin attack suites and mutations.
   sast                    Full SAST pipeline: context, scanners, AI triage, verification, patch, and report.
   secret-scan             Fast deterministic secret scanner over source files.
   semgrep                 Native SAST path using semgrep JSON output.
   taint-iris-next         Bounded IRIS-style taint analysis with deterministic evidence extraction and agent review.
-  tob                     Audit wrapper around the @kuzushi/tob-skills Claude Code plugin collection.
   variant                 Lift exploit patterns from confirmed findings and hunt sibling variants.
-  vuln-scout              Whitebox pentest wrapper around the @kuzushi/vuln-scout Claude Code plugin.
   wasm-plugin             Run a capability-scoped Wasm analyzer against the indexed source snapshot.
 
 -- MAP build context, recon, inventory, and threat model first ---------------------------------------------------------
@@ -48,7 +45,6 @@ MODULES · 42 modules
   module-recommender      Recommend next Kuzushi module tools from local repository, attack-surface, threat-model...
   router                  Per-role model routing. Set MODEL_<ROLE> via `setg` to override models.toml.
   sbom-scan               Extract a deterministic dependency inventory from package manifests.
-  shinsa                  Compliance assessment wrapper around the shinsa-plugin Claude Code plugin.
 
 -- CONFIRM/FIX triage, verify, patch, and report findings --------------------------------------------------------------
   android-apk             Unpack, decompile, and analyze Android APKs so Kuzushi's existing Java/Kotlin SAST engines...
