@@ -111,7 +111,7 @@ fn interruption_detail_lines(
 }
 
 fn budget_snapshot_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
-    let Some(halt) = app.advisory.budget_halt.as_ref() else {
+    let Some(halt) = app.advisory().budget_halt.as_ref() else {
         return vec![detail(
             "budget",
             "no live halt object; see cost for current totals",

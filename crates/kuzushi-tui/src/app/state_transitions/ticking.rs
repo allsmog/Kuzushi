@@ -113,7 +113,7 @@ impl ShellApp {
         let source = source.into();
         let message = message.into();
         self.log("throttle", format!("{source}: {message}"));
-        self.advisory.throttle = Some(ThrottleAdvisory {
+        self.advisory_mut().throttle = Some(ThrottleAdvisory {
             source,
             message,
             since: Instant::now(),
@@ -121,7 +121,7 @@ impl ShellApp {
     }
 
     pub fn clear_throttle(&mut self) {
-        self.advisory.throttle = None;
+        self.advisory_mut().throttle = None;
     }
 
     /// Surface a transient error banner (red) and keep the transcript record.
@@ -154,7 +154,7 @@ impl ShellApp {
             NoticeSeverity::Warn | NoticeSeverity::Success => source.as_str(),
         };
         self.log(prefix, message.clone());
-        self.advisory.notice = Some(Notice {
+        self.advisory_mut().notice = Some(Notice {
             source,
             message,
             severity,
@@ -163,11 +163,11 @@ impl ShellApp {
     }
 
     pub fn clear_notice(&mut self) {
-        self.advisory.notice = None;
+        self.advisory_mut().notice = None;
     }
 
     pub fn is_budget_halted(&self) -> bool {
-        self.advisory.budget_halt.is_some()
+        self.advisory().budget_halt.is_some()
     }
 
     pub fn record_cost(&mut self, cost_usd: f64) {
@@ -187,8 +187,8 @@ enum AdvisoryKind {
 impl AdvisoryKind {
     fn since(self, app: &ShellApp) -> Option<Instant> {
         match self {
-            AdvisoryKind::Throttle => app.advisory.throttle.as_ref().map(|t| t.since),
-            AdvisoryKind::Notice => app.advisory.notice.as_ref().map(|n| n.since),
+            AdvisoryKind::Throttle => app.advisory().throttle.as_ref().map(|t| t.since),
+            AdvisoryKind::Notice => app.advisory().notice.as_ref().map(|n| n.since),
         }
     }
 
@@ -201,8 +201,8 @@ impl AdvisoryKind {
 
     fn clear(self, app: &mut ShellApp) {
         match self {
-            AdvisoryKind::Throttle => app.advisory.throttle = None,
-            AdvisoryKind::Notice => app.advisory.notice = None,
+            AdvisoryKind::Throttle => app.advisory_mut().throttle = None,
+            AdvisoryKind::Notice => app.advisory_mut().notice = None,
         }
     }
 }

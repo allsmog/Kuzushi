@@ -7863,19 +7863,19 @@ fn arm_window_expires_via_tick() {
 fn throttle_advisory_set_and_clear() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_throttle("openai", "429: backing off 2s");
-    assert!(app.advisory.throttle.is_some());
+    assert!(app.advisory().throttle.is_some());
     app.clear_throttle();
-    assert!(app.advisory.throttle.is_none());
+    assert!(app.advisory().throttle.is_none());
 }
 
 #[test]
 fn throttle_advisory_expires_via_tick() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_throttle("openai", "stale");
-    app.advisory.throttle.as_mut().unwrap().since =
+    app.advisory_mut().throttle.as_mut().unwrap().since =
         Instant::now() - (THROTTLE_STALE_AFTER + Duration::from_secs(1));
     app.tick();
-    assert!(app.advisory.throttle.is_none());
+    assert!(app.advisory().throttle.is_none());
 }
 
 #[test]
@@ -7883,7 +7883,7 @@ fn scan_failure_sets_error_notice_and_keeps_log() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.apply_scan_failed("semgrep not found".to_string());
 
-    let notice = app.advisory.notice.as_ref().expect("notice surfaced");
+    let notice = app.advisory().notice.as_ref().expect("notice surfaced");
     assert_eq!(notice.severity, crate::NoticeSeverity::Error);
     assert!(notice.message.contains("semgrep not found"));
     assert!(
@@ -7901,7 +7901,7 @@ fn esc_dismisses_notice_before_going_back() {
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert!(app.advisory.notice.is_none(), "notice dismissed");
+    assert!(app.advisory().notice.is_none(), "notice dismissed");
     assert_eq!(
         app.shell_view,
         ShellView::Tools,
@@ -7924,10 +7924,10 @@ fn empty_back_stack_returns_to_workbench() {
 fn notice_auto_clears_after_stale_window() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_error_notice("tool", "stale");
-    app.advisory.notice.as_mut().unwrap().since =
+    app.advisory_mut().notice.as_mut().unwrap().since =
         Instant::now() - (NOTICE_STALE_AFTER + Duration::from_secs(1));
     assert!(app.tick());
-    assert!(app.advisory.notice.is_none());
+    assert!(app.advisory().notice.is_none());
 }
 
 #[test]
@@ -7936,7 +7936,11 @@ fn multiline_paste_sets_warn_notice() {
     paste_text(&mut app, "first\nsecond\nthird");
 
     assert_eq!(app.input(), "first", "only the first line is kept");
-    let notice = app.advisory.notice.as_ref().expect("paste notice surfaced");
+    let notice = app
+        .advisory()
+        .notice
+        .as_ref()
+        .expect("paste notice surfaced");
     assert_eq!(notice.severity, crate::NoticeSeverity::Warn);
     assert!(notice.message.contains("dropped 2"));
 }
@@ -8498,7 +8502,7 @@ fn budget_halt_triggers_when_cost_exceeds_cap() {
     app.session_mut().set_session_budget_usd(Some(0.10));
     app.record_cost(0.12);
     assert!(app.is_budget_halted());
-    let halt = app.advisory.budget_halt.as_ref().unwrap();
+    let halt = app.advisory().budget_halt.as_ref().unwrap();
     assert!(halt.spent_usd >= 0.12);
     assert_eq!(halt.limit_usd, 0.10);
 }
@@ -8837,18 +8841,18 @@ fn scan_completion_raises_success_banner_when_operator_is_elsewhere() {
     app.shell_view = ShellView::Workbench;
     let effects = app.apply_scan_finished("r-scan".to_string(), 3);
     EffectRuntime::execute(&mut app, effects);
-    let notice = app.advisory.notice.clone().expect("completion banner");
+    let notice = app.advisory().notice.clone().expect("completion banner");
     assert_eq!(notice.severity, NoticeSeverity::Success);
     assert!(notice.message.contains("3 findings"), "{}", notice.message);
     assert!(notice.message.contains("`findings`"), "{}", notice.message);
 
-    app.advisory.notice = None;
+    app.advisory_mut().notice = None;
     app.set_activity(Some(ActivitySession::new("r-scan2")));
     app.shell_view = ShellView::Activity;
     let effects = app.apply_scan_finished("r-scan2".to_string(), 1);
     EffectRuntime::execute(&mut app, effects);
     assert!(
-        app.advisory.notice.is_none(),
+        app.advisory().notice.is_none(),
         "no banner while watching the feed"
     );
 }
@@ -11153,7 +11157,7 @@ fn budget_halt_c_continues_a_aborts() {
     app.session_mut().set_session_budget_usd(Some(0.20));
     app.record_cost(0.0);
     // Force re-trigger by lowering cap and recording zero (helper rechecks).
-    app.advisory.budget_halt = Some(BudgetHalt {
+    app.advisory_mut().budget_halt = Some(BudgetHalt {
         limit_usd: 0.20,
         spent_usd: 0.30,
     });
@@ -11199,7 +11203,7 @@ fn budget_abort_key_returns_effect_without_cancelling_inline() {
     let cancel = ScanCancellation::default();
     app.set_running_tool_for_test("semgrep:scan");
     app.set_tool_cancel_for_test(cancel.clone());
-    app.advisory.budget_halt = Some(BudgetHalt {
+    app.advisory_mut().budget_halt = Some(BudgetHalt {
         limit_usd: 0.20,
         spent_usd: 0.30,
     });
@@ -12246,7 +12250,7 @@ fn confirm_gate_destructive_verb_unconditional_even_when_allowlisted() {
 #[test]
 fn confirm_resolve_remember_writes_session_allowlist() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.advisory.pending_confirm = Some(PendingConfirm {
+    app.advisory_mut().pending_confirm = Some(PendingConfirm {
         kind: ConfirmKind::NetworkEgress,
         tool: "sandbox:run".to_string(),
         target: "https://refund.acme/api".to_string(),
@@ -12260,13 +12264,13 @@ fn confirm_resolve_remember_writes_session_allowlist() {
         .engagement
         .confirm_allowlist()
         .contains("sandbox:run https://refund.acme/api"));
-    assert!(app.advisory.pending_confirm.is_none());
+    assert!(app.advisory().pending_confirm.is_none());
 }
 
 #[test]
 fn pending_confirm_enter_is_consumed_without_approval() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.advisory.pending_confirm = Some(PendingConfirm {
+    app.advisory_mut().pending_confirm = Some(PendingConfirm {
         kind: ConfirmKind::NetworkEgress,
         tool: "sandbox:run".to_string(),
         target: "https://refund.acme/api".to_string(),
@@ -12282,7 +12286,7 @@ fn pending_confirm_enter_is_consumed_without_approval() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    assert!(app.advisory.pending_confirm.is_some());
+    assert!(app.advisory().pending_confirm.is_some());
     assert_eq!(app.input(), "help", "Enter must not submit behind the gate");
     assert!(app.engagement.confirm_allowlist().is_empty());
 }
@@ -12292,7 +12296,7 @@ fn pending_confirm_y_dispatches_deferred_run_once() {
     let tmp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.advisory.pending_confirm = Some(PendingConfirm {
+    app.advisory_mut().pending_confirm = Some(PendingConfirm {
         kind: ConfirmKind::NetworkEgress,
         tool: "sandbox:run".to_string(),
         target: "https://refund.acme/api".to_string(),
@@ -12301,7 +12305,7 @@ fn pending_confirm_y_dispatches_deferred_run_once() {
         actor: None,
         remembered: false,
     });
-    app.advisory.pending_confirm_launch = Some(RunToolLaunch {
+    app.advisory_mut().pending_confirm_launch = Some(RunToolLaunch {
         tool_name: "sandbox:run".to_string(),
         input: serde_json::json!({"target": "https://refund.acme/api"}),
         workspace: workspace.clone(),
@@ -12316,8 +12320,8 @@ fn pending_confirm_y_dispatches_deferred_run_once() {
         ))),
     );
 
-    assert!(app.advisory.pending_confirm.is_none());
-    assert!(app.advisory.pending_confirm_launch.is_none());
+    assert!(app.advisory().pending_confirm.is_none());
+    assert!(app.advisory().pending_confirm_launch.is_none());
     let [ShellEffect::DispatchRunTool(launch)] = result.effects.as_slice() else {
         panic!("expected one deferred run launch effect");
     };
@@ -12331,7 +12335,7 @@ fn pending_confirm_esc_denies_once_without_navigation() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Tools;
     app.push_nav_history(ShellView::Catalog);
-    app.advisory.pending_confirm = Some(PendingConfirm {
+    app.advisory_mut().pending_confirm = Some(PendingConfirm {
         kind: ConfirmKind::NetworkEgress,
         tool: "sandbox:run".to_string(),
         target: "https://refund.acme/api".to_string(),
@@ -12340,7 +12344,7 @@ fn pending_confirm_esc_denies_once_without_navigation() {
         actor: None,
         remembered: false,
     });
-    app.advisory.pending_confirm_launch = Some(RunToolLaunch {
+    app.advisory_mut().pending_confirm_launch = Some(RunToolLaunch {
         tool_name: "sandbox:run".to_string(),
         input: serde_json::json!({"target": "https://refund.acme/api"}),
         workspace: WorkspaceTarget::new(std::env::current_dir().unwrap()).unwrap(),
@@ -12350,8 +12354,8 @@ fn pending_confirm_esc_denies_once_without_navigation() {
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
     assert_eq!(app.shell_view, ShellView::Tools);
-    assert!(app.advisory.pending_confirm.is_none());
-    assert!(app.advisory.pending_confirm_launch.is_none());
+    assert!(app.advisory().pending_confirm.is_none());
+    assert!(app.advisory().pending_confirm_launch.is_none());
     assert!(app.engagement.confirm_denylist().is_empty());
     assert!(app
         .log_lines()
@@ -14178,7 +14182,7 @@ fn phase_advance_does_not_steal_view_when_operator_navigated_away() {
 
     assert_eq!(app.shell_view, ShellView::Workbench);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Hunt));
-    let notice = app.advisory.notice.as_ref().expect("phase ready notice");
+    let notice = app.advisory().notice.as_ref().expect("phase ready notice");
     assert_eq!(notice.severity, NoticeSeverity::Success);
     assert!(notice.message.contains("KUZUSHI"), "{}", notice.message);
     assert!(notice.message.contains("`next`"), "{}", notice.message);

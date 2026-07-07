@@ -1,7 +1,9 @@
+use super::AdvisoryState;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct UiPrefs {
+    advisory: AdvisoryState,
     auto_open_activity: bool,
     auto_open_viz: bool,
     last_operator_interaction: Option<Instant>,
@@ -16,6 +18,7 @@ pub(crate) struct UiPrefs {
 impl UiPrefs {
     pub(crate) fn new(auto_open_activity: bool, auto_open_viz: bool) -> Self {
         Self {
+            advisory: AdvisoryState::default(),
             auto_open_activity,
             auto_open_viz,
             last_operator_interaction: None,
@@ -26,6 +29,14 @@ impl UiPrefs {
             ctrl_c_armed_at: None,
             viewport: TerminalViewport::default(),
         }
+    }
+
+    pub(crate) fn advisory(&self) -> &AdvisoryState {
+        &self.advisory
+    }
+
+    pub(crate) fn advisory_mut(&mut self) -> &mut AdvisoryState {
+        &mut self.advisory
     }
 
     pub(crate) fn auto_open_activity(&self) -> bool {

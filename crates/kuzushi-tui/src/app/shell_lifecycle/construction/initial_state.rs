@@ -28,7 +28,6 @@ macro_rules! shell_app_initial_state {
                 crate::app::TaskDurationStore::load(($target).map(|target| target.root())),
             ),
             workbench_cache: std::cell::RefCell::new(WorkbenchCache::default()),
-            advisory: AdvisoryState::default(),
             engagement: EngagementState::default(),
             router,
             ui: UiPrefs::new(

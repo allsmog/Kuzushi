@@ -95,7 +95,7 @@ fn optional_row(label: &str, value: Option<String>) -> String {
 
 fn default_footer(app: &ShellApp) -> ConfirmDialogFooter {
     ConfirmDialogFooter {
-        stage: if app.advisory.pending_confirm.is_some() {
+        stage: if app.advisory().pending_confirm.is_some() {
             "pending confirm".to_string()
         } else {
             "no pending confirms".to_string()
