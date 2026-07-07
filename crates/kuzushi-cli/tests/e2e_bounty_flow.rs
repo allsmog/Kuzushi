@@ -185,8 +185,11 @@ fn findings_command_without_target_surfaces_actionable_error() {
         "missing target must exit non-zero"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
+    // `findings` now shares the single canonical missing-target message with
+    // `scan`, `export`, `runs`, etc. (support::require_cli_target).
     assert!(
-        stderr.contains("no target set"),
+        stderr.contains("findings needs a target")
+            && stderr.contains("Bug-bounty workflows require explicit scope"),
         "expected actionable error, got: {stderr}"
     );
 }

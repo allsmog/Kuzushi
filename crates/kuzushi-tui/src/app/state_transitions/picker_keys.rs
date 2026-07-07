@@ -1,8 +1,8 @@
 use super::*;
 use crate::app::{
     api_key_model_choice_for_provider, auth_ready_for_provider, build_execution_plan,
-    display_model_selector, oauth_model_choice_for_provider, provider_has_multiple_auth_methods,
-    toggle_planning_row, visible_model_choices, ToggleOutcome,
+    display_model_selector, oauth_model_choice_for_provider, toggle_planning_row,
+    visible_model_choices, ToggleOutcome,
 };
 
 impl ShellApp {
@@ -188,16 +188,13 @@ impl ShellApp {
     }
 
     fn transition_after_model_choice(&mut self, provider: &'static str) {
-        if provider_has_multiple_auth_methods(provider) && !auth_ready_for_provider(provider) {
-            self.open_auth_method_picker(provider.to_string());
-            return;
-        }
+        // A credentialed provider with no wired credentials opens the inline
+        // credential-entry step (API key / OAuth / offline demo) instead of
+        // stranding the operator on the Workbench. `auth_ready_for_provider`
+        // returns `true` for providers that need no credentials, so those
+        // continue straight to the planner.
         if !auth_ready_for_provider(provider) {
-            self.log(
-                "onboarding",
-                format!("{provider} credentials missing; continuing to Workbench (run /auth login {provider} to fix)"),
-            );
-            self.open_workbench(WorkbenchPane::Findings);
+            self.open_credential_entry(provider.to_string());
             return;
         }
         self.open_fresh_planner_or_workbench();
@@ -242,7 +239,7 @@ impl ShellApp {
     fn defer_target_picker(&mut self) {
         self.log(
             "onboarding",
-            "browsing without a target — set one later with `target <path>`",
+            "browsing without a target — set one later with `target <path>`, or run `demo` for the offline fixture",
         );
         self.open_workbench(WorkbenchPane::Findings);
     }
@@ -250,7 +247,7 @@ impl ShellApp {
     fn defer_model_picker(&mut self) {
         self.log(
             "onboarding",
-            "model selection deferred — set one with /model <id>",
+            "model selection deferred — set one with /model <id>, or run `demo` for the offline fixture",
         );
         self.open_workbench(WorkbenchPane::Findings);
     }
@@ -268,6 +265,7 @@ impl ShellApp {
                 self.move_auth_picker_cursor(1);
                 InputUpdate::handled()
             }
+            KeyCode::Char('d') => self.reduce_picker_command(ShellCommand::Demo),
             KeyCode::Enter => self.accept_auth_picker_choice(),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.defer_auth_picker();
@@ -282,9 +280,14 @@ impl ShellApp {
             return false;
         }
         match code {
+            // With an empty draft these are picker chords, not key text:
+            // `j/k` navigate, `q` defers, and `d` runs the offline fixture —
+            // the same keyless escape hatch offered on the model/target
+            // pickers. Once the operator starts pasting a key, they become
+            // literal key characters again.
             KeyCode::Char(ch)
                 if self.router.auth_picker().key_draft().is_empty()
-                    && matches!(ch, 'j' | 'k' | 'q') =>
+                    && matches!(ch, 'j' | 'k' | 'q' | 'd') =>
             {
                 false
             }
@@ -426,7 +429,7 @@ impl ShellApp {
         self.router.auth_picker_mut().clear_key_draft();
         self.log(
             "onboarding",
-            "auth deferred — set credentials and re-run /onboarding when ready",
+            "auth deferred — set credentials and re-run /onboarding, or run `demo` for the offline fixture",
         );
         self.open_workbench(WorkbenchPane::Findings);
     }
