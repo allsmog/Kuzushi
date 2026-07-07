@@ -6,8 +6,7 @@ impl ArtifactKnowledgeStore {
         if !findings_path.exists() {
             return Ok(0);
         }
-        let conn = Connection::open(&findings_path)
-            .with_context(|| format!("Could not open {}", findings_path.display()))?;
+        let conn = crate::sqlite_connection::open_file(&findings_path)?;
         if !sqlite_table_exists(&conn, "finding_observations")? {
             return Ok(0);
         }

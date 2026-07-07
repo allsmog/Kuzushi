@@ -135,6 +135,35 @@ fn plugin_candidate_text_fields_obey_policy_cap() {
     assert!(error.to_string().contains("exceeding policy cap"));
 }
 
+#[test]
+fn plugin_stdout_rejects_unknown_top_level_fields() {
+    let hash = blob_hash();
+    let grant = GrantedSnapshot::new(BTreeMap::from([(hash.clone(), 11)]));
+    let stdout = serde_json::json!({
+        "findings": [candidate(hash)],
+        "eventHash": "spoofed"
+    })
+    .to_string();
+
+    let error = validate_plugin_stdout(&stdout, &grant, &SandboxPolicy::default()).unwrap_err();
+
+    assert!(error.to_string().contains("eventHash"));
+}
+
+#[test]
+fn plugin_candidate_rejects_spoofed_canonical_fields() {
+    let hash = blob_hash();
+    let grant = GrantedSnapshot::new(BTreeMap::from([(hash.clone(), 11)]));
+    let mut candidate = serde_json::to_value(candidate(hash)).unwrap();
+    candidate["stableFp"] = serde_json::json!("fp3_spoofed");
+    candidate["triage"] = serde_json::json!({"verdict": "true_positive"});
+    let stdout = serde_json::json!({ "findings": [candidate] }).to_string();
+
+    let error = validate_plugin_stdout(&stdout, &grant, &SandboxPolicy::default()).unwrap_err();
+
+    assert!(error.to_string().contains("stableFp"));
+}
+
 #[tokio::test]
 async fn sandbox_invocation_rejects_spoofed_blob_candidate() {
     let granted = blob_hash();

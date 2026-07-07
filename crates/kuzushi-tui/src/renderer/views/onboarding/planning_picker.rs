@@ -159,10 +159,10 @@ fn prior_state_banner(app: &ShellApp) -> Line<'static> {
     let map_artifacts_built = app
         .workbench_cache
         .borrow_mut()
-        .map_artifacts_built(app.target.as_deref());
+        .map_artifacts_built(app.target());
     match workspace_history(
         app.engagement.planning_picker().tasks(),
-        app.findings.len(),
+        app.findings().len(),
         map_artifacts_built,
         last_activity,
     ) {
@@ -433,7 +433,7 @@ fn cached_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String>
 }
 
 fn missing_model_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
-    (row.model_backed && app.config.model.is_none())
+    (row.model_backed && app.config().model.is_none())
         .then(|| "needs model — run /model first".to_string())
 }
 
@@ -475,7 +475,7 @@ fn planning_options_pane_lines(app: &ShellApp, width: usize) -> Vec<Line<'static
     let focused = app.engagement.planning_picker().focus() == PickerFocus::OptionsPane;
     let border_style = pane_border_style(focused);
     let title = pane_title(&format!(" {} ", row.tool_name), focused);
-    let Some(tool) = app.registry.resolve_tool(row.tool_name) else {
+    let Some(tool) = app.registry().resolve_tool(row.tool_name) else {
         return bordered_message(&title, "tool descriptor missing", width);
     };
     let mut lines = option_pane_header(&title, focused, border_style, width);

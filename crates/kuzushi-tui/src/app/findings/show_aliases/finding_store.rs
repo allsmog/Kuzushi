@@ -7,15 +7,15 @@ impl ShellApp {
         // explicitly. We canonicalize self.target to the resolved root so
         // subsequent reads are stable, but only when a target was already
         // supplied; we never write a value the operator did not provide.
-        let (workspace, store) = open_finding_store_for_target(self.target.as_ref())?;
+        let (workspace, store) = open_finding_store_for_target(self.target_path_buf())?;
         let resolved = workspace.root().to_path_buf();
-        if self.target.as_deref() != Some(resolved.as_path()) {
-            self.target = Some(resolved);
+        if self.target() != Some(resolved.as_path()) {
+            self.set_target(Some(resolved));
         }
         Ok(store)
     }
 
     pub(crate) fn current_workspace(&self) -> Result<WorkspaceTarget> {
-        workspace_for_target(self.target.as_ref())
+        workspace_for_target(self.target_path_buf())
     }
 }

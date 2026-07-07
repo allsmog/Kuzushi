@@ -15,6 +15,7 @@ pub struct DecisionWrite {
     pub rationale: String,
     pub confidence_millis: u16,
     pub read_watermark: u64,
+    pub updates_finding_triage: bool,
 }
 
 impl DecisionWrite {
@@ -36,6 +37,7 @@ impl DecisionWrite {
             "rationale": self.rationale,
             "confidenceMillis": self.confidence_millis,
             "readWatermark": self.read_watermark,
+            "updatesFindingTriage": self.updates_finding_triage,
         })
     }
 }

@@ -7,7 +7,7 @@ use serde_json::Value;
 fn planning_overrides_are_scoped_to_the_task_preset() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let spec = app
-        .registry
+        .registry()
         .resolve_tool("threat-model:build")
         .unwrap()
         .options

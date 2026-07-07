@@ -1,18 +1,22 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn prompt_edit(&mut self, name: &str) {
+    pub(crate) fn reduce_prompt_edit(&mut self, name: &str) -> Vec<ShellEffect> {
         let Some(path) = self.prompt_path_for(name) else {
             self.log(
                 "prompt",
                 "prompt edit requires a focused module and a workspace target. Next: /use <module>, then prompt edit <name>",
             );
-            return;
+            return Vec::new();
         };
-        if !self.ensure_prompt_edit_parent(&path) {
+        vec![ShellEffect::EditPromptOverride(PromptOverrideEdit { path })]
+    }
+
+    pub(crate) fn edit_prompt_override_effect(&mut self, edit: PromptOverrideEdit) {
+        if !self.ensure_prompt_edit_parent(&edit.path) {
             return;
         }
-        if !self.ensure_prompt_override_editable(&path) {
+        if !self.ensure_prompt_override_editable(&edit.path) {
             return;
         }
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "${EDITOR}".to_string());
@@ -20,7 +24,7 @@ impl ShellApp {
             "prompt",
             format!(
                 "edit override at {}; suspend the shell and run `{editor} {0}` (Ctrl+C twice to exit when done)",
-                path.display()
+                edit.path.display()
             ),
         );
     }
@@ -68,19 +72,25 @@ impl ShellApp {
         }
     }
 
-    pub(crate) fn prompt_show(&mut self, name: &str) {
+    pub(crate) fn reduce_prompt_show(&mut self, name: &str) -> Vec<ShellEffect> {
         let Some(path) = self.prompt_path_for(name) else {
             self.log(
                 "prompt",
                 "prompt show requires a focused module and workspace. Next: /use <module>",
             );
-            return;
+            return Vec::new();
         };
-        match prompt_override_text(&path) {
-            PromptOverrideText::Missing => self.log_missing_prompt_override(&path),
-            PromptOverrideText::Empty => self.log_empty_prompt_override(&path),
-            PromptOverrideText::Present(text) => self.log_prompt_override_text(&path, &text),
-            PromptOverrideText::Unreadable => self.log_unreadable_prompt_override(&path),
+        vec![ShellEffect::ShowPromptOverride(PromptOverrideShow { path })]
+    }
+
+    pub(crate) fn show_prompt_override_effect(&mut self, show: PromptOverrideShow) {
+        match prompt_override_text(&show.path) {
+            PromptOverrideText::Missing => self.log_missing_prompt_override(&show.path),
+            PromptOverrideText::Empty => self.log_empty_prompt_override(&show.path),
+            PromptOverrideText::Present(text) => {
+                self.log_prompt_override_text(&show.path, &text);
+            }
+            PromptOverrideText::Unreadable => self.log_unreadable_prompt_override(&show.path),
         }
     }
 

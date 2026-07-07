@@ -11,6 +11,7 @@ pub(crate) fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
 
     append_module_header(&mut lines, &module, area);
+    append_availability(&mut lines, &module, area);
     append_tools_section(&mut lines, &module, area);
     append_stored_options(&mut lines, &module, area);
     append_prompt_overrides(&mut lines, &module, area);
@@ -23,6 +24,10 @@ pub(crate) fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     ));
 
     lines
+}
+
+fn append_availability(lines: &mut Vec<Line<'static>>, module: &ModuleDetailModel, area: Rect) {
+    append_key_value_section(lines, module.availability_section.as_ref(), area);
 }
 
 fn append_module_header(lines: &mut Vec<Line<'static>>, module: &ModuleDetailModel, area: Rect) {

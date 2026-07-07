@@ -1,3 +1,4 @@
+use super::findings::projected_visible_findings;
 use crate::app::{PaneFocus, ShellView, WorkbenchPane};
 use crate::ShellApp;
 use kuzushi_core::{
@@ -33,7 +34,7 @@ pub(crate) fn screen_context_model(app: &ShellApp) -> ScreenContext {
         visible_rows: visible_rows(app),
         cursor: ScreenCursor {
             row: active_cursor_row(app),
-            col: app.cursor,
+            col: app.cursor(),
         },
     }
 }
@@ -55,14 +56,14 @@ fn core_shell_view_label(view: &ShellView) -> Option<&'static str> {
         ShellView::ModuleRun => Some("ModuleRun"),
         ShellView::Workbench => Some("Workbench"),
         ShellView::Tune => Some("Tune"),
-        ShellView::Threat(_) => Some("Threat"),
+        ShellView::Threat => Some("Threat"),
         ShellView::ThreatEditor => Some("ThreatEditor"),
         ShellView::PromptsEditor => Some("PromptsEditor"),
-        ShellView::ActorDetail(_) => Some("ActorDetail"),
+        ShellView::ActorDetail => Some("ActorDetail"),
         ShellView::Runs => Some("Runs"),
-        ShellView::RunDiff { .. } => Some("RunDiff"),
-        ShellView::Replay(_) => Some("Replay"),
-        ShellView::Trace(_) => Some("Trace"),
+        ShellView::RunDiff => Some("RunDiff"),
+        ShellView::Replay => Some("Replay"),
+        ShellView::Trace => Some("Trace"),
         ShellView::Activity => Some("Activity"),
         _ => None,
     }
@@ -79,9 +80,9 @@ fn workspace_shell_view_label(view: &ShellView) -> Option<&'static str> {
         ShellView::AgentChat => Some("AgentChat"),
         ShellView::History => Some("History"),
         ShellView::Story => Some("Story"),
-        ShellView::Patch(_) => Some("Patch"),
+        ShellView::Patch => Some("Patch"),
         ShellView::Pwn => Some("Pwn"),
-        ShellView::Scene(_) => Some("Scene"),
+        ShellView::Scene => Some("Scene"),
         _ => None,
     }
 }
@@ -94,13 +95,20 @@ fn system_shell_view_label(view: &ShellView) -> Option<&'static str> {
         ShellView::Config => Some("Config"),
         ShellView::Health => Some("Health"),
         ShellView::Tools => Some("Tools"),
-        ShellView::Options(_) => Some("Options"),
+        ShellView::Options => Some("Options"),
         ShellView::SastTasks => Some("SastTasks"),
         ShellView::Auth => Some("Auth"),
         ShellView::Cost => Some("Cost"),
+        ShellView::BootSplash => Some("BootSplash"),
+        ShellView::QuitConfirm => Some("QuitConfirm"),
+        ShellView::ConfirmDialog => Some("ConfirmDialog"),
+        ShellView::ThemePicker => Some("ThemePicker"),
+        ShellView::Keymap => Some("Keymap"),
+        ShellView::UpdateAvailable => Some("UpdateAvailable"),
+        ShellView::Interruption => Some("Interruption"),
         ShellView::CommandPalette => Some("CommandPalette"),
         ShellView::ModelPicker => Some("ModelPicker"),
-        ShellView::AuthMethodPicker(_) => Some("AuthMethodPicker"),
+        ShellView::AuthMethodPicker => Some("AuthMethodPicker"),
         ShellView::TargetPicker => Some("TargetPicker"),
         ShellView::PlanningPicker => Some("PlanningPicker"),
         _ => None,
@@ -109,11 +117,12 @@ fn system_shell_view_label(view: &ShellView) -> Option<&'static str> {
 
 fn focused_pane_label(app: &ShellApp) -> Option<String> {
     match app.shell_view {
-        ShellView::Workbench => Some(workbench_pane_label(app.workbench_focus).to_string()),
-        ShellView::Activity => app
-            .activity
-            .as_ref()
-            .map(|activity| pane_focus_label(activity.effective_pane_focus()).to_string()),
+        ShellView::Workbench => {
+            Some(workbench_pane_label(app.router.workbench().focus()).to_string())
+        }
+        ShellView::Activity => app.activity().map(|activity| {
+            pane_focus_label(app.activity_route().effective_pane_focus(activity)).to_string()
+        }),
         _ => None,
     }
 }
@@ -140,7 +149,7 @@ fn selected_item(app: &ShellApp) -> Option<ScreenSelectedItem> {
 }
 
 fn selected_item_from_finding(app: &ShellApp, finding: &Finding) -> ScreenSelectedItem {
-    let alias = stable_finding_alias(&app.findings, &finding.fingerprint);
+    let alias = stable_finding_alias(app.findings(), &finding.fingerprint);
     ScreenSelectedItem {
         alias: alias.clone(),
         fingerprint: finding.fingerprint.clone(),
@@ -256,29 +265,22 @@ fn runtime_verification_state(finding: &Finding) -> String {
 
 fn selected_run(app: &ShellApp) -> Option<String> {
     match &app.shell_view {
-        ShellView::Replay(run_id) | ShellView::Trace(run_id) => Some(run_id.clone()),
-        ShellView::RunDiff { left, right } => Some(format!("{left} -> {right}")),
+        ShellView::Replay => Some(app.router.replay().run_id_owned()),
+        ShellView::Trace => Some(app.router.trace().run_id_owned()),
+        ShellView::RunDiff => Some(app.router.run_diff().label()),
         _ => app
-            .tool_run_id
-            .clone()
-            .or_else(|| app.scan.as_ref().and_then(|scan| scan.run_id.clone()))
-            .or_else(|| {
-                app.activity
-                    .as_ref()
-                    .map(|activity| activity.run_id.clone())
-            })
-            .or_else(|| {
-                app.agent_chat
-                    .as_ref()
-                    .and_then(|agent| agent.run_id.clone())
-            }),
+            .active_tool_run_id()
+            .map(str::to_string)
+            .or_else(|| app.scan().and_then(|scan| scan.run_id.clone()))
+            .or_else(|| app.activity().map(|activity| activity.run_id.clone()))
+            .or_else(|| app.agent_chat().and_then(|agent| agent.run_id.clone())),
     }
 }
 
 fn selected_revision(app: &ShellApp) -> Option<ScreenRevision> {
     app.workbench_cache
         .borrow_mut()
-        .git_metadata(app.target.as_deref())
+        .git_metadata(app.target())
         .map(ScreenRevision::from)
 }
 
@@ -288,30 +290,36 @@ fn active_phase(app: &ShellApp) -> Option<String> {
 
 fn active_filters(app: &ShellApp) -> Vec<String> {
     match &app.shell_view {
-        ShellView::Options(view) => vec![format!("options:{}", view.filter.label())],
+        ShellView::Options => vec![format!("options:{}", app.router.options().filter.label())],
         _ => Vec::new(),
     }
 }
 
 fn selected_scope(app: &ShellApp) -> Option<String> {
     super::active_project_scope_label(app).or_else(|| {
-        app.target
-            .as_ref()
+        app.target()
             .map(|path| super::compact_target_path(&path.to_string_lossy()))
     })
 }
 
 fn finding_summary(app: &ShellApp) -> Option<ScreenFindingSummary> {
-    if !matches!(app.shell_view, ShellView::Workbench) || app.findings.is_empty() {
+    if !matches!(app.shell_view, ShellView::Workbench) || app.findings().is_empty() {
+        return None;
+    }
+    let findings = projected_visible_findings(app)
+        .into_iter()
+        .map(|projected| projected.finding)
+        .collect::<Vec<_>>();
+    if findings.is_empty() {
         return None;
     }
     Some(ScreenFindingSummary {
-        total: app.findings.len(),
-        by_severity: count_findings(&app.findings, severity_bucket),
-        by_verdict: count_findings(&app.findings, classification_state),
-        by_proof_state: count_findings(&app.findings, proof_state_bucket),
+        total: findings.len(),
+        by_severity: count_findings(&findings, severity_bucket),
+        by_verdict: count_findings(&findings, classification_state),
+        by_proof_state: count_findings(&findings, proof_state_bucket),
         runtime_proof_by_severity: count_findings(
-            runtime_proven_findings(&app.findings),
+            runtime_proven_findings(&findings),
             severity_bucket,
         ),
     })
@@ -368,10 +376,11 @@ fn proof_state_bucket(finding: &Finding) -> String {
 fn visible_rows(app: &ShellApp) -> Vec<String> {
     match app.shell_view {
         ShellView::Runs => visible_run_rows(app),
-        ShellView::RunDiff {
-            ref left,
-            ref right,
-        } => visible_run_diff_rows(app, left, right),
+        ShellView::RunDiff => visible_run_diff_rows(
+            app,
+            app.router.run_diff().left(),
+            app.router.run_diff().right(),
+        ),
         ShellView::Activity => visible_activity_rows(app),
         ShellView::StrategyQueue => visible_strategy_rows(app),
         _ => visible_finding_rows(app),
@@ -441,8 +450,7 @@ fn visible_run_diff_rows(app: &ShellApp, left: &str, right: &str) -> Vec<String>
 }
 
 fn visible_activity_rows(app: &ShellApp) -> Vec<String> {
-    app.activity
-        .as_ref()
+    app.activity()
         .map(|activity| {
             activity
                 .events
@@ -513,20 +521,21 @@ fn bounded_prompt_list(values: &[String]) -> Vec<String> {
 
 fn active_cursor_row(app: &ShellApp) -> usize {
     match app.shell_view {
-        ShellView::Workbench => match app.workbench_focus {
-            WorkbenchPane::Findings => app.findings_route.cursor(),
-            pane => app.workbench_scroll.get(pane) as usize,
+        ShellView::Workbench => match app.router.workbench().focus() {
+            WorkbenchPane::Findings => app.router.findings().cursor(),
+            pane => app.router.workbench().scroll().get(pane) as usize,
         },
-        ShellView::Runs => app.scroll_offset as usize,
+        ShellView::Runs => app.router.default_scroll().offset() as usize,
         ShellView::Activity => app
-            .activity
-            .as_ref()
-            .map(|activity| match activity.effective_pane_focus() {
-                PaneFocus::Left => activity.task_scroll,
-                PaneFocus::Right => activity.feed_scroll,
-            })
+            .activity()
+            .map(
+                |activity| match app.activity_route().effective_pane_focus(activity) {
+                    PaneFocus::Left => app.activity_route().task_scroll,
+                    PaneFocus::Right => app.activity_route().feed_scroll,
+                },
+            )
             .unwrap_or_default(),
-        _ => app.scroll_offset as usize,
+        _ => app.router.default_scroll().offset() as usize,
     }
 }
 

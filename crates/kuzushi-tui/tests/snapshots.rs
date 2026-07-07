@@ -17,7 +17,7 @@ const SNAPSHOT_WIDTH: usize = 120;
 const SNAPSHOT_LOG_TIME: u64 = 55_277;
 
 fn render_at_120(app: &mut ShellApp) -> String {
-    for line in &mut app.log {
+    for line in app.log_lines_mut_for_test() {
         if line.time_secs != 0 {
             line.time_secs = SNAPSHOT_LOG_TIME;
         }
@@ -38,7 +38,7 @@ fn fresh_app() -> ShellApp {
     // in the developer checkout.
     let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
     let mut app = ShellApp::with_registry(V2Config::default(), None, registry);
-    app.option_store = ToolOptionStore::new();
+    app.replace_option_store_for_test(ToolOptionStore::new());
     app
 }
 
@@ -198,7 +198,7 @@ fn recommend_view_with_artifact() {
     .unwrap();
 
     let mut app = fresh_app();
-    app.target = Some(root);
+    app.set_target(Some(root));
     app.shell_view = ShellView::Recommend;
     assert_plain_snapshot("recommend_view_with_artifact", &render_at_120(&mut app));
 }
@@ -206,28 +206,28 @@ fn recommend_view_with_artifact() {
 #[test]
 fn threat_stories_view_with_canonical_fixture() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Threat(ThreatView::Stories);
+    app.open_threat_view_for_test(ThreatView::Stories);
     assert_plain_snapshot("threat_stories_canonical", &render_at_120(&mut app));
 }
 
 #[test]
 fn threat_scope_view_with_canonical_fixture() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Threat(ThreatView::Scope);
+    app.open_threat_view_for_test(ThreatView::Scope);
     assert_plain_snapshot("threat_scope_canonical", &render_at_120(&mut app));
 }
 
 #[test]
 fn threat_stride_view_with_canonical_fixture() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Threat(ThreatView::Stride);
+    app.open_threat_view_for_test(ThreatView::Stride);
     assert_plain_snapshot("threat_stride_canonical", &render_at_120(&mut app));
 }
 
 #[test]
 fn threat_summary_view_with_canonical_fixture() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Threat(ThreatView::Summary);
+    app.open_threat_view_for_test(ThreatView::Summary);
     assert_plain_snapshot("threat_summary_canonical", &render_at_120(&mut app));
 }
 
@@ -248,7 +248,7 @@ fn sast_tasks_view_default() {
 #[test]
 fn tune_view_for_focused_module() {
     let mut app = fresh_app();
-    app.focused_module = Some("sast".to_string());
+    app.set_focused_module(Some("sast".to_string()));
     app.shell_view = ShellView::Tune;
     assert_plain_snapshot("tune_view_sast", &render_at_120(&mut app));
 }
@@ -293,7 +293,7 @@ fn workbench_list_view_with_two_findings() {
         Severity::High,
         "path traversal in /assets/<file>",
     );
-    app.findings = vec![critical, untriaged];
+    app.set_findings(vec![critical, untriaged]);
     app.shell_view = ShellView::Workbench;
     assert_plain_snapshot("workbench_list_two_findings", &render_at_120(&mut app));
 }
@@ -317,7 +317,7 @@ fn run_timeline_view_with_past_runs() {
     .unwrap();
 
     let mut app = fresh_app();
-    app.target = Some(root);
+    app.set_target(Some(root));
     app.shell_view = ShellView::Runs;
     assert_plain_snapshot("run_timeline_view_with_past_runs", &render_at_120(&mut app));
 }
@@ -356,7 +356,7 @@ fn failure_handoff_view_with_artifact() {
     .unwrap();
 
     let mut app = fresh_app();
-    app.target = Some(root);
+    app.set_target(Some(root));
     app.shell_view = ShellView::FailureHandoff;
     assert_plain_snapshot(
         "failure_handoff_view_with_artifact",
@@ -381,8 +381,8 @@ fn module_run_view_with_findings_and_active_scan() {
         rationale: "input concatenated".to_string(),
         cost_usd: 0.0,
     });
-    app.findings.push(finding);
-    app.scan = Some(kuzushi_tui::ScanPanelState {
+    app.set_findings(vec![finding]);
+    app.set_scan_panel(Some(kuzushi_tui::ScanPanelState {
         run_id: Some("run-abc1234".to_string()),
         target: std::path::PathBuf::from("./acme-checkout"),
         stage: "agentic-sast tracing".to_string(),
@@ -390,7 +390,7 @@ fn module_run_view_with_findings_and_active_scan() {
         running: true,
         abort_requested: false,
         error: None,
-    });
+    }));
     app.shell_view = ShellView::ModuleRun;
     assert_plain_snapshot("module_run_with_findings", &render_at_120(&mut app));
 }
@@ -426,7 +426,7 @@ fn story_view_default() {
 #[test]
 fn options_view_for_sast_scan() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Options(OptionsView {
+    app.open_options_for_test(OptionsView {
         tool_name: "sast:scan".to_string(),
         filter: OptionsFilter::Standard,
     });
@@ -505,7 +505,7 @@ fn activity_view_default_split_pane() {
             row.completed_at = Some(snapshot_instant);
         }
     }
-    app.activity = Some(session);
+    app.set_activity(Some(session));
     app.shell_view = ShellView::Activity;
 
     assert_plain_snapshot("activity_view_default_split_pane", &render_at_120(&mut app));
@@ -537,7 +537,7 @@ fn footer_wrapped_narrow_terminal() {
     // at width 60 — the chrome rule plus two keybinding rows.
     let mut app = fresh_app();
     app.shell_view = ShellView::Home;
-    for line in &mut app.log {
+    for line in app.log_lines_mut_for_test() {
         if line.time_secs != 0 {
             line.time_secs = SNAPSHOT_LOG_TIME;
         }
@@ -553,53 +553,75 @@ fn every_shell_view_produces_non_empty_plain_output() {
     // refactor that breaks a view's `*_lines` source would silently
     // produce empty plain output. This regression asserts non-empty
     // plain text for every ShellView variant so the contract holds.
-    let scenarios: Vec<(&str, ShellView)> = vec![
-        ("home", ShellView::Home),
-        ("catalog", ShellView::Catalog),
-        ("recommend", ShellView::Recommend),
-        ("module", ShellView::Module),
-        ("module_run", ShellView::ModuleRun),
-        ("workbench", ShellView::Workbench),
-        ("tune", ShellView::Tune),
-        ("threat_summary", ShellView::Threat(ThreatView::Summary)),
-        ("threat_stride", ShellView::Threat(ThreatView::Stride)),
-        ("threat_stories", ShellView::Threat(ThreatView::Stories)),
-        ("threat_scope", ShellView::Threat(ThreatView::Scope)),
-        ("threat_editor", ShellView::ThreatEditor),
-        ("prompts_editor", ShellView::PromptsEditor),
-        ("actor_detail", ShellView::ActorDetail(0)),
-        ("runs", ShellView::Runs),
-        ("replay", ShellView::Replay("run-1".to_string())),
-        ("trace", ShellView::Trace("run-1".to_string())),
-        ("help", ShellView::Help),
-        ("quickstart", ShellView::Quickstart),
-        ("logs", ShellView::Logs),
-        ("config", ShellView::Config),
-        ("tools", ShellView::Tools),
+    let scenarios: Vec<(&str, ShellView, Option<ThreatView>, Option<&str>)> = vec![
+        ("home", ShellView::Home, None, None),
+        ("catalog", ShellView::Catalog, None, None),
+        ("recommend", ShellView::Recommend, None, None),
+        ("module", ShellView::Module, None, None),
+        ("module_run", ShellView::ModuleRun, None, None),
+        ("workbench", ShellView::Workbench, None, None),
+        ("tune", ShellView::Tune, None, None),
         (
-            "options",
-            ShellView::Options(OptionsView {
-                tool_name: "sast:scan".to_string(),
-                filter: OptionsFilter::Standard,
-            }),
+            "threat_summary",
+            ShellView::Threat,
+            Some(ThreatView::Summary),
+            None,
         ),
-        ("sast_tasks", ShellView::SastTasks),
-        ("context", ShellView::Context),
-        ("workspace", ShellView::Workspace),
-        ("knowledge_base", ShellView::KnowledgeBase),
-        ("failure_handoff", ShellView::FailureHandoff),
-        ("agent_chat", ShellView::AgentChat),
-        ("history", ShellView::History),
-        ("story", ShellView::Story),
-        ("auth", ShellView::Auth),
-        ("cost", ShellView::Cost),
-        ("patch", ShellView::Patch("F-0001".to_string())),
-        ("pwn", ShellView::Pwn),
-        ("activity", ShellView::Activity),
+        (
+            "threat_stride",
+            ShellView::Threat,
+            Some(ThreatView::Stride),
+            None,
+        ),
+        (
+            "threat_stories",
+            ShellView::Threat,
+            Some(ThreatView::Stories),
+            None,
+        ),
+        (
+            "threat_scope",
+            ShellView::Threat,
+            Some(ThreatView::Scope),
+            None,
+        ),
+        ("threat_editor", ShellView::ThreatEditor, None, None),
+        ("prompts_editor", ShellView::PromptsEditor, None, None),
+        ("actor_detail", ShellView::ActorDetail, None, None),
+        ("runs", ShellView::Runs, None, None),
+        ("replay", ShellView::Replay, None, None),
+        ("trace", ShellView::Trace, None, None),
+        ("help", ShellView::Help, None, None),
+        ("quickstart", ShellView::Quickstart, None, None),
+        ("logs", ShellView::Logs, None, None),
+        ("config", ShellView::Config, None, None),
+        ("tools", ShellView::Tools, None, None),
+        ("options", ShellView::Options, None, None),
+        ("sast_tasks", ShellView::SastTasks, None, None),
+        ("context", ShellView::Context, None, None),
+        ("workspace", ShellView::Workspace, None, None),
+        ("knowledge_base", ShellView::KnowledgeBase, None, None),
+        ("failure_handoff", ShellView::FailureHandoff, None, None),
+        ("agent_chat", ShellView::AgentChat, None, None),
+        ("history", ShellView::History, None, None),
+        ("story", ShellView::Story, None, None),
+        ("auth", ShellView::Auth, None, None),
+        ("cost", ShellView::Cost, None, None),
+        ("patch", ShellView::Patch, None, Some("F-0001")),
+        ("pwn", ShellView::Pwn, None, None),
+        ("activity", ShellView::Activity, None, None),
     ];
 
-    for (label, view) in scenarios {
+    for (label, view, threat_view, patch_alias) in scenarios {
         let mut app = fresh_app();
+        app.open_replay_for_test("run-1");
+        app.open_trace_for_test("run-1");
+        if let Some(threat_view) = threat_view {
+            app.open_threat_view_for_test(threat_view);
+        }
+        if let Some(patch_alias) = patch_alias {
+            app.open_patch_for_test(patch_alias);
+        }
         app.shell_view = view;
         let rendered = render_plain_app(&app, SNAPSHOT_WIDTH);
         assert!(

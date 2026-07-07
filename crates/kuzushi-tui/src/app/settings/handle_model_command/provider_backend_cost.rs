@@ -51,8 +51,8 @@ impl ShellApp {
             "backend",
             format!(
                 "{}; bridge {}",
-                runtime_backend_label(&self.config),
-                bridge_command_status(&self.config)
+                runtime_backend_label(self.config()),
+                bridge_command_status(self.config())
             ),
         );
     }
@@ -61,10 +61,11 @@ impl ShellApp {
         // `/cost` lands on the dedicated Cost surface
         // (`design/mockups/cost.jsx`) — budget bars + by-tool spend.
         self.shell_view = ShellView::Cost;
-        let message = if let Some(last) = self.last_tool_cost_usd {
+        let message = if let Some(last) = self.session().last_tool_cost_usd() {
             format!(
                 "session estimate ${:.4}; last tool ${:.4}. Scanner-only work may report no LLM cost.",
-                self.session_cost_usd, last
+                self.session().session_cost_usd(),
+                last
             )
         } else {
             "cost unavailable until a Rust tool reports costUsd; scanner-only work may report no LLM cost. Next: run <tool>"

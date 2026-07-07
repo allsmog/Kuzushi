@@ -87,7 +87,7 @@ pub(crate) fn alias_reference_model(app: &ShellApp) -> AliasReferenceModel {
             .into_iter()
             .take(3)
             .filter_map(|(alias, index)| {
-                let finding = app.findings.get(index)?;
+                let finding = app.findings().get(index)?;
                 Some(AliasReferenceRow {
                     alias,
                     detail: format!(
@@ -138,7 +138,7 @@ fn run_trace_artifact_leaf() -> &'static str {
 }
 
 fn runs_root(app: &ShellApp) -> PathBuf {
-    ui_runs_root(app.target.as_deref())
+    ui_runs_root(app.target())
 }
 
 fn parse_trace_jsonl(path: &Path) -> Vec<TraceStep> {
@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn alias_reference_model_projects_top_aliases() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.findings = vec![
+        *app.findings_mut() = vec![
             named_finding("bbbb2222bbbb", "second"),
             named_finding("aaaa1111aaaa", "first"),
             named_finding("cccc3333cccc", "third"),
@@ -435,7 +435,7 @@ mod tests {
         let run_dir = kuzushi_core::run_dir(temp.path(), "r-invalid");
         std::fs::create_dir_all(run_dir.join(run_metadata_artifact_leaf())).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = replay_model(&app, "r-invalid");
 
@@ -451,7 +451,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::write(run_dir.join(run_metadata_artifact_leaf()), "{not-json").unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = replay_model(&app, "r-malformed");
 
@@ -467,7 +467,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::write(run_dir.join(run_metadata_artifact_leaf()), "[]").unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = replay_model(&app, "r-non-object");
 
@@ -482,7 +482,7 @@ mod tests {
         let run_dir = kuzushi_core::run_dir(temp.path(), "r-invalid-trace");
         std::fs::create_dir_all(run_dir.join(run_trace_artifact_leaf())).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = trace_model(&app, "r-invalid-trace");
 

@@ -7,14 +7,21 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         ShellView::Story => Some(story_keybindings(app)),
         ShellView::Help => Some(help_keybindings(app)),
         ShellView::Health => Some(health_keybindings(app)),
+        ShellView::BootSplash => Some(boot_splash_keybindings()),
+        ShellView::QuitConfirm => Some(quit_confirm_keybindings()),
+        ShellView::ConfirmDialog => Some(confirm_dialog_keybindings()),
+        ShellView::ThemePicker => Some(theme_picker_keybindings()),
+        ShellView::Keymap => Some(keymap_keybindings()),
+        ShellView::UpdateAvailable => Some(update_available_keybindings()),
+        ShellView::Interruption => Some(interruption_keybindings(app)),
         ShellView::Tools => Some(tools_keybindings(app)),
-        ShellView::Scene(page) => Some(scene_keybindings(page)),
+        ShellView::Scene => Some(scene_keybindings(app.router.scene().page())),
         ShellView::SastTasks => Some(sast_tasks_keybindings(app)),
         // First-run pickers own input — surface their controls in the footer
         // so the modal has one canonical hint row.
         ShellView::PlanningPicker => Some(planning_picker_keybindings(app)),
         ShellView::FilePicker => Some(file_picker_keybindings()),
-        ShellView::ModelPicker | ShellView::AuthMethodPicker(_) | ShellView::TargetPicker => {
+        ShellView::ModelPicker | ShellView::AuthMethodPicker | ShellView::TargetPicker => {
             Some(choice_picker_keybindings(app))
         }
         _ => None,
@@ -65,12 +72,14 @@ fn choice_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 
 fn choice_picker_prompt_focused(app: &ShellApp) -> bool {
     match app.shell_view {
-        ShellView::ModelPicker => app.model_picker_route.focus() == crate::app::PickerFocus::Prompt,
-        ShellView::AuthMethodPicker(_) => {
-            app.auth_picker_route.focus() == crate::app::PickerFocus::Prompt
+        ShellView::ModelPicker => {
+            app.router.model_picker().focus() == crate::app::PickerFocus::Prompt
+        }
+        ShellView::AuthMethodPicker => {
+            app.router.auth_picker().focus() == crate::app::PickerFocus::Prompt
         }
         ShellView::TargetPicker => {
-            app.target_picker_route.focus() == crate::app::PickerFocus::Prompt
+            app.router.target_picker().focus() == crate::app::PickerFocus::Prompt
         }
         _ => false,
     }
@@ -92,6 +101,53 @@ fn file_picker_keybindings() -> Vec<FooterKeybinding> {
         bind("Enter", "attach"),
         bind("Esc", "close"),
     ]
+}
+
+fn boot_splash_keybindings() -> Vec<FooterKeybinding> {
+    vec![
+        bind("?", "help"),
+        bind("catalog", "modules"),
+        bind("doctor", "health"),
+        bind("Esc", "back"),
+    ]
+}
+
+fn quit_confirm_keybindings() -> Vec<FooterKeybinding> {
+    vec![
+        bind("Y", "checkpoint+story+quit"),
+        bind("y", "checkpoint+quit"),
+        bind("p", "detach"),
+        bind("n/Esc", "cancel"),
+    ]
+}
+
+fn confirm_dialog_keybindings() -> Vec<FooterKeybinding> {
+    vec![
+        bind("y/n", "once"),
+        bind("Y/N", "remember"),
+        bind("Esc", "deny once"),
+    ]
+}
+
+fn theme_picker_keybindings() -> Vec<FooterKeybinding> {
+    vec![bind("theme <name>", "apply"), bind("Esc", "close")]
+}
+
+fn keymap_keybindings() -> Vec<FooterKeybinding> {
+    vec![bind("j/k", "row"), bind("Esc", "close")]
+}
+
+fn update_available_keybindings() -> Vec<FooterKeybinding> {
+    vec![bind("/update", "pull"), bind("/changelog", "notes")]
+}
+
+fn interruption_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    bindings.push(bind("doctor", "preflight"));
+    bindings.push(bind("auth", "credentials"));
+    bindings.push(bind("config", "policy"));
+    bindings
 }
 
 // The security-viz gallery is fully interactive but its controls live only in

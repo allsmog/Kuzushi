@@ -16,7 +16,7 @@ use ratatui::prelude::{Line, Span};
 /// The 3-row header shown above every gallery page: title, tagline, page nav.
 /// Shared by the 3D frame renderer and the 2D line pages so they stay aligned.
 pub(crate) fn gallery_header_lines(app: &ShellApp) -> Vec<Line<'static>> {
-    let page = app.scene_page;
+    let page = app.router.scene().page();
     vec![
         Line::from(vec![Span::styled(
             format!("◆ KUZUSHI VIZ — {}", page.label().to_uppercase()),
@@ -274,7 +274,7 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
     append_page_tabs(&mut spans, app, page);
     spans.push(Span::styled("  ·  Tab cycles".to_string(), theme::muted()));
     if page.is_3d() {
-        let motion = if app.scene_paused {
+        let motion = if app.router.scene().paused() {
             "paused"
         } else if app.scene_animating() {
             "spinning"
@@ -326,10 +326,10 @@ fn page_nav_label(page: VizPage) -> &'static str {
 
 fn page_has_content(app: &ShellApp, page: VizPage) -> bool {
     match page {
-        VizPage::AttackSurface | VizPage::Heatmap => !app.findings.is_empty(),
-        VizPage::AttackPath => app.taint_flow.is_some(),
+        VizPage::AttackSurface | VizPage::Heatmap => !app.findings().is_empty(),
+        VizPage::AttackPath => app.domain().taint_flow().is_some(),
         VizPage::Dfd => dfd_model(app).empty_hint.is_none(),
-        VizPage::ExploitChain => !app.exploit_chains.is_empty(),
+        VizPage::ExploitChain => app.domain().has_exploit_chains(),
     }
 }
 
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn attack_surface_plain_lines_project_heatmap_data() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.findings = vec![kuzushi_core::Finding::new_semgrep(
+        *app.findings_mut() = vec![kuzushi_core::Finding::new_semgrep(
             "rule.high",
             "src/auth/login.rs",
             10,
@@ -410,20 +410,21 @@ mod tests {
     #[test]
     fn exploit_chain_plain_lines_list_chain_steps() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.exploit_chains = vec![crate::ExploitChainDetail {
-            id: "chain-1".to_string(),
-            title: "template render to RCE".to_string(),
-            severity: crate::ChainSeverity::Critical,
-            narrative: Some("request template reaches renderer".to_string()),
-            impact_description: Some("remote code execution".to_string()),
-            preconditions: vec!["attacker can submit template name".to_string()],
-            steps: vec![crate::ExploitChainStep {
-                role: "source".to_string(),
-                description: "attacker controls template name".to_string(),
-                file: "app.js".to_string(),
-                line: 12,
-            }],
-        }];
+        app.domain_mut()
+            .set_exploit_chains(vec![crate::ExploitChainDetail {
+                id: "chain-1".to_string(),
+                title: "template render to RCE".to_string(),
+                severity: crate::ChainSeverity::Critical,
+                narrative: Some("request template reaches renderer".to_string()),
+                impact_description: Some("remote code execution".to_string()),
+                preconditions: vec!["attacker can submit template name".to_string()],
+                steps: vec![crate::ExploitChainStep {
+                    role: "source".to_string(),
+                    description: "attacker controls template name".to_string(),
+                    file: "app.js".to_string(),
+                    line: 12,
+                }],
+            }]);
 
         let lines = scene_page_lines(&app, Rect::new(0, 0, 96, 24), VizPage::ExploitChain);
         let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");

@@ -1,9 +1,9 @@
 //! SOURCE pane model for the Workbench command center: the finding-bearing
 //! files arranged as a nested directory tree with a per-file finding count.
 //! The builder is pure over the paths it is handed; the `app`-facing wrapper
-//! reads `app.findings` (the IO edge) and relativizes against the target.
+//! reads the Workbench-visible finding projection and relativizes against the target.
 
-use super::findings::{relativize_location, target_base};
+use super::findings::{projected_visible_findings, relativize_location, target_base};
 use super::recommendation_components;
 use crate::app::ProjectScopeTreeState;
 use crate::ShellApp;
@@ -51,9 +51,11 @@ pub(crate) enum SourceTreeComponentTier {
 pub(crate) fn source_tree_model(app: &ShellApp) -> SourceTreeModel {
     let base = target_base(app);
     build_source_tree_with_components(
-        app.findings
-            .iter()
-            .map(|finding| relativize_location(finding.file_path.clone(), base.as_deref())),
+        projected_visible_findings(app)
+            .into_iter()
+            .map(|projected| {
+                relativize_location(projected.finding.file_path.clone(), base.as_deref())
+            }),
         component_roots(app),
     )
 }
@@ -204,7 +206,7 @@ fn component_roots(app: &ShellApp) -> Vec<SourceTreeComponentRoot> {
     let scope_state = app
         .workbench_cache
         .borrow_mut()
-        .project_scope_tree(app.target.as_deref());
+        .project_scope_tree(app.target());
     if let Some(scope_state) = scope_state {
         roots.extend(scope_component_roots(&scope_state, &roots));
     }

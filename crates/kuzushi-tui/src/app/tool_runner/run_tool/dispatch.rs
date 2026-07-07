@@ -1,54 +1,53 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn run_tool(&mut self, tool: Option<String>, input: Option<String>) {
-        let effects = self.reduce_run_tool(tool, input);
-        self.execute_effects(effects);
-    }
-
     pub(crate) fn reduce_run_tool(
         &mut self,
         tool: Option<String>,
         input: Option<String>,
     ) -> Vec<ShellEffect> {
+        let Some(tool_name) = self.resolve_run_tool_name(tool) else {
+            return Vec::new();
+        };
+        vec![ShellEffect::PrepareRunTool(RunToolPreparation {
+            tool_name,
+            input,
+            target: self.target_owned(),
+        })]
+    }
+
+    pub(crate) fn prepare_run_tool_launch(
+        &mut self,
+        prepare: RunToolPreparation,
+    ) -> Vec<ShellEffect> {
         if self.blocked_by_running_tool() {
             return Vec::new();
         }
-        let Some(request) = self.prepare_run_tool_request(tool, input) else {
+        let Some(request) = self.prepare_run_tool_request(prepare) else {
             return Vec::new();
         };
+        if self.run_launch_deferred(&request) {
+            return Vec::new();
+        }
         vec![ShellEffect::DispatchRunTool(request.into_launch())]
     }
 
-    fn prepare_run_tool_request(
-        &mut self,
-        tool: Option<String>,
-        input: Option<String>,
-    ) -> Option<RunToolRequest> {
-        let Some(tool_name) = self.resolve_run_tool_name(tool) else {
-            return None;
-        };
-        let Some(workspace) = self.run_tool_workspace() else {
-            return None;
-        };
-        let Some(input) = self.parse_and_prepare_run_input(&tool_name, input, &workspace) else {
-            return None;
-        };
-        if self.run_launch_deferred(&tool_name, &input) {
-            return None;
-        }
+    fn prepare_run_tool_request(&mut self, prepare: RunToolPreparation) -> Option<RunToolRequest> {
+        let workspace = self.run_tool_workspace(prepare.target.as_ref())?;
+        let input =
+            self.parse_and_prepare_run_input(&prepare.tool_name, prepare.input, &workspace)?;
         Some(RunToolRequest {
             thinking_level: thinking_level_from_input(&input)
-                .or_else(|| self.session_thinking_level.clone()),
-            tool_name,
+                .or_else(|| self.session_thinking_level_owned()),
+            tool_name: prepare.tool_name,
             input,
             workspace,
         })
     }
 
-    fn run_launch_deferred(&mut self, tool_name: &str, input: &serde_json::Value) -> bool {
-        self.blocked_by_pending_threat_review(tool_name)
-            || self.request_run_confirmation(tool_name, input)
+    fn run_launch_deferred(&mut self, request: &RunToolRequest) -> bool {
+        self.blocked_by_pending_threat_review(&request.tool_name)
+            || self.request_run_confirmation(request)
     }
 
     pub(crate) fn dispatch_run_tool(
@@ -57,20 +56,26 @@ impl ShellApp {
         input: serde_json::Value,
         workspace: WorkspaceTarget,
         tool_thinking_level: Option<String>,
-    ) {
+    ) -> Vec<ShellEffect> {
         let prereqs = prereq_steps_for(&tool_name, workspace.root());
         if !prereqs.is_empty() {
             self.shell_view = ShellView::ModuleRun;
-            self.start_prereq_chain(prereqs, tool_name, input, workspace, tool_thinking_level);
-            return;
+            return self.start_prereq_chain(
+                prereqs,
+                tool_name,
+                input,
+                workspace,
+                tool_thinking_level,
+            );
         }
         let status = tool_run_status(&tool_name);
         self.shell_view = ShellView::ModuleRun;
         self.start_background_tool(tool_name, input, workspace, status, tool_thinking_level);
+        Vec::new()
     }
 
     fn blocked_by_running_tool(&mut self) -> bool {
-        let Some(tool_name) = self.tool_running.clone() else {
+        let Some(tool_name) = self.running_tool_name_owned() else {
             return false;
         };
         self.log(
@@ -90,7 +95,8 @@ impl ShellApp {
         if !threat_dependent_tool(tool_name) || !self.engagement.has_pending_threat_patch() {
             return false;
         }
-        self.shell_view = ShellView::Threat(ThreatView::Summary);
+        self.router.threat_mut().open(ThreatView::Summary);
+        self.shell_view = ShellView::Threat;
         self.log(
             "threats",
             format!(
@@ -126,16 +132,16 @@ impl ShellApp {
     ) -> Option<serde_json::Value> {
         let input = self.parse_run_input_for_tool(tool_name, input)?;
         let ctx = ToolExecutionContext {
-            config: &self.config,
+            config: self.config(),
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
         };
-        match self.registry.prepare_tool_input_for_dispatch(
+        match self.registry().prepare_tool_input_for_dispatch(
             tool_name,
             input,
             &ctx,
-            Some(&self.option_store),
+            Some(self.option_store()),
         ) {
             Ok(input) => Some(input),
             Err(error) => {
@@ -184,26 +190,28 @@ impl ShellApp {
         serde_json::json!({})
     }
 
-    fn request_run_confirmation(&mut self, tool_name: &str, input: &serde_json::Value) -> bool {
-        let Some(request) =
-            confirm_gate_for_tool(tool_name, input, self.engagement.confirm_allowlist())
-        else {
+    fn request_run_confirmation(&mut self, request: &RunToolRequest) -> bool {
+        let Some(confirm) = confirm_gate_for_tool(
+            &request.tool_name,
+            &request.input,
+            self.engagement.confirm_allowlist(),
+        ) else {
             return false;
         };
         self.log(
             "system",
             format!(
                 "{} requires approval — {}",
-                tool_name,
-                request.kind.label().to_lowercase()
+                confirm.tool,
+                confirm.kind.label().to_lowercase()
             ),
         );
-        self.request_confirm(request);
+        self.request_confirm_for_run(confirm, request.clone().into_launch());
         true
     }
 
-    fn run_tool_workspace(&mut self) -> Option<WorkspaceTarget> {
-        match self.current_workspace() {
+    fn run_tool_workspace(&mut self, target: Option<&PathBuf>) -> Option<WorkspaceTarget> {
+        match workspace_for_target(target) {
             Ok(workspace) => Some(workspace),
             Err(error) => {
                 self.log(
@@ -226,6 +234,7 @@ fn threat_dependent_tool(tool_name: &str) -> bool {
     )
 }
 
+#[derive(Clone)]
 struct RunToolRequest {
     tool_name: String,
     input: serde_json::Value,

@@ -1,4 +1,4 @@
-use crate::ActivitySession;
+use crate::ActivityRouteState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityFeedPauseModel {
@@ -6,9 +6,9 @@ pub(crate) struct ActivityFeedPauseModel {
 }
 
 pub(crate) fn activity_feed_pause_model(
-    session: &ActivitySession,
+    route: &ActivityRouteState,
 ) -> Option<ActivityFeedPauseModel> {
-    session.paused.then_some(ActivityFeedPauseModel {
+    route.paused.then_some(ActivityFeedPauseModel {
         text: "⏸ feed paused — press Space to resume",
     })
 }
@@ -19,12 +19,12 @@ mod tests {
 
     #[test]
     fn activity_feed_pause_model_projects_pause_copy() {
-        let mut session = ActivitySession::new("r-1");
-        assert!(activity_feed_pause_model(&session).is_none());
+        let mut route = ActivityRouteState::default();
+        assert!(activity_feed_pause_model(&route).is_none());
 
-        session.paused = true;
+        route.paused = true;
         assert_eq!(
-            activity_feed_pause_model(&session),
+            activity_feed_pause_model(&route),
             Some(ActivityFeedPauseModel {
                 text: "⏸ feed paused — press Space to resume",
             })

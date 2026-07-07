@@ -1,36 +1,39 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn prompt_mutate(&mut self, args: &str) {
+    pub(crate) fn prompt_mutate(&mut self, args: &str) -> Vec<ShellEffect> {
         let Some((verb, text)) = prompt_mutation_args(args) else {
             self.log(
                 "prompt",
                 "mutate requires a verb and quoted value: prompt mutate triage \"focus on auth\"",
             );
+            return Vec::new();
+        };
+        let Some((target, module)) = self.prompt_mutation_effect_scope("mutate") else {
+            return Vec::new();
+        };
+        vec![ShellEffect::RecordPromptMutation(PromptMutationRecord {
+            target: Some(target),
+            module,
+            verb: verb.to_string(),
+            text: text.to_string(),
+        })]
+    }
+
+    pub(crate) fn record_prompt_mutation_effect(&mut self, record: PromptMutationRecord) {
+        let Some(workspace) = self.prompt_mutation_workspace(record.target.as_ref(), "mutate")
+        else {
             return;
         };
-        let Some((workspace, module)) = self.prompt_mutation_scope("mutate") else {
-            return;
-        };
-        let mutation =
-            kuzushi_core::PromptMutation::new_at(unix_time_ms(), module, verb, text, "operator");
+        let mutation = kuzushi_core::PromptMutation::new_at(
+            unix_time_ms(),
+            record.module,
+            &record.verb,
+            &record.text,
+            "operator",
+        );
         match kuzushi_core::append_prompt_mutation(&workspace, &mutation) {
-            Ok(()) => {
-                self.workbench_cache
-                    .borrow_mut()
-                    .invalidate_prompt_mutations();
-                self.log(
-                    "prompt",
-                    format!(
-                        "mutation {} pending for {}:{} ({} bytes); approve with prompt approve {}",
-                        mutation.id,
-                        mutation.module_id,
-                        mutation.verb,
-                        mutation.text.len(),
-                        mutation.id
-                    ),
-                );
-            }
+            Ok(()) => self.log_recorded_prompt_mutation(&mutation),
             Err(error) => self.log(
                 "error",
                 format!("could not record prompt mutation: {error}"),
@@ -38,33 +41,74 @@ impl ShellApp {
         }
     }
 
-    pub(crate) fn prompt_approve_mutation(&mut self, args: &str) {
-        self.prompt_set_mutation_status(args, kuzushi_core::PromptMutationStatus::Approved);
+    fn log_recorded_prompt_mutation(&mut self, mutation: &kuzushi_core::PromptMutation) {
+        self.workbench_cache
+            .borrow_mut()
+            .invalidate_prompt_mutations();
+        self.log(
+            "prompt",
+            format!(
+                "mutation {} pending for {}:{} ({} bytes); approve with prompt approve {}",
+                mutation.id,
+                mutation.module_id,
+                mutation.verb,
+                mutation.text.len(),
+                mutation.id
+            ),
+        );
     }
 
-    pub(crate) fn prompt_reject_mutation(&mut self, args: &str) {
-        self.prompt_set_mutation_status(args, kuzushi_core::PromptMutationStatus::Rejected);
+    pub(crate) fn prompt_approve_mutation(&mut self, args: &str) -> Vec<ShellEffect> {
+        self.reduce_prompt_mutation_status(args, kuzushi_core::PromptMutationStatus::Approved)
     }
 
-    fn prompt_set_mutation_status(
+    pub(crate) fn prompt_reject_mutation(&mut self, args: &str) -> Vec<ShellEffect> {
+        self.reduce_prompt_mutation_status(args, kuzushi_core::PromptMutationStatus::Rejected)
+    }
+
+    fn reduce_prompt_mutation_status(
         &mut self,
         args: &str,
         status: kuzushi_core::PromptMutationStatus,
-    ) {
+    ) -> Vec<ShellEffect> {
         let Some((id, reason)) = prompt_mutation_status_args(args) else {
             self.log(
                 "prompt",
                 format!("{} requires a mutation id", status.label()),
             );
+            return Vec::new();
+        };
+        let Some((target, _module)) = self.prompt_mutation_effect_scope(status.label()) else {
+            return Vec::new();
+        };
+        vec![ShellEffect::UpdatePromptMutationStatus(
+            PromptMutationStatusUpdate {
+                target: Some(target),
+                id: id.to_string(),
+                status,
+                reason: reason.map(ToString::to_string),
+            },
+        )]
+    }
+
+    pub(crate) fn update_prompt_mutation_status_effect(
+        &mut self,
+        update: PromptMutationStatusUpdate,
+    ) {
+        let Some(workspace) =
+            self.prompt_mutation_workspace(update.target.as_ref(), update.status.label())
+        else {
             return;
         };
-        let Some((workspace, _module)) = self.prompt_mutation_scope(status.label()) else {
-            return;
-        };
-        if status == kuzushi_core::PromptMutationStatus::Approved {
-            self.approve_prompt_mutation(&workspace, id, reason);
+        if update.status == kuzushi_core::PromptMutationStatus::Approved {
+            self.approve_prompt_mutation(&workspace, &update.id, update.reason.as_deref());
         } else {
-            self.update_prompt_mutation_status(&workspace, id, status, reason);
+            self.set_prompt_mutation_status(
+                &workspace,
+                &update.id,
+                update.status,
+                update.reason.as_deref(),
+            );
         }
     }
 
@@ -89,7 +133,7 @@ impl ShellApp {
         }
     }
 
-    fn update_prompt_mutation_status(
+    fn set_prompt_mutation_status(
         &mut self,
         workspace: &kuzushi_core::WorkspaceTarget,
         id: &str,
@@ -111,23 +155,35 @@ impl ShellApp {
         }
     }
 
-    fn prompt_mutation_scope(
+    fn prompt_mutation_effect_scope(&mut self, action: &str) -> Option<(PathBuf, String)> {
+        let target = self.target_owned().or_else(|| {
+            self.log(
+                "prompt",
+                format!("prompt {action} requires a workspace target"),
+            );
+            None
+        })?;
+        let module = self.focused_module_owned().or_else(|| {
+            self.log("prompt", format!("prompt {action} requires /use <module>"));
+            None
+        })?;
+        Some((target, module))
+    }
+
+    fn prompt_mutation_workspace(
         &mut self,
+        target: Option<&PathBuf>,
         action: &str,
-    ) -> Option<(kuzushi_core::WorkspaceTarget, String)> {
-        let Some(target) = self.target.as_deref() else {
+    ) -> Option<kuzushi_core::WorkspaceTarget> {
+        let Some(target) = target else {
             self.log(
                 "prompt",
                 format!("prompt {action} requires a workspace target"),
             );
             return None;
         };
-        let Some(module) = self.focused_module.clone() else {
-            self.log("prompt", format!("prompt {action} requires /use <module>"));
-            return None;
-        };
         match kuzushi_core::WorkspaceTarget::new(target) {
-            Ok(workspace) => Some((workspace, module)),
+            Ok(workspace) => Some(workspace),
             Err(error) => {
                 self.log("prompt", format!("target unavailable: {error}"));
                 None

@@ -8,23 +8,19 @@ impl ShellApp {
         };
         vec![ShellEffect::ApplyThreatPatch(ThreatPatchApply {
             patch,
-            target: self.target.clone(),
+            target: self.target_owned(),
         })]
-    }
-
-    pub fn apply_pending_threat_patch(&mut self) {
-        let effects = self.reduce_threat_apply();
-        self.execute_effects(effects);
     }
 
     pub fn discard_pending_threat_patch(&mut self) {
         if self.engagement.take_pending_threat_patch().is_some() {
             self.log("threats", "discarded pending patch");
+            self.set_refused_activity("threat model", "pending patch rejected");
         }
     }
 
     pub fn set_pending_threat_patch(&mut self, patch: ThreatPatch) {
         self.engagement.set_pending_threat_patch(patch);
-        self.threat_worker_running = false;
+        self.set_threat_worker_running(false);
     }
 }

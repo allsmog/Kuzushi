@@ -3,9 +3,7 @@ pub(crate) use super::*;
 
 use self::approval::{confirm_gate_for_tool, parse_pending_patch};
 use self::options::closest_option_names;
-use self::workers::{
-    background_tool_worker, spawn_panic_safe_worker, tool_run_status, LiveTraceBudget,
-};
+use self::workers::{background_tool_worker, tool_run_status, LiveTraceBudget};
 use self::{
     thinking_level_from_input, with_next_step, ReconSnapshot, ShellApp, ShellView, ToolEvent,
 };
@@ -20,7 +18,6 @@ use kuzushi_core::{
     TraceHandle, TraceSink, WorkspaceTarget,
 };
 pub(crate) use run_tool::*;
-use std::sync::mpsc;
 use std::sync::Arc;
 pub(crate) use tool_run_records::*;
 mod extract_cost_usd;

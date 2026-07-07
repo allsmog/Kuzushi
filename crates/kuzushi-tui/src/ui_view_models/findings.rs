@@ -173,8 +173,8 @@ pub(crate) struct TriageSummaryModel {
 pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
     let visible = projected_visible_findings(app);
     let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
-        &app.findings,
-        &app.review_decisions,
+        app.findings(),
+        app.review_decisions(),
     );
     let rows = finding_rows(app, &visible, &review_index);
     let selected_out_of_window = selected_out_of_window_notice(app, &rows);
@@ -190,11 +190,11 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
         header: findings_header(total, counts, active_component_rel_path(app).as_deref()),
         reconciliation_header: findings_reconciliation_header(
             total,
-            app.findings.len(),
+            app.findings().len(),
             active_findings_filter_label(app).as_str(),
             active_component_rel_path(app).as_deref(),
         ),
-        cursor: app.findings_route.cursor().min(total.saturating_sub(1)),
+        cursor: app.router.findings().cursor().min(total.saturating_sub(1)),
         empty: empty_state(app),
         selected_out_of_window,
         preview: findings_preview(total, triaged, pending, &rows),
@@ -215,7 +215,7 @@ fn findings_reconciliation_header(
 }
 
 fn active_findings_filter_label(app: &ShellApp) -> String {
-    app.active_findings_filter
+    app.active_findings_filter()
         .as_deref()
         .map(str::trim)
         .filter(|filter| !filter.is_empty())
@@ -266,8 +266,8 @@ fn severity_count_segments(counts: SeverityCounts) -> Vec<String> {
 pub(crate) fn selected_finding_detail_model(app: &ShellApp) -> Option<FindingDetailModel> {
     let (alias, finding) = current_finding_for_detail(app)?;
     let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
-        &app.findings,
-        &app.review_decisions,
+        app.findings(),
+        app.review_decisions(),
     );
     let decision = review_index.effective_decision_for(&finding);
     let runs = run_summary_index(app);
@@ -287,16 +287,16 @@ pub(crate) fn current_finding_for_detail(app: &ShellApp) -> Option<(Option<Strin
         let alias = cached_alias_for_fingerprint(app, &finding.fingerprint);
         return Some((alias, finding));
     }
-    if let Some(projected) = visible.get(app.findings_route.cursor()) {
+    if let Some(projected) = visible.get(app.router.findings().cursor()) {
         return Some((Some(projected.alias.clone()), projected.finding.clone()));
     }
-    let finding = app.selected_finding.clone()?;
+    let finding = app.selected_finding().clone()?;
     let alias = cached_alias_for_fingerprint(app, &finding.fingerprint);
     Some((alias, finding))
 }
 
 pub(crate) fn visible_finding_at_cursor(app: &ShellApp) -> Option<(String, Finding)> {
-    visible_finding_at_index(app, app.findings_route.cursor())
+    visible_finding_at_index(app, app.router.findings().cursor())
 }
 
 pub(crate) fn visible_finding_at_index(app: &ShellApp, index: usize) -> Option<(String, Finding)> {
@@ -328,7 +328,7 @@ fn selected_outside_loaded_findings(
     if active_component_rel_path(app).is_some() {
         return None;
     }
-    let selected = app.selected_finding.as_ref()?;
+    let selected = app.selected_finding().as_ref()?;
     let selected_key = engagement_projection_key(selected);
     let selected_is_loaded = visible
         .iter()
@@ -337,7 +337,7 @@ fn selected_outside_loaded_findings(
 }
 
 fn selected_out_of_window_notice(app: &ShellApp, rows: &[FindingListRow]) -> Option<String> {
-    let selected = app.selected_finding.as_ref()?;
+    let selected = app.selected_finding().as_ref()?;
     if rows.iter().any(|row| row.selected) {
         return None;
     }
@@ -352,7 +352,10 @@ fn finding_rows(
     visible: &[ProjectedFinding],
     review_index: &EffectiveReviewStateIndex,
 ) -> Vec<FindingListRow> {
-    let selected_key = app.selected_finding.as_ref().map(engagement_projection_key);
+    let selected_key = app
+        .selected_finding()
+        .as_ref()
+        .map(engagement_projection_key);
     let base = target_base(app);
     let runs = run_summary_index(app);
     visible
@@ -363,7 +366,7 @@ fn finding_rows(
             let decision = review_index.effective_decision_for(&projected.finding);
             FindingListRow::from_finding(
                 row_index,
-                app.findings_route.cursor(),
+                app.router.findings().cursor(),
                 selected_key.as_deref(),
                 projected.alias.clone(),
                 &projected.finding,
@@ -378,7 +381,7 @@ fn finding_rows(
 pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
     app.workbench_cache
         .borrow_mut()
-        .sorted_finding_alias_indices(&app.findings)
+        .sorted_finding_alias_indices(app.findings())
 }
 
 pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
@@ -398,7 +401,7 @@ fn component_filtered_finding_alias_indices(
     sorted
         .into_iter()
         .filter(|(_, index)| {
-            app.findings
+            app.findings()
                 .get(*index)
                 .is_some_and(|finding| finding_in_component(finding, &prefix, base.as_deref()))
         })
@@ -413,14 +416,14 @@ fn active_filter_finding_alias_indices(
         return visible;
     };
     let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
-        &app.findings,
-        &app.review_decisions,
+        app.findings(),
+        app.review_decisions(),
     );
     let runs = run_summary_index(app);
     visible
         .into_iter()
         .filter(|(_, index)| {
-            app.findings.get(*index).is_some_and(|finding| {
+            app.findings().get(*index).is_some_and(|finding| {
                 finding_matches_active_filter(finding, &filter, &review_index, &runs)
             })
         })
@@ -428,7 +431,7 @@ fn active_filter_finding_alias_indices(
 }
 
 fn parsed_active_findings_filter(app: &ShellApp) -> Option<FindingListFilter> {
-    let expression = app.active_findings_filter.as_deref()?.trim();
+    let expression = app.active_findings_filter().as_deref()?.trim();
     if expression.is_empty() {
         return None;
     }
@@ -458,7 +461,7 @@ fn cached_alias_for_fingerprint(app: &ShellApp, fingerprint: &str) -> Option<Str
     cached_sorted_finding_alias_indices(app)
         .into_iter()
         .find_map(|(alias, index)| {
-            app.findings
+            app.findings()
                 .get(index)
                 .is_some_and(|finding| finding.fingerprint == fingerprint)
                 .then_some(alias)
@@ -469,9 +472,7 @@ fn cached_alias_for_fingerprint(app: &ShellApp, fingerprint: &str) -> Option<Str
 /// the list shows `crates/foo.rs:12` instead of a full `/Users/...` path. Shared
 /// with the Workbench SOURCE tree so both surfaces relativize identically.
 pub(crate) fn target_base(app: &ShellApp) -> Option<String> {
-    app.workbench_cache
-        .borrow_mut()
-        .target_base(app.target.as_deref())
+    app.workbench_cache.borrow_mut().target_base(app.target())
 }
 
 /// Strip the target prefix from a `path:line` location when present, leaving a
@@ -488,7 +489,7 @@ pub(crate) fn relativize_location(location: String, base: Option<&str>) -> Strin
 
 type ProjectedFinding = VisibleFindingProjection;
 
-fn projected_visible_findings(app: &ShellApp) -> Vec<ProjectedFinding> {
+pub(crate) fn projected_visible_findings(app: &ShellApp) -> Vec<ProjectedFinding> {
     let key = visible_findings_cache_key(app);
     if let Some(cached) = app.workbench_cache.borrow().visible_findings(&key) {
         return cached;
@@ -502,8 +503,8 @@ fn projected_visible_findings(app: &ShellApp) -> Vec<ProjectedFinding> {
 
 fn visible_findings_cache_key(app: &ShellApp) -> VisibleFindingsCacheKey {
     VisibleFindingsCacheKey::from_app_parts(
-        &app.findings,
-        &app.review_decisions,
+        app.findings(),
+        app.review_decisions(),
         target_base(app),
         active_component_rel_path(app),
         active_findings_filter_cache_value(app),
@@ -511,7 +512,7 @@ fn visible_findings_cache_key(app: &ShellApp) -> VisibleFindingsCacheKey {
 }
 
 fn active_findings_filter_cache_value(app: &ShellApp) -> Option<String> {
-    app.active_findings_filter
+    app.active_findings_filter()
         .as_deref()
         .map(str::trim)
         .filter(|filter| !filter.is_empty())
@@ -532,7 +533,7 @@ fn engagement_projected_findings(
     let mut groups = Vec::<ProjectedFinding>::new();
     let mut group_index = BTreeMap::<String, usize>::new();
     for (alias, index) in visible {
-        let Some(finding) = app.findings.get(index).cloned() else {
+        let Some(finding) = app.findings().get(index).cloned() else {
             continue;
         };
         let key = engagement_projection_key(&finding);
@@ -641,11 +642,11 @@ fn visible_severity_counts(visible: &[ProjectedFinding]) -> SeverityCounts {
 }
 
 fn active_component_rel_path(app: &ShellApp) -> Option<String> {
-    let active = app.active_scope.as_ref()?;
+    let active = app.active_scope()?;
     if active.rel_path == "." || active.rel_path.trim().is_empty() {
         return None;
     }
-    let target = app.target.as_deref()?;
+    let target = app.target()?;
     let state = app
         .workbench_cache
         .borrow_mut()
@@ -691,7 +692,7 @@ fn empty_state(app: &ShellApp) -> FindingsEmptyState {
 }
 
 fn filtered_empty_state(app: &ShellApp) -> Option<FilteredFindingsEmptyState> {
-    app.active_findings_filter
+    app.active_findings_filter()
         .as_deref()
         .map(str::trim)
         .filter(|filter| !filter.is_empty())
@@ -912,11 +913,11 @@ struct FindingRunProvenance {
 fn run_summary_index(app: &ShellApp) -> BTreeMap<String, RunSummary> {
     app.workbench_cache
         .borrow_mut()
-        .run_summary_index(app.target.as_deref(), finding_scan_ids(app))
+        .run_summary_index(app.target(), finding_scan_ids(app))
 }
 
 fn finding_scan_ids(app: &ShellApp) -> Vec<String> {
-    app.findings
+    app.findings()
         .iter()
         .filter_map(|finding| finding.scan_id.as_deref())
         .filter(|scan_id| !scan_id.is_empty())

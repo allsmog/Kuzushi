@@ -12,7 +12,7 @@
 //!
 //! The state machine is pure and owns only depth-stack concerns (depth, focused
 //! pane, drawer tab, leg/row cursors, scroll). Finding *selection* stays on the
-//! authoritative `ShellApp::findings_route`, so the DETAILS/legs always reflect
+//! authoritative findings route state, so the DETAILS/legs always reflect
 //! the truly selected finding; selection moves come back as [`NavEffect`]s the
 //! app applies through its existing cursor helpers.
 
@@ -24,7 +24,7 @@ pub use scroll::BoundedScroll;
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkbenchNav {
     pub depth: WorkbenchDepth,
     pub pane: FindingPane,

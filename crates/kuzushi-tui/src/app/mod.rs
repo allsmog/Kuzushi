@@ -9,6 +9,9 @@ pub(crate) use background_events::*;
 pub(crate) use catalog::*;
 pub(crate) use command_router::*;
 pub(crate) use ctrl_c_arm_window::*;
+pub(crate) use domain_cache::*;
+pub(crate) use editor_state::*;
+pub(crate) use effect_runtime::*;
 pub(crate) use effects::*;
 pub(crate) use file_picker::*;
 pub(crate) use findings::*;
@@ -22,22 +25,28 @@ pub(crate) use prereq_chain::*;
 pub(crate) use prompts::*;
 pub(crate) use pwn::*;
 pub(crate) use runtime::*;
+pub(crate) use runtime_state::*;
 pub(crate) use sast_tasks::*;
 pub(crate) use scan::*;
+pub(crate) use scan_state::ScanState;
 pub(crate) use services::*;
 pub(crate) use session::*;
+pub(crate) use session_state::*;
 pub(crate) use settings::*;
 pub(crate) use shell_lifecycle::{auth_ready_for_provider, *};
 pub(crate) use shellapp::*;
 pub(crate) use strategy::*;
 pub(crate) use threats::*;
+pub(crate) use tool_run_state::*;
 pub(crate) use tool_runner::*;
+pub(crate) use ui_prefs::*;
 pub(crate) use update::*;
-pub(crate) use view_state::*;
+pub use view_state::*;
 pub(crate) use with_next_step::*;
 pub(crate) use workers::*;
 pub(crate) use workspace_context::*;
 mod agent_chat;
+mod agent_chat_state;
 mod agent_session;
 mod approval;
 mod artifacts;
@@ -45,6 +54,8 @@ mod background_events;
 mod catalog;
 mod command_palette;
 mod command_router;
+mod editor_state;
+mod effect_runtime;
 mod effects;
 mod file_picker;
 mod findings;
@@ -73,29 +84,34 @@ use kuzushi_core::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 mod onboarding;
 mod prompts;
 mod reducers;
 mod runtime;
+mod runtime_state;
 mod sast_tasks;
 mod scan;
+mod scan_state;
 mod services;
 mod session;
+mod session_state;
 mod settings;
 mod state;
 pub(crate) mod state_transitions;
 mod strategy;
 mod task_durations;
 mod threats;
+mod tool_run_state;
 mod tool_runner;
+mod ui_prefs;
 mod update;
 mod view_state;
 mod workers;
 mod workspace_context;
 
 mod ctrl_c_arm_window;
+mod domain_cache;
 mod shell_lifecycle;
 mod shellapp;
 #[cfg(test)]
@@ -103,9 +119,11 @@ mod tests;
 mod with_next_step;
 pub use agent_chat::AgentChatView;
 pub use agent_chat::ChatTurn;
+pub(crate) use agent_chat_state::AgentChatState;
 pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
 pub use live_activity::{LiveActivity, LiveActivityPhase};
 pub use log::LogLine;
+pub(crate) use log::{LogState, LOG_LINE_CAPACITY};
 pub(crate) use onboarding::PlanningRunStep;
 pub use onboarding::{
     applicable_tasks_for_phase, artifact_state as planning_artifact_state, build_execution_plan,
@@ -132,12 +150,19 @@ pub use shellapp::ShellApp;
 pub(crate) use task_durations::compact_secs;
 pub use task_durations::TaskDurationStore;
 pub use view_state::{
-    ActivitySession, ActorDetailFilter, AdvisoryState, AuthLoginView, BudgetHalt, CompletionCycle,
-    ContextSnapshotView, DagTaskDetail, DagTaskDetailState, DagTaskRow, DagTaskState, ExploitChain,
-    HistorySearch, InputMode, KnowledgeBaseView, Notice, NoticeSeverity, OptionsFilter,
-    OptionsView, PaneFocus, PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot,
-    RecordedTraceEvent, ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView,
-    ThrottleAdvisory, TuneAction, WorkbenchPage, WorkbenchPane, WorkbenchPaneScroll, WorkspaceView,
+    ActivityRouteState, ActivitySession, ActorDetailFilter, AdvisoryState, AuthLoginView,
+    AuthScreenFooter, AuthScreenSnapshot, AuthScreenStatus, BudgetHalt, CommandPaletteFooter,
+    CommandPaletteSnapshot, CommandPaletteStatus, CompletionCycle, ConfigScreenFooter,
+    ConfigScreenSnapshot, ConfigScreenStatus, ContextScreenFooter, ContextScreenSnapshot,
+    ContextScreenStatus, ContextSnapshotView, CostScreenFooter, CostScreenSnapshot,
+    CostScreenStatus, DagTaskDetail, DagTaskDetailState, DagTaskRow, DagTaskState, ExploitChain,
+    HelpScreenFooter, HelpScreenSnapshot, HelpScreenStatus, HistorySearch, InputMode,
+    InterruptionView, KnowledgeBaseView, Notice, NoticeSeverity, OptionsFilter,
+    OptionsScreenFooter, OptionsScreenSnapshot, OptionsScreenStatus, OptionsView, PaneFocus,
+    PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot, RecordedTraceEvent,
+    SastTasksFooter, SastTasksSnapshot, SastTasksStatus, ScanPanelState, ShellView,
+    SubsystemAggregate, ThreatPatch, ThreatView, ThrottleAdvisory, TuneAction, WorkbenchPage,
+    WorkbenchPane, WorkbenchPaneScroll, WorkspaceView,
 };
 pub use view_state::{
     BoundedScroll, DrawerTab, FindingPane, NavBounds, NavEffect, WorkbenchDepth, WorkbenchNav,

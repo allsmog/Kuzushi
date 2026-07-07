@@ -12,23 +12,35 @@ pub(crate) fn refresh_terminal_redraw_state(
 }
 
 pub(crate) fn app_background_changed(app: &mut ShellApp) -> bool {
-    let tick_changed = update_and_execute_effects(app, Msg::Tick(Instant::now()));
-    let drain_changed = app.drain_background_events();
+    let drain_changed = apply_runtime_messages(app, Instant::now());
     let view_changed = app.sync_view_change();
-    tick_changed || drain_changed || view_changed
+    drain_changed || view_changed
+}
+
+pub(crate) fn apply_runtime_messages(app: &mut ShellApp, now: Instant) -> bool {
+    let maintenance_changed = app.run_background_maintenance();
+    let mut messages = Vec::with_capacity(1);
+    messages.push(Msg::Tick(now));
+    messages.extend(app.drain_job_messages());
+    update_many_and_execute_effects(app, messages) || maintenance_changed
+}
+
+pub(crate) fn apply_pending_background_events(app: &mut ShellApp) -> bool {
+    let maintenance_changed = app.run_background_maintenance();
+    let messages = app.drain_job_messages();
+    update_many_and_execute_effects(app, messages) || maintenance_changed
 }
 
 pub(crate) fn clear_terminal_after_external_output(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     app: &mut ShellApp,
 ) -> Result<bool> {
-    if !app.force_full_redraw {
+    if !app.ui_mut().take_force_full_redraw() {
         return Ok(false);
     }
     // A subprocess wrote to our terminal while we were paused (e.g. OAuth
     // bridge). Drop ratatui's diff buffer so the next draw repaints every cell.
     terminal.clear()?;
-    app.force_full_redraw = false;
     Ok(true)
 }
 
@@ -53,6 +65,7 @@ pub(crate) fn terminal_event_timeout(app: &ShellApp) -> Duration {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn apply_terminal_event(app: &mut ShellApp, event: Event) -> bool {
     TermEvent::from_crossterm(event)
         .map(|event| update_and_execute_effects(app, Msg::Term(event)))
@@ -67,7 +80,7 @@ pub(crate) fn run_plain_shell(
     registry: ModuleRegistry,
 ) -> Result<()> {
     let mut app = ShellApp::with_registry(config, target, registry);
-    open_start_view(&mut app);
+    apply_launch_start_view(&mut app);
     let mut script = String::new();
     if !stdin_is_terminal {
         stdin

@@ -1,6 +1,6 @@
 use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow, ActivityDagRowTone};
 use super::activity_feed_rows::{ActivityFeedPaneRow, ActivityFeedRowTone};
-use crate::ActivitySession;
+use crate::{ActivityRouteState, ActivitySession};
 use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,13 +24,14 @@ pub(crate) struct ActivityPlainFeedCell {
 
 pub(crate) fn activity_plain_pane_rows(
     session: &ActivitySession,
+    route: &ActivityRouteState,
     dag_width: usize,
     feed_width: usize,
     now: Instant,
     output_rows: &[ActivityFeedPaneRow],
     running_tool: Option<&str>,
 ) -> Vec<ActivityPlainPaneRow> {
-    let dag_rows = activity_dag_pane_rows(session, dag_width, now, running_tool);
+    let dag_rows = activity_dag_pane_rows(session, route, dag_width, now, running_tool);
     let row_count = dag_rows.len().max(output_rows.len());
     (0..row_count)
         .map(|index| ActivityPlainPaneRow {
@@ -98,7 +99,8 @@ mod tests {
                 .with_started_at_ms(43_000),
         );
 
-        let rows = activity_plain_pane_rows(&session, 80, 20, Instant::now(), &[], None);
+        let route = ActivityRouteState::default();
+        let rows = activity_plain_pane_rows(&session, &route, 80, 20, Instant::now(), &[], None);
 
         assert!(rows.len() >= 3);
         assert_eq!(rows[0].separator, " │ ");
@@ -116,12 +118,13 @@ mod tests {
     #[test]
     fn activity_plain_pane_rows_append_pinned_generated_views() {
         let session = ActivitySession::new("r-1");
+        let route = ActivityRouteState::default();
         let extra = [ActivityFeedPaneRow {
             text: "ATTACK PATH".to_string(),
             tone: ActivityFeedRowTone::Success,
         }];
 
-        let rows = activity_plain_pane_rows(&session, 12, 20, Instant::now(), &extra, None);
+        let rows = activity_plain_pane_rows(&session, &route, 12, 20, Instant::now(), &extra, None);
 
         assert!(rows.iter().any(|row| row.feed.text.contains("ATTACK PATH")));
     }

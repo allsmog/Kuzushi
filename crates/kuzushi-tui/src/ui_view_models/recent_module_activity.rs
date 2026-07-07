@@ -76,7 +76,7 @@ fn recon_activity_rows(
     if module_id != "recon" {
         return None;
     }
-    let snapshot = app.recon_snapshot.as_ref()?;
+    let snapshot = app.domain().recon_snapshot()?;
     let rows = recon_snapshot_rows(snapshot, take);
     (!rows.is_empty()).then_some(rows)
 }
@@ -84,14 +84,14 @@ fn threat_hunt_activity_rows(app: &ShellApp, module_id: &str) -> Option<Vec<Modu
     if module_id != "carlini-threat-hunt" && module_id != "offense-review" {
         return None;
     }
-    app.carlini_snapshot.as_ref().map(carlini_snapshot_rows)
+    app.domain().carlini_snapshot().map(carlini_snapshot_rows)
 }
 fn agentic_activity_rows(app: &ShellApp, module_id: &str) -> Option<Vec<ModuleActivityRow>> {
     if module_id != "agentic-sast" {
         return None;
     }
-    app.agentic_sast_snapshot
-        .as_ref()
+    app.domain()
+        .agentic_sast_snapshot()
         .map(agentic_sast_snapshot_rows)
 }
 fn recon_snapshot_rows(snapshot: &ReconSnapshot, take: usize) -> Vec<ModuleActivityRow> {
@@ -215,7 +215,7 @@ fn recent_log_activity_rows(
 fn recent_module_log(app: &ShellApp, module_id: &str, take: usize) -> Vec<(String, String)> {
     let module_id = module_id.to_string();
     let mut matches = app
-        .log
+        .log_lines()
         .iter()
         .rev()
         .filter(|line| log_matches_module(line, &module_id))

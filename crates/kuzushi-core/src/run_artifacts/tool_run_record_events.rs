@@ -27,10 +27,10 @@ pub(crate) fn append_tool_event(record: ToolRunRecord<'_>, status: &str, message
 }
 
 pub(crate) fn append_started_trace(record: ToolRunRecord<'_>) {
-    let _ = append_run_trace_step(
+    let _ = append_run_trace_step_with_next_number(
         record.target,
         record.run_id,
-        &RunTraceStep::new(1, "tool", format!("{} started", record.tool))
+        &RunTraceStep::new(0, "tool", format!("{} started", record.tool))
             .with_tool_name(record.tool),
     );
 }
@@ -41,7 +41,7 @@ pub(crate) fn append_done_trace(
     cost_usd: Option<f64>,
 ) {
     let mut step = RunTraceStep::new(
-        next_run_trace_step_number(record.target, record.run_id),
+        0,
         completion_trace_kind(status),
         completion_trace_label(record.tool, status),
     )
@@ -50,15 +50,15 @@ pub(crate) fn append_done_trace(
     if let Some(severity) = completion_trace_severity(status) {
         step = step.with_severity(severity);
     }
-    let _ = append_run_trace_step(record.target, record.run_id, &step);
+    let _ = append_run_trace_step_with_next_number(record.target, record.run_id, &step);
 }
 
 pub(crate) fn append_failed_trace(record: ToolRunRecord<'_>) {
-    let _ = append_run_trace_step(
+    let _ = append_run_trace_step_with_next_number(
         record.target,
         record.run_id,
         &RunTraceStep::new(
-            next_run_trace_step_number(record.target, record.run_id),
+            0,
             "refused",
             format!("{} failed", record.tool),
         )

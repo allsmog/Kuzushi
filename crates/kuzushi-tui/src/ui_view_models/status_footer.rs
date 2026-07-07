@@ -1,7 +1,9 @@
 use super::{
-    active_project_scope_label, journey_footer_segment, routing_mode_segment, scan_status,
-    status_footer_findings_summary, view_status_segment, ShellApp,
+    active_project_scope_label, findings_model, journey_footer_segment, routing_mode_segment,
+    scan_status, status_footer_findings_summary_from_counts,
+    status_footer_findings_summary_with_total, view_status_segment, ShellApp,
 };
+use crate::ShellView;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StatusFooterModel {
@@ -65,7 +67,7 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
 }
 
 fn scope_footer_segment(app: &ShellApp) -> Option<String> {
-    let scope = app.program_scope.as_ref()?;
+    let scope = app.domain().program_scope()?;
     if scope.is_empty() {
         return None;
     }
@@ -77,11 +79,19 @@ fn project_scope_footer_segment(app: &ShellApp) -> Option<String> {
 }
 
 fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
-    let mut segments = vec![status_footer_findings_summary(&app.findings)];
+    let mut segments = vec![status_footer_findings_segment(app)];
     if warning {
         segments.insert(0, "Ctrl+C again to exit".to_string());
     }
     segments
+}
+
+fn status_footer_findings_segment(app: &ShellApp) -> String {
+    if matches!(app.shell_view, ShellView::Workbench) {
+        let findings = findings_model(app);
+        return status_footer_findings_summary_from_counts(findings.total, findings.counts);
+    }
+    status_footer_findings_summary_with_total(app.findings(), app.findings_total_count())
 }
 
 fn status_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
@@ -105,14 +115,14 @@ fn ambient_chip_activity(app: &ShellApp) -> Option<FooterActivity> {
 }
 
 fn live_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
-    let activity = app.live_activity.as_ref()?;
+    let activity = app.live_activity()?;
     activity.phase.active().then(|| FooterActivity {
         label: activity.short_label(),
     })
 }
 
 fn scan_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
-    let scan = app.scan.as_ref()?;
+    let scan = app.scan()?;
     scan.running.then(|| FooterActivity {
         label: scan_status(scan),
     })
@@ -126,21 +136,21 @@ fn tool_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
 }
 
 fn agent_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
-    let agent = app.agent_chat.as_ref()?;
+    let agent = app.agent_chat()?;
     agent.running.then(|| FooterActivity {
         label: active_or_abort_label("agent", agent.abort_requested),
     })
 }
 
 fn planner_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
-    app.planner_running.then(|| FooterActivity {
-        label: active_or_abort_label("plan", app.plan_abort_requested),
+    app.planner_running().then(|| FooterActivity {
+        label: active_or_abort_label("plan", app.plan_abort_requested()),
     })
 }
 
 fn threat_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
-    app.threat_worker_running.then(|| FooterActivity {
-        label: active_or_abort_label("threats", app.threat_abort_requested),
+    app.threat_worker_running().then(|| FooterActivity {
+        label: active_or_abort_label("threats", app.threat_abort_requested()),
     })
 }
 
@@ -153,10 +163,10 @@ fn active_or_abort_label(name: &str, abort_requested: bool) -> String {
 }
 
 fn model_footer_segment(app: &ShellApp) -> String {
-    if let Some(model) = app.active_model_override.as_deref() {
+    if let Some(model) = app.active_model_override() {
         return format!("{model} (tool)");
     }
-    app.config
+    app.config()
         .model
         .clone()
         .unwrap_or_else(|| "unconfigured".to_string())

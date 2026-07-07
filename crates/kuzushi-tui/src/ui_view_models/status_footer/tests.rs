@@ -1,6 +1,6 @@
 use super::*;
 use crate::ScanPanelState;
-use kuzushi_core::V2Config;
+use kuzushi_core::{Finding, Severity, V2Config};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -18,9 +18,39 @@ fn status_footer_model_reports_idle_shell_segments() {
 }
 
 #[test]
+fn status_footer_uses_projected_findings_count_on_workbench() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    let mut semgrep = Finding::new_semgrep(
+        "demo.sql",
+        "src/search.ts",
+        12,
+        None,
+        Severity::Medium,
+        "SQL injection CWE-89 reaches db.query",
+    );
+    semgrep.scan_id = Some("scan-a".to_string());
+    let mut systems = Finding::new_tool(
+        "systems-hunt",
+        "systems/cwe-89",
+        "src/search.ts",
+        14,
+        None,
+        Severity::High,
+        "SQL injection CWE-89 reaches db.query",
+    );
+    systems.scan_id = Some("scan-b".to_string());
+    *app.findings_mut() = vec![semgrep, systems];
+
+    let model = status_footer_model(&app);
+
+    assert_eq!(model.right_segments, ["1 finding / 1 high"]);
+}
+
+#[test]
 fn status_footer_model_surfaces_ctrl_c_warning() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.ctrl_c_armed_at = Some(Instant::now());
+    app.set_ctrl_c_armed_at(Some(Instant::now()));
 
     let model = status_footer_model(&app);
 
@@ -31,7 +61,8 @@ fn status_footer_model_surfaces_ctrl_c_warning() {
 #[test]
 fn malformed_context_snapshot_surfaces_in_the_cockpit_strip() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+    app.domain_mut().context_view_mut().status =
+        "malformed context snapshot. Next: context build".to_string();
 
     // The bottom bar no longer carries ctx; the malformed signal must still
     // reach the operator through the top cockpit strip.
@@ -54,7 +85,7 @@ fn status_footer_shows_scope_chip_when_program_scope_loaded() {
         "#,
     )
     .unwrap();
-    app.program_scope = Some(scope);
+    app.domain_mut().set_program_scope(Some(scope));
 
     let model = status_footer_model(&app);
 
@@ -64,7 +95,7 @@ fn status_footer_shows_scope_chip_when_program_scope_loaded() {
         model.left_segments
     );
 
-    app.program_scope = None;
+    app.domain_mut().set_program_scope(None);
     let model = status_footer_model(&app);
     assert!(
         !model.left_segments.iter().any(|s| s.starts_with("scope:")),
@@ -76,11 +107,11 @@ fn status_footer_shows_scope_chip_when_program_scope_loaded() {
 #[test]
 fn status_footer_shows_active_project_scope_chip() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.active_scope = Some(crate::app::TargetCandidateScope {
+    app.set_active_scope(Some(crate::app::TargetCandidateScope {
         id: "submodule-libs-parser".to_string(),
         kind: kuzushi_core::NestedProjectKind::Submodule,
         rel_path: "libs/parser".to_string(),
-    });
+    }));
 
     let model = status_footer_model(&app);
 
@@ -97,8 +128,8 @@ fn status_footer_shows_active_project_scope_chip() {
 #[test]
 fn status_footer_model_prefers_active_scan_status() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.config.model = Some("openai:gpt-5.2".to_string());
-    app.scan = Some(ScanPanelState {
+    app.config_mut().model = Some("openai:gpt-5.2".to_string());
+    app.set_scan_panel(Some(ScanPanelState {
         run_id: None,
         target: PathBuf::from("."),
         stage: "semgrep".to_string(),
@@ -106,7 +137,7 @@ fn status_footer_model_prefers_active_scan_status() {
         running: true,
         abort_requested: false,
         error: None,
-    });
+    }));
 
     let model = status_footer_model(&app);
 
@@ -119,9 +150,9 @@ fn status_footer_model_prefers_active_scan_status() {
 #[test]
 fn status_footer_model_reflects_active_tool_model_override() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.config.model = Some("anthropic:claude-default".to_string());
+    app.config_mut().model = Some("anthropic:claude-default".to_string());
     app.set_running_tool_for_test("triage:run");
-    app.active_model_override = Some("openai:gpt-tool".to_string());
+    app.set_active_model_override_for_test("openai:gpt-tool");
 
     let model = status_footer_model(&app);
 

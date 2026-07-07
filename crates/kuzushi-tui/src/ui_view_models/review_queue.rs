@@ -66,10 +66,10 @@ pub(crate) struct ReviewQueueRow {
 
 pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> ReviewQueueModel {
     let base = target_base(app);
-    let selected_key = app.selected_finding.as_ref().map(review_queue_key);
+    let selected_key = app.selected_finding().as_ref().map(review_queue_key);
     let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
-        &app.findings,
-        &app.review_decisions,
+        app.findings(),
+        app.review_decisions(),
     );
     let all_rows = projected_visible_finding_pairs(app)
         .into_iter()
@@ -78,7 +78,7 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
             let decision = review_index.effective_decision_for(&finding);
             ReviewQueueRow::from_finding(
                 index,
-                app.findings_route.cursor(),
+                app.router.findings().cursor(),
                 alias,
                 &finding,
                 decision.as_ref(),

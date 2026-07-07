@@ -80,6 +80,30 @@ fn create_review_decisions_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn ensure_column(conn: &Connection, table: &str, column: &str, alter_sql: &str) -> Result<()> {
+    if column_exists(conn, table, column)? {
+        return Ok(());
+    }
+    conn.execute_batch(alter_sql)
+        .with_context(|| format!("Could not add {table}.{column}"))?;
+    Ok(())
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let sql = format!("pragma table_info({table})");
+    let mut stmt = conn
+        .prepare(&sql)
+        .with_context(|| format!("Could not inspect columns for {table}"))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn create_static_proof_history_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(STATIC_PROOF_HISTORY_SCHEMA)?;
     Ok(())

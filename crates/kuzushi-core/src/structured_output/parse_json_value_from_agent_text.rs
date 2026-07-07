@@ -13,6 +13,10 @@ pub(crate) enum JsonExtractionStrategy {
 }
 
 impl JsonExtractionStrategy {
+    fn is_balanced(self) -> bool {
+        matches!(self, Self::BalancedObject | Self::BalancedArray)
+    }
+
     #[cfg(test)]
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -158,14 +162,22 @@ fn parse_last_fenced_json(text: &str) -> Option<Value> {
     last_ok
 }
 
-/// Typed convenience wrapper: parse the agent's text as a JSON Value
-/// via `parse_json_value_from_agent_text`, then deserialise into T.
-/// Returns None on any failure so callers can fall back to defaults.
+/// Typed convenience wrapper: parse the agent's text as a JSON Value, then
+/// deserialise into T. Balanced-brace extraction is refused for typed verdicts
+/// because those snippets can come from reasoning prose rather than the final
+/// answer.
 pub(crate) fn try_parse_typed_from_agent_text<T: serde::de::DeserializeOwned>(
     text: &str,
 ) -> Option<T> {
-    let value = parse_json_value_from_agent_text(text).ok()?;
-    serde_json::from_value::<T>(value).ok()
+    let parsed = parse_json_value_from_agent_text_with_strategy(text).ok()?;
+    if parsed.strategy.is_balanced() {
+        eprintln!(
+            "refusing typed verdict parse from {:?} extraction; response needs explicit JSON",
+            parsed.strategy
+        );
+        return None;
+    }
+    serde_json::from_value::<T>(parsed.value).ok()
 }
 
 pub(crate) fn strip_markdown_fence(text: &str) -> &str {

@@ -2,7 +2,7 @@ use super::domain::{ClassifierConfig, QuantileEstimator, Score};
 use super::persistence::{load_quantile, save_quantile};
 use crate::agent_router::{AgentRole, RoutedRuntime};
 use crate::findings::{Finding, TriageOutcome, TriageVerdict};
-use crate::runtime::{AgentQueryRequest, AgentRuntime};
+use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::Path;

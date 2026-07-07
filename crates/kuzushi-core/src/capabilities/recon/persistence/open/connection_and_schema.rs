@@ -4,12 +4,7 @@ impl ReconWorkspaceStore {
     pub fn open(workspace: &WorkspaceTarget) -> Result<Self> {
         workspace.ensure_state_dir()?;
         let db_path = workspace.findings_db_path();
-        if let Some(parent) = db_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Could not create {}", parent.display()))?;
-        }
-        let conn = Connection::open(&db_path)
-            .with_context(|| format!("Could not open {}", db_path.display()))?;
+        let conn = crate::sqlite_connection::open_file(&db_path)?;
         let store = Self {
             conn,
             db_path: db_path.display().to_string(),

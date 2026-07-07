@@ -19,6 +19,8 @@ pub(in crate::renderer) use command_palette_lines::*;
 pub(in crate::renderer) use config_lines::*;
 pub(in crate::renderer) use cost_lines::*;
 pub(in crate::renderer) use health_lines::*;
+pub(in crate::renderer) use interruption_lines::*;
+pub(in crate::renderer) use overlay_lines::*;
 pub(in crate::renderer) use tools_lines::*;
 mod auth_lines;
 mod auth_provider_rows;
@@ -26,6 +28,9 @@ mod command_palette_lines;
 mod config_lines;
 mod cost_lines;
 mod health_lines;
+mod interruption_content;
+mod interruption_lines;
+mod overlay_lines;
 mod tools_lines;
 pub(crate) use auth_lines::auth_lines;
 pub(crate) use auth_provider_rows::{auth_provider_line, auth_provider_lines};
@@ -34,4 +39,9 @@ pub(crate) use config_lines::config_lines;
 pub(crate) use cost_lines::cost_budget_bar;
 pub(crate) use cost_lines::cost_lines;
 pub(crate) use health_lines::health_lines;
+pub(crate) use interruption_lines::interruption_lines;
+pub(crate) use overlay_lines::{
+    boot_splash_lines, confirm_dialog_lines, keymap_lines, quit_confirm_lines, theme_picker_lines,
+    update_available_lines,
+};
 pub(crate) use tools_lines::tools_lines;

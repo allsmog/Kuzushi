@@ -10,62 +10,111 @@ pub(crate) fn normalize_ndiff_findings(
     let variants = variants_array(raw);
     let mut findings = Vec::new();
     for item in variants.into_iter() {
-        let Value::Object(object) = item else {
+        let Some(finding) = ndiff_finding_from_item(item, repo_name, advisory_id, pattern)? else {
             continue;
         };
-        let Some(file_path) = read_object_string(&object, &["filePath", "file_path"]) else {
-            continue;
-        };
-        let start_line = read_object_u64(&object, &["startLine", "start_line"])
-            .filter(|line| *line > 0)
-            .unwrap_or(1) as u32;
-        let confidence =
-            read_object_string(&object, &["confidence"]).unwrap_or_else(|| "MEDIUM".to_string());
-        if confidence.eq_ignore_ascii_case("LOW") {
-            continue;
-        }
-        let severity = severity_from_agent(
-            read_object_string(&object, &["severity"])
-                .as_deref()
-                .unwrap_or("WARNING"),
-        );
-        let cwes = {
-            let from_result = read_object_string_array(&object, &["cwe", "cwes"]);
-            if from_result.is_empty() {
-                read_object_string_array(pattern, &["cwe", "cwes"])
-            } else {
-                from_result
-            }
-        };
-        let fallback = format!(
-            "Possible unpatched variant of {}: {}",
-            advisory_id,
-            read_object_string(pattern, &["vulnerableShape", "vulnerable_shape"])
-                .unwrap_or_default()
-        );
-        let message = variant_message(
-            read_object_string(&object, &["message"]).as_deref(),
-            read_object_string(&object, &["rationale"]).as_deref(),
-            &confidence,
-            &cwes,
-            &fallback,
-        );
-        let mut finding = Finding::new_tool(
-            "n-day-diff-hunter",
-            format!("n-day/{advisory_id}"),
-            file_path.clone(),
-            start_line,
-            None,
-            severity,
-            message,
-        );
-        finding.fingerprint = format!("{repo_name}:ndiff/{advisory_id}/{file_path}:{start_line}");
         findings.push(finding);
         if findings.len() >= max_findings {
             break;
         }
     }
     Ok(findings)
+}
+
+fn ndiff_finding_from_item(
+    item: Value,
+    repo_name: &str,
+    advisory_id: &str,
+    pattern: &Map<String, Value>,
+) -> Result<Option<Finding>> {
+    let Some(object) = item.as_object() else {
+        return Ok(None);
+    };
+    let Some(file_path) = read_object_string(object, &["filePath", "file_path"]) else {
+        return Ok(None);
+    };
+    let start_line = read_object_u64(object, &["startLine", "start_line"])
+        .filter(|line| *line > 0)
+        .unwrap_or(1) as u32;
+    let confidence = required_ndiff_string(object, "confidence", advisory_id, &file_path)?;
+    if confidence.eq_ignore_ascii_case("LOW") {
+        return Ok(None);
+    }
+    let severity = severity_from_agent(&required_ndiff_string(
+        object,
+        "severity",
+        advisory_id,
+        &file_path,
+    )?);
+    Ok(Some(build_ndiff_finding(
+        object,
+        repo_name,
+        advisory_id,
+        pattern,
+        file_path,
+        start_line,
+        confidence,
+        severity,
+    )))
+}
+
+fn required_ndiff_string(
+    object: &Map<String, Value>,
+    key: &str,
+    advisory_id: &str,
+    file_path: &str,
+) -> Result<String> {
+    read_object_string(object, &[key]).with_context(|| {
+        format!("n-day variant finding for {advisory_id} in {file_path} missing required `{key}`")
+    })
+}
+
+fn build_ndiff_finding(
+    object: &Map<String, Value>,
+    repo_name: &str,
+    advisory_id: &str,
+    pattern: &Map<String, Value>,
+    file_path: String,
+    start_line: u32,
+    confidence: String,
+    severity: Severity,
+) -> Finding {
+    let cwes = ndiff_cwes(object, pattern);
+    let message = variant_message(
+        read_object_string(object, &["message"]).as_deref(),
+        read_object_string(object, &["rationale"]).as_deref(),
+        &confidence,
+        &cwes,
+        &ndiff_fallback_message(advisory_id, pattern),
+    );
+    let mut finding = Finding::new_tool(
+        "n-day-diff-hunter",
+        format!("n-day/{advisory_id}"),
+        file_path.clone(),
+        start_line,
+        None,
+        severity,
+        message,
+    );
+    finding.fingerprint = format!("{repo_name}:ndiff/{advisory_id}/{file_path}:{start_line}");
+    finding
+}
+
+fn ndiff_cwes(object: &Map<String, Value>, pattern: &Map<String, Value>) -> Vec<String> {
+    let from_result = read_object_string_array(object, &["cwe", "cwes"]);
+    if from_result.is_empty() {
+        read_object_string_array(pattern, &["cwe", "cwes"])
+    } else {
+        from_result
+    }
+}
+
+fn ndiff_fallback_message(advisory_id: &str, pattern: &Map<String, Value>) -> String {
+    format!(
+        "Possible unpatched variant of {}: {}",
+        advisory_id,
+        read_object_string(pattern, &["vulnerableShape", "vulnerable_shape"]).unwrap_or_default()
+    )
 }
 
 pub(crate) fn derive_whitebox_variant_pattern(

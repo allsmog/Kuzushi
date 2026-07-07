@@ -37,7 +37,7 @@ pub(crate) struct PlainWorkspaceModel {
 }
 
 pub(crate) fn workspace_model(app: &ShellApp) -> WorkspaceModel {
-    let view = &app.workspace_view;
+    let view = app.domain().workspace_view();
     WorkspaceModel {
         status: view.status.clone(),
         target_label: compact_path_or(view.root.as_deref(), "none"),
@@ -46,11 +46,11 @@ pub(crate) fn workspace_model(app: &ShellApp) -> WorkspaceModel {
             view.findings_db.as_deref(),
             findings_db_relative_path(),
         ),
-        findings_label: count_or_unknown(view.findings_count),
+        findings_label: workspace_findings_label(app, view.findings_count),
         last_export_label: compact_path_or(view.last_export.as_deref(), "none"),
         empty: view.root.is_none(),
-        rollup_total: app.findings.len(),
-        rollup_rows: rollup_rows(&app.findings),
+        rollup_total: app.findings().len(),
+        rollup_rows: rollup_rows(app.findings()),
     }
 }
 
@@ -106,10 +106,18 @@ fn compact_path_or(path: Option<&Path>, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn count_or_unknown(count: Option<usize>) -> String {
-    count
-        .map(|count| count.to_string())
-        .unwrap_or_else(|| "none yet (run scan first)".to_string())
+fn workspace_findings_label(app: &ShellApp, count: Option<usize>) -> String {
+    let Some(total) = count else {
+        return "none yet (run scan first)".to_string();
+    };
+    let loaded = app.findings().len();
+    if total > loaded && loaded > 0 {
+        return format!("{loaded}/{total} loaded");
+    }
+    if total > 0 && loaded == 0 {
+        return format!("{total} in db (not loaded)");
+    }
+    total.to_string()
 }
 
 fn rollup_rows(findings: &[Finding]) -> Vec<WorkspaceRollupRow> {

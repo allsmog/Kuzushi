@@ -18,6 +18,10 @@ pub struct EngagementState {
     pending_prereq_prompt: Option<PendingPrereqPrompt>,
     pending_patch: Option<PendingPatch>,
     pending_threat_patch: Option<ThreatPatch>,
+    planner_running: bool,
+    plan_abort_requested: bool,
+    threat_worker_running: bool,
+    threat_abort_requested: bool,
     confirm_allowlist: BTreeSet<String>,
     confirm_denylist: BTreeSet<String>,
     pending_plan: Option<PlanProposal>,
@@ -363,6 +367,38 @@ impl EngagementState {
 
     pub(crate) fn has_pending_threat_patch(&self) -> bool {
         self.pending_threat_patch.is_some()
+    }
+
+    pub(crate) fn planner_running(&self) -> bool {
+        self.planner_running
+    }
+
+    pub(crate) fn set_planner_running(&mut self, running: bool) {
+        self.planner_running = running;
+    }
+
+    pub(crate) fn plan_abort_requested(&self) -> bool {
+        self.plan_abort_requested
+    }
+
+    pub(crate) fn set_plan_abort_requested(&mut self, requested: bool) {
+        self.plan_abort_requested = requested;
+    }
+
+    pub(crate) fn threat_worker_running(&self) -> bool {
+        self.threat_worker_running
+    }
+
+    pub(crate) fn set_threat_worker_running(&mut self, running: bool) {
+        self.threat_worker_running = running;
+    }
+
+    pub(crate) fn threat_abort_requested(&self) -> bool {
+        self.threat_abort_requested
+    }
+
+    pub(crate) fn set_threat_abort_requested(&mut self, requested: bool) {
+        self.threat_abort_requested = requested;
     }
 
     pub(crate) fn confirm_allowlist(&self) -> &BTreeSet<String> {

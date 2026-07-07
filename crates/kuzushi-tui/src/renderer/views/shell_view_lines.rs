@@ -22,14 +22,14 @@ fn primary_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'stat
         ShellView::Pwn => viewport_lines(
             pwn_lines(app, area),
             area.height,
-            app.scroll_offset as usize,
+            default_scroll_offset(app),
         ),
         ShellView::Activity => viewport_lines(
             activity_lines(app, area),
             area.height,
-            app.scroll_offset as usize,
+            default_scroll_offset(app),
         ),
-        ShellView::Scene(page) => scene_page_lines(app, area, *page),
+        ShellView::Scene => scene_page_lines(app, area, app.router.scene().page()),
         _ => return None,
     })
 }
@@ -37,28 +37,39 @@ fn primary_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'stat
 fn threat_run_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
     Some(match &app.shell_view {
         ShellView::Tune => tune_lines(app, area),
-        ShellView::Threat(view) => viewport_lines(
-            threat_lines(app, area, *view),
+        ShellView::Threat => viewport_lines(
+            threat_lines(app, area, app.router.threat().view()),
             area.height,
-            app.scroll_offset as usize,
+            default_scroll_offset(app),
         ),
         ShellView::ThreatEditor => threat_editor_lines(app, area),
         ShellView::PromptsEditor => prompts_lines(app, area),
-        ShellView::ActorDetail(index) => actor_detail_lines(app, area, *index),
+        ShellView::ActorDetail => actor_detail_lines(app, area, app.router.actor_detail().index()),
         ShellView::Runs => runs_lines(app, area),
-        ShellView::RunDiff { left, right } => viewport_lines(
-            run_diff_lines(app, area, left, right),
+        ShellView::RunDiff => viewport_lines(
+            run_diff_lines(
+                app,
+                area,
+                app.router.run_diff().left(),
+                app.router.run_diff().right(),
+            ),
             area.height,
-            app.scroll_offset as usize,
+            default_scroll_offset(app),
         ),
-        ShellView::Replay(run_id) => replay_lines(app, area, run_id),
-        ShellView::Trace(run_id) => trace_lines(app, area, run_id),
-        ShellView::Patch(alias) => patch_lines(app, area, alias),
+        ShellView::Replay => replay_lines(app, area, app.router.replay().run_id()),
+        ShellView::Trace => trace_lines(app, area, app.router.trace().run_id()),
+        ShellView::Patch => patch_lines(app, area, app.router.patch().alias()),
         _ => return None,
     })
 }
 
 fn system_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
+    system_document_shell_view_lines(app, area)
+        .or_else(|| system_overlay_shell_view_lines(app, area))
+        .or_else(|| system_picker_shell_view_lines(app, area))
+}
+
+fn system_document_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
     Some(match &app.shell_view {
         ShellView::Help => viewport_lines(
             help_lines(app, area),
@@ -79,7 +90,7 @@ fn system_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'stati
         ShellView::Health => viewport_lines(
             health_lines(app, area),
             area.height,
-            app.scroll_offset as usize,
+            default_scroll_offset(app),
         ),
         ShellView::Tools => viewport_lines(
             tools_lines(app, area),
@@ -88,9 +99,30 @@ fn system_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'stati
         ),
         ShellView::Auth => auth_lines(app, area),
         ShellView::Cost => cost_lines(app, area),
+        _ => return None,
+    })
+}
+
+fn system_overlay_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
+    Some(match &app.shell_view {
+        ShellView::BootSplash => boot_splash_lines(app, area),
+        ShellView::QuitConfirm => quit_confirm_lines(app, area),
+        ShellView::ConfirmDialog => confirm_dialog_lines(app, area),
+        ShellView::ThemePicker => theme_picker_lines(app, area),
+        ShellView::Keymap => keymap_lines(app, area),
+        ShellView::UpdateAvailable => update_available_lines(app, area),
+        ShellView::Interruption => interruption_lines(app, area, app.router.interruption().view()),
+        _ => return None,
+    })
+}
+
+fn system_picker_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
+    Some(match &app.shell_view {
         ShellView::CommandPalette => command_palette_lines(app, area),
         ShellView::ModelPicker => model_picker_lines(app, area),
-        ShellView::AuthMethodPicker(provider) => auth_method_picker_lines(app, area, provider),
+        ShellView::AuthMethodPicker => {
+            auth_method_picker_lines(app, area, app.router.auth_picker().provider())
+        }
         ShellView::TargetPicker => target_picker_lines(app, area),
         ShellView::PlanningPicker => planning_picker_lines(app, area),
         ShellView::FilePicker => file_picker_lines(app, area),
@@ -100,7 +132,7 @@ fn system_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'stati
 
 fn workspace_session_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
     Some(match &app.shell_view {
-        ShellView::Options(view) => options_lines(app, area, view),
+        ShellView::Options => options_lines(app, area, app.router.options()),
         ShellView::SastTasks => sast_tasks_lines(app, area),
         ShellView::Context => context_lines(app, area),
         ShellView::ProjectModel => project_model_lines(app, area),
@@ -123,9 +155,13 @@ fn workspace_session_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<
     })
 }
 
+fn default_scroll_offset(app: &ShellApp) -> usize {
+    app.router.default_scroll().offset() as usize
+}
+
 fn catalog_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let lines = catalog_lines(app, area);
-    if app.catalog_route.is_expanded() {
+    if app.router.catalog().is_expanded() {
         return viewport_lines(lines, area.height, app.router.modules().scroll());
     }
     lines

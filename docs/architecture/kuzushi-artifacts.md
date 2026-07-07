@@ -12,7 +12,25 @@ When `kuzushi run` executes a targetless tool such as `config:show`, artifacts
 are rooted at the process current directory so the run still has a durable
 `.kuzushi/v3/runs/<runId>/` bundle.
 
-## Canonical Per-Run Files
+## Source-Of-Truth Boundary
+
+The run directory is a replay/export bundle, not a second mutable state store.
+V3 source of truth is:
+
+- content-addressed objects for source snapshots and code-derived payloads;
+- the append-only event log for human decisions, rekeys, proofs, patch
+  attempts, model/plugin audit, and run lifecycle;
+- SQLite as a disposable projection and search index with `meta.applied_seq`
+  committed in the same transaction as the projected rows.
+
+Files such as `context.json`, `attack-surface.json`, `findings.json`, and
+`proof.json` are run-scoped exports or deterministic absence markers. When a
+producer emits durable payloads for those files, the run recorder also writes
+the payload to the content-addressed store and records the object reference in
+`artifacts.json`. Readers may inspect the JSON files for replay and reports,
+but new state transitions must go through the storage writer actor.
+
+## Per-Run Bundle Files
 
 Every run should converge on these files:
 
@@ -21,17 +39,17 @@ Every run should converge on these files:
 | `run.json` | Run metadata: run id, kind, tool, target, status, started/completed times, model/provider/prompt hashes/cost where relevant, and reproducibility fingerprints such as house rules. |
 | `events.jsonl` | Ordered run events for replay and plain progress. |
 | `trace.jsonl` | Runtime trace steps, including LLM model, provider, prompt hash, latency, and cost when a model call occurs. |
-| `context.json` | Repository context snapshot used by the run. |
-| `attack-surface.json` | Attack-surface map used by scanners, threat modeling, and recommender. |
-| `threat-model.json` | Threat model snapshot or deterministic absence marker. |
-| `recommendations.json` | Module recommender output or deterministic absence marker. |
-| `strategy.json` | Strategy proposal snapshot or deterministic absence marker. |
-| `findings.json` | Findings emitted or referenced by this run. |
-| `proof.json` | Proof state and verification outcomes referenced by this run. |
+| `context.json` | Derived repository context export used by the run, or deterministic absence marker. |
+| `attack-surface.json` | Derived attack-surface export used by scanners, threat modeling, and recommender, or deterministic absence marker. |
+| `threat-model.json` | Derived threat-model export or deterministic absence marker. |
+| `recommendations.json` | Derived module recommender export or deterministic absence marker. |
+| `strategy.json` | Derived strategy proposal export or deterministic absence marker. |
+| `findings.json` | Derived finding-observation export for this run, or deterministic absence marker. |
+| `proof.json` | Derived proof/verification export referenced by this run, or deterministic absence marker. |
 | `failures.json` | Empty success marker or bounded failure-to-LLM handoff for partial/failed runs. |
 | `report.md` | Human-readable report for the run. |
 | `report.sarif` | Optional SARIF output when a scanner/report can produce it cleanly; reports summarize runs, results, levels, rule IDs, and affected files when present. |
-| `artifacts.json` | Manifest of written artifacts with label/path/kind. |
+| `artifacts.json` | Manifest of written artifacts with label/path/kind and CAS object references when available. |
 
 The target should also maintain:
 
@@ -49,7 +67,7 @@ repairs `.kuzushi/v3/latest` after deletion so replay and failure handoff keep
 pointing at the newest remaining run.
 
 `schemas/run.summary.schema.json` is the machine-readable contract for
-canonical `run.json` metadata. It covers required run
+standard `run.json` metadata. It covers required run
 identity/status/timing fields, optional tool/model/cost/error/reproducibility
 fields, LLM audit call metadata, malformed trace JSONL row counts when present,
 target git metadata, and artifact manifest entries embedded in the run summary.
@@ -121,7 +139,7 @@ under `coreFindings`, `core_findings`, or `findings`.
 summaries, verification proof snapshots, proof levels, verdicts, runtime proof
 flags, state counts, and proof finding entries. Static and verification
 snapshots may also be wrapped under `proof`, `proofs`, or `verification`.
-The schema contract intentionally accepts both canonical camelCase artifact
+The schema contract intentionally accepts both standard camelCase artifact
 fields and the snake_case aliases already supported by Rust readers for run
 metadata, artifact manifests, and failure handoff payloads. The architecture
 gate checks that alias fields are declared and, where they identify required
@@ -167,10 +185,10 @@ The current Rust substrate already writes:
 - `.kuzushi/v3/runs/<runId>/artifacts.json`
 
 This is sufficient for current run replay and failure handoff, but it is not
-the final canonical contract. Context, attack-surface, threat-model,
+the durable state contract. Context, attack-surface, threat-model,
 recommendation, strategy, findings, proof, and report files may be deterministic
 placeholder markers until producer modules return rich snapshot fields. The run
-recorder promotes known result fields into canonical files and records them in
+recorder promotes known result fields into standard run export files and records them in
 `artifacts.json`; module-specific producers should prefer those fields over
 ad-hoc side files. `module-recommender:recommend` results are preserved as the
 full recommendation report, including repository signals and capability
@@ -178,7 +196,7 @@ coverage, rather than only the recommendation list. It also records
 producer-declared artifacts from top-level
 `artifacts` and nested `data.artifacts` into `run.json` and `artifacts.json`,
 so module-owned reports and sidecar outputs stay discoverable even when they
-are not one of the canonical filenames.
+are not one of the standard filenames.
 
 TUI synthetic scan and agent runs also append explicit `sast:scan` and
 `agent:ask` success/failure lifecycle events to `events.jsonl` when the panel

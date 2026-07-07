@@ -1,32 +1,43 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn prompt_set(&mut self, args: &str) {
+    pub(crate) fn reduce_prompt_set(&mut self, args: &str) -> Vec<ShellEffect> {
         let Some((name, value)) = prompt_set_args(args) else {
             self.log(
                 "prompt",
                 "set requires a name and quoted value: prompt set triage \"focus on auth\"",
             );
-            return;
+            return Vec::new();
         };
         let Some(path) = self.prompt_path_for(name) else {
             self.log(
                 "prompt",
                 "prompt set requires a focused module and workspace",
             );
-            return;
+            return Vec::new();
         };
-        if !self.prepare_prompt_set_path(&path) {
+        vec![ShellEffect::WritePromptOverride(PromptOverrideWrite {
+            path,
+            value: value.to_string(),
+        })]
+    }
+
+    pub(crate) fn write_prompt_override_effect(&mut self, write: PromptOverrideWrite) {
+        if !self.prepare_prompt_set_path(&write.path) {
             return;
         }
-        match std::fs::write(&path, value) {
+        match std::fs::write(&write.path, &write.value) {
             Ok(_) => self.log(
                 "prompt",
-                format!("wrote {} ({} bytes)", path.display(), value.len()),
+                format!(
+                    "wrote {} ({} bytes)",
+                    write.path.display(),
+                    write.value.len()
+                ),
             ),
             Err(error) => self.log(
                 "error",
-                format!("could not write {}: {error}", path.display()),
+                format!("could not write {}: {error}", write.path.display()),
             ),
         }
     }

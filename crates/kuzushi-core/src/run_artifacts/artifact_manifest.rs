@@ -419,12 +419,9 @@ fn empty_manifest(run_id: &str) -> RunArtifactManifest {
 
 fn write_manifest(target: impl AsRef<Path>, manifest: &RunArtifactManifest) -> Result<PathBuf> {
     let path = manifest_path(target, &manifest.run_id);
-    fs::create_dir_all(path.parent().unwrap_or_else(|| Path::new(".")))?;
-    fs::write(
-        &path,
-        format!("{}\n", serde_json::to_string_pretty(manifest)?),
-    )
-    .with_context(|| format!("Could not write {}", path.display()))?;
+    let body = format!("{}\n", serde_json::to_string_pretty(manifest)?);
+    crate::fs_atomic::write_atomic(&path, &body)
+        .with_context(|| format!("Could not write {}", path.display()))?;
     Ok(path)
 }
 

@@ -211,12 +211,12 @@ pub(crate) fn workbench_view_model(app: &ShellApp) -> WorkbenchViewModel {
         right_detail,
         report_cta,
         state,
-        focus: app.workbench_focus,
+        focus: app.router.workbench().focus(),
     }
 }
 
 pub(crate) fn active_review_queue_mode(app: &ShellApp) -> ReviewQueueMode {
-    let Some(expression) = app.active_findings_filter.as_deref() else {
+    let Some(expression) = app.active_findings_filter().as_deref() else {
         return ReviewQueueMode::All;
     };
     let Ok(filter) = FindingListFilter::from_filter_expression(expression) else {
@@ -252,9 +252,11 @@ fn review_queue_mode_for_completeness(
 }
 
 pub(crate) fn active_workbench_page(app: &ShellApp) -> WorkbenchPage {
-    app.workbench_page
+    app.router
+        .workbench()
+        .page()
         .or_else(|| {
-            app.target.as_ref().and_then(|_| {
+            app.target_path_buf().and_then(|_| {
                 journey_model(app).map(|journey| WorkbenchPage::from_phase(journey.current))
             })
         })
@@ -348,7 +350,7 @@ fn top_bar_model(app: &ShellApp, page: WorkbenchPage) -> WorkbenchTopBar {
 }
 
 fn project_label(app: &ShellApp) -> String {
-    if app.target.is_some() {
+    if app.target().is_some() {
         super::scoped_target_path_label(app)
     } else {
         "no target".to_string()
@@ -356,14 +358,13 @@ fn project_label(app: &ShellApp) -> String {
 }
 
 fn target_label(app: &ShellApp) -> String {
-    app.focused_module
-        .clone()
+    app.focused_module_owned()
         .unwrap_or_else(|| "all modules".to_string())
 }
 
 fn center_model(app: &ShellApp) -> WorkbenchCenter {
     let code = selected_finding_code_model(app);
-    let active_mode = app.workbench_center_mode;
+    let active_mode = app.router.workbench().center_mode();
     let context = center_context(app);
     let tabs = center_tabs(app, code.as_ref(), active_mode);
     let body = center_body(app, code, active_mode);
@@ -393,8 +394,11 @@ fn center_body(
             empty_hint: selected_taint_flow_path(app).empty_hint,
         },
         WorkbenchCenterMode::Risk => WorkbenchCenterBody::Risk {
-            empty_hint: cached_findings_heatmap_with_selection(app, app.selected_finding.as_ref())
-                .empty_hint,
+            empty_hint: cached_findings_heatmap_with_selection(
+                app,
+                app.selected_finding().as_ref(),
+            )
+            .empty_hint,
         },
     }
 }
@@ -423,9 +427,11 @@ fn center_tab_empty(
     match mode {
         WorkbenchCenterMode::Code => code.map_or(true, |code| code.empty_hint.is_some()),
         WorkbenchCenterMode::Dfd => dfd_model(app).empty_hint.is_some(),
-        WorkbenchCenterMode::Chain => app.exploit_chains.is_empty(),
+        WorkbenchCenterMode::Chain => !app.domain().has_exploit_chains(),
         WorkbenchCenterMode::Flow => selected_taint_flow_path(app).empty_hint.is_some(),
-        WorkbenchCenterMode::Risk => app.findings.is_empty(),
+        WorkbenchCenterMode::Risk => cached_findings_heatmap_with_selection(app, None)
+            .empty_hint
+            .is_some(),
     }
 }
 
@@ -466,8 +472,8 @@ fn plain_tab_label(tab: &WorkbenchCenterTab) -> String {
 fn workbench_state(app: &ShellApp) -> WorkbenchState {
     derive_state(WorkbenchStateInputs {
         scanning: app.has_running_work(),
-        selected: app.selected_finding.is_some(),
-        has_findings: !app.findings.is_empty(),
+        selected: app.selected_finding().is_some(),
+        has_findings: !app.findings().is_empty(),
         has_threat_doc: threat_model_doc(app).is_some(),
         at_fix: journey_model(app).is_some_and(|journey| journey.current == WorkflowPhase::Fix),
     })
@@ -549,7 +555,7 @@ mod tests {
     #[test]
     fn live_is_on_with_a_running_scan() {
         let mut app = app();
-        app.scan = Some(crate::app::ScanPanelState {
+        app.set_scan_panel(Some(crate::app::ScanPanelState {
             run_id: Some("run-1".to_string()),
             target: std::path::PathBuf::from("."),
             stage: "running".to_string(),
@@ -557,7 +563,7 @@ mod tests {
             running: true,
             abort_requested: false,
             error: None,
-        });
+        }));
         let model = workbench_view_model(&app);
         assert!(model.top_bar.live);
         assert_eq!(model.state, WorkbenchState::Scanning);
@@ -566,14 +572,14 @@ mod tests {
     #[test]
     fn live_is_on_with_agentic_background_work() {
         let setups: [fn(&mut ShellApp); 3] = [
-            |app: &mut ShellApp| app.planner_running = true,
-            |app: &mut ShellApp| app.threat_worker_running = true,
+            |app: &mut ShellApp| app.set_planner_running(true),
+            |app: &mut ShellApp| app.set_threat_worker_running(true),
             |app: &mut ShellApp| {
-                app.agent_chat = Some(crate::app::AgentChatView {
+                app.set_agent_chat(Some(crate::app::AgentChatView {
                     question: "q".to_string(),
                     running: true,
                     ..Default::default()
-                });
+                }));
             },
         ];
         for setup in setups {
@@ -591,7 +597,7 @@ mod tests {
     fn top_bar_includes_phase_chip_and_phase_rail_when_target_is_set() {
         let target = tempfile::tempdir().unwrap();
         let mut app = app();
-        app.target = Some(target.path().to_path_buf());
+        app.set_target(Some(target.path().to_path_buf()));
 
         let model = workbench_view_model(&app);
 
@@ -624,9 +630,11 @@ mod tests {
     fn top_bar_rail_tracks_workspace_reality_not_open_page() {
         let target = tempfile::tempdir().unwrap();
         let mut app = app();
-        app.target = Some(target.path().to_path_buf());
-        app.findings = vec![finding(Severity::High)];
-        app.workbench_page = Some(WorkbenchPage::Terrain);
+        app.set_target(Some(target.path().to_path_buf()));
+        *app.findings_mut() = vec![finding(Severity::High)];
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Terrain));
 
         let model = workbench_view_model(&app);
 
@@ -665,7 +673,9 @@ mod tests {
     #[test]
     fn center_tabs_mark_active_page_and_empty_artifacts() {
         let mut app = app();
-        app.workbench_center_mode = WorkbenchCenterMode::Risk;
+        app.router
+            .workbench_mut()
+            .set_center_mode(WorkbenchCenterMode::Risk);
 
         let model = workbench_view_model(&app);
 
@@ -683,9 +693,32 @@ mod tests {
     }
 
     #[test]
+    fn risk_tab_empty_state_matches_heatmap_for_unknown_severity_findings() {
+        let mut app = app();
+        *app.findings_mut() = vec![finding(Severity::Unknown)];
+        app.router
+            .workbench_mut()
+            .set_center_mode(WorkbenchCenterMode::Risk);
+
+        let model = workbench_view_model(&app);
+
+        assert!(model
+            .center
+            .tabs
+            .iter()
+            .any(|tab| { tab.mode == WorkbenchCenterMode::Risk && tab.active && tab.empty }));
+        assert!(matches!(
+            model.center.body,
+            WorkbenchCenterBody::Risk {
+                empty_hint: Some(_)
+            }
+        ));
+    }
+
+    #[test]
     fn findings_surface_report_export_cta() {
         let mut app = app();
-        app.findings = vec![finding(Severity::High)];
+        *app.findings_mut() = vec![finding(Severity::High)];
 
         let model = workbench_view_model(&app);
 
@@ -702,9 +735,11 @@ mod tests {
     #[test]
     fn report_export_cta_tracks_active_review_completeness_filter() {
         let mut app = app();
-        app.findings = vec![finding(Severity::High)];
-        app.active_findings_filter = Some("completeness:open".to_string());
-        app.workbench_page = Some(WorkbenchPage::Ship);
+        *app.findings_mut() = vec![finding(Severity::High)];
+        app.set_active_findings_filter(Some("completeness:open".to_string()));
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Ship));
 
         let model = workbench_view_model(&app);
         let expected = "workspace export findings report.sarif --completeness open";
@@ -737,9 +772,11 @@ mod tests {
         let mut app = app();
         let selected = finding(Severity::High);
         let fingerprint = selected.fingerprint.clone();
-        app.findings = vec![selected.clone()];
-        app.selected_finding = Some(selected);
-        app.workbench_page = Some(WorkbenchPage::Ship);
+        *app.findings_mut() = vec![selected.clone()];
+        *app.selected_finding_mut() = Some(selected);
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Ship));
 
         let model = workbench_view_model(&app);
 
@@ -755,8 +792,8 @@ mod tests {
     #[test]
     fn finding_detail_state_when_a_finding_is_selected() {
         let mut app = app();
-        app.findings = vec![finding(Severity::High)];
-        app.selected_finding = Some(finding(Severity::High));
+        *app.findings_mut() = vec![finding(Severity::High)];
+        *app.selected_finding_mut() = Some(finding(Severity::High));
         let model = workbench_view_model(&app);
         assert_eq!(model.state, WorkbenchState::FindingDetail);
         assert!(model.right_detail.is_some());
@@ -788,9 +825,9 @@ mod tests {
     #[test]
     fn center_focus_keeps_code_preview_when_selected_finding() {
         let mut app = app();
-        app.findings = vec![finding(Severity::High)];
-        app.selected_finding = Some(app.findings[0].clone());
-        app.workbench_focus = WorkbenchPane::Center;
+        *app.findings_mut() = vec![finding(Severity::High)];
+        *app.selected_finding_mut() = Some(app.findings()[0].clone());
+        app.router.workbench_mut().set_focus(WorkbenchPane::Center);
 
         let model = workbench_view_model(&app);
 
@@ -800,10 +837,12 @@ mod tests {
     #[test]
     fn center_mode_can_explicitly_show_dfd_with_selected_finding() {
         let mut app = app();
-        app.findings = vec![finding(Severity::High)];
-        app.selected_finding = Some(app.findings[0].clone());
-        app.workbench_focus = WorkbenchPane::Center;
-        app.workbench_center_mode = WorkbenchCenterMode::Dfd;
+        *app.findings_mut() = vec![finding(Severity::High)];
+        *app.selected_finding_mut() = Some(app.findings()[0].clone());
+        app.router.workbench_mut().set_focus(WorkbenchPane::Center);
+        app.router
+            .workbench_mut()
+            .set_center_mode(WorkbenchCenterMode::Dfd);
 
         let model = workbench_view_model(&app);
 
@@ -811,15 +850,15 @@ mod tests {
     }
 
     fn app_with_findings_cursor(app: &mut ShellApp, first: Finding, second: Finding) {
-        app.findings = vec![first.clone(), second];
-        app.selected_finding = Some(first);
-        app.findings_route.set_cursor(1);
+        *app.findings_mut() = vec![first.clone(), second];
+        *app.selected_finding_mut() = Some(first);
+        app.router.findings_mut().set_cursor(1);
     }
 
     #[test]
     fn severity_chip_counts_reflect_findings() {
         let mut app = app();
-        app.findings = vec![
+        *app.findings_mut() = vec![
             finding_at("crates/critical.rs", Severity::Critical),
             finding_at("crates/high_a.rs", Severity::High),
             finding_at("crates/high_b.rs", Severity::High),
@@ -834,7 +873,7 @@ mod tests {
     #[test]
     fn severity_chip_counts_use_engagement_projection() {
         let mut app = app();
-        app.findings = vec![finding(Severity::Medium), finding(Severity::High)];
+        *app.findings_mut() = vec![finding(Severity::Medium), finding(Severity::High)];
         let right_list = workbench_view_model(&app).right_list;
         assert_eq!(right_list.total, 1);
         assert_eq!(right_list.counts.high, 1);
@@ -842,10 +881,22 @@ mod tests {
     }
 
     #[test]
+    fn source_tree_counts_use_engagement_projection() {
+        let mut app = app();
+        *app.findings_mut() = vec![finding(Severity::Medium), finding(Severity::High)];
+
+        let model = workbench_view_model(&app);
+
+        assert_eq!(model.right_list.total, 1);
+        assert_eq!(model.left.finding_count, 1);
+        assert_eq!(model.left.file_count, 1);
+    }
+
+    #[test]
     fn review_queue_mode_follows_active_completeness_filter() {
         let mut app = app();
-        app.findings = vec![finding(Severity::High)];
-        app.active_findings_filter = Some("decision:needs_review completeness:open".to_string());
+        *app.findings_mut() = vec![finding(Severity::High)];
+        app.set_active_findings_filter(Some("decision:needs_review completeness:open".to_string()));
 
         let model = workbench_view_model(&app);
 
@@ -857,8 +908,8 @@ mod tests {
     #[test]
     fn review_queue_mode_defaults_to_all_for_ambiguous_completeness_filter() {
         let mut app = app();
-        app.findings = vec![finding(Severity::High)];
-        app.active_findings_filter = Some("completeness:open completeness:complete".to_string());
+        *app.findings_mut() = vec![finding(Severity::High)];
+        app.set_active_findings_filter(Some("completeness:open completeness:complete".to_string()));
 
         let model = workbench_view_model(&app);
 

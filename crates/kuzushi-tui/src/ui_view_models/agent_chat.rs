@@ -30,12 +30,12 @@ pub(crate) struct AgentChatTurn {
 pub(crate) fn agent_chat_model(app: &ShellApp) -> AgentChatModel {
     AgentChatModel {
         model: agent_model_label(app),
-        session: app.agent_chat.as_ref().map(AgentChatSession::from_view),
+        session: app.agent_chat().map(AgentChatSession::from_view),
     }
 }
 
 fn agent_model_label(app: &ShellApp) -> String {
-    app.config
+    app.config()
         .model
         .as_deref()
         .map(crate::app::display_model_selector)

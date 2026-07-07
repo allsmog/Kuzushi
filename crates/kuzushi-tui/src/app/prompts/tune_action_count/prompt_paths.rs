@@ -2,8 +2,8 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn prompt_path_for(&self, name: &str) -> Option<PathBuf> {
-        let module = self.focused_module.as_ref()?;
-        let target = self.target.clone()?;
+        let module = self.focused_module()?;
+        let target = self.target_owned()?;
         let safe = name.trim().replace(['/', '\\'], "");
         if safe.is_empty() {
             return None;

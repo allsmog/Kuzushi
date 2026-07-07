@@ -13,43 +13,60 @@ impl ShellApp {
         &mut self,
         key: KeyEvent,
         modifiers: KeyModifierState,
-    ) -> bool {
-        if !self.input.is_empty() {
-            return false;
+    ) -> InputUpdate {
+        if !self.input().is_empty() {
+            return InputUpdate::ignored();
         }
         // First view-specific handler that claims the key wins; the hotkey
         // fallback is last so per-view keys take precedence.
-        EMPTY_INPUT_VIEW_KEY_HANDLERS
-            .iter()
-            .any(|handler| handler(self, key, modifiers))
+        let config_update = self.handle_config_view_key(key, modifiers);
+        if config_update.handled {
+            return config_update;
+        }
+        if self.handle_scene_view_key(key, modifiers) {
+            return InputUpdate::handled();
+        }
+        self.handle_view_hotkey_fallback(key, modifiers)
     }
 
     /// Arrow-key / single-key view hotkeys, tried after the per-view handlers.
-    fn handle_view_hotkey_fallback(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
-        if matches!(key.code, KeyCode::Up | KeyCode::Down)
-            && modifiers.plain
-            && self.handle_view_hotkey(key)
-        {
-            return true;
+    fn handle_view_hotkey_fallback(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> InputUpdate {
+        if matches!(key.code, KeyCode::Up | KeyCode::Down) && modifiers.plain {
+            let update = self.handle_view_hotkey(key);
+            if update.handled {
+                return update;
+            }
         }
-        modifiers.no_modifiers && self.handle_view_hotkey(key)
+        if modifiers.no_modifiers {
+            return self.handle_view_hotkey(key);
+        }
+        InputUpdate::ignored()
     }
 
     pub(super) fn handle_config_view_key(
         &mut self,
         key: KeyEvent,
         modifiers: KeyModifierState,
-    ) -> bool {
+    ) -> InputUpdate {
         if !modifiers.plain || !matches!(self.shell_view, ShellView::Config) {
-            return false;
+            return InputUpdate::ignored();
         }
         match key.code {
-            KeyCode::Up => self.move_model_selection(-1),
-            KeyCode::Down => self.move_model_selection(1),
-            KeyCode::Enter => self.select_current_model_choice(),
-            _ => return false,
+            KeyCode::Up => {
+                self.move_model_selection(-1);
+                InputUpdate::handled()
+            }
+            KeyCode::Down => {
+                self.move_model_selection(1);
+                InputUpdate::handled()
+            }
+            KeyCode::Enter => InputUpdate::handled_with_effects(self.select_current_model_choice()),
+            _ => InputUpdate::ignored(),
         }
-        true
     }
 
     /// 3D playground controls (active only while `ShellView::Scene` is open and
@@ -59,23 +76,23 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> bool {
-        if !modifiers.plain || !matches!(self.shell_view, ShellView::Scene(_)) {
+        if !modifiers.plain || !matches!(self.shell_view, ShellView::Scene) {
             return false;
         }
         // Gallery hotkeys yield to the prompt the moment the operator starts
         // typing — otherwise `back`/`home` are untypeable on the 3D page
         // (h/j/k/l would orbit the camera instead of reaching the prompt).
-        if !self.input.is_empty() {
+        if !self.input().is_empty() {
             return false;
         }
         // 3D controls only apply on the attack-surface page; on 2D pages they
         // fall through. Tab/Shift+Tab/Esc/q work on every page.
-        let is_3d = matches!(self.shell_view, ShellView::Scene(page) if page.is_3d());
+        let is_3d = self.router.scene().page().is_3d();
         match key.code {
             KeyCode::Tab => self.cycle_scene(1),
             KeyCode::BackTab => self.cycle_scene(-1),
             KeyCode::Char(' ') | KeyCode::Char('p') if is_3d => {
-                self.scene_paused = !self.scene_paused
+                self.router.scene_mut().toggle_paused()
             }
             KeyCode::Char('r') if is_3d => self.reset_scene_orientation(),
             // Explicit exits: the gallery is a leaf view, never a trap.
@@ -90,30 +107,22 @@ impl ShellApp {
     }
 
     fn cycle_scene(&mut self, direction: i32) {
-        let next = if direction >= 0 {
-            self.scene_page.next()
-        } else {
-            self.scene_page.prev()
-        };
+        let next = self.router.scene_mut().next_page(direction);
         self.set_scene_page(next);
     }
 
     /// Manual orbit implies the operator wants to inspect a frame, so it pauses
     /// the idle spin; `space` resumes it.
     fn nudge_scene_yaw(&mut self, sign: f32) {
-        self.scene_paused = true;
-        self.scene_spin = super::ticking::wrap_angle(self.scene_spin + sign * SCENE_NUDGE);
+        self.router.scene_mut().nudge_yaw(sign * SCENE_NUDGE);
     }
 
     fn nudge_scene_pitch(&mut self, sign: f32) {
-        self.scene_paused = true;
-        self.scene_pitch = (self.scene_pitch + sign * SCENE_NUDGE).clamp(-1.4, 1.4);
+        self.router.scene_mut().nudge_pitch(sign * SCENE_NUDGE);
     }
 
     fn reset_scene_orientation(&mut self) {
-        self.scene_spin = 0.6;
-        self.scene_pitch = 0.45;
-        self.scene_paused = false;
+        self.router.scene_mut().reset_orientation();
     }
 
     pub(super) fn handle_history_key(
@@ -132,16 +141,6 @@ impl ShellApp {
         true
     }
 }
-
-type ViewKeyHandler = fn(&mut ShellApp, KeyEvent, KeyModifierState) -> bool;
-
-/// Per-view empty-prompt key handlers, tried in order; the hotkey fallback is
-/// last so view-specific keys take precedence. Add a view by appending here.
-const EMPTY_INPUT_VIEW_KEY_HANDLERS: &[ViewKeyHandler] = &[
-    ShellApp::handle_config_view_key,
-    ShellApp::handle_scene_view_key,
-    ShellApp::handle_view_hotkey_fallback,
-];
 
 fn cursor_key_handler(code: KeyCode, modifiers: KeyModifierState) -> Option<fn(&mut ShellApp)> {
     if modifiers.ctrl_or_alt() {

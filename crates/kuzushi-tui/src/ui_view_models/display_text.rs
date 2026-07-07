@@ -15,14 +15,13 @@ pub(crate) fn compact_target_path(value: &str) -> String {
 }
 
 pub(crate) fn active_project_scope_label(app: &ShellApp) -> Option<String> {
-    let scope = app.active_scope.as_ref()?;
+    let scope = app.active_scope()?;
     (scope.kind != NestedProjectKind::Root).then(|| scope.rel_path.clone())
 }
 
 pub(crate) fn scoped_target_path_label(app: &ShellApp) -> String {
     let target = app
-        .target
-        .as_ref()
+        .target()
         .map(|path| compact_target_path(&path.display().to_string()))
         .unwrap_or_else(|| "none".to_string());
     active_project_scope_label(app)
@@ -31,7 +30,9 @@ pub(crate) fn scoped_target_path_label(app: &ShellApp) -> String {
 }
 
 pub(crate) fn format_session_cost(usd: f64) -> String {
-    if usd < 0.01 {
+    if usd == 0.0 {
+        "$0.00".to_string()
+    } else if usd < 0.01 {
         format!("${usd:.4}")
     } else if usd < 100.0 {
         format!("${usd:.2}")

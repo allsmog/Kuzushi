@@ -1,4 +1,4 @@
-use crate::{ActivitySession, PaneFocus};
+use crate::{ActivityRouteState, ActivitySession, PaneFocus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityPaneChromeModel {
@@ -26,20 +26,30 @@ pub(crate) struct ActivityPaneTitle {
     pub(crate) focused: bool,
 }
 
-pub(crate) fn activity_pane_chrome_model(session: &ActivitySession) -> ActivityPaneChromeModel {
+pub(crate) fn activity_pane_chrome_model(
+    session: &ActivitySession,
+    route: &ActivityRouteState,
+) -> ActivityPaneChromeModel {
     // "TASKS" / "OUTPUT" read for operators; "DAG"/"FEED" were dev jargon.
     ActivityPaneChromeModel {
-        dag: pane_title("TASKS", session.effective_pane_focus() == PaneFocus::Left),
-        feed: pane_title("OUTPUT", session.effective_pane_focus() == PaneFocus::Right),
+        dag: pane_title(
+            "TASKS",
+            route.effective_pane_focus(session) == PaneFocus::Left,
+        ),
+        feed: pane_title(
+            "OUTPUT",
+            route.effective_pane_focus(session) == PaneFocus::Right,
+        ),
     }
 }
 
 pub(crate) fn activity_plain_pane_header_model(
     session: &ActivitySession,
+    route: &ActivityRouteState,
     dag_width: usize,
     feed_width: usize,
 ) -> ActivityPlainPaneHeaderModel {
-    let chrome = activity_pane_chrome_model(session);
+    let chrome = activity_pane_chrome_model(session, route);
     ActivityPlainPaneHeaderModel {
         dag: plain_header_cell(&chrome.dag, dag_width),
         separator: " │ ",
@@ -93,18 +103,19 @@ mod tests {
     #[test]
     fn activity_pane_chrome_model_projects_focus() {
         let mut session = ActivitySession::new("r-1");
+        let mut route = ActivityRouteState::default();
         seed_task(&mut session);
         assert_eq!(
-            activity_pane_chrome_model(&session),
+            activity_pane_chrome_model(&session, &route),
             ActivityPaneChromeModel {
                 dag: pane_title("TASKS", true),
                 feed: pane_title("OUTPUT", false),
             }
         );
 
-        session.pane_focus = PaneFocus::Right;
+        route.pane_focus = PaneFocus::Right;
         assert_eq!(
-            activity_pane_chrome_model(&session),
+            activity_pane_chrome_model(&session, &route),
             ActivityPaneChromeModel {
                 dag: pane_title("TASKS", false),
                 feed: pane_title("OUTPUT", true),
@@ -127,10 +138,11 @@ mod tests {
     #[test]
     fn activity_plain_pane_header_model_projects_padded_cells() {
         let mut session = ActivitySession::new("r-1");
+        let mut route = ActivityRouteState::default();
         seed_task(&mut session);
 
         assert_eq!(
-            activity_plain_pane_header_model(&session, 10, 12),
+            activity_plain_pane_header_model(&session, &route, 10, 12),
             ActivityPlainPaneHeaderModel {
                 dag: ActivityPlainPaneHeaderCell {
                     text: " ── TASKS ".to_string(),
@@ -144,9 +156,9 @@ mod tests {
             }
         );
 
-        session.pane_focus = PaneFocus::Right;
+        route.pane_focus = PaneFocus::Right;
         assert_eq!(
-            activity_plain_pane_header_model(&session, 6, 6),
+            activity_plain_pane_header_model(&session, &route, 6, 6),
             ActivityPlainPaneHeaderModel {
                 dag: ActivityPlainPaneHeaderCell {
                     text: " ── TA".to_string(),

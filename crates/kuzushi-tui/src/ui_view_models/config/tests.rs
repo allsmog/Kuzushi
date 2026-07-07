@@ -53,8 +53,9 @@ fn config_model_summarizes_default_runtime_state() {
 #[test]
 fn config_model_reports_session_cost_when_available() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.session_cost_usd = 0.0456;
-    app.last_tool_cost_usd = Some(0.0123);
+    app.session_mut().set_session_cost_usd_for_test(0.0456);
+    app.session_mut()
+        .set_last_tool_cost_usd_for_test(Some(0.0123));
 
     let model = config_model(&app);
 
@@ -69,7 +70,7 @@ fn config_model_reports_session_cost_when_available() {
 #[test]
 fn config_model_preserves_explicit_reasoning_override() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.session_thinking_level = Some("xhigh".to_string());
+    app.set_session_thinking_level(Some("xhigh".to_string()));
 
     let model = config_model(&app);
 

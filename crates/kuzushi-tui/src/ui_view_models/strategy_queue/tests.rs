@@ -38,7 +38,7 @@ fn strategy_queue_model_reads_persisted_proposals() {
     append_strategy_proposal(&workspace, &proposal).unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
     let model = strategy_queue_model(&app);
 
     assert_eq!(
@@ -75,7 +75,7 @@ fn strategy_queue_model_sorts_proposed_before_approved_and_rejected() {
     append_strategy_proposal(&workspace, &proposed).unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
     let model = strategy_queue_model(&app);
 
     assert_eq!(model.rows[0].id, "review-codeql-scan");

@@ -1,29 +1,154 @@
 use super::*;
 use kuzushi_core::findings::ReviewDecision;
+use kuzushi_core::DynamicModuleLoadOptions;
 use kuzushi_core::OptionScope;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(crate) enum ShellEffect {
+    OpenActivity(ActivityOpen),
     ApplyReviewedPatch(ReviewedPatchApply),
+    ApplySastTaskOptions(SastTaskOptionsApply),
     ApplyThreatPatch(ThreatPatchApply),
+    AuthLogin(AuthLoginStart),
+    ActivateTarget(TargetActivation),
+    AdvancePrereqChain(PrereqChainAdvance),
+    AbortForBudget,
     CancelActiveJobs,
+    ClearConversation,
+    ContinuePastBudget,
+    BuildContext(ContextBuild),
     DispatchAgent(AgentDispatch),
+    DispatchNextPlanningTask(PlanningTaskDispatch),
+    PrepareRunTool(RunToolPreparation),
     DispatchRunTool(RunToolLaunch),
+    RefreshDeterministicRecommendations(DeterministicRecommendationRefresh),
+    DiffPromptOverride(PromptOverrideDiff),
+    EditPromptOverride(PromptOverrideEdit),
+    ListPromptOverrides(PromptOverrideList),
+    LoadDynamicModule(DynamicModuleLoad),
+    OpenFilePicker,
+    OpenGuidedScan(GuidedScanOpen),
+    ShowKnowledgeBase(KnowledgeBaseShow),
+    AttachKnowledgeBaseSource(KnowledgeBaseAttach),
+    DetachKnowledgeBaseSource(KnowledgeBaseSource),
+    PauseActiveWork,
+    ResetHouseRules(HouseRulesReset),
     PersistCommandHistory,
+    RecordAgentRun(AgentRunRecord),
+    RecordPromptMutation(PromptMutationRecord),
+    RecordScanRun(ScanRunRecord),
+    RecordScanStageTrace(ScanStageTraceRecord),
+    RecordToolRun(ToolRunRecordEffect),
+    RefreshContextView,
+    RefreshFindings(FindingsRefresh),
+    ReportFilteredFindingMovement(FilteredFindingMovementNotice),
+    FinalizeWorkbenchOpen(WorkbenchOpenFinalize),
+    FinalizeGuidedScanOpen,
+    FinalizeOpenFinding(OpenFindingFinalize),
+    FinalizeSastTaskCommand(SastTaskCommandFinalize),
+    HydrateSceneSnapshots(SceneSnapshotsHydration),
+    FinalizeScanCompletion(ScanCompletionFinalize),
+    PersistGlobalModelSelection(GlobalModelSelectionPersist),
+    PersistPlanningOptionOverride(PlanningOptionOverridePersist),
     PersistOptions(OptionScope),
+    ResetPromptOverride(PromptOverrideReset),
+    ResumeSession(ResumeSession),
+    RequestExitAbort,
+    RequestShellQuit,
     Quit,
+    FinishShellQuit,
     RecordReviewDecision(ReviewDecisionApply),
+    UpdatePromptMutationStatus(PromptMutationStatusUpdate),
+    RefreshPwnState,
+    RefreshProgramScope,
+    OpenFinding(OpenFindingReference),
+    OpenRunArtifact(OpenRunArtifact),
+    SelectComponent(ComponentSelection),
+    FireNextApprovedStrategy(StrategyFireNext),
+    RecordStrategyCorrection(StrategyCorrectionRecord),
+    UpdateStrategyProposalStatus(StrategyProposalStatusUpdate),
+    SetSessionEnv(SessionEnvVar),
+    ShowAuthStatus(AuthStatusShow),
+    ShowContextStatus,
+    ShowHouseRules(HouseRulesShow),
+    RefreshHouseRules(HouseRulesRefresh),
+    ShowPromptOverride(PromptOverrideShow),
+    ShowWorkspaceStatus,
+    ReparseKnowledgeBaseSource(KnowledgeBaseSource),
+    StartOfflineDemoFixtureScan,
     StartPlanner(PlannerStart),
+    PrepareScan(ScanStartPreparation),
     StartScan(ScanStartRequest),
     StartThreat(ThreatWorkerStart),
+    SwitchTargetRevision(TargetRevisionSwitch),
+    WaitForAbortCleanup,
     WorkspaceExportFindings(WorkspaceExportFindings),
     WorkspaceScopeInit(WorkspaceScopeInit),
+    WriteHouseRules(HouseRulesWrite),
+    WritePromptOverride(PromptOverrideWrite),
+}
+
+pub(crate) struct ActivityOpen {
+    pub(crate) run_id: Option<String>,
+}
+
+pub(crate) struct DynamicModuleLoad {
+    pub(crate) specifier: String,
+}
+
+pub(crate) struct GuidedScanOpen {
+    pub(crate) target: Option<PathBuf>,
+}
+
+pub(crate) struct ScanStartPreparation {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) explicit_input: Option<serde_json::Value>,
+}
+
+pub(crate) struct KnowledgeBaseShow {
+    pub(crate) module: Option<String>,
+}
+
+pub(crate) struct KnowledgeBaseAttach {
+    pub(crate) source: String,
+}
+
+pub(crate) struct KnowledgeBaseSource {
+    pub(crate) id: String,
+}
+
+pub(crate) struct ContextBuild {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) scope: Option<String>,
+}
+
+pub(crate) struct ResumeSession {
+    pub(crate) run_id: Option<String>,
+}
+
+pub(crate) struct PlanningTaskDispatch {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) missing_workspace_message: &'static str,
+    pub(crate) success_view: Option<PlanningDispatchView>,
+}
+
+pub(crate) struct DeterministicRecommendationRefresh {
+    pub(crate) target: Option<PathBuf>,
+}
+
+pub(crate) struct PrereqChainAdvance {
+    pub(crate) target: Option<PathBuf>,
+}
+
+pub(crate) enum PlanningDispatchView {
+    Activity,
+    Catalog,
 }
 
 pub(crate) struct ReviewedPatchApply {
     pub(crate) alias: String,
     pub(crate) diff: String,
-    pub(crate) workspace: WorkspaceTarget,
+    pub(crate) target: Option<PathBuf>,
 }
 
 pub(crate) struct ThreatPatchApply {
@@ -51,6 +176,258 @@ pub(crate) struct WorkspaceScopeInit {
     pub(crate) target: Option<PathBuf>,
 }
 
+pub(crate) struct SessionEnvVar {
+    pub(crate) key: String,
+    pub(crate) value: String,
+}
+
+pub(crate) struct AuthStatusShow {
+    pub(crate) api_key_env: String,
+}
+
+pub(crate) struct AuthLoginStart {
+    pub(crate) provider: String,
+    pub(crate) method: String,
+    pub(crate) continue_after_success: bool,
+}
+
+pub(crate) struct GlobalModelSelectionPersist {
+    pub(crate) model: String,
+    pub(crate) thinking_level: Option<String>,
+}
+
+pub(crate) struct PlanningOptionOverridePersist {
+    pub(crate) task: PlanningTaskId,
+    pub(crate) tool_name: String,
+    pub(crate) option_name: String,
+    pub(crate) value: serde_json::Value,
+}
+
+pub(crate) struct PromptMutationRecord {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) module: String,
+    pub(crate) verb: String,
+    pub(crate) text: String,
+}
+
+pub(crate) struct PromptMutationStatusUpdate {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) id: String,
+    pub(crate) status: kuzushi_core::PromptMutationStatus,
+    pub(crate) reason: Option<String>,
+}
+
+pub(crate) struct SastTaskOptionsApply {
+    pub(crate) mutations: Vec<SastTaskOptionMutation>,
+    pub(crate) message_prefix: String,
+}
+
+pub(crate) enum SastTaskOptionMutation {
+    Set {
+        name: String,
+        value: serde_json::Value,
+    },
+    Unset {
+        name: String,
+    },
+}
+
+pub(crate) struct SastTaskCommandFinalize {
+    pub(crate) outcome: SastTaskCommandOutcome,
+}
+
+pub(crate) enum SastTaskCommandOutcome {
+    Applied(String),
+    Error(String),
+}
+
+pub(crate) struct ComponentSelection {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) raw: Option<String>,
+}
+
+pub(crate) struct StrategyProposalStatusUpdate {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) id: String,
+    pub(crate) status: kuzushi_core::StrategyProposalStatus,
+    pub(crate) label: &'static str,
+}
+
+pub(crate) struct StrategyFireNext {
+    pub(crate) target: Option<PathBuf>,
+}
+
+pub(crate) struct StrategyCorrectionRecord {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) id: String,
+    pub(crate) to_strategy: String,
+    pub(crate) reason: Option<String>,
+    pub(crate) scope: StrategyCorrectionCommandScope,
+    pub(crate) active_run_id: Option<String>,
+}
+
+pub(crate) struct AgentRunRecord {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) run_id: String,
+    pub(crate) latency_ms: Option<u64>,
+    pub(crate) audit: AgentCallAudit,
+    pub(crate) outcome: AgentRunOutcome,
+}
+
+pub(crate) enum AgentRunOutcome {
+    Complete { answer_chars: usize },
+    Failed { error: String },
+}
+
+pub(crate) struct ScanRunRecord {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) run_id: String,
+    pub(crate) target_label: String,
+    pub(crate) outcome: ScanRunOutcome,
+}
+
+pub(crate) enum ScanRunOutcome {
+    Complete { findings_count: usize },
+    Failed { error: String },
+}
+
+pub(crate) struct ScanStageTraceRecord {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) run_id: String,
+    pub(crate) stage: String,
+}
+
+pub(crate) struct ToolRunRecordEffect {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) run_id: Option<String>,
+    pub(crate) tool_name: String,
+    pub(crate) outcome: ToolRunRecordOutcome,
+}
+
+pub(crate) enum ToolRunRecordOutcome {
+    Complete { result: serde_json::Value },
+    Failed { error: String },
+}
+
+pub(crate) struct FindingsRefresh {
+    pub(crate) announce: bool,
+    pub(crate) filter: Option<String>,
+}
+
+pub(crate) struct FilteredFindingMovementNotice {
+    pub(crate) fingerprint: String,
+}
+
+pub(crate) struct WorkbenchOpenFinalize {
+    pub(crate) pane: WorkbenchPane,
+}
+
+pub(crate) struct OpenFindingReference {
+    pub(crate) reference: String,
+}
+
+pub(crate) struct OpenFindingFinalize {
+    pub(crate) reference: String,
+    pub(crate) outcome: OpenFindingOutcome,
+}
+
+pub(crate) enum OpenFindingOutcome {
+    ChainAlias(ExploitChain),
+    Found(Finding),
+    Missing,
+    MissingChainAlias { alias: String },
+    MissingFindingAlias { alias: String },
+    Error(String),
+}
+
+pub(crate) struct SceneSnapshotsHydration {
+    pub(crate) target: Option<PathBuf>,
+}
+
+pub(crate) struct ScanCompletionFinalize {
+    pub(crate) run_id: String,
+    pub(crate) findings_count: usize,
+}
+
+pub(crate) struct TargetActivation {
+    pub(crate) path: PathBuf,
+    pub(crate) selected_scope: Option<TargetCandidateScope>,
+    pub(crate) source: TargetActivationSource,
+}
+
+pub(crate) struct TargetRevisionSwitch {
+    pub(crate) target: PathBuf,
+    pub(crate) reference: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TargetActivationSource {
+    Command,
+    Picker,
+}
+
+pub(crate) struct HouseRulesWrite {
+    pub(crate) path: PathBuf,
+    pub(crate) value: String,
+}
+
+pub(crate) struct HouseRulesReset {
+    pub(crate) path: PathBuf,
+}
+
+pub(crate) struct PromptOverrideWrite {
+    pub(crate) path: PathBuf,
+    pub(crate) value: String,
+}
+
+pub(crate) struct PromptOverrideReset {
+    pub(crate) path: PathBuf,
+}
+
+pub(crate) struct PromptOverrideEdit {
+    pub(crate) path: PathBuf,
+}
+
+pub(crate) struct PromptOverrideShow {
+    pub(crate) path: PathBuf,
+}
+
+pub(crate) struct PromptOverrideDiff {
+    pub(crate) path: PathBuf,
+}
+
+pub(crate) struct PromptOverrideList {
+    pub(crate) dir: PathBuf,
+}
+
+pub(crate) struct HouseRulesShow {
+    pub(crate) path: Option<PathBuf>,
+}
+
+pub(crate) struct HouseRulesRefresh {
+    pub(crate) path: Option<PathBuf>,
+}
+
+pub(crate) struct OpenRunArtifact {
+    pub(crate) selector: String,
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) view: RunArtifactView,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum RunArtifactView {
+    Replay,
+    Trace,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RunToolPreparation {
+    pub(crate) tool_name: String,
+    pub(crate) input: Option<String>,
+    pub(crate) target: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct RunToolLaunch {
     pub(crate) tool_name: String,
     pub(crate) input: serde_json::Value,
@@ -58,43 +435,30 @@ pub(crate) struct RunToolLaunch {
     pub(crate) thinking_level: Option<String>,
 }
 
-pub(crate) struct EffectRuntime;
-
-impl EffectRuntime {
-    pub(crate) fn execute(app: &mut ShellApp, effects: Vec<ShellEffect>) {
-        for effect in effects {
-            app.execute_effect(effect);
-        }
-    }
-}
-
 impl ShellApp {
-    pub(crate) fn execute_effects(&mut self, effects: Vec<ShellEffect>) {
-        EffectRuntime::execute(self, effects);
-    }
-
-    fn execute_effect(&mut self, effect: ShellEffect) {
-        match effect {
-            ShellEffect::ApplyReviewedPatch(apply) => self.apply_reviewed_patch_effect(apply),
-            ShellEffect::ApplyThreatPatch(apply) => self.apply_threat_patch_effect(apply),
-            ShellEffect::CancelActiveJobs => self.cancel_active_jobs_effect(),
-            ShellEffect::DispatchAgent(dispatch) => self.dispatch_agent(dispatch),
-            ShellEffect::DispatchRunTool(launch) => self.dispatch_run_tool_effect(launch),
-            ShellEffect::PersistCommandHistory => self.persist_command_history(),
-            ShellEffect::PersistOptions(scope) => self.persist_option_store(scope),
-            ShellEffect::Quit => self.request_exit(),
-            ShellEffect::RecordReviewDecision(apply) => self.record_review_decision_effect(apply),
-            ShellEffect::StartPlanner(start) => self.dispatch_planner(start),
-            ShellEffect::StartScan(request) => self.start_prepared_scan(request),
-            ShellEffect::StartThreat(start) => self.dispatch_threat_worker(start),
-            ShellEffect::WorkspaceExportFindings(export) => {
-                self.export_workspace_findings_effect(export)
+    pub(super) fn start_offline_demo_fixture_scan_effect(&mut self) -> Vec<ShellEffect> {
+        match kuzushi_core::prepare_demo_fixture() {
+            Ok(demo_dir) => {
+                self.log(
+                    "demo",
+                    format!(
+                        "offline fixture ready at {} — deterministic engines only; no key or model required",
+                        demo_dir.display()
+                    ),
+                );
+                self.reduce_scan_start(
+                    Some(demo_dir),
+                    Some(kuzushi_core::offline_demo_scan_input()),
+                )
             }
-            ShellEffect::WorkspaceScopeInit(init) => self.init_workspace_scope_effect(init),
+            Err(error) => {
+                self.log("error", format!("could not prepare demo fixture: {error}"));
+                Vec::new()
+            }
         }
     }
 
-    fn export_workspace_findings_effect(&mut self, export: WorkspaceExportFindings) {
+    pub(super) fn export_workspace_findings_effect(&mut self, export: WorkspaceExportFindings) {
         match export_findings_for_target(
             export.target.as_ref(),
             &export.output,
@@ -103,16 +467,18 @@ impl ShellApp {
             export.allow_empty,
         ) {
             Ok(report) => {
-                self.workspace_view = self.build_workspace_view(Some(report.output_path.clone()));
+                let workspace_view = self.build_workspace_view(Some(report.output_path.clone()));
+                self.domain_mut().set_workspace_view(workspace_view);
                 self.shell_view = ShellView::Workspace;
-                self.focused_module = Some("workspace".to_string());
+                self.set_focused_module(Some("workspace".to_string()));
                 self.log(
                     "export",
                     workspace_export_message(&report, export.completeness.as_deref()),
                 );
             }
             Err(error) => {
-                self.workspace_view = self.build_workspace_view(None);
+                let workspace_view = self.build_workspace_view(None);
+                self.domain_mut().set_workspace_view(workspace_view);
                 self.shell_view = ShellView::Workspace;
                 self.log(
                     "error",
@@ -124,13 +490,16 @@ impl ShellApp {
         }
     }
 
-    fn init_workspace_scope_effect(&mut self, init: WorkspaceScopeInit) {
+    pub(super) fn init_workspace_scope_effect(
+        &mut self,
+        init: WorkspaceScopeInit,
+    ) -> Vec<ShellEffect> {
         match init_scope_for_target(init.target.as_ref()) {
             Ok(path) => {
-                self.refresh_program_scope();
-                self.workspace_view = self.build_workspace_view(None);
+                let workspace_view = self.build_workspace_view(None);
+                self.domain_mut().set_workspace_view(workspace_view);
                 self.shell_view = ShellView::Workspace;
-                self.focused_module = Some("workspace".to_string());
+                self.set_focused_module(Some("workspace".to_string()));
                 self.log(
                     "scope",
                     format!(
@@ -138,57 +507,56 @@ impl ShellApp {
                         path.display()
                     ),
                 );
+                vec![ShellEffect::RefreshProgramScope]
             }
             Err(error) => {
-                self.workspace_view = self.build_workspace_view(None);
+                let workspace_view = self.build_workspace_view(None);
+                self.domain_mut().set_workspace_view(workspace_view);
                 self.shell_view = ShellView::Workspace;
                 self.log(
                     "error",
                     format!("{error}. Next: target <path>, then workspace scope init"),
                 );
+                Vec::new()
             }
         }
     }
 
-    fn record_review_decision_effect(&mut self, apply: ReviewDecisionApply) {
+    pub(super) fn record_review_decision_effect(
+        &mut self,
+        apply: ReviewDecisionApply,
+    ) -> Vec<ShellEffect> {
         let workspace = match workspace_for_target(apply.target.as_ref()) {
             Ok(workspace) => workspace,
             Err(error) => {
-                self.log(
-                    "error",
-                    with_next_step(error.to_string(), "target <path> then findings"),
-                );
-                return;
+                self.log_review_decision_workspace_error(error);
+                return Vec::new();
             }
         };
-        let result = match apply.read_watermark {
-            Some(read_watermark) => {
-                kuzushi_core::workspace::record_user_review_decision_for_finding_at_watermark(
-                    &workspace,
-                    &apply.finding,
-                    &apply.decision,
-                    Some(read_watermark),
-                )
-            }
-            None => kuzushi_core::workspace::record_user_review_decision_for_finding(
-                &workspace,
-                &apply.finding,
-                &apply.decision,
-            ),
-        };
-        match result {
+        match record_review_decision_in_workspace(&workspace, &apply) {
             Ok(decision_id) => {
                 let label = review_decision_finding_label(apply.alias.as_deref(), &apply.finding);
                 self.log_saved_review_decision(decision_id, apply.decision.verdict, &label);
-                self.refresh_findings_after_review_decision(&apply.finding);
+                self.review_decision_refresh_effects(&apply.finding)
             }
-            Err(error) => self.log_review_decision_write_error(&apply.finding, error),
+            Err(error) => {
+                self.log_review_decision_write_error(&apply.finding, error);
+                Vec::new()
+            }
         }
     }
 
-    fn apply_threat_patch_effect(&mut self, apply: ThreatPatchApply) {
+    fn log_review_decision_workspace_error(&mut self, error: anyhow::Error) {
+        self.log(
+            "error",
+            with_next_step(error.to_string(), "target <path> then findings"),
+        );
+    }
+
+    pub(super) fn apply_threat_patch_effect(&mut self, apply: ThreatPatchApply) {
         let target = threat_patch_target_root(apply.target);
         self.engagement.clear_pending_threat_patch();
+        self.set_completed_activity("threat model", "pending patch applied");
         let mut document = kuzushi_core::load_persistent_threat_model(&target)
             .unwrap_or_else(|| serde_json::json!({}));
         merge_json(&mut document, &apply.patch.patch);
@@ -208,16 +576,28 @@ impl ShellApp {
         }
     }
 
-    fn apply_reviewed_patch_effect(&mut self, apply: ReviewedPatchApply) {
-        match kuzushi_core::remediation::patch::apply_reviewed_patch(
-            apply.workspace.root(),
-            &apply.diff,
-        ) {
+    pub(super) fn apply_reviewed_patch_effect(&mut self, apply: ReviewedPatchApply) {
+        let workspace = match workspace_for_target(apply.target.as_ref()) {
+            Ok(workspace) => workspace,
+            Err(error) => {
+                self.log(
+                    "error",
+                    with_next_step(error.to_string(), "target <path> then patch apply"),
+                );
+                return;
+            }
+        };
+        match kuzushi_core::remediation::patch::apply_reviewed_patch(workspace.root(), &apply.diff)
+        {
             Ok(report) => {
                 self.engagement.clear_pending_patch();
                 self.shell_view = ShellView::Workbench;
-                self.workbench_page = Some(crate::app::WorkbenchPage::Ship);
-                self.workbench_focus = crate::app::WorkbenchPane::Details;
+                self.router
+                    .workbench_mut()
+                    .set_page(Some(crate::app::WorkbenchPage::Ship));
+                self.router
+                    .workbench_mut()
+                    .set_focus(crate::app::WorkbenchPane::Details);
                 self.log("patch", applied_patch_message(&apply.alias, &report));
             }
             Err(error) => self.log(
@@ -227,26 +607,186 @@ impl ShellApp {
         }
     }
 
-    fn dispatch_run_tool_effect(&mut self, launch: RunToolLaunch) {
+    pub(super) fn dispatch_run_tool_effect(&mut self, launch: RunToolLaunch) -> Vec<ShellEffect> {
         self.dispatch_run_tool(
             launch.tool_name,
             launch.input,
             launch.workspace,
             launch.thinking_level,
-        );
+        )
     }
 
-    fn cancel_active_jobs_effect(&mut self) {
+    pub(super) fn prepare_run_tool_effect(
+        &mut self,
+        prepare: RunToolPreparation,
+    ) -> Vec<ShellEffect> {
+        self.prepare_run_tool_launch(prepare)
+    }
+
+    pub(super) fn advance_prereq_chain_effect(&mut self, advance: PrereqChainAdvance) {
+        let workspace = match workspace_for_target(advance.target.as_ref()) {
+            Ok(workspace) => workspace,
+            Err(error) => {
+                self.log(
+                    "error",
+                    with_next_step(
+                        error.to_string(),
+                        "target <path> then approve prerequisites",
+                    ),
+                );
+                self.engagement.clear_pending_chain();
+                return;
+            }
+        };
+        self.advance_chain(workspace);
+    }
+
+    pub(super) fn cancel_active_jobs_effect(&mut self) {
         if !self.request_active_abort() {
             self.log("cancel", "no active scan/tool/agent to cancel");
         }
     }
+
+    pub(super) fn open_run_artifact_effect(&mut self, open: OpenRunArtifact) {
+        let Some(run_id) = resolve_run_artifact_selector(self, &open) else {
+            return;
+        };
+        match open.view {
+            RunArtifactView::Replay => {
+                self.router.replay_mut().open(run_id.clone());
+                self.shell_view = ShellView::Replay;
+                self.log("replay", run_id);
+            }
+            RunArtifactView::Trace => {
+                self.router.trace_mut().open(run_id.clone());
+                self.shell_view = ShellView::Trace;
+                self.log("trace", run_id);
+            }
+        }
+    }
+
+    pub(super) fn open_activity_effect(&mut self, open: ActivityOpen) {
+        if self.activity().is_none() {
+            let mut session =
+                ActivitySession::new(open.run_id.unwrap_or_else(manual_activity_run_id));
+            session.seed_from_registry(self.registry());
+            self.set_activity(Some(session));
+        }
+        self.shell_view = ShellView::Activity;
+        self.log("activity", "live module-progress dashboard");
+    }
+
+    pub(super) fn load_dynamic_module_effect(&mut self, load: DynamicModuleLoad) {
+        let options = DynamicModuleLoadOptions {
+            trusted_specifiers: self.config().operator.trusted_modules.clone(),
+        };
+        match self
+            .registry_mut()
+            .load_dynamic_module(&load.specifier, &options)
+        {
+            Ok(()) => {
+                self.log("load", format!("{} loaded. Next: tools", load.specifier));
+            }
+            Err(error) => self.log("error", error.to_string()),
+        }
+    }
+}
+
+fn resolve_run_artifact_selector(app: &mut ShellApp, open: &OpenRunArtifact) -> Option<String> {
+    if open.selector != "latest" {
+        return Some(open.selector.clone());
+    }
+    let latest_path = latest_run_pointer_path(app, open)?;
+    read_latest_run_id(app, &latest_path)
+}
+
+fn latest_run_pointer_path(app: &mut ShellApp, open: &OpenRunArtifact) -> Option<PathBuf> {
+    let Some(target) = open.target.as_deref() else {
+        app.log(
+            "error",
+            format!(
+                "{} latest needs a target. Next: target <path> or show runs",
+                open.view.verb()
+            ),
+        );
+        return None;
+    };
+    Some(crate::ui_view_models::ui_latest_run_path(Some(target)))
+}
+
+fn read_latest_run_id(app: &mut ShellApp, latest_path: &Path) -> Option<String> {
+    let text = match std::fs::read_to_string(&latest_path) {
+        Ok(text) => text,
+        Err(error) => {
+            app.log(
+                "error",
+                format!(
+                    "could not read latest run pointer {}: {error}. Next: show runs",
+                    latest_path.display()
+                ),
+            );
+            return None;
+        }
+    };
+    let run_id = text.trim();
+    if run_id.is_empty() {
+        app.log(
+            "error",
+            format!(
+                "latest run pointer {} is empty. Next: show runs",
+                latest_path.display()
+            ),
+        );
+        return None;
+    }
+    Some(run_id.to_string())
+}
+
+impl RunArtifactView {
+    fn verb(self) -> &'static str {
+        match self {
+            Self::Replay => "replay",
+            Self::Trace => "trace",
+        }
+    }
+}
+
+fn manual_activity_run_id() -> String {
+    format!("manual-{}", current_unix_seconds())
+}
+
+fn current_unix_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 fn threat_patch_target_root(target: Option<PathBuf>) -> PathBuf {
     target
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn record_review_decision_in_workspace(
+    workspace: &WorkspaceTarget,
+    apply: &ReviewDecisionApply,
+) -> anyhow::Result<i64> {
+    match apply.read_watermark {
+        Some(read_watermark) => {
+            kuzushi_core::workspace::record_user_review_decision_for_finding_at_watermark(
+                workspace,
+                &apply.finding,
+                &apply.decision,
+                Some(read_watermark),
+            )
+        }
+        None => kuzushi_core::workspace::record_user_review_decision_for_finding(
+            workspace,
+            &apply.finding,
+            &apply.decision,
+        ),
+    }
 }
 
 fn applied_patch_message(
@@ -281,6 +821,47 @@ mod tests {
 
         EffectRuntime::execute(&mut app, vec![ShellEffect::Quit]);
 
-        assert!(app.should_quit);
+        assert!(app.should_quit());
+    }
+
+    #[test]
+    fn quit_effect_requests_abort_then_finishes_shell_quit() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let cancel = ScanCancellation::default();
+        app.set_scan_cancel_for_test(cancel.clone());
+        app.set_scan_panel(Some(ScanPanelState {
+            run_id: Some("run-1".to_string()),
+            target: PathBuf::from("."),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        }));
+
+        EffectRuntime::execute(&mut app, vec![ShellEffect::Quit]);
+
+        assert!(cancel.is_cancelled());
+        assert!(app.scan().is_some_and(|scan| scan.abort_requested));
+        assert!(app.should_quit());
+        assert!(app.log_lines().iter().any(|line| {
+            line.prefix == "system" && line.body.contains("exit requested; closing shell")
+        }));
+    }
+
+    #[test]
+    fn offline_demo_fixture_effect_returns_scan_followup_without_starting_worker() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let effects = app.start_offline_demo_fixture_scan_effect();
+
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], ShellEffect::PrepareScan(_)));
+        assert!(app.scan_is_none());
+        assert!(!app.jobs.is_running(JobKind::Run));
+        assert!(app
+            .log_lines()
+            .iter()
+            .any(|entry| entry.body.contains("offline fixture ready")));
     }
 }

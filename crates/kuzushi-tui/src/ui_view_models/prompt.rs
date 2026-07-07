@@ -10,17 +10,13 @@ pub(crate) struct PromptModel {
 }
 
 pub(crate) fn prompt_model(app: &ShellApp) -> PromptModel {
-    if let Some(search) = app.history_search.as_ref() {
+    if let Some(search) = app.history_search() {
         return reverse_search_prompt(app, &search.query);
     }
     PromptModel {
-        prefix: prompt_text(
-            prompt_brand(),
-            routing_mode(app),
-            app.focused_module.as_deref(),
-        ),
-        input: app.input.clone(),
-        cursor: app.cursor,
+        prefix: prompt_text(prompt_brand(), routing_mode(app), app.focused_module()),
+        input: app.input().to_string(),
+        cursor: app.cursor(),
         placeholder: prompt_placeholder(app),
     }
 }
@@ -38,7 +34,7 @@ fn reverse_search_prompt(app: &ShellApp, query: &str) -> PromptModel {
 }
 
 fn prompt_placeholder(app: &ShellApp) -> Option<String> {
-    app.input
+    app.input()
         .is_empty()
         .then(|| "type help or press Tab".to_string())
 }
