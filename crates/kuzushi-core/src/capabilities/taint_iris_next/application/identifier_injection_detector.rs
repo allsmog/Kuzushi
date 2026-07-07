@@ -208,6 +208,7 @@ fn identifier_printf_call<'tree, 'src>(
 
     let args_node = call.child_by_field_name("arguments")?;
     let arg_nodes: Vec<Node> = (0..args_node.named_child_count())
+        .filter_map(|i| u32::try_from(i).ok())
         .filter_map(|i| args_node.named_child(i))
         .collect();
     if arg_nodes.is_empty() {
