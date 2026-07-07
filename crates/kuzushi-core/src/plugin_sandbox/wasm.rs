@@ -5,6 +5,7 @@ use super::{
 use crate::identity::Blake3Hash;
 use anyhow::{bail, Context, Result};
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -217,18 +218,20 @@ fn blob_read(
     let Ok(hash) = read_guest_hash(&mut caller, hash_ptr, hash_len) else {
         return -1;
     };
-    let Ok(bytes) = read_granted_blob(&caller, &hash) else {
+    let offset = offset.max(0) as u64;
+    let Some(len) = granted_read_len(&caller, &hash, offset, max_len) else {
         return -1;
     };
-    let offset = offset.max(0) as usize;
-    if offset >= bytes.len() {
+    if len == 0 {
         return 0;
     }
-    let len = bytes[offset..].len().min(max_len.max(0) as usize);
     if !reserve_served_bytes(caller.data_mut(), len as u64) {
         return -1;
     }
-    write_guest_memory(&mut caller, dst_ptr, &bytes[offset..offset + len])
+    let Ok(bytes) = read_granted_blob_range(&caller, &hash, offset, len) else {
+        return -1;
+    };
+    write_guest_memory(&mut caller, dst_ptr, &bytes)
 }
 
 fn read_guest_hash(
@@ -272,13 +275,40 @@ fn memory_from_caller(caller: &mut Caller<'_, WasmHostState>) -> Result<Memory> 
     }
 }
 
-fn read_granted_blob(caller: &Caller<'_, WasmHostState>, hash: &Blake3Hash) -> Result<Vec<u8>> {
+fn granted_read_len(
+    caller: &Caller<'_, WasmHostState>,
+    hash: &Blake3Hash,
+    offset: u64,
+    max_len: i32,
+) -> Option<usize> {
+    let blob_size = caller.data().grant.blob_size(hash)?;
+    if offset >= blob_size {
+        return Some(0);
+    }
+    let requested = u64::try_from(max_len).ok()?;
+    let available = blob_size.saturating_sub(offset);
+    available.min(requested).try_into().ok()
+}
+
+fn read_granted_blob_range(
+    caller: &Caller<'_, WasmHostState>,
+    hash: &Blake3Hash,
+    offset: u64,
+    len: usize,
+) -> Result<Vec<u8>> {
     let path = caller
         .data()
         .grant
         .object_path(hash)
         .with_context(|| format!("blob {hash} has no granted CAS object path"))?;
-    fs::read(path).with_context(|| format!("Could not read granted blob {}", path.display()))
+    let mut file =
+        fs::File::open(path).with_context(|| format!("Could not read granted blob {}", path.display()))?;
+    file.seek(SeekFrom::Start(offset))
+        .with_context(|| format!("Could not seek granted blob {}", path.display()))?;
+    let mut bytes = vec![0; len];
+    file.read_exact(&mut bytes)
+        .with_context(|| format!("Could not read granted blob range {}", path.display()))?;
+    Ok(bytes)
 }
 
 fn reserve_served_bytes(state: &mut WasmHostState, next: u64) -> bool {
