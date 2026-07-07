@@ -31,6 +31,7 @@ pub struct DomainCache {
     program_scope: Option<ProgramScope>,
     findings: Vec<Finding>,
     findings_total: usize,
+    findings_read_watermark: Option<u64>,
     review_decisions: Vec<ReviewDecisionRecord>,
 }
 
@@ -63,6 +64,7 @@ impl DomainCache {
             program_scope: None,
             findings: Vec::new(),
             findings_total: 0,
+            findings_read_watermark: None,
             review_decisions: Vec::new(),
         }
     }
@@ -287,6 +289,10 @@ impl DomainCache {
         self.findings_total_count() > self.findings.len()
     }
 
+    pub(crate) fn findings_read_watermark(&self) -> Option<u64> {
+        self.findings_read_watermark
+    }
+
     pub(crate) fn findings_mut(&mut self) -> &mut Vec<Finding> {
         &mut self.findings
     }
@@ -298,6 +304,10 @@ impl DomainCache {
 
     pub(crate) fn set_findings_total_count(&mut self, total: usize) {
         self.findings_total = total.max(self.findings.len());
+    }
+
+    pub(crate) fn set_findings_read_watermark(&mut self, read_watermark: Option<u64>) {
+        self.findings_read_watermark = read_watermark;
     }
 
     pub(crate) fn review_decisions(&self) -> &[ReviewDecisionRecord] {

@@ -579,6 +579,10 @@ impl ShellApp {
         self.domain.findings_are_partial()
     }
 
+    pub(crate) fn findings_read_watermark(&self) -> Option<u64> {
+        self.domain.findings_read_watermark()
+    }
+
     pub(crate) fn findings_mut(&mut self) -> &mut Vec<Finding> {
         self.domain.findings_mut()
     }
@@ -589,6 +593,10 @@ impl ShellApp {
 
     pub(crate) fn set_findings_total_count(&mut self, total: usize) {
         self.domain.set_findings_total_count(total);
+    }
+
+    pub(crate) fn set_findings_read_watermark(&mut self, read_watermark: Option<u64>) {
+        self.domain.set_findings_read_watermark(read_watermark);
     }
 
     pub(crate) fn review_decisions(&self) -> &[kuzushi_core::findings::ReviewDecisionRecord] {

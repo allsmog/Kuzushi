@@ -12,10 +12,15 @@ impl ShellApp {
         };
 
         let filter = FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT);
+        let read_watermark = self.current_findings_projection_watermark();
         match store.list_findings_filtered(&filter) {
-            Ok(report) => {
-                self.replace_findings_from_store(&store, report.findings, report.count, announce)
-            }
+            Ok(report) => self.replace_findings_from_store(
+                &store,
+                report.findings,
+                report.count,
+                announce,
+                read_watermark,
+            ),
             Err(error) => self.log_refresh_findings_error(error.into(), announce),
         }
     }
@@ -39,12 +44,19 @@ impl ShellApp {
                 return;
             }
         };
+        let read_watermark = self.current_findings_projection_watermark();
         match store.list_findings_filtered(&filter) {
             Ok(report) => {
                 match self.filter_findings_by_provenance(report.findings, report.count, &filter) {
                     Ok((findings, count)) => {
                         let findings = findings.into_iter().take(requested_limit).collect();
-                        self.replace_filtered_findings(&store, findings, expression, count);
+                        self.replace_filtered_findings(
+                            &store,
+                            findings,
+                            expression,
+                            count,
+                            read_watermark,
+                        );
                     }
                     Err(error) => self.log("error", format!("invalid findings filter: {error}")),
                 }
@@ -83,9 +95,10 @@ impl ShellApp {
         findings: Vec<Finding>,
         total_count: usize,
         announce: bool,
+        read_watermark: Option<u64>,
     ) {
         let decisions = self.load_review_decisions_for_findings(store, &findings);
-        self.replace_findings(findings, decisions, announce, total_count);
+        self.replace_findings(findings, decisions, announce, total_count, read_watermark);
     }
 
     fn replace_findings(
@@ -94,9 +107,11 @@ impl ShellApp {
         review_decisions: Vec<kuzushi_core::findings::ReviewDecisionRecord>,
         announce: bool,
         total_count: usize,
+        read_watermark: Option<u64>,
     ) {
         self.set_findings(findings);
         self.set_findings_total_count(total_count);
+        self.set_findings_read_watermark(read_watermark);
         self.set_review_decisions(review_decisions);
         self.set_active_findings_filter(None);
         self.reselect_current_finding();
@@ -113,9 +128,10 @@ impl ShellApp {
         findings: Vec<Finding>,
         expression: &str,
         count: usize,
+        read_watermark: Option<u64>,
     ) {
         let decisions = self.load_review_decisions_for_findings(store, &findings);
-        self.replace_findings(findings, decisions, false, count);
+        self.replace_findings(findings, decisions, false, count, read_watermark);
         self.set_active_findings_filter(Some(expression.to_string()));
         self.log(
             "findings",
@@ -124,6 +140,28 @@ impl ShellApp {
                 self.findings().len()
             ),
         );
+    }
+
+    fn current_findings_projection_watermark(&mut self) -> Option<u64> {
+        let workspace = match self.current_workspace() {
+            Ok(workspace) => workspace,
+            Err(_) => return None,
+        };
+        match kuzushi_core::storage_v3::ProjectionDb::open(workspace.findings_db_path())
+            .and_then(|db| db.meta())
+        {
+            Ok(meta) => Some(meta.applied_seq),
+            Err(error) => {
+                self.log(
+                    "error",
+                    with_next_step(
+                        format!("could not read findings projection watermark: {error}"),
+                        "workspace status",
+                    ),
+                );
+                None
+            }
+        }
     }
 
     fn load_review_decisions_for_findings(

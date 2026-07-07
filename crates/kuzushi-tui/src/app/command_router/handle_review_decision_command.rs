@@ -47,7 +47,8 @@ impl ShellApp {
             .router
             .workbench()
             .review()
-            .read_watermark_for(finding_stable_fp(&finding));
+            .read_watermark_for(finding_stable_fp(&finding))
+            .or_else(|| self.findings_read_watermark_for(&finding));
         vec![ShellEffect::RecordReviewDecision(ReviewDecisionApply {
             alias,
             decision,
@@ -55,6 +56,15 @@ impl ShellApp {
             read_watermark,
             target: self.target_owned(),
         })]
+    }
+
+    fn findings_read_watermark_for(&self, finding: &Finding) -> Option<u64> {
+        let stable_fp = finding_stable_fp(finding);
+        self.findings()
+            .iter()
+            .any(|row| finding_stable_fp(row) == stable_fp)
+            .then(|| self.findings_read_watermark())
+            .flatten()
     }
 
     fn parse_review_decision_verdict_or_log(

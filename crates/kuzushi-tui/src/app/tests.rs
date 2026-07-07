@@ -769,7 +769,7 @@ fn seed_true_positive_finding(workspace: &WorkspaceTarget) -> String {
     let fingerprint = finding.fingerprint.clone();
     let finding_id = store.insert_finding("run-variant", &finding).unwrap();
     store
-        .save_triage(
+        .record_auto_triage(
             finding_id,
             &TriageOutcome {
                 verdict: TriageVerdict::TruePositive,
@@ -4165,7 +4165,7 @@ fn workspace_export_honors_completeness_filter() {
         )
         .unwrap();
     store
-        .save_triage(
+        .record_auto_triage(
             confirmed_id,
             &TriageOutcome {
                 verdict: TriageVerdict::TruePositive,
@@ -4352,6 +4352,13 @@ fn review_decision_write_effect_returns_reload_followups_without_inline_refresh(
         ))
         .expect("review decision should be effect-routed");
     let apply = review_decision_apply_owned(effects).expect("review decision effect");
+    let expected_watermark =
+        kuzushi_core::storage_v3::ProjectionDb::open(workspace.findings_db_path())
+            .unwrap()
+            .meta()
+            .unwrap()
+            .applied_seq;
+    assert_eq!(apply.read_watermark, Some(expected_watermark));
     let followups = app.record_review_decision_effect(apply);
 
     assert_eq!(
@@ -7134,7 +7141,7 @@ fn run_command_dispatches_findings_filters_through_registry() {
     );
     let finding_id = store.insert_finding("run-1", &finding).unwrap();
     store
-        .save_triage(
+        .record_auto_triage(
             finding_id,
             &TriageOutcome {
                 verdict: TriageVerdict::TruePositive,
@@ -7430,7 +7437,7 @@ fn run_command_dispatches_verify_through_langgraph_runtime_bridge() {
     );
     let finding_id = store.insert_finding("run-1", &finding).unwrap();
     store
-        .save_triage(
+        .record_auto_triage(
             finding_id,
             &TriageOutcome {
                 verdict: TriageVerdict::TruePositive,
@@ -7498,7 +7505,7 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
     );
     let finding_id = store.insert_finding("run-1", &finding).unwrap();
     store
-        .save_triage(
+        .record_auto_triage(
             finding_id,
             &TriageOutcome {
                 verdict: TriageVerdict::TruePositive,
