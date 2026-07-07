@@ -322,15 +322,13 @@ impl FindingStore {
     }
 
     fn commit_v3_observation(&self, commit: ObservationCommit) -> Result<()> {
-        if let Some((event_log_dir, db_path)) = self.v3_storage_paths() {
-            StorageWriterActor::commit_blocking_many(
-                event_log_dir,
-                db_path,
-                observation_commands(commit),
-            )?;
-        } else {
-            self.insert_v3_observation_projection_direct(&commit.observation)?;
-        }
+        let (event_log_dir, db_path) =
+            self.required_v3_storage_paths("record finding observation")?;
+        StorageWriterActor::commit_blocking_many(
+            event_log_dir,
+            db_path,
+            observation_commands(commit),
+        )?;
         Ok(())
     }
 
@@ -401,64 +399,7 @@ impl FindingStore {
             .with_context(|| format!("Could not load finding {finding_id} for v3 projection"))?;
         Ok(finding)
     }
-
-    fn insert_v3_observation_projection_direct(&self, write: &ObservationWrite) -> Result<()> {
-        let created_seq = self.next_in_memory_projection_seq()?;
-        self.conn.execute(
-            UPSERT_V3_OBSERVATION_PROJECTION_SQL,
-            params![
-                write.observation_hash,
-                write.stable_fp,
-                write.snapshot_hash,
-                write.run_id,
-                write.tool,
-                write.tool_version,
-                write.rule_id,
-                write.rule_set_hash,
-                write.severity,
-                write.title,
-                write.message,
-                write.blob_hash,
-                write.byte_start.map(|value| value as i64),
-                write.byte_end.map(|value| value as i64),
-                write.display_path,
-                write.display_line.map(i64::from),
-                write.raw_result_hash,
-                write.finding_json,
-                created_seq,
-                now_isoish(),
-            ],
-        )?;
-        Ok(())
-    }
-
-    fn next_in_memory_projection_seq(&self) -> Result<i64> {
-        self.conn
-            .query_row(
-                "select coalesce(max(created_seq), 0) + 1 from finding_observations",
-                [],
-                |row| row.get(0),
-            )
-            .context("Could not allocate in-memory v3 projection sequence")
-    }
 }
-
-const UPSERT_V3_OBSERVATION_PROJECTION_SQL: &str = r#"
-insert into finding_observations(
-  observation_hash, stable_fp, snapshot_hash, run_id, tool, tool_version,
-  rule_id, rule_set_hash, severity, title, message, blob_hash, byte_start,
-  byte_end, display_path, display_line, raw_result_hash, finding_json,
-  created_seq, created_at
-)
-values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
-on conflict(observation_hash) do update set
-  severity = excluded.severity,
-  title = excluded.title,
-  message = excluded.message,
-  finding_json = excluded.finding_json,
-  created_seq = excluded.created_seq,
-  created_at = excluded.created_at
-"#;
 
 fn carry_previous_triage(projected: &mut Finding, previous: Option<&Finding>) {
     if projected.triage.is_some() {
