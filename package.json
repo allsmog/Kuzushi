@@ -38,6 +38,7 @@
     "doctor": "bash scripts/doctor.sh",
     "check:docs": "node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
     "check:retired-ts-runtime": "node scripts/check-retired-ts-runtime.mjs",
+    "check:ts-budget": "bash ci/ts-budget.sh",
     "export:source": "bash scripts/export-clean-source.sh",
     "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
     "prepare": "husky",

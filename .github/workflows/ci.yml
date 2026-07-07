@@ -74,6 +74,10 @@ jobs:
       # (sync policy in UPSTREAM_CODEX.md); fresh CI clones only have origin.
       - run: git remote add upstream-codex https://github.com/openai/codex.git
       - run: pnpm check:docs
+      # TypeScript-removal ratchet (Phase 0): fail if non-allowlisted TS grows
+      # past the committed budget in .ts-budget. Coexists with
+      # check-retired-ts-runtime.mjs until the removal reaches zero.
+      - run: bash ci/ts-budget.sh
       - run: pnpm check
 
   # ── Codegen drift check (parallel after install) ──────────────────────────
