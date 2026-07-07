@@ -63,7 +63,7 @@ fn threat_model_summary(value: &Value) -> Option<String> {
     let dfd = document.get("dfd");
     let nodes = array_len(dfd.and_then(|value| value.get("nodes")));
     let flows = array_len(dfd.and_then(|value| value.get("flows")));
-    let boundaries = array_len(dfd.and_then(trust_boundaries_value));
+    let boundaries = array_len(dfd.and_then(|value| value.get("trustBoundaries")));
     if threats.is_none() && nodes.is_none() {
         return None;
     }
@@ -81,11 +81,6 @@ fn threat_model_document(value: &Value) -> &Value {
         .get("document")
         .or_else(|| value.pointer("/data/document"))
         .unwrap_or(value)
-}
-
-fn trust_boundaries_value(dfd: &Value) -> Option<&Value> {
-    dfd.get("trustBoundaries")
-        .or_else(|| dfd.get("trust_boundaries"))
 }
 
 fn methodology_segment(document: &Value) -> Option<String> {
@@ -117,65 +112,41 @@ fn related_cwe_segment(document: &Value) -> Option<String> {
 
 fn narrative_flow_segments(document: &Value) -> Vec<String> {
     [
-        ("attackerControlled", "/attackerControlled", "/attacker_controlled"),
-        ("operatorControlled", "/operatorControlled", "/operator_controlled"),
-        ("developerControlled", "/developerControlled", "/developer_controlled"),
-        ("externalServices", "/externalServices", "/external_services"),
-        ("credentialFlows", "/credentialFlows", "/credential_flows"),
-        ("authorizationFlows", "/authorizationFlows", "/authorization_flows"),
-        ("fileIngestFlows", "/fileIngestFlows", "/file_ingest_flows"),
-        ("dataEgressFlows", "/dataEgressFlows", "/data_egress_flows"),
-        ("callbackFlows", "/callbackFlows", "/callback_flows"),
+        ("attackerControlled", "attackerControlled"),
+        ("operatorControlled", "operatorControlled"),
+        ("developerControlled", "developerControlled"),
+        ("externalServices", "externalServices"),
+        ("credentialFlows", "credentialFlows"),
+        ("authorizationFlows", "authorizationFlows"),
+        ("fileIngestFlows", "fileIngestFlows"),
+        ("dataEgressFlows", "dataEgressFlows"),
+        ("callbackFlows", "callbackFlows"),
     ]
     .into_iter()
-    .filter_map(|(label, camel_leaf, snake_leaf)| narrative_flow_segment(document, label, camel_leaf, snake_leaf))
+    .filter_map(|(label, key)| narrative_flow_segment(document, label, key))
     .collect()
 }
 
-fn narrative_flow_segment(
-    document: &Value,
-    label: &str,
-    camel_leaf: &str,
-    snake_leaf: &str,
-) -> Option<String> {
-    let count = array_len(narrative_flow_value(document, camel_leaf, snake_leaf))?;
+fn narrative_flow_segment(document: &Value, label: &str, key: &str) -> Option<String> {
+    let count = array_len(document.pointer(&format!("/narrative/inputCategories/{key}")))?;
     (count > 0).then(|| format!("{label}={count}"))
-}
-
-fn narrative_flow_value<'a>(
-    document: &'a Value,
-    camel_leaf: &str,
-    snake_leaf: &str,
-) -> Option<&'a Value> {
-    [
-        format!("/narrative/inputCategories{camel_leaf}"),
-        format!("/narrative/inputCategories{snake_leaf}"),
-        format!("/narrative/input_categories{camel_leaf}"),
-        format!("/narrative/input_categories{snake_leaf}"),
-    ]
-    .into_iter()
-    .find_map(|pointer| document.pointer(&pointer))
 }
 
 fn narrative_story_segments(document: &Value) -> Vec<String> {
     [
-        ("attackerStories", "/narrative/attackerStories", "/narrative/attacker_stories"),
-        ("outOfScope", "/narrative/outOfScope", "/narrative/out_of_scope"),
+        ("attackerStories", "/narrative/attackerStories"),
+        ("outOfScope", "/narrative/outOfScope"),
         (
             "sandboxBoundary",
             "/narrative/inputCategories/sandboxBoundary",
-            "/narrative/input_categories/sandbox_boundary",
         ),
         (
             "assumptions",
             "/narrative/inputCategories/assumptions",
-            "/narrative/input_categories/assumptions",
         ),
     ]
     .into_iter()
-    .filter_map(|(label, camel_pointer, snake_pointer)| {
-        narrative_array_count_segment(document, label, camel_pointer, snake_pointer)
-    })
+    .filter_map(|(label, pointer)| narrative_array_count_segment(document, label, pointer))
     .chain(criticality_bucket_segment(document))
     .collect()
 }
@@ -183,21 +154,15 @@ fn narrative_story_segments(document: &Value) -> Vec<String> {
 fn narrative_array_count_segment(
     document: &Value,
     label: &str,
-    camel_pointer: &str,
-    snake_pointer: &str,
+    pointer: &str,
 ) -> Option<String> {
-    let count = array_len(
-        document
-            .pointer(camel_pointer)
-            .or_else(|| document.pointer(snake_pointer)),
-    )?;
+    let count = array_len(document.pointer(pointer))?;
     (count > 0).then(|| format!("{label}={count}"))
 }
 
 fn criticality_bucket_segment(document: &Value) -> Option<String> {
     let count = document
-        .pointer("/narrative/criticalityBuckets")
-        .or_else(|| document.pointer("/narrative/criticality_buckets"))?
+        .pointer("/narrative/criticalityBuckets")?
         .as_object()?
         .len();
     (count > 0).then(|| format!("criticalityBuckets={count}"))
@@ -224,10 +189,7 @@ fn collect_related_cwes(threat: &Value, counts: &mut BTreeMap<String, usize>) {
 }
 
 fn related_cwe_value(threat: &Value) -> Option<&Value> {
-    threat
-        .get("relatedCwe")
-        .or_else(|| threat.get("related_cwe"))
-        .or_else(|| threat.get("cwe"))
+    threat.get("relatedCwe")
 }
 
 fn non_empty(value: &&str) -> bool {

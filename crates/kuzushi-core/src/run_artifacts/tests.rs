@@ -4185,11 +4185,11 @@ mod tests {
             "dfd": {
                 "nodes": [{"id": "app"}],
                 "flows": [{"id": "flow-public"}],
-                "trust_boundaries": [{"id": "tb-public"}]
+                "trustBoundaries": [{"id": "tb-public"}]
             },
             "threats": [{
                 "id": "T-001",
-                "related_cwe": ["CWE-20"],
+                "relatedCwe": ["CWE-20"],
                 "affectedFiles": [{"filePath": "src/app.ts"}]
             }],
             "attackSurface": {
@@ -4197,8 +4197,8 @@ mod tests {
             },
             "narrative": {
                 "overview": "deterministic model",
-                "input_categories": {
-                    "data_egress_flows": ["GET /reports/download"]
+                "inputCategories": {
+                    "dataEgressFlows": ["GET /reports/download"]
                 }
             },
             "degradation": {

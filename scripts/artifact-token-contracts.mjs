@@ -112,7 +112,7 @@ export const tokenChecks = [
   {
     label: "report threat-model envelope aliases",
     file: "crates/kuzushi-core/src/report/artifact_summary.rs",
-    tokens: ["/data/document", "trustBoundaries", "trust_boundaries"],
+    tokens: ["/data/document", "trustBoundaries", "relatedCwe", "inputCategories"],
   },
   {
     label: "report artifact manifest uses canonical artifact fields",

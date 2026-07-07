@@ -261,28 +261,19 @@ const fieldShapeSpecs = {
     { path: ["properties", "nodes"], type: "array" },
     { path: ["properties", "flows"], type: "array" },
     { path: ["properties", "trustBoundaries"], type: "array" },
-    { path: ["properties", "trust_boundaries"], type: "array" },
     { path: ["properties", "threats"], type: "array", itemRef: "#/definitions/threat" },
     { path: ["properties", "relatedCwe"], ref: "#/definitions/stringList" },
-    { path: ["properties", "related_cwe"], ref: "#/definitions/stringList" },
-    { path: ["properties", "cwe"], ref: "#/definitions/stringList" },
     { path: ["properties", "attackSurface"], ref: "#/definitions/attackSurfaceHandoff" },
     { path: ["properties", "narrative"], ref: "#/definitions/narrative" },
     { path: ["properties", "degradation"], type: "object" },
     { path: ["definitions", "dfd", "properties", "nodes"], type: "array" },
     { path: ["definitions", "dfd", "properties", "flows"], type: "array" },
     { path: ["definitions", "dfd", "properties", "trustBoundaries"], type: "array" },
-    { path: ["definitions", "dfd", "properties", "trust_boundaries"], type: "array" },
     { path: ["definitions", "threat", "properties", "id"], type: "string" },
     {
       path: ["definitions", "threat", "properties", "relatedCwe"],
       ref: "#/definitions/stringList",
     },
-    {
-      path: ["definitions", "threat", "properties", "related_cwe"],
-      ref: "#/definitions/stringList",
-    },
-    { path: ["definitions", "threat", "properties", "cwe"], ref: "#/definitions/stringList" },
     { path: ["definitions", "attackSurfaceHandoff", "properties", "entryPoints"], type: "array" },
     { path: ["definitions", "attackSurfaceHandoff", "properties", "roleGates"], type: "array" },
     { path: ["definitions", "attackSurfaceHandoff", "properties", "externalSinks"], type: "array" },
@@ -292,10 +283,6 @@ const fieldShapeSpecs = {
     },
     {
       path: ["definitions", "narrative", "properties", "inputCategories"],
-      ref: "#/definitions/inputCategories",
-    },
-    {
-      path: ["definitions", "narrative", "properties", "input_categories"],
       ref: "#/definitions/inputCategories",
     },
     { path: ["definitions", "narrative", "properties", "attackerStories"], type: "array" },
@@ -310,15 +297,7 @@ const fieldShapeSpecs = {
       ref: "#/definitions/stringList",
     },
     {
-      path: ["definitions", "inputCategories", "properties", "attacker_controlled"],
-      ref: "#/definitions/stringList",
-    },
-    {
       path: ["definitions", "inputCategories", "properties", "operatorControlled"],
-      ref: "#/definitions/stringList",
-    },
-    {
-      path: ["definitions", "inputCategories", "properties", "operator_controlled"],
       ref: "#/definitions/stringList",
     },
     {
@@ -326,15 +305,7 @@ const fieldShapeSpecs = {
       ref: "#/definitions/stringList",
     },
     {
-      path: ["definitions", "inputCategories", "properties", "developer_controlled"],
-      ref: "#/definitions/stringList",
-    },
-    {
       path: ["definitions", "inputCategories", "properties", "externalServices"],
-      ref: "#/definitions/stringList",
-    },
-    {
-      path: ["definitions", "inputCategories", "properties", "external_services"],
       ref: "#/definitions/stringList",
     },
     {
@@ -342,15 +313,7 @@ const fieldShapeSpecs = {
       ref: "#/definitions/stringList",
     },
     {
-      path: ["definitions", "inputCategories", "properties", "credential_flows"],
-      ref: "#/definitions/stringList",
-    },
-    {
       path: ["definitions", "inputCategories", "properties", "authorizationFlows"],
-      ref: "#/definitions/stringList",
-    },
-    {
-      path: ["definitions", "inputCategories", "properties", "authorization_flows"],
       ref: "#/definitions/stringList",
     },
     {
@@ -358,15 +321,7 @@ const fieldShapeSpecs = {
       ref: "#/definitions/stringList",
     },
     {
-      path: ["definitions", "inputCategories", "properties", "file_ingest_flows"],
-      ref: "#/definitions/stringList",
-    },
-    {
       path: ["definitions", "inputCategories", "properties", "dataEgressFlows"],
-      ref: "#/definitions/stringList",
-    },
-    {
-      path: ["definitions", "inputCategories", "properties", "data_egress_flows"],
       ref: "#/definitions/stringList",
     },
     {
@@ -374,15 +329,7 @@ const fieldShapeSpecs = {
       ref: "#/definitions/stringList",
     },
     {
-      path: ["definitions", "inputCategories", "properties", "callback_flows"],
-      ref: "#/definitions/stringList",
-    },
-    {
       path: ["definitions", "inputCategories", "properties", "sandboxBoundary"],
-      ref: "#/definitions/stringList",
-    },
-    {
-      path: ["definitions", "inputCategories", "properties", "sandbox_boundary"],
       ref: "#/definitions/stringList",
     },
     {

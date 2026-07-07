@@ -1636,7 +1636,7 @@ fn report_fails_on_malformed_run_metadata_without_legacy_fallback() {
 }
 
 #[test]
-fn report_counts_threat_model_related_cwe_aliases() {
+fn report_summarizes_canonical_threat_model_narrative() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-cwe-aliases", "threat-model:build");
     write_run_summary(temp.path(), &source).unwrap();
@@ -1650,28 +1650,26 @@ fn report_counts_threat_model_related_cwe_aliases() {
             "dfd": {"nodes": [], "flows": [], "trustBoundaries": []},
             "relatedCwe": ["CWE-22"],
             "threats": [
-                {"id": "T-001", "related_cwe": ["CWE-640"]},
-                {"id": "T-002", "cwe": ["CWE-434", "CWE-640"]}
+                {"id": "T-001", "relatedCwe": ["CWE-640"]},
+                {"id": "T-002", "relatedCwe": ["CWE-434", "CWE-640"]}
             ],
             "narrative": {
-                "input_categories": {
-                    "attacker_controlled": ["query params", "uploaded files"],
+                "inputCategories": {
+                    "attackerControlled": ["query params", "uploaded files"],
                     "operatorControlled": ["admin toggles"],
-                    "developer_controlled": ["deployment config"],
+                    "developerControlled": ["deployment config"],
                     "externalServices": ["Stripe webhook"],
-                    "credential_flows": ["POST /auth/login", "POST /credentials/rotate"],
+                    "credentialFlows": ["POST /auth/login", "POST /credentials/rotate"],
                     "authorizationFlows": ["POST /admin/users"],
-                    "file_ingest_flows": ["POST /customers/import-file"],
+                    "fileIngestFlows": ["POST /customers/import-file"],
                     "callbackFlows": ["POST /login/return-to"],
-                    "data_egress_flows": ["GET /reports/download"]
+                    "dataEgressFlows": ["GET /reports/download"],
+                    "sandboxBoundary": ["container boundary"],
+                    "assumptions": ["static evidence only"]
                 },
                 "attackerStories": [{"threatIds": ["T-001"]}, {"threatIds": ["T-002"]}],
                 "criticalityBuckets": {"critical": ["auth"], "medium": ["files"]},
-                "outOfScope": ["runtime exploit confirmation"],
-                "inputCategories": {
-                    "sandboxBoundary": ["container boundary"],
-                    "assumptions": ["static evidence only"]
-                }
+                "outOfScope": ["runtime exploit confirmation"]
             }
         }),
     )
@@ -1685,7 +1683,7 @@ fn report_counts_threat_model_related_cwe_aliases() {
 }
 
 #[test]
-fn report_summarizes_snake_case_threat_model_trust_boundaries() {
+fn report_ignores_snake_case_threat_model_trust_boundaries() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-threat-snake", "threat-model:build");
     write_run_summary(temp.path(), &source).unwrap();
@@ -1709,7 +1707,7 @@ fn report_summarizes_snake_case_threat_model_trust_boundaries() {
     let report = build_run_report(temp.path(), Some("run-threat-snake")).unwrap();
 
     assert!(report.report_markdown.contains(
-        "threat-model.json: present - methodology stride, 0 threat(s), DFD nodes=1, flows=1, boundaries=1"
+        "threat-model.json: present - methodology stride, 0 threat(s), DFD nodes=1, flows=1, boundaries=0"
     ));
 }
 

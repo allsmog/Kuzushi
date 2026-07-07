@@ -26,14 +26,11 @@
     "nodes": { "type": "array" },
     "flows": { "type": "array" },
     "trustBoundaries": { "type": "array" },
-    "trust_boundaries": { "type": "array" },
     "threats": {
       "type": "array",
       "items": { "$ref": "#/definitions/threat" }
     },
     "relatedCwe": { "$ref": "#/definitions/stringList" },
-    "related_cwe": { "$ref": "#/definitions/stringList" },
-    "cwe": { "$ref": "#/definitions/stringList" },
     "attackSurface": { "$ref": "#/definitions/attackSurfaceHandoff" },
     "narrative": { "$ref": "#/definitions/narrative" },
     "degradation": { "type": "object" }
@@ -53,8 +50,7 @@
       "properties": {
         "nodes": { "type": "array" },
         "flows": { "type": "array" },
-        "trustBoundaries": { "type": "array" },
-        "trust_boundaries": { "type": "array" }
+        "trustBoundaries": { "type": "array" }
       }
     },
     "threat": {
@@ -62,9 +58,7 @@
       "additionalProperties": true,
       "properties": {
         "id": { "type": "string" },
-        "relatedCwe": { "$ref": "#/definitions/stringList" },
-        "related_cwe": { "$ref": "#/definitions/stringList" },
-        "cwe": { "$ref": "#/definitions/stringList" }
+        "relatedCwe": { "$ref": "#/definitions/stringList" }
       }
     },
     "attackSurfaceHandoff": {
@@ -95,7 +89,6 @@
       "properties": {
         "overview": { "type": "string" },
         "inputCategories": { "$ref": "#/definitions/inputCategories" },
-        "input_categories": { "$ref": "#/definitions/inputCategories" },
         "attackerStories": { "type": "array" },
         "criticalityBuckets": { "type": "object" },
         "outOfScope": {
@@ -109,25 +102,15 @@
       "additionalProperties": true,
       "properties": {
         "attackerControlled": { "$ref": "#/definitions/stringList" },
-        "attacker_controlled": { "$ref": "#/definitions/stringList" },
         "operatorControlled": { "$ref": "#/definitions/stringList" },
-        "operator_controlled": { "$ref": "#/definitions/stringList" },
         "developerControlled": { "$ref": "#/definitions/stringList" },
-        "developer_controlled": { "$ref": "#/definitions/stringList" },
         "externalServices": { "$ref": "#/definitions/stringList" },
-        "external_services": { "$ref": "#/definitions/stringList" },
         "credentialFlows": { "$ref": "#/definitions/stringList" },
-        "credential_flows": { "$ref": "#/definitions/stringList" },
         "authorizationFlows": { "$ref": "#/definitions/stringList" },
-        "authorization_flows": { "$ref": "#/definitions/stringList" },
         "fileIngestFlows": { "$ref": "#/definitions/stringList" },
-        "file_ingest_flows": { "$ref": "#/definitions/stringList" },
         "dataEgressFlows": { "$ref": "#/definitions/stringList" },
-        "data_egress_flows": { "$ref": "#/definitions/stringList" },
         "callbackFlows": { "$ref": "#/definitions/stringList" },
-        "callback_flows": { "$ref": "#/definitions/stringList" },
         "sandboxBoundary": { "$ref": "#/definitions/stringList" },
-        "sandbox_boundary": { "$ref": "#/definitions/stringList" },
         "assumptions": { "$ref": "#/definitions/stringList" }
       }
     },

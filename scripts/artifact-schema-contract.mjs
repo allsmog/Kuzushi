@@ -1,7 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { checkFieldShapeSpecs } from "./artifact-schema-shapes.mjs";
-import { checkThreatModelNarrativeFlowAliases } from "./artifact-schema-threat-model.mjs";
 import {
   optionalRunArtifactSpecs,
   requiredRunArtifactSpecs,
@@ -462,9 +461,6 @@ function checkSchemaDocument(relativeFile, schema) {
     ...checkProofStateEnums(relativeFile, schema),
     ...checkProofStateRefs(relativeFile, schema),
     ...checkProofLevelNumericBranch(relativeFile, schema),
-    ...checkDfdTrustBoundaryAliases(relativeFile, schema),
-    ...checkRelatedCweAliases(relativeFile, schema),
-    ...checkThreatModelNarrativeFlowAliases(relativeFile, schema),
     ...checkFieldShapeSpecs(relativeFile, schema, schemaNode),
     ...checkRunArtifactManifestReservedMetadata(relativeFile, schema),
     ...checkNamedEnums(relativeFile, schema),
@@ -477,33 +473,6 @@ function checkProofLevelNumericBranch(relativeFile, schema) {
   return branch?.type === "integer" && branch?.minimum === 1 && branch?.maximum === 4
     ? []
     : [`${relativeFile}: proofLevel numeric branch must constrain integer 1..4`];
-}
-
-function checkDfdTrustBoundaryAliases(relativeFile, schema) {
-  if (relativeFile !== "schemas/run.threat-model.schema.json") return [];
-  const preserved =
-    schemaNode(schema, ["properties", "dfd"])?.$ref === "#/definitions/dfd" &&
-    schemaNode(schema, ["definitions", "dfd", "properties", "trustBoundaries"]) &&
-    schemaNode(schema, ["definitions", "dfd", "properties", "trust_boundaries"]);
-  return preserved ? [] : [`${relativeFile}: DFD schema must preserve trust-boundary aliases`];
-}
-
-function checkRelatedCweAliases(relativeFile, schema) {
-  if (relativeFile !== "schemas/run.threat-model.schema.json") return [];
-  const stringListPaths = [
-    ["properties", "relatedCwe"],
-    ["properties", "related_cwe"],
-    ["properties", "cwe"],
-    ["definitions", "threat", "properties", "relatedCwe"],
-    ["definitions", "threat", "properties", "related_cwe"],
-    ["definitions", "threat", "properties", "cwe"],
-  ];
-  const preserved =
-    schemaNode(schema, ["properties", "threats", "items"])?.$ref === "#/definitions/threat" &&
-    stringListPaths.every(
-      (nodePath) => schemaNode(schema, nodePath)?.$ref === "#/definitions/stringList",
-    );
-  return preserved ? [] : [`${relativeFile}: threat schema must preserve related-CWE aliases`];
 }
 
 function schemaAcceptsObject(schema) {
