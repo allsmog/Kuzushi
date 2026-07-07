@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::findings::persistence::open) struct FindingIdentityAssignment {
     pub identity_id: String,
     pub match_tier: FindingIdentityMatchTier,

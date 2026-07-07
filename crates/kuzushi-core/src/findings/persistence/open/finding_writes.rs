@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 struct FindingInsertOutcome {
     id: i64,
+    projected: Finding,
     evidence: ProjectionEvidence,
 }
 
@@ -49,8 +50,9 @@ impl FindingStore {
         let outcome = self.insert_finding_statements(&tx, scan_id, finding)?;
         tx.commit()
             .context("Could not commit findings write transaction")?;
-        self.record_v3_observation(scan_id, finding, outcome.id, outcome.evidence)?;
-        Ok(outcome.id)
+        let id = outcome.id;
+        self.record_v3_observation(scan_id, finding, outcome)?;
+        Ok(id)
     }
 
     pub fn insert_findings(&self, scan_id: &str, findings: &[Finding]) -> Result<Vec<i64>> {
@@ -109,8 +111,10 @@ impl FindingStore {
             |row| row.get(0),
         )?;
         let evidence = self.verified_finding_evidence(tx, scan_id, &finding.evidence)?;
+        let projected = projected_seed(scan_id, id, finding, &identity);
         Ok(FindingInsertOutcome {
             id,
+            projected,
             evidence: ProjectionEvidence::Replace(evidence),
         })
     }
@@ -178,8 +182,22 @@ impl FindingStore {
             ProjectionEvidence::KeepExisting
         };
         self.record_collision_identity(tx, &existing, finding)?;
+        let identity = match collision_identity_assignment(&existing) {
+            Some(identity) => identity,
+            None => self.identity_assignment_for_finding(tx, scan_id, finding)?,
+        };
+        let projected = merged_projection_seed(
+            scan_id,
+            merge_id,
+            existing,
+            finding,
+            &identity,
+            &merged_tool,
+            merged_source,
+        );
         Ok(FindingInsertOutcome {
             id: merge_id,
+            projected,
             evidence,
         })
     }
@@ -261,13 +279,9 @@ impl FindingStore {
         &self,
         scan_id: &str,
         finding: &Finding,
-        finding_id: i64,
-        evidence: ProjectionEvidence,
+        outcome: FindingInsertOutcome,
     ) -> Result<()> {
-        let Some(commit) = self.v3_observation_commit(scan_id, finding, finding_id, evidence)?
-        else {
-            return Ok(());
-        };
+        let commit = self.v3_observation_commit(scan_id, finding, outcome)?;
         self.commit_v3_observation(commit)
     }
 
@@ -278,7 +292,7 @@ impl FindingStore {
         outcomes: Vec<FindingInsertOutcome>,
     ) -> Result<()> {
         for (finding, outcome) in findings.iter().zip(outcomes) {
-            self.record_v3_observation(scan_id, finding, outcome.id, outcome.evidence)?;
+            self.record_v3_observation(scan_id, finding, outcome)?;
         }
         Ok(())
     }
@@ -287,37 +301,35 @@ impl FindingStore {
         &self,
         scan_id: &str,
         finding: &Finding,
-        finding_id: i64,
-        evidence: ProjectionEvidence,
-    ) -> Result<Option<ObservationCommit>> {
-        let Some(identity) = self.finding_identity_for_id(finding_id, "observation")? else {
-            return Ok(None);
-        };
-        let projected =
-            self.projected_observation_finding(scan_id, finding, finding_id, evidence)?;
+        outcome: FindingInsertOutcome,
+    ) -> Result<ObservationCommit> {
+        let projected = self.projected_observation_finding(scan_id, finding, outcome)?;
         let provenance = self.observation_provenance(scan_id, &projected)?;
-        let observation =
-            observation_write(scan_id, &projected, identity.stable_fp(), &provenance)?;
-        Ok(Some(ObservationCommit {
+        let stable_fp = projected
+            .identity_id
+            .clone()
+            .unwrap_or_else(|| projected.fingerprint.clone());
+        let observation = observation_write(scan_id, &projected, stable_fp, &provenance)?;
+        Ok(ObservationCommit {
             observation,
             provenance,
-        }))
+        })
     }
 
     fn projected_observation_finding(
         &self,
         scan_id: &str,
         finding: &Finding,
-        finding_id: i64,
-        evidence: ProjectionEvidence,
+        outcome: FindingInsertOutcome,
     ) -> Result<Finding> {
-        let mut projected = self.projected_finding_for_v3(finding_id)?;
-        let previous_projection = self.v3_finding_by_projected_id(finding_id)?;
+        let mut projected = outcome.projected;
+        projected.corroboration_count = projected.corroboration_count.max(1);
+        let previous_projection = self.v3_finding_by_projected_id(outcome.id)?;
         carry_previous_triage(&mut projected, previous_projection.as_ref());
         let sources =
             self.projected_finding_sources(previous_projection.as_ref(), scan_id, finding);
         apply_projected_sources(&mut projected, sources);
-        projected.evidence = projected_evidence(evidence, previous_projection.as_ref());
+        projected.evidence = projected_evidence(outcome.evidence, previous_projection.as_ref());
         Ok(projected)
     }
 
@@ -377,28 +389,6 @@ impl FindingStore {
         Some(self.db_path.as_ref()?.parent()?.join("objects"))
     }
 
-    pub(crate) fn projected_finding_for_v3(&self, finding_id: i64) -> Result<Finding> {
-        let finding = self
-            .conn
-            .query_row(
-                r#"
-                select
-                  f.id, f.run_id, f.fingerprint, f.rule_id, f.title, f.severity,
-                  f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
-                  f.static_proof_state, f.created_at,
-                  null, null, null, null,
-                  f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
-                  f.remediation, f.references_json, null, f.source_signature,
-                  f.corroboration_count, f.identity_id, f.identity_match_tier
-                from finding_projection_rows f
-                where f.id = ?1
-                "#,
-                params![finding_id],
-                row_to_finding,
-            )
-            .with_context(|| format!("Could not load finding {finding_id} for v3 projection"))?;
-        Ok(finding)
-    }
 }
 
 fn carry_previous_triage(projected: &mut Finding, previous: Option<&Finding>) {
@@ -538,6 +528,49 @@ fn source_path_for_finding(root: &Path, file_path: &str) -> Option<PathBuf> {
         return path.starts_with(root).then(|| path.to_path_buf());
     }
     Some(root.join(path))
+}
+
+fn projected_seed(
+    scan_id: &str,
+    finding_id: i64,
+    finding: &Finding,
+    identity: &FindingIdentityAssignment,
+) -> Finding {
+    let mut projected = finding.clone();
+    apply_projection_identity(&mut projected, scan_id, finding_id, identity);
+    projected
+}
+
+fn merged_projection_seed(
+    scan_id: &str,
+    finding_id: i64,
+    existing: Finding,
+    incoming: &Finding,
+    identity: &FindingIdentityAssignment,
+    merged_tool: &str,
+    merged_source: Option<VulnSource>,
+) -> Finding {
+    let mut projected = if incoming.severity > existing.severity {
+        incoming.clone()
+    } else {
+        existing
+    };
+    projected.tool = merged_tool.to_string();
+    projected.vuln_source = merged_source;
+    apply_projection_identity(&mut projected, scan_id, finding_id, identity);
+    projected
+}
+
+fn apply_projection_identity(
+    projected: &mut Finding,
+    scan_id: &str,
+    finding_id: i64,
+    identity: &FindingIdentityAssignment,
+) {
+    projected.id = Some(finding_id);
+    projected.scan_id = Some(scan_id.to_string());
+    projected.identity_id = Some(identity.identity_id.clone());
+    projected.identity_match_tier = Some(identity.match_tier.as_str().to_string());
 }
 
 fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {
@@ -755,6 +788,20 @@ fn collision_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollisionRow> {
         identity_id: row.get(14)?,
         identity_match_tier: row.get(15)?,
     })
+}
+
+fn collision_identity_assignment(finding: &Finding) -> Option<FindingIdentityAssignment> {
+    Some(FindingIdentityAssignment {
+        identity_id: finding.identity_id.clone()?,
+        match_tier: identity_match_tier(finding.identity_match_tier.as_deref()),
+    })
+}
+
+fn identity_match_tier(raw: Option<&str>) -> FindingIdentityMatchTier {
+    match raw {
+        Some("dedup_collision") => FindingIdentityMatchTier::DedupCollision,
+        _ => FindingIdentityMatchTier::StableFingerprint,
+    }
 }
 
 fn dedup_collision_can_merge(existing: &Finding, incoming: &Finding) -> bool {

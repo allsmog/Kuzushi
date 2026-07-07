@@ -293,7 +293,7 @@ mod tests {
                     "systems-hunt",
                     "systems/cwe-89",
                     "src/db.rs",
-                    11,
+                    10,
                     Severity::High,
                 ),
             )

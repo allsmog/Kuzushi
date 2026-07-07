@@ -1,4 +1,4 @@
-use super::*;
+use crate::findings::VulnSource;
 
 pub(crate) fn merge_tool_list(existing: &str, incoming: &str) -> String {
     let mut tools: std::collections::BTreeSet<String> = existing
