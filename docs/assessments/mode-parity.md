@@ -40,8 +40,20 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 ## Intentional Asymmetries
 
 - **Interactive shell views** are shell-only: Workbench, Activity dashboard,
-  replay/trace, prompt tuning, actor detail, guided phase picker, model/auth
-  pickers, and two-stage idle Ctrl+C.
+  replay/trace, jobs registry, prompt tuning, actor detail, guided phase picker,
+  model/auth pickers, and two-stage idle Ctrl+C.
+- **Jobs registry + steer queue + background handoff are shell-only.** `jobs`
+  (`ShellView::Jobs`) is a live control surface over the shared
+  `.kuzushi/v3/runs/` format: it merges the single live `Run` (shared `JobHub`
+  slot + `ActivitySession`) and queued steer items with recent on-disk
+  `RunSummary` rows, de-duped by `run_id`. `jobs -k <id>` reuses the existing
+  `CancelActiveJobs` path or dequeues a pending steer item. The steer queue
+  (`queue`, plus auto-queue of a `run` submitted while busy) is the
+  lowest-precedence "next tool" mechanism — deterministic order **chain → plan
+  → steer** — and only one live `Run` exists at a time, so queued items always
+  render as pending, never running. `background`/`bg` (and Activity `b`) drops
+  to the Workbench without cancelling. The CLI `runs list/show/trace` is the
+  headless analogue over the same shared artefacts.
 - **`--ci` is scan-only.** Headless `kuzushi run` always emits JSON on stdout
   and writes run artifacts for machine consumers; it does not have a `--json`
   flag.

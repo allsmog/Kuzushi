@@ -418,6 +418,22 @@ is expected to behave identically and should be filed as a parity bug.
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator
   surfaces** that *consume* shared `.kuzushi/v3/runs/<runId>/`
   artefacts. They are read-only over a shared on-disk format.
+- **Jobs registry (`jobs`, `ShellView::Jobs`), steer queue (`queue`),
+  and background handoff (`background`/`bg`, Activity `b`)** — shell-only.
+  `jobs` is a Metasploit-style live control surface over the shared
+  `.kuzushi/v3/runs/` format: it merges the one live `Run` (from the shared
+  single-slot `JobHub` + `ActivitySession`) plus queued steer items with
+  recent on-disk `RunSummary` rows, de-duped by `run_id` (live supersedes its
+  still-`running` disk twin). `jobs -k <id>` reuses the existing
+  `CancelActiveJobs` path for a live job or dequeues a pending steer item; it
+  never invents a second cancellation mechanism. The steer queue is the third
+  and lowest-precedence "next tool" mechanism after the prereq chain and the
+  planning queue — deterministic order is **chain → plan → steer**
+  (`advance_steer_queue` runs last in `apply_finished_tool_event` and no-ops
+  while a chain is pending or work is running). Only one live `Run` exists at a
+  time, so queued items always render as **pending**, never running. `kuzushi
+  run` stays single-shot; the CLI `runs list/show/trace` is the headless
+  analogue over the same shared artefacts.
 - **Pipeline-only artefacts are scan-only.** `kuzushi run` and shell tool
   dispatch now mint a `runId` and write `summary.json`, `trace.jsonl`,
   and input/result JSON. They do not produce scan-specific `triage.jsonl`,
