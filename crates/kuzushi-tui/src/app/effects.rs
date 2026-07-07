@@ -82,6 +82,7 @@ pub(crate) enum ShellEffect {
     StartThreat(ThreatWorkerStart),
     SwitchTargetRevision(TargetRevisionSwitch),
     WaitForAbortCleanup,
+    WorkspaceReindex(WorkspaceReindex),
     WorkspaceExportFindings(WorkspaceExportFindings),
     WorkspaceScopeInit(WorkspaceScopeInit),
     WriteHouseRules(HouseRulesWrite),
@@ -169,6 +170,10 @@ pub(crate) struct WorkspaceExportFindings {
     pub(crate) completeness: Option<String>,
     pub(crate) format: Option<String>,
     pub(crate) output: PathBuf,
+    pub(crate) target: Option<PathBuf>,
+}
+
+pub(crate) struct WorkspaceReindex {
     pub(crate) target: Option<PathBuf>,
 }
 
@@ -485,6 +490,34 @@ impl ShellApp {
                     format!(
                         "{error}. Next: workspace export findings <path> [json|jsonl|sarif|csv|markdown-bundle] [--completeness open|complete] [--allow-empty]"
                     ),
+                );
+            }
+        }
+    }
+
+    pub(super) fn reindex_workspace_effect(&mut self, reindex: WorkspaceReindex) {
+        match reindex_workspace_for_target(reindex.target.as_ref()) {
+            Ok(indexed) => {
+                let workspace_view = self.build_workspace_view(None);
+                self.domain_mut().set_workspace_view(workspace_view);
+                self.clear_workspace_stale();
+                self.set_shell_view(ShellView::Workspace);
+                self.set_focused_module(Some("workspace".to_string()));
+                self.log(
+                    "workspace",
+                    format!(
+                        "indexed {} files at seq {} ({})",
+                        indexed.file_count, indexed.applied_seq, indexed.snapshot_hash
+                    ),
+                );
+            }
+            Err(error) => {
+                let workspace_view = self.build_workspace_view(None);
+                self.domain_mut().set_workspace_view(workspace_view);
+                self.set_shell_view(ShellView::Workspace);
+                self.log(
+                    "error",
+                    format!("{error}. Next: target <path>, then workspace reindex"),
                 );
             }
         }
@@ -813,6 +846,7 @@ fn applied_patch_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzushi_core::incremental_index::{ReindexPlan, WorkspaceChange};
     use kuzushi_core::V2Config;
 
     #[test]
@@ -863,5 +897,31 @@ mod tests {
             .log_lines()
             .iter()
             .any(|entry| entry.body.contains("offline fixture ready")));
+    }
+
+    #[test]
+    fn workspace_reindex_effect_clears_stale_state_after_success() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("src.rs"), "fn main() {}\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.apply_workspace_changes(&[WorkspaceChange::GitHeadChanged]);
+        assert_eq!(
+            app.workspace_stale().unwrap().strongest_plan(),
+            ReindexPlan::FullSnapshot
+        );
+
+        let target = app.target_owned();
+        EffectRuntime::execute(
+            &mut app,
+            vec![ShellEffect::WorkspaceReindex(WorkspaceReindex { target })],
+        );
+
+        assert!(app.workspace_stale().is_none());
+        assert_eq!(app.shell_view(), ShellView::Workspace);
+        assert!(workspace.objects_dir().join("blake3").is_dir());
+        assert!(app.log_lines().iter().any(|entry| {
+            entry.prefix == "workspace" && entry.body.contains("indexed 1 files")
+        }));
     }
 }

@@ -20,6 +20,7 @@ pub enum ContextCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceCommand {
     Status,
+    Reindex,
     ScopeInit,
     ExportFindings {
         output: PathBuf,

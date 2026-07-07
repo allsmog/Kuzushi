@@ -241,6 +241,9 @@ impl EffectRuntime {
             effect @ ShellEffect::WorkspaceExportFindings(_) => {
                 Self::execute_workspace_effect(app, effect)
             }
+            effect @ ShellEffect::WorkspaceReindex(_) => {
+                Self::execute_workspace_effect(app, effect)
+            }
             _ => unreachable!("secondary shell effect dispatch"),
         }
     }
@@ -250,6 +253,7 @@ impl EffectRuntime {
             ShellEffect::WorkspaceExportFindings(export) => {
                 app.export_workspace_findings_effect(export)
             }
+            ShellEffect::WorkspaceReindex(reindex) => app.reindex_workspace_effect(reindex),
             _ => unreachable!("workspace effect dispatch"),
         }
     }

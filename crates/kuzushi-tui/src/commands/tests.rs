@@ -459,6 +459,14 @@ mod tests {
             ShellCommand::Workspace(WorkspaceCommand::Status)
         );
         assert_eq!(
+            parse_command("workspace reindex"),
+            ShellCommand::Workspace(WorkspaceCommand::Reindex)
+        );
+        assert_eq!(
+            parse_command("workspace index"),
+            ShellCommand::Workspace(WorkspaceCommand::Reindex)
+        );
+        assert_eq!(
             parse_command("workspace export findings out.json"),
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
                 output: PathBuf::from("out.json"),

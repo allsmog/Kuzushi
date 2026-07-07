@@ -89,6 +89,7 @@ pub(crate) fn parse_context_command(parts: Vec<&str>) -> ShellCommand {
 pub(crate) fn parse_workspace_command(parts: Vec<&str>) -> ShellCommand {
     match parts.first().copied() {
         None | Some("status") => ShellCommand::Workspace(WorkspaceCommand::Status),
+        Some("reindex" | "index") => ShellCommand::Workspace(WorkspaceCommand::Reindex),
         Some("export") => match parts.get(1).copied() {
             Some("findings") => parse_workspace_findings_export_args(
                 parts.get(2..).unwrap_or_default(),

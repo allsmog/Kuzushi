@@ -1522,6 +1522,7 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
         | ShellEffect::UpdatePromptMutationStatus(_)
         | ShellEffect::WaitForAbortCleanup
         | ShellEffect::WorkspaceExportFindings(_)
+        | ShellEffect::WorkspaceReindex(_)
         | ShellEffect::WorkspaceScopeInit(_)
         | ShellEffect::WriteHouseRules(_)
         | ShellEffect::WritePromptOverride(_) => {
@@ -1622,6 +1623,7 @@ fn planner_reducer_returns_start_effect_without_spawning_worker() {
         | ShellEffect::UpdatePromptMutationStatus(_)
         | ShellEffect::WaitForAbortCleanup
         | ShellEffect::WorkspaceExportFindings(_)
+        | ShellEffect::WorkspaceReindex(_)
         | ShellEffect::WorkspaceScopeInit(_)
         | ShellEffect::WriteHouseRules(_)
         | ShellEffect::WritePromptOverride(_) => panic!("expected planner start effect"),
@@ -1720,6 +1722,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::UpdatePromptMutationStatus(_)
         | ShellEffect::WaitForAbortCleanup
         | ShellEffect::WorkspaceExportFindings(_)
+        | ShellEffect::WorkspaceReindex(_)
         | ShellEffect::WorkspaceScopeInit(_)
         | ShellEffect::WriteHouseRules(_)
         | ShellEffect::WritePromptOverride(_) => panic!("expected threat start effect"),
@@ -1803,6 +1806,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::UpdatePromptMutationStatus(_)
         | ShellEffect::WaitForAbortCleanup
         | ShellEffect::WorkspaceExportFindings(_)
+        | ShellEffect::WorkspaceReindex(_)
         | ShellEffect::WorkspaceScopeInit(_)
         | ShellEffect::WriteHouseRules(_)
         | ShellEffect::WritePromptOverride(_) => panic!("expected threat start effect"),
@@ -2912,6 +2916,7 @@ enum EffectKind {
     UpdatePromptMutationStatus,
     WaitForAbortCleanup,
     WorkspaceExport,
+    WorkspaceReindex,
     WorkspaceScope,
     WriteHouseRules,
     WritePromptOverride,
@@ -3003,6 +3008,7 @@ fn command_effect_kind(command: ShellCommand) -> Option<EffectKind> {
         ShellEffect::UpdatePromptMutationStatus(_) => EffectKind::UpdatePromptMutationStatus,
         ShellEffect::WaitForAbortCleanup => EffectKind::WaitForAbortCleanup,
         ShellEffect::WorkspaceExportFindings(_) => EffectKind::WorkspaceExport,
+        ShellEffect::WorkspaceReindex(_) => EffectKind::WorkspaceReindex,
         ShellEffect::WorkspaceScopeInit(_) => EffectKind::WorkspaceScope,
         ShellEffect::WriteHouseRules(_) => EffectKind::WriteHouseRules,
         ShellEffect::WritePromptOverride(_) => EffectKind::WritePromptOverride,

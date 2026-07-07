@@ -7,6 +7,11 @@ impl ShellApp {
     ) -> Option<Vec<ShellEffect>> {
         match command {
             WorkspaceCommand::Status => Some(vec![ShellEffect::ShowWorkspaceStatus]),
+            WorkspaceCommand::Reindex => {
+                Some(vec![ShellEffect::WorkspaceReindex(WorkspaceReindex {
+                    target: self.target_owned(),
+                })])
+            }
             WorkspaceCommand::ScopeInit => {
                 Some(vec![ShellEffect::WorkspaceScopeInit(WorkspaceScopeInit {
                     target: self.target_owned(),
@@ -38,7 +43,7 @@ impl ShellApp {
         self.log(
             "error",
             format!(
-                "{raw} is not supported by the Rust workspace bridge yet. Supported: workspace status, workspace scope init, workspace export findings <path> [json|jsonl|sarif|csv|markdown-bundle] [--completeness open|complete] [--allow-empty]"
+                "{raw} is not supported by the Rust workspace bridge yet. Supported: workspace status, workspace reindex, workspace scope init, workspace export findings <path> [json|jsonl|sarif|csv|markdown-bundle] [--completeness open|complete] [--allow-empty]"
             ),
         );
     }
@@ -68,5 +73,30 @@ impl ShellApp {
             "system",
             "Conversation cleared. Command history retained. Next: history or help",
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn workspace_reindex_command_returns_targeted_effect() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        let effects = app
+            .reduce_workspace_command_effects(&WorkspaceCommand::Reindex)
+            .expect("workspace command should be routed");
+
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            ShellEffect::WorkspaceReindex(reindex) => {
+                assert_eq!(reindex.target.as_deref(), Some(workspace.root()));
+            }
+            _ => panic!("expected workspace reindex effect"),
+        }
     }
 }

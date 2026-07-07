@@ -2,9 +2,9 @@ use super::*;
 use anyhow::Result;
 use kuzushi_core::workspace::write_program_scope_scaffold;
 use kuzushi_core::{
-    export_workspace_findings_with_options, workspace_status_for_target,
-    WorkspaceExportCompleteness, WorkspaceExportFormat, WorkspaceExportOptions,
-    WorkspaceFindingsExport, WorkspaceStatus,
+    export_workspace_findings_with_options, incremental_index::IndexedWorkspaceSnapshot,
+    workspace_status_for_target, WorkspaceExportCompleteness, WorkspaceExportFormat,
+    WorkspaceExportOptions, WorkspaceFindingsExport, WorkspaceStatus,
 };
 
 pub(crate) fn workspace_for_target(target: Option<&PathBuf>) -> Result<WorkspaceTarget> {
@@ -48,6 +48,13 @@ pub(crate) fn export_findings_for_target(
 pub(crate) fn init_scope_for_target(target: Option<&PathBuf>) -> Result<PathBuf> {
     let workspace = explicit_workspace_for_target(target)?;
     write_program_scope_scaffold(&workspace)
+}
+
+pub(crate) fn reindex_workspace_for_target(
+    target: Option<&PathBuf>,
+) -> Result<IndexedWorkspaceSnapshot> {
+    let workspace = explicit_workspace_for_target(target)?;
+    kuzushi_core::incremental_index::index_workspace_snapshot(&workspace)
 }
 
 pub(crate) fn workspace_view_for_target(

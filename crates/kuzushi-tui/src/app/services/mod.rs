@@ -10,6 +10,6 @@ pub(crate) use findings::{
     open_finding_store_for_target,
 };
 pub(crate) use workspace::{
-    export_findings_for_target, init_scope_for_target, workspace_for_target,
-    workspace_view_for_target,
+    export_findings_for_target, init_scope_for_target, reindex_workspace_for_target,
+    workspace_for_target, workspace_view_for_target,
 };

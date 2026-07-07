@@ -68,6 +68,12 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
         description: "show target and state status",
     },
     ShellCommandSpec {
+        command: "workspace reindex",
+        aliases: &["/workspace reindex", "workspace index"],
+        category: ShellCommandCategory::ContextKb,
+        description: "refresh the v3 content-addressed workspace index",
+    },
+    ShellCommandSpec {
         command: "workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
         aliases: &[
             "/workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
