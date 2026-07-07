@@ -6,6 +6,7 @@ pub(crate) enum Msg {
     Term(TermEvent),
     Tick(Instant),
     Job(ShellEvent),
+    WorkspaceChanged(Vec<kuzushi_core::incremental_index::WorkspaceChange>),
     Cmd(ShellCommand),
 }
 
@@ -32,6 +33,10 @@ pub(crate) fn update(app: &mut ShellApp, msg: Msg) -> UpdateResult {
                 changed: true,
                 effects,
             }
+        }
+        Msg::WorkspaceChanged(changes) => {
+            app.apply_workspace_changes(&changes);
+            UpdateResult::changed(true)
         }
         Msg::Cmd(command) => update_command(app, command),
     }

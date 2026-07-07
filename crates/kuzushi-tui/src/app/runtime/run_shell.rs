@@ -116,9 +116,10 @@ pub(crate) fn terminal_shell_loop(
     let mut state = TerminalLoopState::default();
     let (input, wake) = TerminalLoopInbox::spawn_crossterm_reader();
     app.set_loop_wake(Some(wake.clone()));
-    app.jobs_mut().set_wake(Some(wake));
+    app.jobs_mut().set_wake(Some(wake.clone()));
+    let mut watcher = WorkspaceWatcherRuntime::start(app.target(), wake)?;
     while !app.should_quit() {
-        terminal_shell_step(terminal, app, &mut state, &input)?;
+        terminal_shell_step(terminal, app, &mut state, &input, watcher.as_mut())?;
     }
     app.jobs_mut().set_wake(None);
     app.set_loop_wake(None);
@@ -141,8 +142,9 @@ pub(crate) fn terminal_shell_step(
     app: &mut ShellApp,
     state: &mut TerminalLoopState,
     input: &TerminalLoopInbox,
+    watcher: Option<&mut WorkspaceWatcherRuntime>,
 ) -> Result<()> {
-    refresh_terminal_redraw_state(terminal, app, state)?;
+    refresh_terminal_redraw_state(terminal, app, state, watcher)?;
     state.needs_redraw |= wait_for_terminal_loop_event(app, input)?;
     Ok(())
 }

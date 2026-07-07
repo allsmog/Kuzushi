@@ -133,7 +133,7 @@ mod tests {
             "running semgrep".to_string(),
         )));
 
-        assert!(apply_runtime_messages(&mut app, now));
+        assert!(apply_runtime_messages(&mut app, now, None));
 
         assert_eq!(app.ctrl_c_armed_at(), None);
         assert_eq!(app.scan().unwrap().stage, "running semgrep");

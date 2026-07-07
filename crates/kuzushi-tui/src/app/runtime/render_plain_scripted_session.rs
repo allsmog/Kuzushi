@@ -12,7 +12,7 @@ pub(crate) fn render_plain_scripted_session(
         }
         let log_start = app.log_len();
         submit_plain_scripted_command(app, command);
-        app_background_changed(app);
+        app_background_changed(app, None);
         output.push_str(&render_plain_command_result(app, width, command, log_start));
         if app.should_quit() {
             break;
