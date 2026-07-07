@@ -46,6 +46,36 @@ mod tests {
     }
 
     #[test]
+    fn phase_stamping_is_display_metadata_only() {
+        // Stamping must set `phase` and leave every dispatch-relevant field
+        // (name, headless, hidden, runtime_requirement, options) untouched —
+        // proving phase is display grouping, not execution input.
+        let module = builtin_module(
+            "semgrep",
+            "Semgrep",
+            ModuleKind::Scan,
+            "Static analysis",
+            vec![hidden_tool_with_options(
+                "semgrep:scan",
+                "Scan with Semgrep.",
+                vec![opt("target", OptionType::Path, "Path.")],
+            )],
+            vec![],
+        );
+        let before = module.tools()[0].clone();
+        let stamped = module.with_stamped_phases();
+        let after = &stamped.tools()[0];
+
+        assert_eq!(before.phase, ToolPhase::Operate); // default before stamping
+        assert_eq!(after.phase, ToolPhase::Hunt); // canonical semgrep phase
+        assert_eq!(after.name, before.name);
+        assert_eq!(after.headless, before.headless);
+        assert_eq!(after.hidden, before.hidden);
+        assert_eq!(after.runtime_requirement, before.runtime_requirement);
+        assert_eq!(after.options, before.options);
+    }
+
+    #[test]
     fn option_builders_set_contract_flags_without_exposing_mutation() {
         let option = opt("mode", OptionType::Enum, "Mode.")
             .required()

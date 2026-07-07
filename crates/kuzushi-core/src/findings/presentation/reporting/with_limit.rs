@@ -680,3 +680,77 @@ fn parse_limit_value(value: &Value) -> Result<usize> {
         _ => anyhow::bail!("findings:list limit must be a number"),
     }
 }
+
+#[cfg(test)]
+mod confidence_and_state_tests {
+    use super::*;
+
+    fn triaged(verdict: TriageVerdict, confidence: f32) -> Finding {
+        let mut finding = Finding::new_semgrep(
+            "demo.rule",
+            "src/a.rs",
+            1,
+            Some(1),
+            Severity::High,
+            "demo finding",
+        );
+        finding.triage = Some(TriageOutcome {
+            verdict,
+            confidence,
+            rationale: "test".to_string(),
+            cost_usd: 0.0,
+        });
+        finding
+    }
+
+    fn untriaged() -> Finding {
+        Finding::new_semgrep(
+            "demo.rule",
+            "src/a.rs",
+            1,
+            Some(1),
+            Severity::High,
+            "demo finding",
+        )
+    }
+
+    fn matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+        filter.matches_with_review_decision(finding, None)
+    }
+
+    #[test]
+    fn confidence_high_matches_banded_triage_and_excludes_untriaged() {
+        let filter = FindingListFilter::from_filter_expression("confidence:high").unwrap();
+        assert_eq!(filter.confidence, vec![ConfidenceBand::High]);
+        assert!(matches(&filter, &triaged(TriageVerdict::TruePositive, 0.9)));
+        assert!(!matches(&filter, &triaged(TriageVerdict::TruePositive, 0.5)));
+        assert!(!matches(&filter, &untriaged()));
+    }
+
+    #[test]
+    fn band_alias_and_unknown_value_error() {
+        assert_eq!(
+            FindingListFilter::from_filter_expression("band:low")
+                .unwrap()
+                .confidence,
+            vec![ConfidenceBand::Low]
+        );
+        assert!(FindingListFilter::from_filter_expression("confidence:bogus").is_err());
+    }
+
+    #[test]
+    fn state_open_is_untriaged_or_needs_review() {
+        let filter = FindingListFilter::from_filter_expression("state:open").unwrap();
+        assert!(matches(&filter, &untriaged()));
+        assert!(matches(&filter, &triaged(TriageVerdict::NeedsReview, 0.6)));
+        assert!(!matches(&filter, &triaged(TriageVerdict::TruePositive, 0.9)));
+    }
+
+    #[test]
+    fn conf_key_still_means_verdict_not_confidence() {
+        // `conf` remains a verdict alias; it must not populate the band filter.
+        let filter = FindingListFilter::from_filter_expression("conf:confirmed").unwrap();
+        assert!(filter.confidence.is_empty());
+        assert_eq!(filter.verdict, vec![FindingVerdictFilter::TruePositive]);
+    }
+}
