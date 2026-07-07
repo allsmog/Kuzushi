@@ -24,7 +24,7 @@ impl StorageWriter {
             ControlCommand::Checkpoint => self.record_checkpoint(),
             ControlCommand::RebuildProjection => self.rebuild_projection(),
             ControlCommand::Compact => self.compact_log(),
-            ControlCommand::Shutdown => self.current_receipt("shutdown"),
+            ControlCommand::Shutdown => self.shutdown_receipt(),
         }
     }
 

@@ -362,6 +362,26 @@ fn storage_writer_appends_to_rolled_segment_after_compaction() {
 }
 
 #[test]
+fn storage_writer_shutdown_command_enters_stopped_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut writer =
+        StorageWriter::open(tmp.path().join("log"), tmp.path().join("index.sqlite3")).unwrap();
+
+    let receipt = writer
+        .execute_command(WriterCommand::Control(ControlCommand::Shutdown))
+        .unwrap();
+
+    assert_eq!(receipt.event_hash, "shutdown");
+    assert_eq!(writer.lifecycle.state(), WriterActorState::Stopped);
+    let error = writer
+        .execute_command(WriterCommand::Watcher(WatcherCommand::FindingObservation(
+            observation("obs3_after_shutdown"),
+        )))
+        .unwrap_err();
+    assert!(error.to_string().contains("expected Live"));
+}
+
+#[test]
 fn storage_writer_rejects_stale_decision_for_changed_finding() {
     let tmp = tempfile::tempdir().unwrap();
     let mut writer =
