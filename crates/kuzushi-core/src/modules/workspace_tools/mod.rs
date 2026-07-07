@@ -172,7 +172,7 @@ mod tests {
 
     fn save_confirmed_triage(store: &FindingStore, finding_id: i64) {
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,

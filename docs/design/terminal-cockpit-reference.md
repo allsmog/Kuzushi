@@ -42,7 +42,7 @@ Confirmed behavior (code read directly):
 │ item       │                                          │ dedup_key, evidence }                                                                                                           │
 ├────────────┼──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ Sticky     │ findings/persistence/open/triage_and_ver │                                                                                                                                 │
-│ classifica │ ification.rs                             │ save_triage() UPSERT on finding_id; save_verification() append-only                                                             │
+│ classifica │ ification.rs                             │ record_auto_triage() appends a v3 decision event; save_verification() appends proof events                                      │
 │ tion       │                                          │                                                                                                                                 │
 ├────────────┼──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ Classifica │                                          │                                                                                                                                 │

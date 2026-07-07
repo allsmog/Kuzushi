@@ -99,7 +99,7 @@ impl FindingStore {
     ) -> Result<i64> {
         if decision.author == TriageAuthor::Auto {
             anyhow::bail!(
-                "append_user_review_decision requires a human or imported author; automated triage must use save_triage"
+                "append_user_review_decision requires a human or imported author; automated triage must use record_auto_triage"
             );
         }
         if decision.rationale.trim().is_empty() {

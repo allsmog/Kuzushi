@@ -257,7 +257,7 @@ fn save_classifier_skip_if_needed(
         return Ok(());
     };
     let outcome = gate.skip_outcome(score);
-    run.store.save_triage(id, &outcome)
+    run.store.record_auto_triage(id, &outcome)
 }
 
 fn classifier_score_response(

@@ -512,7 +512,7 @@ mod tests {
             .id
             .expect("persisted finding id");
         store
-            .save_triage_with_author(
+            .record_triage_with_author(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -600,7 +600,7 @@ mod tests {
         let needs_review_id = store.insert_finding("run-1", &needs_review).unwrap();
         store.insert_finding("run-1", &untriaged).unwrap();
         store
-            .save_triage_with_author(
+            .record_triage_with_author(
                 confirmed_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -612,7 +612,7 @@ mod tests {
             )
             .unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 needs_review_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::NeedsReview,
@@ -670,7 +670,7 @@ mod tests {
         let first_id = store.insert_finding("run-identity-a", &repeated).unwrap();
         let second_id = store.insert_finding("run-identity-b", &repeated).unwrap();
         store
-            .save_triage_with_author(
+            .record_triage_with_author(
                 first_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -744,7 +744,7 @@ mod tests {
         second.static_proof_state = Some(StaticProofState::SourceSinkLinked);
         store.insert_finding("run-rejected-b", &second).unwrap();
         store
-            .save_triage_with_author(
+            .record_triage_with_author(
                 first_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::FalsePositive,
@@ -863,7 +863,7 @@ mod tests {
         let confirmed_id = store.insert_finding("run-1", &confirmed).unwrap();
         store.insert_finding("run-1", &open).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 confirmed_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,

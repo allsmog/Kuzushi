@@ -345,7 +345,7 @@ fn persist_auto_triage_outcome(
     use crate::capabilities::deep_auditor::record_evidence;
 
     if let Some(id) = finding.id {
-        let _ = store.save_triage(id, &outcome.triage);
+        let _ = store.record_auto_triage(id, &outcome.triage);
         let _ = record_evidence(store, id, &outcome.evidence);
     }
 }

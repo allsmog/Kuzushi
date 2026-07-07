@@ -143,7 +143,7 @@ pub(in crate::modules) fn persist_triage_outcome(
         stats.record_unpersisted_outcome(finding, runtime_outcome.outcome);
         return;
     };
-    if let Err(error) = store.save_triage_for_fingerprint(&finding.fingerprint, &runtime_outcome.outcome) {
+    if let Err(error) = store.record_auto_triage_for_fingerprint(&finding.fingerprint, &runtime_outcome.outcome) {
         eprintln!(
             "[triage:run] could not persist triage for finding {}: {error}",
             finding.fingerprint

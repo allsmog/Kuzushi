@@ -264,7 +264,7 @@ mod tests {
         let fingerprint = finding.fingerprint.clone();
         let finding_id = store.insert_finding(run_id, &finding).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -511,7 +511,7 @@ mod tests {
         let fingerprint = finding.fingerprint.clone();
         let finding_id = store.insert_finding("run-variant", &finding).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::NeedsReview,

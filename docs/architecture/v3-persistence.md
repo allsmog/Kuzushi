@@ -54,9 +54,9 @@ object reference in `artifacts.json`.
 | Reports | derived export | optional cached artifact |
 | FTS rows | projection data | disposable search index |
 
-Direct mutation of projected findings for human decisions is forbidden. The
-legacy `save_triage` path now appends a v3 decision event and lets the
-projection update the finding JSON in the same transaction as `applied_seq`.
+Direct mutation of projected findings for human decisions is forbidden.
+`record_auto_triage` appends a v3 decision event and lets the projection update
+the finding JSON in the same transaction as `applied_seq`.
 
 ## Writer State Machine
 

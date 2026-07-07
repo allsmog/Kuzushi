@@ -231,7 +231,7 @@ mod tests {
         )]);
         let stored = store.list_findings_for_scan_id("scan-z").unwrap();
         store
-            .save_triage(stored[0].id.unwrap(), &true_positive_outcome())
+            .record_auto_triage(stored[0].id.unwrap(), &true_positive_outcome())
             .unwrap();
 
         let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
@@ -254,7 +254,7 @@ mod tests {
             .unwrap();
         let first_id = store.insert_finding("scan-a", &finding).unwrap();
         store
-            .save_triage(first_id, &true_positive_outcome())
+            .record_auto_triage(first_id, &true_positive_outcome())
             .unwrap();
         store.record_run_finished("scan-a", "completed", 1).unwrap();
         store

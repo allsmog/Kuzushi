@@ -328,7 +328,7 @@ mod tests {
     fn insert_true_positive(store: &FindingStore, run_id: &str, finding: Finding) -> Finding {
         let id = store.insert_finding(run_id, &finding).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,

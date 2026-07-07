@@ -569,7 +569,7 @@ mod tests {
         );
         let finding_id = store.insert_finding(run_id, &finding).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::NeedsReview,
@@ -800,7 +800,7 @@ mod tests {
     }
 
     #[test]
-    fn file_backed_save_triage_records_v3_event_and_projection() {
+    fn file_backed_record_auto_triage_records_v3_event_and_projection() {
         let temp = tempfile::tempdir().unwrap();
         let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
         let log_path = temp.path().join(".kuzushi/v3/log");
@@ -821,7 +821,7 @@ mod tests {
         let finding_id = store.insert_finding(run_id, &finding).unwrap();
 
         store
-            .save_triage_with_author(
+            .record_triage_with_author(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -1008,7 +1008,7 @@ mod tests {
         assert_eq!(first[0].identity_match_tier.as_deref(), Some("stable_fp"));
 
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::NeedsReview,
@@ -1058,7 +1058,7 @@ mod tests {
         );
 
         store
-            .save_triage_with_author(
+            .record_triage_with_author(
                 first_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -1212,7 +1212,7 @@ mod tests {
         );
         let finding_id = store.insert_finding("run-human-triage", &finding).unwrap();
         store
-            .save_triage_with_author(
+            .record_triage_with_author(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -1224,7 +1224,7 @@ mod tests {
             )
             .unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::FalsePositive,
@@ -1260,7 +1260,7 @@ mod tests {
             .insert_finding("run-review-decisions", &finding)
             .unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::NeedsReview,
@@ -1271,7 +1271,7 @@ mod tests {
             )
             .unwrap();
         store
-            .save_triage_with_author(
+            .record_triage_with_author(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -1283,7 +1283,7 @@ mod tests {
             )
             .unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::FalsePositive,
@@ -1369,7 +1369,7 @@ mod tests {
         let second_id = store.insert_finding("run-decision-b", &finding).unwrap();
 
         store
-            .save_triage_with_author(
+            .record_triage_with_author(
                 first_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -1479,7 +1479,7 @@ mod tests {
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("automated triage must use save_triage"));
+            .contains("automated triage must use record_auto_triage"));
         assert!(store.list_review_decisions(finding_id).unwrap().is_empty());
     }
 
@@ -2260,7 +2260,7 @@ mod tests {
         let false_positive_id = store.insert_finding("run-1", &false_positive).unwrap();
         store.insert_finding("run-1", &untriaged).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 true_positive_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -2271,7 +2271,7 @@ mod tests {
             )
             .unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 false_positive_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::FalsePositive,
@@ -2335,7 +2335,7 @@ mod tests {
         let needs_review_id = store.insert_finding("run-1", &needs_review).unwrap();
         store.insert_finding("run-1", &untriaged).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 confirmed_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -2346,7 +2346,7 @@ mod tests {
             )
             .unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 needs_review_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::NeedsReview,
@@ -2783,9 +2783,9 @@ mod tests {
     }
 
     #[test]
-    fn save_triage_against_missing_finding_id_returns_clean_fk_error() {
+    fn record_auto_triage_against_missing_finding_id_returns_clean_fk_error() {
         // M1 §1.5: this protects against the "triage:assertions FK fault"
-        // family — historically the bus worker could call `save_triage`
+        // family — historically the bus worker could call `record_auto_triage`
         // with a finding_id that did not exist yet (race with the findings
         // insert). SQLite must enforce the FK so callers observe a clean
         // Err and never silently corrupt the triage table.
@@ -2800,7 +2800,7 @@ mod tests {
             rationale: "synthetic".to_string(),
             cost_usd: 0.0,
         };
-        let result = store.save_triage(stale_id, &outcome);
+        let result = store.record_auto_triage(stale_id, &outcome);
         let err = match result {
             Ok(_) => panic!("FK constraint must reject orphan triage rows"),
             Err(err) => err.to_string(),
@@ -2813,7 +2813,7 @@ mod tests {
     }
 
     #[test]
-    fn save_triage_after_finding_insert_succeeds_with_dedup_safe_id() {
+    fn record_auto_triage_after_finding_insert_succeeds_with_dedup_safe_id() {
         // Companion to the FK error test — confirms the happy path: when
         // a triage write follows its findings insert in the same scan,
         // the FK is satisfied. This is the contract callers must keep.
@@ -2832,7 +2832,7 @@ mod tests {
         );
         let id = store.insert_finding("run-fk-ok", &finding).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,

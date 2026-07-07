@@ -226,7 +226,7 @@ fn persist_deep_audit_outcome(
     let Some(id) = run.finding.id else {
         return Ok(());
     };
-    run.store.save_triage(id, &outcome.triage)?;
+    run.store.record_auto_triage(id, &outcome.triage)?;
     crate::capabilities::deep_auditor::record_evidence(&run.store, id, &outcome.evidence)
 }
 

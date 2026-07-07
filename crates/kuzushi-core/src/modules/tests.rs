@@ -1699,7 +1699,7 @@ OUT
             rationale: "test".to_string(),
             cost_usd: 0.0123,
         };
-        store.save_triage(finding_id, &outcome).unwrap();
+        store.record_auto_triage(finding_id, &outcome).unwrap();
 
         // Reload the finding via the public API and confirm the
         // verdict + confidence round-trip; cost_usd persists in the
@@ -4086,7 +4086,7 @@ OUT
         let confirmed_id = store.insert_finding("run-1", &confirmed).unwrap();
         store.insert_finding("run-1", &low).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 confirmed_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -4553,7 +4553,7 @@ OUT
         );
         let finding_id = store.insert_finding("run-1", &finding).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -4661,7 +4661,7 @@ OUT
             .is_some_and(|output| output.contains("Run triage:run first")));
 
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -4722,7 +4722,7 @@ OUT
         );
         let finding_id = store.insert_finding("run-1", &finding).unwrap();
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
@@ -4830,7 +4830,7 @@ OUT
             .is_some_and(|output| output.contains("Run triage:run first")));
 
         store
-            .save_triage(
+            .record_auto_triage(
                 finding_id,
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,

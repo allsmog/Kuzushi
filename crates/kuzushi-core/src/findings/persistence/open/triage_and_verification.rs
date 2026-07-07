@@ -5,11 +5,11 @@ use crate::storage_v3::writer_actor::{
 use std::collections::BTreeMap;
 
 impl FindingStore {
-    pub fn save_triage(&self, finding_id: i64, triage: &TriageOutcome) -> Result<()> {
-        self.save_triage_with_author(finding_id, triage, TriageAuthor::Auto)
+    pub fn record_auto_triage(&self, finding_id: i64, triage: &TriageOutcome) -> Result<()> {
+        self.record_triage_with_author(finding_id, triage, TriageAuthor::Auto)
     }
 
-    pub fn save_triage_with_author(
+    pub fn record_triage_with_author(
         &self,
         finding_id: i64,
         triage: &TriageOutcome,
@@ -18,7 +18,7 @@ impl FindingStore {
         self.upsert_triage_for_finding_ids([finding_id], triage, author)
     }
 
-    pub fn save_triage_for_fingerprint(
+    pub fn record_auto_triage_for_fingerprint(
         &self,
         fingerprint: &str,
         triage: &TriageOutcome,
