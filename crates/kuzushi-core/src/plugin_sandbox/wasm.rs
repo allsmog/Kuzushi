@@ -6,7 +6,8 @@ use crate::identity::Blake3Hash;
 use anyhow::{bail, Context, Result};
 use std::fs;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 use wasmtime::{
     Caller, Config, Engine, Extern, Linker, Memory, Module, Store, StoreLimits, StoreLimitsBuilder,
 };
@@ -71,6 +72,7 @@ fn validate_wasm_policy(invocation: &WasmPluginInvocation) -> Result<()> {
 fn wasm_engine() -> Result<Engine> {
     let mut config = Config::new();
     config.consume_fuel(true);
+    config.epoch_interruption(true);
     config.signals_based_traps(false);
     config.wasm_backtrace(false);
     Engine::new(&config).context("Could not initialize Wasmtime engine")
@@ -98,7 +100,16 @@ fn wasm_store(engine: &Engine, invocation: &WasmPluginInvocation) -> Result<Stor
     store
         .set_fuel(invocation.policy.fuel_limit)
         .context("Could not set Wasm fuel limit")?;
+    store.set_epoch_deadline(1);
+    interrupt_engine_after_timeout(engine.clone(), invocation.policy.timeout_ms);
     Ok(store)
+}
+
+fn interrupt_engine_after_timeout(engine: Engine, timeout_ms: u64) {
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(timeout_ms));
+        engine.increment_epoch();
+    });
 }
 
 fn register_host_imports(linker: &mut Linker<WasmHostState>) -> Result<()> {

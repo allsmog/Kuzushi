@@ -319,6 +319,28 @@ fn wasm_plugin_output_budget_is_enforced() {
     assert!(error.to_string().contains("output exceeds policy cap"));
 }
 
+#[test]
+fn wasm_plugin_timeout_is_enforced() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hash = blob_hash();
+    let module_path = tmp.path().join("plugin.wasm");
+    std::fs::write(&module_path, infinite_wasm_plugin_bytes()).unwrap();
+    let grant = GrantedSnapshot::new(BTreeMap::from([(hash, 11)]));
+
+    let error = run_wasm_plugin_invocation(WasmPluginInvocation {
+        module_path,
+        policy: SandboxPolicy {
+            timeout_ms: 1,
+            fuel_limit: u64::MAX,
+            ..SandboxPolicy::default()
+        },
+        grant,
+    })
+    .unwrap_err();
+
+    assert!(error.to_string().contains("analyze export trapped"));
+}
+
 fn wasm_plugin_bytes(hash: &str) -> Vec<u8> {
     let output = format!(
         "{{\"findings\":[{{\"ruleId\":\"demo.rule\",\"title\":\"demo finding\",\"severity\":\"high\",\"blobHash\":\"{hash}\",\"byteStart\":6,\"byteEnd\":15,\"message\":\"demo\"}}]}}"
@@ -375,6 +397,23 @@ fn wasm_plugin_bytes(hash: &str) -> Vec<u8> {
         .replace("__DENIED_OUTPUT_LEN__", &denied_output_len.to_string())
         .replace("__OUTPUT_LEN__", &output_len.to_string());
     wat::parse_str(wat).unwrap()
+}
+
+fn infinite_wasm_plugin_bytes() -> Vec<u8> {
+    wat::parse_str(
+        r#"
+        (module
+          (memory (export "memory") 1)
+          (func (export "kuzushi_analyze") (result i64)
+            loop
+              br 0
+            end
+            i64.const 0
+          )
+        )
+        "#,
+    )
+    .unwrap()
 }
 
 fn wat_string(value: &str) -> String {
