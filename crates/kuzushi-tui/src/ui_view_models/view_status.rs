@@ -8,7 +8,7 @@ pub(crate) fn view_status_segment(app: &ShellApp) -> String {
 }
 
 fn primary_view_status(app: &ShellApp) -> Option<String> {
-    match &app.shell_view {
+    match &app.shell_view() {
         ShellView::Home => Some("home".to_string()),
         ShellView::Catalog => Some(focused_or_default(app, "modules")),
         ShellView::Recommend => Some("recommend".to_string()),
@@ -27,7 +27,7 @@ fn primary_view_status(app: &ShellApp) -> Option<String> {
 }
 
 fn threat_view_status(app: &ShellApp) -> Option<String> {
-    match &app.shell_view {
+    match &app.shell_view() {
         ShellView::Tune => Some("tune".to_string()),
         ShellView::Threat => Some(format!(
             "threats:{}",
@@ -46,7 +46,7 @@ fn threat_view_status(app: &ShellApp) -> Option<String> {
 }
 
 fn system_view_status(app: &ShellApp) -> Option<String> {
-    match &app.shell_view {
+    match &app.shell_view() {
         ShellView::Help => Some("help".to_string()),
         ShellView::Quickstart => Some("quickstart".to_string()),
         ShellView::Logs => Some("logs".to_string()),
@@ -70,7 +70,7 @@ fn system_view_status(app: &ShellApp) -> Option<String> {
 }
 
 fn workspace_view_status(app: &ShellApp) -> String {
-    match &app.shell_view {
+    match &app.shell_view() {
         ShellView::Context => "context".to_string(),
         ShellView::ProjectModel => "project-model".to_string(),
         ShellView::StrategyQueue => "strategy-queue".to_string(),

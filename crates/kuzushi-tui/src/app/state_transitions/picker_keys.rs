@@ -9,7 +9,7 @@ impl ShellApp {
     /// The first-run model/auth/planning pickers are modal selection screens.
     pub(crate) fn is_picker_view(&self) -> bool {
         matches!(
-            self.shell_view,
+            self.shell_view(),
             ShellView::ModelPicker
                 | ShellView::AuthMethodPicker
                 | ShellView::PlanningPicker
@@ -33,7 +33,7 @@ impl ShellApp {
     }
 
     fn handle_picker_capture_override(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if matches!(self.shell_view, ShellView::FilePicker) {
+        if matches!(self.shell_view(), ShellView::FilePicker) {
             return Some(self.handle_file_picker_key(key));
         }
         if self.picker_prompt_focused() {
@@ -71,7 +71,7 @@ impl ShellApp {
     }
 
     fn dispatch_picker_control_key(&mut self, key: KeyEvent) -> InputUpdate {
-        match &self.shell_view {
+        match &self.shell_view() {
             ShellView::ModelPicker => self.handle_model_picker_key(key.code),
             ShellView::AuthMethodPicker => self.handle_auth_picker_key(key.code),
             ShellView::PlanningPicker => self.handle_planning_picker_key(key),
@@ -112,7 +112,7 @@ impl ShellApp {
     }
 
     fn current_picker_focus(&self) -> PickerFocus {
-        match self.shell_view {
+        match self.shell_view() {
             ShellView::ModelPicker => self.router.model_picker().focus(),
             ShellView::AuthMethodPicker => self.router.auth_picker().focus(),
             ShellView::TargetPicker => self.router.target_picker().focus(),
@@ -122,7 +122,7 @@ impl ShellApp {
     }
 
     fn set_current_picker_focus(&mut self, focus: PickerFocus) {
-        match self.shell_view {
+        match self.shell_view() {
             ShellView::ModelPicker => self.router.model_picker_mut().set_focus(focus),
             ShellView::AuthMethodPicker => self.router.auth_picker_mut().set_focus(focus),
             ShellView::TargetPicker => self.router.target_picker_mut().set_focus(focus),
@@ -309,7 +309,7 @@ impl ShellApp {
     }
 
     fn accept_auth_picker_choice(&mut self) -> InputUpdate {
-        let provider = match self.shell_view {
+        let provider = match self.shell_view() {
             ShellView::AuthMethodPicker => self.router.auth_picker().provider().to_string(),
             _ => return InputUpdate::ignored(),
         };

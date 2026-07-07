@@ -59,7 +59,7 @@ impl ShellApp {
     ) -> Vec<ShellEffect> {
         let prereqs = prereq_steps_for(&tool_name, workspace.root());
         if !prereqs.is_empty() {
-            self.shell_view = ShellView::ModuleRun;
+            self.set_shell_view(ShellView::ModuleRun);
             return self.start_prereq_chain(
                 prereqs,
                 tool_name,
@@ -69,7 +69,7 @@ impl ShellApp {
             );
         }
         let status = tool_run_status(&tool_name);
-        self.shell_view = ShellView::ModuleRun;
+        self.set_shell_view(ShellView::ModuleRun);
         self.start_background_tool(tool_name, input, workspace, status, tool_thinking_level);
         Vec::new()
     }
@@ -96,7 +96,7 @@ impl ShellApp {
             return false;
         }
         self.router.threat_mut().open(ThreatView::Summary);
-        self.shell_view = ShellView::Threat;
+        self.set_shell_view(ShellView::Threat);
         self.log(
             "threats",
             format!(

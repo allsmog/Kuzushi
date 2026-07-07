@@ -2,7 +2,7 @@ use super::{bind, push_view_keybindings, FooterKeybinding};
 use crate::{ShellApp, ShellView};
 
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
-    match app.shell_view {
+    match app.shell_view() {
         ShellView::Options => Some(options_keybindings(app)),
         ShellView::Context => Some(context_keybindings(app)),
         ShellView::StrategyQueue => Some(strategy_queue_keybindings(app)),

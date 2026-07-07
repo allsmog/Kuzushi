@@ -128,7 +128,7 @@ impl ShellApp {
     }
 
     fn scroll_target(&self) -> ScrollTarget {
-        match self.shell_view {
+        match self.shell_view() {
             ShellView::Activity => ScrollTarget::Activity,
             ShellView::Workbench if self.router.workbench().focus() != WorkbenchPane::Findings => {
                 ScrollTarget::WorkbenchPane
@@ -142,7 +142,7 @@ impl ShellApp {
         let changed = self
             .router
             .navigation_mut()
-            .sync_view_change(self.shell_view.clone());
+            .sync_view_change(self.shell_view().clone());
         if changed {
             self.router.default_scroll_mut().reset();
         }

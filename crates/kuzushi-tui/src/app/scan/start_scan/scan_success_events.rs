@@ -84,7 +84,7 @@ impl ShellApp {
             return;
         }
         self.maybe_switch_activity_deck_to_findings();
-        if !matches!(self.shell_view, ShellView::Activity) {
+        if !matches!(self.shell_view(), ShellView::Activity) {
             self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
         }
     }
@@ -142,7 +142,7 @@ impl ShellApp {
     /// Green completion banner when the scan lands while the operator is
     /// on another view (ambient-progress story).
     fn notify_scan_completion(&mut self, findings_count: usize) {
-        if matches!(self.shell_view, ShellView::Activity) {
+        if matches!(self.shell_view(), ShellView::Activity) {
             return;
         }
         self.set_success_notice(

@@ -76,7 +76,7 @@ fn main_view_layout(
 }
 
 fn line_view_height(app: &ShellApp, line_count: usize, max_view_height: u16) -> u16 {
-    if matches!(app.shell_view, crate::ShellView::PlanningPicker) {
+    if matches!(app.shell_view(), crate::ShellView::PlanningPicker) {
         return max_view_height;
     }
     (line_count as u16).clamp(1, max_view_height)
@@ -103,7 +103,7 @@ fn render_line_view(
     app: &ShellApp,
     view_lines: Vec<Line<'static>>,
 ) {
-    if matches!(app.shell_view, crate::ShellView::PlanningPicker) {
+    if matches!(app.shell_view(), crate::ShellView::PlanningPicker) {
         render_centered_lines(frame, area, view_lines);
     } else {
         render_lines(frame, area, view_lines);

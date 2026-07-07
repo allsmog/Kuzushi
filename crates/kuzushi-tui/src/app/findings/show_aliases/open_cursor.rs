@@ -21,7 +21,7 @@ impl ShellApp {
     }
 
     fn focus_workbench_details_for_opened_finding(&mut self) {
-        self.shell_view = ShellView::Workbench;
+        self.set_shell_view(ShellView::Workbench);
         self.router
             .workbench_mut()
             .set_focus(crate::app::WorkbenchPane::Details);

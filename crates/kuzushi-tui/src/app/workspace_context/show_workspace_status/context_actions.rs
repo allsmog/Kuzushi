@@ -59,7 +59,7 @@ impl ShellApp {
             }
         };
         self.set_focused_module(Some("context".to_string()));
-        self.shell_view = ShellView::Context;
+        self.set_shell_view(ShellView::Context);
         vec![ShellEffect::DispatchRunTool(RunToolLaunch {
             tool_name: "context:build".to_string(),
             input,
@@ -72,7 +72,7 @@ impl ShellApp {
         match self.refresh_context_view() {
             Ok(()) => {
                 self.set_focused_module(Some("context".to_string()));
-                self.shell_view = ShellView::Context;
+                self.set_shell_view(ShellView::Context);
                 self.log("context", self.domain().context_view().status.clone());
             }
             Err(error) => self.log("error", error.to_string()),

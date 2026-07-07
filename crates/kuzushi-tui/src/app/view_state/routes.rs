@@ -8,6 +8,7 @@ use std::time::Instant;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RouterState {
+    current: crate::app::ShellView,
     focused_module: Option<String>,
     auth_screen_snapshot: Option<crate::app::AuthScreenSnapshot>,
     boot_splash_snapshot: Option<crate::app::BootSplashSnapshot>,
@@ -59,6 +60,18 @@ pub struct RouterState {
 }
 
 impl RouterState {
+    pub(crate) fn current(&self) -> crate::app::ShellView {
+        self.current
+    }
+
+    pub(crate) fn current_ref(&self) -> &crate::app::ShellView {
+        &self.current
+    }
+
+    pub(crate) fn set_current(&mut self, view: crate::app::ShellView) {
+        self.current = view;
+    }
+
     pub(crate) fn focused_module(&self) -> Option<&str> {
         self.focused_module.as_deref()
     }

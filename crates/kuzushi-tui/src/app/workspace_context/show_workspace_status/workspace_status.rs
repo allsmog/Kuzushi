@@ -5,7 +5,7 @@ impl ShellApp {
         let workspace_view = self.build_workspace_view(None);
         let status = workspace_view.status.clone();
         self.domain_mut().set_workspace_view(workspace_view);
-        self.shell_view = ShellView::Workspace;
+        self.set_shell_view(ShellView::Workspace);
         self.set_focused_module(Some("workspace".to_string()));
         self.log("workspace", status);
     }

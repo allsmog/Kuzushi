@@ -22,7 +22,7 @@ const SCREEN_CONTEXT_TEXT_LIMIT: usize = 4000;
 
 pub(crate) fn screen_context_model(app: &ShellApp) -> ScreenContext {
     ScreenContext {
-        view: shell_view_label(&app.shell_view),
+        view: shell_view_label(&app.shell_view()),
         focused_pane: focused_pane_label(app),
         selected_item: selected_item(app),
         selected_run: selected_run(app),
@@ -116,7 +116,7 @@ fn system_shell_view_label(view: &ShellView) -> Option<&'static str> {
 }
 
 fn focused_pane_label(app: &ShellApp) -> Option<String> {
-    match app.shell_view {
+    match app.shell_view() {
         ShellView::Workbench => {
             Some(workbench_pane_label(app.router.workbench().focus()).to_string())
         }
@@ -264,7 +264,7 @@ fn runtime_verification_state(finding: &Finding) -> String {
 }
 
 fn selected_run(app: &ShellApp) -> Option<String> {
-    match &app.shell_view {
+    match &app.shell_view() {
         ShellView::Replay => Some(app.router.replay().run_id_owned()),
         ShellView::Trace => Some(app.router.trace().run_id_owned()),
         ShellView::RunDiff => Some(app.router.run_diff().label()),
@@ -289,7 +289,7 @@ fn active_phase(app: &ShellApp) -> Option<String> {
 }
 
 fn active_filters(app: &ShellApp) -> Vec<String> {
-    match &app.shell_view {
+    match &app.shell_view() {
         ShellView::Options => vec![format!("options:{}", app.router.options().filter.label())],
         _ => Vec::new(),
     }
@@ -303,7 +303,7 @@ fn selected_scope(app: &ShellApp) -> Option<String> {
 }
 
 fn finding_summary(app: &ShellApp) -> Option<ScreenFindingSummary> {
-    if !matches!(app.shell_view, ShellView::Workbench) || app.findings().is_empty() {
+    if !matches!(app.shell_view(), ShellView::Workbench) || app.findings().is_empty() {
         return None;
     }
     let findings = projected_visible_findings(app)
@@ -374,7 +374,7 @@ fn proof_state_bucket(finding: &Finding) -> String {
 }
 
 fn visible_rows(app: &ShellApp) -> Vec<String> {
-    match app.shell_view {
+    match app.shell_view() {
         ShellView::Runs => visible_run_rows(app),
         ShellView::RunDiff => visible_run_diff_rows(
             app,
@@ -520,7 +520,7 @@ fn bounded_prompt_list(values: &[String]) -> Vec<String> {
 }
 
 fn active_cursor_row(app: &ShellApp) -> usize {
-    match app.shell_view {
+    match app.shell_view() {
         ShellView::Workbench => match app.router.workbench().focus() {
             WorkbenchPane::Findings => app.router.findings().cursor(),
             pane => app.router.workbench().scroll().get(pane) as usize,

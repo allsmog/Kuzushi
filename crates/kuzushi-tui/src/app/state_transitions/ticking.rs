@@ -19,7 +19,7 @@ impl ShellApp {
     /// page and not paused — drives both the faster redraw cadence and the
     /// per-tick camera advance.
     pub fn scene_animating(&self) -> bool {
-        matches!(self.shell_view, ShellView::Scene)
+        matches!(self.shell_view(), ShellView::Scene)
             && self.router.scene().page().is_animated()
             && !self.router.scene().paused()
             && !crate::theme::active_theme().reduced_motion

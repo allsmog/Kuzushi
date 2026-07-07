@@ -133,7 +133,7 @@ impl ShellApp {
             self.config(),
         ));
         self.set_activity(Some(self.pending_scan_activity(&request.run_id)));
-        self.shell_view = self.scan_shell_view();
+        self.set_shell_view(self.scan_shell_view());
         self.log_scan_start(&request.target_root, &request.effective_options);
     }
 

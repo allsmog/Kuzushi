@@ -89,7 +89,7 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     // `apply_initial_onboarding_phase` — otherwise the first-run flow
     // would be clobbered the moment the terminal shell loop boots.
     if matches!(
-        app.shell_view,
+        app.shell_view(),
         ShellView::ModelPicker
             | ShellView::AuthMethodPicker
             | ShellView::PlanningPicker
@@ -101,7 +101,7 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     // interactive shell and the plain front door route through here). The
     // onboarding/target/model pickers above still take precedence — nothing
     // here clobbers a first-run gate.
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     let center_mode = app.default_workbench_center_mode(WorkbenchPane::Findings);
     app.router
         .workbench_mut()

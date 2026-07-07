@@ -2,7 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub fn show_aliases(&mut self, prefix: Option<&str>) {
-        self.shell_view = ShellView::Workbench;
+        self.set_shell_view(ShellView::Workbench);
         self.router
             .workbench_mut()
             .set_focus(crate::app::WorkbenchPane::Findings);
@@ -40,7 +40,7 @@ impl ShellApp {
     }
 
     fn begin_workbench_open(&mut self, pane: crate::app::WorkbenchPane) {
-        self.shell_view = ShellView::Workbench;
+        self.set_shell_view(ShellView::Workbench);
         self.router.workbench_mut().set_focus(pane);
         if pane == crate::app::WorkbenchPane::Center {
             *self.selected_finding_mut() = None;

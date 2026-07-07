@@ -132,7 +132,7 @@ mod tests {
 
         assert!(result.changed);
         assert!(result.effects.is_empty());
-        assert_eq!(app.shell_view, ShellView::Help);
+        assert_eq!(app.shell_view(), ShellView::Help);
     }
 
     #[test]
@@ -170,7 +170,7 @@ mod tests {
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let history_path = tmp.path().join(".kuzushi/v3/shell-history.txt");
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-        app.shell_view = ShellView::Home;
+        app.set_shell_view(ShellView::Home);
         app.set_input("tools");
         app.set_cursor(app.input().chars().count());
 
@@ -184,7 +184,7 @@ mod tests {
 
         assert!(result.changed);
         assert_eq!(app.input(), "");
-        assert_eq!(app.shell_view, ShellView::Tools);
+        assert_eq!(app.shell_view(), ShellView::Tools);
         assert!(result
             .effects
             .iter()
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn update_terminal_picker_demo_key_returns_effect_without_executing_it() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = ShellView::ModelPicker;
+        app.set_shell_view(ShellView::ModelPicker);
 
         let result = update(
             &mut app,
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn update_terminal_mouse_uses_recorded_viewport_for_hit_testing() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = ShellView::Workbench;
+        app.set_shell_view(ShellView::Workbench);
         app.router.workbench_mut().set_focus(WorkbenchPane::Source);
         update(
             &mut app,

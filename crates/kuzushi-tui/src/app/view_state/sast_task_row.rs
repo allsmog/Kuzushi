@@ -86,7 +86,7 @@ pub enum InterruptionView {
     RateLimited,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellView {
     Home,
     Catalog,
@@ -206,6 +206,12 @@ pub enum ShellView {
     /// `KUZUSHI_AUTO_OPEN_VIZ=false`); page + 3D orientation live on
     /// `app.router.scene()`. TTY-only for the 3D page — plain mode shows a summary.
     Scene,
+}
+
+impl Default for ShellView {
+    fn default() -> Self {
+        Self::Catalog
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
