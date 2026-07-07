@@ -11,6 +11,10 @@ use ratatui::style::Style;
 const KV_LABEL_WIDTH: usize = 10;
 
 pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    if let Some(snapshot) = app.auth_screen_snapshot() {
+        return auth_snapshot_lines(snapshot.clone(), area.width as usize);
+    }
+
     let mut lines = context_strip(app, area);
     let config = config_model(app);
     let cost = cost_model(app);
@@ -22,6 +26,61 @@ pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     push_auth_rotate_section(&mut lines, area);
     push_auth_commands(&mut lines, area);
     lines
+}
+
+pub(crate) fn auth_snapshot_lines(
+    snapshot: AuthScreenSnapshot,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        raw(format!(
+            " KUZUSHI  target {}  ctx ✓ {}  model {}  module {}  cost {}",
+            snapshot.status.target,
+            snapshot.status.ctx,
+            snapshot.status.model,
+            snapshot.status.module,
+            snapshot.status.cost
+        )),
+        raw("─".repeat(width)),
+        blank(),
+    ];
+    lines.extend(snapshot.body_rows.into_iter().map(raw));
+    lines.push(blank());
+    lines.push(raw("─".repeat(width)));
+    lines.push(raw(auth_footer_stage_line(width, &snapshot.footer)));
+    lines.push(raw(auth_footer_keybind_line(&snapshot.footer)));
+    lines.push(raw(auth_prompt_line(&snapshot.footer)));
+    lines
+}
+
+fn auth_footer_stage_line(width: usize, footer: &AuthScreenFooter) -> String {
+    let left = format!(" stage {} · routing direct", footer.stage);
+    let right = format!("Ctrl+C quit · findings {}", footer.findings);
+    let gap = width
+        .saturating_sub(left.chars().count() + right.chars().count())
+        .saturating_sub(1);
+    format!("{left}{}{right}", " ".repeat(gap))
+}
+
+fn auth_footer_keybind_line(footer: &AuthScreenFooter) -> String {
+    let body = footer
+        .keybinds
+        .iter()
+        .map(|(key, label)| format!("{key} {label}"))
+        .collect::<Vec<_>>()
+        .join("   ");
+    format!(" {body}")
+}
+
+fn auth_prompt_line(footer: &AuthScreenFooter) -> String {
+    match footer.prompt_module.as_deref() {
+        Some(module) => format!(" kuzushi ({module})>"),
+        None => " kuzushi>".to_string(),
+    }
+}
+
+fn raw(value: impl Into<String>) -> Line<'static> {
+    Line::raw(value.into())
 }
 
 /// One `label value` cell of a kv row. Rows render inline

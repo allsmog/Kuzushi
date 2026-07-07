@@ -27,6 +27,7 @@ pub use wasm::{run_wasm_plugin_invocation, WasmPluginInvocation};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct UntrustedFindingCandidate {
     pub rule_id: String,
     pub title: String,
@@ -81,6 +82,7 @@ pub struct PluginObservationContext {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub(super) struct PluginStdout {
     #[serde(default)]
     findings: Vec<UntrustedFindingCandidate>,
@@ -228,8 +230,8 @@ pub(super) fn validate_plugin_stdout(
             policy.max_output_bytes
         );
     }
-    let stdout: PluginStdout =
-        serde_json::from_str(stdout).context("plugin returned invalid JSON")?;
+    let stdout: PluginStdout = serde_json::from_str(stdout)
+        .map_err(|error| anyhow::anyhow!("plugin returned invalid JSON: {error}"))?;
     if stdout.findings.len() > policy.max_findings_returned as usize {
         bail!(
             "plugin returned {} findings, exceeding policy cap {}",

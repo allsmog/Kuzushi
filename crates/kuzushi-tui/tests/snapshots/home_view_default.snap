@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI › home · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › home · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- HOME ---------------------------------------------------------------------------------------------------------------
 

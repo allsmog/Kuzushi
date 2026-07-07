@@ -10,10 +10,11 @@ impl ShellApp {
             }
         };
 
-        self.shell_view = ShellView::Options(OptionsView {
+        self.router.set_options(OptionsView {
             tool_name: tool_name.clone(),
             filter,
         });
+        self.shell_view = ShellView::Options;
         self.log(
             "options",
             format!("showing {} for {tool_name}", options_filter_label(filter)),

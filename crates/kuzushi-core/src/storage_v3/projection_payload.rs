@@ -29,17 +29,25 @@ pub(super) fn payload_u64(payload: &Value, key: &str) -> Option<u64> {
     payload.get(key).and_then(Value::as_u64)
 }
 
+pub(super) fn require_payload_u64(payload: &Value, key: &str) -> Result<u64> {
+    payload_u64(payload, key).with_context(|| format!("event payload missing integer {key}"))
+}
+
 pub(super) fn payload_f64(payload: &Value, key: &str) -> Option<f64> {
     payload.get(key).and_then(Value::as_f64)
 }
 
-pub(super) fn triage_verdict_for_review(verdict: &str) -> Option<&'static str> {
-    match verdict {
+pub(super) fn require_payload_f64(payload: &Value, key: &str) -> Result<f64> {
+    payload_f64(payload, key).with_context(|| format!("event payload missing number {key}"))
+}
+
+pub(super) fn triage_verdict_for_review(verdict: &str) -> Result<Option<&'static str>> {
+    Ok(match verdict {
         "confirmed" => Some("true_positive"),
         "rejected_false_positive" => Some("false_positive"),
         "accepted_risk" => Some("by_design"),
         "needs_review" => Some("needs_review"),
         "suppressed" | "deferred" => None,
-        _ => None,
-    }
+        _ => anyhow::bail!("unknown review verdict {verdict:?}"),
+    })
 }

@@ -2,7 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(in crate::app::line_editor) fn module_completion_values(&self) -> Vec<String> {
-        self.registry
+        self.registry()
             .modules()
             .map(|module| module.metadata().id.clone())
             .collect()
@@ -10,13 +10,13 @@ impl ShellApp {
 
     pub(in crate::app::line_editor) fn tool_completion_values(&self) -> Vec<String> {
         let mut values = self
-            .registry
+            .registry()
             .tools()
             .map(|tool| tool.name.clone())
             .collect::<Vec<_>>();
-        if let Some(module) = self.focused_module.as_ref() {
+        if let Some(module) = self.focused_module() {
             let prefix = format!("{module}:");
-            values.extend(self.registry.tools().filter_map(|tool| {
+            values.extend(self.registry().tools().filter_map(|tool| {
                 tool.name
                     .strip_prefix(&prefix)
                     .map(|short_name| short_name.to_string())
@@ -28,7 +28,7 @@ impl ShellApp {
     pub(in crate::app::line_editor) fn option_completion_values(&self) -> Vec<String> {
         self.resolve_options_tool(None)
             .ok()
-            .and_then(|tool_name| self.registry.resolve_tool(&tool_name))
+            .and_then(|tool_name| self.registry().resolve_tool(&tool_name))
             .map(|tool| tool.options.iter().map(|spec| spec.name.clone()).collect())
             .unwrap_or_default()
     }
@@ -103,7 +103,8 @@ impl ShellApp {
     }
 
     pub(in crate::app::line_editor) fn attachment_id_completion_values(&self) -> Vec<String> {
-        self.kb_view
+        self.domain()
+            .kb_view()
             .attachments
             .iter()
             .map(|record| record.id.clone())
@@ -111,15 +112,15 @@ impl ShellApp {
     }
 
     pub(in crate::app::line_editor) fn finding_completion_values(&self) -> Vec<String> {
-        finding_completion_values_for_target(self.target.as_ref(), &self.findings)
+        finding_completion_values_for_target(self.target_path_buf(), self.findings())
     }
 
     pub(in crate::app::line_editor) fn run_id_completion_values(&self) -> Vec<String> {
         let mut values = Vec::new();
-        if let Some(run_id) = self.scan.as_ref().and_then(|scan| scan.run_id.clone()) {
+        if let Some(run_id) = self.scan().and_then(|scan| scan.run_id.clone()) {
             values.push(run_id);
         }
-        if let Some(target) = self.target.as_ref() {
+        if let Some(target) = self.target_path_buf() {
             let runs_dir = kuzushi_core::runs_root(target);
             if let Ok(entries) = fs::read_dir(runs_dir) {
                 values.extend(entries.flatten().filter_map(|entry| {
@@ -148,8 +149,8 @@ mod tests {
         std::fs::create_dir_all(kuzushi_core::run_dir(temp.path(), "r-past")).unwrap();
         std::fs::write(kuzushi_core::runs_root(temp.path()).join("not-a-run"), "").unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
-        app.scan = Some(ScanPanelState {
+        app.set_target(Some(temp.path().to_path_buf()));
+        app.set_scan_panel(Some(ScanPanelState {
             run_id: Some("r-active".to_string()),
             target: PathBuf::from("/tmp/demo"),
             stage: "running".to_string(),
@@ -157,7 +158,7 @@ mod tests {
             running: true,
             abort_requested: false,
             error: None,
-        });
+        }));
 
         let values = app.run_id_completion_values();
 

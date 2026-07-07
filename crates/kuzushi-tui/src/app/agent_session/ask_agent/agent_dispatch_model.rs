@@ -6,116 +6,32 @@ pub(crate) struct AgentDispatch {
     pub(super) model: String,
     pub(super) thinking_level: Option<String>,
     pub(super) cwd: PathBuf,
-    pub(super) operator_question: String,
-    pub(super) agent_prompt: String,
-    pub(super) run_id: String,
-    pub(super) attached_failure_context: bool,
-    pub(super) attached_screen_context: bool,
-    pub(super) tx: mpsc::Sender<StampedEvent<AgentEvent>>,
-    pub(super) generation: WorkerGeneration,
-    pub(super) cancel: ScanCancellation,
-}
-
-pub(super) struct AgentDispatchStart {
-    pub(super) state: AgentDispatchState,
-    pub(super) parts: AgentDispatchParts,
-}
-
-impl AgentDispatchStart {
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
-        prior: AgentChatView,
-        operator_question: String,
-        model: String,
-        agent_prompt: String,
-        run_id: String,
-        started_secs: u64,
-        screen_context_scope: Option<String>,
-        failure_context: Option<FailureToLlmContext>,
-        tx: mpsc::Sender<StampedEvent<AgentEvent>>,
-        rx: mpsc::Receiver<StampedEvent<AgentEvent>>,
-        generation: WorkerGeneration,
-        cancel: ScanCancellation,
-    ) -> Self {
-        let attached_failure_context = failure_context.is_some();
-        let state = AgentDispatchState {
-            prior,
-            operator_question: operator_question.clone(),
-            run_id: run_id.clone(),
-            started_secs,
-            screen_context_scope,
-            failure_context,
-            generation,
-            rx,
-            cancel: cancel.clone(),
-        };
-        let parts = AgentDispatchParts {
-            model,
-            operator_question,
-            agent_prompt,
-            run_id,
-            attached_failure_context,
-            tx,
-            generation,
-            cancel,
-        };
-        Self { state, parts }
-    }
-}
-
-pub(super) struct AgentDispatchParts {
-    pub(super) model: String,
-    pub(super) operator_question: String,
-    pub(super) agent_prompt: String,
-    pub(super) run_id: String,
-    pub(super) attached_failure_context: bool,
-    pub(super) tx: mpsc::Sender<StampedEvent<AgentEvent>>,
-    pub(super) generation: WorkerGeneration,
-    pub(super) cancel: ScanCancellation,
-}
-
-pub(super) struct AgentDispatchState {
     pub(super) prior: AgentChatView,
     pub(super) operator_question: String,
+    pub(super) agent_prompt: String,
     pub(super) run_id: String,
     pub(super) started_secs: u64,
     pub(super) screen_context_scope: Option<String>,
     pub(super) failure_context: Option<FailureToLlmContext>,
-    pub(super) generation: WorkerGeneration,
-    pub(super) rx: mpsc::Receiver<StampedEvent<AgentEvent>>,
-    pub(super) cancel: ScanCancellation,
+    pub(super) attached_failure_context: bool,
+    pub(super) attached_screen_context: bool,
 }
 
 pub(super) fn spawn_agent_dispatch(
     dispatch: AgentDispatch,
-    wake: Option<TerminalLoopWake>,
+    ticket: JobTicket,
 ) -> std::thread::JoinHandle<()> {
-    let failure_audit =
-        AgentCallAudit::for_prompt(&dispatch.model, ASK_SYSTEM_PROMPT, &dispatch.agent_prompt);
-    let failure_tx = dispatch.tx.clone();
-    spawn_panic_safe_worker(
-        "agent",
-        failure_tx,
-        dispatch.generation,
-        wake.clone(),
-        move || {
-            agent_worker(
-                dispatch.config,
-                dispatch.model,
-                dispatch.thinking_level,
-                dispatch.cwd,
-                dispatch.agent_prompt,
-                dispatch.tx,
-                dispatch.generation,
-                dispatch.cancel,
-                wake,
-            )
-        },
-        move |error| AgentEvent::Failed {
-            error,
-            audit: failure_audit,
-        },
-    )
+    spawn_job_worker("agent", ticket, move |sink, cancel| {
+        agent_worker(
+            dispatch.config,
+            dispatch.model,
+            dispatch.thinking_level,
+            dispatch.cwd,
+            dispatch.agent_prompt,
+            sink,
+            cancel,
+        )
+    })
 }
 
 pub(super) fn next_agent_run_id() -> (String, u64) {

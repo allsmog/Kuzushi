@@ -58,9 +58,14 @@ fn render_review_body(
     app: &ShellApp,
     model: &WorkbenchViewModel,
 ) {
-    if app.workbench_depth_stack {
+    if app.router.workbench().depth_stack() {
         let depth_model = crate::ui_view_models::workbench_depth_model(app);
-        super::depth_stack::render_workbench_depth(frame, area, &app.workbench_nav, &depth_model);
+        super::depth_stack::render_workbench_depth(
+            frame,
+            area,
+            &app.router.workbench().nav(),
+            &depth_model,
+        );
         return;
     }
     match workbench_layout(area) {
@@ -260,7 +265,7 @@ fn render_page_pane(
         title,
         lines,
         model.focus == WorkbenchPane::Center,
-        app.workbench_scroll.get(WorkbenchPane::Center),
+        app.router.workbench().scroll().get(WorkbenchPane::Center),
     );
 }
 
@@ -463,7 +468,7 @@ fn four_column_widths(total: u16) -> FourColumnWidths {
 }
 
 fn pane_scroll(app: &ShellApp, _model: &WorkbenchViewModel, pane: WorkbenchPane) -> u16 {
-    app.workbench_scroll.get(pane)
+    app.router.workbench().scroll().get(pane)
 }
 
 fn render_pane(
@@ -879,10 +884,10 @@ pub(crate) fn workbench_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     lines.push(blank());
     if model.page != WorkbenchPage::Review {
         append_phase_page_plain_lines(&mut lines, app, &model, area);
-    } else if app.workbench_depth_stack {
+    } else if app.router.workbench().depth_stack() {
         let depth_model = crate::ui_view_models::workbench_depth_model(app);
         lines.extend(super::depth_stack::workbench_depth_lines(
-            &app.workbench_nav,
+            &app.router.workbench().nav(),
             &depth_model,
             area.width,
         ));

@@ -4,32 +4,35 @@ pub(crate) fn active_stage_label(app: &ShellApp) -> Option<&'static str> {
     live_activity_stage(app)
         .or_else(|| scan_stage(app))
         .or_else(|| agent_chat_stage(app))
-        .or_else(|| running_or_aborting(app.planner_running, app.plan_abort_requested, "thinking"))
         .or_else(|| {
             running_or_aborting(
-                app.threat_worker_running,
-                app.threat_abort_requested,
+                app.planner_running(),
+                app.plan_abort_requested(),
+                "thinking",
+            )
+        })
+        .or_else(|| {
+            running_or_aborting(
+                app.threat_worker_running(),
+                app.threat_abort_requested(),
                 "thinking",
             )
         })
 }
 
 fn live_activity_stage(app: &ShellApp) -> Option<&'static str> {
-    app.live_activity
-        .as_ref()
+    app.live_activity()
         .filter(|activity| activity.phase.active())
         .map(|activity| activity.phase.label())
 }
 
 fn scan_stage(app: &ShellApp) -> Option<&'static str> {
-    app.scan
-        .as_ref()
+    app.scan()
         .and_then(|scan| running_or_aborting(scan.running, scan.abort_requested, "searching"))
 }
 
 fn agent_chat_stage(app: &ShellApp) -> Option<&'static str> {
-    app.agent_chat
-        .as_ref()
+    app.agent_chat()
         .and_then(|agent| running_or_aborting(agent.running, agent.abort_requested, "thinking"))
 }
 

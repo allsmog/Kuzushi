@@ -25,7 +25,7 @@ pub(in crate::renderer::views::workbench) fn center_pane_lines(
         }
         WorkbenchCenterBody::Risk { .. } => heatmap_lines(
             width,
-            &cached_findings_heatmap_with_selection(app, app.selected_finding.as_ref()),
+            &cached_findings_heatmap_with_selection(app, app.selected_finding().as_ref()),
         ),
     }
 }

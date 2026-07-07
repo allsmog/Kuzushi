@@ -149,4 +149,18 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn typed_helper_rejects_balanced_object_extraction() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Verdict {
+            triggerable: bool,
+            confidence: f32,
+        }
+        let body = "Reasoning scratchpad: {\"triggerable\":true,\"confidence\":0.91}. Final: needs review.";
+
+        let parsed: Option<Verdict> = try_parse_typed_from_agent_text(body);
+
+        assert!(parsed.is_none());
+    }
 }

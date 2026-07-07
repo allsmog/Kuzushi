@@ -80,8 +80,7 @@ pub(crate) fn project_model(app: &ShellApp) -> ProjectModel {
 }
 
 fn project_scope_label(app: &ShellApp) -> String {
-    app.target
-        .as_ref()
+    app.target()
         .map(|_| scoped_target_path_label(app))
         .unwrap_or_else(|| "no target selected".to_string())
 }
@@ -89,7 +88,7 @@ fn project_scope_label(app: &ShellApp) -> String {
 fn project_revision_label(app: &ShellApp) -> String {
     app.workbench_cache
         .borrow_mut()
-        .git_metadata(app.target.as_deref())
+        .git_metadata(app.target())
         .map(|git| {
             let sha = git.sha.chars().take(7).collect::<String>();
             format!("rev:{}{}", sha, if git.dirty { "*" } else { "" })
@@ -98,7 +97,7 @@ fn project_revision_label(app: &ShellApp) -> String {
 }
 
 fn scope_tree_row(app: &ShellApp) -> ProjectModelRow {
-    if app.target.is_none() {
+    if app.target().is_none() {
         return ProjectModelRow {
             section: "scope tree",
             origin: ProjectModelOrigin::Missing,
@@ -110,7 +109,7 @@ fn scope_tree_row(app: &ShellApp) -> ProjectModelRow {
     match app
         .workbench_cache
         .borrow_mut()
-        .project_scope_tree(app.target.as_deref())
+        .project_scope_tree(app.target())
     {
         Some(ProjectScopeTreeState::Persisted(tree)) => {
             scope_tree_project_row(&tree, ProjectModelOrigin::Local, "present")

@@ -106,13 +106,14 @@ fn parse_navigation_command(verb: &str) -> Option<ShellCommand> {
         "help" | "h" | "?" => Some(ShellCommand::Help(None)),
         "back" | "b" => Some(ShellCommand::Back),
         "quit" | "exit" | "q" => Some(ShellCommand::Quit),
+        "quit-confirm" => Some(ShellCommand::QuitConfirm),
         _ => None,
     }
 }
 
 fn parse_catalog_command(verb: &str) -> Option<ShellCommand> {
     match verb {
-        "modules" | "m" => Some(ShellCommand::Modules),
+        "catalog" | "modules" | "m" => Some(ShellCommand::Modules),
         "recommend" | "rec" => Some(ShellCommand::Recommend),
         "tune" | "t" => Some(ShellCommand::Tune),
         "prompts" => Some(ShellCommand::Prompts),
@@ -129,6 +130,10 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "cost" => Some(ShellCommand::Cost),
         "config" => Some(ShellCommand::Config),
         "permissions" => Some(ShellCommand::Permissions),
+        "boot" | "boot-splash" => Some(ShellCommand::BootSplash),
+        "theme" | "themes" => Some(ShellCommand::ThemePicker),
+        "keys" | "keymap" => Some(ShellCommand::Keymap),
+        "update" | "updates" | "changelog" => Some(ShellCommand::UpdateAvailable),
         "history" => Some(ShellCommand::History),
         "clear" => Some(ShellCommand::Clear),
         "pause" => Some(ShellCommand::Pause),

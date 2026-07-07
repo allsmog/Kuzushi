@@ -10,7 +10,7 @@ impl ShellApp {
     /// never writes to the operator's global home behind their back. Returns
     /// `None` when no workspace is selected (history stays in-memory only).
     pub(crate) fn history_file_path(&self) -> Option<PathBuf> {
-        let paths = kuzushi_core::ConfigPaths::from_target(self.target.as_deref()).ok()?;
+        let paths = kuzushi_core::ConfigPaths::from_target(self.target()).ok()?;
         paths.project_history_path()
     }
 
@@ -30,7 +30,7 @@ impl ShellApp {
                     .collect();
                 let overflow = entries.len().saturating_sub(COMMAND_HISTORY_CAP);
                 entries.drain(0..overflow);
-                self.command_history = entries;
+                self.editor_mut().replace_command_history(entries);
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => self.log("history", format!("could not load history: {error}")),
@@ -43,7 +43,7 @@ impl ShellApp {
         let Some(path) = self.history_file_path() else {
             return;
         };
-        if let Err(error) = write_history_file(&path, &self.command_history) {
+        if let Err(error) = write_history_file(&path, self.command_history()) {
             self.log("history", format!("could not persist history: {error}"));
         }
     }

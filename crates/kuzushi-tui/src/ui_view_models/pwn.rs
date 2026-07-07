@@ -35,7 +35,7 @@ pub(crate) struct PwnReverseObservationRow {
 }
 
 pub(crate) fn pwn_dashboard_model(app: &ShellApp) -> PwnDashboardModel {
-    let view = &app.pwn_view;
+    let view = app.pwn_view();
     PwnDashboardModel {
         target: path_or_dash(view.target.as_ref()),
         binary: path_or_dash(view.binary.as_ref()),
@@ -206,12 +206,13 @@ mod tests {
     #[test]
     fn pwn_dashboard_model_shapes_json_snapshots_for_renderer() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.pwn_view.target = Some(std::path::PathBuf::from("./chal"));
-        app.pwn_view.profile_snapshot = Some(serde_json::json!({
+        let pwn = app.pwn_view_mut();
+        pwn.target = Some(std::path::PathBuf::from("./chal"));
+        pwn.profile_snapshot = Some(serde_json::json!({
             "arch": "x86_64",
             "needed": ["libc.so.6"]
         }));
-        app.pwn_view.state_snapshot = Some(serde_json::json!({
+        pwn.state_snapshot = Some(serde_json::json!({
             "primitives": [{
                 "kind": "stack-write",
                 "confidence": 0.875,
@@ -219,13 +220,13 @@ mod tests {
                 "evidence": "memcpy length is attacker-controlled"
             }]
         }));
-        app.pwn_view.auto_solve_snapshot = Some(serde_json::json!({
+        pwn.auto_solve_snapshot = Some(serde_json::json!({
             "llmPlanner": {"iterations": [{
                 "round": 2,
                 "decision": {"actions": [{"operation": "reverse", "function": "main"}]}
             }]}
         }));
-        app.pwn_view.reverse_snapshots.push(serde_json::json!({
+        pwn.reverse_snapshots.push(serde_json::json!({
             "function": "main",
             "dangerousIo": ["read"],
             "revng": {"ok": true, "output": "call memcpy"}

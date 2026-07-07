@@ -34,10 +34,7 @@ fn cost_cap_halt_model_formats_spend_against_limit() {
 
 #[test]
 fn advisory_models_are_absent_without_active_advisories() {
-    let app = ShellApp {
-        advisory: AdvisoryState::default(),
-        ..ShellApp::new(kuzushi_core::V2Config::default(), None)
-    };
+    let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
 
     assert!(throttle_banner_model(&app).is_none());
     assert!(cost_cap_halt_model(&app).is_none());

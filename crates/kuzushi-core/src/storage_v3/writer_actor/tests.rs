@@ -11,6 +11,7 @@ fn decision(stable_fp: &str, read_watermark: u64) -> DecisionWrite {
         rationale: "reviewed".to_string(),
         confidence_millis: 1000,
         read_watermark,
+        updates_finding_triage: false,
     }
 }
 

@@ -65,7 +65,7 @@ impl LiveActivityPhase {
 impl ShellApp {
     pub(crate) fn set_live_activity(&mut self, activity: LiveActivity) {
         let line = activity.transcript_line();
-        self.live_activity = Some(activity);
+        self.set_live_activity_state(Some(activity));
         self.log("activity", line);
     }
 
@@ -101,11 +101,11 @@ impl ShellApp {
         // Clear the live strip indicator, but don't echo a low-value
         // "activity completed" line into the transcript — the DAG ✓ and the
         // tool's own `result` line already convey completion.
-        self.live_activity = Some(LiveActivity::new(
+        self.set_live_activity_state(Some(LiveActivity::new(
             LiveActivityPhase::Completed,
             subject,
             detail,
-        ));
+        )));
     }
 
     pub(crate) fn set_refused_activity(

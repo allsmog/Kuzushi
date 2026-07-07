@@ -114,32 +114,32 @@ fn canonical_run_status(status: &str) -> &'static str {
 pub fn append_trace_step(
     target: Option<&std::path::Path>,
     run_id: &str,
-    n: usize,
     kind: &str,
     label: &str,
     latency_ms: Option<u64>,
     cost_usd: Option<f64>,
 ) {
     let Some(target) = target else { return };
-    let step = kuzushi_core::RunTraceStep::new(n, kind.to_string(), label.to_string())
+    let step = kuzushi_core::RunTraceStep::new(0, kind.to_string(), label.to_string())
         .with_latency_ms(latency_ms)
         .with_cost_usd(cost_usd);
-    let _ = kuzushi_core::append_run_trace_step(target, run_id, &step);
+    let _ =
+        kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step);
 }
 
 pub fn append_llm_trace_step(
     target: Option<&std::path::Path>,
     run_id: &str,
-    n: usize,
     kind: &str,
     label: &str,
     latency_ms: Option<u64>,
     audit: &AgentCallAudit,
 ) {
     let Some(target) = target else { return };
-    let step = kuzushi_core::RunTraceStep::new(n, kind.to_string(), label.to_string())
+    let step = kuzushi_core::RunTraceStep::new(0, kind.to_string(), label.to_string())
         .with_latency_ms(latency_ms)
         .with_cost_usd(audit.cost_usd)
         .with_model_metadata(&audit.model, &audit.provider, &audit.prompt_hash);
-    let _ = kuzushi_core::append_run_trace_step(target, run_id, &step);
+    let _ =
+        kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step);
 }

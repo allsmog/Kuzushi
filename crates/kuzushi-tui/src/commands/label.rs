@@ -18,6 +18,15 @@ pub enum ShellCommand {
     Component(Option<String>),
     Open(String),
     Scan(Option<PathBuf>),
+    /// Internal launch command. Chooses the initial terminal route without
+    /// going through a public slash verb.
+    LaunchStartView,
+    /// Internal launch command for bare interactive shells without a target.
+    LaunchTargetPicker,
+    /// Internal command for non-interactive scripted input. The public `scan`
+    /// verb opens the guided workflow in the TUI; scripted plain mode starts
+    /// the scan immediately and still routes through `Msg::Cmd`.
+    ScriptedScan(Option<PathBuf>),
     Demo,
     Model(Option<String>),
     Auth,
@@ -28,6 +37,11 @@ pub enum ShellCommand {
     Config,
     Health,
     Permissions,
+    BootSplash,
+    QuitConfirm,
+    ThemePicker,
+    Keymap,
+    UpdateAvailable,
     Use(String),
     Tune,
     Threat(ThreatView),

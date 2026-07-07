@@ -64,8 +64,6 @@ pub struct PwnView {
     pub auto_solve_snapshot: Option<serde_json::Value>,
     pub state_snapshot: Option<serde_json::Value>,
     pub candidates_snapshot: Option<serde_json::Value>,
-    pub selected_panel: usize,
-    pub selected_row: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +73,17 @@ pub struct AuthLoginView {
     pub status: String,
     pub detail: String,
     pub store_path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptionView {
+    BudgetHardStop,
+    BudgetStop,
+    NoBinary,
+    NoModel,
+    NoPlugin,
+    NetworkDown,
+    RateLimited,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,20 +99,17 @@ pub enum ShellView {
     /// `Kuzushi · Project · Target · LIVE · phase` top bar, with the shared
     /// prompt/keybind footer acting as its command bar. Folds the old standalone
     /// findings, finding-detail, and threat-DFD surfaces into one frame view.
-    /// Pane focus lives on `app.workbench_focus`.
+    /// Pane focus lives on `app.router.workbench().focus()`.
     Workbench,
     Tune,
-    Threat(ThreatView),
+    Threat,
     ThreatEditor,
     PromptsEditor,
-    ActorDetail(usize),
+    ActorDetail,
     Runs,
-    RunDiff {
-        left: String,
-        right: String,
-    },
-    Replay(String),
-    Trace(String),
+    RunDiff,
+    Replay,
+    Trace,
     Help,
     Quickstart,
     /// Full-screen scrollable transcript. M1 §1.1 — the embedded
@@ -115,7 +121,7 @@ pub enum ShellView {
     Config,
     Health,
     Tools,
-    Options(OptionsView),
+    Options,
     SastTasks,
     Context,
     ProjectModel,
@@ -131,20 +137,43 @@ pub enum ShellView {
     Auth,
     /// `/cost` budget bars + by-tool spend.  See `design/mockups/cost.jsx`.
     Cost,
+    /// Launch splash / doctor-at-start surface. See
+    /// `design/mockups/boot-splash.jsx`.
+    BootSplash,
+    /// Exit confirmation surface for dirty/in-flight sessions. See
+    /// `design/mockups/quit-confirm.jsx`.
+    QuitConfirm,
+    /// Approval/refusal queue for runtime tool gates. See
+    /// `design/mockups/confirm-dialog.jsx`.
+    ConfirmDialog,
+    /// Theme and accessibility preview surface. See
+    /// `design/mockups/theme-picker.jsx`.
+    ThemePicker,
+    /// Printable keymap derived from command specs and active keybindings. See
+    /// `design/mockups/keymap.jsx`.
+    Keymap,
+    /// Release-check/update status surface. See
+    /// `design/mockups/update-available.jsx`.
+    UpdateAvailable,
+    /// Read-only recovery surfaces for common blocking states. See
+    /// `design/mockups/err-no-model.jsx`, `err-no-binary.jsx`,
+    /// `err-no-plugin.jsx`, `rate-limited.jsx`, `network-down.jsx`,
+    /// `budget-stop.jsx`, and `budget-hard-stop.jsx`.
+    Interruption,
     /// Patch review view — RATIONALE / DIFF / TESTS / GUARDRAIL.
     /// String is the finding alias the patch addresses.
-    Patch(String),
+    Patch,
     /// Dedicated pwn workflow dashboard backed by pwn:* tool results and
     /// `.kuzushi/pwn/<hash>/state.json`.
     Pwn,
     /// Live module-progress dashboard. Split pane: left shows DAG status
     /// (queued / active / done / failing per task), right shows a tagged
-    /// reasoning feed `[module:verb]`. Session state lives on `app.activity`.
+    /// reasoning feed `[module:verb]`. Session state lives in `DomainCache`.
     Activity,
     /// Fuzzy command palette (Ctrl+G). Filters every `SHELL_COMMAND_SPECS`
-    /// entry by `app.palette_query`; Enter loads the selected command's
+    /// entry by the command-palette route query; Enter loads the selected command's
     /// canonical head into the prompt (never auto-executes). State lives on
-    /// `app.palette_query` / `app.palette_cursor`.
+    /// `app.router.command_palette()`.
     CommandPalette,
     /// First-run model picker. Lists the entries in `MODEL_CHOICES` and
     /// lets the operator pick one with ↑/↓/Enter. Esc falls through to
@@ -152,9 +181,9 @@ pub enum ShellView {
     ModelPicker,
     /// Secondary picker shown after `ModelPicker` when the chosen
     /// provider supports both an API-key and an OAuth login path
-    /// (anthropic, openai). The string is the provider id; this stays
-    /// on the variant so the renderer + key handler stay stateless.
-    AuthMethodPicker(String),
+    /// (anthropic, openai). Provider and cursor state live on
+    /// `app.router.auth_picker()`.
+    AuthMethodPicker,
     /// Launch-time target picker. Opens when an interactive shell starts
     /// with no `--target` (bare `kuzushi`), offering cwd + child repos /
     /// previous kuzushi targets so the front door lands in the same guided
@@ -175,8 +204,8 @@ pub enum ShellView {
     /// (attack path, DFD, findings heatmap, exploit chain). Auto-opens to the
     /// relevant page when its artifact is generated (unless
     /// `KUZUSHI_AUTO_OPEN_VIZ=false`); page + 3D orientation live on
-    /// `app.scene_*`. TTY-only for the 3D page — plain mode shows a summary.
-    Scene(crate::scene3d::VizPage),
+    /// `app.router.scene()`. TTY-only for the 3D page — plain mode shows a summary.
+    Scene,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

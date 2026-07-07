@@ -5,39 +5,32 @@ use crate::{ShellApp, ShellView};
 impl ShellApp {
     /// Open the fuzzy command palette, resetting its query and cursor.
     pub(crate) fn open_command_palette(&mut self) {
-        self.palette_query.clear();
-        self.palette_cursor = 0;
+        self.router.command_palette_mut().reset();
         self.shell_view = ShellView::CommandPalette;
     }
 
     pub(crate) fn palette_input(&mut self, ch: char) {
-        self.palette_query.push(ch);
-        self.palette_cursor = 0;
+        self.router.command_palette_mut().push_query(ch);
     }
 
     pub(crate) fn palette_backspace(&mut self) {
-        self.palette_query.pop();
-        self.palette_cursor = 0;
+        self.router.command_palette_mut().pop_query();
     }
 
     pub(crate) fn palette_move(&mut self, delta: isize) {
         let len = self.palette_matches().len();
-        if len == 0 {
-            self.palette_cursor = 0;
-            return;
-        }
-        let current = self.palette_cursor.min(len - 1) as isize;
-        self.palette_cursor = (current + delta).rem_euclid(len as isize) as usize;
+        self.router.command_palette_mut().move_cursor(delta, len);
     }
 
     /// Load the selected command's canonical head into the prompt — never
     /// auto-execute, so the operator reviews (and completes any args) first.
     pub(crate) fn accept_palette(&mut self) {
-        if let Some(spec) = self.palette_matches().get(self.palette_cursor) {
-            let head =
-                command_completion_head(spec.command).unwrap_or_else(|| spec.command.to_string());
-            self.input = head;
-            self.cursor = self.input.chars().count();
+        let cursor = self.router.command_palette().cursor();
+        let head = self.palette_matches().get(cursor).map(|spec| {
+            command_completion_head(spec.command).unwrap_or_else(|| spec.command.to_string())
+        });
+        if let Some(head) = head {
+            self.set_input(head);
         }
         self.close_palette();
     }
@@ -49,7 +42,7 @@ impl ShellApp {
     /// Specs whose command, aliases, or description fuzzy-match the query,
     /// ranked best-first (stable for ties).
     pub(crate) fn palette_matches(&self) -> Vec<&'static ShellCommandSpec> {
-        let query = &self.palette_query;
+        let query = self.router.command_palette().query();
         let mut scored: Vec<(i32, usize, &'static ShellCommandSpec)> = shell_command_specs()
             .enumerate()
             .filter_map(|(idx, spec)| palette_score(spec, query).map(|score| (score, idx, spec)))

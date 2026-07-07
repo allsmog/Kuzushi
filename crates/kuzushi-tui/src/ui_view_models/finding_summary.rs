@@ -1,28 +1,46 @@
 use kuzushi_core::{Finding, Severity};
 
-pub(crate) fn findings_count_summary(findings: &[Finding]) -> String {
+pub(crate) fn findings_count_summary_with_total(findings: &[Finding], total: usize) -> String {
     let counts = SeverityCounts::from_findings(findings);
-    let total = findings.len();
+    let loaded = findings.len();
+    let base = loaded_findings_label(loaded, total);
     if counts.critical > 0 {
-        return format!(
-            "{total} {} ({} critical)",
-            finding_noun(total),
-            counts.critical
-        );
+        return format!("{base} ({} critical)", counts.critical);
     }
     if counts.high > 0 {
-        return format!("{total} {} ({} high)", finding_noun(total), counts.high);
+        return format!("{base} ({} high)", counts.high);
     }
     if counts.medium > 0 {
-        return format!("{total} {} ({} medium)", finding_noun(total), counts.medium);
+        return format!("{base} ({} medium)", counts.medium);
     }
-    format!("{total} {}", finding_noun(total))
+    base
 }
 
 pub(crate) fn status_footer_findings_summary(findings: &[Finding]) -> String {
+    status_footer_findings_summary_with_total(findings, findings.len())
+}
+
+pub(crate) fn status_footer_findings_summary_with_total(
+    findings: &[Finding],
+    total: usize,
+) -> String {
     let counts = SeverityCounts::from_findings(findings);
-    let total = findings.len();
-    let mut parts = vec![format!("{total} {}", finding_noun(total))];
+    status_footer_findings_summary_from_counts_with_loaded(findings.len(), total, counts)
+}
+
+pub(crate) fn status_footer_findings_summary_from_counts(
+    total: usize,
+    counts: SeverityCounts,
+) -> String {
+    status_footer_findings_summary_from_counts_with_loaded(total, total, counts)
+}
+
+pub(crate) fn status_footer_findings_summary_from_counts_with_loaded(
+    loaded: usize,
+    total: usize,
+    counts: SeverityCounts,
+) -> String {
+    let mut parts = vec![loaded_findings_label(loaded, total)];
     append_nonzero_severity(&mut parts, counts.critical, "crit");
     append_nonzero_severity(&mut parts, counts.high, "high");
     append_nonzero_severity(&mut parts, counts.medium, "med");
@@ -30,7 +48,7 @@ pub(crate) fn status_footer_findings_summary(findings: &[Finding]) -> String {
 }
 
 pub(crate) fn ci_result_findings_summary(findings: &[Finding], fallback_count: usize) -> String {
-    if findings.is_empty() && fallback_count > 0 {
+    if fallback_count > findings.len() {
         return format!("{fallback_count} {}", finding_noun(fallback_count));
     }
     status_footer_findings_summary(findings)
@@ -64,6 +82,14 @@ fn finding_noun(count: usize) -> &'static str {
         "finding"
     } else {
         "findings"
+    }
+}
+
+fn loaded_findings_label(loaded: usize, total: usize) -> String {
+    if total > loaded {
+        format!("{loaded}/{total} findings loaded")
+    } else {
+        format!("{loaded} {}", finding_noun(loaded))
     }
 }
 

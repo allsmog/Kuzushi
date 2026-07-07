@@ -14,8 +14,8 @@ fn catalog_collapsed_model_steers_context_then_findings() {
     );
     assert_eq!(model.collapsed.scan_command, "target .; next");
 
-    app.target = Some(PathBuf::from("."));
-    app.context_view.exists = true;
+    app.set_target(Some(PathBuf::from(".")));
+    app.domain_mut().context_view_mut().exists = true;
     let model = catalog_model(&app);
     assert!(model.collapsed.next_hint.contains("First finding"));
     assert_eq!(
@@ -28,7 +28,8 @@ fn catalog_collapsed_model_steers_context_then_findings() {
 #[test]
 fn catalog_collapsed_model_surfaces_malformed_context_snapshot() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+    app.domain_mut().context_view_mut().status =
+        "malformed context snapshot. Next: context build".to_string();
 
     let model = catalog_model(&app);
 
@@ -41,8 +42,8 @@ fn catalog_collapsed_model_surfaces_malformed_context_snapshot() {
 #[test]
 fn catalog_collapsed_model_prioritizes_critical_alias_hint() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view.exists = true;
-    app.findings = vec![
+    app.domain_mut().context_view_mut().exists = true;
+    *app.findings_mut() = vec![
         Finding::new_semgrep("demo.medium", "src/a.rs", 1, None, Severity::Medium, "x"),
         Finding::new_semgrep(
             "demo.critical",
@@ -68,7 +69,7 @@ fn catalog_collapsed_layout_uses_width_and_expand_toggle() {
     assert!(catalog_uses_collapsed_layout(&model, 80));
     assert!(!catalog_uses_collapsed_layout(&model, 120));
 
-    app.catalog_route.expand();
+    app.router.catalog_mut().expand();
     let model = catalog_model(&app);
     assert!(!catalog_uses_collapsed_layout(&model, 80));
 }

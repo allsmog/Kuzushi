@@ -1,4 +1,7 @@
 use super::*;
+use crate::storage_v3::writer_actor::{
+    ControlCommand, DecisionCommand, DecisionWrite, StorageWriterActor, WriterCommand,
+};
 
 impl FindingStore {
     pub fn list_review_decisions(&self, finding_id: i64) -> Result<Vec<ReviewDecisionRecord>> {
@@ -107,6 +110,7 @@ impl FindingStore {
             decision,
             decision.verdict.to_triage_verdict(),
             &now_isoish(),
+            false,
         )
     }
 
@@ -118,7 +122,7 @@ impl FindingStore {
         created_at: &str,
     ) -> Result<i64> {
         let decision = ReviewDecision::from_triage(triage, Some(author));
-        self.append_review_decision(finding_id, &decision, Some(triage.verdict), created_at)
+        self.append_review_decision(finding_id, &decision, Some(triage.verdict), created_at, true)
     }
 
     fn append_review_decision(
@@ -127,6 +131,66 @@ impl FindingStore {
         decision: &ReviewDecision,
         triage_verdict: Option<TriageVerdict>,
         created_at: &str,
+        updates_finding_triage: bool,
+    ) -> Result<i64> {
+        if self.v3_storage_paths().is_some() {
+            return self.append_review_decision_event(
+                finding_id,
+                decision,
+                updates_finding_triage,
+            );
+        }
+        self.append_review_decision_projection_direct(
+            finding_id,
+            decision,
+            triage_verdict,
+            created_at,
+            updates_finding_triage,
+        )
+    }
+
+    fn append_review_decision_event(
+        &self,
+        finding_id: i64,
+        decision: &ReviewDecision,
+        updates_finding_triage: bool,
+    ) -> Result<i64> {
+        let target = self
+            .v3_target_for_finding(finding_id, "review decision")?
+            .context("review decisions require a file-backed v3 finding identity")?;
+        let read_watermark = StorageWriterActor::commit_blocking(
+            target.event_log_dir.clone(),
+            target.db_path.clone(),
+            WriterCommand::Control(ControlCommand::Barrier),
+        )?
+        .committed_seq;
+        let receipt = StorageWriterActor::commit_blocking(
+            target.event_log_dir,
+            target.db_path,
+            WriterCommand::Decision(DecisionCommand::ReviewDecision(DecisionWrite {
+                stable_fp: target.stable_fp,
+                finding_id: Some(finding_id),
+                identity_id: target.identity_id,
+                verdict: decision.verdict.as_str().to_string(),
+                author: decision.author.as_str().to_string(),
+                rationale: decision.rationale.clone(),
+                confidence_millis: confidence_millis(decision.confidence),
+                read_watermark,
+                updates_finding_triage,
+            })),
+        )?;
+        Ok(receipt
+            .projected_review_decision_id
+            .unwrap_or(receipt.committed_seq as i64))
+    }
+
+    fn append_review_decision_projection_direct(
+        &self,
+        finding_id: i64,
+        decision: &ReviewDecision,
+        triage_verdict: Option<TriageVerdict>,
+        created_at: &str,
+        updates_finding_triage: bool,
     ) -> Result<i64> {
         let triage_verdict = triage_verdict.map(TriageVerdict::as_str);
         self.conn.execute(
@@ -148,7 +212,11 @@ impl FindingStore {
                 created_at,
             ],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        let decision_id = self.conn.last_insert_rowid();
+        if updates_finding_triage {
+            self.apply_triage_projection_direct(finding_id, decision, triage_verdict)?;
+        }
+        Ok(decision_id)
     }
 
     fn identity_id_for_finding(&self, finding_id: i64) -> Result<Option<String>> {
@@ -156,6 +224,48 @@ impl FindingStore {
             .v3_finding_by_projected_id(finding_id)?
             .and_then(|finding| finding.identity_id))
     }
+
+    fn apply_triage_projection_direct(
+        &self,
+        finding_id: i64,
+        decision: &ReviewDecision,
+        triage_verdict: Option<&str>,
+    ) -> Result<()> {
+        let Some(triage_verdict) = triage_verdict else {
+            return Ok(());
+        };
+        self.conn.execute(
+            r#"
+            update finding_observations
+               set finding_json = json_set(
+                     finding_json,
+                     '$.triage',
+                     json_object(
+                       'verdict', ?2,
+                       'confidence', ?3,
+                       'rationale', ?4,
+                       'cost_usd', 0.0
+                     ),
+                     '$.triaged_by',
+                     ?5
+                   )
+             where finding_json is not null
+               and json_extract(finding_json, '$.id') = ?1
+            "#,
+            params![
+                finding_id,
+                triage_verdict,
+                decision.confidence,
+                decision.rationale.as_str(),
+                decision.author.as_str(),
+            ],
+        )?;
+        Ok(())
+    }
+}
+
+fn confidence_millis(confidence: f32) -> u16 {
+    (confidence.clamp(0.0, 1.0) * 1000.0).round() as u16
 }
 
 fn review_decision_record_from_row(

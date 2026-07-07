@@ -1,38 +1,111 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn open_finding(&mut self, reference: &str) {
-        if self.open_chain_alias(reference) {
-            return;
+    pub(crate) fn open_finding_effects(&mut self, reference: &str) -> Vec<ShellEffect> {
+        let open = ShellEffect::OpenFinding(OpenFindingReference {
+            reference: reference.to_string(),
+        });
+        if parse_finding_alias(reference).is_some() {
+            return vec![
+                ShellEffect::RefreshFindings(FindingsRefresh {
+                    announce: false,
+                    filter: None,
+                }),
+                open,
+            ];
         }
-
-        let Some(reference) = self.resolve_open_finding_reference(reference) else {
-            return;
-        };
-        let result = match finding_by_reference_for_target(self.target.as_ref(), &reference) {
-            Ok(result) => Ok(result),
-            Err(error) => {
-                self.log("error", error.to_string());
-                return;
-            }
-        };
-        self.apply_open_finding_result(&reference, result);
+        vec![open]
     }
 
-    fn open_chain_alias(&mut self, reference: &str) -> bool {
-        let Some(index) = parse_chain_alias(reference) else {
-            return false;
+    pub(crate) fn resolve_open_finding_effect(
+        &mut self,
+        open: OpenFindingReference,
+    ) -> Vec<ShellEffect> {
+        vec![ShellEffect::FinalizeOpenFinding(
+            self.resolve_open_finding(open.reference),
+        )]
+    }
+
+    pub(crate) fn finalize_open_finding_effect(&mut self, open: OpenFindingFinalize) {
+        match open.outcome {
+            OpenFindingOutcome::ChainAlias(chain) => self.log_opened_chain_alias(&chain),
+            OpenFindingOutcome::Found(finding) => self.apply_found_finding(finding),
+            OpenFindingOutcome::Missing => self.log_missing_finding(&open.reference),
+            OpenFindingOutcome::MissingChainAlias { alias } => self.log_missing_chain_alias(alias),
+            OpenFindingOutcome::MissingFindingAlias { alias } => {
+                self.log_missing_finding_alias(alias)
+            }
+            OpenFindingOutcome::Error(error) => self.log_open_finding_error(error),
+        }
+    }
+
+    fn resolve_open_finding(&self, reference: String) -> OpenFindingFinalize {
+        let outcome = self.open_finding_outcome(&reference);
+        OpenFindingFinalize { reference, outcome }
+    }
+
+    fn open_finding_outcome(&self, reference: &str) -> OpenFindingOutcome {
+        if let Some(outcome) = self.chain_alias_outcome(reference) {
+            return outcome;
+        }
+        let reference = match self.resolved_finding_reference(reference) {
+            Ok(reference) => reference,
+            Err(outcome) => return outcome,
         };
-        let Some(chain) = self.chains.get(index) else {
-            self.log(
-                "error",
-                format!(
-                    "no chain alias {} is available. Next: /show aliases",
-                    format_chain_alias(index)
-                ),
-            );
-            return true;
+        self.finding_lookup_outcome(&reference)
+    }
+
+    fn chain_alias_outcome(&self, reference: &str) -> Option<OpenFindingOutcome> {
+        let index = parse_chain_alias(reference)?;
+        Some(
+            self.chain_aliases()
+                .get(index)
+                .cloned()
+                .map(OpenFindingOutcome::ChainAlias)
+                .unwrap_or_else(|| OpenFindingOutcome::MissingChainAlias {
+                    alias: format_chain_alias(index),
+                }),
+        )
+    }
+
+    fn resolved_finding_reference(&self, reference: &str) -> Result<String, OpenFindingOutcome> {
+        let Some(index) = parse_finding_alias(reference) else {
+            return Ok(reference.to_string());
         };
+        let Some(finding) = resolve_finding_alias(self.findings(), reference) else {
+            return Err(OpenFindingOutcome::MissingFindingAlias {
+                alias: format_finding_alias(index),
+            });
+        };
+        Ok(finding.fingerprint.clone())
+    }
+
+    fn finding_lookup_outcome(&self, reference: &str) -> OpenFindingOutcome {
+        match finding_by_reference_for_target(self.target_path_buf(), reference) {
+            Ok(Some(finding)) => OpenFindingOutcome::Found(finding),
+            Ok(None) => OpenFindingOutcome::Missing,
+            Err(error) => OpenFindingOutcome::Error(error.to_string()),
+        }
+    }
+
+    fn apply_found_finding(&mut self, finding: Finding) {
+        *self.selected_finding_mut() = Some(finding.clone());
+        self.sync_findings_cursor_to_selected();
+        self.shell_view = ShellView::Workbench;
+        self.router
+            .workbench_mut()
+            .set_focus(crate::app::WorkbenchPane::Details);
+        self.router
+            .workbench_mut()
+            .set_center_mode(crate::app::WorkbenchCenterMode::Code);
+        self.router
+            .workbench_mut()
+            .scroll_mut()
+            .set(crate::app::WorkbenchPane::Details, 0);
+        self.log_opened_finding(&finding);
+    }
+
+    fn log_opened_chain_alias(&mut self, chain: &ExploitChain) {
         self.log(
             "open",
             format!(
@@ -42,54 +115,6 @@ impl ShellApp {
                 chain.title
             ),
         );
-        true
-    }
-
-    fn resolve_open_finding_reference(&mut self, reference: &str) -> Option<String> {
-        let Some(index) = parse_finding_alias(reference) else {
-            return Some(reference.to_string());
-        };
-        self.refresh_findings(false);
-        let Some(finding) = resolve_finding_alias(&self.findings, reference) else {
-            self.log(
-                "error",
-                format!(
-                    "no finding alias {} is available. Next: findings",
-                    format_finding_alias(index)
-                ),
-            );
-            return None;
-        };
-        Some(finding.fingerprint.clone())
-    }
-
-    fn apply_open_finding_result(
-        &mut self,
-        reference: &str,
-        result: Result<Option<Finding>, anyhow::Error>,
-    ) {
-        match result {
-            Ok(result) => self.apply_found_finding(reference, result),
-            Err(error) => self.log_open_finding_error(error),
-        }
-    }
-
-    fn apply_found_finding(&mut self, reference: &str, finding: Option<Finding>) {
-        let Some(finding) = finding else {
-            self.log(
-                "error",
-                format!("no finding matches {reference:?}. Next: findings or scan"),
-            );
-            return;
-        };
-        self.selected_finding = Some(finding.clone());
-        self.sync_findings_cursor_to_selected();
-        self.shell_view = ShellView::Workbench;
-        self.workbench_focus = crate::app::WorkbenchPane::Details;
-        self.workbench_center_mode = crate::app::WorkbenchCenterMode::Code;
-        self.workbench_scroll
-            .set(crate::app::WorkbenchPane::Details, 0);
-        self.log_opened_finding(&finding);
     }
 
     fn log_opened_finding(&mut self, finding: &Finding) {
@@ -117,10 +142,28 @@ impl ShellApp {
         }
     }
 
-    fn log_open_finding_error(&mut self, error: anyhow::Error) {
+    fn log_missing_finding(&mut self, reference: &str) {
         self.log(
             "error",
-            with_next_step(error.to_string(), "findings or scan <target>"),
+            format!("no finding matches {reference:?}. Next: findings or scan"),
         );
+    }
+
+    fn log_missing_chain_alias(&mut self, alias: String) {
+        self.log(
+            "error",
+            format!("no chain alias {alias} is available. Next: /show aliases"),
+        );
+    }
+
+    fn log_missing_finding_alias(&mut self, alias: String) {
+        self.log(
+            "error",
+            format!("no finding alias {alias} is available. Next: findings"),
+        );
+    }
+
+    fn log_open_finding_error(&mut self, error: String) {
+        self.log("error", with_next_step(error, "findings or scan <target>"));
     }
 }

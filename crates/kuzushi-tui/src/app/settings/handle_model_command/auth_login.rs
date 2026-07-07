@@ -6,12 +6,17 @@ use super::super::{
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn show_auth_status(&mut self) {
+    pub(crate) fn reduce_auth_status(&mut self) -> Vec<ShellEffect> {
         // `/auth` now lands on the dedicated Auth surface
         // (`design/mockups/auth.jsx`) instead of the generic Config panel.
         self.shell_view = ShellView::Auth;
-        let api_key_env = self.config.runtime.api_key_env.as_str();
-        let env_status = if env::var_os(api_key_env).is_some() {
+        vec![ShellEffect::ShowAuthStatus(AuthStatusShow {
+            api_key_env: self.config().runtime.api_key_env.clone(),
+        })]
+    }
+
+    pub(crate) fn show_auth_status_effect(&mut self, show: AuthStatusShow) {
+        let env_status = if env::var_os(&show.api_key_env).is_some() {
             "set"
         } else {
             "missing"
@@ -24,7 +29,8 @@ impl ShellApp {
         self.log(
             "auth",
             format!(
-                "LangGraph auth: {api_key_env}={env_status}; ANTHROPIC_API_KEY={anthropic_env}; openai oauth {}; anthropic oauth {}; github-copilot oauth {}; secret values hidden. Next: auth login openai browser, auth login openai headless, auth login github-copilot",
+                "LangGraph auth: {}={env_status}; ANTHROPIC_API_KEY={anthropic_env}; openai oauth {}; anthropic oauth {}; github-copilot oauth {}; secret values hidden. Next: auth login openai browser, auth login openai headless, auth login github-copilot",
+                show.api_key_env,
                 oauth_provider_status("openai-codex"),
                 oauth_provider_status("anthropic"),
                 oauth_provider_status("github-copilot")
@@ -32,13 +38,27 @@ impl ShellApp {
         );
     }
 
-    pub(crate) fn handle_auth_login_command(&mut self, provider: Option<String>) {
+    pub(crate) fn reduce_auth_login_command(
+        &mut self,
+        provider: &Option<String>,
+    ) -> Vec<ShellEffect> {
+        self.reduce_auth_login(provider.as_deref(), false)
+    }
+
+    pub(crate) fn reduce_picker_auth_login(&mut self, provider: &str) -> Vec<ShellEffect> {
+        self.reduce_auth_login(Some(provider), true)
+    }
+
+    fn reduce_auth_login(
+        &mut self,
+        provider: Option<&str>,
+        continue_after_success: bool,
+    ) -> Vec<ShellEffect> {
         self.shell_view = ShellView::Auth;
-        let Some((provider, method)) = self.auth_login_provider_and_method(provider.as_deref())
-        else {
-            return;
+        let Some((provider, method)) = self.auth_login_provider_and_method(provider) else {
+            return Vec::new();
         };
-        self.auth_login = Some(AuthLoginView {
+        self.router.auth_mut().set_login(AuthLoginView {
             provider: auth_provider_display_name(provider).to_string(),
             method: method.to_string(),
             status: "starting".to_string(),
@@ -52,11 +72,31 @@ impl ShellApp {
                 auth_provider_display_name(provider),
             ),
         );
+        vec![ShellEffect::AuthLogin(AuthLoginStart {
+            provider: provider.to_string(),
+            method: method.to_string(),
+            continue_after_success,
+        })]
+    }
 
+    pub(crate) fn start_auth_login_effect(&mut self, login: AuthLoginStart) -> Vec<ShellEffect> {
         let Some(command) = self.auth_login_bridge_command() else {
-            return;
+            return Vec::new();
         };
-        self.run_auth_login_process(provider, method, &command);
+        self.run_auth_login_process(&login.provider, &login.method, &command);
+        if login.continue_after_success {
+            return self.continue_after_picker_auth_login(&login.provider);
+        }
+        Vec::new()
+    }
+
+    fn continue_after_picker_auth_login(&mut self, provider: &str) -> Vec<ShellEffect> {
+        if !auth_ready_for_provider(oauth_credential_provider_for_login(provider)) {
+            return Vec::new();
+        }
+        let effects = self.select_oauth_model_for_provider(provider);
+        self.transition_after_auth_ready();
+        effects
     }
 
     pub(crate) fn auth_login_provider_and_method(
@@ -93,7 +133,7 @@ impl ShellApp {
 
     pub(crate) fn auth_login_bridge_command(&mut self) -> Option<Vec<String>> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let command = match LangGraphRuntime::from_config(&self.config, &cwd) {
+        let command = match LangGraphRuntime::from_config(self.config(), &cwd) {
             Ok(runtime) => runtime.command().to_vec(),
             Err(error) => {
                 self.log("error", error.to_string());
@@ -126,12 +166,12 @@ impl ShellApp {
         };
 
         let raw_mode_was_disabled = pause_raw_mode_for_auth_login();
-        if let Some(login) = &mut self.auth_login {
+        if let Some(login) = self.router.auth_mut().login_mut() {
             login.status = "waiting".to_string();
         }
         let status = spawn_auth_login_process(program, &command[1..], provider, method);
         restore_raw_mode_after_auth_login(raw_mode_was_disabled);
-        repaint_after_auth_login(&mut self.force_full_redraw);
+        repaint_after_auth_login(self.ui_mut());
         self.log_auth_login_status(provider, method, status);
     }
 
@@ -142,7 +182,7 @@ impl ShellApp {
         status: io::Result<std::process::ExitStatus>,
     ) {
         let success = status.as_ref().is_ok_and(std::process::ExitStatus::success);
-        if let Some(login) = &mut self.auth_login {
+        if let Some(login) = self.router.auth_mut().login_mut() {
             login.status = if success { "connected" } else { "failed" }.to_string();
             login.detail = if success {
                 "credentials saved; values hidden".to_string()
@@ -162,5 +202,12 @@ fn auth_login_detail(provider: &str, method: &str) -> &'static str {
         ("anthropic", _) => "browser OAuth flow",
         ("github-copilot", _) => "GitHub device code flow",
         _ => "OAuth flow",
+    }
+}
+
+fn oauth_credential_provider_for_login(provider: &str) -> &str {
+    match provider {
+        "openai" | "openai-codex" => "openai-codex",
+        other => other,
     }
 }

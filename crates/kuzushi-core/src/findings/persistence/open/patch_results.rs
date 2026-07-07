@@ -18,8 +18,7 @@ impl FindingStore {
             return Ok(Vec::new());
         };
         crate::storage_v3::ProjectionDb::open(db_path)?;
-        let conn = rusqlite::Connection::open(db_path)
-            .with_context(|| format!("Could not open {}", db_path.display()))?;
+        let conn = crate::sqlite_connection::open_file(db_path)?;
         let mut stmt = conn.prepare(
             r#"
             select patch_run_id, fingerprint, repo, diff_object, status, iterations,

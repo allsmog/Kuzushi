@@ -106,10 +106,7 @@ pub(crate) fn prompts_model(app: &ShellApp) -> PromptsModel {
 }
 
 fn focused_module(app: &ShellApp) -> String {
-    app.focused_module
-        .as_deref()
-        .unwrap_or("semgrep")
-        .to_string()
+    app.focused_module().unwrap_or("semgrep").to_string()
 }
 
 fn tune_action_rows(app: &ShellApp) -> Vec<TuneActionRow> {
@@ -126,7 +123,7 @@ fn tune_action_rows(app: &ShellApp) -> Vec<TuneActionRow> {
 }
 
 fn house_rules(app: &ShellApp, limit: usize) -> TuneHouseRules {
-    match app.read_house_rules_state() {
+    match app.router.tune().house_rules() {
         HouseRulesRead::Present(text) => {
             TuneHouseRules::Present(text.lines().take(limit).map(ToString::to_string).collect())
         }
@@ -293,7 +290,7 @@ fn prompt_mutation_layer_state(
     module: &str,
     verb: &str,
 ) -> PromptMutationLayerState {
-    let Some(target) = app.target.as_ref() else {
+    let Some(target) = app.target_path_buf() else {
         return PromptMutationLayerState::NoTarget;
     };
     let workspace = match kuzushi_core::WorkspaceTarget::new(target) {
@@ -346,7 +343,7 @@ fn prompt_override_layer_state(
     let relative = kuzushi_core::relative_prompt_override_path(module, verb)
         .display()
         .to_string();
-    let Some(target) = app.target.as_ref() else {
+    let Some(target) = app.target_path_buf() else {
         return PromptOverrideLayerState::NoTarget { path: relative };
     };
     let path = kuzushi_core::prompt_override_path(target, module, verb);

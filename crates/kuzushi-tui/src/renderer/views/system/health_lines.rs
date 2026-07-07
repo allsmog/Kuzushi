@@ -1,45 +1,59 @@
 use super::*;
-use crate::ui_view_models::{health_model, HealthModel, HealthRow, HealthTone};
+use crate::ui_view_models::{health_display_model, HealthDisplayModel};
+use crate::{HealthFooter, HealthStatus};
 
 pub(crate) fn health_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let model = health_model(app);
-    let mut lines = context_strip(app, area);
+    health_model_lines(health_display_model(app), area.width as usize)
+}
+
+fn health_model_lines(model: HealthDisplayModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        health_status_line(&model.status),
+        raw("─".repeat(width)),
+        blank(),
+    ];
+    lines.extend(model.body_rows.into_iter().map(raw));
     lines.push(blank());
-    lines.push(divider("HEALTH", area.width));
-    lines.push(muted(&fit(&model.summary, area.width as usize)));
-    lines.push(blank());
-    push_health_rows(&mut lines, &model, area.width as usize);
-    push_health_commands(&mut lines, &model, area.width as usize);
+    lines.push(raw("─".repeat(width)));
+    lines.push(raw(health_footer_stage_line(width, &model.footer)));
+    lines.push(raw(health_footer_keybind_line(&model.footer)));
+    lines.push(raw(health_prompt_line(&model.footer)));
     lines
 }
 
-fn push_health_rows(lines: &mut Vec<Line<'static>>, model: &HealthModel, width: usize) {
-    for row in &model.rows {
-        lines.push(health_row_line(row, width));
-        if !row.next.is_empty() {
-            lines.push(muted(&fit(&format!("       next: {}", row.next), width)));
-        }
+fn health_status_line(status: &HealthStatus) -> Line<'static> {
+    raw(format!(
+        " KUZUSHI  target {}  ctx ✓ {}  model {}  module {}  cost {}",
+        status.target, status.ctx, status.model, status.module, status.cost
+    ))
+}
+
+fn health_footer_stage_line(width: usize, footer: &HealthFooter) -> String {
+    let left = format!(" stage {} · routing direct", footer.stage);
+    let right = format!("Ctrl+C quit · findings {}", footer.findings);
+    let gap = width
+        .saturating_sub(left.chars().count() + right.chars().count())
+        .saturating_sub(1);
+    format!("{left}{}{right}", " ".repeat(gap))
+}
+
+fn health_footer_keybind_line(footer: &HealthFooter) -> String {
+    let body = footer
+        .keybinds
+        .iter()
+        .map(|(key, label)| format!("{key} {label}"))
+        .collect::<Vec<_>>()
+        .join("   ");
+    format!(" {body}")
+}
+
+fn health_prompt_line(footer: &HealthFooter) -> String {
+    match footer.prompt_module.as_deref() {
+        Some(module) => format!(" kuzushi ({module})>"),
+        None => " kuzushi>".to_string(),
     }
 }
 
-fn health_row_line(row: &HealthRow, width: usize) -> Line<'static> {
-    let detail_width = width.saturating_sub(25);
-    Line::from(vec![
-        Span::styled(format!("{:<5} ", row.status), health_tone_style(row.tone)),
-        Span::styled(format!("{:<16}", row.check), theme::primary()),
-        Span::styled(fit(&row.detail, detail_width), theme::muted()),
-    ])
-}
-
-fn push_health_commands(lines: &mut Vec<Line<'static>>, model: &HealthModel, width: usize) {
-    lines.push(blank());
-    lines.push(command_list_line(&model.commands, width));
-}
-
-fn health_tone_style(tone: HealthTone) -> ratatui::style::Style {
-    match tone {
-        HealthTone::Pass => theme::success(),
-        HealthTone::Warn => theme::warn(),
-        HealthTone::Fail => theme::danger(),
-    }
+fn raw(value: impl Into<String>) -> Line<'static> {
+    Line::raw(value.into())
 }

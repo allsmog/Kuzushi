@@ -3,18 +3,6 @@ use crate::scene3d::VizPage;
 
 const AUTO_OPEN_INTERACTION_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
 
-/// `/scene` (`/viz`) opens the security-viz gallery, keeping
-/// whatever page was last shown. Pages are fed real Kuzushi data and show an
-/// empty-state hint until the backing artifact (findings, threat model, exploit
-/// chains, taint flow) has been generated.
-pub(crate) fn handle_scene_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
-    let ShellCommand::Scene = command else {
-        return false;
-    };
-    app.open_scene();
-    true
-}
-
 /// Map a completed tool to the gallery page that visualizes its artifact, if
 /// any. Pure so the auto-open hooks stay testable. Matched exactly on the verbs
 /// that actually *emit* the structured artifact the page draws — prereq steps
@@ -33,16 +21,16 @@ pub(crate) fn viz_page_for_tool(tool_name: &str) -> Option<VizPage> {
 impl ShellApp {
     /// Open the gallery, keeping whatever page was last shown.
     pub fn open_scene(&mut self) {
-        self.open_scene_to_page(self.scene_page);
+        self.open_scene_to_page(self.router.scene().page());
     }
 
     /// Open the gallery focused on a specific page (manual nav and auto-open).
     pub fn open_scene_to_page(&mut self, page: VizPage) {
-        if !matches!(self.shell_view, ShellView::Scene(_)) {
+        if !matches!(self.shell_view, ShellView::Scene) {
             self.push_nav_history(self.shell_view.clone());
         }
-        self.scene_page = page;
-        self.shell_view = ShellView::Scene(page);
+        self.router.scene_mut().set_page(page);
+        self.shell_view = ShellView::Scene;
         self.log(
             "scene",
             format!(
@@ -56,7 +44,7 @@ impl ShellApp {
     /// operator opted out via `setg ui.auto_open_viz false`. Mirrors
     /// `auto_open_activity`.
     pub(crate) fn auto_open_viz_page(&mut self, page: VizPage) {
-        if !self.auto_open_viz {
+        if !self.ui().auto_open_viz() {
             return;
         }
         if self.activity_deck_is_pinned() {
@@ -68,7 +56,7 @@ impl ShellApp {
     }
 
     pub(crate) fn auto_open_workbench_dfd(&mut self) {
-        if !self.auto_open_viz {
+        if !self.ui().auto_open_viz() {
             return;
         }
         if crate::ui_view_models::dfd_model(self).empty_hint.is_some() {
@@ -86,14 +74,12 @@ impl ShellApp {
     }
 
     fn activity_deck_is_pinned(&self) -> bool {
-        self.activity
-            .as_ref()
-            .is_some_and(|session| !session.can_auto_switch_deck())
+        self.activity().is_some() && !self.router.activity().can_auto_switch_deck()
     }
 
     fn sync_activity_deck_to_scene_page(&mut self, page: VizPage) {
-        if let Some(session) = self.activity.as_mut() {
-            session.set_deck_scene_page(page);
+        if self.activity().is_some() {
+            self.router.activity_mut().set_deck_scene_page(page);
         }
     }
 
@@ -126,8 +112,8 @@ impl ShellApp {
 
     fn can_auto_open_viz_now(&self) -> bool {
         if self
-            .last_char_at
-            .is_some_and(|at| at.elapsed() <= AUTO_OPEN_INTERACTION_GRACE)
+            .ui()
+            .recent_operator_interaction(AUTO_OPEN_INTERACTION_GRACE)
         {
             return false;
         }
@@ -137,14 +123,14 @@ impl ShellApp {
                 | ShellView::TargetPicker
                 | ShellView::PlanningPicker
                 | ShellView::ModelPicker
-                | ShellView::AuthMethodPicker(_)
+                | ShellView::AuthMethodPicker
                 | ShellView::PromptsEditor
                 | ShellView::ThreatEditor
                 | ShellView::AgentChat
                 | ShellView::Story
                 | ShellView::FailureHandoff
-                | ShellView::Trace(_)
-                | ShellView::Replay(_)
+                | ShellView::Trace
+                | ShellView::Replay
         )
     }
 
@@ -153,18 +139,15 @@ impl ShellApp {
     /// yank the operator to an empty page that reads "run the tool".
     pub(crate) fn viz_page_has_content(&self, page: VizPage) -> bool {
         match page {
-            VizPage::AttackPath => self.taint_flow.is_some(),
-            VizPage::ExploitChain => !self.exploit_chains.is_empty(),
+            VizPage::AttackPath => self.domain().taint_flow().is_some(),
+            VizPage::ExploitChain => self.domain().has_exploit_chains(),
             VizPage::Dfd => crate::ui_view_models::dfd_model(self).empty_hint.is_none(),
-            VizPage::Heatmap | VizPage::AttackSurface => !self.findings.is_empty(),
+            VizPage::Heatmap | VizPage::AttackSurface => !self.findings().is_empty(),
         }
     }
 
     /// Switch to a specific gallery page and reflect it in the open view.
     pub fn set_scene_page(&mut self, page: VizPage) {
-        self.scene_page = page;
-        if matches!(self.shell_view, ShellView::Scene(_)) {
-            self.shell_view = ShellView::Scene(page);
-        }
+        self.router.scene_mut().set_page(page);
     }
 }

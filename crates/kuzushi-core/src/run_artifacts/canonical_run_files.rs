@@ -284,14 +284,16 @@ fn write_json_if_missing(path: PathBuf, value: Value) -> Result<()> {
 
 fn write_json(path: PathBuf, value: Value) -> Result<()> {
     let body = format!("{}\n", serde_json::to_string_pretty(&value)?);
-    fs::write(&path, body).with_context(|| format!("Could not write {}", path.display()))
+    crate::fs_atomic::write_atomic(&path, &body)
+        .with_context(|| format!("Could not write {}", path.display()))
 }
 
 fn write_text_if_missing(path: PathBuf, body: impl AsRef<str>) -> Result<()> {
     if missing_file_target_exists(&path, "Canonical text artifact target")? {
         return Ok(());
     }
-    fs::write(&path, body.as_ref()).with_context(|| format!("Could not write {}", path.display()))
+    crate::fs_atomic::write_atomic(&path, body.as_ref())
+        .with_context(|| format!("Could not write {}", path.display()))
 }
 
 fn missing_file_target_exists(path: &Path, label: &str) -> Result<bool> {

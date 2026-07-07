@@ -13,23 +13,23 @@ fn active_stage_is_absent_when_idle() {
 #[test]
 fn active_stage_reports_scan_running_and_abort() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.scan = Some(scan_panel(true, false));
+    app.set_scan_panel(Some(scan_panel(true, false)));
 
     assert_eq!(active_stage_label(&app), Some("searching"));
 
-    app.scan = Some(scan_panel(true, true));
+    app.set_scan_panel(Some(scan_panel(true, true)));
     assert_eq!(active_stage_label(&app), Some("aborting"));
 }
 
 #[test]
 fn active_stage_prefers_live_activity_over_scan() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.scan = Some(scan_panel(true, false));
-    app.live_activity = Some(LiveActivity::new(
+    app.set_scan_panel(Some(scan_panel(true, false)));
+    app.set_live_activity_state(Some(LiveActivity::new(
         LiveActivityPhase::WritingArtifact,
         "report",
         "writing",
-    ));
+    )));
 
     assert_eq!(active_stage_label(&app), Some("writing artifact"));
 }

@@ -1,42 +1,15 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn handle_context_command(&mut self, command: ContextCommand) {
-        match command {
-            ContextCommand::Show | ContextCommand::Status => self.show_context_status(),
-            ContextCommand::Build => self.build_context_snapshot(None),
-            ContextCommand::Regen(slice) => self.regen_context_slice(&slice),
-        }
-    }
-
-    pub(crate) fn handle_workspace_command(&mut self, command: WorkspaceCommand) {
-        if let Some(effects) = self.reduce_workspace_command_effects(&command) {
-            self.execute_effects(effects);
-            return;
-        }
-        match command {
-            WorkspaceCommand::Status => self.show_workspace_status(),
-            WorkspaceCommand::Unsupported(raw) => {
-                self.shell_view = ShellView::Workspace;
-                self.log(
-                    "error",
-                    format!(
-                        "{raw} is not supported by the Rust workspace bridge yet. Supported: workspace status, workspace scope init, workspace export findings <path> [json|jsonl|sarif|csv|markdown-bundle] [--completeness open|complete] [--allow-empty]"
-                    ),
-                );
-            }
-            WorkspaceCommand::ScopeInit | WorkspaceCommand::ExportFindings { .. } => {}
-        }
-    }
-
     pub(crate) fn reduce_workspace_command_effects(
         &mut self,
         command: &WorkspaceCommand,
     ) -> Option<Vec<ShellEffect>> {
         match command {
+            WorkspaceCommand::Status => Some(vec![ShellEffect::ShowWorkspaceStatus]),
             WorkspaceCommand::ScopeInit => {
                 Some(vec![ShellEffect::WorkspaceScopeInit(WorkspaceScopeInit {
-                    target: self.target.clone(),
+                    target: self.target_owned(),
                 })])
             }
             WorkspaceCommand::ExportFindings {
@@ -50,17 +23,30 @@ impl ShellApp {
                     completeness: completeness.clone(),
                     format: format.clone(),
                     output: output.clone(),
-                    target: self.target.clone(),
+                    target: self.target_owned(),
                 },
             )]),
-            WorkspaceCommand::Status | WorkspaceCommand::Unsupported(_) => None,
+            WorkspaceCommand::Unsupported(raw) => {
+                self.show_unsupported_workspace_command(raw);
+                Some(Vec::new())
+            }
         }
+    }
+
+    fn show_unsupported_workspace_command(&mut self, raw: &str) {
+        self.shell_view = ShellView::Workspace;
+        self.log(
+            "error",
+            format!(
+                "{raw} is not supported by the Rust workspace bridge yet. Supported: workspace status, workspace scope init, workspace export findings <path> [json|jsonl|sarif|csv|markdown-bundle] [--completeness open|complete] [--allow-empty]"
+            ),
+        );
     }
 
     pub(crate) fn show_history(&mut self) {
         self.shell_view = ShellView::History;
         self.router.history_mut().open();
-        let count = self.command_history.len();
+        let count = self.command_history().len();
         self.log(
             "history",
             format!(
@@ -71,10 +57,12 @@ impl ShellApp {
     }
 
     pub(crate) fn clear_conversation(&mut self) {
-        self.log.clear();
-        self.selected_finding = None;
-        self.agent_chat = None;
-        self.agent_rx = None;
+        self.jobs.cancel(JobKind::Agent);
+        self.jobs.finish(JobKind::Agent);
+        self.clear_log();
+        *self.selected_finding_mut() = None;
+        self.clear_agent_chat();
+        self.set_agent_cancel(None);
         self.shell_view = ShellView::Catalog;
         self.log(
             "system",

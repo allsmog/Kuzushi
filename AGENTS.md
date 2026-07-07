@@ -347,8 +347,8 @@ is expected to behave identically and should be filed as a parity bug.
   `findings` and `open <id>` verbs route here. Interactive-only
   fidelity (bordered panes), but degrades to text via
   `renderer/views/workbench/render_workbench_view.rs::workbench_lines` for
-  plain/non-TTY. `LIVE` lights only on real run activity (same `has_run_activity`
-  signal as the routing mode); pane focus lives on `app.workbench_focus`.
+  plain/non-TTY. `LIVE` lights while shell work is actually running (the shared
+  `ShellApp::has_running_work` signal); pane focus lives on `app.workbench_focus`.
 - **Launch-time target picker (`ShellView::TargetPicker`)** — interactive
   only. A bare `kuzushi` (no `--target`) on a real TTY opens a picker
   (cwd + child repos/previous `.kuzushi` targets, via
@@ -565,8 +565,9 @@ plumbed through `ToolExecutionContext.trace`.
 - **Keys**: `j`/`k`/`g`/`G` scroll the focused pane, `Tab` toggles pane focus,
   `←`/`→` switch output pages, `V` toggles verbose subsystem events, `p`
   freezes/resumes the feed, `R` resets presentation state, `Enter` focuses the
-  selected task, `o` opens the selected output artifact, and uppercase `C`
-  arms cancellation before aborting live work.
+  selected task, and `o` opens the selected output artifact. Cancellation uses
+  the global `Ctrl+C` chord or the `cancel`/`stop` command, not an Activity-local
+  letter binding.
 
 When adding a new producer module, follow the pattern in
 `crates/kuzushi-core/src/modules/native_scanners/register_modules.rs::run_semgrep_scan`

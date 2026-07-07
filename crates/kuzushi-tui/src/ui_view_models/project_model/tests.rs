@@ -35,22 +35,23 @@ fn project_model_origin_labels_are_stable() {
 fn project_model_aggregates_context_threat_dfd_and_findings() {
     let temp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.context_view = crate::app::ContextSnapshotView {
-        snapshot_path: Some(kuzushi_core::context_snapshot_path(temp.path())),
-        exists: true,
-        status: "snapshot present; 2 indexed file(s)".to_string(),
-        target: Some(temp.path().display().to_string()),
-        discovery: Some("auto".to_string()),
-        files_indexed: Some(2),
-        total_files: Some(3),
-        languages: vec!["Rust".to_string()],
-        frameworks: vec!["Cargo".to_string()],
-        generated_slices: vec!["repo".to_string()],
-        stale_slices: Vec::new(),
-    };
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.domain_mut()
+        .set_context_view(crate::app::ContextSnapshotView {
+            snapshot_path: Some(kuzushi_core::context_snapshot_path(temp.path())),
+            exists: true,
+            status: "snapshot present; 2 indexed file(s)".to_string(),
+            target: Some(temp.path().display().to_string()),
+            discovery: Some("auto".to_string()),
+            files_indexed: Some(2),
+            total_files: Some(3),
+            languages: vec!["Rust".to_string()],
+            frameworks: vec!["Cargo".to_string()],
+            generated_slices: vec!["repo".to_string()],
+            stale_slices: Vec::new(),
+        });
     write_threat_model(temp.path());
-    app.findings = vec![kuzushi_core::Finding::new_tool(
+    *app.findings_mut() = vec![kuzushi_core::Finding::new_tool(
         "demo",
         "demo.rule",
         "src/auth/login.rs",
@@ -106,12 +107,12 @@ fn project_model_renders_persisted_nested_scope_tree() {
     let tree = kuzushi_core::discover_nested_project_scopes(temp.path());
     kuzushi_core::save_nested_project_scopes(temp.path(), &tree).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.active_scope = Some(crate::app::TargetCandidateScope {
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.set_active_scope(Some(crate::app::TargetCandidateScope {
         id: "submodule-libs-parser".to_string(),
         kind: kuzushi_core::NestedProjectKind::Submodule,
         rel_path: "libs/parser".to_string(),
-    });
+    }));
 
     let model = project_model(&app);
 
@@ -132,7 +133,7 @@ fn project_model_does_not_discover_unpersisted_scope_tree_during_render() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("vendor")).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = project_model(&app);
 
@@ -182,7 +183,7 @@ fn project_model_prefers_persisted_scope_document_rows() {
     save_project_model_document(temp.path(), &document).unwrap();
     std::fs::write(&context_path, "{\"new\":true}\n").unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = project_model(&app);
 

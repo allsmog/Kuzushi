@@ -1,7 +1,7 @@
 use super::{
-    active_stage_label, compact_target_path, context_snapshot_state, findings_count_summary,
-    format_session_cost, journey_footer_segment, routing_mode_segment, scoped_target_path_label,
-    view_status_segment, ShellApp,
+    active_stage_label, compact_target_path, context_snapshot_state,
+    findings_count_summary_with_total, format_session_cost, journey_footer_segment,
+    routing_mode_segment, scoped_target_path_label, view_status_segment, ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,10 +31,10 @@ pub(crate) fn context_strip_model(app: &ShellApp) -> ContextStripModel {
     ContextStripModel {
         mode: routing_mode_segment(app),
         target: target_segment_value(app),
-        context_present: app.context_view.exists,
+        context_present: app.domain().context_view().exists,
         context_state: context_snapshot_state(app),
         model: model_segment_value(app),
-        findings: findings_count_summary(&app.findings),
+        findings: findings_count_summary_with_total(app.findings(), app.findings_total_count()),
         view: view_status_segment(app),
         phase: journey_footer_segment(app),
         compact_activity: compact_activity_segment(app),
@@ -83,7 +83,7 @@ impl ContextStripModel {
 }
 
 fn target_segment_value(app: &ShellApp) -> String {
-    if app.target.is_some() {
+    if app.target().is_some() {
         scoped_target_path_label(app)
     } else {
         "none".to_string()
@@ -91,7 +91,7 @@ fn target_segment_value(app: &ShellApp) -> String {
 }
 
 fn model_segment_value(app: &ShellApp) -> String {
-    app.config
+    app.config()
         .model
         .as_deref()
         .map(crate::app::display_model_selector)
@@ -99,7 +99,7 @@ fn model_segment_value(app: &ShellApp) -> String {
 }
 
 fn live_activity_segment(app: &ShellApp) -> Option<ContextStripSegment> {
-    let activity = app.live_activity.as_ref()?;
+    let activity = app.live_activity()?;
     activity.phase.active().then(|| ContextStripSegment {
         label: "activity",
         value: format!("{} {}", app.spinner_glyph(), activity.short_label()),
@@ -107,9 +107,7 @@ fn live_activity_segment(app: &ShellApp) -> Option<ContextStripSegment> {
 }
 
 fn compact_activity_segment(app: &ShellApp) -> Option<String> {
-    app.live_activity
-        .as_ref()
-        .map(|activity| activity.short_label())
+    app.live_activity().map(|activity| activity.short_label())
 }
 
 fn run_tool_segment(app: &ShellApp) -> Option<ContextStripSegment> {
@@ -124,7 +122,7 @@ fn stage_segment(app: &ShellApp) -> Option<ContextStripSegment> {
     let label = active_stage_label(app)?;
     Some(ContextStripSegment {
         label: "stage",
-        value: format!("{} {label}", stage_spinner(app.spinner_phase)),
+        value: format!("{} {label}", stage_spinner(app.ui().spinner_phase())),
     })
 }
 
@@ -134,7 +132,8 @@ fn stage_spinner(phase: u8) -> &'static str {
 }
 
 fn cost_segment_value(app: &ShellApp) -> Option<String> {
-    (app.session_cost_usd > 0.0).then(|| format_session_cost(app.session_cost_usd))
+    let cost = app.session().session_cost_usd();
+    Some(format_session_cost(cost))
 }
 
 #[cfg(test)]

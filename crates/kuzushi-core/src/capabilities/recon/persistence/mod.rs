@@ -10,6 +10,5 @@ use anyhow::{Context, Result};
 use rows::{row_to_host, row_to_note, row_to_service};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
-use std::fs;
 use std::path::Path;
 use uuid::Uuid;

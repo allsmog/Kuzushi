@@ -38,7 +38,7 @@ pub(crate) fn selected_finding_code_model(app: &ShellApp) -> Option<CodePaneMode
 
 impl CodePaneModel {
     fn from_finding(app: &ShellApp, finding: &Finding, alias: &str, base: Option<&str>) -> Self {
-        let source_path = resolve_source_path(app.target.as_deref(), &finding.file_path);
+        let source_path = resolve_source_path(app.target(), &finding.file_path);
         let path_label = relativize_location(finding.file_path.clone(), base);
         let title = code_title(alias, &path_label, finding.start_line, finding.end_line);
         match app

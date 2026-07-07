@@ -48,6 +48,16 @@ pub struct PendingConfirm {
 impl ShellApp {
     pub fn request_confirm(&mut self, request: PendingConfirm) {
         self.advisory.pending_confirm = Some(request);
+        self.advisory.pending_confirm_launch = None;
+    }
+
+    pub(crate) fn request_confirm_for_run(
+        &mut self,
+        request: PendingConfirm,
+        launch: RunToolLaunch,
+    ) {
+        self.request_confirm(request);
+        self.advisory.pending_confirm_launch = Some(launch);
     }
 
     pub fn resolve_confirm(&mut self, outcome: bool, remember: bool) -> Option<PendingConfirm> {

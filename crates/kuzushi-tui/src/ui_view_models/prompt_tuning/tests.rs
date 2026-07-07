@@ -21,7 +21,7 @@ fn relative_prompt_override_path(module: &str, verb: &str) -> String {
 #[test]
 fn tune_model_shapes_default_module_actions_and_empty_rules() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.tune_cursor = 1;
+    app.router.tune_mut().set_cursor(1);
 
     let model = tune_model(&app, 4);
 
@@ -37,14 +37,14 @@ fn tune_model_shapes_default_module_actions_and_empty_rules() {
 }
 
 #[test]
-fn tune_model_reads_limited_house_rules() {
-    let temp = tempfile::tempdir().unwrap();
+fn tune_model_uses_limited_cached_house_rules() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.focused_module = Some("sast".to_string());
-    let rules = house_rule_path(temp.path());
-    fs::create_dir_all(rules.parent().unwrap()).unwrap();
-    fs::write(&rules, "auth only\nno generated code\nthird line").unwrap();
+    app.set_focused_module(Some("sast".to_string()));
+    app.router
+        .tune_mut()
+        .set_house_rules(HouseRulesRead::Present(
+            "auth only\nno generated code\nthird line".to_string(),
+        ));
 
     let model = tune_model(&app, 2);
 
@@ -58,14 +58,14 @@ fn tune_model_reads_limited_house_rules() {
 }
 
 #[test]
-fn tune_model_surfaces_unreadable_house_rules() {
+fn tune_model_surfaces_cached_unreadable_house_rules() {
     let temp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.focused_module = Some("sast".to_string());
+    app.set_focused_module(Some("sast".to_string()));
     let rules = house_rule_path(temp.path());
-    fs::create_dir_all(rules.parent().unwrap()).unwrap();
-    fs::create_dir_all(&rules).unwrap();
+    app.router
+        .tune_mut()
+        .set_house_rules(HouseRulesRead::Unreadable(rules.clone()));
 
     let model = tune_model(&app, 2);
 
@@ -78,8 +78,8 @@ fn tune_model_surfaces_unreadable_house_rules() {
 #[test]
 fn prompts_model_shapes_prompt_rows_for_focused_module() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.focused_module = Some("sast".to_string());
-    app.prompts_cursor = 2;
+    app.set_focused_module(Some("sast".to_string()));
+    app.router.prompts_mut().set_cursor(2);
 
     let model = prompts_model(&app);
 
@@ -100,9 +100,9 @@ fn prompts_model_shapes_prompt_rows_for_focused_module() {
 fn prompts_model_builds_stack_for_selected_project_override() {
     let temp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.focused_module = Some("sast".to_string());
-    app.prompts_cursor = 1;
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.set_focused_module(Some("sast".to_string()));
+    app.router.prompts_mut().set_cursor(1);
     let override_path = kuzushi_core::prompt_override_path(temp.path(), "sast", "triage");
     fs::create_dir_all(override_path.parent().unwrap()).unwrap();
     fs::write(&override_path, "focus on auth bypass\n").unwrap();
@@ -136,9 +136,9 @@ fn prompts_model_blocks_final_stack_for_pending_mutation_until_approved() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.focused_module = Some("sast".to_string());
-    app.prompts_cursor = 1;
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.set_focused_module(Some("sast".to_string()));
+    app.router.prompts_mut().set_cursor(1);
     let mutation =
         kuzushi_core::PromptMutation::new("sast", "triage", "focus authz paths", "operator");
     let expected_hash = mutation.content_hash();

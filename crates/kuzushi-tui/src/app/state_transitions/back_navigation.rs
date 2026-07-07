@@ -1,15 +1,15 @@
 use super::*;
 
 impl ShellApp {
-    /// Pop the most recent entry off `nav_history` and switch to it.
+    /// Pop the most recent entry off the router navigation stack and switch to it.
     /// Falls back to `Workbench` when the stack is empty (e.g. first
     /// command after boot). The stack is maintained by `sync_view_change`
     /// — every transition into a new view pushes the prior view here.
     pub(crate) fn go_back(&mut self) {
-        match self.nav_history.pop() {
+        match self.router.navigation_mut().pop_history() {
             Some(ShellView::Home) => {
-                self.focused_module = None;
-                self.catalog_route.collapse();
+                self.clear_focused_module();
+                self.router.catalog_mut().collapse();
                 self.shell_view = ShellView::Home;
             }
             Some(target) => {

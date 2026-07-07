@@ -209,6 +209,11 @@ mod tests {
         assert_eq!(parse_command("/config"), ShellCommand::Config);
         assert_eq!(parse_command("/permissions"), ShellCommand::Permissions);
         assert_eq!(parse_command("show permissions"), ShellCommand::Permissions);
+        assert_eq!(parse_command("/boot"), ShellCommand::BootSplash);
+        assert_eq!(parse_command("/theme"), ShellCommand::ThemePicker);
+        assert_eq!(parse_command("/keys"), ShellCommand::Keymap);
+        assert_eq!(parse_command("/update"), ShellCommand::UpdateAvailable);
+        assert_eq!(parse_command("/quit-confirm"), ShellCommand::QuitConfirm);
         assert_eq!(
             parse_command("/use semgrep"),
             ShellCommand::Use("semgrep".to_string())
@@ -662,6 +667,7 @@ mod tests {
             "auth-login",
             "back",
             "backend",
+            "boot-splash",
             "cancel",
             "clear",
             "component",
@@ -700,8 +706,10 @@ mod tests {
             "project-model",
             "pwn",
             "quickstart",
+            "keymap",
             "recommend",
             "quit",
+            "quit-confirm",
             "reparse",
             "replay",
             "resume",
@@ -726,10 +734,12 @@ mod tests {
             "threat-editor",
             "threat-regen",
             "threat-reject",
+            "theme-picker",
             "tools",
             "trace",
             "tune",
             "unset-option",
+            "update-available",
             "use",
             "workbench",
             "workspace",
@@ -781,6 +791,9 @@ mod tests {
             ShellCommand::Component(_) => "component",
             ShellCommand::Open(_) => "open",
             ShellCommand::Scan(_) => "scan",
+            ShellCommand::LaunchStartView => "launch-start-view",
+            ShellCommand::LaunchTargetPicker => "launch-target-picker",
+            ShellCommand::ScriptedScan(_) => "scripted-scan",
             ShellCommand::Demo => "demo",
             ShellCommand::Model(_) => "model",
             ShellCommand::Auth => "auth",
@@ -791,6 +804,11 @@ mod tests {
             ShellCommand::Config => "config",
             ShellCommand::Health => "health",
             ShellCommand::Permissions => "permissions",
+            ShellCommand::BootSplash => "boot-splash",
+            ShellCommand::QuitConfirm => "quit-confirm",
+            ShellCommand::ThemePicker => "theme-picker",
+            ShellCommand::Keymap => "keymap",
+            ShellCommand::UpdateAvailable => "update-available",
             ShellCommand::ProjectModel => "project-model",
             ShellCommand::Use(_) => "use",
             ShellCommand::Tune => "tune",

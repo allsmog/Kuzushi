@@ -1,4 +1,5 @@
-use crate::ShellApp;
+use super::{cost_model, format_session_cost};
+use crate::{HealthFooter, HealthSnapshot, HealthStatus, ShellApp};
 use kuzushi_core::{executable_on_path, CodeqlScanner, ScanEngine, SemgrepScanner};
 use std::path::{Path, PathBuf};
 
@@ -25,6 +26,13 @@ pub(crate) struct HealthModel {
     pub(crate) commands: [&'static str; 4],
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct HealthDisplayModel {
+    pub(crate) status: HealthStatus,
+    pub(crate) body_rows: Vec<String>,
+    pub(crate) footer: HealthFooter,
+}
+
 pub(crate) fn health_model(app: &ShellApp) -> HealthModel {
     let rows = vec![
         model_runtime_row(app),
@@ -42,8 +50,111 @@ pub(crate) fn health_model(app: &ShellApp) -> HealthModel {
     }
 }
 
+pub(crate) fn health_display_model(app: &ShellApp) -> HealthDisplayModel {
+    app.health_snapshot()
+        .cloned()
+        .map(HealthDisplayModel::from)
+        .unwrap_or_else(|| default_health_display_model(app))
+}
+
+impl From<HealthSnapshot> for HealthDisplayModel {
+    fn from(snapshot: HealthSnapshot) -> Self {
+        Self {
+            status: snapshot.status,
+            body_rows: snapshot.body_rows,
+            footer: snapshot.footer,
+        }
+    }
+}
+
+fn default_health_display_model(app: &ShellApp) -> HealthDisplayModel {
+    let model = health_model(app);
+    HealthDisplayModel {
+        status: default_status(app),
+        body_rows: default_body_rows(&model),
+        footer: default_footer(app, &model),
+    }
+}
+
+fn default_status(app: &ShellApp) -> HealthStatus {
+    HealthStatus {
+        target: app
+            .target()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        ctx: "live".to_string(),
+        model: app
+            .config()
+            .model
+            .clone()
+            .unwrap_or_else(|| "unconfigured".to_string()),
+        module: "doctor".to_string(),
+        cost: default_cost(app),
+    }
+}
+
+fn default_cost(app: &ShellApp) -> String {
+    cost_model(app)
+        .budget_status
+        .map(|status| status.cells[1].clone())
+        .unwrap_or_else(|| format_session_cost(0.0))
+}
+
+fn default_body_rows(model: &HealthModel) -> Vec<String> {
+    let mut rows = vec![
+        " --:--:--  ●  doctor".to_string(),
+        String::new(),
+        " -- CURRENT PREFLIGHT".to_string(),
+    ];
+    rows.extend(model.rows.iter().map(default_check_row));
+    rows.push(String::new());
+    rows.push(" -- SUMMARY".to_string());
+    rows.push(format!("   {}", model.summary));
+    rows
+}
+
+fn default_check_row(row: &HealthRow) -> String {
+    let next = optional_next_hint(row);
+    format!(
+        "  {}  {:<30} {}{}",
+        health_symbol(row.tone),
+        row.check,
+        row.detail,
+        next
+    )
+}
+
+fn optional_next_hint(row: &HealthRow) -> String {
+    if row.next.is_empty() {
+        String::new()
+    } else {
+        format!("  ·  {}", row.next)
+    }
+}
+
+fn health_symbol(tone: HealthTone) -> &'static str {
+    match tone {
+        HealthTone::Pass => "✓",
+        HealthTone::Warn => "!",
+        HealthTone::Fail => "✗",
+    }
+}
+
+fn default_footer(app: &ShellApp, model: &HealthModel) -> HealthFooter {
+    HealthFooter {
+        stage: model.summary.clone(),
+        findings: app.findings_total_count(),
+        keybinds: vec![
+            ("/auth".to_string(), "login".to_string()),
+            ("/model".to_string(), "select".to_string()),
+            ("j/k".to_string(), "row".to_string()),
+        ],
+        prompt_module: Some("doctor".to_string()),
+    }
+}
+
 fn model_runtime_row(app: &ShellApp) -> HealthRow {
-    let Some(model) = app.config.model.as_deref() else {
+    let Some(model) = app.config().model.as_deref() else {
         return health_row(
             HealthTone::Warn,
             "model/runtime",
@@ -53,7 +164,7 @@ fn model_runtime_row(app: &ShellApp) -> HealthRow {
     };
     match kuzushi_core::runtime::bridge_api_key_env_for_model(
         model,
-        &app.config.runtime.api_key_env,
+        &app.config().runtime.api_key_env,
     ) {
         Ok(api_key_env) => health_row(
             HealthTone::Pass,
@@ -89,16 +200,16 @@ fn credential_row(app: &ShellApp) -> HealthRow {
 }
 
 fn effective_credential_env(app: &ShellApp) -> &str {
-    let Some(model) = app.config.model.as_deref() else {
-        return app.config.runtime.api_key_env.as_str();
+    let Some(model) = app.config().model.as_deref() else {
+        return app.config().runtime.api_key_env.as_str();
     };
     match kuzushi_core::runtime::bridge_api_key_env_for_model(
         model,
-        &app.config.runtime.api_key_env,
+        &app.config().runtime.api_key_env,
     ) {
         Ok(env) if env == "ANTHROPIC_API_KEY" => "ANTHROPIC_API_KEY",
         Ok(env) if env == "OPENAI_API_KEY" => "OPENAI_API_KEY",
-        _ => app.config.runtime.api_key_env.as_str(),
+        _ => app.config().runtime.api_key_env.as_str(),
     }
 }
 
@@ -110,7 +221,7 @@ fn scanner_row(check: &'static str, result: anyhow::Result<()>) -> HealthRow {
 }
 
 fn codeql_db_row(app: &ShellApp) -> HealthRow {
-    let Some(target) = app.target.as_deref() else {
+    let Some(target) = app.target() else {
         return health_row(
             HealthTone::Warn,
             "codeql db",
@@ -195,8 +306,7 @@ fn joern_launcher_path() -> Option<PathBuf> {
 
 fn joern_cpg_path(app: &ShellApp) -> Option<PathBuf> {
     configured_path("KUZUSHI_JOERN_CPG").or_else(|| {
-        app.target
-            .as_ref()
+        app.target()
             .map(|target| target.join(".kuzushi").join("cpg.bin"))
     })
 }

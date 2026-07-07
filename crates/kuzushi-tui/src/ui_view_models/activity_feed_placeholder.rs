@@ -1,4 +1,4 @@
-use crate::ActivitySession;
+use crate::{ActivityRouteState, ActivitySession};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityFeedPlaceholderModel {
@@ -7,25 +7,26 @@ pub(crate) struct ActivityFeedPlaceholderModel {
 
 pub(crate) fn activity_feed_placeholder_model(
     session: &ActivitySession,
+    route: &ActivityRouteState,
     running_tool: Option<&str>,
 ) -> Option<ActivityFeedPlaceholderModel> {
-    if session.paused || has_visible_feed_events(session) {
+    if route.paused || has_visible_feed_events(session, route) {
         return None;
     }
     Some(ActivityFeedPlaceholderModel {
         text: placeholder_text(
             hidden_subsystem_event_count(session),
-            session.verbose_subsystems,
+            route.verbose_subsystems,
             running_tool,
         ),
     })
 }
 
-fn has_visible_feed_events(session: &ActivitySession) -> bool {
+fn has_visible_feed_events(session: &ActivitySession, route: &ActivityRouteState) -> bool {
     session
         .events
         .iter()
-        .any(|event| event_is_visible(event.step.module_id.as_deref(), session.verbose_subsystems))
+        .any(|event| event_is_visible(event.step.module_id.as_deref(), route.verbose_subsystems))
 }
 
 fn event_is_visible(module_id: Option<&str>, verbose_subsystems: bool) -> bool {
@@ -84,15 +85,17 @@ mod tests {
     #[test]
     fn activity_feed_placeholder_model_waits_without_events() {
         let session = ActivitySession::new("r-1");
+        let route = ActivityRouteState::default();
 
         assert_eq!(
-            activity_feed_placeholder_model(&session, Some("threat-model:build")).map(|m| m.text),
+            activity_feed_placeholder_model(&session, &route, Some("threat-model:build"))
+                .map(|m| m.text),
             Some(
                 " (threat-model:build is working — waiting for its first trace event…)".to_string()
             )
         );
         assert_eq!(
-            activity_feed_placeholder_model(&session, None).map(|m| m.text),
+            activity_feed_placeholder_model(&session, &route, None).map(|m| m.text),
             Some(" (no trace events recorded for this run)".to_string())
         );
     }
@@ -100,12 +103,13 @@ mod tests {
     #[test]
     fn activity_feed_placeholder_model_counts_hidden_events() {
         let mut session = ActivitySession::new("r-1");
+        let route = ActivityRouteState::default();
         session.apply_step(RunTraceStep::new(1, "reasoning", "index").with_module_id("pipeline"));
         session
             .apply_step(RunTraceStep::new(2, "reasoning", "slice").with_module_id("context-lite"));
 
         assert_eq!(
-            activity_feed_placeholder_model(&session, None).map(|model| model.text),
+            activity_feed_placeholder_model(&session, &route, None).map(|model| model.text),
             Some(" (2 hidden subsystem events — press V to show)".to_string())
         );
     }
@@ -113,11 +117,12 @@ mod tests {
     #[test]
     fn activity_feed_placeholder_model_skips_visible_or_paused_feed() {
         let mut session = ActivitySession::new("r-1");
+        let mut route = ActivityRouteState::default();
         session.apply_step(RunTraceStep::new(1, "reasoning", "triage").with_module_id("triage"));
-        assert!(activity_feed_placeholder_model(&session, None).is_none());
+        assert!(activity_feed_placeholder_model(&session, &route, None).is_none());
 
         session.events.clear();
-        session.paused = true;
-        assert!(activity_feed_placeholder_model(&session, None).is_none());
+        route.paused = true;
+        assert!(activity_feed_placeholder_model(&session, &route, None).is_none());
     }
 }

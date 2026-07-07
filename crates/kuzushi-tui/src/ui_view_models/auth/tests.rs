@@ -23,7 +23,7 @@ fn auth_env_summary_names_keys_without_secret_values() {
 
     let summary = auth_env_summary(&app);
 
-    assert!(summary.contains(&app.config.runtime.api_key_env));
+    assert!(summary.contains(&app.config().runtime.api_key_env));
     assert!(summary.contains("ANTHROPIC_API_KEY"));
     assert!(!summary.contains("sk-"));
 }

@@ -10,7 +10,7 @@ use super::viz_data::{
     AttackTree, DfdFlowModel, DfdModel, FindingsHeatmap, ModuleRisk, RiskByModule, TaintFlowPath,
 };
 use super::SeverityTone;
-use crate::{ActivityDeckPage, ActivitySession, ChainSeverity, ShellApp};
+use crate::{ActivityDeckPage, ActivityRouteState, ActivitySession, ChainSeverity, ShellApp};
 use kuzushi_core::RunSummary;
 
 const DECK_WINDOW_ROWS: usize = 7;
@@ -21,40 +21,43 @@ const DECK_WINDOW_ROWS: usize = 7;
 pub(crate) fn activity_deck_rows(
     app: &ShellApp,
     session: &ActivitySession,
+    route: &ActivityRouteState,
     width: usize,
     _running_tool: Option<&str>,
 ) -> Vec<ActivityFeedPaneRow> {
-    activity_deck_page_rows(app, session, width)
+    activity_deck_page_rows(app, session, route, width)
 }
 
 pub(crate) fn activity_deck_plain_extra_rows(
     app: &ShellApp,
     session: &ActivitySession,
+    route: &ActivityRouteState,
     width: usize,
 ) -> Vec<ActivityFeedPaneRow> {
-    activity_deck_page_rows(app, session, width)
+    activity_deck_page_rows(app, session, route, width)
 }
 
 fn activity_deck_page_rows(
     app: &ShellApp,
     session: &ActivitySession,
+    route: &ActivityRouteState,
     width: usize,
 ) -> Vec<ActivityFeedPaneRow> {
-    let mut rows = activity_deck_header_rows(app, session, width);
-    rows.extend(match session.deck_page {
-        ActivityDeckPage::Findings => findings_deck_rows(app, session.deck_cursor, width),
+    let mut rows = activity_deck_header_rows(app, session, route, width);
+    rows.extend(match route.deck_page {
+        ActivityDeckPage::Findings => findings_deck_rows(app, route.deck_cursor, width),
         ActivityDeckPage::AttackSurface => {
-            attack_surface_deck_rows(&cached_risk_by_module(app), session.deck_cursor, width)
+            attack_surface_deck_rows(&cached_risk_by_module(app), route.deck_cursor, width)
         }
-        ActivityDeckPage::Dfd => dfd_deck_rows(&dfd_model(app), session.deck_cursor, width),
+        ActivityDeckPage::Dfd => dfd_deck_rows(&dfd_model(app), route.deck_cursor, width),
         ActivityDeckPage::Heatmap => {
-            heatmap_deck_rows(&cached_findings_heatmap(app), session.deck_cursor, width)
+            heatmap_deck_rows(&cached_findings_heatmap(app), route.deck_cursor, width)
         }
         ActivityDeckPage::AttackPath => {
-            attack_path_deck_rows(&taint_flow_path(app), session.deck_cursor, width)
+            attack_path_deck_rows(&taint_flow_path(app), route.deck_cursor, width)
         }
         ActivityDeckPage::ExploitChain => {
-            exploit_chain_deck_rows(&attack_tree(app), session.deck_cursor, width)
+            exploit_chain_deck_rows(&attack_tree(app), route.deck_cursor, width)
         }
     });
     rows.into_iter()
@@ -65,10 +68,11 @@ fn activity_deck_page_rows(
 fn activity_deck_header_rows(
     app: &ShellApp,
     session: &ActivitySession,
+    route: &ActivityRouteState,
     _width: usize,
 ) -> Vec<ActivityFeedPaneRow> {
     let mut rows = vec![row(
-        deck_tabs(app, session.deck_page),
+        deck_tabs(app, route.deck_page),
         ActivityFeedRowTone::Primary,
     )];
     if let Some(status) = artifact_source_status_row(app, session) {
@@ -100,11 +104,11 @@ fn deck_tab(app: &ShellApp, page: ActivityDeckPage, active: ActivityDeckPage) ->
 
 fn deck_page_has_content(app: &ShellApp, page: ActivityDeckPage) -> bool {
     match page {
-        ActivityDeckPage::Findings => !app.findings.is_empty(),
-        ActivityDeckPage::AttackSurface | ActivityDeckPage::Heatmap => !app.findings.is_empty(),
+        ActivityDeckPage::Findings => !app.findings().is_empty(),
+        ActivityDeckPage::AttackSurface | ActivityDeckPage::Heatmap => !app.findings().is_empty(),
         ActivityDeckPage::Dfd => dfd_model(app).empty_hint.is_none(),
-        ActivityDeckPage::AttackPath => app.taint_flow.is_some(),
-        ActivityDeckPage::ExploitChain => !app.exploit_chains.is_empty(),
+        ActivityDeckPage::AttackPath => app.domain().taint_flow().is_some(),
+        ActivityDeckPage::ExploitChain => app.domain().has_exploit_chains(),
     }
 }
 
@@ -124,7 +128,7 @@ fn artifact_source_status_row(
 }
 
 fn active_run_summary(app: &ShellApp, session: &ActivitySession) -> Option<RunSummary> {
-    let target = app.target.as_deref()?;
+    let target = app.target()?;
     app.workbench_cache
         .borrow_mut()
         .run_summary_index(Some(target), vec![session.run_id.clone()])
@@ -892,7 +896,7 @@ mod tests {
             summary
         });
 
-        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, 160);
+        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, &fixture.route, 160);
 
         let status = artifact_source_status(&rows).expect("artifact source status row");
         assert_eq!(status.tone, ActivityFeedRowTone::Warn);
@@ -913,7 +917,7 @@ mod tests {
             summary.failed("semgrep exited nonzero")
         });
 
-        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, 160);
+        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, &fixture.route, 160);
 
         let status = artifact_source_status(&rows).expect("artifact source status row");
         assert_eq!(status.tone, ActivityFeedRowTone::Danger);
@@ -925,7 +929,7 @@ mod tests {
     fn activity_deck_omits_artifact_warning_for_completed_runs() {
         let fixture = app_with_run_summary("run-completed", kuzushi_core::RunSummary::complete);
 
-        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, 160);
+        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, &fixture.route, 160);
 
         assert!(artifact_source_status(&rows).is_none(), "{rows:?}");
     }
@@ -950,6 +954,7 @@ mod tests {
             _temp: temp,
             app,
             session,
+            route: ActivityRouteState::default(),
         }
     }
 
@@ -957,6 +962,7 @@ mod tests {
         _temp: tempfile::TempDir,
         app: ShellApp,
         session: ActivitySession,
+        route: ActivityRouteState,
     }
 
     fn artifact_source_status(rows: &[ActivityFeedPaneRow]) -> Option<&ActivityFeedPaneRow> {

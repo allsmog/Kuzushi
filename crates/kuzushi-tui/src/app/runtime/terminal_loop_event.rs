@@ -3,7 +3,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 
 pub(crate) enum TerminalLoopEvent {
-    Terminal(Event),
+    Terminal(TermEvent),
     Wake,
 }
 
@@ -28,7 +28,7 @@ impl TerminalLoopInbox {
         let wake = TerminalLoopWake { tx: tx.clone() };
         thread::spawn(move || loop {
             let event = event::read()
-                .map(TerminalLoopEvent::Terminal)
+                .map(terminal_loop_event_from_crossterm)
                 .map_err(|error| error.to_string());
             if tx.send(event).is_err() {
                 break;
@@ -58,12 +58,20 @@ impl TerminalLoopInbox {
     }
 }
 
+fn terminal_loop_event_from_crossterm(event: Event) -> TerminalLoopEvent {
+    TermEvent::from_crossterm(event)
+        .map(TerminalLoopEvent::Terminal)
+        .unwrap_or(TerminalLoopEvent::Wake)
+}
+
 pub(crate) fn wait_for_terminal_loop_event(
     app: &mut ShellApp,
     inbox: &TerminalLoopInbox,
 ) -> Result<bool> {
     match inbox.recv_timeout(terminal_event_timeout(app))? {
-        Some(TerminalLoopEvent::Terminal(event)) => Ok(apply_terminal_event(app, event)),
+        Some(TerminalLoopEvent::Terminal(event)) => {
+            Ok(update_and_execute_effects(app, Msg::Term(event)))
+        }
         Some(TerminalLoopEvent::Wake) | None => Ok(false),
     }
 }
