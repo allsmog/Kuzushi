@@ -150,8 +150,8 @@ const expectedPackageMetadata = {
 const expectedPackageKeywords = ["sast", "security", "semgrep", "ai", "triage"];
 const expectedOnlyBuiltDependencies = ["better-sqlite3", "esbuild"];
 const expectedPackageDependencies = {
-  "@anthropic-ai/sdk": "^0.81.0",
-  "@kuzushi/augur": "^0.1.0",
+  "@anthropic-ai/sdk": "^0.109.1",
+  "@kuzushi/augur": "^0.3.0",
   "@langchain/anthropic": "^1.0.0",
   "@langchain/core": "^1.0.0",
   "@langchain/langgraph": "^1.0.0",
@@ -169,41 +169,41 @@ const expectedPackageDependencies = {
 };
 const expectedPnpmLockfileRootDependencyVersions = {
   dependencies: {
-    "@anthropic-ai/sdk": "0.81.0(zod@4.3.6)",
-    "@kuzushi/augur": "0.1.0",
+    "@anthropic-ai/sdk": "0.109.1(zod@4.4.3)",
+    "@kuzushi/augur": "0.3.0",
     "@langchain/anthropic":
-      "1.4.0(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))",
-    "@langchain/core": "1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1)",
+      "1.5.1(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))",
+    "@langchain/core": "1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1)",
     "@langchain/langgraph":
-      "1.3.2(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6)",
+      "1.4.7(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))(zod@4.4.3)",
     "@langchain/mcp-adapters":
-      "1.1.3(@cfworker/json-schema@4.1.1)(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))(@langchain/langgraph@1.3.2(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6))",
+      "1.1.3(@cfworker/json-schema@4.1.1)(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))(@langchain/langgraph@1.4.7(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))(zod@4.4.3))",
     "@langchain/openai":
-      "1.4.7(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))(ws@8.20.1)",
-    "better-sqlite3": "12.8.0",
+      "1.5.3(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))(ws@8.20.1)",
+    "better-sqlite3": "12.11.1",
     chalk: "5.6.2",
     commander: "15.0.0",
     langchain:
-      "1.4.2(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1)(zod-to-json-schema@3.25.1(zod@4.3.6))",
-    tinyglobby: "0.2.15",
+      "1.5.2(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1)",
+    tinyglobby: "0.2.17",
     typescript: "5.9.3",
     undici: "7.22.0",
-    yaml: "2.8.2",
-    zod: "4.3.6",
+    yaml: "2.9.0",
+    zod: "4.4.3",
   },
   devDependencies: {
-    "@biomejs/biome": "2.4.12",
+    "@biomejs/biome": "2.5.2",
     "@commitlint/cli": "21.2.0(@types/node@22.19.11)(typescript@5.9.3)",
     "@commitlint/config-conventional": "21.2.0",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "22.19.11",
     "@vitest/coverage-v8":
-      "3.2.4(vitest@3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))",
+      "3.2.4(vitest@3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0))",
     husky: "9.1.7",
     "lint-staged": "17.0.8",
     madge: "8.0.0(typescript@5.9.3)",
-    tsx: "4.21.0",
-    vitest: "3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)",
+    tsx: "4.22.4",
+    vitest: "3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0)",
   },
   optionalDependencies: {
     "@kuzushi/tob-skills":
