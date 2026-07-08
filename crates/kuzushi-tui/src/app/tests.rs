@@ -14489,6 +14489,82 @@ fn queued_steer_item_dispatches_when_a_scan_finishes() {
 }
 
 #[test]
+fn clear_conversation_drains_a_queued_steer_item_left_by_a_solo_agent_chat() {
+    // Regression: `/clear` force-finishes the Agent slot out-of-band
+    // (jobs.cancel + jobs.finish) instead of via its normal terminal
+    // ShellEvent, so the worker's eventual terminal event later arrives with
+    // a stale generation and is dropped by `JobHub::drain_one` before it can
+    // reach the centralized steer-queue drain in `apply_job_event`. A steer
+    // item queued while only an agent chat was running must not starve.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _agent_ticket = app.jobs_mut().start(JobKind::Agent, "agent");
+    app.set_agent_chat(Some(AgentChatView {
+        question: "what changed?".to_string(),
+        answer: None,
+        running: true,
+        abort_requested: false,
+        error: None,
+        history: Vec::new(),
+        run_id: None,
+        started_secs: 0,
+        screen_context_scope: None,
+        failure_context: None,
+        pending_failure_context: None,
+    }));
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+
+    run_command(&mut app, ShellCommand::Clear);
+
+    assert!(app.agent_chat().is_none());
+    assert!(
+        app.steer_queue().is_empty(),
+        "queued steer item must dispatch once /clear force-finishes the only live job"
+    );
+}
+
+#[test]
+fn ctrl_l_clear_conversation_also_drains_a_queued_steer_item() {
+    // Same regression as `clear_conversation_drains_a_queued_steer_item_left_
+    // by_a_solo_agent_chat`, but through the Ctrl+L key binding
+    // (`ControlKeyAction::EditEffects`) instead of the `/clear` command, so
+    // the follow-up effects must be forwarded through `InputUpdate` instead
+    // of being dropped by a plain `fn(&mut ShellApp)` handler.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _agent_ticket = app.jobs_mut().start(JobKind::Agent, "agent");
+    app.set_agent_chat(Some(AgentChatView {
+        question: "what changed?".to_string(),
+        answer: None,
+        running: true,
+        abort_requested: false,
+        error: None,
+        history: Vec::new(),
+        run_id: None,
+        started_secs: 0,
+        screen_context_scope: None,
+        failure_context: None,
+        pending_failure_context: None,
+    }));
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
+    );
+
+    assert!(app.agent_chat().is_none());
+    assert!(
+        app.steer_queue().is_empty(),
+        "Ctrl+L must drain a queued steer item left by a solo agent chat"
+    );
+}
+
+#[test]
 fn advance_steer_queue_yields_to_a_pending_planning_queue() {
     // chain -> plan -> steer: while the planning queue still has steps (whose
     // dispatch is deferred through DispatchNextPlanningTask), the steer item
@@ -14567,6 +14643,36 @@ fn cancel_job_scopes_cancellation_to_the_addressed_live_run() {
         effects.as_slice(),
         [ShellEffect::CancelJob(JobKind::Run)]
     ));
+}
+
+#[test]
+fn cancel_job_effect_for_a_non_run_kind_does_not_blank_a_live_run_jobs_rows() {
+    // Regression: `jobs -k <plan-id>` (or agent/threat) must not flip a
+    // still-running Run job's DAG rows to Canceled. Only the Run slot ever
+    // owns Activity rows; canceling a different job kind must leave them be.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _run_ticket = app.jobs_mut().start(JobKind::Run, "triage:run");
+    let mut session = ActivitySession::new("r-1");
+    session.apply_step(
+        RunTraceStep::new(1, "tool", "triage start")
+            .with_module_id("triage")
+            .with_verb("run"),
+    );
+    app.set_activity(Some(session));
+
+    let _plan_ticket = app.jobs_mut().start(JobKind::Plan, "plan");
+    app.set_planner_running(true);
+
+    app.cancel_job_effect(JobKind::Plan);
+
+    // The addressed Plan job was actually aborted...
+    assert!(app.plan_abort_requested());
+    // ...but the still-running Run job's DAG row must be untouched.
+    let row = app
+        .activity()
+        .and_then(|session| session.tasks.get("triage:run"))
+        .expect("triage row seeded");
+    assert_ne!(row.state, DagTaskState::Canceled);
 }
 
 #[test]

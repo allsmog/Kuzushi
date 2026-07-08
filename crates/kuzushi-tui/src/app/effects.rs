@@ -662,12 +662,18 @@ impl ShellApp {
             JobKind::Plan => self.request_plan_abort(),
             JobKind::Threat => self.request_threat_abort(),
         };
-        if cancelled {
+        if !cancelled {
+            self.log("jobs", "that job is no longer running; nothing to cancel");
+            return;
+        }
+        // Only the Run slot (scan/tool) ever writes DAG rows into the
+        // Activity session — Agent/Plan/Threat jobs report through a
+        // separate trace-free path (see `ShellEvent::kind()`). Cancelling a
+        // non-Run job must not blank the still-live Run job's rows.
+        if kind == JobKind::Run {
             if let Some(session) = self.activity_mut() {
                 session.mark_active_tasks_canceled();
             }
-        } else {
-            self.log("jobs", "that job is no longer running; nothing to cancel");
         }
     }
 
