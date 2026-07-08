@@ -553,6 +553,45 @@ mod tests {
     }
 
     #[test]
+    fn sarif_export_omits_suppression_for_automated_dismissal() {
+        // An LLM auto-triage that maps to a dismissal-style verdict must NOT
+        // emit a SARIF suppression (which asserts a human accepted the risk).
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        seed_workspace_with_findings(&workspace, 2);
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let finding_id = store.list_findings(10).unwrap()[0]
+            .id
+            .expect("persisted finding id");
+        store
+            .save_triage_with_author(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::FalsePositive,
+                    confidence: 0.8,
+                    rationale: "model believes this is a false positive".to_string(),
+                    cost_usd: 0.0,
+                },
+                TriageAuthor::Auto,
+            )
+            .unwrap();
+
+        let output = tmp.path().join("out.sarif");
+        export_workspace_findings(&workspace, &output, None).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+
+        for run in document["runs"].as_array().unwrap() {
+            for result in run["results"].as_array().unwrap() {
+                assert!(
+                    result.get("suppressions").is_none(),
+                    "automated triage must not emit a SARIF suppression"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn exports_workspace_findings_to_csv() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();

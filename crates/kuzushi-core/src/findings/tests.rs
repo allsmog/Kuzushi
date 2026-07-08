@@ -3103,4 +3103,142 @@ mod tests {
         let result = store.append_dismissal(id, DismissReason::WontFix, "   ", "alice");
         assert!(result.unwrap_err().to_string().contains("note cannot be empty"));
     }
+
+    fn confirmed_human_decision() -> ReviewDecision {
+        ReviewDecision {
+            verdict: ReviewDecisionVerdict::Confirmed,
+            author: TriageAuthor::Human,
+            confidence: 1.0,
+            rationale: "verified reachable".to_string(),
+            dismiss_reason: None,
+            actor: None,
+        }
+    }
+
+    #[test]
+    fn scoped_same_tool_rerun_does_not_fabricate_removed() {
+        // A confirmed/open finding in src/db must NOT show Fixed/Removed after a
+        // semgrep re-run scoped to a *different* subdir (src/api).
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-a", &semgrep_finding("demo.db", 10, "sqli in src/db"))
+            .unwrap();
+        store.record_run_finished("run-a", "completed", 1).unwrap();
+
+        // Same tool, but the run scanned only a subdir — different scope.
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo/src/api"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-b", &semgrep_finding("demo.api", 20, "issue in src/api"))
+            .unwrap();
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        assert_eq!(
+            state_filter_count(&store, "state:removed"),
+            0,
+            "a subdir-scoped re-run must not stale out-of-scope findings"
+        );
+        assert_eq!(state_filter_count(&store, "state:fixed"), 0);
+        assert_eq!(state_filter_count(&store, "state:open"), 2);
+    }
+
+    #[test]
+    fn agentic_rehunt_never_marks_confirmed_finding_fixed() {
+        // A non-deterministic engine (taint-iris-next) must NEVER retire a
+        // finding: a re-hunt that happens not to re-surface a real bug is not
+        // evidence the bug is fixed.
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("hunt-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let real = Finding::new_tool(
+            "taint-iris-next",
+            "tin.sqli",
+            "src/db.rs",
+            10,
+            Some(10),
+            Severity::High,
+            "confirmed sqli",
+        );
+        let id = store.insert_finding("hunt-a", &real).unwrap();
+        store
+            .append_user_review_decision(id, &confirmed_human_decision())
+            .unwrap();
+        store.record_run_finished("hunt-a", "completed", 1).unwrap();
+
+        // Same target, same tool, but a flaky re-hunt returns a different flow.
+        store
+            .record_run_started("hunt-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding(
+                "hunt-b",
+                &Finding::new_tool(
+                    "taint-iris-next",
+                    "tin.xss",
+                    "src/api.rs",
+                    5,
+                    Some(5),
+                    Severity::Medium,
+                    "different flow",
+                ),
+            )
+            .unwrap();
+        store.record_run_finished("hunt-b", "completed", 1).unwrap();
+
+        assert_eq!(
+            state_filter_count(&store, "state:fixed"),
+            0,
+            "agentic re-hunt must not fabricate Fixed"
+        );
+        assert_eq!(state_filter_count(&store, "state:confirmed"), 1);
+    }
+
+    #[test]
+    fn auto_retriage_after_human_confirm_still_yields_fixed() {
+        // A human Confirmed followed by a later automated re-triage must not be
+        // masked: on same-scope disappearance the finding is Fixed, not Removed.
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let id = store
+            .insert_finding("run-a", &semgrep_finding("demo.real", 10, "confirmed bug"))
+            .unwrap();
+        store
+            .append_user_review_decision(id, &confirmed_human_decision())
+            .unwrap();
+        store
+            .save_triage_with_author(
+                id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::NeedsReview,
+                    confidence: 0.5,
+                    rationale: "automated re-triage".to_string(),
+                    ..Default::default()
+                },
+                TriageAuthor::Auto,
+            )
+            .unwrap();
+        store.record_run_finished("run-a", "completed", 1).unwrap();
+
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-b", &semgrep_finding("demo.other", 20, "still here"))
+            .unwrap();
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        assert_eq!(
+            state_filter_count(&store, "state:fixed"),
+            1,
+            "human Confirm must survive a later automated re-triage"
+        );
+        assert_eq!(state_filter_count(&store, "state:removed"), 0);
+    }
 }
