@@ -50,6 +50,7 @@ mod agent_chat_state;
 mod agent_session;
 mod approval;
 mod artifacts;
+mod autonomy;
 mod background_events;
 mod catalog;
 mod command_palette;

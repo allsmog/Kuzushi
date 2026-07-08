@@ -376,6 +376,20 @@ is expected to behave identically and should be filed as a parity bug.
   compact `組 map 1/4` style chip, and `next` (typed alias `continue`) reopens
   the phase walker at the derived phase. All of it is target-gated: no
   `--target`, no journey chrome.
+- **Autonomy dial chip + `Ctrl+↑`/`Ctrl+↓` chord** — shell-only chrome over a
+  *shared* gate. The always-visible `⛭ <glyph> <rung>` posture chip
+  (`ui_view_models/journey.rs::autonomy_footer_segment`, beside the phase chip,
+  target-gated, with a `⚠` when it throttles the walker) and the raise/lower
+  chord (`app/state_transitions/key_dispatch.rs::handle_autonomy_key`) are
+  interactive-only. The *policy* is shared: the pure
+  `modules::autonomy::gate(name, posture)` runs once in
+  `dispatch_prepared_tool_with_runtime` and **only refuses** tools above the
+  ceiling — it never redirects/substitutes a tool/model/runtime (no-silent-
+  fallback safe). Posture rides `V2Config.autonomy` (serde-skip, in-process,
+  default `Fix` = unconstrained so headless callers are unchanged). `kuzushi
+  run --autonomy <recon|hunt|confirm|fix>` and the shell `autonomy`/`posture`
+  verb set it; both clamp by `phases.stop_after`. Posture is orthogonal to the
+  reality-derived journey phase — raising the dial never forges phase progress.
 - **Security-viz gallery (`/scene`, `/viz`)** — interactive only
   (the rendering is TTY-bound), but **ungated and fed real Kuzushi data**. A
   `Tab`-cycled gallery of five pages (`scene3d::VizPage`). Pure view-model

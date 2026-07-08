@@ -44,6 +44,7 @@ pub(in crate::modules) use verify_module::*;
 pub(in crate::modules) use workspace_module::*;
 mod agentic_sast;
 mod application;
+pub mod autonomy;
 mod builtins;
 mod catalog_query;
 mod chrome_rce;
@@ -104,6 +105,9 @@ mod workspace_module;
 
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
 pub use catalog_query::{RuntimeFilter, ToolQuery};
+pub use autonomy::{
+    gate as autonomy_gate, tool_phase, AutonomyDecision, AutonomyPosture, WorkflowPhase,
+};
 pub use contracts::ToolExecutionContext;
 pub use contracts::{
     canonical_tool_phase, BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec,

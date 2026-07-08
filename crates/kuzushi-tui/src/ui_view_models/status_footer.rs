@@ -1,6 +1,6 @@
 use super::{
-    active_project_scope_label, findings_model, journey_footer_segment, routing_mode_segment,
-    scan_status, status_footer_findings_summary_from_counts,
+    active_project_scope_label, autonomy_footer_segment, findings_model, journey_footer_segment,
+    routing_mode_segment, scan_status, status_footer_findings_summary_from_counts,
     status_footer_findings_summary_with_total, view_status_segment, ShellApp,
 };
 use crate::ShellView;
@@ -33,6 +33,9 @@ fn active_status_footer_segments(app: &ShellApp, activity: FooterActivity) -> Ve
     if let Some(chip) = journey_footer_segment(app) {
         segments.push(chip);
     }
+    if let Some(chip) = autonomy_footer_segment(app) {
+        segments.push(chip);
+    }
     segments.extend([
         view_status_segment(app),
         model_footer_segment(app),
@@ -54,6 +57,11 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
     // by the Workbench keeps the current journey step visible on every view,
     // not just inside the launch walker.
     if let Some(chip) = journey_footer_segment(app) {
+        segments.push(chip);
+    }
+    // The autonomy dial rides beside the phase chip — the always-visible
+    // master control (`⛭ 作 confirm`, with `⚠` when it throttles the walker).
+    if let Some(chip) = autonomy_footer_segment(app) {
         segments.push(chip);
     }
     if let Some(chip) = scope_footer_segment(app) {

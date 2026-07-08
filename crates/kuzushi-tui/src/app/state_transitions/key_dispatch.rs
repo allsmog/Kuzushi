@@ -38,6 +38,10 @@ impl ShellApp {
         let modifiers = KeyModifierState::new(key);
         self.reset_completion_cycle_for_key(key);
 
+        if let Some(update) = self.handle_autonomy_key(key, modifiers) {
+            return update;
+        }
+
         let update = self.handle_mode_or_control_key(key, modifiers);
         if update.handled {
             return update;
@@ -333,6 +337,28 @@ impl ShellApp {
         }
     }
 
+    /// The always-available autonomy dial chord: `Ctrl+↑` raises the posture
+    /// one rung, `Ctrl+↓` lowers it. Arrows are the only chord family free in
+    /// every view and never swallowed by the text input line, so wiring is
+    /// additive (no readline key is stolen). Runs before the text/nav chain;
+    /// modal/palette/history-search already returned earlier in the dispatch,
+    /// so the dial never fires while one of those is capturing input.
+    fn handle_autonomy_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> Option<InputUpdate> {
+        if !modifiers.ctrl {
+            return None;
+        }
+        match key.code {
+            KeyCode::Up => self.raise_autonomy(),
+            KeyCode::Down => self.lower_autonomy(),
+            _ => return None,
+        }
+        Some(InputUpdate::handled())
+    }
+
     pub(super) fn handle_story_toggle_key(&mut self, key: KeyEvent) -> bool {
         if !key.modifiers.contains(KeyModifiers::CONTROL)
             || !matches!(key.code, KeyCode::Char('o') | KeyCode::Char('O'))
@@ -434,6 +460,38 @@ mod tests {
 
     fn plain_key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn ctrl_arrows_move_the_autonomy_dial_without_typing_into_the_prompt() {
+        use kuzushi_core::AutonomyPosture;
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_autonomy(AutonomyPosture::ReconOnly);
+
+        let update = app.reduce_key(ctrl_key(KeyCode::Up));
+        assert!(update.handled);
+        assert_eq!(app.autonomy(), AutonomyPosture::Hunt);
+        // The chord must never leak into the input line (regression against
+        // handle_text_key inserting the keystroke).
+        assert!(app.input().is_empty());
+
+        let update = app.reduce_key(ctrl_key(KeyCode::Down));
+        assert!(update.handled);
+        assert_eq!(app.autonomy(), AutonomyPosture::ReconOnly);
+        assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn plain_arrows_do_not_move_the_autonomy_dial() {
+        use kuzushi_core::AutonomyPosture;
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_autonomy(AutonomyPosture::Hunt);
+        app.reduce_key(plain_key(KeyCode::Up));
+        assert_eq!(app.autonomy(), AutonomyPosture::Hunt);
     }
 
     #[test]

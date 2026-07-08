@@ -77,6 +77,9 @@ pub enum ShellCommand {
     /// Open a specific engagement phase picker without changing workspace-
     /// derived `next` semantics.
     Phase(WorkflowPhase),
+    /// Read (`None`) or set the operator autonomy posture — the always-visible
+    /// authorization ceiling the dispatch gate enforces.
+    Autonomy(Option<AutonomyPosture>),
     Logs,
     Target(Option<String>),
     TargetRevision(String),

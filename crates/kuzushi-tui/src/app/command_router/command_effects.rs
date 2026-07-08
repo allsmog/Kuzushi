@@ -308,6 +308,10 @@ impl ShellApp {
                 self.open_requested_phase_picker(*phase);
                 Some(Vec::new())
             }
+            ShellCommand::Autonomy(posture) => {
+                self.reduce_autonomy_command(*posture);
+                Some(Vec::new())
+            }
             ShellCommand::ProjectModel => {
                 self.open_project_model_view();
                 Some(Vec::new())

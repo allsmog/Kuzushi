@@ -215,6 +215,10 @@ pub(crate) enum Command {
         /// Override a canonical tool option. Repeat as `--option key=value`.
         #[arg(long = "option")]
         options: Vec<String>,
+        /// Autonomy ceiling for this run (`recon|hunt|confirm|fix`). Refuses
+        /// tools above the rung instead of running them; omitted = unconstrained.
+        #[arg(long)]
+        autonomy: Option<String>,
     },
     /// Run a local MCP server (joern, clang, or gtags) over stdio.
     Mcp {

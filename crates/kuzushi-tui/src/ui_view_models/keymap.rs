@@ -90,6 +90,10 @@ fn global_keymap_section() -> KeymapSection {
             ("Ctrl-G", "command palette · all commands fuzzy-find"),
             ("Ctrl-P  ·  Ctrl-N", "history previous · next"),
             ("Ctrl-R", "recall last command · prefix-search history"),
+            (
+                "Ctrl-↑  ·  Ctrl-↓",
+                "autonomy dial: raise · lower the tool-dispatch ceiling",
+            ),
             ("Esc", "cancel field / close overlay / interrupt streaming"),
         ],
     )

@@ -444,11 +444,49 @@ mod tests {
         .unwrap();
     }
 
+    #[test]
+    fn cli_autonomy_flag_refuses_tools_above_the_rung() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        // triage:run is a confirm action; `--autonomy hunt` must refuse it with
+        // the actionable message rather than silently running or substituting.
+        let error = run_tool_command(
+            "triage:run".to_string(),
+            "{}".to_string(),
+            Vec::new(),
+            Some("hunt".to_string()),
+            Some(workspace.root().to_path_buf()),
+            Vec::new(),
+        )
+        .expect_err("triage:run must be refused under --autonomy hunt");
+        assert!(error.to_string().contains("raise posture"), "{error}");
+    }
+
+    #[test]
+    fn cli_autonomy_flag_rejects_unknown_rung() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let error = run_tool_command(
+            "secret-scan:scan".to_string(),
+            "{}".to_string(),
+            Vec::new(),
+            Some("bogus".to_string()),
+            Some(workspace.root().to_path_buf()),
+            Vec::new(),
+        )
+        .expect_err("an unknown rung must be a hard error");
+        assert!(
+            error.to_string().contains("--autonomy must be one of"),
+            "{error}"
+        );
+    }
+
     fn run_secret_scan_cli(workspace: &WorkspaceTarget) -> String {
         run_tool_command(
             "secret-scan:scan".to_string(),
             "{}".to_string(),
             Vec::new(),
+            None,
             Some(workspace.root().to_path_buf()),
             Vec::new(),
         )

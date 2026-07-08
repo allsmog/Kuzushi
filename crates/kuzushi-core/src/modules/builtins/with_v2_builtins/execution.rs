@@ -71,6 +71,7 @@ impl ModuleRegistry {
         ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
     ) -> Result<Value> {
+        enforce_autonomy_posture(name, ctx.config.autonomy)?;
         self.enforce_runtime_requirement(name, &input, runtime)?;
         let scoped_trace = scoped_tool_trace(ctx, name);
         let scoped_ctx;
@@ -144,6 +145,40 @@ fn dispatch_timestamp() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs().to_string())
         .unwrap_or_default()
+}
+
+/// Enforce the operator autonomy posture at the one shared dispatch boundary.
+///
+/// This *only ever refuses* a tool that sits above the authorized ceiling — it
+/// never substitutes a different tool, model, or runtime. It is therefore
+/// incapable of a silent model/runtime fallback (that policy lives in
+/// `runtime/policy/no_silent_fallback.rs` and is untouched here). Below/at the
+/// ceiling the dispatch proceeds; mutating-tool approval is owned by the
+/// caller's existing confirm gate, not by this refusal.
+fn enforce_autonomy_posture(
+    name: &str,
+    posture: crate::modules::autonomy::AutonomyPosture,
+) -> Result<()> {
+    use crate::modules::autonomy::{gate, AutonomyDecision};
+    match gate(name, posture) {
+        AutonomyDecision::Refuse { needed, ceiling } => {
+            anyhow::bail!(posture_refusal_message(name, needed, ceiling))
+        }
+        AutonomyDecision::Allow | AutonomyDecision::RequireApproval => Ok(()),
+    }
+}
+
+fn posture_refusal_message(
+    name: &str,
+    needed: crate::modules::autonomy::WorkflowPhase,
+    ceiling: crate::modules::autonomy::WorkflowPhase,
+) -> String {
+    format!(
+        "{name} is a {} action but autonomy posture is capped at {}; \
+         raise posture (Ctrl+Up) to authorize",
+        needed.word(),
+        ceiling.word()
+    )
 }
 
 fn runtime_requirement_is_deferred_to_executor(name: &str) -> bool {
@@ -380,6 +415,83 @@ mod prompt_file_default_tests {
             input["THREAT_MODEL_PROMPT"],
             json!("focus callback replay threats\n")
         );
+    }
+}
+
+#[cfg(test)]
+mod autonomy_gate_dispatch_tests {
+    use crate::modules::autonomy::AutonomyPosture;
+    use crate::modules::registry::ModuleRegistry;
+    use crate::{V2Config, WorkspaceTarget};
+    use serde_json::json;
+
+    fn ctx_with_posture<'a>(
+        config: &'a V2Config,
+        workspace: &'a WorkspaceTarget,
+    ) -> crate::ToolExecutionContext<'a> {
+        crate::ToolExecutionContext {
+            config,
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+        }
+    }
+
+    #[test]
+    fn fix_tool_is_refused_under_hunt_posture_with_actionable_message() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut config = V2Config::default();
+        config.autonomy = AutonomyPosture::Hunt;
+        let ctx = ctx_with_posture(&config, &workspace);
+
+        let error = registry
+            .dispatch_prepared_tool_with_runtime("patch:finding", json!({}), &ctx, None)
+            .expect_err("patch:finding must be refused above the ceiling");
+        let message = error.to_string();
+        assert!(message.contains("patch:finding"), "{message}");
+        assert!(message.contains("posture"), "{message}");
+        assert!(message.contains("raise"), "{message}");
+    }
+
+    #[test]
+    fn refusal_fires_before_the_runtime_requirement_check() {
+        // triage:run needs a runtime AND is above a Hunt ceiling; the posture
+        // refusal must win so the operator sees the authorization message, not
+        // a runtime error.
+        let registry = ModuleRegistry::with_v2_builtins();
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut config = V2Config::default();
+        config.autonomy = AutonomyPosture::Hunt;
+        let ctx = ctx_with_posture(&config, &workspace);
+
+        let error = registry
+            .dispatch_prepared_tool_with_runtime("triage:run", json!({}), &ctx, None)
+            .expect_err("triage:run must be refused above the ceiling");
+        let message = error.to_string();
+        assert!(message.contains("raise posture"), "{message}");
+        assert!(!message.contains("requires an agent runtime"), "{message}");
+    }
+
+    #[test]
+    fn default_fix_posture_leaves_runtime_requirement_as_the_gate() {
+        // With the default (Fix) posture nothing is refused by autonomy, so the
+        // existing runtime-requirement error is what surfaces — proving the
+        // gate is behavior-preserving for headless callers.
+        let registry = ModuleRegistry::with_v2_builtins();
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ctx_with_posture(&config, &workspace);
+
+        let error = registry
+            .dispatch_prepared_tool_with_runtime("triage:run", json!({}), &ctx, None)
+            .expect_err("triage:run still needs a runtime under Fix");
+        let message = error.to_string();
+        assert!(message.contains("requires an agent runtime"), "{message}");
+        assert!(!message.contains("raise posture"), "{message}");
     }
 }
 

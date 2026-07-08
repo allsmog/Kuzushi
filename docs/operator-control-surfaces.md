@@ -59,6 +59,13 @@ Specifier trust is controlled by `[operator].trusted_modules`; the dynamic
 Node bridge only loads trusted specifiers. Untrusted analyzers belong in the
 v3 sandbox plugin path.
 
+`kuzushi run --autonomy <recon|hunt|confirm|fix>` sets the autonomy ceiling
+for that run. The shared dispatch gate refuses any tool whose engagement phase
+sits above the rung (`recon`→map, `hunt`→hunt, `confirm`→confirm, `fix`→fix)
+with an actionable error — it never silently runs or substitutes it. Omitted =
+`fix` (unconstrained, matching prior behavior). The requested rung is clamped
+by `[phases].stop_after`; an unrecognized rung is a hard error.
+
 ## Shell
 
 The Rust shell uses the same descriptors:
@@ -69,6 +76,10 @@ The Rust shell uses the same descriptors:
 - `setg <key> <value>` writes a global option.
 - `unsetg <key>` clears a global option.
 - `scan` prepares `sast:scan` input from the option store before dispatch.
+- `autonomy [recon|hunt|confirm|fix]` (alias `posture`) reads or sets the
+  always-visible autonomy dial; `Ctrl+↑`/`Ctrl+↓` raise/lower it one rung. The
+  dial is the same ceiling `kuzushi run --autonomy` sets; it is session-scoped
+  and clamped by `[phases].stop_after`.
 
 Session options last only for the shell process. Global options are persisted.
 Workspace option files are loaded when present and preserved by the same store
