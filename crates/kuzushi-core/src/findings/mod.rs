@@ -25,7 +25,7 @@ pub use domain::{
     ReviewDecisionVerdict, Severity, StaticProofState, StaticProofStateEvent, TriageAuthor,
     TriageOutcome, TriageVerdict, VulnSource,
 };
-pub use persistence::FindingStore;
+pub use persistence::{FindingStore, SuppressionLifecycleEvent};
 pub use presentation::{
     compare_findings_by_confidence, finding_lifecycle_status, finding_next_action,
     format_finding_alias, parse_finding_alias, proof_ladder_state, proof_state_label,

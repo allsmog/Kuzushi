@@ -123,6 +123,7 @@ fn finding_lifecycle(event_kind: EventKind) -> FindingLifecycleWrite {
         reason: Some("state transition test".to_string()),
         actor: "state-machine".to_string(),
         run_id: None,
+        suppression: None,
     }
 }
 

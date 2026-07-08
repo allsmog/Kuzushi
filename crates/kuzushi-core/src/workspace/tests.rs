@@ -519,6 +519,89 @@ mod tests {
         assert!(first["properties"]["kuzushiDerivedSourcePresent"].is_boolean());
         assert!(first["properties"]["kuzushiAutomatedReasoningPresent"].is_boolean());
         assert!(first["properties"]["kuzushiRawHttpBlobPresent"].is_boolean());
+        // Non-suppressed findings carry no SARIF result.suppressions array.
+        assert!(first.get("suppressions").is_none());
+    }
+
+    #[test]
+    fn suppressed_finding_emits_sarif_suppression() {
+        use crate::suppressions::{
+            run_suppression_sweep, save_suppression_rules, FindingRef, SuppressionOrigin,
+            SuppressionPredicate, SuppressionReason, SuppressionRule,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        seed_workspace_with_findings(&workspace, 1);
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let finding = store.list_findings(1).unwrap().into_iter().next().unwrap();
+        let rule = SuppressionRule {
+            id: "sup-sarif".to_string(),
+            predicate: SuppressionPredicate {
+                finding_id: Some(FindingRef(finding.fingerprint.clone())),
+                ..SuppressionPredicate::empty()
+            },
+            reason: SuppressionReason::FalsePositive,
+            statement: "sanitized upstream".to_string(),
+            actor: "tester".to_string(),
+            created_at_unix: 1,
+            expires_at_unix: None,
+            origin: SuppressionOrigin::File,
+        };
+        save_suppression_rules(&workspace, &[rule]).unwrap();
+        run_suppression_sweep(&store, &workspace, "tester").unwrap();
+
+        let output = tmp.path().join("out.sarif");
+        export_workspace_findings(&workspace, &output, None).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+        let result = &document["runs"][0]["results"][0];
+        assert_eq!(result["suppressions"][0]["kind"], "external");
+    }
+
+    #[test]
+    fn export_reflects_a_lapsed_suppression_rule() {
+        use crate::suppressions::{
+            run_suppression_sweep, save_suppression_rules, FindingRef, SuppressionOrigin,
+            SuppressionPredicate, SuppressionReason, SuppressionRule,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        seed_workspace_with_findings(&workspace, 1);
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let fingerprint = store.list_findings(1).unwrap()[0].fingerprint.clone();
+        let rule = |expires: Option<u64>| SuppressionRule {
+            id: "sup-exp".to_string(),
+            predicate: SuppressionPredicate {
+                finding_id: Some(FindingRef(fingerprint.clone())),
+                ..SuppressionPredicate::empty()
+            },
+            reason: SuppressionReason::FalsePositive,
+            statement: "sanitized".to_string(),
+            actor: "op".to_string(),
+            created_at_unix: 1,
+            expires_at_unix: expires,
+            origin: SuppressionOrigin::File,
+        };
+
+        // Live rule suppresses the finding (rule-originated) via a sweep.
+        save_suppression_rules(&workspace, &[rule(None)]).unwrap();
+        run_suppression_sweep(&store, &workspace, "test").unwrap();
+        assert!(store.list_findings(1).unwrap()[0].suppressed);
+
+        // Rule lapses. Export must reconcile and show the finding NOT suppressed,
+        // even with no intervening scan.
+        save_suppression_rules(&workspace, &[rule(Some(2))]).unwrap();
+        let output = tmp.path().join("out.sarif");
+        export_workspace_findings(&workspace, &output, None).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+        let result = &document["runs"][0]["results"][0];
+        assert!(
+            result.get("suppressions").is_none(),
+            "a lapsed rule must not export as suppressed/accepted"
+        );
+        let reopened = FindingStore::open(workspace.findings_db_path()).unwrap();
+        assert!(!reopened.list_findings(1).unwrap()[0].suppressed);
     }
 
     #[test]

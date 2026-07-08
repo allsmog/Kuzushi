@@ -12,6 +12,7 @@ pub const WORKSPACE_STATIC_EVIDENCE_DB_FILE: &str = "static-evidence.sqlite3";
 pub const WORKSPACE_ARTIFACT_KB_DB_FILE: &str = "artifact-kb.sqlite3";
 pub const WORKSPACE_ATTACHMENTS_FILE: &str = "attachments.json";
 pub const WORKSPACE_MODELS_FILE: &str = "models.toml";
+pub const WORKSPACE_SUPPRESSIONS_FILE: &str = "suppressions.toml";
 pub const WORKSPACE_CODEQL_DB_DIR: &str = "codeql-db";
 pub const LEGACY_CODEQL_STATE_DIR: &str = ".codeql";
 pub const LEGACY_CODEQL_DB_DIR: &str = "db";
@@ -62,6 +63,13 @@ pub fn workspace_attachments_path(root: impl AsRef<Path>) -> PathBuf {
 
 pub fn workspace_models_path(root: impl AsRef<Path>) -> PathBuf {
     workspace_state_root(root).join(WORKSPACE_MODELS_FILE)
+}
+
+/// Suppression rule store. Lives under `state_dir()` (`.kuzushi/v3/`) with
+/// the other v3 stores, unlike `scope.toml`/`models.toml` which sit directly
+/// under `.kuzushi/`.
+pub fn workspace_suppressions_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_SUPPRESSIONS_FILE)
 }
 
 pub fn workspace_codeql_db_path(root: impl AsRef<Path>) -> PathBuf {
@@ -117,6 +125,10 @@ impl WorkspaceTarget {
 
     pub fn objects_dir(&self) -> PathBuf {
         workspace_objects_dir(&self.root)
+    }
+
+    pub fn suppressions_path(&self) -> PathBuf {
+        workspace_suppressions_path(&self.root)
     }
 
     pub fn ensure_state_dir(&self) -> Result<PathBuf> {
