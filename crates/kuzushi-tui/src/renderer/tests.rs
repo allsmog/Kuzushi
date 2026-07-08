@@ -647,12 +647,15 @@ fn prompt_renders_fuzzy_completion_candidate() {
     let backend = TestBackend::new(80, 12);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.set_input("fnd");
+    // "fnd" alone now also fuzzy-matches the shorter `find` verb, so use a
+    // suffix ("gs") that only the `findings*` family contains to keep this
+    // test unambiguous.
+    app.set_input("fndgs");
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let row = buffer_row_text(terminal.backend().buffer(), 80, 11);
 
-    assert!(row.contains("fnd"), "{row}");
+    assert!(row.contains("fndgs"), "{row}");
     assert!(row.contains("findings"), "{row}");
 }
 
@@ -2044,7 +2047,11 @@ fn plain_config_onboarding_uses_explicit_model_selection() {
 
 #[test]
 fn renders_help_grouped_by_operator_workflow() {
-    let backend = TestBackend::new(110, 130);
+    // The combined command catalog (jobs/queue/background/autonomy verbs plus
+    // the SESSION group) is taller than the help view fit in previously;
+    // render into a taller viewport so every group, including SESSION, is
+    // actually painted instead of scrolled out of the test buffer.
+    let backend = TestBackend::new(110, 140);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Help);

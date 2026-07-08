@@ -93,7 +93,10 @@ mod tests {
     #[test]
     fn completion_preview_names_fuzzy_candidate_when_suffix_is_not_enough() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_input("fnd");
+        // "fnd" alone now also fuzzy-matches the shorter `find` verb, so use a
+        // suffix ("gs") that only the `findings*` family contains to keep this
+        // test unambiguous.
+        app.set_input("fndgs");
 
         let preview = app.completion_preview().expect("fuzzy preview");
 

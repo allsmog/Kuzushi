@@ -43,6 +43,8 @@ next - continue the engagement (alias: continue) — open the current phase's pi
   aliases / examples: /next
 phase <map|hunt|confirm|fix> - open a specific engagement phase picker
   aliases / examples: phase map, phase hunt, phase confirm, phase fix
+autonomy [recon|hunt|confirm|fix] - read/set the autonomy dial (also Ctrl+Up/Down) — the tool-dispatch ceiling
+  aliases / examples: autonomy, /autonomy, posture, /posture
 logs - scrollable full-screen transcript
   aliases / examples: /logs, log, transcript, /transcript
 background - drop to Workbench, keep the job running (Ctrl+C still cancels)
@@ -141,6 +143,8 @@ open <id> - open a finding alias or fingerprint
 decision <verdict> <reason> - record a human review decision for the selected finding
 aliases / examples: decision confirmed reviewed source-linked evidence, decision suppressed accepted by policy owner,
 review rejected_false_positive reviewed data flow
+dismiss <reason> <note> - dismiss the selected finding with an auditable reason
+  aliases / examples: dismiss false_positive not reachable in prod, dismiss used_in_tests test fixture only
 show aliases [prefix] - list finding aliases
   aliases / examples: /show aliases [prefix]
 show runs - recent run artifacts
