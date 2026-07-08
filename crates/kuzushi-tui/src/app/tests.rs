@@ -5342,6 +5342,34 @@ fn auth_login_reducer_returns_login_effect_without_spawning_process() {
 }
 
 #[test]
+fn auth_login_effect_with_missing_bridge_reopens_credential_entry() {
+    // `LangGraphRuntime::from_config` treats an explicit empty bridge
+    // command as an error, standing in for "the OAuth bridge binary is
+    // missing / runtime construction failed" without spawning a process.
+    let mut config = V2Config::default();
+    config.runtime.langgraph_bridge_command = Some(Vec::new());
+    let mut app = ShellApp::new(config, None);
+    app.set_shell_view(ShellView::Auth);
+
+    let effects = app.start_auth_login_effect(AuthLoginStart {
+        provider: "openai-codex".to_string(),
+        method: "browser".to_string(),
+        continue_after_success: true,
+    });
+
+    assert!(effects.is_empty());
+    assert_eq!(
+        app.shell_view(),
+        ShellView::AuthMethodPicker,
+        "bridge-missing OAuth should reopen credential entry, not dead-end on Auth"
+    );
+    assert_eq!(app.router.auth_picker().provider(), "openai-codex");
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "onboarding" && line.body.contains("OAuth bridge unavailable")
+    }));
+}
+
+#[test]
 fn auth_picker_oauth_returns_login_effect_with_continuation() {
     let _env_lock = env_test_lock();
     let tmp = tempfile::tempdir().unwrap();

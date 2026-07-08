@@ -81,12 +81,26 @@ impl ShellApp {
 
     pub(crate) fn start_auth_login_effect(&mut self, login: AuthLoginStart) -> Vec<ShellEffect> {
         let Some(command) = self.auth_login_bridge_command() else {
-            return Vec::new();
+            return self.recover_from_missing_auth_login_bridge(&login.provider);
         };
         self.run_auth_login_process(&login.provider, &login.method, &command);
         if login.continue_after_success {
             return self.continue_after_picker_auth_login(&login.provider);
         }
+        Vec::new()
+    }
+
+    /// `auth_login_bridge_command` already logged why the OAuth bridge is
+    /// unavailable (missing binary, bad runtime config, …). Route back to
+    /// the inline credential-entry step instead of stranding the operator on
+    /// the read-only Auth view with no exit — the exact keyless dead-end
+    /// this onboarding surface exists to remove.
+    fn recover_from_missing_auth_login_bridge(&mut self, provider: &str) -> Vec<ShellEffect> {
+        self.log(
+            "onboarding",
+            "OAuth bridge unavailable — pick another method, or press d for the offline demo",
+        );
+        self.open_credential_entry(provider.to_string());
         Vec::new()
     }
 
