@@ -8,11 +8,18 @@ impl ShellApp {
     pub(crate) fn apply_initial_onboarding_phase(&mut self) {
         let phase = self.compute_initial_onboarding_phase();
         self.log_mcp_attachment_plan();
+        self.open_onboarding_phase(phase);
+    }
+
+    /// Open the view for a resolved onboarding phase. Shared by the
+    /// construction/activation path and the interactive launch path.
+    pub(crate) fn open_onboarding_phase(&mut self, phase: InitialOnboardingPhase) {
         match phase {
             InitialOnboardingPhase::Catalog => {}
+            InitialOnboardingPhase::TargetPicker => self.open_target_picker(),
             InitialOnboardingPhase::ModelPicker => self.open_model_picker(),
             InitialOnboardingPhase::AuthMethodPicker { provider } => {
-                self.open_auth_method_picker(provider);
+                self.open_credential_entry(provider);
             }
             InitialOnboardingPhase::PlanningPicker => self.open_planning_picker(),
         }
@@ -53,9 +60,21 @@ impl ShellApp {
         self.router.auth_picker_mut().open(provider.clone());
         self.log(
             "onboarding",
-            format!("{provider} supports multiple auth methods — paste an API key or pick OAuth"),
+            format!(
+                "{provider} needs credentials — paste an API key, pick OAuth, or press d for the offline demo"
+            ),
         );
         self.set_shell_view(ShellView::AuthMethodPicker);
+    }
+
+    /// Inline credential-entry step for a credentialed provider whose
+    /// credentials are missing. Replaces the old "log and dump to the
+    /// Workbench" dead-end: the operator stays in an actionable surface with
+    /// three exits (API key, OAuth, offline demo). No provider or model is
+    /// picked here — every mutation stays behind an explicit Enter on a
+    /// labeled row, preserving no-silent-fallback.
+    pub(crate) fn open_credential_entry(&mut self, provider: String) {
+        self.open_auth_method_picker(provider);
     }
 
     /// Open the launch picker at the first phase (組 KUMI-KATA · map).
@@ -220,26 +239,47 @@ impl ShellApp {
         // act on, and dropping into the model picker would block every
         // test that constructs a bare `ShellApp` for unrelated
         // assertions. Onboarding only auto-opens when the operator
-        // launched the shell with a real workspace.
+        // launched the shell with a real workspace. (The pure gate also
+        // enforces this via `allow_target_gate = false`; this guard keeps
+        // the short-circuit explicit at the construction/activation edge.)
         if self.target().is_none() {
             return InitialOnboardingPhase::Catalog;
         }
-        let provider = self
-            .config()
-            .model
-            .as_deref()
-            .and_then(|model| model.split(':').next());
-        let has_multiple_auth = provider
-            .map(provider_has_multiple_auth_methods)
-            .unwrap_or(false);
-        let auth_ready = provider.map(auth_ready_for_provider).unwrap_or(false);
         initial_onboarding_phase_for(
             self.config(),
             self.target(),
-            auth_ready,
-            has_multiple_auth,
+            self.provider_auth_ready(),
             self.workspace_is_fresh_for_auto_planner(),
         )
+    }
+
+    /// Whether the operator's configured provider already has credentials.
+    /// Providers that need none (`local:`, unknown) report `false` here only
+    /// when no model is set; `auth_ready_for_provider` returns `true` for
+    /// them so they never gate.
+    fn provider_auth_ready(&self) -> bool {
+        self.config()
+            .model
+            .as_deref()
+            .and_then(|model| model.split(':').next())
+            .map(auth_ready_for_provider)
+            .unwrap_or(false)
+    }
+
+    /// The launch-time onboarding phase for the interactive terminal front
+    /// door. Unlike `compute_initial_onboarding_phase`, this permits the
+    /// target gate (`allow_target_gate = true`) so a bare `kuzushi` with no
+    /// `--target` opens the target picker as the first stage of the gate.
+    pub(crate) fn launch_onboarding_phase(&self) -> InitialOnboardingPhase {
+        let inputs = crate::app::OnboardingInputs {
+            model: self.config().model.as_deref(),
+            provider_auth_ready: self.provider_auth_ready(),
+            has_target: self.target().is_some(),
+            workspace_is_fresh: self.workspace_is_fresh_for_auto_planner(),
+            skip_onboarding_env: crate::app::skip_onboarding_env(),
+            allow_target_gate: true,
+        };
+        crate::app::initial_onboarding_phase(&inputs)
     }
 
     pub(crate) fn open_fresh_planner_or_workbench(&mut self) {

@@ -1,3 +1,4 @@
+use crate::support::require_cli_target;
 use anyhow::{Context, Result};
 use kuzushi_core::{
     resolve_finding_alias, stable_finding_alias, FindingDetailReport, FindingListFilter,
@@ -10,7 +11,7 @@ pub(crate) fn findings_command(
     filter: FindingListFilter,
     json: bool,
 ) -> Result<()> {
-    let target = require_target(target)?;
+    let target = require_cli_target("findings", target, None)?;
     let workspace = WorkspaceTarget::new(target)?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let report = store.list_findings_filtered(&filter)?;
@@ -34,7 +35,7 @@ pub(crate) fn finding_command(
     reference: String,
     json: bool,
 ) -> Result<()> {
-    let target = require_target(target)?;
+    let target = require_cli_target("finding", target, None)?;
     let workspace = WorkspaceTarget::new(target)?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let all_findings = store
@@ -86,17 +87,4 @@ fn missing_finding_message(reference: &str, workspace: &WorkspaceTarget) -> Stri
         workspace.findings_db_path().display(),
         workspace.root().display()
     )
-}
-
-/// Resolve a CLI `--target` flag into a concrete path. Returns an actionable
-/// error when the caller did not supply one — bug-bounty scope discipline
-/// requires the operator to opt into a target explicitly. Pass `--target .`
-/// to intentionally operate on the current directory.
-fn require_target(target: Option<PathBuf>) -> Result<PathBuf> {
-    target.ok_or_else(|| {
-        anyhow::anyhow!(
-            "no target set. Next: pass `--target <path>` (or `--target .` to use the \
-             current directory). Bug-bounty workflows require explicit scope."
-        )
-    })
 }

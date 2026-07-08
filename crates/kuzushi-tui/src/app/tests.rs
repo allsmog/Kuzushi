@@ -5342,6 +5342,34 @@ fn auth_login_reducer_returns_login_effect_without_spawning_process() {
 }
 
 #[test]
+fn auth_login_effect_with_missing_bridge_reopens_credential_entry() {
+    // `LangGraphRuntime::from_config` treats an explicit empty bridge
+    // command as an error, standing in for "the OAuth bridge binary is
+    // missing / runtime construction failed" without spawning a process.
+    let mut config = V2Config::default();
+    config.runtime.langgraph_bridge_command = Some(Vec::new());
+    let mut app = ShellApp::new(config, None);
+    app.set_shell_view(ShellView::Auth);
+
+    let effects = app.start_auth_login_effect(AuthLoginStart {
+        provider: "openai-codex".to_string(),
+        method: "browser".to_string(),
+        continue_after_success: true,
+    });
+
+    assert!(effects.is_empty());
+    assert_eq!(
+        app.shell_view(),
+        ShellView::AuthMethodPicker,
+        "bridge-missing OAuth should reopen credential entry, not dead-end on Auth"
+    );
+    assert_eq!(app.router.auth_picker().provider(), "openai-codex");
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "onboarding" && line.body.contains("OAuth bridge unavailable")
+    }));
+}
+
+#[test]
 fn auth_picker_oauth_returns_login_effect_with_continuation() {
     let _env_lock = env_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -8833,6 +8861,126 @@ fn target_picker_esc_defers_to_workbench_without_a_target() {
         .log_lines()
         .iter()
         .any(|line| line.body.contains("browsing without a target")));
+}
+
+#[test]
+fn model_picker_enter_with_keyless_credentialed_provider_opens_credential_entry() {
+    // Dead-end #2 fix: choosing a credentialed model with no wired credentials
+    // must open the inline credential-entry step, never log-and-dump to the
+    // Workbench.
+    let _env_lock = env_test_lock();
+    let _anthropic = EnvVarGuard::unset("ANTHROPIC_API_KEY");
+    let tmp = tempfile::tempdir().unwrap();
+    let _home = EnvVarGuard::set("HOME", tmp.path().to_string_lossy().as_ref());
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_model_picker();
+    let choices = super::settings::visible_model_choices(app.config().model.as_deref());
+    let idx = choices
+        .iter()
+        .position(|choice| choice.provider == "anthropic")
+        .expect("an anthropic model is offered");
+    app.router.model_picker_mut().open(idx, choices.len());
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.shell_view(), ShellView::AuthMethodPicker);
+    assert_eq!(app.router.auth_picker().provider(), "anthropic");
+}
+
+#[test]
+fn opening_credential_entry_does_not_change_the_model() {
+    // No-silent-fallback: merely opening the credential surface must not
+    // mutate the operator's configured model or provider.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.config_mut().model = Some("anthropic:claude-sonnet-4-6".to_string());
+
+    app.open_credential_entry("anthropic".to_string());
+
+    assert_eq!(
+        app.config().model.as_deref(),
+        Some("anthropic:claude-sonnet-4-6")
+    );
+    assert_eq!(app.shell_view(), ShellView::AuthMethodPicker);
+}
+
+#[test]
+fn auth_picker_selected_kind_tracks_the_row_model() {
+    // Selection is decided by row identity, never a hardcoded index.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router.auth_picker_mut().open("anthropic".to_string());
+
+    assert!(app.router.auth_picker().is_api_key_row());
+    assert!(!app.router.auth_picker().is_offline_demo_row());
+
+    let last_row = app.router.auth_picker().row_count() - 1;
+    app.router.auth_picker_mut().set_cursor(last_row);
+    assert!(app.router.auth_picker().is_offline_demo_row());
+    assert!(!app.router.auth_picker().is_api_key_row());
+}
+
+#[test]
+fn auth_picker_d_runs_the_offline_fixture_with_empty_draft() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router.auth_picker_mut().open("anthropic".to_string());
+    app.set_shell_view(ShellView::AuthMethodPicker);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()),
+    );
+
+    assert!(app.router.auth_picker().key_draft().is_empty());
+    assert!(
+        app.target().is_some(),
+        "offline fixture target should be active"
+    );
+    assert_ne!(app.shell_view(), ShellView::AuthMethodPicker);
+}
+
+#[test]
+fn auth_picker_d_types_into_a_nonempty_key_draft() {
+    // Once the operator starts pasting a key, `d` is literal key text again —
+    // it must not trigger the fixture mid-paste.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router.auth_picker_mut().open("openai".to_string());
+    app.set_shell_view(ShellView::AuthMethodPicker);
+
+    paste_text(&mut app, "sk-");
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.router.auth_picker().key_draft(), "sk-d");
+    assert_eq!(app.shell_view(), ShellView::AuthMethodPicker);
+    assert!(app.target().is_none());
+}
+
+#[test]
+fn launch_onboarding_phase_opens_target_picker_when_targetless() {
+    let _env_lock = env_test_lock();
+    let _skip = EnvVarGuard::unset("KUZUSHI_SKIP_ONBOARDING");
+    let app = ShellApp::new(V2Config::default(), None);
+
+    assert_eq!(
+        app.launch_onboarding_phase(),
+        crate::app::InitialOnboardingPhase::TargetPicker
+    );
+}
+
+#[test]
+fn launch_onboarding_phase_skips_target_picker_when_skip_env_is_set() {
+    let _env_lock = env_test_lock();
+    let _skip = EnvVarGuard::set("KUZUSHI_SKIP_ONBOARDING", "1");
+    let app = ShellApp::new(V2Config::default(), None);
+
+    assert_eq!(
+        app.launch_onboarding_phase(),
+        crate::app::InitialOnboardingPhase::Catalog
+    );
 }
 
 #[test]

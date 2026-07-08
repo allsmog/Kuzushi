@@ -67,3 +67,14 @@ async fn launch_shell(world: &mut OnboardingWorld) {
     std::thread::sleep(Duration::from_millis(800));
     world.session = Some(session);
 }
+
+#[when("I launch the shell without a target")]
+async fn launch_shell_without_target(world: &mut OnboardingWorld) {
+    world.ensure_binary();
+    let binary = world.binary.to_string_lossy().into_owned();
+    world.pending_seeds.clear();
+    let session = TmuxSession::launch_targetless(&binary, world.env.clone())
+        .expect("tmux session must launch — install tmux and rebuild the CLI if this fails");
+    std::thread::sleep(Duration::from_millis(800));
+    world.session = Some(session);
+}

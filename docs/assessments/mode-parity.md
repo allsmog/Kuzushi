@@ -42,6 +42,14 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 - **Interactive shell views** are shell-only: Workbench, Activity dashboard,
   replay/trace, prompt tuning, actor detail, guided phase picker, model/auth
   pickers, and two-stage idle Ctrl+C.
+- **Ordered onboarding gate is shell-only.** The interactive front door runs a
+  single ordered gate — Target → Model → Credentials → Planning — via the pure
+  `initial_onboarding_phase` fn. A bare `kuzushi` (no `--target`) opens the
+  target picker first (only when `allow_target_gate` is set by the interactive
+  launch); a missing API key opens the inline credential-entry step (API-key
+  paste / OAuth / `d` offline demo) instead of dumping to the Workbench.
+  `KUZUSHI_SKIP_ONBOARDING`, headless, and plain modes bypass the whole gate.
+  Explicit-target consent (PR #64) is intact — nothing silently defaults to cwd.
 - **`--ci` is scan-only.** Headless `kuzushi run` always emits JSON on stdout
   and writes run artifacts for machine consumers; it does not have a `--json`
   flag.

@@ -350,14 +350,23 @@ is expected to behave identically and should be filed as a parity bug.
   plain/non-TTY. `LIVE` lights while shell work is actually running (the shared
   `ShellApp::has_running_work` signal); pane focus lives on `app.workbench_focus`.
 - **Launch-time target picker (`ShellView::TargetPicker`)** — interactive
-  only. A bare `kuzushi` (no `--target`) on a real TTY opens a picker
-  (cwd + child repos/previous `.kuzushi` targets, via
-  `discover_target_candidates`) before the model/auth/planning chain;
-  selection runs the same wiring as the `target <path>` verb. Hooked in
-  `run_terminal_shell` (never construction) so headless, plain-mode, and
-  test apps keep the targetless default; `KUZUSHI_SKIP_ONBOARDING` skips
-  it. Explicit-target consent (PR #64) is preserved — nothing silently
-  falls back to cwd.
+  only, and now the **first phase of the ordered onboarding gate** (Target →
+  Model → Credentials → Planning). A bare `kuzushi` (no `--target`) on a real
+  TTY opens a picker (cwd + child repos/previous `.kuzushi` targets, via
+  `discover_target_candidates`) before the model/credentials/planning chain;
+  selection runs the same wiring as the `target <path>` verb and re-enters the
+  gate. The decision is expressed in the pure `initial_onboarding_phase` fn via
+  `OnboardingInputs::allow_target_gate`, which only the interactive launch
+  (`run_shell::apply_launch_onboarding` → `ShellApp::launch_onboarding_phase`)
+  sets `true`; construction and target activation pass `false`, so headless,
+  plain-mode, and test apps keep the targetless default. `KUZUSHI_SKIP_ONBOARDING`
+  short-circuits the whole gate inside the pure fn (no separate launch-site env
+  check). Explicit-target consent (PR #64) is preserved — the picker only
+  *offers* cwd as a candidate row, selection is an explicit Enter, and Esc
+  opts into targetless browsing; nothing silently falls back to cwd. A missing
+  API key opens the inline credential-entry step (`open_credential_entry`,
+  reusing the `AuthMethodPicker` surface: API-key paste / OAuth / `d` offline
+  demo) instead of logging a message and dumping the operator on the Workbench.
 - **Engagement journey spine (`next`, phase rail, phase chip)** —
   shell-only operator orientation. `ui_view_models/journey.rs` derives the
   current 組 map → 崩 hunt → 作 confirm → 掛 fix phase from workspace reality

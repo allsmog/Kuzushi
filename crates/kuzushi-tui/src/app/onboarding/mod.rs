@@ -6,6 +6,7 @@
 //! under `app/state_transitions/` (key handling), `renderer/chrome/cards/`
 //! (rendering), and `app/onboarding/` (state + dependency graph).
 
+mod auth_rows;
 mod controls;
 mod dependencies;
 mod failure;
@@ -18,6 +19,9 @@ mod target_candidates;
 mod task_id;
 mod task_row;
 
+pub use auth_rows::{
+    auth_method_row_kinds, auth_method_rows, AuthMethodRow, AuthMethodRowKind,
+};
 pub use controls::{
     build_execution_plan, row_disposition, toggle_planning_row, RowDisposition, ToggleOutcome,
 };
