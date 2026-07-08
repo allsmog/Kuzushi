@@ -170,7 +170,9 @@ pub(crate) use home_cockpit::{
     home_cockpit_model, HomeArtifactRow, HomeCockpitModel, HomeFindingsCard, HomeNextCard,
     HomeRunArtifactChip, HomeRunCard, HomeTopRiskRow,
 };
-pub(crate) use jobs_registry::{jobs_registry_model, JobRow, JobRunStatus, JobSource, JobsRegistryModel};
+pub(crate) use jobs_registry::{
+    jobs_registry_model, JobRow, JobRunStatus, JobSource, JobsRegistryModel,
+};
 pub(crate) use journey::{
     journey_footer_segment, journey_model, journey_phase_segment, JourneyModel, JourneyPhaseState,
     JourneyPhaseStatus, JourneyPhaseTone,

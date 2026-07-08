@@ -26,8 +26,7 @@ fn jobs_registry_model_projects_recent_disk_runs_newest_first() {
     );
     persist(
         &app,
-        RunSummary::running("scan-200-b", "scan", Some("sast:scan".into()), "/repo")
-            .failed("boom"),
+        RunSummary::running("scan-200-b", "scan", Some("sast:scan".into()), "/repo").failed("boom"),
     );
 
     let model = jobs_registry_model(&app, 20);

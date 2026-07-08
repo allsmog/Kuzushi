@@ -139,13 +139,20 @@ fn append_jobs_footer(
 
 fn append_empty_jobs(lines: &mut Vec<Line<'static>>) {
     let runs_root = ui_runs_root_relative_path();
-    let detail = format!("live jobs appear here while running; recent runs load from {runs_root}/<id>.");
+    let detail =
+        format!("live jobs appear here while running; recent runs load from {runs_root}/<id>.");
     lines.extend(empty_state_panel(
         "no jobs yet",
         &[&detail, "this workspace has not run a module yet."],
         &[
-            ("scan", "start a background scan · streams into this registry"),
-            ("run <tool>", "queue more with `queue <tool>` while one runs"),
+            (
+                "scan",
+                "start a background scan · streams into this registry",
+            ),
+            (
+                "run <tool>",
+                "queue more with `queue <tool>` while one runs",
+            ),
         ],
     ));
 }

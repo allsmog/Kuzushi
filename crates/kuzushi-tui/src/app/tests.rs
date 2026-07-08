@@ -1453,7 +1453,7 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
-            | ShellEffect::CancelJob(_)
+        | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -1554,7 +1554,7 @@ fn planner_reducer_returns_start_effect_without_spawning_worker() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
-            | ShellEffect::CancelJob(_)
+        | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -1653,7 +1653,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
-            | ShellEffect::CancelJob(_)
+        | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -1737,7 +1737,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
-            | ShellEffect::CancelJob(_)
+        | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)

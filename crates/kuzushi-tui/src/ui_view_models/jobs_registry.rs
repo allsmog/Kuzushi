@@ -161,7 +161,11 @@ fn live_run_phase(session: &ActivitySession, scan_stage: Option<&str>) -> Option
                 row.last_label.clone()
             }
         });
-    active.or_else(|| scan_stage.map(str::to_string).filter(|stage| !stage.is_empty()))
+    active.or_else(|| {
+        scan_stage
+            .map(str::to_string)
+            .filter(|stage| !stage.is_empty())
+    })
 }
 
 fn worker_job_rows(app: &ShellApp) -> Vec<JobRow> {
