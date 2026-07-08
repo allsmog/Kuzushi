@@ -1,7 +1,7 @@
 use crate::findings::{
     derive_triage_state, finding_lifecycle_status, proof_state_label, runtime_validation_label,
     Finding, FindingTriageState, PersistedVerification, StableLifecycleStatus, StaticProofState,
-    VulnSource,
+    TriageAuthor, VulnSource,
 };
 use std::collections::HashMap;
 
@@ -145,7 +145,9 @@ fn review_summary(
             .map(|review| review.decision.verdict.as_str().to_string())
             .unwrap_or_else(|| "needs_review".to_string()),
         triage_state: derived.as_str().to_string(),
-        dismissal: review.and_then(|review| dismissal_summary(&review.decision)),
+        dismissal: review.and_then(|review| {
+            dismissal_summary(&review.decision, review.decided_at.clone())
+        }),
         review_decision_conflict: review.and_then(|review| {
             review
                 .decision_conflict_label(finding)
@@ -161,12 +163,20 @@ fn review_summary(
 
 fn dismissal_summary(
     decision: &crate::findings::ReviewDecision,
+    decided_at: Option<String>,
 ) -> Option<WorkspaceDismissalExportSummary> {
+    // Only a human dismissal is a real suppression. An LLM auto-triage
+    // (author == Auto) must never emit a SARIF suppression asserting a human
+    // accepted the risk — mirror `human_decision_state` in the domain fold.
+    if decision.author != TriageAuthor::Human {
+        return None;
+    }
     let reason = decision.effective_dismiss_reason()?;
     Some(WorkspaceDismissalExportSummary {
         reason: reason.as_str().to_string(),
         note: decision.rationale.clone(),
         actor: decision.actor.clone(),
+        at: decided_at,
     })
 }
 

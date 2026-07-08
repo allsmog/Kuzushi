@@ -132,6 +132,7 @@ fn sarif_suppression(record: &WorkspaceFindingExportRecord) -> Option<serde_json
         "properties": {
             "kuzushiDismissReason": dismissal.reason,
             "kuzushiDismissedBy": dismissal.actor,
+            "kuzushiDismissedAt": dismissal.at,
             "kuzushiNote": dismissal.note,
             "kuzushiTriageState": record.triage_state,
         },

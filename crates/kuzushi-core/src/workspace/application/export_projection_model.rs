@@ -60,6 +60,8 @@ pub struct WorkspaceDismissalExportSummary {
     pub note: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]

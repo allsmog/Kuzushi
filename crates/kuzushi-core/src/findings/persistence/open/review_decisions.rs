@@ -92,6 +92,58 @@ impl FindingStore {
         self.latest_review_decision_for_identity(&identity_id)
     }
 
+    /// Most recent HUMAN-authored decision for a finding's identity. The triage
+    /// fold must ignore a later automated re-triage so an LLM verdict cannot
+    /// mask a human `Confirmed`/dismissal (which would flip a `Fixed` to
+    /// `Removed`, or resurrect a dismissed finding).
+    pub fn latest_human_review_decision_for_finding_identity(
+        &self,
+        finding_id: i64,
+    ) -> Result<Option<ReviewDecisionRecord>> {
+        let Some(identity_id) = self.identity_id_for_finding(finding_id)? else {
+            return self.latest_human_review_decision(finding_id);
+        };
+        self.latest_human_review_decision_for_identity(&identity_id)
+    }
+
+    fn latest_human_review_decision(
+        &self,
+        finding_id: i64,
+    ) -> Result<Option<ReviewDecisionRecord>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            select id, finding_id, identity_id, decision_verdict, triage_verdict,
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+              from review_decisions
+             where finding_id = ?1 and author = 'human'
+             order by created_at desc, id desc
+             limit 1
+            "#,
+        )?;
+        stmt.query_row(params![finding_id], review_decision_record_from_row)
+            .optional()
+            .context("Could not load latest human review decision")
+    }
+
+    fn latest_human_review_decision_for_identity(
+        &self,
+        identity_id: &str,
+    ) -> Result<Option<ReviewDecisionRecord>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            select id, finding_id, identity_id, decision_verdict, triage_verdict,
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+              from review_decisions
+             where identity_id = ?1 and author = 'human'
+             order by created_at desc, id desc
+             limit 1
+            "#,
+        )?;
+        stmt.query_row(params![identity_id], review_decision_record_from_row)
+            .optional()
+            .context("Could not load latest human review decision for identity")
+    }
+
     pub fn append_user_review_decision(
         &self,
         finding_id: i64,

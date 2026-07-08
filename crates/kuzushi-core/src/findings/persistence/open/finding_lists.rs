@@ -48,7 +48,10 @@ fn push_matching_finding(
     }
     if filter.has_derived_triage_state_filter() {
         let lifecycle = store.stable_lifecycle_status_for_finding(&finding)?;
-        let derived = derive_triage_state(lifecycle, review_decision.as_ref());
+        // The fold reads the latest HUMAN decision, not the latest of any
+        // author, so a later automated re-triage cannot mask a human verdict.
+        let human_decision = latest_human_review_decision_for_filter(store, &finding)?;
+        let derived = derive_triage_state(lifecycle, human_decision.as_ref());
         if !filter.matches_triage_lifecycle(&derived) {
             return Ok(false);
         }
@@ -87,6 +90,18 @@ fn load_latest_review_decision_for_filter(
         Some(finding_id) => store.latest_review_decision(finding_id),
         None => Ok(None),
     }
+}
+
+fn latest_human_review_decision_for_filter(
+    store: &FindingStore,
+    finding: &Finding,
+) -> Result<Option<ReviewDecision>> {
+    let Some(finding_id) = finding.id else {
+        return Ok(None);
+    };
+    Ok(store
+        .latest_human_review_decision_for_finding_identity(finding_id)?
+        .map(|record| record.decision))
 }
 
 fn review_cache_key(finding: &Finding) -> Option<String> {
