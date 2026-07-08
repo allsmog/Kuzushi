@@ -97,12 +97,24 @@ mod tests {
             .read_all()
             .unwrap();
         assert_eq!(events.len(), 3);
-        assert_eq!(events[0].event_kind, crate::event_log::EventKind::RunStarted);
-        assert_eq!(events[1].event_kind, crate::event_log::EventKind::FindingObserved);
-        assert_eq!(events[2].event_kind, crate::event_log::EventKind::SuppressionAdded);
+        assert_eq!(
+            events[0].event_kind,
+            crate::event_log::EventKind::RunStarted
+        );
+        assert_eq!(
+            events[1].event_kind,
+            crate::event_log::EventKind::FindingObserved
+        );
+        assert_eq!(
+            events[2].event_kind,
+            crate::event_log::EventKind::SuppressionAdded
+        );
         assert_eq!(
             events[2].payload["stableFp"],
-            persisted.identity_id.as_deref().unwrap_or(&persisted.fingerprint)
+            persisted
+                .identity_id
+                .as_deref()
+                .unwrap_or(&persisted.fingerprint)
         );
     }
 
@@ -272,8 +284,8 @@ mod tests {
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         FindingStore::open(workspace.findings_db_path()).unwrap();
         let output = workspace.root().join("exports/empty.json");
-        let options = WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
-            .with_allow_empty(false);
+        let options =
+            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json)).with_allow_empty(false);
 
         let error = export_workspace_findings_with_options(&workspace, &output, options)
             .unwrap_err()
@@ -353,9 +365,7 @@ mod tests {
                 .with_completeness(WorkspaceExportCompleteness::Open);
 
             let preview = preview_workspace_findings_export(&workspace, format, options).unwrap();
-            let output = tmp
-                .path()
-                .join(format!("preview-equivalent.{extension}"));
+            let output = tmp.path().join(format!("preview-equivalent.{extension}"));
             let report =
                 export_workspace_findings_with_options(&workspace, &output, options).unwrap();
 
@@ -376,12 +386,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         FindingStore::open(workspace.findings_db_path()).unwrap();
-        let options = WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
-            .with_allow_empty(false);
+        let options =
+            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json)).with_allow_empty(false);
 
-        let error = preview_workspace_findings_export(&workspace, WorkspaceExportFormat::Json, options)
-            .unwrap_err()
-            .to_string();
+        let error =
+            preview_workspace_findings_export(&workspace, WorkspaceExportFormat::Json, options)
+                .unwrap_err()
+                .to_string();
 
         assert!(error.contains("selected 0 findings"));
 
@@ -621,9 +632,9 @@ mod tests {
         let first_line = body.lines().next().unwrap();
         assert!(first_line.starts_with("alias,identity_id,fingerprint,kind,rule_id,title"));
         assert!(first_line.contains("confidence,priority,lifecycle_status,review_decision"));
-        assert!(first_line.contains(
-            "review_decision,review_decision_conflict,review_decision_author"
-        ));
+        assert!(
+            first_line.contains("review_decision,review_decision_conflict,review_decision_author")
+        );
         assert!(first_line.contains("review_decision_author,triage_verdict,suppressed"));
         assert!(first_line.contains(
             "observed_evidence_present,observed_evidence_count,observed_code_evidence_count"
@@ -900,7 +911,9 @@ mod tests {
         assert!(readme.contains("**Completeness:** `all`"));
         assert!(readme.contains("**Included:** 2 of 2 finding(s)"));
         assert!(readme.contains("**Review decisions:** needs_review=2"));
-        assert!(readme.contains("| Alias | Severity | Decision | Lifecycle | Evidence | Location |"));
+        assert!(
+            readme.contains("| Alias | Severity | Decision | Lifecycle | Evidence | Location |")
+        );
 
         let manifest: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(output.join("manifest.json")).unwrap())
@@ -1037,5 +1050,73 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("must be empty"));
+    }
+
+    #[test]
+    fn human_confirmed_decision_masks_later_auto_retriage_in_export() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("run-1", workspace.root(), "completed")
+            .unwrap();
+
+        // Create a finding and record human Confirmed decision
+        let finding = fixture_finding("fixture/human-confirmed", Severity::High, 10);
+        let finding_id = store.insert_finding("run-1", &finding).unwrap();
+        store
+            .save_triage_with_author(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.9,
+                    rationale: "human confirmed this is real".to_string(),
+                    cost_usd: 0.0,
+                },
+                TriageAuthor::Human,
+            )
+            .unwrap();
+
+        // Simulate an automated re-triage that tries to change the verdict to FalsePositive
+        // (e.g., a later LLM run changing its mind)
+        store
+            .save_triage_with_author(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::FalsePositive,
+                    confidence: 0.7,
+                    rationale: "auto re-triage thinks this is fp".to_string(),
+                    cost_usd: 0.0,
+                },
+                TriageAuthor::Auto,
+            )
+            .unwrap();
+
+        // Export should use the human decision (Confirmed), not the auto re-triage
+        let output = tmp.path().join("export.json");
+        export_workspace_findings_with_options(
+            &workspace,
+            &output,
+            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+                .with_completeness(WorkspaceExportCompleteness::Complete),
+        )
+        .unwrap();
+
+        let export_json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+        let exported = &export_json["findings"][0];
+
+        // The exported triage_state must reflect the human decision (confirmed),
+        // not the auto re-triage (open). This is the core fix: the export path
+        // now uses the latest HUMAN decision, not the latest ANY-author decision.
+        assert_eq!(
+            exported["triageState"], "confirmed",
+            "human Confirmed decision must be preserved in export despite later auto re-triage"
+        );
+        // Verify the decision author is human, not auto
+        assert_eq!(
+            exported["reviewDecisionAuthor"], "human",
+            "review decision author must be human, not auto"
+        );
     }
 }

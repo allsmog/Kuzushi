@@ -346,7 +346,13 @@ fn latest_stored_review_context(
                 WorkspaceFindingReviewContext::from_record_for_finding(record, finding)
             }));
         }
-        let record = store.latest_review_decision_for_identity(identity_id)?;
+        // Use human-only review decision: a later automated re-triage must
+        // not mask a human Confirmed/dismissal verdict (preventing export as "open"
+        // when a human previously confirmed the finding).
+        let record = finding.id.map_or_else(
+            || Ok(None),
+            |finding_id| store.latest_human_review_decision_for_finding_identity(finding_id),
+        )?;
         let review = record
             .as_ref()
             .map(|record| WorkspaceFindingReviewContext::from_record_for_finding(record, finding));
@@ -355,7 +361,7 @@ fn latest_stored_review_context(
     }
     match finding.id {
         Some(finding_id) => Ok(store
-            .latest_review_decision(finding_id)?
+            .latest_human_review_decision_for_finding_identity(finding_id)?
             .as_ref()
             .map(WorkspaceFindingReviewContext::from_record)),
         None => Ok(None),
@@ -544,7 +550,10 @@ fn csv_signal_fields(record: &WorkspaceFindingExportRecord) -> Vec<String> {
         record.evidence.observed_code_count.to_string(),
         record.evidence.observed_capture_count.to_string(),
         record.evidence.observed_other_count.to_string(),
-        record.evidence.model_generated_reasoning_present.to_string(),
+        record
+            .evidence
+            .model_generated_reasoning_present
+            .to_string(),
         record.evidence.model_generated_reasoning_count.to_string(),
         record.evidence.derived_source_present.to_string(),
         record.analysis.automated_reasoning_present.to_string(),
@@ -561,7 +570,11 @@ fn csv_provenance_fields(record: &WorkspaceFindingExportRecord) -> Vec<String> {
         record.corroboration_count.to_string(),
         record.run_id.clone().unwrap_or_default(),
         record.provenance.run_status.clone().unwrap_or_default(),
-        record.provenance.kuzushi_version.clone().unwrap_or_default(),
+        record
+            .provenance
+            .kuzushi_version
+            .clone()
+            .unwrap_or_default(),
         record.provenance.model.clone().unwrap_or_default(),
     ]
 }
