@@ -188,11 +188,17 @@ fn default_heap_mb() -> u64 {
 
 /// Physical RAM in MB via POSIX `sysconf` (portable across macOS and Linux),
 /// or `None` when the query is unavailable.
+#[cfg(unix)]
 fn physical_ram_mb() -> Option<u64> {
     // SAFETY: sysconf only reads system constants; no memory is touched.
     let pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
     (pages > 0 && page_size > 0).then(|| (pages as u64) * (page_size as u64) / (1024 * 1024))
+}
+
+#[cfg(not(unix))]
+fn physical_ram_mb() -> Option<u64> {
+    None
 }
 
 /// Interpret a finished joern-parse run: `Ok(None)` on success, `Ok(Some(skip))`
