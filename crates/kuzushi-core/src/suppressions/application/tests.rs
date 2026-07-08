@@ -1,11 +1,15 @@
 use super::compile_scope_rule::compile_scope_rule;
 use super::reconcile_suppression_events::reconcile_suppression_events;
-use crate::findings::{Finding, FindingStore, Severity};
+use super::run_sweep::run_suppression_sweep;
+use crate::findings::{
+    Finding, FindingStore, ReviewDecision, ReviewDecisionVerdict, Severity, TriageAuthor,
+};
 use crate::suppressions::domain::{
     evaluate_suppressions, FindingRef, SuppressionOrigin, SuppressionPredicate, SuppressionReason,
     SuppressionRule,
 };
-use crate::workspace::ProgramScope;
+use crate::suppressions::persistence::save_suppression_rules;
+use crate::workspace::{ProgramScope, WorkspaceTarget};
 
 fn file_rule(id: &str, fingerprint: &str, expires_at_unix: Option<u64>) -> SuppressionRule {
     SuppressionRule {
@@ -89,6 +93,102 @@ fn expired_rule_reopens_previously_suppressed_finding() {
     let summary = reconcile_suppression_events(&store, &report2, "system:sweep").unwrap();
     assert_eq!(summary.expired, 1);
     assert!(!store.list_findings(10).unwrap()[0].suppressed, "expiry must reopen");
+}
+
+fn workspace_store(tmp: &std::path::Path) -> (WorkspaceTarget, FindingStore) {
+    std::fs::create_dir_all(tmp.join("src")).unwrap();
+    let workspace = WorkspaceTarget::new(tmp).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("run-sup", workspace.root(), "completed")
+        .unwrap();
+    (workspace, store)
+}
+
+#[test]
+fn deleting_ignore_comment_reopens_the_finding() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (workspace, store) = workspace_store(tmp.path());
+    let source = workspace.root().join("src/app.rs");
+    std::fs::write(
+        &source,
+        "fn main() {\n    // kuzushi-ignore: rust.sqli — false-positive\n    run_query(input);\n}\n",
+    )
+    .unwrap();
+    let finding = Finding::new_tool(
+        "semgrep",
+        "rust.sqli",
+        "src/app.rs",
+        3,
+        Some(3),
+        Severity::High,
+        "tainted query",
+    );
+    store.insert_finding("run-sup", &finding).unwrap();
+
+    // In-source ignore comment suppresses (finding still stored, now flagged).
+    let first = run_suppression_sweep(&store, &workspace, "test").unwrap();
+    assert_eq!(first.summary.added, 1);
+    assert!(store.list_findings(10).unwrap()[0].suppressed);
+
+    // Delete the comment (keep line numbering) → next sweep reopens it.
+    std::fs::write(&source, "fn main() {\n\n    run_query(input);\n}\n").unwrap();
+    let second = run_suppression_sweep(&store, &workspace, "test").unwrap();
+    assert_eq!(second.summary.removed, 1, "deleting the comment must reopen");
+    assert!(!store.list_findings(10).unwrap()[0].suppressed);
+}
+
+#[test]
+fn lapsing_rule_never_reopens_a_manual_dismissal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (workspace, store) = workspace_store(tmp.path());
+    let finding = Finding::new_tool(
+        "semgrep",
+        "rust.sqli",
+        "src/app.rs",
+        3,
+        Some(3),
+        Severity::High,
+        "tainted query",
+    );
+    let finding_id = store.insert_finding("run-sup", &finding).unwrap();
+
+    // Human dismissal → SuppressionAdded with NO ruleId (manual).
+    store
+        .append_user_review_decision(
+            finding_id,
+            &ReviewDecision {
+                verdict: ReviewDecisionVerdict::Suppressed,
+                author: TriageAuthor::Human,
+                confidence: 1.0,
+                rationale: "reviewed by hand".to_string(),
+            },
+        )
+        .unwrap();
+    assert!(store.list_findings(10).unwrap()[0].suppressed);
+
+    // A broad rule that also matches the finding but has already lapsed.
+    let lapsed = SuppressionRule {
+        id: "sup-broad".to_string(),
+        predicate: SuppressionPredicate {
+            rule_id: Some("rust.sqli".to_string()),
+            ..SuppressionPredicate::empty()
+        },
+        reason: SuppressionReason::AcceptableRisk,
+        statement: "broad".to_string(),
+        actor: "op".to_string(),
+        created_at_unix: 1,
+        expires_at_unix: Some(2),
+        origin: SuppressionOrigin::File,
+    };
+    save_suppression_rules(&workspace, &[lapsed]).unwrap();
+
+    let sweep = run_suppression_sweep(&store, &workspace, "test").unwrap();
+    assert_eq!(sweep.summary.expired, 0, "manual dismissal must not be reopened");
+    assert!(
+        store.list_findings(10).unwrap()[0].suppressed,
+        "human dismissal survives the lapsing rule"
+    );
 }
 
 #[test]
