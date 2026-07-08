@@ -7,6 +7,7 @@ mod domain;
 mod git_metadata;
 pub mod inventory;
 pub mod source_span;
+pub mod tool_shelf;
 
 #[cfg(test)]
 mod tests;
@@ -52,3 +53,7 @@ pub use git_metadata::{
 };
 pub use inventory::*;
 pub use source_span::*;
+pub use tool_shelf::{
+    load_tool_shelf, record_tool_use, save_tool_shelf, workspace_tool_shelf_path, RecentTool,
+    ToolShelf, RECENTS_CAP, WORKSPACE_TOOL_SHELF_FILE,
+};

@@ -31,6 +31,34 @@ mod tests {
             parse_command("show tools codeql"),
             ShellCommand::Tools(Some("codeql".to_string()))
         );
+        assert_eq!(
+            parse_command("find phase:hunt taint"),
+            ShellCommand::Tools(Some("phase:hunt taint".to_string()))
+        );
+        assert_eq!(
+            parse_command("tools --fav"),
+            ShellCommand::Tools(Some("fav:yes".to_string()))
+        );
+        assert_eq!(
+            parse_command("tools --fav phase:hunt"),
+            ShellCommand::Tools(Some("fav:yes phase:hunt".to_string()))
+        );
+        assert_eq!(
+            parse_command("find --fav"),
+            ShellCommand::Tools(Some("fav:yes".to_string()))
+        );
+        assert_eq!(
+            parse_command("find --fav phase:hunt"),
+            ShellCommand::Tools(Some("fav:yes phase:hunt".to_string()))
+        );
+        assert_eq!(
+            parse_command("favorite semgrep:scan"),
+            ShellCommand::FavoriteTool("semgrep:scan".to_string())
+        );
+        assert_eq!(
+            parse_command("fav semgrep:scan"),
+            ShellCommand::FavoriteTool("semgrep:scan".to_string())
+        );
         assert_eq!(parse_command("/findings"), ShellCommand::Findings);
         assert_eq!(parse_command("/f"), ShellCommand::Findings);
         assert_eq!(
@@ -677,6 +705,7 @@ mod tests {
             "demo",
             "detach",
             "failure-handoff",
+            "favorite-tool",
             "file-picker",
             "findings",
             "findings-filter",
@@ -784,6 +813,7 @@ mod tests {
             ShellCommand::Modules => "modules",
             ShellCommand::Recommend => "recommend",
             ShellCommand::Tools(_) => "tools",
+            ShellCommand::FavoriteTool(_) => "favorite-tool",
             ShellCommand::Workbench(_) => "workbench",
             ShellCommand::Aim(_) => "aim",
             ShellCommand::Findings => "findings",

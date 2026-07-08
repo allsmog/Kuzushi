@@ -39,9 +39,21 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "tools [query]",
-        aliases: &["/tools", "show tools", "tools semgrep"],
+        aliases: &["/tools", "show tools", "tools semgrep", "tools --fav"],
         category: ShellCommandCategory::Navigation,
         description: "list or filter routed Rust tools",
+    },
+    ShellCommandSpec {
+        command: "find [query]",
+        aliases: &["/find", "find phase:hunt taint"],
+        category: ShellCommandCategory::Navigation,
+        description: "open the Tools view grammar-first (alias for tools [query])",
+    },
+    ShellCommandSpec {
+        command: "favorite <tool>",
+        aliases: &["/favorite <tool>", "fav <tool>", "/fav <tool>"],
+        category: ShellCommandCategory::Navigation,
+        description: "toggle a tool on the per-workspace YOUR TOOLS shelf",
     },
     ShellCommandSpec {
         command: "doctor",

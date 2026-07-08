@@ -348,6 +348,39 @@ impl ShellApp {
         self.session.set_target(target);
     }
 
+    /// Cached "YOUR TOOLS" shelf. Read-only; never triggers IO, so it is safe
+    /// to call from per-frame view models.
+    pub(crate) fn tool_shelf(&self) -> &kuzushi_core::workspace::ToolShelf {
+        self.domain.tool_shelf()
+    }
+
+    /// Reload the shelf cache from the active target's `tool-shelf.json`. Call
+    /// this on target wiring and after a favorite toggle — not per frame. With
+    /// no target the shelf resets to empty (no cwd fallback).
+    pub(crate) fn reload_tool_shelf(&mut self) {
+        let shelf = self
+            .target_owned()
+            .and_then(|path| kuzushi_core::WorkspaceTarget::new(path).ok())
+            .and_then(|target| kuzushi_core::workspace::load_tool_shelf(&target).ok())
+            .unwrap_or_default();
+        self.domain.set_tool_shelf(shelf);
+    }
+
+    /// Toggle a tool favorite: load-modify-save on disk, refresh the cache, and
+    /// return the new favorite state. Errors when there is no active target.
+    pub(crate) fn toggle_tool_favorite(&mut self, tool: &str) -> anyhow::Result<bool> {
+        let path = self.target_owned().ok_or_else(|| {
+            anyhow::anyhow!("favorites need a target; open one with `target <path>`")
+        })?;
+        let target = kuzushi_core::WorkspaceTarget::new(path)?;
+        target.ensure_state_dir()?;
+        let mut shelf = kuzushi_core::workspace::load_tool_shelf(&target)?;
+        let now_favorite = shelf.toggle_favorite(tool);
+        kuzushi_core::workspace::save_tool_shelf(&target, &shelf)?;
+        self.domain.set_tool_shelf(shelf);
+        Ok(now_favorite)
+    }
+
     pub fn active_scope(&self) -> Option<&TargetCandidateScope> {
         self.session.active_scope()
     }

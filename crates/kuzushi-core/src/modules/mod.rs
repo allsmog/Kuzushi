@@ -45,6 +45,7 @@ pub(in crate::modules) use workspace_module::*;
 mod agentic_sast;
 mod application;
 mod builtins;
+mod catalog_query;
 mod chrome_rce;
 pub(crate) mod context;
 mod contracts;
@@ -102,10 +103,11 @@ mod verify_module;
 mod workspace_module;
 
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
+pub use catalog_query::{RuntimeFilter, ToolQuery};
 pub use contracts::ToolExecutionContext;
 pub use contracts::{
-    BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec, OptionType,
-    RuntimeRequirement, ToolDescriptor,
+    canonical_tool_phase, BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec,
+    OptionType, RuntimeRequirement, ToolDescriptor, ToolPhase,
 };
 pub use dynamic_loader::DynamicModuleLoadOptions;
 pub use options::coerce_option_value;

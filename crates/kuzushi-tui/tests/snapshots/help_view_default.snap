@@ -24,7 +24,11 @@ modules - browse native Rust modules
 recommend - open latest module recommendations
   aliases / examples: /recommend, rec, /rec
 tools [query] - list or filter routed Rust tools
-  aliases / examples: /tools, show tools, tools semgrep
+  aliases / examples: /tools, show tools, tools semgrep, tools --fav
+find [query] - open the Tools view grammar-first (alias for tools [query])
+  aliases / examples: /find, find phase:hunt taint
+favorite <tool> - toggle a tool on the per-workspace YOUR TOOLS shelf
+  aliases / examples: /favorite <tool>, fav <tool>, /fav <tool>
 doctor - show shell preflight health
   aliases / examples: /doctor, health, /health
 use <module> - focus a module

@@ -61,6 +61,7 @@ impl ModuleRegistry {
     }
 
     pub fn register(&mut self, builtin: BuiltinModule) {
+        let builtin = builtin.with_stamped_phases();
         self.register_builtin_tools(&builtin);
         self.register_builtin_dag_executors(&builtin);
         self.modules.insert(builtin.metadata().id.clone(), builtin);

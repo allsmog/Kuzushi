@@ -996,4 +996,107 @@ export default {
             );
         }
     }
+
+    #[test]
+    fn successful_visible_tool_run_is_recorded_on_the_recents_shelf() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        registry
+            .execute_tool("workspace:status", json!({}), &ctx)
+            .unwrap();
+
+        let shelf = crate::workspace::load_tool_shelf(&workspace).unwrap();
+        assert!(
+            shelf
+                .recents()
+                .iter()
+                .any(|entry| entry.tool == "workspace:status"),
+            "a successful, visible tool run should land on the recents shelf"
+        );
+    }
+
+    #[test]
+    fn failed_tool_run_is_not_recorded_on_the_recents_shelf() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        // recon:import is visible (not hidden), but a nonexistent import file
+        // makes the executor itself fail after option validation passes.
+        let result = registry.execute_tool(
+            "recon:import",
+            json!({"tool": "nmap-xml", "path": "/nonexistent/does-not-exist.xml"}),
+            &ctx,
+        );
+        assert!(
+            result.is_err(),
+            "expected recon:import to fail on a missing file"
+        );
+
+        let shelf = crate::workspace::load_tool_shelf(&workspace).unwrap();
+        assert!(
+            shelf.recents().is_empty(),
+            "a failed tool run must not show up on the YOUR TOOLS shelf"
+        );
+    }
+
+    #[test]
+    fn hidden_module_tool_is_not_recorded_even_when_the_tool_itself_is_not_hidden() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        // threat-leads:read has `hidden: false` on the tool descriptor, but
+        // its owning module ("threat-leads") is hidden — the same policy
+        // `tools_with_modules` already applies for catalog visibility.
+        assert!(!registry.resolve_tool("threat-leads:read").unwrap().hidden);
+        assert!(registry
+            .all_modules()
+            .find(|module| module.metadata().id == "threat-leads")
+            .unwrap()
+            .is_hidden());
+
+        let artifact_dir = crate::workspace::workspace_state_root(workspace.root());
+        fs::create_dir_all(&artifact_dir).unwrap();
+        fs::write(
+            artifact_dir.join("threat-leads.json"),
+            json!({"leadCount": 0, "leads": []}).to_string(),
+        )
+        .unwrap();
+
+        let result = registry.execute_tool("threat-leads:read", json!({}), &ctx);
+        assert!(
+            result.is_ok(),
+            "expected threat-leads:read to succeed: {result:?}"
+        );
+
+        let shelf = crate::workspace::load_tool_shelf(&workspace).unwrap();
+        assert!(
+            shelf.recents().is_empty(),
+            "a hidden-module tool must not show up on the YOUR TOOLS shelf even on success"
+        );
+    }
 }

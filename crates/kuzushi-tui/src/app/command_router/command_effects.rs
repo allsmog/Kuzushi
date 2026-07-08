@@ -403,6 +403,10 @@ impl ShellApp {
                 self.open_tools_view(filter.clone());
                 Some(Vec::new())
             }
+            ShellCommand::FavoriteTool(tool) => {
+                self.toggle_favorite_tool(tool);
+                Some(Vec::new())
+            }
             _ => None,
         }
     }
@@ -524,8 +528,26 @@ impl ShellApp {
         );
     }
 
+    fn toggle_favorite_tool(&mut self, tool: &str) {
+        if self.registry().resolve_tool(tool).is_none() {
+            self.log("tool", format!("unknown tool {tool:?}"));
+            return;
+        }
+        match self.toggle_tool_favorite(tool) {
+            Ok(true) => self.log("tool", format!("★ favorited {tool}")),
+            Ok(false) => self.log("tool", format!("☆ unfavorited {tool}")),
+            Err(error) => self.log("tool", format!("{error}")),
+        }
+    }
+
     fn open_tools_view(&mut self, filter: Option<String>) {
         self.set_shell_view(ShellView::Tools);
+        self.reload_tool_shelf();
+        if let Some(expr) = filter.as_deref() {
+            if let Err(error) = kuzushi_core::modules::ToolQuery::parse(expr) {
+                self.log("tool", format!("invalid query {expr:?}: {error}"));
+            }
+        }
         self.router.tools_mut().open(filter.clone());
         let model = crate::ui_view_models::tools_model(self);
         let suffix = filter
