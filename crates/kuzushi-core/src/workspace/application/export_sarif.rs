@@ -112,8 +112,21 @@ fn sarif_result(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
                 "region": sarif_region(record),
             }
         }],
+        "rank": sarif_rank(&record.proof_confidence),
         "properties": sarif_properties(record),
     })
+}
+
+/// SARIF `rank` (0.0–100.0, higher = more significant) derived from the coarse
+/// proof/confidence band so downstream SARIF tools can sort by verification
+/// confidence, not just severity.
+fn sarif_rank(proof_confidence: &str) -> f64 {
+    match proof_confidence {
+        "confirmed" => 90.0,
+        "likely" => 60.0,
+        "dismissed" => 0.0,
+        _ => 30.0,
+    }
 }
 
 fn sarif_region(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
@@ -174,6 +187,7 @@ fn sarif_proof_properties(record: &WorkspaceFindingExportRecord) -> serde_json::
     json!({
         "kuzushiStaticProofState": record.static_proof_state,
         "kuzushiStaticProofLabel": record.static_proof_label,
+        "kuzushiProofConfidence": record.proof_confidence,
         "kuzushiVerification": record.verification.label,
         "kuzushiVerificationVerdict": record.verification.verdict,
         "kuzushiVerificationProofLevel": record.verification.proof_level,

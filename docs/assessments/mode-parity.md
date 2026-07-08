@@ -81,6 +81,12 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 - **DAG descriptors are not automatically execution ordering.** In the current
   Rust path, a `depends_on` edge is execution input only when the owning scan
   executor consumes it. Otherwise it is progress/catalog metadata.
+- **Workbench confidence-first display sort is shell-only and hardcoded.** The
+  Workbench findings pane re-orders the severity-major alias list by
+  `compare_findings_by_confidence` (`confidence_first_display_order` in
+  `crates/kuzushi-tui/src/ui_view_models/findings.rs`) before severity; there is
+  no `setg`-controlled toggle back to severity-first, and scan/run output/exports
+  keep the severity-major alias order.
 
 ## Current Parity Risks
 

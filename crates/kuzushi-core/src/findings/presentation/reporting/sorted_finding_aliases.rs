@@ -89,6 +89,16 @@ pub(in crate::findings) fn short_id(fingerprint: &str) -> String {
     fingerprint.chars().take(8).collect()
 }
 
+/// Total order over findings by `(confidence, severity, fingerprint)`. Shared by
+/// the core display sort and the Workbench display funnel so both agree.
+pub fn compare_findings_by_confidence(a: &Finding, b: &Finding) -> std::cmp::Ordering {
+    ProofConfidence::classify(a)
+        .rank()
+        .cmp(&ProofConfidence::classify(b).rank())
+        .then_with(|| severity_rank(a.severity).cmp(&severity_rank(b.severity)))
+        .then_with(|| a.fingerprint.cmp(&b.fingerprint))
+}
+
 pub(in crate::findings) fn severity_rank(severity: Severity) -> u8 {
     match severity {
         Severity::Critical => 0,
@@ -102,4 +112,63 @@ pub(in crate::findings) fn severity_rank(severity: Severity) -> u8 {
 
 pub(in crate::findings) fn pad(value: &str, width: usize) -> String {
     format!("{value:<width$}")
+}
+
+#[cfg(test)]
+mod compare_findings_by_confidence_tests {
+    use super::*;
+    use crate::findings::domain::{
+        PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification,
+    };
+
+    fn finding(
+        fingerprint: &str,
+        severity: Severity,
+        verification: Option<PersistedVerification>,
+    ) -> Finding {
+        Finding {
+            fingerprint: fingerprint.to_string(),
+            severity,
+            verification,
+            ..Finding::default()
+        }
+    }
+
+    fn confirmed() -> PersistedVerification {
+        PersistedVerification {
+            proof_level: 3,
+            proof_verdict: PersistedProofVerdict::Exploited,
+            backend: PersistedSandboxBackend::Plain,
+            language: None,
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 0,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            created_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn confidence_first_puts_low_confirmed_above_critical_unverified() {
+        let mut findings = vec![
+            finding("crit", Severity::Critical, None),
+            finding("low", Severity::Low, Some(confirmed())),
+        ];
+        findings.sort_by(compare_findings_by_confidence);
+        // The confirmed low finding sorts to the top under confidence-first.
+        assert_eq!(findings[0].fingerprint, "low");
+        assert_eq!(findings[1].fingerprint, "crit");
+    }
+
+    #[test]
+    fn severity_is_the_tie_break_when_confidence_matches() {
+        let mut findings = vec![
+            finding("low", Severity::Low, None),
+            finding("crit", Severity::Critical, None),
+        ];
+        findings.sort_by(compare_findings_by_confidence);
+        assert_eq!(findings[0].fingerprint, "crit");
+        assert_eq!(findings[1].fingerprint, "low");
+    }
 }

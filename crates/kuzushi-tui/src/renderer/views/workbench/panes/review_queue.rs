@@ -1,5 +1,6 @@
 use super::*;
 use crate::ui_view_models::{ReviewQueueModel, ReviewQueueRow, SeverityTone};
+use kuzushi_core::ProofConfidence;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Line, Span};
 
@@ -78,7 +79,8 @@ fn review_queue_row_line(row: &ReviewQueueRow, width: usize) -> Line<'static> {
     let marker = if row.selected { ">" } else { " " };
     let signals = review_queue_signal_text(row, width);
     let signals_width = review_queue_signal_width(width);
-    let title_budget = review_queue_title_budget(width, signals_width);
+    let chip = review_queue_confidence_chip(row, width);
+    let title_budget = review_queue_title_budget(width, signals_width, chip.chars().count());
     Line::from(vec![
         Span::styled(marker.to_string(), review_queue_row_marker_style(row)),
         Span::styled(
@@ -92,6 +94,11 @@ fn review_queue_row_line(row: &ReviewQueueRow, width: usize) -> Line<'static> {
         ),
         Span::raw(" "),
         Span::styled(
+            chip,
+            review_queue_row_style(row, theme::proof_confidence_tone(row.proof_confidence)),
+        ),
+        Span::raw(" "),
+        Span::styled(
             pad(&signals, signals_width),
             review_queue_row_style(row, review_queue_decision_style(row)),
         ),
@@ -101,6 +108,25 @@ fn review_queue_row_line(row: &ReviewQueueRow, width: usize) -> Line<'static> {
             review_queue_row_style(row, theme::primary()),
         ),
     ])
+}
+
+/// The confidence chip that sits between the severity glyph and the decision
+/// signals. Full word (`CONFIRMED`) at readable widths, a one-char marker
+/// (`✓ ◇ ? !`) when the row is too narrow to spend on a word.
+fn review_queue_confidence_chip(row: &ReviewQueueRow, width: usize) -> String {
+    if width < REVIEW_FULL_METADATA_MIN_WIDTH {
+        return proof_confidence_marker(row.proof_confidence).to_string();
+    }
+    row.proof_confidence_label.clone()
+}
+
+fn proof_confidence_marker(confidence: ProofConfidence) -> &'static str {
+    match confidence {
+        ProofConfidence::Confirmed => "✓",
+        ProofConfidence::Likely => "◇",
+        ProofConfidence::Unverified => "?",
+        ProofConfidence::Dismissed => "!",
+    }
 }
 
 fn review_queue_signal_text(row: &ReviewQueueRow, width: usize) -> String {
@@ -132,8 +158,8 @@ fn review_queue_signal_width(width: usize) -> usize {
     }
 }
 
-fn review_queue_title_budget(width: usize, signal_width: usize) -> usize {
-    let prefix_width = 2 + 7 + 1 + 1 + 1 + signal_width + 1;
+fn review_queue_title_budget(width: usize, signal_width: usize, chip_width: usize) -> usize {
+    let prefix_width = 2 + 7 + 1 + 1 + 1 + chip_width + 1 + signal_width + 1;
     width.saturating_sub(prefix_width).max(8)
 }
 
@@ -234,6 +260,8 @@ mod tests {
             identity_label: "FI-12345678".to_string(),
             severity_tone: SeverityTone::High,
             severity_label: "HIGH".to_string(),
+            proof_confidence: ProofConfidence::Confirmed,
+            proof_confidence_label: "CONFIRMED".to_string(),
             confidence_label: "91%".to_string(),
             priority_label: "review-order:1".to_string(),
             lifecycle_status: "statically_supported".to_string(),
@@ -283,6 +311,23 @@ mod tests {
         assert!(text.contains("evidence:1"), "{text}");
         assert!(text.contains("next:validate"), "{text}");
         assert!(text.contains("request reaches sink"), "{text}");
+    }
+
+    #[test]
+    fn row_shows_confidence_chip_after_severity_glyph() {
+        let row = review_row();
+        let wide = line_text(review_queue_row_line(&row, 220));
+        // At metadata widths the full band word sits right after the severity glyph.
+        assert!(wide.contains("CONFIRMED"), "{wide}");
+        assert!(wide.contains("H CONFIRMED"), "{wide}");
+    }
+
+    #[test]
+    fn row_collapses_confidence_to_marker_when_narrow() {
+        let row = review_row();
+        let narrow = line_text(review_queue_row_line(&row, 60));
+        assert!(!narrow.contains("CONFIRMED"), "{narrow}");
+        assert!(narrow.contains('✓'), "{narrow}");
     }
 
     #[test]

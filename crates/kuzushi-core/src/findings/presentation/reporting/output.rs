@@ -69,6 +69,7 @@ struct FindingListToolFinding {
     message: String,
     tool: String,
     static_proof_state: Option<String>,
+    proof_confidence: String,
     review_decision: Option<String>,
     triaged_by: Option<TriageAuthor>,
     source_signature: Option<String>,
@@ -95,6 +96,7 @@ impl FindingListToolFinding {
             static_proof_state: finding
                 .static_proof_state
                 .map(|state| state.as_str().to_string()),
+            proof_confidence: ProofConfidence::classify(finding).as_str().to_string(),
             review_decision: review_decision_label(finding),
             triaged_by: finding.triaged_by,
             source_signature: finding.source_signature.clone(),
@@ -164,6 +166,7 @@ struct FindingTableWidths {
     alias: usize,
     fingerprint: usize,
     severity: usize,
+    confidence: usize,
     verdict: usize,
     name: usize,
 }
@@ -187,6 +190,7 @@ fn finding_table_widths(aliased: &[(String, Finding)], findings: &[Finding]) -> 
         alias: max_alias_width(aliased),
         fingerprint: max_fingerprint_width(aliased),
         severity: max_severity_width(findings),
+        confidence: "unverified".len(),
         verdict: max_verdict_width(findings),
         name: max_name_width(findings),
     }
@@ -244,18 +248,20 @@ fn max_name_width(findings: &[Finding]) -> usize {
 fn finding_table_header(widths: FindingTableWidths) -> Vec<String> {
     vec![
         format!(
-            "  {}  {}  {}  {}  {}",
+            "  {}  {}  {}  {}  {}  {}",
             pad("Alias", widths.alias),
             pad("Fingerprint", widths.fingerprint),
             pad("Sev", widths.severity),
+            pad("Conf", widths.confidence),
             pad("Check", widths.verdict),
             pad("Name", widths.name)
         ),
         format!(
-            "  {}  {}  {}  {}  {}",
+            "  {}  {}  {}  {}  {}  {}",
             "-".repeat(widths.alias),
             "-".repeat(widths.fingerprint),
             "-".repeat(widths.severity),
+            "-".repeat(widths.confidence),
             "-".repeat(widths.verdict),
             "-".repeat(widths.name)
         ),
@@ -264,10 +270,11 @@ fn finding_table_header(widths: FindingTableWidths) -> Vec<String> {
 
 fn finding_table_row(alias: &str, finding: &Finding, widths: FindingTableWidths) -> String {
     format!(
-        "  {}  {}  {}  {}  {}",
+        "  {}  {}  {}  {}  {}  {}",
         pad(alias, widths.alias),
         pad(&short_id(&finding.fingerprint), widths.fingerprint),
         pad(finding.severity.as_str(), widths.severity),
+        pad(ProofConfidence::classify(finding).as_str(), widths.confidence),
         pad(
             FindingVerdictFilter::from_finding(finding).as_export_str(),
             widths.verdict

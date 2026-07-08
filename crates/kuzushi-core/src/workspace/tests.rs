@@ -94,12 +94,24 @@ mod tests {
             .read_all()
             .unwrap();
         assert_eq!(events.len(), 3);
-        assert_eq!(events[0].event_kind, crate::event_log::EventKind::RunStarted);
-        assert_eq!(events[1].event_kind, crate::event_log::EventKind::FindingObserved);
-        assert_eq!(events[2].event_kind, crate::event_log::EventKind::SuppressionAdded);
+        assert_eq!(
+            events[0].event_kind,
+            crate::event_log::EventKind::RunStarted
+        );
+        assert_eq!(
+            events[1].event_kind,
+            crate::event_log::EventKind::FindingObserved
+        );
+        assert_eq!(
+            events[2].event_kind,
+            crate::event_log::EventKind::SuppressionAdded
+        );
         assert_eq!(
             events[2].payload["stableFp"],
-            persisted.identity_id.as_deref().unwrap_or(&persisted.fingerprint)
+            persisted
+                .identity_id
+                .as_deref()
+                .unwrap_or(&persisted.fingerprint)
         );
     }
 
@@ -253,6 +265,7 @@ mod tests {
         );
         assert_eq!(exported["findings"][0]["reviewDecision"], "needs_review");
         assert_eq!(exported["findings"][0]["staticProofState"], "not_recorded");
+        assert_eq!(exported["findings"][0]["proofConfidence"], "unverified");
         assert_eq!(
             exported["findings"][0]["provenance"]["runStatus"],
             "completed"
@@ -269,8 +282,8 @@ mod tests {
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         FindingStore::open(workspace.findings_db_path()).unwrap();
         let output = workspace.root().join("exports/empty.json");
-        let options = WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
-            .with_allow_empty(false);
+        let options =
+            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json)).with_allow_empty(false);
 
         let error = export_workspace_findings_with_options(&workspace, &output, options)
             .unwrap_err()
@@ -350,9 +363,7 @@ mod tests {
                 .with_completeness(WorkspaceExportCompleteness::Open);
 
             let preview = preview_workspace_findings_export(&workspace, format, options).unwrap();
-            let output = tmp
-                .path()
-                .join(format!("preview-equivalent.{extension}"));
+            let output = tmp.path().join(format!("preview-equivalent.{extension}"));
             let report =
                 export_workspace_findings_with_options(&workspace, &output, options).unwrap();
 
@@ -373,12 +384,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         FindingStore::open(workspace.findings_db_path()).unwrap();
-        let options = WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
-            .with_allow_empty(false);
+        let options =
+            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json)).with_allow_empty(false);
 
-        let error = preview_workspace_findings_export(&workspace, WorkspaceExportFormat::Json, options)
-            .unwrap_err()
-            .to_string();
+        let error =
+            preview_workspace_findings_export(&workspace, WorkspaceExportFormat::Json, options)
+                .unwrap_err()
+                .to_string();
 
         assert!(error.contains("selected 0 findings"));
 
@@ -491,6 +503,13 @@ mod tests {
         let first = &document["runs"][0]["results"][0];
         assert!(["error", "warning", "note"].contains(&first["level"].as_str().unwrap()));
         assert!(first["locations"][0]["physicalLocation"]["region"]["startLine"].is_number());
+        // Unverified fixture findings (no runtime/static proof recorded) map to
+        // the mid-band SARIF rank and the `unverified` confidence token.
+        assert_eq!(first["rank"], serde_json::json!(30.0));
+        assert_eq!(
+            first["properties"]["kuzushiProofConfidence"],
+            serde_json::json!("unverified")
+        );
         assert!(first["properties"]["kuzushiReviewDecision"].is_string());
         assert!(first["properties"]["kuzushiObservedEvidencePresent"].is_boolean());
         assert!(first["properties"]["kuzushiObservedCodeEvidenceCount"].is_number());
@@ -532,9 +551,9 @@ mod tests {
         let first_line = body.lines().next().unwrap();
         assert!(first_line.starts_with("alias,identity_id,fingerprint,kind,rule_id,title"));
         assert!(first_line.contains("confidence,priority,lifecycle_status,review_decision"));
-        assert!(first_line.contains(
-            "review_decision,review_decision_conflict,review_decision_author"
-        ));
+        assert!(
+            first_line.contains("review_decision,review_decision_conflict,review_decision_author")
+        );
         assert!(first_line.contains("review_decision_author,triage_verdict,suppressed"));
         assert!(first_line.contains(
             "observed_evidence_present,observed_evidence_count,observed_code_evidence_count"
@@ -543,11 +562,16 @@ mod tests {
             "observed_capture_evidence_count,observed_other_evidence_count,model_generated_reasoning_present"
         ));
         assert!(first_line.contains("model_generated_reasoning_count,derived_source_present"));
+        assert!(first_line.contains("static_proof_state,proof_confidence,verification"));
         assert!(first_line.contains("run_id,run_status,kuzushi_version,model"));
         assert!(first_line.contains(
             "export_completeness,export_included_count,export_total_count,format_omitted_fields"
         ));
         assert!(body.contains("confirmed,,human,true_positive"));
+        // Neither fixture finding has runtime/static proof recorded, so the
+        // `proof_confidence` column (between static_proof_state and
+        // verification) reads `unverified`.
+        assert!(body.contains("not_recorded,unverified,not attempted"));
         assert!(body.contains(
             "all,2,2,reviewDecisionReason;snoozedUntil;evidence.sourceCount;evidence.rawHttpBlobPresent"
         ));
@@ -811,7 +835,9 @@ mod tests {
         assert!(readme.contains("**Completeness:** `all`"));
         assert!(readme.contains("**Included:** 2 of 2 finding(s)"));
         assert!(readme.contains("**Review decisions:** needs_review=2"));
-        assert!(readme.contains("| Alias | Severity | Decision | Lifecycle | Evidence | Location |"));
+        assert!(readme.contains(
+            "| Alias | Severity | Confidence | Decision | Lifecycle | Evidence | Location |"
+        ));
 
         let manifest: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(output.join("manifest.json")).unwrap())

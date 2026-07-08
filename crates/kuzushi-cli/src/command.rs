@@ -78,6 +78,10 @@ pub(crate) enum Command {
         /// Filter by lifecycle status, e.g. candidate, seen, runtime_verified, verified_static.
         #[arg(long, value_delimiter = ',')]
         status: Vec<String>,
+        /// Filter by proof/confidence band: confirmed, likely, unverified, dismissed.
+        /// Comma- or repeat-separated.
+        #[arg(long, value_delimiter = ',')]
+        confidence: Vec<String>,
         /// Filter by finding alias or rule name.
         #[arg(long)]
         name: Option<String>,

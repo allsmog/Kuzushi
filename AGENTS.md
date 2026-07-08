@@ -349,6 +349,14 @@ is expected to behave identically and should be filed as a parity bug.
   `renderer/views/workbench/render_workbench_view.rs::workbench_lines` for
   plain/non-TTY. `LIVE` lights while shell work is actually running (the shared
   `ShellApp::has_running_work` signal); pane focus lives on `app.workbench_focus`.
+- **Workbench confidence-first findings sort is shell-only and hardcoded.**
+  `confidence_first_display_order` in
+  `crates/kuzushi-tui/src/ui_view_models/findings.rs` re-orders the
+  severity-major alias list by `compare_findings_by_confidence` (`Confirmed`
+  before `Unverified`, severity as tie-break) before it reaches the Workbench
+  findings pane. There is no operator `setg` toggle back to severity-first, and
+  scan/run output and `workspace:export-findings` keep the severity-major
+  alias order untouched.
 - **Launch-time target picker (`ShellView::TargetPicker`)** — interactive
   only, and now the **first phase of the ordered onboarding gate** (Target →
   Model → Credentials → Planning). A bare `kuzushi` (no `--target`) on a real

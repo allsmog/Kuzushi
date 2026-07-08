@@ -148,6 +148,20 @@ pub fn danger() -> Style {
     })
 }
 
+/// Style for the proof/confidence chip. Mirrors `proof_detail_style`
+/// (success/accent/muted/danger) so the chip and the detail pane read the same:
+/// green = verified, blue = static support, grey = honest "we don't know",
+/// dim = dismissed.
+pub fn proof_confidence_tone(confidence: kuzushi_core::ProofConfidence) -> Style {
+    use kuzushi_core::ProofConfidence;
+    match confidence {
+        ProofConfidence::Confirmed => success(),
+        ProofConfidence::Likely => accent(),
+        ProofConfidence::Unverified => muted(),
+        ProofConfidence::Dismissed => disabled(),
+    }
+}
+
 pub fn selection() -> Style {
     let config = active_theme();
     if config.no_color {

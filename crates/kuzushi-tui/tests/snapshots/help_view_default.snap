@@ -131,9 +131,9 @@ workspace scope init - write an editable .kuzushi/scope.toml scaffold
 FINDINGS / EVIDENCE — browse findings, evidence, and report output
 findings - open persisted findings
   aliases / examples: /f, f, /findings
-findings filter <expr> - open filtered findings by severity, review decision, or completeness
-aliases / examples: findings filter state:new rank:high, findings filter decision:confirmed completeness:open, /findings
-filter <expr>
+findings filter <expr> - filter findings by severity, confidence (proof), review decision, or completeness
+aliases / examples: findings filter state:new rank:high, findings filter decision:confirmed completeness:open, findings
+filter confidence:confirmed, /findings filter <expr>
 component <scope|path|all> - focus Workbench findings on a detected component
   aliases / examples: component web/app, component entrypoint-cmd-proxy, component all
 open <id> - open a finding alias or fingerprint

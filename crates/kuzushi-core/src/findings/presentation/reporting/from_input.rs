@@ -14,9 +14,7 @@ impl FindingVerdictFilter {
     pub fn from_input(value: &str) -> Result<Self> {
         match value.trim() {
             "tp" | "true_positive" | "vulnerable" | "confirmed" => Ok(Self::TruePositive),
-            "fp" | "false_positive" | "safe" | "rejected_false_positive" => {
-                Ok(Self::FalsePositive)
-            }
+            "fp" | "false_positive" | "safe" | "rejected_false_positive" => Ok(Self::FalsePositive),
             "needs_review" | "review" | "detected" => Ok(Self::NeedsReview),
             "by_design" | "by-design" | "accepted_risk" => Ok(Self::ByDesign),
             "suppressed" => Ok(Self::Suppressed),
@@ -34,9 +32,7 @@ impl FindingVerdictFilter {
         }
     }
 
-    pub(in crate::findings) fn from_review_decision(
-        decision: ReviewDecisionVerdict,
-    ) -> Self {
+    pub(in crate::findings) fn from_review_decision(decision: ReviewDecisionVerdict) -> Self {
         match decision {
             ReviewDecisionVerdict::Confirmed => Self::TruePositive,
             ReviewDecisionVerdict::RejectedFalsePositive => Self::FalsePositive,
@@ -168,9 +164,17 @@ pub struct FindingListFilter {
     pub triage_state: Vec<FindingTriageStateFilter>,
     pub completeness: Vec<FindingReviewCompletenessFilter>,
     pub lifecycle_status: Vec<FindingLifecycleStatusFilter>,
-    /// Filter by triage confidence band. Empty = no filter. Untriaged findings
-    /// never match a confidence band (honest — no fabricated confidence).
-    pub confidence: Vec<ConfidenceBand>,
+    /// Coarse proof/confidence bands (Confirmed/Likely/Unverified/Dismissed),
+    /// derived from `static_proof_state` (+ verification/triage/suppression).
+    /// Empty = no filter. Distinct from `lifecycle_status` (granular),
+    /// `verdict` (triage decision), and `triage_band` (the model's
+    /// self-reported triage confidence, bucketed).
+    pub confidence: Vec<ProofConfidence>,
+    /// Filter by triage-confidence band (bucketed `TriageOutcome.confidence`).
+    /// Empty = no filter. Untriaged findings never match a triage band
+    /// (honest — no fabricated confidence). Distinct from `confidence` (the
+    /// proof/verification axis).
+    pub triage_band: Vec<ConfidenceBand>,
     pub name: Option<String>,
     pub text_terms: Vec<String>,
     pub file_path: Option<String>,
@@ -192,6 +196,7 @@ impl Default for FindingListFilter {
             completeness: Vec::new(),
             lifecycle_status: Vec::new(),
             confidence: Vec::new(),
+            triage_band: Vec::new(),
             name: None,
             text_terms: Vec::new(),
             file_path: None,
