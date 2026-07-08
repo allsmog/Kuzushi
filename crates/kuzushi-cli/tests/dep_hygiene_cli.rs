@@ -44,12 +44,6 @@ fn assert_latest_canonical_run_bundle(repo: &std::path::Path) {
         "run.json",
         "events.jsonl",
         "trace.jsonl",
-        "context.json",
-        "attack-surface.json",
-        "threat-model.json",
-        "recommendations.json",
-        "findings.json",
-        "proof.json",
         "failures.json",
         "report.md",
         "artifacts.json",
@@ -57,6 +51,19 @@ fn assert_latest_canonical_run_bundle(repo: &std::path::Path) {
         assert!(
             run_dir.join(leaf).exists(),
             "latest run {run_id} missing canonical artifact {leaf}"
+        );
+    }
+    for leaf in [
+        "context.json",
+        "attack-surface.json",
+        "threat-model.json",
+        "recommendations.json",
+        "findings.json",
+        "proof.json",
+    ] {
+        assert!(
+            !run_dir.join(leaf).exists(),
+            "latest run {run_id} wrote retired v2 artifact {leaf}"
         );
     }
 
@@ -77,34 +84,19 @@ fn assert_latest_canonical_run_bundle(repo: &std::path::Path) {
 fn assert_latest_static_artifacts(repo: &std::path::Path, expected_tool: &str) {
     assert_latest_canonical_run_bundle(repo);
 
-    let findings = latest_run_json(repo, "findings.json");
+    let result = latest_run_json(repo, "result.json");
+    let finding = result
+        .pointer("/data/coreFindings/0")
+        .or_else(|| result.pointer("/coreFindings/0"))
+        .or_else(|| result.pointer("/data/findings/0"))
+        .expect("tool result should carry at least one finding");
     assert_eq!(
-        findings.pointer("/0/tool").and_then(Value::as_str),
+        finding.get("tool").and_then(Value::as_str),
         Some(expected_tool)
     );
     assert_eq!(
-        findings
-            .pointer("/0/staticProofState")
-            .and_then(Value::as_str),
+        finding.get("staticProofState").and_then(Value::as_str),
         Some("signal_only")
-    );
-
-    let proof = latest_run_json(repo, "proof.json");
-    assert_eq!(
-        proof.pointer("/source").and_then(Value::as_str),
-        Some("normalized-findings")
-    );
-    assert_eq!(
-        proof
-            .pointer("/countsByState/signal_only")
-            .and_then(Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        proof
-            .pointer("/runtimeVerification")
-            .and_then(Value::as_bool),
-        Some(false)
     );
 
     let artifacts = latest_run_json(repo, "artifacts.json");
@@ -115,8 +107,9 @@ fn assert_latest_static_artifacts(repo: &std::path::Path, expected_tool: &str) {
         .iter()
         .filter_map(|artifact| artifact.pointer("/label").and_then(Value::as_str))
         .collect::<Vec<_>>();
-    assert!(artifact_labels.contains(&"findings"));
-    assert!(artifact_labels.contains(&"proof"));
+    assert!(artifact_labels.contains(&"tool result"));
+    assert!(!artifact_labels.contains(&"findings"));
+    assert!(!artifact_labels.contains(&"proof"));
 }
 
 fn write_systems_hunt_fixture(repo: &std::path::Path) {
@@ -1097,7 +1090,6 @@ fn scan_tasks_iac_scan_reaches_scan_engine_path() {
     let findings = store.list_findings(10).unwrap();
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].tool, "iac-scan");
-    assert_latest_static_artifacts(&repo, "iac-scan");
 }
 
 #[test]

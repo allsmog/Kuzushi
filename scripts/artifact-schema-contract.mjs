@@ -137,56 +137,6 @@ const expectedProofStates = [
   "execution_rejected",
 ];
 
-const findingEnumSpecs = [
-  {
-    name: "severity",
-    path: ["definitions", "severity"],
-    values: ["critical", "high", "medium", "low", "info", "unknown", "ERROR", "WARNING", "INFO"],
-    refs: [["definitions", "finding", "properties", "severity"]],
-  },
-  {
-    name: "confidence",
-    path: ["definitions", "confidence", "anyOf", 0],
-    values: ["high", "medium", "low", "unknown", "HIGH", "MEDIUM", "LOW", "UNKNOWN"],
-    refs: [["definitions", "finding", "properties", "confidence"]],
-  },
-];
-
-const attackSurfaceEnumSpecs = [
-  {
-    name: "surfaceKind",
-    path: ["definitions", "surfaceKind"],
-    values: [
-      "http_route",
-      "rpc_handler",
-      "cli_entrypoint",
-      "background_job",
-      "deserialization_point",
-      "file_upload_parse_path",
-      "external_service_client",
-      "auth_boundary",
-      "session_state_boundary",
-      "request_trust_boundary",
-      "tenant_isolation_boundary",
-      "db_query_boundary",
-      "command_execution_boundary",
-    ],
-    refs: [
-      ["properties", "kind"],
-      ["definitions", "surface", "properties", "kind"],
-    ],
-  },
-  {
-    name: "riskTier",
-    path: ["definitions", "riskTier"],
-    values: ["critical", "high", "medium", "low"],
-    refs: [
-      ["properties", "tier"],
-      ["definitions", "risk", "properties", "tier"],
-    ],
-  },
-];
-
 const artifactKindSpec = (refs) => ({
   name: "artifactKind",
   path: ["definitions", "artifactKind"],
@@ -205,42 +155,6 @@ const runSummaryStatusSpec = {
   values: ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"],
   refs: [],
 };
-const routeMethodSpec = (refs) => ({
-  name: "routeMethod",
-  path: ["definitions", "routeMethod"],
-  values: [
-    "GET",
-    "POST",
-    "PUT",
-    "PATCH",
-    "DELETE",
-    "OPTIONS",
-    "HEAD",
-    "TRACE",
-    "CONNECT",
-    "ANY",
-    "USE",
-  ],
-  refs,
-});
-const proofVerdictValues = [
-  "confirmed",
-  "exploited",
-  "not_reproduced",
-  "harness_failed_to_build",
-  "infrastructure_error",
-  "language_unsupported_yet",
-  "insufficient_finding_detail",
-  "needs-runtime-evidence",
-];
-const proofKindValues = [
-  "verification",
-  "llm-exploitability-review",
-  "empirical-verification",
-  "verification-outcome",
-  "patch-validation",
-];
-const proofLevelValues = ["runtime-and-static", "static-signal-only"];
 const traceKindValues = ["tool", "reasoning", "tool-progress", "done", "refused"];
 
 const schemaEnumSpecs = {
@@ -405,9 +319,9 @@ function aliasGroupIsRequired(schema, group) {
     ? true
     : group.kind === "required"
       ? group.fields.every((field) => requiredFields(schema).includes(field))
-    : group.kind === "anyOf"
-      ? anyOfRequiresFields(schema.anyOf, group.fields)
-      : allOfContainsAnyOfRequirement(schema.allOf, group.fields);
+      : group.kind === "anyOf"
+        ? anyOfRequiresFields(schema.anyOf, group.fields)
+        : allOfContainsAnyOfRequirement(schema.allOf, group.fields);
 }
 
 function schemaNode(schema, nodePath) {
@@ -498,7 +412,9 @@ function checkRunArtifactManifestReservedMetadata(relativeFile, schema) {
     return [`${relativeFile}: missing canonical artifact metadata rules`];
   }
   return reservedArtifactMetadataSpecs.flatMap((spec) => {
-    const rule = rules.find((candidate) => ruleMatchesPath(candidate, artifactPathPattern(spec.path)));
+    const rule = rules.find((candidate) =>
+      ruleMatchesPath(candidate, artifactPathPattern(spec.path)),
+    );
     if (!rule) return [`${relativeFile}: missing reserved metadata rule for ${spec.path}`];
     return missingArtifactMetadataConsts(relativeFile, rule, spec);
   });
@@ -506,8 +422,7 @@ function checkRunArtifactManifestReservedMetadata(relativeFile, schema) {
 
 function ruleMatchesPath(rule, pattern) {
   return (
-    requiredFields(rule?.if).includes("path") &&
-    rule?.if?.properties?.path?.pattern === pattern
+    requiredFields(rule?.if).includes("path") && rule?.if?.properties?.path?.pattern === pattern
   );
 }
 

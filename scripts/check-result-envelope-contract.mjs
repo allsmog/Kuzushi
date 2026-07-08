@@ -73,11 +73,7 @@ const checks = [
   {
     label: "report artifact summaries use canonical artifact fields",
     file: "crates/kuzushi-core/src/report/artifact_summary/artifact_manifest.rs",
-    tokens: [
-      "CANONICAL_RUN_ARTIFACTS",
-      "nonempty_value_string",
-      ...canonicalArtifactFieldKeys,
-    ],
+    tokens: ["CANONICAL_RUN_ARTIFACTS", "nonempty_value_string", ...canonicalArtifactFieldKeys],
   },
   {
     label: "module result envelope helpers expose all canonical statuses",

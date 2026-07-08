@@ -520,9 +520,13 @@ mod tests {
     }
 
     fn assert_secret_scan_artifact_identity(workspace: &WorkspaceTarget, run_id: &str) -> String {
-        let findings_path = run_dir(workspace.root(), run_id).join("findings.json");
-        let findings: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(findings_path).unwrap()).unwrap();
+        let result_path = run_dir(workspace.root(), run_id).join("result.json");
+        let result: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(result_path).unwrap()).unwrap();
+        let findings = result
+            .pointer("/data/coreFindings")
+            .and_then(serde_json::Value::as_array)
+            .expect("run result core findings");
         let identity = findings[0]["identityId"]
             .as_str()
             .expect("run artifact finding identity")
@@ -862,7 +866,7 @@ mod tests {
             .iter()
             .map(|artifact| artifact.label.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(labels, vec!["tool input", "findings", "tool result"]);
+        assert_eq!(labels, vec!["tool input", "tool result"]);
         for artifact in &summary.artifacts {
             assert!(
                 std::path::Path::new(&artifact.path).exists(),
@@ -1061,7 +1065,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
         write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
-        write_findings_snapshot(
+        write_result_findings_snapshot(
             temp.path(),
             "run-a",
             serde_json::json!([
@@ -1070,7 +1074,7 @@ mod tests {
                 {"identityId": "fi_stable", "fingerprint": "stable-old", "severity": "low", "confidence": 0.5}
             ]),
         );
-        write_findings_snapshot(
+        write_result_findings_snapshot(
             temp.path(),
             "run-b",
             serde_json::json!([
@@ -1111,8 +1115,8 @@ mod tests {
             &summary_started_at_with_status("run-b", 1_000_100, "completed"),
         )
         .unwrap();
-        write_findings_snapshot(temp.path(), "run-a", serde_json::json!([]));
-        write_findings_snapshot(temp.path(), "run-b", serde_json::json!([]));
+        write_result_findings_snapshot(temp.path(), "run-a", serde_json::json!([]));
+        write_result_findings_snapshot(temp.path(), "run-b", serde_json::json!([]));
 
         let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
 
@@ -1126,7 +1130,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
         write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
-        write_findings_snapshot(
+        write_result_findings_snapshot(
             temp.path(),
             "run-a",
             serde_json::json!([
@@ -1142,7 +1146,7 @@ mod tests {
                 }
             ]),
         );
-        write_findings_snapshot(
+        write_result_findings_snapshot(
             temp.path(),
             "run-b",
             serde_json::json!([
@@ -1204,7 +1208,7 @@ mod tests {
         );
         write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
         write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
-        write_findings_snapshot(
+        write_result_findings_snapshot(
             temp.path(),
             "run-a",
             serde_json::json!([
@@ -1220,7 +1224,7 @@ mod tests {
                 }
             ]),
         );
-        write_findings_snapshot(
+        write_result_findings_snapshot(
             temp.path(),
             "run-b",
             serde_json::json!([
@@ -1268,8 +1272,8 @@ mod tests {
         );
         write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
         write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
-        write_findings_snapshot(temp.path(), "run-a", serde_json::json!([]));
-        write_findings_snapshot(
+        write_result_findings_snapshot(temp.path(), "run-a", serde_json::json!([]));
+        write_result_findings_snapshot(
             temp.path(),
             "run-b",
             serde_json::json!([
@@ -1336,7 +1340,7 @@ mod tests {
         assert_eq!(base_row.identity_id.as_deref(), Some(identity.as_str()));
         let compare_reference = compare_row.fingerprint.clone();
         drop(store);
-        write_findings_snapshot(
+        write_result_findings_snapshot(
             temp.path(),
             "run-a",
             serde_json::json!([{
@@ -1350,7 +1354,7 @@ mod tests {
                 "tool": base.tool
             }]),
         );
-        write_findings_snapshot(
+        write_result_findings_snapshot(
             temp.path(),
             "run-b",
             serde_json::json!([{
@@ -1459,12 +1463,12 @@ mod tests {
             &summary_started_at_with_status("run-failed", 1_000_100, "failed"),
         )
         .unwrap();
-        write_findings_snapshot(
+        write_result_findings_snapshot(
             temp.path(),
             "run-partial",
             serde_json::json!([{"fingerprint": "left-only", "severity": "high"}]),
         );
-        write_findings_snapshot(temp.path(), "run-failed", serde_json::json!([]));
+        write_result_findings_snapshot(temp.path(), "run-failed", serde_json::json!([]));
 
         let diff = runs_diff(temp.path(), "run-partial", "run-failed").unwrap();
 
@@ -2077,10 +2081,14 @@ mod tests {
         summary
     }
 
-    fn write_findings_snapshot(target: &Path, run_id: &str, value: serde_json::Value) {
+    fn write_result_findings_snapshot(target: &Path, run_id: &str, value: serde_json::Value) {
         std::fs::write(
-            run_dir(target, run_id).join("findings.json"),
-            serde_json::to_string_pretty(&value).unwrap(),
+            run_dir(target, run_id).join("result.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ok": true,
+                "data": { "coreFindings": value }
+            }))
+            .unwrap(),
         )
         .unwrap();
     }

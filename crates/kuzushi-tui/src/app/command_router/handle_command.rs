@@ -6,7 +6,7 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_command_message(&mut self, command: ShellCommand) -> CommandUpdate {
-        let previous_view = self.shell_view().clone();
+        let previous_view = self.shell_view();
         let update = self.reduce_command_without_effect_execution(command);
         self.discard_stashed_input_after_view_change(&previous_view);
         update

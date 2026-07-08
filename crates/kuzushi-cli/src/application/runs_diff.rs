@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use kuzushi_core::findings::{ReviewDecisionVerdict, TriageVerdict};
 use kuzushi_core::{
-    load_run_summary, run_artifact_path, workspace_findings_db_path, FindingStore, WorkspaceTarget,
+    load_run_summary, run_artifact_path, tool_result_artifact_spec, workspace_findings_db_path,
+    FindingStore, WorkspaceTarget,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -268,7 +269,7 @@ fn changed_finding(
 }
 
 fn load_run_findings(target: &Path, run_id: &str) -> Result<BTreeMap<String, RunsFindingRow>> {
-    let path = run_artifact_path(target, run_id, run_findings_artifact_leaf());
+    let path = run_artifact_path(target, run_id, run_result_artifact_leaf());
     let body =
         fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
     let value = serde_json::from_str::<Value>(&body)
@@ -279,20 +280,19 @@ fn load_run_findings(target: &Path, run_id: &str) -> Result<BTreeMap<String, Run
         .collect())
 }
 
-fn run_findings_artifact_leaf() -> &'static str {
-    "findings.json"
+fn run_result_artifact_leaf() -> &'static str {
+    tool_result_artifact_spec("result.json")
+        .expect("tool result artifact must be in shared spec")
+        .leaf
 }
 
 fn finding_array(value: &Value) -> Vec<&Value> {
     value
-        .as_array()
+        .pointer("/data/coreFindings")
+        .or_else(|| value.pointer("/data/findings"))
+        .or_else(|| value.get("findings"))
+        .and_then(Value::as_array)
         .map(|items| items.iter().collect())
-        .or_else(|| {
-            value
-                .get("findings")
-                .and_then(Value::as_array)
-                .map(|items| items.iter().collect())
-        })
         .unwrap_or_default()
 }
 

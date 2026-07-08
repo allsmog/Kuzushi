@@ -84,11 +84,7 @@ export const tokenChecks = [
   {
     label: "report recommendation envelope aliases",
     file: "crates/kuzushi-core/src/report/artifact_summary/recommendations.rs",
-    tokens: [
-      "recommendationReport",
-      "/data/recommendationReport",
-      "/data/recommendations",
-    ],
+    tokens: ["recommendationReport", "/data/recommendationReport", "/data/recommendations"],
   },
   {
     label: "TUI recommendation view model artifact envelope aliases",

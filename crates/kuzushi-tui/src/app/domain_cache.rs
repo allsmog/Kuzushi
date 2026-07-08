@@ -44,10 +44,12 @@ impl WorkspaceStaleSummary {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn change_count(&self) -> usize {
         self.pending_changes.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn strongest_plan(&self) -> ReindexPlan {
         self.strongest_plan
     }

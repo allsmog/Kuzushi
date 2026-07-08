@@ -34,6 +34,9 @@ allow = [
   "BSL-1.0",
   "MPL-2.0",
   "Unicode-3.0",
+  # `notify` 8.x publishes under CC0; accepted as a permissive public-domain
+  # style license for the passive workspace watcher.
+  "CC0-1.0",
 ]
 confidence-threshold = 0.8
 

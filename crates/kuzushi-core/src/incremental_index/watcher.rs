@@ -97,7 +97,7 @@ fn classify_existing_path(root: &Path, path: &Path) -> Option<WorkspaceChange> {
     }
     special_workspace_change(&relative)
         .or_else(|| manifest_or_lockfile_change(&relative))
-        .or_else(|| Some(WorkspaceChange::FileChanged(relative)))
+        .or(Some(WorkspaceChange::FileChanged(relative)))
 }
 
 fn classify_deleted_path(root: &Path, path: &Path) -> Option<WorkspaceChange> {
@@ -107,7 +107,7 @@ fn classify_deleted_path(root: &Path, path: &Path) -> Option<WorkspaceChange> {
     }
     special_workspace_change(&relative)
         .or_else(|| manifest_or_lockfile_change(&relative))
-        .or_else(|| Some(WorkspaceChange::FileDeleted(relative)))
+        .or(Some(WorkspaceChange::FileDeleted(relative)))
 }
 
 fn classify_moved_path(root: &Path, from: &Path, to: &Path) -> Vec<WorkspaceChange> {

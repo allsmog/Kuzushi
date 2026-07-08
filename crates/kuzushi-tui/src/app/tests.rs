@@ -6300,7 +6300,7 @@ fn plain_scripted_help_then_quit_prints_one_result_block_per_command() {
 fn plain_scripted_unchanged_view_command_still_prints_result_block() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Workbench);
-    let before = app.shell_view().clone();
+    let before = app.shell_view();
 
     let output = render_plain_scripted_session(&mut app, &["/workbench"], 80);
 
@@ -8235,7 +8235,7 @@ fn open_start_view_preserves_an_active_onboarding_picker() {
         ShellView::PlanningPicker,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_shell_view(picker.clone());
+        app.set_shell_view(picker);
         open_start_view(&mut app);
         assert_eq!(app.shell_view(), picker, "picker was clobbered");
     }
@@ -9015,7 +9015,7 @@ fn static_scene_pages_do_not_consume_3d_only_controls() {
 #[test]
 fn next_command_without_target_logs_guidance() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    let view_before = app.shell_view().clone();
+    let view_before = app.shell_view();
     run_command(&mut app, ShellCommand::Next);
     assert_eq!(app.shell_view(), view_before);
     assert!(app
@@ -10802,7 +10802,7 @@ fn scrollable_views_advertise_scroll_and_back_hints() {
     ];
     for view in scrollable {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_shell_view(view.clone());
+        app.set_shell_view(view);
         let advertised = app.view_keybindings();
         assert!(
             advertised.iter().any(|binding| binding.hint == "j/k/g/G"),
@@ -13339,7 +13339,7 @@ fn auto_open_viz_page_is_inert_when_disabled() {
     use crate::scene3d::VizPage;
     let mut app = ShellApp::new(V2Config::default(), None);
     app.ui_mut().set_auto_open_viz(false);
-    let before = app.shell_view().clone();
+    let before = app.shell_view();
     app.auto_open_viz_page(VizPage::Dfd);
     assert_eq!(app.shell_view(), before);
 }
@@ -13465,7 +13465,7 @@ fn scan_finished_event_records_aggregate_cost() {
 fn scan_completion_respects_viz_opt_out() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.ui_mut().set_auto_open_viz(false);
-    let before = app.shell_view().clone();
+    let before = app.shell_view();
     let effects = app.apply_scan_finished("run-viz".to_string(), 2);
     EffectRuntime::execute(&mut app, effects);
     assert_eq!(app.shell_view(), before);
@@ -13475,7 +13475,7 @@ fn scan_completion_respects_viz_opt_out() {
 fn clean_scan_does_not_auto_open_an_empty_heatmap() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.ui_mut().set_auto_open_viz(true);
-    let before = app.shell_view().clone();
+    let before = app.shell_view();
     let effects = app.apply_scan_finished("run-clean".to_string(), 0);
     EffectRuntime::execute(&mut app, effects);
     assert_eq!(

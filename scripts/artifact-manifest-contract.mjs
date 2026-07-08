@@ -1676,8 +1676,12 @@ const cliRunsPathRequirementsByFile = {
   "crates/kuzushi-cli/src/application/runs_diff.rs": [
     { needle: "run_artifact_path(", message: "CLI runs diff must use run_artifact_path" },
     {
-      needle: "run_findings_artifact_leaf()",
-      message: "CLI runs diff must centralize findings artifact leaf",
+      needle: 'tool_result_artifact_spec("result.json")',
+      message: "CLI runs diff must use shared tool-result artifact spec",
+    },
+    {
+      needle: "run_result_artifact_leaf()",
+      message: "CLI runs diff must centralize result artifact leaf",
     },
   ],
   "crates/kuzushi-cli/src/application/runs_prune.rs": [
@@ -2266,15 +2270,6 @@ function sharedArtifactSpec(specs, artifact, label) {
       kind: "unknown",
     }
   );
-}
-
-function tupleSpecs(body, kind) {
-  if (body === null) return [];
-  return [...body.matchAll(/\(\s*"([^"]+)"\s*,\s*"([^"]+)"/g)].map((match) => ({
-    path: match[1],
-    label: match[2],
-    kind,
-  }));
 }
 
 function reportReaderExpectedSpecs() {

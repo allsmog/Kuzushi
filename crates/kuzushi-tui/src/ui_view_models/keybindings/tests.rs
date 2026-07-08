@@ -16,7 +16,7 @@ fn unmapped_leaf_views_advertise_the_exit_path() {
         ShellView::FailureHandoff,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_shell_view(view.clone());
+        app.set_shell_view(view);
         let bindings = footer_keybindings(&app);
         assert!(
             bindings.contains(&bind("Esc", "back")),
@@ -170,7 +170,7 @@ fn previously_empty_views_now_show_scroll_and_back_in_footer() {
         ShellView::PromptsEditor,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_shell_view(view.clone());
+        app.set_shell_view(view);
         let bindings = footer_keybindings(&app);
         assert!(
             bindings.contains(&bind("j/k/g/G", "scroll")),
@@ -197,7 +197,7 @@ fn footers_do_not_relabel_back_as_home() {
         ShellView::AgentChat,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_shell_view(view.clone());
+        app.set_shell_view(view);
         let bindings = footer_keybindings(&app);
         assert!(
             !bindings.contains(&bind("Esc", "home")),

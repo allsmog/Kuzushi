@@ -27,7 +27,7 @@ impl ShellApp {
     /// Open the gallery focused on a specific page (manual nav and auto-open).
     pub fn open_scene_to_page(&mut self, page: VizPage) {
         if !matches!(self.shell_view(), ShellView::Scene) {
-            self.push_nav_history(self.shell_view().clone());
+            self.push_nav_history(self.shell_view());
         }
         self.router.scene_mut().set_page(page);
         self.set_shell_view(ShellView::Scene);

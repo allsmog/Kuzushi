@@ -117,7 +117,9 @@ async function readParityTargets() {
   return body
     .split("\n")
     .map((line) => {
-      const match = line.match(/^\| `([^`]+\.jsx)` \| (Implement|Defer|Cut) \| ([^|]+) \| ([^|]+) \|$/);
+      const match = line.match(
+        /^\| `([^`]+\.jsx)` \| (Implement|Defer|Cut) \| ([^|]+) \| ([^|]+) \|$/,
+      );
       if (!match) return null;
       return {
         file: match[1],
@@ -158,7 +160,9 @@ async function renderMockup(target, temp) {
   if (typeof view !== "function") {
     throw new Error(`${target.file} did not register window.${viewName}`);
   }
-  return collectRows(view()).map((line) => line.trimEnd()).join("\n");
+  return collectRows(view())
+    .map((line) => line.trimEnd())
+    .join("\n");
 }
 
 async function viewExportName(sourcePath) {
@@ -178,17 +182,27 @@ async function importWithPragma(sourcePath, temp, name) {
 }
 
 function collectRows(node, rows = []) {
-  if (Array.isArray(node)) {
-    node.forEach((child) => collectRows(child, rows));
-    return rows;
-  }
-  if (!node || typeof node !== "object") return rows;
+  if (Array.isArray(node)) return collectArrayRows(node, rows);
+  if (!isCollectableNode(node)) return rows;
   if (isRow(node)) {
     rows.push(textOf(node));
     return rows;
   }
-  childrenOf(node).forEach((child) => collectRows(child, rows));
+  return collectChildRows(node, rows);
+}
+
+function collectArrayRows(nodes, rows) {
+  for (const child of nodes) collectRows(child, rows);
   return rows;
+}
+
+function collectChildRows(node, rows) {
+  for (const child of childrenOf(node)) collectRows(child, rows);
+  return rows;
+}
+
+function isCollectableNode(node) {
+  return Boolean(node) && typeof node === "object";
 }
 
 function isRow(node) {

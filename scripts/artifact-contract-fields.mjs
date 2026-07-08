@@ -1,10 +1,4 @@
-export const runArtifactManifestSchemaFields = [
-  "runId",
-  "artifacts",
-  "label",
-  "path",
-  "kind",
-];
+export const runArtifactManifestSchemaFields = ["runId", "artifacts", "label", "path", "kind"];
 
 export const forbiddenFailureClaims = [
   "success claim without explicit verification",
@@ -32,17 +26,9 @@ export const failureHandoffFields = [
   "claims_forbidden",
 ];
 
-export const schemaAliasContractFields = [
-  "camelCase",
-  "runId",
-  "startedAtUnix",
-];
+export const schemaAliasContractFields = ["camelCase", "runId", "startedAtUnix"];
 
-export const reportJsonlAliasFields = [
-  "module_id",
-  "cost_usd",
-  "prompt_hash",
-];
+export const reportJsonlAliasFields = ["module_id", "cost_usd", "prompt_hash"];
 
 export const runAttackSurfaceSchemaFields = [
   "attack-surface.json",

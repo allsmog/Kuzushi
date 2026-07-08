@@ -113,6 +113,8 @@ reparse <id> - refresh local attachment metadata
   aliases / examples: /reparse <id>
 workspace - show target and state status
   aliases / examples: /workspace, workspace status
+workspace reindex - refresh the v3 content-addressed workspace index
+  aliases / examples: /workspace reindex, workspace index
 workspace export findings <path> [format] [--completeness open|complete] [--allow-empty] - export findings; choose
 all/open/complete and pass --allow-empty for metadata-only exports
 aliases / examples: /workspace export findings <path> [format] [--completeness open|complete] [--allow-empty], findings

@@ -70,10 +70,7 @@ const reportAliasFields = [
   "reportSarif",
   "data.reportSarif",
 ];
-const reportSubstrateAliasFields = [
-  "reportMarkdown",
-  "reportSarif",
-];
+const reportSubstrateAliasFields = ["reportMarkdown", "reportSarif"];
 const schemaArchitectureDocChecks = requiredArtifactSchemaReferences().map((reference) => ({
   label: `run schema architecture doc ${reference.artifactPath}`,
   file: "docs/architecture/kuzushi-artifacts.md",

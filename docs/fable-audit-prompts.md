@@ -7,7 +7,7 @@ safeguards don't downgrade the run. Keep them framed that way: no "vuln",
 "exploit", "attack", "malware", or "pentest" language.
 
 Usage: open Fable at the repo root, paste one prompt, let it produce the report,
-then feed the report back to Codex/Claude as the implementation step. All prompts
+then feed the report back to an implementation agent. All prompts
 are **read-only** — they must not edit code.
 
 ---

@@ -13,8 +13,8 @@ assertion_line: 89
   no findings loaded
   0 findings
 
-  RUN   none · no runs yet · artifacts 0/10 recorded
-        ctx ■  surface ■  threat ■  recommend ■  strategy ■  findings ■  proof ■  failures ■  report ■  manifest ■
+  RUN   none · no runs yet · artifacts 0/3 recorded
+        failures ■  report ■  manifest ■
         .kuzushi/v3/runs/latest · `show runs` for detail
 
   WORKSPACE   target none · modules 38 · context not built
