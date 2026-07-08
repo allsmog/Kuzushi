@@ -87,10 +87,15 @@ fn phase_for_module(module_id: &str) -> Option<WorkflowPhase> {
 
 /// Exact tool names whose phase differs from their module default.
 /// `codeql:create-db` builds a reusable analysis artifact (map) even though
-/// `codeql:scan` is a hunt action.
+/// `codeql:scan` is a hunt action. `pwn:reverse` disassembles/profiles a
+/// binary into an analysis artifact (map) even though the rest of the `pwn`
+/// module (`exploit-run`, `auto-solve`, …) are hunt/mutating actions; this
+/// mirrors the onboarding walker's own `PlanningTaskId::ReverseEngineerBinary`
+/// classification (`crates/kuzushi-tui/src/app/onboarding/task_id.rs`), which
+/// a drift test cross-checks against this table.
 fn phase_override(tool_name: &str) -> Option<WorkflowPhase> {
     match tool_name {
-        "codeql:create-db" => Some(WorkflowPhase::Map),
+        "codeql:create-db" | "pwn:reverse" => Some(WorkflowPhase::Map),
         _ => None,
     }
 }
@@ -185,6 +190,12 @@ mod tests {
     fn codeql_db_build_is_a_map_action_not_a_hunt() {
         assert_eq!(tool_phase("codeql:create-db"), Some(WorkflowPhase::Map));
         assert_eq!(tool_phase("codeql:scan"), Some(WorkflowPhase::Hunt));
+    }
+
+    #[test]
+    fn pwn_reverse_is_a_map_action_not_a_hunt() {
+        assert_eq!(tool_phase("pwn:reverse"), Some(WorkflowPhase::Map));
+        assert_eq!(tool_phase("pwn:exploit-run"), Some(WorkflowPhase::Hunt));
     }
 
     #[test]

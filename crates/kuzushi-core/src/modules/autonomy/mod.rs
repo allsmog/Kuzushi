@@ -272,22 +272,25 @@ mod tests {
         }
     }
 
-    /// The anti-escape guard: every registered tool (including hidden DAG
-    /// verbs) must be explicitly classified as read/infra or phase-bearing.
-    /// A newly-registered mutating tool with an unknown module prefix trips
-    /// this, forcing the author to place it in the phase table rather than
-    /// silently escaping the autonomy gate.
+    /// The anti-escape guard: every *dispatchable* tool — including hidden
+    /// DAG-node ids that never appear in `registry.tools` but are still
+    /// resolvable via `registry.executors` at the dispatch boundary — must be
+    /// explicitly classified as read/infra or phase-bearing. Iterating
+    /// `executors` rather than `tools` matters: a DAG-internal id with an
+    /// unknown module prefix would otherwise classify to `None` (permissive
+    /// `Allow`) and dispatch anyway, escaping gating without this test ever
+    /// noticing.
     #[test]
     fn every_registered_tool_is_classified() {
         let registry = ModuleRegistry::with_v2_builtins();
         let unclassified: Vec<&String> = registry
-            .tools
+            .executors
             .keys()
             .filter(|name| classify(name).is_none())
             .collect();
         assert!(
             unclassified.is_empty(),
-            "these registered tools escape autonomy classification (add their module \
+            "these dispatchable tools escape autonomy classification (add their module \
              prefix to tool_phase.rs): {unclassified:?}"
         );
     }

@@ -62,8 +62,10 @@ pub(crate) fn prepare_cli_tool_run(
 
 /// Resolve the `--autonomy` flag into the run's posture. Absent = the config
 /// default (`Fix`, unconstrained). An explicit rung is clamped by the
-/// project-declared `phases.stop_after` cap, and an unrecognized rung is a hard
-/// error — never a silent fallback to a different rung.
+/// project-declared `phases.stop_after` cap (with a stderr note when clamping
+/// actually changes the requested rung — mirrors the TUI's "posture stays
+/// at…" log so the operator isn't silently overridden), and an unrecognized
+/// rung is a hard error — never a silent fallback to a different rung.
 fn resolve_cli_autonomy(
     config: &kuzushi_core::V2Config,
     autonomy: Option<String>,
@@ -79,7 +81,16 @@ fn resolve_cli_autonomy(
         .stop_after
         .map(AutonomyPosture::from_guided_phase)
         .unwrap_or(AutonomyPosture::Fix);
-    Ok(posture.capped_by(cap))
+    let applied = posture.capped_by(cap);
+    if applied != posture {
+        eprintln!(
+            "autonomy: --autonomy {} clamped to {} by phases.stop_after={}",
+            posture.label(),
+            applied.label(),
+            cap.label()
+        );
+    }
+    Ok(applied)
 }
 
 #[cfg(test)]
@@ -299,4 +310,45 @@ fn record_cli_tool_run_started(
         config_hash(config).ok(),
         loaded_modules,
     );
+}
+
+#[cfg(test)]
+mod resolve_cli_autonomy_tests {
+    use super::resolve_cli_autonomy;
+    use kuzushi_core::{AutonomyPosture, GuidedPhase, V2Config};
+
+    #[test]
+    fn absent_flag_keeps_the_config_default() {
+        let config = V2Config::default();
+        assert_eq!(
+            resolve_cli_autonomy(&config, None).unwrap(),
+            config.autonomy
+        );
+    }
+
+    #[test]
+    fn explicit_rung_under_the_cap_is_applied_unchanged() {
+        let mut config = V2Config::default();
+        config.phases.stop_after = Some(GuidedPhase::Fix);
+        assert_eq!(
+            resolve_cli_autonomy(&config, Some("hunt".to_string())).unwrap(),
+            AutonomyPosture::Hunt
+        );
+    }
+
+    #[test]
+    fn explicit_rung_above_the_cap_is_clamped() {
+        let mut config = V2Config::default();
+        config.phases.stop_after = Some(GuidedPhase::Hunt);
+        assert_eq!(
+            resolve_cli_autonomy(&config, Some("fix".to_string())).unwrap(),
+            AutonomyPosture::Hunt
+        );
+    }
+
+    #[test]
+    fn unrecognized_rung_is_a_hard_error() {
+        let config = V2Config::default();
+        assert!(resolve_cli_autonomy(&config, Some("nonsense".to_string())).is_err());
+    }
 }

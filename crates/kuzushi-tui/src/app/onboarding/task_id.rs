@@ -252,4 +252,34 @@ mod tests {
         assert_eq!(PlanningTaskId::ScanSemgrep.required_cli(), Some("semgrep"));
         assert_eq!(PlanningTaskId::TriageFindings.required_cli(), None);
     }
+
+    /// Drift guard: this onboarding walker has its own
+    /// `PlanningTaskId::phase()` table, and `kuzushi_core`'s autonomy gate has
+    /// its own independent `tool_phase()` table (`modules::autonomy::tool_phase`,
+    /// keyed by dispatched tool name rather than task id). Both exist to
+    /// answer the same question — "which spine phase does this action belong
+    /// to?" — so a tool whose two answers disagree would let the walker
+    /// present a task as (say) Map-phase while the shared gate refuses it
+    /// under a Map-ceiling posture (or vice versa). `AttachFiles` is the one
+    /// task that never dispatches a tool (`dispatches_tool() == false`), so
+    /// there is nothing for the gate to classify; every other task's
+    /// dispatched tool name must classify to exactly the phase the walker
+    /// already assigns it.
+    #[test]
+    fn task_phase_matches_the_core_autonomy_tool_phase_table() {
+        for task in PlanningTaskId::ALL.iter().copied() {
+            if !task.dispatches_tool() {
+                continue;
+            }
+            let tool_name = task.tool_name();
+            assert_eq!(
+                kuzushi_core::tool_phase(tool_name),
+                Some(task.phase()),
+                "{task:?} (tool {tool_name:?}) claims phase {:?} in \
+                 PlanningTaskId::phase() but kuzushi_core::tool_phase() \
+                 disagrees — the two tool→phase tables have drifted",
+                task.phase()
+            );
+        }
+    }
 }
