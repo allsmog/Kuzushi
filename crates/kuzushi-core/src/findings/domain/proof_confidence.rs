@@ -8,12 +8,22 @@ use serde::{Deserialize, Serialize};
 ///
 /// Declaration order is high-confidence-first so `Ord`/`rank()` sort `Confirmed`
 /// most-significant and `Dismissed` least. The classifier that maps a `Finding`
-/// onto this enum lives with the proof ladder (`presentation::detail`) so the
-/// chip can never disagree with the ladder / lifecycle status.
+/// onto this enum (`ProofConfidence::classify`) lives with the proof ladder
+/// (`presentation::detail`) so the chip can never disagree with the ladder /
+/// lifecycle status.
+///
+/// `classify` is patch-blind: `Finding` carries no patch field, so it always
+/// resolves the ladder with `latest_patch: None`. In practice `Confirmed` here
+/// means *runtime-exploited*, not "runtime-exploited or a verified patch" — the
+/// ladder's `Patched` rung (which does fold into `Confirmed`) is only reachable
+/// from callers that thread real `PatchResult` data in explicitly, such as
+/// `proof_ladder_state` in finding-detail rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProofConfidence {
-    /// Runtime-exploited or a sound/verified patch is recorded.
+    /// Runtime-exploited. (The ladder also folds a sound/verified patch into
+    /// this rung, but `classify` never sees patch data — see the type-level
+    /// doc comment.)
     Confirmed,
     /// Static evidence links the finding (code-cited / source-sink / sanitizer /
     /// statically-confirmed) but no runtime proof is recorded.
@@ -60,7 +70,9 @@ impl TryFrom<&str> for ProofConfidence {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         match normalize(value).as_str() {
             "confirmed" | "verified" | "exploited" | "runtimeverified" => Ok(Self::Confirmed),
-            "likely" | "supported" | "static" | "staticsupported" | "pathlinked" => Ok(Self::Likely),
+            "likely" | "supported" | "static" | "staticsupported" | "pathlinked" => {
+                Ok(Self::Likely)
+            }
             "unverified" | "suspected" | "candidate" | "unknown" | "signal" => Ok(Self::Unverified),
             "dismissed" | "rejected" | "falsepositive" | "fp" | "suppressed" | "bydesign" => {
                 Ok(Self::Dismissed)

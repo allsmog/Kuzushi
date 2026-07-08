@@ -30,9 +30,8 @@ pub use presentation::{
     compare_findings_by_confidence, finding_lifecycle_status, finding_next_action,
     format_finding_alias, parse_finding_alias, proof_ladder_state, proof_state_label,
     resolve_finding_alias, runtime_validation_label, runtime_validation_summary,
-    sorted_finding_alias_indices, sorted_finding_aliases, sorted_finding_display_indices,
-    stable_finding_alias, static_proof_summary, FindingDetailReport, FindingLifecycleStatusFilter,
-    FindingListFilter, FindingListReport, FindingNextAction, FindingReviewCompletenessFilter,
-    FindingSortAxis, FindingVerdictFilter, ProofLadderState, RuntimeValidationSummary,
-    StaticProofSummary,
+    sorted_finding_alias_indices, sorted_finding_aliases, stable_finding_alias,
+    static_proof_summary, FindingDetailReport, FindingLifecycleStatusFilter, FindingListFilter,
+    FindingListReport, FindingNextAction, FindingReviewCompletenessFilter, FindingVerdictFilter,
+    ProofLadderState, RuntimeValidationSummary, StaticProofSummary,
 };
