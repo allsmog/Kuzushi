@@ -1,6 +1,6 @@
 {
   "name": "kuzushi",
-  "version": "0.24.0-alpha.5",
+  "version": "0.24.0-alpha.6",
   "description": "Kuzushi — security-native code agent for evidence-backed repository scans",
   "author": "Shayaun Nejad",
   "repository": {
