@@ -14,6 +14,10 @@ pub(crate) enum ShellEffect {
     AdvancePrereqChain(PrereqChainAdvance),
     AbortForBudget,
     CancelActiveJobs,
+    /// Cancel exactly one live job slot by kind (`jobs -k <id>`). Scoped so the
+    /// per-row cancel a `Jobs` row advertises abors only that job, not every
+    /// concurrent job the way `CancelActiveJobs` does.
+    CancelJob(JobKind),
     ClearConversation,
     ContinuePastBudget,
     BuildContext(ContextBuild),
@@ -644,6 +648,32 @@ impl ShellApp {
     pub(super) fn cancel_active_jobs_effect(&mut self) {
         if !self.request_active_abort() {
             self.log("cancel", "no active scan/tool/agent to cancel");
+        }
+    }
+
+    /// Cancel exactly one live job slot (`jobs -k <id>`). Scoped so a per-row
+    /// cancel does not abort concurrent jobs the way `CancelActiveJobs` does.
+    pub(super) fn cancel_job_effect(&mut self, kind: JobKind) {
+        let cancelled = match kind {
+            // The Run slot holds either a scan or a background tool; one of
+            // these matches, the other is a no-op.
+            JobKind::Run => self.request_scan_abort() | self.request_tool_abort(),
+            JobKind::Agent => self.request_agent_abort(),
+            JobKind::Plan => self.request_plan_abort(),
+            JobKind::Threat => self.request_threat_abort(),
+        };
+        if !cancelled {
+            self.log("jobs", "that job is no longer running; nothing to cancel");
+            return;
+        }
+        // Only the Run slot (scan/tool) ever writes DAG rows into the
+        // Activity session — Agent/Plan/Threat jobs report through a
+        // separate trace-free path (see `ShellEvent::kind()`). Cancelling a
+        // non-Run job must not blank the still-live Run job's rows.
+        if kind == JobKind::Run {
+            if let Some(session) = self.activity_mut() {
+                session.mark_active_tasks_canceled();
+            }
         }
     }
 

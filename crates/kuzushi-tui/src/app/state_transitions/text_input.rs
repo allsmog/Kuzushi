@@ -56,11 +56,12 @@ impl ShellApp {
         })
     }
 
-    pub(super) fn clear_conversation_preserving_input(&mut self) {
+    pub(super) fn clear_conversation_preserving_input(&mut self) -> Vec<ShellEffect> {
         let (saved_input, saved_cursor) = self.editor().snapshot_input();
-        self.clear_conversation();
+        let effects = self.clear_conversation();
         self.editor_mut()
             .restore_input_snapshot(saved_input, saved_cursor);
+        effects
     }
 
     pub(crate) fn reduce_paste(&mut self, text: &str) -> InputUpdate {

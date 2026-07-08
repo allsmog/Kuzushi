@@ -56,7 +56,7 @@ impl ShellApp {
         );
     }
 
-    pub(crate) fn clear_conversation(&mut self) {
+    pub(crate) fn clear_conversation(&mut self) -> Vec<ShellEffect> {
         self.jobs_mut().cancel(JobKind::Agent);
         self.jobs_mut().finish(JobKind::Agent);
         self.clear_log();
@@ -68,5 +68,12 @@ impl ShellApp {
             "system",
             "Conversation cleared. Command history retained. Next: history or help",
         );
+        // The Agent slot is force-finished out-of-band above instead of via
+        // its normal terminal ShellEvent, so the centralized steer-queue
+        // drain in `apply_job_event` never runs for it (the worker's
+        // eventual terminal event arrives with a stale generation and is
+        // dropped by `JobHub::drain_one`). Drain here so a steer item queued
+        // while only an agent chat was running doesn't starve after `/clear`.
+        self.advance_steer_queue()
     }
 }

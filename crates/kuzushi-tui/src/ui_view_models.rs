@@ -43,6 +43,7 @@ mod generated_views_feed;
 mod health;
 mod help;
 mod home_cockpit;
+mod jobs_registry;
 mod journey;
 mod keybindings;
 mod keymap;
@@ -168,6 +169,9 @@ pub(crate) use help::{
 pub(crate) use home_cockpit::{
     home_cockpit_model, HomeArtifactRow, HomeCockpitModel, HomeFindingsCard, HomeNextCard,
     HomeRunArtifactChip, HomeRunCard, HomeTopRiskRow,
+};
+pub(crate) use jobs_registry::{
+    jobs_registry_model, JobRow, JobRunStatus, JobSource, JobsRegistryModel,
 };
 pub(crate) use journey::{
     autonomy_footer_segment, journey_footer_segment, journey_model, journey_phase_segment,

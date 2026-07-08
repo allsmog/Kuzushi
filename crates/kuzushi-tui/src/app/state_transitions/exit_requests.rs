@@ -32,7 +32,7 @@ impl ShellApp {
         requested
     }
 
-    pub(super) fn request_scan_abort(&mut self) -> bool {
+    pub(crate) fn request_scan_abort(&mut self) -> bool {
         if !self.can_request_scan_abort() {
             return false;
         }
@@ -75,7 +75,7 @@ impl ShellApp {
         }
     }
 
-    pub(super) fn request_tool_abort(&mut self) -> bool {
+    pub(crate) fn request_tool_abort(&mut self) -> bool {
         let Some(tool_name) = self.running_tool_name_owned() else {
             return false;
         };
@@ -97,7 +97,7 @@ impl ShellApp {
         self.cancel_job_or_token(JobKind::Run, cancel);
     }
 
-    pub(super) fn request_agent_abort(&mut self) -> bool {
+    pub(crate) fn request_agent_abort(&mut self) -> bool {
         let should_abort = self
             .agent_chat()
             .is_some_and(|agent| agent.running && !agent.abort_requested);
@@ -116,7 +116,7 @@ impl ShellApp {
         true
     }
 
-    pub(super) fn request_plan_abort(&mut self) -> bool {
+    pub(crate) fn request_plan_abort(&mut self) -> bool {
         if !self.planner_running() || self.plan_abort_requested() {
             return false;
         }
@@ -130,7 +130,7 @@ impl ShellApp {
         true
     }
 
-    pub(super) fn request_threat_abort(&mut self) -> bool {
+    pub(crate) fn request_threat_abort(&mut self) -> bool {
         if !self.threat_worker_running() || self.threat_abort_requested() {
             return false;
         }

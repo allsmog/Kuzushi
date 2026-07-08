@@ -139,6 +139,7 @@ impl<'a> ActiveActivityViewModel<'a> {
         Some(ActivityLiveTool {
             ambient: self.app.tool_is_ambient(&name),
             queued_plan_steps: self.app.stalled_planning_steps(),
+            queued_steer_steps: self.app.steer_queue().len(),
             name,
             spinner: self.app.spinner_glyph(),
             elapsed_secs: self.session.started_at.elapsed().as_secs(),

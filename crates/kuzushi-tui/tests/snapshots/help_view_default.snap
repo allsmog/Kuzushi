@@ -45,6 +45,8 @@ phase <map|hunt|confirm|fix> - open a specific engagement phase picker
   aliases / examples: phase map, phase hunt, phase confirm, phase fix
 logs - scrollable full-screen transcript
   aliases / examples: /logs, log, transcript, /transcript
+background - drop to Workbench, keep the job running (Ctrl+C still cancels)
+  aliases / examples: /background, bg, /bg
 
 RUN / SCAN — dispatch tools and scans
 demo - run a 90-second offline fixture scan; no key, model, or external scanner
@@ -55,6 +57,8 @@ run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthan
   aliases / examples: run ., /run <tool> [json], run . [json]
 ask <question> - explicit agent question
   aliases / examples: /ask <question>, ?text
+queue <tool|verb> - queue a command to run after the current one finishes
+  aliases / examples: /queue <tool>, queue run <tool>
 
 OPTIONS / TASKS — options + sast task control
 options [tool] - show tool options
@@ -141,6 +145,10 @@ show aliases [prefix] - list finding aliases
   aliases / examples: /show aliases [prefix]
 show runs - recent run artifacts
   aliases / examples: /show runs, runs, /runs
+jobs - live + recent run registry
+  aliases / examples: /jobs, jobs list
+jobs -k <runId> - cancel a running job or drop a pending one
+  aliases / examples: jobs kill <runId>, jobs cancel <runId>
 runs diff <left> <right> - compare findings snapshots from two runs
   aliases / examples: runs diff <runA> <runB>, runs compare <runA> <runB>
 replay <run|latest> - render a run summary

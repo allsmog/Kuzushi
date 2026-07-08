@@ -37,9 +37,29 @@ impl ShellApp {
             effects.append(&mut local_effects);
             return CommandUpdate::handled(effects);
         }
-        let mut command_update = self.reduce_command_message(parse_command(raw));
+        let parsed = parse_command(raw);
+        if self.queue_operator_submission_while_busy(trimmed, &parsed) {
+            return CommandUpdate::handled(effects);
+        }
+        let mut command_update = self.reduce_command_message(parsed);
         effects.append(&mut command_update.effects);
         CommandUpdate::handled(effects)
+    }
+
+    /// Auto-queue the ergonomic path: a `run <tool>` submitted while a job is
+    /// live is queued instead of rejected. Only operator submissions flow
+    /// through here — internal chain/planning dispatches never reach
+    /// `reduce_submitted_line`, so their single-slot ordering is untouched.
+    fn queue_operator_submission_while_busy(
+        &mut self,
+        trimmed: &str,
+        parsed: &ShellCommand,
+    ) -> bool {
+        if !self.has_running_work() || !is_steerable_submission(parsed) {
+            return false;
+        }
+        self.enqueue_steer_command(trimmed);
+        true
     }
 
     /// `<group-verb> ?` lists the verb's sub-verbs inline. Editor-local so it
@@ -110,6 +130,13 @@ impl ShellApp {
             self.set_last_cleared_input(None);
         }
     }
+}
+
+/// A submission that dispatches a tool run — the steerable case that queues
+/// behind a live job. Deliberately excludes `Scan` (opens the guided picker,
+/// not a direct dispatch) so a busy operator isn't blocked from navigating.
+fn is_steerable_submission(command: &ShellCommand) -> bool {
+    matches!(command, ShellCommand::RunTool { .. })
 }
 
 pub(crate) struct CommandUpdate {

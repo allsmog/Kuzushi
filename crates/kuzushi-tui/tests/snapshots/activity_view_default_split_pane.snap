@@ -26,4 +26,4 @@ assertion_line: 89
 
  * FOCUS  hover [j/k] to inspect a task
  j/k/g/G scroll   Tab pane   [/] views   f findings   o open   V verbose   Space pause   x reset view   Enter focus
- Esc leave
+ b background   Esc leave

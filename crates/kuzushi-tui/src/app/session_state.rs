@@ -1,4 +1,4 @@
-use super::TargetCandidateScope;
+use super::{SteerQueue, TargetCandidateScope};
 use kuzushi_core::{ModuleRegistry, ToolOptionStore, V2Config};
 use std::path::{Path, PathBuf};
 
@@ -14,6 +14,7 @@ pub(crate) struct SessionState {
     session_budget_usd: Option<f64>,
     trusted_workflow_auto_accept: bool,
     thinking_level: Option<String>,
+    steer_queue: SteerQueue,
 }
 
 impl SessionState {
@@ -36,7 +37,16 @@ impl SessionState {
             session_budget_usd,
             trusted_workflow_auto_accept,
             thinking_level: None,
+            steer_queue: SteerQueue::default(),
         }
+    }
+
+    pub(crate) fn steer_queue(&self) -> &SteerQueue {
+        &self.steer_queue
+    }
+
+    pub(crate) fn steer_queue_mut(&mut self) -> &mut SteerQueue {
+        &mut self.steer_queue
     }
 
     pub(crate) fn config(&self) -> &V2Config {

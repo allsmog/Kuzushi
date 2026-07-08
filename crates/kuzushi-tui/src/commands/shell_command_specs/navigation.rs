@@ -111,4 +111,10 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::Navigation,
         description: "scrollable full-screen transcript",
     },
+    ShellCommandSpec {
+        command: "background",
+        aliases: &["/background", "bg", "/bg"],
+        category: ShellCommandCategory::Navigation,
+        description: "drop to Workbench, keep the job running (Ctrl+C still cancels)",
+    },
 ];

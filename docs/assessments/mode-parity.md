@@ -40,8 +40,8 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 ## Intentional Asymmetries
 
 - **Interactive shell views** are shell-only: Workbench, Activity dashboard,
-  replay/trace, prompt tuning, actor detail, guided phase picker, model/auth
-  pickers, and two-stage idle Ctrl+C.
+  replay/trace, jobs registry, prompt tuning, actor detail, guided phase picker,
+  model/auth pickers, and two-stage idle Ctrl+C.
 - **Ordered onboarding gate is shell-only.** The interactive front door runs a
   single ordered gate — Target → Model → Credentials → Planning — via the pure
   `initial_onboarding_phase` fn. A bare `kuzushi` (no `--target`) opens the
@@ -50,6 +50,21 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
   paste / OAuth / `d` offline demo) instead of dumping to the Workbench.
   `KUZUSHI_SKIP_ONBOARDING`, headless, and plain modes bypass the whole gate.
   Explicit-target consent (PR #64) is intact — nothing silently defaults to cwd.
+- **Jobs registry + steer queue + background handoff are shell-only.** `jobs`
+  (`ShellView::Jobs`) is a live control surface over the shared
+  `.kuzushi/v3/runs/` format: it merges the single live `Run` (shared `JobHub`
+  slot + `ActivitySession`) and queued steer items with recent on-disk
+  `RunSummary` rows, de-duped by `run_id` (a disk `running` row with no live
+  twin renders `Stale`/"running?"). `jobs -k <id>` dequeues a pending steer item
+  or emits a scoped `CancelJob(JobKind)` that aborts only the addressed slot.
+  The steer queue (`queue`, plus auto-queue of a `run` submitted while busy) is
+  the lowest-precedence "next tool" mechanism — deterministic order **chain →
+  plan → steer**, drained centrally in `apply_job_event` on every terminal job
+  event and guarded against a pending chain/prereq-prompt/planning-queue. Only
+  one live `Run` exists at a time, so queued items always render as pending,
+  never running. `background`/`bg` (and Activity `b`) drops to the Workbench
+  without cancelling. The CLI `runs list/show/trace` is the headless analogue
+  over the same shared artefacts.
 - **`--ci` is scan-only.** Headless `kuzushi run` always emits JSON on stdout
   and writes run artifacts for machine consumers; it does not have a `--json`
   flag.
