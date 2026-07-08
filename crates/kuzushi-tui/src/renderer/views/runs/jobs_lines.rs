@@ -99,7 +99,8 @@ fn job_status_style(status: JobRunStatus) -> Style {
         JobRunStatus::Completed => theme::success(),
         JobRunStatus::Partial | JobRunStatus::Interrupted => theme::warn(),
         JobRunStatus::Failed => theme::danger(),
-        JobRunStatus::Skipped | JobRunStatus::Unknown => theme::muted(),
+        // Stale (unverified disk `running`) reads muted, not confident green.
+        JobRunStatus::Stale | JobRunStatus::Skipped | JobRunStatus::Unknown => theme::muted(),
     }
 }
 

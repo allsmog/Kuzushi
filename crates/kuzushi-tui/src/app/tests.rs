@@ -1453,6 +1453,7 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
+            | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -1553,6 +1554,7 @@ fn planner_reducer_returns_start_effect_without_spawning_worker() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
+            | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -1651,6 +1653,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
+            | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -1734,6 +1737,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
+            | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -2932,6 +2936,7 @@ fn command_effect_kind(command: ShellCommand) -> Option<EffectKind> {
         ShellEffect::AdvancePrereqChain(_) => EffectKind::AdvancePrereqChain,
         ShellEffect::AbortForBudget => EffectKind::AbortForBudget,
         ShellEffect::CancelActiveJobs => EffectKind::Cancel,
+        ShellEffect::CancelJob(_) => EffectKind::Cancel,
         ShellEffect::ClearConversation => EffectKind::ClearConversation,
         ShellEffect::BuildContext(_) => EffectKind::BuildContext,
         ShellEffect::ContinuePastBudget => EffectKind::ContinuePastBudget,
@@ -14453,6 +14458,58 @@ fn advance_steer_queue_waits_while_work_runs_then_drains_when_idle() {
 }
 
 #[test]
+fn queued_steer_item_dispatches_when_a_scan_finishes() {
+    // Regression: the drain must run on the scan-completion path, not only on a
+    // successful background-tool finish. scan running -> queue a run -> scan
+    // finishes -> the queued item leaves the queue.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_scan_panel(Some(running_scan_panel()));
+    let _ticket = app.jobs_mut().start(JobKind::Run, "scan");
+    app.set_activity(Some(ActivitySession::new("scan-1")));
+
+    run_command(
+        &mut app,
+        ShellCommand::QueueCommand("run triage:run".to_string()),
+    );
+    assert_eq!(app.steer_queue().len(), 1);
+
+    // The scan's terminal event flows through the central drain in
+    // `apply_job_event`.
+    let _effects = app.apply_job_event(ShellEvent::Scan(ScanEvent::Finished {
+        run_id: "scan-1".to_string(),
+        findings_count: 0,
+        cost_usd: None,
+    }));
+
+    assert!(!app.scan().is_some_and(|scan| scan.running));
+    assert!(
+        app.steer_queue().is_empty(),
+        "queued steer item must dispatch when the scan finishes"
+    );
+}
+
+#[test]
+fn advance_steer_queue_yields_to_a_pending_planning_queue() {
+    // chain -> plan -> steer: while the planning queue still has steps (whose
+    // dispatch is deferred through DispatchNextPlanningTask), the steer item
+    // must stay queued or it would be popped and then dropped by the overlap
+    // reject.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+    app.engagement
+        .queue_plan(vec![crate::app::PlanningTaskId::GatherRepoContext]);
+    assert!(!app.engagement.planning_queues_empty());
+
+    let effects = app.advance_steer_queue();
+
+    assert!(effects.is_empty());
+    assert_eq!(app.steer_queue().len(), 1);
+}
+
+#[test]
 fn advance_steer_queue_yields_to_a_pending_prereq_chain() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.steer_queue_mut().enqueue(QueuedCommand {
@@ -14496,7 +14553,7 @@ fn cancel_job_dequeues_a_pending_steer_item() {
 }
 
 #[test]
-fn cancel_job_reuses_cancel_effect_for_the_live_run() {
+fn cancel_job_scopes_cancellation_to_the_addressed_live_run() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let _ticket = app.jobs_mut().start(JobKind::Run, "triage:run");
     app.set_activity(Some(ActivitySession::new("tool-abc")));
@@ -14505,9 +14562,10 @@ fn cancel_job_reuses_cancel_effect_for_the_live_run() {
         .reduce_command_effects(&ShellCommand::CancelJob("tool-abc".to_string()))
         .expect("cancel-job routes");
 
+    // Scoped: cancels only the addressed Run slot, not every concurrent job.
     assert!(matches!(
         effects.as_slice(),
-        [ShellEffect::CancelActiveJobs]
+        [ShellEffect::CancelJob(JobKind::Run)]
     ));
 }
 

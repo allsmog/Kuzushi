@@ -49,9 +49,14 @@ impl ShellApp {
         if finishes_slot {
             self.jobs_mut().finish(kind);
         }
-        let effects = self.apply_current_job_event(event);
+        let mut effects = self.apply_current_job_event(event);
         if finishes_slot {
             self.clear_finished_job(kind);
+            // Centralized steer-queue drain: every terminal job event (scan
+            // success/failure, tool success/failure, agent/plan/threat finish)
+            // flows through here, so the operator steer queue drains on ALL
+            // completion paths — not just a successful background-tool finish.
+            effects.extend(self.advance_steer_queue());
         }
         effects
     }

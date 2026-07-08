@@ -128,14 +128,32 @@ fn jobs_registry_model_downgrades_orphaned_running_summary() {
     let model = jobs_registry_model(&app, 20);
 
     assert_eq!(model.rows.len(), 1);
-    // repair_stale_running_summary downgrades the orphan so it is not shown as
-    // forever-running with no live backing. The dead-PID probe is only wired on
-    // platforms with /proc; elsewhere the summary round-trips unchanged.
+    // On Linux the dead-PID probe downgrades the orphan to `interrupted`.
+    // Elsewhere (no /proc) liveness can't be verified, so a disk `running` row
+    // with no live twin renders as `Stale` ("running?"), never confident green.
     let expected = if cfg!(target_os = "linux") {
         JobRunStatus::Interrupted
     } else {
-        JobRunStatus::Running
+        JobRunStatus::Stale
     };
     assert_eq!(model.rows[0].status, expected);
+    assert!(!model.rows[0].cancelable);
+}
+
+#[test]
+fn jobs_registry_model_marks_untwinned_disk_running_row_as_stale() {
+    let (_temp, app) = app_with_target();
+    // A `running` summary with no process_id (so no repair) and no live twin in
+    // this session: liveness is unverifiable, so it must not read as running.
+    persist(
+        &app,
+        RunSummary::running("tool-700-ghost", "tool", Some("triage:run".into()), "/repo"),
+    );
+
+    let model = jobs_registry_model(&app, 20);
+
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].status, JobRunStatus::Stale);
+    assert_eq!(model.rows[0].status.label(), "running?");
     assert!(!model.rows[0].cancelable);
 }

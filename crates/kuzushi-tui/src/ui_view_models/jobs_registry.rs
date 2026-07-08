@@ -12,6 +12,11 @@ use std::collections::HashSet;
 pub(crate) enum JobRunStatus {
     Running,
     Queued,
+    /// A disk summary still marked `running` but with **no live backing** in
+    /// this session. The liveness can't be trusted (the owning process may
+    /// have crashed; the dead-PID probe only exists where `/proc` does), so it
+    /// renders muted as `running?` rather than a confident green `running`.
+    Stale,
     Completed,
     Failed,
     Interrupted,
@@ -25,6 +30,7 @@ impl JobRunStatus {
         match self {
             JobRunStatus::Running => "running",
             JobRunStatus::Queued => "pending",
+            JobRunStatus::Stale => "running?",
             JobRunStatus::Completed => "completed",
             JobRunStatus::Failed => "failed",
             JobRunStatus::Interrupted => "interrupted",
@@ -34,9 +40,13 @@ impl JobRunStatus {
         }
     }
 
-    fn from_summary_status(status: &str) -> Self {
+    /// Status for a **disk** row. A `running` disk summary that survived the
+    /// live-supersedes-disk merge has no live twin in this session, so it is
+    /// reported as `Stale` (unverifiable liveness), never a confident
+    /// `Running`.
+    fn from_disk_status(status: &str) -> Self {
         match status.to_ascii_lowercase().as_str() {
-            "running" => JobRunStatus::Running,
+            "running" => JobRunStatus::Stale,
             "completed" => JobRunStatus::Completed,
             "failed" => JobRunStatus::Failed,
             "interrupted" => JobRunStatus::Interrupted,
@@ -228,7 +238,7 @@ fn disk_job_row(summary: kuzushi_core::RunSummary) -> JobRow {
             summary.kind.clone()
         },
         label: summary.tool.clone().unwrap_or_else(|| summary.kind.clone()),
-        status: JobRunStatus::from_summary_status(&summary.status),
+        status: JobRunStatus::from_disk_status(&summary.status),
         elapsed_secs,
         phase: None,
         findings: summary.findings,

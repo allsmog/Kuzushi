@@ -100,6 +100,7 @@ impl EffectRuntime {
         match effect {
             effect @ (ShellEffect::AbortForBudget
             | ShellEffect::CancelActiveJobs
+            | ShellEffect::CancelJob(_)
             | ShellEffect::ClearConversation
             | ShellEffect::ContinuePastBudget
             | ShellEffect::FinishShellQuit
@@ -136,6 +137,7 @@ impl EffectRuntime {
         match effect {
             ShellEffect::AbortForBudget => app.abort_for_budget(),
             ShellEffect::CancelActiveJobs => app.cancel_active_jobs_effect(),
+            ShellEffect::CancelJob(kind) => app.cancel_job_effect(kind),
             ShellEffect::ClearConversation => app.clear_conversation(),
             ShellEffect::ContinuePastBudget => app.continue_past_budget(),
             ShellEffect::FinishShellQuit => app.finish_shell_quit_effect(),

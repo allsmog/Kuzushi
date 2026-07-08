@@ -742,31 +742,39 @@ impl ShellApp {
     }
 
     /// Cancel-by-id. A pending steer item cancels by dequeue (never fires a
-    /// token); a live job reuses the existing `CancelActiveJobs` path so the
-    /// cancellation policy is not duplicated. A completed/unknown id reports
-    /// honestly rather than pretending to act.
+    /// token); a live job resolves to its single `JobKind` slot and cancels
+    /// **only that job** (`CancelJob`), so the per-row cancel a `Jobs` row
+    /// advertises does not abort concurrent jobs. A completed/unknown id
+    /// reports honestly rather than pretending to act.
     fn reduce_cancel_job(&mut self, run_id: &str) -> Vec<ShellEffect> {
         if let Some(removed) = self.steer_queue_mut().remove_matching(run_id) {
             self.log("jobs", format!("dropped pending {}", removed.summary));
             return Vec::new();
         }
-        if self.run_id_matches_live_job(run_id) {
-            return vec![ShellEffect::CancelActiveJobs];
+        match self.resolve_live_job_kind(run_id) {
+            Some(kind) => vec![ShellEffect::CancelJob(kind)],
+            None => {
+                self.log(
+                    "jobs",
+                    format!("{run_id} is not running; cancel only affects live jobs (see `jobs`)"),
+                );
+                Vec::new()
+            }
         }
-        self.log(
-            "jobs",
-            format!("{run_id} is not running; cancel only affects live jobs (see `jobs`)"),
-        );
-        Vec::new()
     }
 
-    fn run_id_matches_live_job(&self, run_id: &str) -> bool {
-        let matches_run_slot = self.jobs().is_running(crate::app::JobKind::Run)
-            && self.live_run_id().is_some_and(|id| id == run_id);
-        matches_run_slot
-            || (run_id == "plan" && self.jobs().is_running(crate::app::JobKind::Plan))
-            || (run_id == "threat" && self.jobs().is_running(crate::app::JobKind::Threat))
-            || (run_id == "agent" && self.jobs().is_running(crate::app::JobKind::Agent))
+    fn resolve_live_job_kind(&self, run_id: &str) -> Option<crate::app::JobKind> {
+        use crate::app::JobKind;
+        if self.jobs().is_running(JobKind::Run) && self.live_run_id().is_some_and(|id| id == run_id)
+        {
+            return Some(JobKind::Run);
+        }
+        match run_id {
+            "plan" if self.jobs().is_running(JobKind::Plan) => Some(JobKind::Plan),
+            "threat" if self.jobs().is_running(JobKind::Threat) => Some(JobKind::Threat),
+            "agent" if self.jobs().is_running(JobKind::Agent) => Some(JobKind::Agent),
+            _ => None,
+        }
     }
 
     fn live_run_id(&self) -> Option<String> {
@@ -825,12 +833,15 @@ impl ShellApp {
         }
     }
 
-    /// Drain the steer queue after a tool finishes. Lowest precedence of the
-    /// three "next tool" mechanisms: chain → plan → steer. If a prereq chain or
-    /// planning task already re-occupied the single Run slot, the steer item
-    /// stays queued and retries on the next completion.
+    /// Drain the steer queue after any job finishes. Lowest precedence of the
+    /// three "next tool" mechanisms: **chain → plan → steer**. The steer item
+    /// stays queued whenever a prereq chain OR the planning queue still has work
+    /// pending — the planning advance dispatches its next task through a
+    /// *deferred* `DispatchNextPlanningTask` effect, so at drain time nothing
+    /// looks running yet; without the `planning_queues_empty` guard the steer
+    /// item would be popped and then dropped by the overlap reject.
     pub(crate) fn advance_steer_queue(&mut self) -> Vec<ShellEffect> {
-        if self.has_running_work() || self.engagement.has_pending_chain() {
+        if self.steer_dispatch_blocked() {
             return Vec::new();
         }
         let Some(queued) = self.steer_queue_mut().pop_front() else {
@@ -839,6 +850,13 @@ impl ShellApp {
         self.log("queue", format!("dispatching queued {}", queued.summary));
         self.reduce_command_message(crate::commands::parse_command(&queued.raw))
             .effects
+    }
+
+    fn steer_dispatch_blocked(&self) -> bool {
+        self.has_running_work()
+            || self.engagement.has_pending_chain()
+            || self.engagement.has_pending_prereq_prompt()
+            || !self.engagement.planning_queues_empty()
     }
 
     fn open_run_diff_view(&mut self, left: String, right: String) {
