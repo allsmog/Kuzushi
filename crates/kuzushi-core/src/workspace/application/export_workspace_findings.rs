@@ -9,6 +9,20 @@ use crate::findings::ReviewDecisionRecord;
 use crate::run_artifacts::load_run_summary;
 use std::collections::HashMap;
 
+/// Refresh suppression state against the current clock before exporting, so a
+/// finding whose rule lapsed since the last scan exports as NOT suppressed
+/// (and no lapsed suppression is exported as SARIF-accepted). Idempotent; a
+/// no-op when nothing changed. A missing findings DB is not an error here —
+/// there is simply nothing to reconcile.
+fn reconcile_suppressions_for_export(workspace: &WorkspaceTarget) -> Result<()> {
+    if !workspace.findings_db_path().exists() {
+        return Ok(());
+    }
+    let store = crate::findings::FindingStore::open(workspace.findings_db_path())?;
+    crate::suppressions::run_suppression_sweep(&store, workspace, "system:export")?;
+    Ok(())
+}
+
 pub fn export_workspace_findings(
     workspace: &WorkspaceTarget,
     output_path: impl AsRef<Path>,
@@ -33,6 +47,7 @@ pub fn export_workspace_findings_with_options(
     let format = resolve_workspace_findings_export_format(output_path, options.format)?;
     validate_workspace_findings_output_path(output_path, format)?;
 
+    reconcile_suppressions_for_export(workspace)?;
     let prepared = prepare_workspace_findings_export(workspace, options)?;
     ensure_empty_export_is_allowed(&prepared.records, options)?;
     ensure_workspace_export_parent(output_path)?;

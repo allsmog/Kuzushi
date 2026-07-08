@@ -157,11 +157,22 @@ fn store_unified_suppression_rule(
         derive_rule_id, upsert_suppression_rule, FindingRef, SuppressionOrigin,
         SuppressionPredicate, SuppressionReason, SuppressionRule,
     };
+    // The CLI `--reason` is free text. If it is not one of the structured
+    // suppression reasons, do NOT silently mis-bucket it into a rule; surface it
+    // and skip the durable rule. The whitebox record + review decision (which
+    // preserve the free-text reason) still apply.
+    let Some(parsed_reason) = SuppressionReason::parse(reason) else {
+        eprintln!(
+            "suppress: reason {reason:?} is not a structured suppression reason \
+             (false-positive, acceptable-risk, wont-fix, used-in-tests, no-time-to-fix, \
+             out-of-scope); recorded as a review decision only, no suppressions.toml rule written."
+        );
+        return Ok(());
+    };
     let predicate = SuppressionPredicate {
         finding_id: Some(FindingRef(finding.fingerprint.clone())),
         ..SuppressionPredicate::empty()
     };
-    let parsed_reason = SuppressionReason::parse(reason).unwrap_or(SuppressionReason::AcceptableRisk);
     let rule = SuppressionRule {
         id: derive_rule_id(&predicate, parsed_reason),
         predicate,

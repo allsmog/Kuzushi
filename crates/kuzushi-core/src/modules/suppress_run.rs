@@ -1,11 +1,11 @@
 use super::*;
 use crate::findings::{FindingStore, Severity};
 use crate::suppressions::{
-    derive_rule_id, evaluate_suppressions, load_suppression_rules, remove_suppression_rule,
-    run_suppression_sweep, upsert_suppression_rule, FindingRef, SuppressionOrigin,
-    SuppressionPredicate, SuppressionReason, SuppressionRule, SuppressionState,
+    derive_rule_id, load_suppression_rules, remove_suppression_rule, run_suppression_sweep,
+    upsert_suppression_rule, FindingRef, SuppressionOrigin, SuppressionPredicate, SuppressionReason,
+    SuppressionRule,
 };
-use crate::workspace::{load_program_scope, ScopeVerdict, WorkspaceTarget};
+use crate::workspace::{ScopeVerdict, WorkspaceTarget};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(in crate::modules) fn run_suppress_add(
@@ -77,63 +77,24 @@ pub(in crate::modules) fn run_suppress_remove(
         .context("suppress:remove requires a findings store")?;
     let rule_id = string_input_any(input, &["id", "ruleId", "rule_id"])
         .context("suppress:remove requires id=<rule-id>")?;
-    let reopened = reopen_findings_for_removed_rule(store, workspace, &rule_id)?;
     let removed = remove_suppression_rule(workspace, &rule_id)?;
+    // The sweep reopens (emits SuppressionRemoved for) any rule-originated
+    // finding that no longer matches a rule now that this one is gone. Manual
+    // dismissals are untouched.
+    let sweep = run_suppression_sweep(store, workspace, "suppress:remove")?;
     let output = if removed {
-        format!("suppress:remove deleted {rule_id}; reopened {reopened} finding(s)")
+        format!(
+            "suppress:remove deleted {rule_id}; reopened {} finding(s)",
+            sweep.summary.removed
+        )
     } else {
         format!("suppress:remove found no rule {rule_id}")
     };
     Ok(crate::module_result::completed_output_result(
         output.clone(),
         output,
-        json!({ "ruleId": rule_id, "removed": removed, "reopened": reopened }),
+        json!({ "ruleId": rule_id, "removed": removed, "reopened": sweep.summary.removed }),
     ))
-}
-
-/// Before removing a rule, emit `SuppressionRemoved` only for findings whose
-/// *active* suppressor is exactly this rule. This never reopens manual
-/// dismissals or findings held by another rule.
-fn reopen_findings_for_removed_rule(
-    store: &FindingStore,
-    workspace: &WorkspaceTarget,
-    rule_id: &str,
-) -> Result<usize> {
-    let findings = store.list_findings(usize::MAX)?;
-    let scope = load_program_scope(workspace)?;
-    let rules = load_suppression_rules(workspace)?;
-    let now_unix = now_unix();
-    let report = evaluate_suppressions(&findings, &rules, scope.as_ref(), now_unix);
-    let mut reopened = 0;
-    for entry in &report.states {
-        if active_rule_id(&entry.state) == Some(rule_id) {
-            store.append_finding_suppression_event(
-                &entry.fingerprint,
-                removed_event(rule_id),
-            )?;
-            reopened += 1;
-        }
-    }
-    Ok(reopened)
-}
-
-fn active_rule_id(state: &SuppressionState) -> Option<&str> {
-    match state {
-        SuppressionState::Active(matched) => Some(matched.rule_id.as_str()),
-        _ => None,
-    }
-}
-
-fn removed_event(rule_id: &str) -> crate::findings::SuppressionLifecycleEvent {
-    crate::findings::SuppressionLifecycleEvent {
-        event_kind: crate::event_log::EventKind::SuppressionRemoved,
-        reason: None,
-        rule_id: Some(rule_id.to_string()),
-        statement: None,
-        origin: None,
-        expires_at_unix: None,
-        actor: "suppress:remove".to_string(),
-    }
 }
 
 fn build_rule_from_input(
