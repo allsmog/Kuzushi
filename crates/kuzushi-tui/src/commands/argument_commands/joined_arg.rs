@@ -10,7 +10,7 @@ pub(crate) fn parse_joined_arg_command(
         "model" => ShellCommand::Model((!rest.trim().is_empty()).then_some(rest)),
         "aim" => ShellCommand::Aim((!rest.trim().is_empty()).then_some(rest)),
         "tools" => ShellCommand::Tools(tools_query(&rest)),
-        "find" => ShellCommand::Tools((!rest.trim().is_empty()).then_some(rest)),
+        "find" => ShellCommand::Tools(tools_query(&rest)),
         "favorite" | "fav" => required_joined_arg(rest, original, ShellCommand::FavoriteTool),
         "prompt" => empty_joined_arg(rest, ShellCommand::Prompts, ShellCommand::Prompt),
         "plan" => required_joined_arg(rest, original, ShellCommand::Plan),

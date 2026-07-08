@@ -44,6 +44,14 @@ mod tests {
             ShellCommand::Tools(Some("fav:yes phase:hunt".to_string()))
         );
         assert_eq!(
+            parse_command("find --fav"),
+            ShellCommand::Tools(Some("fav:yes".to_string()))
+        );
+        assert_eq!(
+            parse_command("find --fav phase:hunt"),
+            ShellCommand::Tools(Some("fav:yes phase:hunt".to_string()))
+        );
+        assert_eq!(
             parse_command("favorite semgrep:scan"),
             ShellCommand::FavoriteTool("semgrep:scan".to_string())
         );
@@ -697,6 +705,7 @@ mod tests {
             "demo",
             "detach",
             "failure-handoff",
+            "favorite-tool",
             "file-picker",
             "findings",
             "findings-filter",

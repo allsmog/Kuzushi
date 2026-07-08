@@ -87,24 +87,36 @@ impl ModuleRegistry {
             format!("registered tool or DAG node {name:?} has no Rust executor mapping")
         })?;
         let result = executor(self, name, &input, ctx, runtime);
-        self.record_recent_tool_use(name, ctx);
+        if result.is_ok() {
+            self.record_recent_tool_use(name, ctx);
+        }
         return result.map(|output| normalize_tool_output_contract(name, output));
     }
 
     /// Record a recents entry at the shared dispatch boundary so scan, shell,
-    /// and run all agree. Only visible (non-hidden) registered tools with a
-    /// workspace are recorded; a shelf-write failure never fails the tool run.
+    /// and run all agree. Only called for `Ok` results (a failed run should not
+    /// show up on the YOUR TOOLS shelf); only visible tools (matching the same
+    /// hidden-tool/hidden-module policy as `tools_with_modules`) with a
+    /// workspace are recorded. A shelf-write failure never fails the tool run,
+    /// but it is reported on stderr so a corrupt shelf file is diagnosable
+    /// instead of silently no-op'ing recents forever.
     fn record_recent_tool_use(&self, name: &str, ctx: &ToolExecutionContext<'_>) {
         let Some(workspace) = ctx.workspace else {
             return;
         };
-        let is_visible_tool = self.resolve_tool(name).is_some_and(|tool| !tool.hidden);
+        let is_visible_tool = self
+            .resolve_tool(name)
+            .is_some_and(|tool| self.is_tool_visible(tool));
         if !is_visible_tool {
             return;
         }
         let at = dispatch_timestamp();
-        // Convenience state — a write failure must never fail the tool run.
-        let _ = crate::workspace::record_tool_use(workspace, name, &at);
+        // Convenience state — a write failure must never fail the tool run,
+        // but it must not be silent either: a corrupt tool-shelf.json should
+        // be observable instead of making recents quietly no-op forever.
+        if let Err(error) = crate::workspace::record_tool_use(workspace, name, &at) {
+            eprintln!("kuzushi: failed to record recent tool use for {name:?}: {error:#}");
+        }
     }
 
     fn enforce_runtime_requirement(
