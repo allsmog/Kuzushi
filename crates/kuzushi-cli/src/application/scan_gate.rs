@@ -1,6 +1,7 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use kuzushi_core::{
-    export_workspace_findings, FindingStore, Severity, WorkspaceExportFormat, WorkspaceTarget,
+    export_workspace_findings, suppressions::run_suppression_sweep, FindingStore, Severity,
+    WorkspaceExportFormat, WorkspaceTarget,
 };
 use std::path::PathBuf;
 
@@ -34,8 +35,26 @@ pub(crate) fn apply_scan_gate_policy(
         );
     }
     if let Some(threshold) = policy.fail_on {
+        reconcile_suppressions_before_gate(workspace, store)?;
         enforce_fail_on(store, scan_id, threshold)?;
     }
+    Ok(())
+}
+
+/// Re-run the suppression sweep immediately before `--fail-on` decides
+/// pass/fail. The scan-start sweep is not enough by itself: a finding the
+/// scan re-observes gets its `stable_findings.current_status` reset to
+/// `open` by the observation projection, which hydrates `suppressed=false`
+/// regardless of an unexpired rule. Gating on that stale hydration used to
+/// only self-correct when `--sarif` also ran (SARIF export carries its own
+/// sweep). Idempotent; a sweep failure is a hard error so the gate never
+/// passes on state it could not re-evaluate.
+fn reconcile_suppressions_before_gate(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+) -> Result<()> {
+    run_suppression_sweep(store, workspace, "system:scan-gate")
+        .context("suppression sweep failed before fail-on gate; refusing to gate on stale state")?;
     Ok(())
 }
 
@@ -174,6 +193,85 @@ mod tests {
         assert_eq!(
             count_blocking_findings(&store, "scan-2", Severity::Low).unwrap(),
             0
+        );
+    }
+
+    /// Regression test for the bug where `--fail-on` only honored a
+    /// suppression for a re-observed finding when `--sarif` was also passed
+    /// (SARIF export carries its own sweep; the gate previously did not).
+    /// A finding the scan re-observes gets `stable_findings.current_status`
+    /// reset to `open` by the observation projection, which re-hydrates
+    /// `suppressed=false` even though an unexpired rule still matches it.
+    /// `apply_scan_gate_policy` must now re-sweep right before the gate
+    /// decides, so this passes with no `--sarif` option set.
+    #[test]
+    fn gate_honors_suppression_for_a_re_observed_finding_without_sarif() {
+        use kuzushi_core::suppressions::{
+            save_suppression_rules, FindingRef, SuppressionOrigin, SuppressionPredicate,
+            SuppressionReason, SuppressionRule,
+        };
+
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("scan-1", workspace.root(), "running")
+            .unwrap();
+
+        let finding = Finding::new_tool(
+            "semgrep",
+            "rust.sqli.tainted-query",
+            "src/app.rs",
+            10,
+            Some(10),
+            Severity::High,
+            "tainted query, CWE-89",
+        );
+        store.insert_finding("scan-1", &finding).unwrap();
+        let fingerprint = store.list_findings_for_scan_id("scan-1").unwrap()[0]
+            .fingerprint
+            .clone();
+
+        let rule = SuppressionRule {
+            id: "sup-reobserve".to_string(),
+            predicate: SuppressionPredicate {
+                finding_id: Some(FindingRef(fingerprint)),
+                ..SuppressionPredicate::empty()
+            },
+            reason: SuppressionReason::FalsePositive,
+            statement: "sanitized upstream".to_string(),
+            actor: "tester".to_string(),
+            created_at_unix: 1,
+            expires_at_unix: None,
+            origin: SuppressionOrigin::File,
+        };
+        save_suppression_rules(&workspace, &[rule]).unwrap();
+
+        // Scan-start sweep suppresses the finding for this run.
+        run_suppression_sweep(&store, &workspace, "system:scan-start").unwrap();
+        assert!(store.list_findings_for_scan_id("scan-1").unwrap()[0].suppressed);
+
+        // The scan re-observes the same finding later in the same run,
+        // resetting current_status to 'open' and re-hydrating
+        // suppressed=false, without any change to the (still unexpired) rule.
+        store.insert_finding("scan-1", &finding).unwrap();
+        assert!(
+            !store.list_findings_for_scan_id("scan-1").unwrap()[0].suppressed,
+            "re-observation must reproduce the stale-open hydration bug"
+        );
+
+        // The gate must re-sweep before enforcing --fail-on, without needing
+        // --sarif, so the unexpired rule still suppresses the finding here.
+        let policy = ScanGatePolicy {
+            fail_on: Some(Severity::High),
+            sarif: None,
+        };
+        apply_scan_gate_policy(&workspace, &store, "scan-1", &policy)
+            .expect("gate must not fail when an unexpired rule covers the re-observed finding");
+        assert!(
+            store.list_findings_for_scan_id("scan-1").unwrap()[0].suppressed,
+            "gate-time sweep must leave the finding suppressed"
         );
     }
 }
