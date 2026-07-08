@@ -111,7 +111,8 @@ impl FindingStore {
         let id = projected_finding_id(scan_id, &finding.fingerprint);
         let projected = projected_seed(scan_id, id, finding, &identity);
         let evidence = self.verified_finding_evidence(tx, scan_id, &finding.evidence)?;
-        let identity_link = ProjectionIdentityLink::from_assignment(&identity, &finding.fingerprint);
+        let identity_link =
+            ProjectionIdentityLink::from_assignment(&identity, &finding.fingerprint);
         Ok(FindingInsertOutcome {
             id,
             projected,
@@ -136,8 +137,11 @@ impl FindingStore {
             Some(identity) => identity,
             None => self.identity_assignment_for_finding(tx, scan_id, finding)?,
         };
-        let identity_link =
-            ProjectionIdentityLink::collision(&identity, &finding.fingerprint, existing_had_identity);
+        let identity_link = ProjectionIdentityLink::collision(
+            &identity,
+            &finding.fingerprint,
+            existing_had_identity,
+        );
         let projected = merged_projection_seed(
             scan_id,
             merge_id,
@@ -165,11 +169,9 @@ impl FindingStore {
         if incoming.severity <= existing.severity {
             return Ok(ProjectionEvidence::KeepExisting);
         }
-        Ok(ProjectionEvidence::Replace(self.verified_finding_evidence(
-            tx,
-            scan_id,
-            &incoming.evidence,
-        )?))
+        Ok(ProjectionEvidence::Replace(
+            self.verified_finding_evidence(tx, scan_id, &incoming.evidence)?,
+        ))
     }
 
     /// Look up an existing finding in this scan run that shares the dedup_key.
@@ -193,7 +195,10 @@ impl FindingStore {
               limit 1",
         )?;
         let row = stmt
-            .query_row(params![scan_id, dedup_key, new_fingerprint], row_to_current_finding)
+            .query_row(
+                params![scan_id, dedup_key, new_fingerprint],
+                row_to_current_finding,
+            )
             .optional()?;
         Ok(row)
     }
@@ -221,13 +226,8 @@ impl FindingStore {
             .identity_id
             .clone()
             .unwrap_or_else(|| projected.fingerprint.clone());
-        let observation = observation_write(
-            scan_id,
-            &projected,
-            stable_fp,
-            &identity_link,
-            &provenance,
-        )?;
+        let observation =
+            observation_write(scan_id, &projected, stable_fp, &identity_link, &provenance)?;
         Ok(ObservationCommit {
             observation,
             provenance,
@@ -306,7 +306,6 @@ impl FindingStore {
     fn v3_objects_dir(&self) -> Option<PathBuf> {
         Some(self.db_path.as_ref()?.parent()?.join("objects"))
     }
-
 }
 
 fn carry_previous_triage(projected: &mut Finding, previous: Option<&Finding>) {

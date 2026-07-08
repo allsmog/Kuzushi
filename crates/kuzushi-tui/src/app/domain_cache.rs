@@ -6,6 +6,7 @@ use super::{
 use kuzushi_core::{
     findings::ReviewDecisionRecord,
     incremental_index::{coalesce_changes, plan_for_change, ReindexPlan, WorkspaceChange},
+    workspace::ToolShelf,
     AgenticSastReport, CarliniThreatHuntReport, Finding, ProgramScope, ScanProgress,
 };
 
@@ -109,6 +110,9 @@ pub struct DomainCache {
     findings_read_watermark: Option<u64>,
     review_decisions: Vec<ReviewDecisionRecord>,
     workspace_stale: Option<WorkspaceStaleSummary>,
+    /// Cached "YOUR TOOLS" shelf (favorites + recents). Loaded from disk on
+    /// target wiring and favorite toggles — never read per frame.
+    tool_shelf: ToolShelf,
 }
 
 impl DomainCache {
@@ -143,7 +147,16 @@ impl DomainCache {
             findings_read_watermark: None,
             review_decisions: Vec::new(),
             workspace_stale: None,
+            tool_shelf: ToolShelf::default(),
         }
+    }
+
+    pub(crate) fn tool_shelf(&self) -> &ToolShelf {
+        &self.tool_shelf
+    }
+
+    pub(crate) fn set_tool_shelf(&mut self, shelf: ToolShelf) {
+        self.tool_shelf = shelf;
     }
 
     pub(crate) fn context_view(&self) -> &ContextSnapshotView {

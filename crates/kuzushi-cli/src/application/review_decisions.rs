@@ -48,6 +48,8 @@ fn human_review_decision(verdict: ReviewDecisionVerdict, reason: String) -> Revi
         author: TriageAuthor::Human,
         confidence: 1.0,
         rationale: reason,
+        dismiss_reason: None,
+        actor: None,
     }
 }
 

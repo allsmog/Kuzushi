@@ -151,13 +151,14 @@ fn projection_count_summary(
 
 fn push_readme_findings_table(out: &mut String, records: &[WorkspaceFindingExportRecord]) {
     out.push_str("## Findings\n\n");
-    out.push_str("| Alias | Severity | Decision | Lifecycle | Evidence | Location |\n");
-    out.push_str("| --- | --- | --- | --- | --- | --- |\n");
+    out.push_str("| Alias | Severity | Confidence | Decision | Lifecycle | Evidence | Location |\n");
+    out.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
     for record in records {
         out.push_str(&format!(
-            "| {} | {} | {} | {} | {} | `{}:{}` |\n",
+            "| {} | {} | {} | {} | {} | {} | `{}:{}` |\n",
             markdown_table_cell(&record.alias),
             markdown_table_cell(&record.severity),
+            markdown_table_cell(&record.proof_confidence),
             markdown_table_cell(&record.review_decision),
             markdown_table_cell(&record.lifecycle_status),
             markdown_table_cell(&record.evidence.state),
@@ -166,7 +167,7 @@ fn push_readme_findings_table(out: &mut String, records: &[WorkspaceFindingExpor
         ));
     }
     if records.is_empty() {
-        out.push_str("| - | - | - | - | - | - |\n");
+        out.push_str("| - | - | - | - | - | - | - |\n");
     }
     out.push('\n');
 }
@@ -272,6 +273,10 @@ fn push_bundle_analysis_summary(out: &mut String, record: &WorkspaceFindingExpor
     out.push_str(&format!(
         "- **Automated reasoning:** {}\n",
         record.analysis.automated_reasoning_present
+    ));
+    out.push_str(&format!(
+        "- **Confidence:** {}\n",
+        record.proof_confidence
     ));
     out.push_str(&format!(
         "- **Static proof:** {} ({})\n",
@@ -380,6 +385,7 @@ fn build_manifest_entry(
         "alias": record.alias,
         "fingerprint": record.fingerprint,
         "severity": record.severity,
+        "proofConfidence": record.proof_confidence,
         "tool": record.tool,
         "ruleId": record.rule_id,
         "file": record.location.file,

@@ -22,8 +22,8 @@ apps/  · 2
 
  -- REVIEW QUEUE - showing 2 of 2 - 1 open - 1 complete ----------------------------------------------------------------
 REVIEW QUEUE - showing 2 of 2 - 1 open - 1 complete · mode:all · filter:decision:all
->F-0001  C unassigned review-order:1 decision:confirmed source-linked...                      sql injection via...
- F-0002  H unassigned review-order:2 decision:needs_review source-linked next:validate...     path traversal in...
+>F-0001  C ? unassigned review-order:1 decision:confirmed source-linked...                      sql injection via...
+ F-0002  H ? unassigned review-order:2 decision:needs_review source-linked next:validate...     path traversal in...
 
  -- DETAILS ------------------------------------------------------------------------------------------------------------
 sql injection via order_id concatenation
@@ -36,6 +36,7 @@ producing tool: semgrep
 
 -- SIGNALS --
 severity: critical
+  confidence: unverified
 lifecycle status: candidate
 evidence state: source-linked
   proof summary: ? signal-only

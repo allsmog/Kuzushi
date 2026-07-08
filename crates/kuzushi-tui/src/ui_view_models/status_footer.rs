@@ -1,6 +1,6 @@
 use super::{
-    active_project_scope_label, findings_model, journey_footer_segment, routing_mode_segment,
-    scan_status, status_footer_findings_summary_from_counts,
+    active_project_scope_label, autonomy_footer_segment, findings_model, journey_footer_segment,
+    routing_mode_segment, scan_status, status_footer_findings_summary_from_counts,
     status_footer_findings_summary_with_total, view_status_segment, ShellApp,
 };
 use crate::app::ReviewMode;
@@ -60,6 +60,7 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
 fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
     [
         journey_footer_segment(app),
+        autonomy_footer_segment(app),
         review_conflict_footer_segment(app),
         workspace_stale_footer_segment(app),
     ]
@@ -70,6 +71,9 @@ fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
 fn optional_idle_chips(app: &ShellApp) -> impl Iterator<Item = String> {
     [
         journey_footer_segment(app),
+        // The autonomy dial rides beside the phase chip — the always-visible
+        // master control (`⛭ 作 confirm`, with `⚠` when it throttles the walker).
+        autonomy_footer_segment(app),
         scope_footer_segment(app),
         project_scope_footer_segment(app),
         review_conflict_footer_segment(app),

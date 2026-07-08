@@ -59,6 +59,10 @@ impl ShellApp {
         self.auto_open_viz_for_tool(&tool_name);
         effects.extend(self.advance_chain_after_tool(&tool_name));
         effects.extend(self.advance_planning_queue_after_tool(&tool_name));
+        // The operator steer queue drains centrally in `apply_job_event` on the
+        // terminal event, after chain + planning advance have queued their
+        // deferred effects — keeping chain → plan → steer precedence for every
+        // completion path (success, failure, cancel), not just this one.
         effects
     }
 

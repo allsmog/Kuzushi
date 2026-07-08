@@ -50,6 +50,22 @@ impl TmuxSession {
         env: HashMap<String, String>,
         seeds: &[ArtifactSeed],
     ) -> Result<Self> {
+        Self::launch_inner(binary, env, seeds, true)
+    }
+
+    /// Launch a bare interactive `kuzushi shell` with **no** `--target`, from a
+    /// scoped temp directory. Exercises the launch-time target-picker gate,
+    /// which only fires when the operator supplied no target.
+    pub fn launch_targetless(binary: &str, env: HashMap<String, String>) -> Result<Self> {
+        Self::launch_inner(binary, env, &[], false)
+    }
+
+    fn launch_inner(
+        binary: &str,
+        env: HashMap<String, String>,
+        seeds: &[ArtifactSeed],
+        with_target: bool,
+    ) -> Result<Self> {
         require_tmux()?;
         let session_name = format!("kbdd-{}", uuid::Uuid::new_v4().simple());
         let temp_home = tempfile::tempdir().context("creating scoped HOME")?;
@@ -62,17 +78,29 @@ impl TmuxSession {
             "HOME={home} ",
             home = shell_escape(temp_home.path().to_string_lossy().as_ref()),
         );
+        if !with_target {
+            // Run the picker from inside the scoped target dir so a targetless
+            // launch discovers a real cwd candidate without touching the repo.
+            cmd.push_str(&format!(
+                "cd {dir} && ",
+                dir = shell_escape(temp_target.path().to_string_lossy().as_ref()),
+            ));
+        }
         for (key, value) in &env {
             if matches!(key.as_str(), "HOME" | "KUZUSHI_V2_CONFIG_MODEL") {
                 continue;
             }
             cmd.push_str(&format!("{key}={} ", shell_escape(value)));
         }
-        cmd.push_str(&format!(
-            "{bin} shell --target {target}",
-            bin = shell_escape(binary),
-            target = shell_escape(temp_target.path().to_string_lossy().as_ref()),
-        ));
+        if with_target {
+            cmd.push_str(&format!(
+                "{bin} shell --target {target}",
+                bin = shell_escape(binary),
+                target = shell_escape(temp_target.path().to_string_lossy().as_ref()),
+            ));
+        } else {
+            cmd.push_str(&format!("{bin} shell", bin = shell_escape(binary)));
+        }
 
         let status = Command::new("tmux")
             .args([

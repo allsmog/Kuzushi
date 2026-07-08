@@ -4,6 +4,10 @@ use super::*;
 pub(super) enum ControlKeyAction {
     QuitChord,
     Edit(fn(&mut ShellApp)),
+    /// Like `Edit`, but for handlers that produce follow-up effects (e.g.
+    /// draining the steer queue) that must reach `EffectRuntime` instead of
+    /// being silently dropped.
+    EditEffects(fn(&mut ShellApp) -> Vec<ShellEffect>),
 }
 
 impl ControlKeyAction {
@@ -14,6 +18,7 @@ impl ControlKeyAction {
                 handler(app);
                 InputUpdate::handled()
             }
+            Self::EditEffects(handler) => InputUpdate::handled_with_effects(handler(app)),
         }
     }
 }
@@ -42,7 +47,7 @@ const CONTROL_KEY_ACTIONS: &[(char, ControlKeyAction)] = &[
     ('n', ControlKeyAction::Edit(ShellApp::history_next)),
     (
         'l',
-        ControlKeyAction::Edit(ShellApp::clear_conversation_preserving_input),
+        ControlKeyAction::EditEffects(ShellApp::clear_conversation_preserving_input),
     ),
     ('r', ControlKeyAction::Edit(ShellApp::enter_history_search)),
     (

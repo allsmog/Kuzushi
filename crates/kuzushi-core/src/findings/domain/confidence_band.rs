@@ -72,7 +72,10 @@ mod tests {
 
     #[test]
     fn parses_upper_and_lower_case_labels() {
-        assert_eq!(ConfidenceBand::try_from("HIGH").unwrap(), ConfidenceBand::High);
+        assert_eq!(
+            ConfidenceBand::try_from("HIGH").unwrap(),
+            ConfidenceBand::High
+        );
         assert_eq!(
             ConfidenceBand::try_from("medium").unwrap(),
             ConfidenceBand::Medium

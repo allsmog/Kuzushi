@@ -217,7 +217,6 @@ impl EngagementState {
         self.pending_chain = Some(chain);
     }
 
-    #[cfg(test)]
     pub(crate) fn has_pending_chain(&self) -> bool {
         self.pending_chain.is_some()
     }

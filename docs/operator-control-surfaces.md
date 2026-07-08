@@ -59,6 +59,13 @@ Specifier trust is controlled by `[operator].trusted_modules`; the dynamic
 Node bridge only loads trusted specifiers. Untrusted analyzers belong in the
 v3 sandbox plugin path.
 
+`kuzushi run --autonomy <recon|hunt|confirm|fix>` sets the autonomy ceiling
+for that run. The shared dispatch gate refuses any tool whose engagement phase
+sits above the rung (`recon`→map, `hunt`→hunt, `confirm`→confirm, `fix`→fix)
+with an actionable error — it never silently runs or substitutes it. Omitted =
+`fix` (unconstrained, matching prior behavior). The requested rung is clamped
+by `[phases].stop_after`; an unrecognized rung is a hard error.
+
 ## Shell
 
 The Rust shell uses the same descriptors:
@@ -69,6 +76,10 @@ The Rust shell uses the same descriptors:
 - `setg <key> <value>` writes a global option.
 - `unsetg <key>` clears a global option.
 - `scan` prepares `sast:scan` input from the option store before dispatch.
+- `autonomy [recon|hunt|confirm|fix]` (alias `posture`) reads or sets the
+  always-visible autonomy dial; `Ctrl+↑`/`Ctrl+↓` raise/lower it one rung. The
+  dial is the same ceiling `kuzushi run --autonomy` sets; it is session-scoped
+  and clamped by `[phases].stop_after`.
 
 Session options last only for the shell process. Global options are persisted.
 Workspace option files are loaded when present and preserved by the same store
@@ -169,6 +180,52 @@ hosts = ["admin.example.com"]
 
 When an allow list is present, unmatched hosts/IPs are out of scope. With only
 deny rules, unmatched targets remain unknown rather than explicitly allowed.
+
+## Suppression rules
+
+Suppression is one composable primitive. Mute a false positive, gate a scope,
+filter a severity band, or honor an in-source ignore comment — all compile into
+a single `SuppressionRule` (predicate + reason + statement + actor + optional
+expiry). Suppression **annotates, never hides**: a suppressed finding stays in
+every default list with a `status:suppressed` tag, is emitted in SARIF with a
+standard `result.suppressions[]` entry, and is skipped by `--fail-on`. Exclude
+suppressed findings explicitly with the existing filter grammar.
+
+Rules live in a durable, target-local file (like `scope.toml`, target-authored
+and therefore only allowed to *annotate*, never to silently change security
+policy):
+
+```toml
+# <target>/.kuzushi/v3/suppressions.toml
+version = 1
+
+[[rule]]
+reason = "false-positive"     # false-positive | acceptable-risk | wont-fix |
+                              # used-in-tests | no-time-to-fix | out-of-scope
+statement = "Sanitizer applied upstream; taint path infeasible."  # required
+actor = "shayaun"
+created_at_unix = 1783468800
+expires_at_unix = 1791244800  # optional; omit = never. `expires = "YYYY-MM-DD"`
+                              # is an accepted alias (not both).
+
+[rule.match]                  # at least one key required
+finding_id = "FI-3A2B9C01"    # alias | identity id | fingerprint prefix
+rule_id = "rust.sqli.tainted-query"
+path = "tests/**"             # globset, matched against Finding.file_path
+tool = "semgrep"
+module = "taint-iris"
+severity_below = "medium"     # mutes strictly below the band (never Unknown)
+scope_status = "out-of-scope" # in-scope | out-of-scope | unknown
+```
+
+Author rules with the `suppress:add|list|remove` tool (or the `kuzushi suppress`
+CLI, which also keeps the legacy whitebox store in sync). Expiry is
+read-time-authoritative; a reconcile sweep at scan start and target load appends
+`SuppressionExpired` so lapsed rules **auto-reopen** findings visibly via the
+event log. In-source `# kuzushi-ignore: <target> — <reason>` comments follow
+Semgrep `nosemgrep` semantics: the finding is still emitted, then marked
+suppressed; malformed comments suppress nothing and are surfaced by
+`suppress:list`.
 
 ## Environment Variables
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::{auth_method_rows, AuthMethodRow, AuthMethodRowKind};
 
 pub(crate) fn auth_method_picker_lines(
     app: &ShellApp,
@@ -14,10 +15,17 @@ pub(crate) fn auth_method_picker_lines(
     lines.push(divider("CHOOSE AUTH METHOD", area.width));
     lines.push(blank());
     lines.push(muted(&format!(
-        "Provider {provider} supports multiple auth methods. Pick one to continue.",
+        "Provider {provider} needs credentials. Paste a key, sign in, or try the demo.",
     )));
     lines.push(blank());
     for (idx, row) in rows.iter().enumerate() {
+        // Promote the keyless escape hatch: set the demo row apart with a
+        // blank line + a "No key yet?" lead so it reads as a distinct offer,
+        // not a third undifferentiated auth method.
+        if row.kind == AuthMethodRowKind::OfflineDemo {
+            lines.push(blank());
+            lines.push(muted("No key yet? Try the offline demo (no key/model/binary):"));
+        }
         lines.push(auth_row_line(app, idx, row, area.width));
     }
     if app.router.auth_picker().is_api_key_row() {
@@ -26,51 +34,12 @@ pub(crate) fn auth_method_picker_lines(
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("↑/↓/j/k", "move"),
+        ("d", "offline fixture"),
         (":", "type a command"),
         ("Enter", "confirm"),
         ("Esc/q", "defer"),
     ]));
     lines
-}
-
-pub(crate) fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
-    match provider {
-        "anthropic" => vec![
-            AuthMethodRow {
-                label: "API key (ANTHROPIC_API_KEY)",
-                hint: "paste key here, Enter accepts for this session",
-            },
-            AuthMethodRow {
-                label: "Claude.ai OAuth login",
-                hint: "opens a browser flow (or headless link in non-TTY)",
-            },
-            AuthMethodRow {
-                label: "Offline demo",
-                hint: "run bundled fixture now; no key, model, or scanner binary",
-            },
-        ],
-        "openai" | "openai-codex" => vec![
-            AuthMethodRow {
-                label: "API key (OPENAI_API_KEY)",
-                hint: "paste key here, Enter accepts for this session",
-            },
-            AuthMethodRow {
-                label: "OpenAI OAuth login",
-                hint: "opens a browser flow (or headless link in non-TTY)",
-            },
-            AuthMethodRow {
-                label: "Offline demo",
-                hint: "run bundled fixture now; no key, model, or scanner binary",
-            },
-        ],
-        _ => Vec::new(),
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct AuthMethodRow {
-    pub label: &'static str,
-    pub hint: &'static str,
 }
 
 fn api_key_draft_lines(app: &ShellApp, provider: &str, width: u16) -> Vec<Line<'static>> {

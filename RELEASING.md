@@ -105,3 +105,22 @@ git tag -d v0.2.0
 git tag v0.2.0
 git push origin v0.2.0 --force
 ```
+
+## Suppression primitive migration (unreleased)
+
+A unified `SuppressionRule` primitive now backs all muting concepts. Notes:
+
+- New durable store `<target>/.kuzushi/v3/suppressions.toml`. Absent file is a
+  no-op, so existing workspaces are unaffected.
+- The legacy `<target>/.kuzushi/v3/whitebox-suppressions.json` store is retained
+  and compiled into the unified pipeline. `kuzushi suppress` now writes both.
+  A later release may migrate whitebox records into `suppressions.toml` and drop
+  the JSON store; no data loss in this release.
+- No event-log or projection migration: the `SuppressionAdded` /
+  `SuppressionExpired` / `SuppressionRemoved` event kinds and the
+  `stable_findings.current_status` projection already existed. New payload fields
+  are additive and ignored by old readers.
+- `Finding.suppressed` is now hydrated from the projection (additive over any
+  value stored in finding JSON). This lights up the pre-existing
+  `status:suppressed` / `verdict:suppressed` filter tokens and the export
+  `suppressed` column/SARIF `result.suppressions[]`.

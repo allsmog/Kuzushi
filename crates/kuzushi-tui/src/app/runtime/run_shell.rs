@@ -58,15 +58,7 @@ pub(crate) fn run_terminal_shell(
     if let Ok((columns, rows)) = crossterm::terminal::size() {
         apply_initial_terminal_size(&mut app, columns, rows);
     }
-    apply_launch_start_view(&mut app);
-    // Bare interactive launch (no --target): open the target picker so the
-    // front door lands in the same guided journey as `shell --target .`.
-    // Done here (not in construction) so headless/test apps keep their
-    // targetless default, and the explicit-target rule stays intact — the
-    // operator picks, nothing silently falls back to cwd.
-    if app.target().is_none() && !crate::app::skip_onboarding_env() {
-        apply_launch_target_picker(&mut app);
-    }
+    apply_launch_onboarding(&mut app);
     let result = terminal_shell_loop(&mut terminal, &mut app);
     let _ = restore_terminal(&mut terminal);
     result
@@ -82,6 +74,26 @@ pub(crate) fn apply_launch_start_view(app: &mut ShellApp) -> bool {
 
 pub(crate) fn apply_launch_target_picker(app: &mut ShellApp) -> bool {
     update_and_execute_effects(app, Msg::Cmd(ShellCommand::LaunchTargetPicker))
+}
+
+/// Single interactive-launch onboarding entry point. Construction already ran
+/// `apply_initial_onboarding_phase` (opening the model/auth/planning picker
+/// when a `--target` was given), so the only additional front-door decision
+/// is whether to open the launch-time target picker. The ordered gate lives
+/// in the pure `initial_onboarding_phase` fn: only a bare interactive launch
+/// (no `--target`, no skip-env) yields `TargetPicker`; every other phase was
+/// already applied at construction and is preserved by `open_start_view`.
+/// Nothing silently falls back to cwd — the operator picks a target or
+/// explicitly defers with Esc.
+pub(crate) fn apply_launch_onboarding(app: &mut ShellApp) {
+    match app.launch_onboarding_phase() {
+        InitialOnboardingPhase::TargetPicker => {
+            apply_launch_target_picker(app);
+        }
+        _ => {
+            apply_launch_start_view(app);
+        }
+    }
 }
 
 pub(crate) fn open_start_view(app: &mut ShellApp) {

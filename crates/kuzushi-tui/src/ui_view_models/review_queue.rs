@@ -9,7 +9,9 @@ use super::review_state::{
 };
 use super::SeverityTone;
 use crate::ShellApp;
-use kuzushi_core::{finding_next_action, project_finding, Finding, FindingNextAction};
+use kuzushi_core::{
+    finding_next_action, project_finding, Finding, FindingNextAction, ProofConfidence,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReviewQueueMode {
@@ -47,6 +49,8 @@ pub(crate) struct ReviewQueueRow {
     pub(crate) identity_label: String,
     pub(crate) severity_tone: SeverityTone,
     pub(crate) severity_label: String,
+    pub(crate) proof_confidence: ProofConfidence,
+    pub(crate) proof_confidence_label: String,
     pub(crate) confidence_label: String,
     pub(crate) priority_label: String,
     pub(crate) lifecycle_status: String,
@@ -162,6 +166,8 @@ impl ReviewQueueRow {
             identity_label: finding_identity_label(finding),
             severity_tone: SeverityTone::from_severity(projection.severity),
             severity_label: projection.severity_label,
+            proof_confidence: ProofConfidence::classify(finding),
+            proof_confidence_label: ProofConfidence::classify(finding).label().to_string(),
             confidence_label: effective_review_confidence_label(finding, decision),
             priority_label: format!("review-order:{}", index + 1),
             lifecycle_status: lifecycle_status_label(finding),

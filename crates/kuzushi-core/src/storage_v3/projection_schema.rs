@@ -206,7 +206,9 @@ create table if not exists review_decisions (
   confidence real not null,
   rationale text not null,
   author text not null,
-  created_at text not null
+  created_at text not null,
+  dismiss_reason text,
+  dismissed_by text
 );
 create index if not exists idx_review_decisions_finding
   on review_decisions(finding_id, created_at desc, id desc);

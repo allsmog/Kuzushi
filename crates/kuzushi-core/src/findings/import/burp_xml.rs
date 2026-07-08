@@ -98,10 +98,7 @@ fn parse_burp_items(xml: &str) -> Result<Vec<BurpItem>> {
     loop {
         match reader.read_event() {
             Ok(Event::Start(event)) => handle_burp_open(&event, &mut state)?,
-            Ok(Event::Text(event)) => state
-                .current_field
-                .text
-                .push_str(&decoded_text(&event)?),
+            Ok(Event::Text(event)) => state.current_field.text.push_str(&decoded_text(&event)?),
             Ok(Event::CData(event)) => state
                 .current_field
                 .text

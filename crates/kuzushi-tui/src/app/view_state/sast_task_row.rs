@@ -107,6 +107,11 @@ pub enum ShellView {
     PromptsEditor,
     ActorDetail,
     Runs,
+    /// Background jobs registry — the operator control surface over the live
+    /// run plus recent on-disk runs and queued steer items. Extends the Runs
+    /// timeline with elapsed, current step, `-k` cancel, and pending rows.
+    /// Shell-only, stateless like `Runs`.
+    Jobs,
     RunDiff,
     Replay,
     Trace,

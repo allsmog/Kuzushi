@@ -28,9 +28,9 @@ pub(super) fn project_review_decision(
         r#"
         insert into review_decisions(
           finding_id, identity_id, decision_verdict, triage_verdict, confidence,
-          rationale, author, created_at
+          rationale, author, created_at, dismiss_reason, dismissed_by
         )
-        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         "#,
         params![
             finding_id,
@@ -41,6 +41,8 @@ pub(super) fn project_review_decision(
             payload_str(&event.payload, "rationale").unwrap_or(""),
             payload_str(&event.payload, "author").unwrap_or(event.actor.as_str()),
             event.created_at,
+            payload_str(&event.payload, "dismissReason"),
+            payload_str(&event.payload, "dismissedBy"),
         ],
     )?;
     let review_decision_id = tx.last_insert_rowid();

@@ -252,4 +252,68 @@ mod tests {
         assert_eq!(PlanningTaskId::ScanSemgrep.required_cli(), Some("semgrep"));
         assert_eq!(PlanningTaskId::TriageFindings.required_cli(), None);
     }
+
+    /// Drift guard: the curated planning-task phase must agree with the
+    /// canonical `ToolPhase` stamped on each task's registry tool. This proves
+    /// the descriptor phase field and the walker's task list are one truth.
+    #[test]
+    fn planning_task_phase_agrees_with_descriptor_phase() {
+        use kuzushi_core::modules::ToolPhase;
+        use kuzushi_core::V2Config;
+
+        let app = crate::ShellApp::new(V2Config::default(), None);
+        let registry = app.registry();
+
+        for task in PlanningTaskId::ALL.iter().copied() {
+            if task.is_inline_action() {
+                continue; // inline actions (e.g. attach) are not registry tools
+            }
+            let Some(descriptor) = registry.resolve_tool(task.tool_name()) else {
+                continue; // tool not registered in this build (optional adapters)
+            };
+            let expected = match task.phase() {
+                WorkflowPhase::Map => ToolPhase::Map,
+                WorkflowPhase::Hunt => ToolPhase::Hunt,
+                WorkflowPhase::Confirm => ToolPhase::Confirm,
+                WorkflowPhase::Fix => ToolPhase::Fix,
+            };
+            assert_eq!(
+                descriptor.phase,
+                expected,
+                "phase drift for task {:?} (tool {})",
+                task,
+                task.tool_name()
+            );
+        }
+    }
+
+    /// Drift guard: this onboarding walker has its own
+    /// `PlanningTaskId::phase()` table, and `kuzushi_core`'s autonomy gate has
+    /// its own independent `tool_phase()` table (`modules::autonomy::tool_phase`,
+    /// keyed by dispatched tool name rather than task id). Both exist to
+    /// answer the same question — "which spine phase does this action belong
+    /// to?" — so a tool whose two answers disagree would let the walker
+    /// present a task as (say) Map-phase while the shared gate refuses it
+    /// under a Map-ceiling posture (or vice versa). `AttachFiles` is the one
+    /// task that never dispatches a tool (`is_inline_action() == true`), so
+    /// there is nothing for the gate to classify; every other task's
+    /// dispatched tool name must classify to exactly the phase the walker
+    /// already assigns it.
+    #[test]
+    fn task_phase_matches_the_core_autonomy_tool_phase_table() {
+        for task in PlanningTaskId::ALL.iter().copied() {
+            if task.is_inline_action() {
+                continue;
+            }
+            let tool_name = task.tool_name();
+            assert_eq!(
+                kuzushi_core::tool_phase(tool_name),
+                Some(task.phase()),
+                "{task:?} (tool {tool_name:?}) claims phase {:?} in \
+                 PlanningTaskId::phase() but kuzushi_core::tool_phase() \
+                 disagrees — the two tool→phase tables have drifted",
+                task.phase()
+            );
+        }
+    }
 }

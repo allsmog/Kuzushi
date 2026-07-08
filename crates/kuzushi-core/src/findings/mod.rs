@@ -18,19 +18,21 @@ pub(crate) use application::{
 };
 pub(crate) use domain::is_runtime_proof_state;
 pub use domain::{
-    compute_dedup_key, compute_root_cause_key, compute_source_signature, extract_cwe,
-    normalize_cwe, ConfidenceBand, Finding, FindingEvidence, FindingSource, PatchAttempt,
-    PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, Severity,
+    compute_dedup_key, compute_root_cause_key, compute_source_signature, derive_triage_state,
+    extract_cwe, normalize_cwe, ConfidenceBand, DismissReason, Finding, FindingEvidence,
+    FindingSource, FindingTriageState, PatchAttempt, PatchResult, PatchStatus,
+    PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofConfidence,
+    ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, Severity, StableLifecycleStatus,
     StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict,
     VulnSource,
 };
-pub use persistence::FindingStore;
+pub use persistence::{FindingStore, SuppressionLifecycleEvent};
 pub use presentation::{
-    finding_lifecycle_status, finding_next_action, format_finding_alias, parse_finding_alias,
-    proof_ladder_state, proof_state_label, resolve_finding_alias, runtime_validation_label,
-    runtime_validation_summary, sorted_finding_alias_indices, sorted_finding_aliases,
-    stable_finding_alias, static_proof_summary, FindingDetailReport, FindingLifecycleStatusFilter,
-    FindingListFilter, FindingListReport, FindingNextAction, FindingReviewCompletenessFilter,
-    FindingVerdictFilter, ProofLadderState, RuntimeValidationSummary, StaticProofSummary,
+    compare_findings_by_confidence, finding_lifecycle_status, finding_next_action,
+    format_finding_alias, parse_finding_alias, proof_ladder_state, proof_state_label,
+    resolve_finding_alias, runtime_validation_label, runtime_validation_summary,
+    sorted_finding_alias_indices, sorted_finding_aliases, stable_finding_alias,
+    static_proof_summary, FindingDetailReport, FindingLifecycleStatusFilter, FindingListFilter,
+    FindingListReport, FindingNextAction, FindingReviewCompletenessFilter, FindingVerdictFilter,
+    ProofLadderState, RuntimeValidationSummary, StaticProofSummary,
 };

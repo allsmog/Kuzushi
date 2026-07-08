@@ -170,6 +170,8 @@ fn review_queue_model_applies_loaded_append_only_decisions() {
             author: TriageAuthor::Human,
             confidence: 1.0,
             rationale: "suppressed by approved review policy".to_string(),
+            dismiss_reason: None,
+            actor: None,
         },
         triage_verdict: None,
         created_at: "2026-07-02T00:00:00Z".to_string(),

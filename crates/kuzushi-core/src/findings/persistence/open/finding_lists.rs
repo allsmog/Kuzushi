@@ -29,8 +29,8 @@ fn collect_filtered_findings(
     let mut findings = Vec::new();
     let mut review_cache = BTreeMap::new();
     for row in rows {
-        count += push_matching_finding(store, &mut review_cache, &mut findings, row, filter)?
-            as usize;
+        count +=
+            push_matching_finding(store, &mut review_cache, &mut findings, row, filter)? as usize;
     }
     Ok((count, findings))
 }
@@ -45,6 +45,16 @@ fn push_matching_finding(
     let review_decision = latest_review_decision_for_filter(store, review_cache, &finding)?;
     if !filter.matches_with_review_decision(&finding, review_decision.as_ref()) {
         return Ok(false);
+    }
+    if filter.has_derived_triage_state_filter() {
+        let lifecycle = store.stable_lifecycle_status_for_finding(&finding)?;
+        // The fold reads the latest HUMAN decision, not the latest of any
+        // author, so a later automated re-triage cannot mask a human verdict.
+        let human_decision = latest_human_review_decision_for_filter(store, &finding)?;
+        let derived = derive_triage_state(lifecycle, human_decision.as_ref());
+        if !filter.matches_triage_lifecycle(&derived) {
+            return Ok(false);
+        }
     }
     if findings.len() < filter.limit {
         findings.push(finding);
@@ -63,8 +73,8 @@ fn latest_review_decision_for_filter(
     if let Some(decision) = review_cache.get(&cache_key) {
         return Ok(decision.clone());
     }
-    let decision = load_latest_review_decision_for_filter(store, finding)?
-        .map(|record| record.decision);
+    let decision =
+        load_latest_review_decision_for_filter(store, finding)?.map(|record| record.decision);
     review_cache.insert(cache_key, decision.clone());
     Ok(decision)
 }
@@ -80,6 +90,18 @@ fn load_latest_review_decision_for_filter(
         Some(finding_id) => store.latest_review_decision(finding_id),
         None => Ok(None),
     }
+}
+
+fn latest_human_review_decision_for_filter(
+    store: &FindingStore,
+    finding: &Finding,
+) -> Result<Option<ReviewDecision>> {
+    let Some(finding_id) = finding.id else {
+        return Ok(None);
+    };
+    Ok(store
+        .latest_human_review_decision_for_finding_identity(finding_id)?
+        .map(|record| record.decision))
 }
 
 fn review_cache_key(finding: &Finding) -> Option<String> {

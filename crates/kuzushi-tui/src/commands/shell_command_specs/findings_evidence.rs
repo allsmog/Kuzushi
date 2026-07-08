@@ -12,10 +12,11 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &[
             "findings filter state:new rank:high",
             "findings filter decision:confirmed completeness:open",
+            "findings filter confidence:confirmed",
             "/findings filter <expr>",
         ],
         category: ShellCommandCategory::FindingsEvidence,
-        description: "open filtered findings by severity, review decision, or completeness",
+        description: "filter findings by severity, confidence (proof), review decision, or completeness",
     },
     ShellCommandSpec {
         command: "component <scope|path|all>",
@@ -44,6 +45,15 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "record a human review decision for the selected finding",
     },
     ShellCommandSpec {
+        command: "dismiss <reason> <note>",
+        aliases: &[
+            "dismiss false_positive not reachable in prod",
+            "dismiss used_in_tests test fixture only",
+        ],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "dismiss the selected finding with an auditable reason",
+    },
+    ShellCommandSpec {
         command: "show aliases [prefix]",
         aliases: &["/show aliases [prefix]"],
         category: ShellCommandCategory::FindingsEvidence,
@@ -54,6 +64,18 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &["/show runs", "runs", "/runs"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "recent run artifacts",
+    },
+    ShellCommandSpec {
+        command: "jobs",
+        aliases: &["/jobs", "jobs list"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "live + recent run registry",
+    },
+    ShellCommandSpec {
+        command: "jobs -k <runId>",
+        aliases: &["jobs kill <runId>", "jobs cancel <runId>"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "cancel a running job or drop a pending one",
     },
     ShellCommandSpec {
         command: "runs diff <left> <right>",

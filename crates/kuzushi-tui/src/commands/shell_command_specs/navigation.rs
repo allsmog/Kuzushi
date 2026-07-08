@@ -39,9 +39,21 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "tools [query]",
-        aliases: &["/tools", "show tools", "tools semgrep"],
+        aliases: &["/tools", "show tools", "tools semgrep", "tools --fav"],
         category: ShellCommandCategory::Navigation,
         description: "list or filter routed Rust tools",
+    },
+    ShellCommandSpec {
+        command: "find [query]",
+        aliases: &["/find", "find phase:hunt taint"],
+        category: ShellCommandCategory::Navigation,
+        description: "open the Tools view grammar-first (alias for tools [query])",
+    },
+    ShellCommandSpec {
+        command: "favorite <tool>",
+        aliases: &["/favorite <tool>", "fav <tool>", "/fav <tool>"],
+        category: ShellCommandCategory::Navigation,
+        description: "toggle a tool on the per-workspace YOUR TOOLS shelf",
     },
     ShellCommandSpec {
         command: "doctor",
@@ -88,9 +100,21 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         description: "open a specific engagement phase picker",
     },
     ShellCommandSpec {
+        command: "autonomy [recon|hunt|confirm|fix]",
+        aliases: &["autonomy", "/autonomy", "posture", "/posture"],
+        category: ShellCommandCategory::Navigation,
+        description: "read/set the autonomy dial (also Ctrl+Up/Down) — the tool-dispatch ceiling",
+    },
+    ShellCommandSpec {
         command: "logs",
         aliases: &["/logs", "log", "transcript", "/transcript"],
         category: ShellCommandCategory::Navigation,
         description: "scrollable full-screen transcript",
+    },
+    ShellCommandSpec {
+        command: "background",
+        aliases: &["/background", "bg", "/bg"],
+        category: ShellCommandCategory::Navigation,
+        description: "drop to Workbench, keep the job running (Ctrl+C still cancels)",
     },
 ];

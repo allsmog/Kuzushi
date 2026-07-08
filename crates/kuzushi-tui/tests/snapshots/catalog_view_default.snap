@@ -4,7 +4,7 @@ assertion_line: 33
 ---
  KUZUSHI › modules · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
-MODULES · 38 modules
+MODULES · 39 modules
 
 > NEXT Run sast — Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
 
@@ -51,5 +51,6 @@ MODULES · 38 modules
   findings                Persist and inspect findings in SQLite.
   patch                   Generate and validate a patch for a finding.
   report                  Build artifact-backed Kuzushi run reports without executing scanners or runtimes.
+  suppress                Compose suppression rules (mute false positives, scope, severity, expiry).
   triage                  LLM-driven triage of scanner findings with evidence-backed verdicts.
   verify                  Exploitability verification through proof-of-concept construction and sandboxed execution.

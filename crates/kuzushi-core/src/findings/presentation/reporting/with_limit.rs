@@ -1,4 +1,5 @@
 use super::*;
+use crate::query::{tokenize_filter_expression, FilterToken};
 use crate::run_artifacts::RunSummary;
 use std::collections::BTreeMap;
 
@@ -59,10 +60,17 @@ impl FindingListFilter {
                 input,
                 &["completeness", "reviewCompleteness", "review_completeness"],
             )?)?);
+        self.triage_band
+            .extend(parsed_confidence_bands(string_values(input, "band")?)?);
         self.lifecycle_status
             .extend(parsed_lifecycle_status_filters(string_values_any(
                 input,
                 &["status", "lifecycleStatus", "lifecycle_status"],
+            )?)?);
+        self.confidence
+            .extend(parsed_confidence_filters(string_values_any(
+                input,
+                &["confidence", "proofConfidence", "proof_confidence"],
             )?)?);
         Ok(())
     }
@@ -89,10 +97,12 @@ impl FindingListFilter {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
             limit,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_parts_full(
         severity: Vec<String>,
         verdict: Vec<String>,
@@ -101,6 +111,7 @@ impl FindingListFilter {
         vuln_source: Vec<String>,
         completeness: Vec<String>,
         lifecycle_status: Vec<String>,
+        confidence: Vec<String>,
         limit: usize,
     ) -> Result<Self> {
         Ok(Self {
@@ -109,6 +120,8 @@ impl FindingListFilter {
             triage_state: Vec::new(),
             completeness: parsed_part_completeness_filters(completeness)?,
             lifecycle_status: parsed_part_lifecycle_status_filters(lifecycle_status)?,
+            confidence: parsed_confidence_filters(confidence)?,
+            triage_band: Vec::new(),
             name: normalize_string(name),
             text_terms: Vec::new(),
             file_path: normalize_string(file_path),
@@ -121,6 +134,14 @@ impl FindingListFilter {
         })
     }
 
+    /// Adds triage-lifecycle state constraints from raw CLI/tool strings
+    /// (e.g. `dismissed`, `fixed`, `open`). Compiles into the same
+    /// `triage_state` filter used by the `state:` expression and tool option.
+    pub fn with_triage_states(mut self, states: Vec<String>) -> Result<Self> {
+        self.triage_state.extend(parsed_triage_states(states)?);
+        Ok(self)
+    }
+
     pub fn from_filter_expression(expression: &str) -> Result<Self> {
         let mut filter = Self::default();
         filter.apply_filter_expression(expression)?;
@@ -128,29 +149,20 @@ impl FindingListFilter {
     }
 
     fn apply_filter_expression(&mut self, expression: &str) -> Result<()> {
-        for token in expression.split_whitespace() {
+        for token in tokenize_filter_expression(expression)? {
             self.apply_filter_token(token)?;
         }
         Ok(())
     }
 
-    fn apply_filter_token(&mut self, token: &str) -> Result<()> {
-        if token.trim().is_empty() {
-            return Ok(());
+    fn apply_filter_token(&mut self, token: FilterToken) -> Result<()> {
+        match token.key {
+            None => {
+                self.text_terms.push(normalize_filter_value(token.raw));
+                Ok(())
+            }
+            Some(key) => self.apply_keyed_filter(&key, token.values),
         }
-        if token.starts_with('-') {
-            anyhow::bail!("findings:list filter negation is not supported yet: {token:?}");
-        }
-        let Some((key, raw_value)) = token.split_once(':') else {
-            self.text_terms
-                .push(normalize_filter_value(token.to_string()));
-            return Ok(());
-        };
-        let values = split_csv(raw_value.to_string()).collect::<Vec<_>>();
-        if values.is_empty() {
-            anyhow::bail!("findings:list filter {key:?} requires a value");
-        }
-        self.apply_keyed_filter(key, values)
     }
 
     fn apply_keyed_filter(&mut self, key: &str, values: Vec<String>) -> Result<()> {
@@ -158,10 +170,14 @@ impl FindingListFilter {
             FilterKey::Rank => self.severity.extend(parsed_severities(values)?),
             FilterKey::Verdict => self.verdict.extend(parsed_verdicts(values)?),
             FilterKey::State => self.triage_state.extend(parsed_triage_states(values)?),
-            FilterKey::Completeness => self.completeness.extend(parsed_completeness_filters(values)?),
+            FilterKey::Completeness => self
+                .completeness
+                .extend(parsed_completeness_filters(values)?),
+            FilterKey::TriageBand => self.triage_band.extend(parsed_confidence_bands(values)?),
             FilterKey::Status => self
                 .lifecycle_status
                 .extend(parsed_lifecycle_status_filters(values)?),
+            FilterKey::Confidence => self.confidence.extend(parsed_confidence_filters(values)?),
             FilterKey::Source => self.vuln_source.extend(parsed_sources(values)?),
             FilterKey::File => {
                 self.file_path = merge_optional_contains(self.file_path.take(), values)
@@ -185,14 +201,37 @@ impl FindingListFilter {
     ) -> bool {
         severity_matches(self, finding)
             && triage_state_filter_matches(self, finding)
+            && triage_band_matches(self, finding)
             && verdict_matches(self, finding, review_decision)
             && review_completeness_matches(self, finding, review_decision)
             && lifecycle_status_matches(self, finding)
+            && confidence_matches(self, finding)
             && name_matches(self, finding)
             && text_terms_match(self, finding)
             && source_matches(self, finding)
             && file_path_matches(self, finding)
             && run_id_matches(self, finding)
+    }
+
+    /// True when the filter constrains derived triage-lifecycle states
+    /// (`open`/`reviewing`/`confirmed`/`to_fix`/`dismissed`/`fixed`/`removed`).
+    pub fn has_derived_triage_state_filter(&self) -> bool {
+        self.triage_state.iter().any(|state| state.is_derived())
+    }
+
+    /// Derived phase: whether the finding's derived triage state satisfies the
+    /// derived filter states. Legacy states are ignored (matched separately).
+    pub fn matches_triage_lifecycle(&self, derived: &FindingTriageState) -> bool {
+        let derived_filters: Vec<FindingTriageStateFilter> = self
+            .triage_state
+            .iter()
+            .copied()
+            .filter(|state| state.is_derived())
+            .collect();
+        derived_filters.is_empty()
+            || derived_filters
+                .iter()
+                .any(|state| state.matches_derived(derived))
     }
 
     pub fn has_provenance_filter(&self) -> bool {
@@ -266,23 +305,53 @@ fn parsed_part_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
         .collect()
 }
 
-fn triage_state_matches(state: FindingTriageStateFilter, finding: &Finding) -> bool {
+fn legacy_triage_state_matches(state: FindingTriageStateFilter, finding: &Finding) -> bool {
     match state {
         FindingTriageStateFilter::Untriaged => finding.triage.is_none(),
         FindingTriageStateFilter::Triaged => finding.triage.is_some(),
+        // Derived states (open/reviewing/confirmed/to_fix/dismissed/fixed/removed)
+        // are evaluated in the store layer via the lifecycle fold.
+        _ => false,
     }
+}
+
+fn triage_band_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    if filter.triage_band.is_empty() {
+        return true;
+    }
+    finding
+        .triage
+        .as_ref()
+        .map(|triage| ConfidenceBand::from_score(triage.confidence))
+        .is_some_and(|band| filter.triage_band.contains(&band))
+}
+
+fn parsed_confidence_bands(values: Vec<String>) -> Result<Vec<ConfidenceBand>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| ConfidenceBand::try_from(value.as_str()))
+        .collect()
 }
 
 fn severity_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
     filter.severity.is_empty() || filter.severity.contains(&finding.severity)
 }
 
+/// Pure phase: only the legacy `untriaged`/`triaged` filter states are
+/// evaluated here. Derived states (`open`/`dismissed`/`fixed`/...) are matched
+/// against the projected lifecycle in `FindingListFilter::matches_triage_lifecycle`.
 fn triage_state_filter_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
-    filter.triage_state.is_empty()
-        || filter
-            .triage_state
+    let legacy: Vec<FindingTriageStateFilter> = filter
+        .triage_state
+        .iter()
+        .copied()
+        .filter(|state| !state.is_derived())
+        .collect();
+    legacy.is_empty()
+        || legacy
             .iter()
-            .any(|state| triage_state_matches(*state, finding))
+            .any(|state| legacy_triage_state_matches(*state, finding))
 }
 
 fn verdict_matches(
@@ -291,10 +360,9 @@ fn verdict_matches(
     review_decision: Option<&ReviewDecision>,
 ) -> bool {
     filter.verdict.is_empty()
-        || filter.verdict.contains(&effective_verdict_filter(
-            finding,
-            review_decision,
-        ))
+        || filter
+            .verdict
+            .contains(&effective_verdict_filter(finding, review_decision))
 }
 
 fn effective_verdict_filter(
@@ -349,6 +417,13 @@ fn lifecycle_status_matches(filter: &FindingListFilter, finding: &Finding) -> bo
             .lifecycle_status
             .iter()
             .any(|status| status.as_str() == finding_lifecycle_status(finding))
+}
+
+fn confidence_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    filter.confidence.is_empty()
+        || filter
+            .confidence
+            .contains(&ProofConfidence::classify(finding))
 }
 
 fn name_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
@@ -501,6 +576,14 @@ fn parsed_lifecycle_status_filters(
         .collect()
 }
 
+fn parsed_confidence_filters(values: Vec<String>) -> Result<Vec<ProofConfidence>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| ProofConfidence::try_from(value.as_str()))
+        .collect()
+}
+
 fn parsed_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
     values
         .into_iter()
@@ -516,7 +599,9 @@ enum FilterKey {
     Verdict,
     State,
     Completeness,
+    TriageBand,
     Status,
+    Confidence,
     Source,
     File,
     Name,
@@ -534,7 +619,9 @@ impl FilterKey {
             "verdict" | "decision" | "conf" | "confirmation" => Ok(Self::Verdict),
             "state" | "triage" => Ok(Self::State),
             "completeness" | "review" | "reviewstate" => Ok(Self::Completeness),
+            "band" => Ok(Self::TriageBand),
             "status" | "lifecycle" | "lifecyclestatus" => Ok(Self::Status),
+            "confidence" | "proof" | "proofstate" | "proofconfidence" => Ok(Self::Confidence),
             "source" | "channel" => Ok(Self::Source),
             "file" | "path" => Ok(Self::File),
             "name" | "title" | "q" => Ok(Self::Name),
@@ -649,5 +736,123 @@ fn parse_limit_value(value: &Value) -> Result<usize> {
             .with_context(|| "findings:list limit must be a non-negative integer")
             .map(|value| value.min(FindingListFilter::MAX_LIMIT)),
         _ => anyhow::bail!("findings:list limit must be a number"),
+    }
+}
+
+#[cfg(test)]
+mod triage_band_and_state_tests {
+    use super::*;
+
+    fn triaged(verdict: TriageVerdict, confidence: f32) -> Finding {
+        let mut finding = Finding::new_semgrep(
+            "demo.rule",
+            "src/a.rs",
+            1,
+            Some(1),
+            Severity::High,
+            "demo finding",
+        );
+        finding.triage = Some(TriageOutcome {
+            verdict,
+            confidence,
+            rationale: "test".to_string(),
+            cost_usd: 0.0,
+        });
+        finding
+    }
+
+    fn untriaged() -> Finding {
+        Finding::new_semgrep(
+            "demo.rule",
+            "src/a.rs",
+            1,
+            Some(1),
+            Severity::High,
+            "demo finding",
+        )
+    }
+
+    fn matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+        filter.matches_with_review_decision(finding, None)
+    }
+
+    #[test]
+    fn band_high_matches_banded_triage_and_excludes_untriaged() {
+        let filter = FindingListFilter::from_filter_expression("band:high").unwrap();
+        assert_eq!(filter.triage_band, vec![ConfidenceBand::High]);
+        assert!(matches(&filter, &triaged(TriageVerdict::TruePositive, 0.9)));
+        assert!(!matches(
+            &filter,
+            &triaged(TriageVerdict::TruePositive, 0.5)
+        ));
+        assert!(!matches(&filter, &untriaged()));
+    }
+
+    #[test]
+    fn band_key_and_unknown_value_error() {
+        assert_eq!(
+            FindingListFilter::from_filter_expression("band:low")
+                .unwrap()
+                .triage_band,
+            vec![ConfidenceBand::Low]
+        );
+        assert!(FindingListFilter::from_filter_expression("band:bogus").is_err());
+    }
+
+    #[test]
+    fn conf_key_still_means_verdict_not_triage_band() {
+        // `conf` remains a verdict alias; it must not populate the band filter.
+        let filter = FindingListFilter::from_filter_expression("conf:confirmed").unwrap();
+        assert!(filter.triage_band.is_empty());
+        assert!(filter.confidence.is_empty());
+        assert_eq!(filter.verdict, vec![FindingVerdictFilter::TruePositive]);
+    }
+}
+
+#[cfg(test)]
+mod confidence_filter_tests {
+    use super::*;
+    use crate::findings::domain::StaticProofState;
+
+    fn finding_with_state(fingerprint: &str, state: Option<StaticProofState>) -> Finding {
+        Finding {
+            fingerprint: fingerprint.to_string(),
+            static_proof_state: state,
+            ..Finding::default()
+        }
+    }
+
+    #[test]
+    fn confidence_key_parses_to_the_confidence_axis() {
+        let filter = FindingListFilter::from_filter_expression("confidence:likely").unwrap();
+        assert_eq!(filter.confidence, vec![ProofConfidence::Likely]);
+        // The `proof:` alias also targets confidence.
+        let by_proof = FindingListFilter::from_filter_expression("proof:confirmed").unwrap();
+        assert_eq!(by_proof.confidence, vec![ProofConfidence::Confirmed]);
+    }
+
+    #[test]
+    fn conf_key_still_maps_to_verdict_not_confidence() {
+        // Regression: `conf` is a pre-existing verdict alias; it must not be
+        // silently reassigned to the confidence axis.
+        let filter = FindingListFilter::from_filter_expression("conf:tp").unwrap();
+        assert!(filter.confidence.is_empty());
+        assert_eq!(filter.verdict, vec![FindingVerdictFilter::TruePositive]);
+    }
+
+    #[test]
+    fn confidence_matcher_filters_by_band() {
+        let filter = FindingListFilter::from_filter_expression("confidence:likely").unwrap();
+        let likely = finding_with_state("a", Some(StaticProofState::SourceSinkLinked));
+        let unverified = finding_with_state("b", Some(StaticProofState::SignalOnly));
+        assert!(filter.matches_with_review_decision(&likely, None));
+        assert!(!filter.matches_with_review_decision(&unverified, None));
+    }
+
+    #[test]
+    fn empty_confidence_filter_admits_everything() {
+        let filter = FindingListFilter::default();
+        let unverified = finding_with_state("b", Some(StaticProofState::SignalOnly));
+        assert!(filter.matches_with_review_decision(&unverified, None));
     }
 }

@@ -349,15 +349,32 @@ is expected to behave identically and should be filed as a parity bug.
   `renderer/views/workbench/render_workbench_view.rs::workbench_lines` for
   plain/non-TTY. `LIVE` lights while shell work is actually running (the shared
   `ShellApp::has_running_work` signal); pane focus lives on `app.workbench_focus`.
+- **Workbench confidence-first findings sort is shell-only and hardcoded.**
+  `confidence_first_display_order` in
+  `crates/kuzushi-tui/src/ui_view_models/findings.rs` re-orders the
+  severity-major alias list by `compare_findings_by_confidence` (`Confirmed`
+  before `Unverified`, severity as tie-break) before it reaches the Workbench
+  findings pane. There is no operator `setg` toggle back to severity-first, and
+  scan/run output and `workspace:export-findings` keep the severity-major
+  alias order untouched.
 - **Launch-time target picker (`ShellView::TargetPicker`)** — interactive
-  only. A bare `kuzushi` (no `--target`) on a real TTY opens a picker
-  (cwd + child repos/previous `.kuzushi` targets, via
-  `discover_target_candidates`) before the model/auth/planning chain;
-  selection runs the same wiring as the `target <path>` verb. Hooked in
-  `run_terminal_shell` (never construction) so headless, plain-mode, and
-  test apps keep the targetless default; `KUZUSHI_SKIP_ONBOARDING` skips
-  it. Explicit-target consent (PR #64) is preserved — nothing silently
-  falls back to cwd.
+  only, and now the **first phase of the ordered onboarding gate** (Target →
+  Model → Credentials → Planning). A bare `kuzushi` (no `--target`) on a real
+  TTY opens a picker (cwd + child repos/previous `.kuzushi` targets, via
+  `discover_target_candidates`) before the model/credentials/planning chain;
+  selection runs the same wiring as the `target <path>` verb and re-enters the
+  gate. The decision is expressed in the pure `initial_onboarding_phase` fn via
+  `OnboardingInputs::allow_target_gate`, which only the interactive launch
+  (`run_shell::apply_launch_onboarding` → `ShellApp::launch_onboarding_phase`)
+  sets `true`; construction and target activation pass `false`, so headless,
+  plain-mode, and test apps keep the targetless default. `KUZUSHI_SKIP_ONBOARDING`
+  short-circuits the whole gate inside the pure fn (no separate launch-site env
+  check). Explicit-target consent (PR #64) is preserved — the picker only
+  *offers* cwd as a candidate row, selection is an explicit Enter, and Esc
+  opts into targetless browsing; nothing silently falls back to cwd. A missing
+  API key opens the inline credential-entry step (`open_credential_entry`,
+  reusing the `AuthMethodPicker` surface: API-key paste / OAuth / `d` offline
+  demo) instead of logging a message and dumping the operator on the Workbench.
 - **Engagement journey spine (`next`, phase rail, phase chip)** —
   shell-only operator orientation. `ui_view_models/journey.rs` derives the
   current 組 map → 崩 hunt → 作 confirm → 掛 fix phase from workspace reality
@@ -367,6 +384,20 @@ is expected to behave identically and should be filed as a parity bug.
   compact `組 map 1/4` style chip, and `next` (typed alias `continue`) reopens
   the phase walker at the derived phase. All of it is target-gated: no
   `--target`, no journey chrome.
+- **Autonomy dial chip + `Ctrl+↑`/`Ctrl+↓` chord** — shell-only chrome over a
+  *shared* gate. The always-visible `⛭ <glyph> <rung>` posture chip
+  (`ui_view_models/journey.rs::autonomy_footer_segment`, beside the phase chip,
+  target-gated, with a `⚠` when it throttles the walker) and the raise/lower
+  chord (`app/state_transitions/key_dispatch.rs::handle_autonomy_key`) are
+  interactive-only. The *policy* is shared: the pure
+  `modules::autonomy::gate(name, posture)` runs once in
+  `dispatch_prepared_tool_with_runtime` and **only refuses** tools above the
+  ceiling — it never redirects/substitutes a tool/model/runtime (no-silent-
+  fallback safe). Posture rides `V2Config.autonomy` (serde-skip, in-process,
+  default `Fix` = unconstrained so headless callers are unchanged). `kuzushi
+  run --autonomy <recon|hunt|confirm|fix>` and the shell `autonomy`/`posture`
+  verb set it; both clamp by `phases.stop_after`. Posture is orthogonal to the
+  reality-derived journey phase — raising the dial never forges phase progress.
 - **Security-viz gallery (`/scene`, `/viz`)** — interactive only
   (the rendering is TTY-bound), but **ungated and fed real Kuzushi data**. A
   `Tab`-cycled gallery of five pages (`scene3d::VizPage`). Pure view-model
@@ -418,6 +449,28 @@ is expected to behave identically and should be filed as a parity bug.
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator
   surfaces** that *consume* shared `.kuzushi/v3/runs/<runId>/`
   artefacts. They are read-only over a shared on-disk format.
+- **Jobs registry (`jobs`, `ShellView::Jobs`), steer queue (`queue`),
+  and background handoff (`background`/`bg`, Activity `b`)** — shell-only.
+  `jobs` is a Metasploit-style live control surface over the shared
+  `.kuzushi/v3/runs/` format: it merges the one live `Run` (from the shared
+  single-slot `JobHub` + `ActivitySession`) plus queued steer items with
+  recent on-disk `RunSummary` rows, de-duped by `run_id` (live supersedes its
+  still-`running` disk twin; a disk `running` row with no live twin renders as
+  `Stale`/"running?" muted, since its liveness can't be verified off-`/proc`).
+  `jobs -k <id>` dequeues a pending steer item, or emits a **scoped**
+  `CancelJob(JobKind)` that aborts only the addressed slot (not every live job
+  the way `CancelActiveJobs` does) through the existing per-slot abort helpers —
+  it never invents a second cancellation mechanism. The steer queue is the
+  third and lowest-precedence "next tool" mechanism after the prereq chain and
+  the planning queue — deterministic order is **chain → plan → steer**.
+  `advance_steer_queue` drains centrally from `apply_job_event` on **every**
+  terminal job event (scan/tool/agent/plan/threat, success or failure), and
+  no-ops while work is running, a chain/prereq-prompt is pending, OR the
+  planning queue is non-empty (its dispatch is deferred, so it must be guarded
+  explicitly). Only one live `Run` exists at a time, so queued items always
+  render as **pending**, never running. `kuzushi run` stays single-shot; the
+  CLI `runs list/show/trace` is the headless analogue over the same shared
+  artefacts.
 - **Pipeline-only artefacts are scan-only.** `kuzushi run` and shell tool
   dispatch now mint a `runId` and write `summary.json`, `trace.jsonl`,
   and input/result JSON. They do not produce scan-specific `triage.jsonl`,

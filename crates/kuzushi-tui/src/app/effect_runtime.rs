@@ -41,6 +41,7 @@ impl EffectRuntime {
                 | ShellEffect::AuthLogin(_)
                 | ShellEffect::BuildContext(_)
                 | ShellEffect::AdvancePrereqChain(_)
+                | ShellEffect::ClearConversation
                 | ShellEffect::DispatchNextPlanningTask(_)
                 | ShellEffect::FinalizeGuidedScanOpen
                 | ShellEffect::FireNextApprovedStrategy(_)
@@ -62,6 +63,7 @@ impl EffectRuntime {
             ShellEffect::ApplySastTaskOptions(apply) => app.apply_sast_task_options_effect(apply),
             ShellEffect::AuthLogin(login) => app.start_auth_login_effect(login),
             ShellEffect::BuildContext(build) => app.build_context_effect(build),
+            ShellEffect::ClearConversation => app.clear_conversation(),
             ShellEffect::AdvancePrereqChain(advance) => {
                 app.advance_prereq_chain_effect(advance);
                 Vec::new()
@@ -100,7 +102,7 @@ impl EffectRuntime {
         match effect {
             effect @ (ShellEffect::AbortForBudget
             | ShellEffect::CancelActiveJobs
-            | ShellEffect::ClearConversation
+            | ShellEffect::CancelJob(_)
             | ShellEffect::ContinuePastBudget
             | ShellEffect::FinishShellQuit
             | ShellEffect::PauseActiveWork
@@ -136,7 +138,7 @@ impl EffectRuntime {
         match effect {
             ShellEffect::AbortForBudget => app.abort_for_budget(),
             ShellEffect::CancelActiveJobs => app.cancel_active_jobs_effect(),
-            ShellEffect::ClearConversation => app.clear_conversation(),
+            ShellEffect::CancelJob(kind) => app.cancel_job_effect(kind),
             ShellEffect::ContinuePastBudget => app.continue_past_budget(),
             ShellEffect::FinishShellQuit => app.finish_shell_quit_effect(),
             ShellEffect::PauseActiveWork => app.pause_active_work_effect(),

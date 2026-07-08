@@ -1,4 +1,7 @@
-use crate::app::{PickerFocus, PlanningOptionEdit, PlanningTaskId, PlanningTaskRow};
+use crate::app::{
+    auth_method_row_kinds, AuthMethodRowKind, PickerFocus, PlanningOptionEdit, PlanningTaskId,
+    PlanningTaskRow,
+};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -36,14 +39,14 @@ pub struct AuthPickerRouteState {
     focus: PickerFocus,
     provider: String,
     key_draft: String,
+    rows: Vec<AuthMethodRowKind>,
 }
 
 impl AuthPickerRouteState {
-    const METHOD_COUNT: usize = 3;
-
     pub(crate) fn open(&mut self, provider: String) {
         self.cursor = 0;
         self.focus = PickerFocus::List;
+        self.rows = auth_method_row_kinds(&provider);
         self.provider = provider;
         self.key_draft.clear();
     }
@@ -56,21 +59,32 @@ impl AuthPickerRouteState {
         self.cursor
     }
 
+    pub(crate) fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Identity of the row under the cursor. Selection is decided by this,
+    /// never by a hardcoded index, so promoting the demo row in the layout
+    /// cannot desync which action a cursor position triggers.
+    pub(crate) fn selected_kind(&self) -> Option<AuthMethodRowKind> {
+        self.rows.get(self.cursor).copied()
+    }
+
     #[cfg(test)]
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
-        self.cursor = cursor.min(Self::METHOD_COUNT.saturating_sub(1));
+        self.cursor = cursor.min(self.rows.len().saturating_sub(1));
     }
 
     pub(crate) fn is_api_key_row(&self) -> bool {
-        self.cursor == 0
+        self.selected_kind() == Some(AuthMethodRowKind::ApiKey)
     }
 
     pub(crate) fn is_offline_demo_row(&self) -> bool {
-        self.cursor == 2
+        self.selected_kind() == Some(AuthMethodRowKind::OfflineDemo)
     }
 
     pub(crate) fn move_cursor(&mut self, delta: isize) {
-        self.cursor = wrapped_cursor(self.cursor, delta, Self::METHOD_COUNT);
+        self.cursor = wrapped_cursor(self.cursor, delta, self.rows.len());
     }
 
     pub(crate) fn focus(&self) -> PickerFocus {

@@ -78,6 +78,15 @@ pub(crate) enum Command {
         /// Filter by lifecycle status, e.g. candidate, seen, runtime_verified, verified_static.
         #[arg(long, value_delimiter = ',')]
         status: Vec<String>,
+        /// Filter by proof/confidence band: confirmed, likely, unverified, dismissed.
+        /// Comma- or repeat-separated.
+        #[arg(long, value_delimiter = ',')]
+        confidence: Vec<String>,
+        /// Filter by triage-lifecycle state: open, reviewing, confirmed, to_fix,
+        /// dismissed, fixed, removed (or legacy untriaged/triaged).
+        /// Comma- or repeat-separated.
+        #[arg(long, value_delimiter = ',')]
+        state: Vec<String>,
         /// Filter by finding alias or rule name.
         #[arg(long)]
         name: Option<String>,
@@ -197,7 +206,8 @@ pub(crate) enum Command {
         json: bool,
     },
     /// Scan a vendored vulnerable fixture offline — no API key, no model,
-    /// no external scanners. A real finding with evidence in seconds.
+    /// no external scanners. A real finding with evidence in seconds. The
+    /// fixture is self-contained, so `--target` is ignored here.
     Demo {
         /// Emit the demo result as machine-readable JSON.
         #[arg(long)]
@@ -214,6 +224,10 @@ pub(crate) enum Command {
         /// Override a canonical tool option. Repeat as `--option key=value`.
         #[arg(long = "option")]
         options: Vec<String>,
+        /// Autonomy ceiling for this run (`recon|hunt|confirm|fix`). Refuses
+        /// tools above the rung instead of running them; omitted = unconstrained.
+        #[arg(long)]
+        autonomy: Option<String>,
     },
     /// Run a local MCP server (joern, clang, or gtags) over stdio.
     Mcp {

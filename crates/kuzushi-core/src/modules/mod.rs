@@ -26,6 +26,8 @@ pub(in crate::modules) use recon_module::*;
 pub(in crate::modules) use report_module::*;
 pub(in crate::modules) use resolve_tool_model::*;
 pub(in crate::modules) use router_module::*;
+pub(in crate::modules) use suppress_module::*;
+pub(in crate::modules) use suppress_run::*;
 pub(in crate::modules) use router_show_tool::*;
 pub(in crate::modules) use run_deep_audit_tool::*;
 pub(in crate::modules) use sast_run::*;
@@ -44,7 +46,9 @@ pub(in crate::modules) use verify_module::*;
 pub(in crate::modules) use workspace_module::*;
 mod agentic_sast;
 mod application;
+pub mod autonomy;
 mod builtins;
+mod catalog_query;
 mod chrome_rce;
 pub(crate) mod context;
 mod contracts;
@@ -91,6 +95,8 @@ mod resolve_tool_model;
 mod router_module;
 mod router_show_tool;
 mod run_deep_audit_tool;
+mod suppress_module;
+mod suppress_run;
 #[cfg(test)]
 mod tests;
 mod threat_intel_module;
@@ -102,10 +108,14 @@ mod verify_module;
 mod workspace_module;
 
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
+pub use catalog_query::{RuntimeFilter, ToolQuery};
+pub use autonomy::{
+    gate as autonomy_gate, tool_phase, AutonomyDecision, AutonomyPosture, WorkflowPhase,
+};
 pub use contracts::ToolExecutionContext;
 pub use contracts::{
-    BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec, OptionType,
-    RuntimeRequirement, ToolDescriptor,
+    canonical_tool_phase, BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec,
+    OptionType, RuntimeRequirement, ToolDescriptor, ToolPhase,
 };
 pub use dynamic_loader::DynamicModuleLoadOptions;
 pub use options::coerce_option_value;

@@ -61,6 +61,7 @@ impl ModuleRegistry {
     }
 
     pub fn register(&mut self, builtin: BuiltinModule) {
+        let builtin = builtin.with_stamped_phases();
         self.register_builtin_tools(&builtin);
         self.register_builtin_dag_executors(&builtin);
         self.modules.insert(builtin.metadata().id.clone(), builtin);
@@ -368,6 +369,7 @@ fn register_finding_report_modules(registry: &mut ModuleRegistry) {
     registry.register(verify_module().with_executor(execute_finding_action_tool));
     registry.register(patch_module().with_executor(execute_finding_action_tool));
     registry.register(findings_module().with_executor(execute_context_workspace_tool));
+    registry.register(suppress_module().with_executor(execute_context_workspace_tool));
     registry.register(report_module().with_executor(execute_context_workspace_tool));
 }
 

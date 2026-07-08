@@ -15,6 +15,7 @@ pub(crate) fn parse_single_arg_command(
         "target" => parse_target_command(args, original),
         "actor" => parse_actor_command(first, original),
         "phase" => parse_phase_command(first, original),
+        "autonomy" | "posture" => parse_autonomy_command(first, original),
         _ => return None,
     };
     Some(command)
@@ -75,6 +76,18 @@ fn parse_phase_command(first: Option<&str>, original: &str) -> ShellCommand {
         .and_then(WorkflowPhase::parse)
         .map(ShellCommand::Phase)
         .unwrap_or_else(|| ShellCommand::Unknown(original.to_string()))
+}
+
+/// `autonomy` / `posture` with no argument reads the current rung;
+/// `autonomy <recon|hunt|confirm|fix>` sets it. An unrecognized rung is an
+/// explicit error, never a silent no-op.
+fn parse_autonomy_command(first: Option<&str>, original: &str) -> ShellCommand {
+    match first {
+        None => ShellCommand::Autonomy(None),
+        Some(raw) => AutonomyPosture::parse(raw)
+            .map(|posture| ShellCommand::Autonomy(Some(posture)))
+            .unwrap_or_else(|| ShellCommand::Unknown(original.to_string())),
+    }
 }
 
 pub(crate) fn required_arg(

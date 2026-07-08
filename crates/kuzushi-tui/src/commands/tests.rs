@@ -31,6 +31,34 @@ mod tests {
             parse_command("show tools codeql"),
             ShellCommand::Tools(Some("codeql".to_string()))
         );
+        assert_eq!(
+            parse_command("find phase:hunt taint"),
+            ShellCommand::Tools(Some("phase:hunt taint".to_string()))
+        );
+        assert_eq!(
+            parse_command("tools --fav"),
+            ShellCommand::Tools(Some("fav:yes".to_string()))
+        );
+        assert_eq!(
+            parse_command("tools --fav phase:hunt"),
+            ShellCommand::Tools(Some("fav:yes phase:hunt".to_string()))
+        );
+        assert_eq!(
+            parse_command("find --fav"),
+            ShellCommand::Tools(Some("fav:yes".to_string()))
+        );
+        assert_eq!(
+            parse_command("find --fav phase:hunt"),
+            ShellCommand::Tools(Some("fav:yes phase:hunt".to_string()))
+        );
+        assert_eq!(
+            parse_command("favorite semgrep:scan"),
+            ShellCommand::FavoriteTool("semgrep:scan".to_string())
+        );
+        assert_eq!(
+            parse_command("fav semgrep:scan"),
+            ShellCommand::FavoriteTool("semgrep:scan".to_string())
+        );
         assert_eq!(parse_command("/findings"), ShellCommand::Findings);
         assert_eq!(parse_command("/f"), ShellCommand::Findings);
         assert_eq!(
@@ -55,6 +83,19 @@ mod tests {
             parse_command("decision suppressed"),
             ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
                 "decision suppressed".to_string(),
+            ))
+        );
+        assert_eq!(
+            parse_command("dismiss used_in_tests only exercised in fixtures"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Dismiss {
+                reason: "used_in_tests".to_string(),
+                note: "only exercised in fixtures".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_command("dismiss false_positive"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
+                "dismiss false_positive".to_string(),
             ))
         );
         assert_eq!(
@@ -673,10 +714,13 @@ mod tests {
             "ask",
             "auth",
             "auth-login",
+            "autonomy",
             "back",
             "backend",
+            "background",
             "boot-splash",
             "cancel",
+            "cancel-job",
             "clear",
             "component",
             "config",
@@ -685,6 +729,7 @@ mod tests {
             "demo",
             "detach",
             "failure-handoff",
+            "favorite-tool",
             "file-picker",
             "findings",
             "findings-filter",
@@ -713,6 +758,7 @@ mod tests {
             "provider",
             "project-model",
             "pwn",
+            "queue-command",
             "quickstart",
             "keymap",
             "recommend",
@@ -728,6 +774,7 @@ mod tests {
             "scene",
             "set-option",
             "show-aliases",
+            "show-jobs",
             "show-runs",
             "since",
             "story",
@@ -792,6 +839,7 @@ mod tests {
             ShellCommand::Modules => "modules",
             ShellCommand::Recommend => "recommend",
             ShellCommand::Tools(_) => "tools",
+            ShellCommand::FavoriteTool(_) => "favorite-tool",
             ShellCommand::Workbench(_) => "workbench",
             ShellCommand::Aim(_) => "aim",
             ShellCommand::Findings => "findings",
@@ -830,6 +878,10 @@ mod tests {
             ShellCommand::Prompt(_) => "prompt",
             ShellCommand::Actor(_) => "actor",
             ShellCommand::ShowRuns => "show-runs",
+            ShellCommand::ShowJobs => "show-jobs",
+            ShellCommand::CancelJob(_) => "cancel-job",
+            ShellCommand::QueueCommand(_) => "queue-command",
+            ShellCommand::Background => "background",
             ShellCommand::RunDiff { .. } => "run-diff",
             ShellCommand::ShowAliases(_) => "show-aliases",
             ShellCommand::Since(_) => "since",
@@ -844,6 +896,7 @@ mod tests {
             ShellCommand::Onboarding => "onboarding",
             ShellCommand::Next => "next",
             ShellCommand::Phase(_) => "phase",
+            ShellCommand::Autonomy(_) => "autonomy",
             ShellCommand::Logs => "logs",
             ShellCommand::Target(_) => "target",
             ShellCommand::TargetRevision(_) => "target-revision",
@@ -894,6 +947,7 @@ mod tests {
                 "<ref>" => "main".to_string(),
                 "<provider>" => "openai".to_string(),
                 "<map|hunt|confirm|fix>" => "confirm".to_string(),
+                "[recon|hunt|confirm|fix]" => "hunt".to_string(),
                 "<choice>" => "1".to_string(),
                 "<question>" => "what now".to_string(),
                 "<specifier>" => "builtin:sast".to_string(),

@@ -35,6 +35,7 @@ pub(crate) use session_state::*;
 pub(crate) use settings::*;
 pub(crate) use shell_lifecycle::{auth_ready_for_provider, *};
 pub(crate) use shellapp::*;
+pub(crate) use steer_queue::*;
 pub(crate) use strategy::*;
 pub(crate) use threats::*;
 pub(crate) use tool_run_state::*;
@@ -50,6 +51,7 @@ mod agent_chat_state;
 mod agent_session;
 mod approval;
 mod artifacts;
+mod autonomy;
 mod background_events;
 mod catalog;
 mod command_palette;
@@ -99,6 +101,7 @@ mod session_state;
 mod settings;
 mod state;
 pub(crate) mod state_transitions;
+mod steer_queue;
 mod strategy;
 mod task_durations;
 mod threats;
@@ -126,10 +129,11 @@ pub use log::LogLine;
 pub(crate) use log::{LogState, LOG_LINE_CAPACITY};
 pub(crate) use onboarding::PlanningRunStep;
 pub use onboarding::{
-    applicable_tasks_for_phase, artifact_state as planning_artifact_state, build_execution_plan,
-    cli_is_on_path, direct_dependencies, direct_dependents, discover_target_candidates,
-    initial_onboarding_phase, initial_onboarding_phase_for, model_recommended_in_phase,
-    provider_has_multiple_auth_methods, recommended_tasks_for_phase, record_recent_target,
+    applicable_tasks_for_phase, artifact_state as planning_artifact_state, auth_method_row_kinds,
+    auth_method_rows, build_execution_plan, cli_is_on_path, direct_dependencies, direct_dependents,
+    discover_target_candidates, initial_onboarding_phase, initial_onboarding_phase_for,
+    model_recommended_in_phase, provider_has_multiple_auth_methods, recommended_tasks_for_phase,
+    record_recent_target, AuthMethodRow, AuthMethodRowKind,
     row_disposition, skip_onboarding_env, toggle_planning_row, topological_order,
     transitive_dependencies, ArtifactState as PlanningArtifactState, FailedPlanningTask,
     InitialOnboardingPhase, OnboardingInputs, PendingRetry, PickerFocus, PlanningOptionEdit,

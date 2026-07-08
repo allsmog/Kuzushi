@@ -20,8 +20,11 @@ pub(crate) fn parse_nested_shell_command(
         "context" => parse_context_command(args.to_vec()),
         "project" => parse_project_command(args),
         "runs" => parse_runs_command(args),
+        "jobs" => parse_jobs_command(args),
+        "queue" => parse_queue_command(args),
         "strategy" | "strategies" => parse_strategy_command(args),
         "decision" | "review" => parse_review_decision_command(args),
+        "dismiss" => parse_dismiss_command(args),
         "patch" => parse_patch_command(args),
         "workspace" => parse_workspace_command(args.to_vec()),
         "pwn" => parse_pwn_command(args),
@@ -39,6 +42,24 @@ fn parse_runs_command(args: &[&str]) -> ShellCommand {
         },
         ["diff" | "compare", ..] => ShellCommand::Unknown("runs diff".to_string()),
         [other, ..] => ShellCommand::Unknown(format!("runs {other}")),
+    }
+}
+
+fn parse_jobs_command(args: &[&str]) -> ShellCommand {
+    match args {
+        [] | ["list"] => ShellCommand::ShowJobs,
+        ["-k", id] | ["kill", id] | ["cancel", id] => ShellCommand::CancelJob((*id).to_string()),
+        ["-k"] | ["kill"] | ["cancel"] => ShellCommand::Unknown("jobs -k <id>".to_string()),
+        [other, ..] => ShellCommand::Unknown(format!("jobs {other}")),
+    }
+}
+
+fn parse_queue_command(args: &[&str]) -> ShellCommand {
+    let rest = args.join(" ");
+    if rest.trim().is_empty() {
+        ShellCommand::Unknown("queue".to_string())
+    } else {
+        ShellCommand::QueueCommand(rest)
     }
 }
 
@@ -120,6 +141,24 @@ fn parse_review_decision_command(args: &[&str]) -> ShellCommand {
     ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
         verdict: verdict.to_string(),
         reason,
+    })
+}
+
+fn parse_dismiss_command(args: &[&str]) -> ShellCommand {
+    let Some(reason) = args.first().copied() else {
+        return ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
+            "dismiss".to_string(),
+        ));
+    };
+    let note = args.get(1..).unwrap_or_default().join(" ");
+    if note.trim().is_empty() {
+        return ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(format!(
+            "dismiss {reason}"
+        )));
+    }
+    ShellCommand::ReviewDecision(ReviewDecisionCommand::Dismiss {
+        reason: reason.to_string(),
+        note,
     })
 }
 

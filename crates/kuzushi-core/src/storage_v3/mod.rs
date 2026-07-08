@@ -374,8 +374,35 @@ fn configure_projection_connection(conn: &Connection) -> Result<()> {
 
 pub(crate) fn create_projection_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(PROJECTION_SCHEMA)?;
+    migrate_review_decision_dismissal_columns(conn)?;
     create_optional_fts(conn)?;
     Ok(())
+}
+
+/// Idempotent, additive migration for pre-existing projection DBs that were
+/// created before the dismissal columns landed. `create table if not exists`
+/// leaves older tables untouched, so add the columns when they are absent.
+fn migrate_review_decision_dismissal_columns(conn: &Connection) -> Result<()> {
+    for column in ["dismiss_reason", "dismissed_by"] {
+        if !review_decisions_has_column(conn, column)? {
+            conn.execute_batch(&format!(
+                "alter table review_decisions add column {column} text"
+            ))?;
+        }
+    }
+    Ok(())
+}
+
+fn review_decisions_has_column(conn: &Connection, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare("pragma table_info(review_decisions)")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn meta_u64(conn: &Connection, key: &str) -> Result<u64> {

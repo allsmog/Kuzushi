@@ -1453,6 +1453,7 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
+        | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -1554,6 +1555,7 @@ fn planner_reducer_returns_start_effect_without_spawning_worker() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
+        | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -1653,6 +1655,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
+        | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -1737,6 +1740,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::AdvancePrereqChain(_)
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
+        | ShellEffect::CancelJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -2937,6 +2941,7 @@ fn command_effect_kind(command: ShellCommand) -> Option<EffectKind> {
         ShellEffect::AdvancePrereqChain(_) => EffectKind::AdvancePrereqChain,
         ShellEffect::AbortForBudget => EffectKind::AbortForBudget,
         ShellEffect::CancelActiveJobs => EffectKind::Cancel,
+        ShellEffect::CancelJob(_) => EffectKind::Cancel,
         ShellEffect::ClearConversation => EffectKind::ClearConversation,
         ShellEffect::BuildContext(_) => EffectKind::BuildContext,
         ShellEffect::ContinuePastBudget => EffectKind::ContinuePastBudget,
@@ -4236,6 +4241,8 @@ fn refresh_findings_loads_review_decisions_without_mutating_triage() {
                 author: kuzushi_core::findings::TriageAuthor::Human,
                 confidence: 1.0,
                 rationale: "suppressed by approved review policy".to_string(),
+                dismiss_reason: None,
+                actor: None,
             },
         )
         .unwrap();
@@ -5362,6 +5369,34 @@ fn auth_login_reducer_returns_login_effect_without_spawning_process() {
     assert_eq!(effect.method, "headless");
     assert!(!effect.continue_after_success);
     assert!(!app.ui().force_full_redraw());
+}
+
+#[test]
+fn auth_login_effect_with_missing_bridge_reopens_credential_entry() {
+    // `LangGraphRuntime::from_config` treats an explicit empty bridge
+    // command as an error, standing in for "the OAuth bridge binary is
+    // missing / runtime construction failed" without spawning a process.
+    let mut config = V2Config::default();
+    config.runtime.langgraph_bridge_command = Some(Vec::new());
+    let mut app = ShellApp::new(config, None);
+    app.set_shell_view(ShellView::Auth);
+
+    let effects = app.start_auth_login_effect(AuthLoginStart {
+        provider: "openai-codex".to_string(),
+        method: "browser".to_string(),
+        continue_after_success: true,
+    });
+
+    assert!(effects.is_empty());
+    assert_eq!(
+        app.shell_view(),
+        ShellView::AuthMethodPicker,
+        "bridge-missing OAuth should reopen credential entry, not dead-end on Auth"
+    );
+    assert_eq!(app.router.auth_picker().provider(), "openai-codex");
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "onboarding" && line.body.contains("OAuth bridge unavailable")
+    }));
 }
 
 #[test]
@@ -8856,6 +8891,126 @@ fn target_picker_esc_defers_to_workbench_without_a_target() {
         .log_lines()
         .iter()
         .any(|line| line.body.contains("browsing without a target")));
+}
+
+#[test]
+fn model_picker_enter_with_keyless_credentialed_provider_opens_credential_entry() {
+    // Dead-end #2 fix: choosing a credentialed model with no wired credentials
+    // must open the inline credential-entry step, never log-and-dump to the
+    // Workbench.
+    let _env_lock = env_test_lock();
+    let _anthropic = EnvVarGuard::unset("ANTHROPIC_API_KEY");
+    let tmp = tempfile::tempdir().unwrap();
+    let _home = EnvVarGuard::set("HOME", tmp.path().to_string_lossy().as_ref());
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_model_picker();
+    let choices = super::settings::visible_model_choices(app.config().model.as_deref());
+    let idx = choices
+        .iter()
+        .position(|choice| choice.provider == "anthropic")
+        .expect("an anthropic model is offered");
+    app.router.model_picker_mut().open(idx, choices.len());
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.shell_view(), ShellView::AuthMethodPicker);
+    assert_eq!(app.router.auth_picker().provider(), "anthropic");
+}
+
+#[test]
+fn opening_credential_entry_does_not_change_the_model() {
+    // No-silent-fallback: merely opening the credential surface must not
+    // mutate the operator's configured model or provider.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.config_mut().model = Some("anthropic:claude-sonnet-4-6".to_string());
+
+    app.open_credential_entry("anthropic".to_string());
+
+    assert_eq!(
+        app.config().model.as_deref(),
+        Some("anthropic:claude-sonnet-4-6")
+    );
+    assert_eq!(app.shell_view(), ShellView::AuthMethodPicker);
+}
+
+#[test]
+fn auth_picker_selected_kind_tracks_the_row_model() {
+    // Selection is decided by row identity, never a hardcoded index.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router.auth_picker_mut().open("anthropic".to_string());
+
+    assert!(app.router.auth_picker().is_api_key_row());
+    assert!(!app.router.auth_picker().is_offline_demo_row());
+
+    let last_row = app.router.auth_picker().row_count() - 1;
+    app.router.auth_picker_mut().set_cursor(last_row);
+    assert!(app.router.auth_picker().is_offline_demo_row());
+    assert!(!app.router.auth_picker().is_api_key_row());
+}
+
+#[test]
+fn auth_picker_d_runs_the_offline_fixture_with_empty_draft() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router.auth_picker_mut().open("anthropic".to_string());
+    app.set_shell_view(ShellView::AuthMethodPicker);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()),
+    );
+
+    assert!(app.router.auth_picker().key_draft().is_empty());
+    assert!(
+        app.target().is_some(),
+        "offline fixture target should be active"
+    );
+    assert_ne!(app.shell_view(), ShellView::AuthMethodPicker);
+}
+
+#[test]
+fn auth_picker_d_types_into_a_nonempty_key_draft() {
+    // Once the operator starts pasting a key, `d` is literal key text again —
+    // it must not trigger the fixture mid-paste.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router.auth_picker_mut().open("openai".to_string());
+    app.set_shell_view(ShellView::AuthMethodPicker);
+
+    paste_text(&mut app, "sk-");
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.router.auth_picker().key_draft(), "sk-d");
+    assert_eq!(app.shell_view(), ShellView::AuthMethodPicker);
+    assert!(app.target().is_none());
+}
+
+#[test]
+fn launch_onboarding_phase_opens_target_picker_when_targetless() {
+    let _env_lock = env_test_lock();
+    let _skip = EnvVarGuard::unset("KUZUSHI_SKIP_ONBOARDING");
+    let app = ShellApp::new(V2Config::default(), None);
+
+    assert_eq!(
+        app.launch_onboarding_phase(),
+        crate::app::InitialOnboardingPhase::TargetPicker
+    );
+}
+
+#[test]
+fn launch_onboarding_phase_skips_target_picker_when_skip_env_is_set() {
+    let _env_lock = env_test_lock();
+    let _skip = EnvVarGuard::set("KUZUSHI_SKIP_ONBOARDING", "1");
+    let app = ShellApp::new(V2Config::default(), None);
+
+    assert_eq!(
+        app.launch_onboarding_phase(),
+        crate::app::InitialOnboardingPhase::Catalog
+    );
 }
 
 #[test]
@@ -14406,4 +14561,320 @@ fn sample_two_findings() -> Vec<kuzushi_core::Finding> {
             "second",
         ),
     ]
+}
+
+// ---- Background jobs registry: steer queue, cancel-by-id, background handoff ----
+
+fn running_scan_panel() -> ScanPanelState {
+    ScanPanelState {
+        run_id: Some("scan-1".to_string()),
+        target: PathBuf::from("."),
+        stage: "running".to_string(),
+        findings_count: 0,
+        running: true,
+        abort_requested: false,
+        error: None,
+    }
+}
+
+#[test]
+fn queue_command_enqueues_a_tool_while_a_job_is_running() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_scan_panel(Some(running_scan_panel()));
+
+    run_command(
+        &mut app,
+        ShellCommand::QueueCommand("run taint-iris:hunt".to_string()),
+    );
+
+    assert_eq!(app.steer_queue().len(), 1);
+    assert_eq!(
+        app.steer_queue().peek().map(|cmd| cmd.raw.as_str()),
+        Some("run taint-iris:hunt")
+    );
+}
+
+#[test]
+fn busy_run_submission_is_queued_instead_of_rejected() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_scan_panel(Some(running_scan_panel()));
+
+    // The operator submit path routes a `run` while busy into the steer queue
+    // rather than the old bare rejection.
+    app.reduce_submitted_line("run triage:run");
+
+    assert_eq!(app.steer_queue().len(), 1);
+    assert_eq!(
+        app.steer_queue().peek().map(|cmd| cmd.summary.as_str()),
+        Some("run triage:run")
+    );
+}
+
+#[test]
+fn advance_steer_queue_waits_while_work_runs_then_drains_when_idle() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+
+    // Work still running: steer item must wait, never pre-empt.
+    app.set_scan_panel(Some(running_scan_panel()));
+    let held = app.advance_steer_queue();
+    assert!(held.is_empty());
+    assert_eq!(app.steer_queue().len(), 1);
+
+    // Idle: the queued item drains.
+    app.set_scan_panel(None);
+    let _ = app.advance_steer_queue();
+    assert!(app.steer_queue().is_empty());
+}
+
+#[test]
+fn queued_steer_item_dispatches_when_a_scan_finishes() {
+    // Regression: the drain must run on the scan-completion path, not only on a
+    // successful background-tool finish. scan running -> queue a run -> scan
+    // finishes -> the queued item leaves the queue.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_scan_panel(Some(running_scan_panel()));
+    let _ticket = app.jobs_mut().start(JobKind::Run, "scan");
+    app.set_activity(Some(ActivitySession::new("scan-1")));
+
+    run_command(
+        &mut app,
+        ShellCommand::QueueCommand("run triage:run".to_string()),
+    );
+    assert_eq!(app.steer_queue().len(), 1);
+
+    // The scan's terminal event flows through the central drain in
+    // `apply_job_event`.
+    let _effects = app.apply_job_event(ShellEvent::Scan(ScanEvent::Finished {
+        run_id: "scan-1".to_string(),
+        findings_count: 0,
+        cost_usd: None,
+    }));
+
+    assert!(!app.scan().is_some_and(|scan| scan.running));
+    assert!(
+        app.steer_queue().is_empty(),
+        "queued steer item must dispatch when the scan finishes"
+    );
+}
+
+#[test]
+fn clear_conversation_drains_a_queued_steer_item_left_by_a_solo_agent_chat() {
+    // Regression: `/clear` force-finishes the Agent slot out-of-band
+    // (jobs.cancel + jobs.finish) instead of via its normal terminal
+    // ShellEvent, so the worker's eventual terminal event later arrives with
+    // a stale generation and is dropped by `JobHub::drain_one` before it can
+    // reach the centralized steer-queue drain in `apply_job_event`. A steer
+    // item queued while only an agent chat was running must not starve.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _agent_ticket = app.jobs_mut().start(JobKind::Agent, "agent");
+    app.set_agent_chat(Some(AgentChatView {
+        question: "what changed?".to_string(),
+        answer: None,
+        running: true,
+        abort_requested: false,
+        error: None,
+        history: Vec::new(),
+        run_id: None,
+        started_secs: 0,
+        screen_context_scope: None,
+        failure_context: None,
+        pending_failure_context: None,
+    }));
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+
+    run_command(&mut app, ShellCommand::Clear);
+
+    assert!(app.agent_chat().is_none());
+    assert!(
+        app.steer_queue().is_empty(),
+        "queued steer item must dispatch once /clear force-finishes the only live job"
+    );
+}
+
+#[test]
+fn ctrl_l_clear_conversation_also_drains_a_queued_steer_item() {
+    // Same regression as `clear_conversation_drains_a_queued_steer_item_left_
+    // by_a_solo_agent_chat`, but through the Ctrl+L key binding
+    // (`ControlKeyAction::EditEffects`) instead of the `/clear` command, so
+    // the follow-up effects must be forwarded through `InputUpdate` instead
+    // of being dropped by a plain `fn(&mut ShellApp)` handler.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _agent_ticket = app.jobs_mut().start(JobKind::Agent, "agent");
+    app.set_agent_chat(Some(AgentChatView {
+        question: "what changed?".to_string(),
+        answer: None,
+        running: true,
+        abort_requested: false,
+        error: None,
+        history: Vec::new(),
+        run_id: None,
+        started_secs: 0,
+        screen_context_scope: None,
+        failure_context: None,
+        pending_failure_context: None,
+    }));
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL),
+    );
+
+    assert!(app.agent_chat().is_none());
+    assert!(
+        app.steer_queue().is_empty(),
+        "Ctrl+L must drain a queued steer item left by a solo agent chat"
+    );
+}
+
+#[test]
+fn advance_steer_queue_yields_to_a_pending_planning_queue() {
+    // chain -> plan -> steer: while the planning queue still has steps (whose
+    // dispatch is deferred through DispatchNextPlanningTask), the steer item
+    // must stay queued or it would be popped and then dropped by the overlap
+    // reject.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+    app.engagement
+        .queue_plan(vec![crate::app::PlanningTaskId::GatherRepoContext]);
+    assert!(!app.engagement.planning_queues_empty());
+
+    let effects = app.advance_steer_queue();
+
+    assert!(effects.is_empty());
+    assert_eq!(app.steer_queue().len(), 1);
+}
+
+#[test]
+fn advance_steer_queue_yields_to_a_pending_prereq_chain() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+    // A prereq chain is pending (chain -> plan -> steer precedence): the steer
+    // item must stay queued for the chain to finish first.
+    app.engagement.set_pending_chain(PrereqChain::new(
+        Vec::new(),
+        "carlini-threat-hunt:run".to_string(),
+        serde_json::Value::Null,
+        None,
+    ));
+
+    let effects = app.advance_steer_queue();
+
+    assert!(effects.is_empty());
+    assert_eq!(app.steer_queue().len(), 1);
+}
+
+#[test]
+fn cancel_job_dequeues_a_pending_steer_item() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run a".to_string(),
+        summary: "run a".to_string(),
+    });
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run b".to_string(),
+        summary: "run b".to_string(),
+    });
+
+    run_command(&mut app, ShellCommand::CancelJob("queued-1".to_string()));
+
+    assert_eq!(app.steer_queue().len(), 1);
+    assert_eq!(
+        app.steer_queue().peek().map(|cmd| cmd.raw.as_str()),
+        Some("run b")
+    );
+}
+
+#[test]
+fn cancel_job_scopes_cancellation_to_the_addressed_live_run() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _ticket = app.jobs_mut().start(JobKind::Run, "triage:run");
+    app.set_activity(Some(ActivitySession::new("tool-abc")));
+
+    let effects = app
+        .reduce_command_effects(&ShellCommand::CancelJob("tool-abc".to_string()))
+        .expect("cancel-job routes");
+
+    // Scoped: cancels only the addressed Run slot, not every concurrent job.
+    assert!(matches!(
+        effects.as_slice(),
+        [ShellEffect::CancelJob(JobKind::Run)]
+    ));
+}
+
+#[test]
+fn cancel_job_effect_for_a_non_run_kind_does_not_blank_a_live_run_jobs_rows() {
+    // Regression: `jobs -k <plan-id>` (or agent/threat) must not flip a
+    // still-running Run job's DAG rows to Canceled. Only the Run slot ever
+    // owns Activity rows; canceling a different job kind must leave them be.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _run_ticket = app.jobs_mut().start(JobKind::Run, "triage:run");
+    let mut session = ActivitySession::new("r-1");
+    session.apply_step(
+        RunTraceStep::new(1, "tool", "triage start")
+            .with_module_id("triage")
+            .with_verb("run"),
+    );
+    app.set_activity(Some(session));
+
+    let _plan_ticket = app.jobs_mut().start(JobKind::Plan, "plan");
+    app.set_planner_running(true);
+
+    app.cancel_job_effect(JobKind::Plan);
+
+    // The addressed Plan job was actually aborted...
+    assert!(app.plan_abort_requested());
+    // ...but the still-running Run job's DAG row must be untouched.
+    let row = app
+        .activity()
+        .and_then(|session| session.tasks.get("triage:run"))
+        .expect("triage row seeded");
+    assert_ne!(row.state, DagTaskState::Canceled);
+}
+
+#[test]
+fn cancel_job_unknown_id_does_not_fire_a_token() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    let effects = app
+        .reduce_command_effects(&ShellCommand::CancelJob("scan-999".to_string()))
+        .expect("cancel-job routes");
+
+    // Nothing live and no queued item: report honestly, emit no cancel effect.
+    assert!(effects.is_empty());
+}
+
+#[test]
+fn background_handoff_shows_workbench_without_cancelling_live_work() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_scan_panel(Some(running_scan_panel()));
+
+    run_command(&mut app, ShellCommand::Background);
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert!(app.has_running_work());
+    assert!(!app.scan().is_some_and(|scan| scan.abort_requested));
+}
+
+#[test]
+fn jobs_verb_opens_the_jobs_registry_view() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    run_command(&mut app, ShellCommand::ShowJobs);
+    assert_eq!(app.shell_view(), ShellView::Jobs);
 }

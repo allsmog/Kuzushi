@@ -6,13 +6,51 @@ pub(crate) fn findings_module() -> BuiltinModule {
         "Findings",
         ModuleKind::Defense,
         "Persist and inspect findings in SQLite.",
-        vec![tool_with_options(
-            "findings:list",
-            "List persisted findings.",
-            findings_list_options(),
-        )],
+        vec![
+            tool_with_options(
+                "findings:list",
+                "List persisted findings.",
+                findings_list_options(),
+            ),
+            tool_with_options(
+                "findings:dismiss",
+                "Dismiss a finding with an auditable, SARIF-compatible reason.",
+                findings_dismiss_options(),
+            ),
+        ],
         vec![],
     )
+}
+
+fn findings_dismiss_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "fingerprint",
+            OptionType::String,
+            "Finding fingerprint or FI- alias.",
+        )
+        .aliases(&["finding", "reference", "id"])
+        .required(),
+        opt(
+            "reason",
+            OptionType::Enum,
+            "Dismissal reason (SARIF-compatible).",
+        )
+        .choices(&[
+            "false_positive",
+            "acceptable_risk",
+            "wont_fix",
+            "used_in_tests",
+            "no_time_to_fix",
+        ])
+        .required(),
+        opt("note", OptionType::String, "Free-text justification.").required(),
+        opt(
+            "author",
+            OptionType::String,
+            "Who is dismissing (defaults to the resolved operator).",
+        ),
+    ]
 }
 
 fn findings_list_options() -> Vec<OptionSpec> {

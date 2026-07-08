@@ -17,12 +17,13 @@ pub(crate) fn run_tool_command(
     tool: String,
     input: String,
     options: Vec<String>,
+    autonomy: Option<String>,
     target: Option<PathBuf>,
     load: Vec<String>,
 ) -> Result<()> {
     let input = resolve_run_input(input)?;
     let tool_label = tool.clone();
-    match prepare_cli_tool_run(tool, input, options, target, load) {
+    match prepare_cli_tool_run(tool, input, options, autonomy, target, load) {
         Ok(run) => {
             let output = execute_cli_tool_run(&run)?;
             println!("{}", serde_json::to_string_pretty(&output)?);

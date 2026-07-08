@@ -114,9 +114,9 @@ mod tests {
         };
         let body = build_pr_comment(&input);
 
-        assert!(body.contains("| ID | Severity | CWE | Title | Location |"));
+        assert!(body.contains("| ID | Severity | Confidence | CWE | Title | Location |"));
         assert!(body.contains("[F-0001](https://example/runs/1#F-0001)"));
-        assert!(body.contains("| 🟧 HIGH | CWE-89 |"));
+        assert!(body.contains("| 🟧 HIGH | unverified | CWE-89 |"));
         assert!(body.contains("> **F-0001 evidence:** evidence 1 anchors"));
         assert!(body.contains("src/db.rs:12"));
     }

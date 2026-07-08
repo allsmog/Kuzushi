@@ -1,5 +1,5 @@
 pub use super::descriptor::{
-    BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec, OptionType,
-    RuntimeRequirement, ToolDescriptor,
+    canonical_tool_phase, BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec,
+    OptionType, RuntimeRequirement, ToolDescriptor, ToolPhase,
 };
 pub use super::execution_context::ToolExecutionContext;

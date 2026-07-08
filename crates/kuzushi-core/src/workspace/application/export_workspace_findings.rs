@@ -9,6 +9,20 @@ use crate::findings::ReviewDecisionRecord;
 use crate::run_artifacts::load_run_summary;
 use std::collections::HashMap;
 
+/// Refresh suppression state against the current clock before exporting, so a
+/// finding whose rule lapsed since the last scan exports as NOT suppressed
+/// (and no lapsed suppression is exported as SARIF-accepted). Idempotent; a
+/// no-op when nothing changed. A missing findings DB is not an error here —
+/// there is simply nothing to reconcile.
+fn reconcile_suppressions_for_export(workspace: &WorkspaceTarget) -> Result<()> {
+    if !workspace.findings_db_path().exists() {
+        return Ok(());
+    }
+    let store = crate::findings::FindingStore::open(workspace.findings_db_path())?;
+    crate::suppressions::run_suppression_sweep(&store, workspace, "system:export")?;
+    Ok(())
+}
+
 pub fn export_workspace_findings(
     workspace: &WorkspaceTarget,
     output_path: impl AsRef<Path>,
@@ -33,6 +47,7 @@ pub fn export_workspace_findings_with_options(
     let format = resolve_workspace_findings_export_format(output_path, options.format)?;
     validate_workspace_findings_output_path(output_path, format)?;
 
+    reconcile_suppressions_for_export(workspace)?;
     let prepared = prepare_workspace_findings_export(workspace, options)?;
     ensure_empty_export_is_allowed(&prepared.records, options)?;
     ensure_workspace_export_parent(output_path)?;
@@ -346,7 +361,13 @@ fn latest_stored_review_context(
                 WorkspaceFindingReviewContext::from_record_for_finding(record, finding)
             }));
         }
-        let record = store.latest_review_decision_for_identity(identity_id)?;
+        // Use human-only review decision: a later automated re-triage must
+        // not mask a human Confirmed/dismissal verdict (preventing export as "open"
+        // when a human previously confirmed the finding).
+        let record = finding.id.map_or_else(
+            || Ok(None),
+            |finding_id| store.latest_human_review_decision_for_finding_identity(finding_id),
+        )?;
         let review = record
             .as_ref()
             .map(|record| WorkspaceFindingReviewContext::from_record_for_finding(record, finding));
@@ -355,7 +376,7 @@ fn latest_stored_review_context(
     }
     match finding.id {
         Some(finding_id) => Ok(store
-            .latest_review_decision(finding_id)?
+            .latest_human_review_decision_for_finding_identity(finding_id)?
             .as_ref()
             .map(WorkspaceFindingReviewContext::from_record)),
         None => Ok(None),
@@ -439,6 +460,7 @@ const CSV_FINDINGS_HEADER: &[&str] = &[
     "derived_source_present",
     "automated_reasoning_present",
     "static_proof_state",
+    "proof_confidence",
     "verification",
     "tool",
     "vuln_source",
@@ -544,11 +566,15 @@ fn csv_signal_fields(record: &WorkspaceFindingExportRecord) -> Vec<String> {
         record.evidence.observed_code_count.to_string(),
         record.evidence.observed_capture_count.to_string(),
         record.evidence.observed_other_count.to_string(),
-        record.evidence.model_generated_reasoning_present.to_string(),
+        record
+            .evidence
+            .model_generated_reasoning_present
+            .to_string(),
         record.evidence.model_generated_reasoning_count.to_string(),
         record.evidence.derived_source_present.to_string(),
         record.analysis.automated_reasoning_present.to_string(),
         record.static_proof_state.clone(),
+        record.proof_confidence.clone(),
         record.verification.label.clone(),
     ]
 }
@@ -561,7 +587,11 @@ fn csv_provenance_fields(record: &WorkspaceFindingExportRecord) -> Vec<String> {
         record.corroboration_count.to_string(),
         record.run_id.clone().unwrap_or_default(),
         record.provenance.run_status.clone().unwrap_or_default(),
-        record.provenance.kuzushi_version.clone().unwrap_or_default(),
+        record
+            .provenance
+            .kuzushi_version
+            .clone()
+            .unwrap_or_default(),
         record.provenance.model.clone().unwrap_or_default(),
     ]
 }

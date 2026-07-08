@@ -20,7 +20,7 @@ pub use lifecycle::{WriterActorState, WriterLifecycle};
 pub use writes::{
     AttackSurfaceWrite, AuditWrite, CandidateObservationWrite, DecisionWrite, FileDeletedWrite,
     FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite, RekeyWrite,
-    RunLifecycleWrite, SnapshotWrite, VerificationWrite,
+    RunLifecycleWrite, SnapshotWrite, SuppressionEventMeta, VerificationWrite,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

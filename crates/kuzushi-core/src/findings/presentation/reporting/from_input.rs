@@ -14,9 +14,7 @@ impl FindingVerdictFilter {
     pub fn from_input(value: &str) -> Result<Self> {
         match value.trim() {
             "tp" | "true_positive" | "vulnerable" | "confirmed" => Ok(Self::TruePositive),
-            "fp" | "false_positive" | "safe" | "rejected_false_positive" => {
-                Ok(Self::FalsePositive)
-            }
+            "fp" | "false_positive" | "safe" | "rejected_false_positive" => Ok(Self::FalsePositive),
             "needs_review" | "review" | "detected" => Ok(Self::NeedsReview),
             "by_design" | "by-design" | "accepted_risk" => Ok(Self::ByDesign),
             "suppressed" => Ok(Self::Suppressed),
@@ -34,11 +32,9 @@ impl FindingVerdictFilter {
         }
     }
 
-    pub(in crate::findings) fn from_review_decision(
-        decision: ReviewDecisionVerdict,
-    ) -> Self {
+    pub(in crate::findings) fn from_review_decision(decision: ReviewDecisionVerdict) -> Self {
         match decision {
-            ReviewDecisionVerdict::Confirmed => Self::TruePositive,
+            ReviewDecisionVerdict::Confirmed | ReviewDecisionVerdict::ToFix => Self::TruePositive,
             ReviewDecisionVerdict::RejectedFalsePositive => Self::FalsePositive,
             ReviewDecisionVerdict::NeedsReview => Self::NeedsReview,
             ReviewDecisionVerdict::AcceptedRisk => Self::ByDesign,
@@ -61,16 +57,54 @@ impl FindingVerdictFilter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindingTriageStateFilter {
+    // Legacy states, matched on the presence of triage metadata.
     Untriaged,
     Triaged,
+    // Derived triage-lifecycle states, matched via `derive_triage_state` in the
+    // store layer. `Open` = still being worked (no verdict yet, or "needs
+    // review"); distinct from review-completeness `open` (`completeness:open`).
+    Open,
+    Reviewing,
+    Confirmed,
+    ToFix,
+    Dismissed,
+    Fixed,
+    Removed,
 }
 
 impl FindingTriageStateFilter {
     pub fn from_input(value: &str) -> Result<Self> {
         match value.trim() {
-            "new" | "pending" | "untriaged" => Ok(Self::Untriaged),
+            "new" | "untriaged" => Ok(Self::Untriaged),
             "triaged" | "classified" => Ok(Self::Triaged),
+            "open" | "working" | "pending" => Ok(Self::Open),
+            "reviewing" | "in_review" | "in-review" | "review" => Ok(Self::Reviewing),
+            "confirmed" => Ok(Self::Confirmed),
+            "to_fix" | "to-fix" | "tofix" => Ok(Self::ToFix),
+            "dismissed" | "dismiss" => Ok(Self::Dismissed),
+            "fixed" => Ok(Self::Fixed),
+            "removed" | "gone" => Ok(Self::Removed),
             other => anyhow::bail!("unknown findings:list state filter {other:?}"),
+        }
+    }
+
+    /// True for states whose evaluation requires the derived triage lifecycle
+    /// (and therefore the projected `stable_findings.current_status`).
+    pub fn is_derived(self) -> bool {
+        !matches!(self, Self::Untriaged | Self::Triaged)
+    }
+
+    /// Whether a derived `FindingTriageState` satisfies this filter variant.
+    pub fn matches_derived(self, derived: &FindingTriageState) -> bool {
+        match self {
+            Self::Open => matches!(derived, FindingTriageState::Open),
+            Self::Reviewing => matches!(derived, FindingTriageState::Reviewing),
+            Self::Confirmed => matches!(derived, FindingTriageState::Confirmed),
+            Self::ToFix => matches!(derived, FindingTriageState::ToFix),
+            Self::Dismissed => derived.is_dismissed(),
+            Self::Fixed => matches!(derived, FindingTriageState::Fixed),
+            Self::Removed => matches!(derived, FindingTriageState::Removed),
+            Self::Untriaged | Self::Triaged => false,
         }
     }
 }
@@ -164,6 +198,17 @@ pub struct FindingListFilter {
     pub triage_state: Vec<FindingTriageStateFilter>,
     pub completeness: Vec<FindingReviewCompletenessFilter>,
     pub lifecycle_status: Vec<FindingLifecycleStatusFilter>,
+    /// Coarse proof/confidence bands (Confirmed/Likely/Unverified/Dismissed),
+    /// derived from `static_proof_state` (+ verification/triage/suppression).
+    /// Empty = no filter. Distinct from `lifecycle_status` (granular),
+    /// `verdict` (triage decision), and `triage_band` (the model's
+    /// self-reported triage confidence, bucketed).
+    pub confidence: Vec<ProofConfidence>,
+    /// Filter by triage-confidence band (bucketed `TriageOutcome.confidence`).
+    /// Empty = no filter. Untriaged findings never match a triage band
+    /// (honest — no fabricated confidence). Distinct from `confidence` (the
+    /// proof/verification axis).
+    pub triage_band: Vec<ConfidenceBand>,
     pub name: Option<String>,
     pub text_terms: Vec<String>,
     pub file_path: Option<String>,
@@ -184,6 +229,8 @@ impl Default for FindingListFilter {
             triage_state: Vec::new(),
             completeness: Vec::new(),
             lifecycle_status: Vec::new(),
+            confidence: Vec::new(),
+            triage_band: Vec::new(),
             name: None,
             text_terms: Vec::new(),
             file_path: None,

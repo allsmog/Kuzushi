@@ -56,6 +56,8 @@ fn dispatch_findings_command(command: Command, default_target: Option<PathBuf>) 
         decision,
         completeness,
         status,
+        confidence,
+        state,
         name,
         file_path,
         vuln_source,
@@ -73,8 +75,10 @@ fn dispatch_findings_command(command: Command, default_target: Option<PathBuf>) 
         vuln_source,
         completeness,
         status,
+        confidence,
         limit,
-    )?;
+    )?
+    .with_triage_states(state)?;
     findings_command(default_target, filter, json)
 }
 
