@@ -1426,7 +1426,7 @@ mod tests {
         );
         let finding_id = store.insert_finding(run_id, &finding).unwrap();
         store
-            .save_triage_with_author(
+            .record_triage_with_author(
                 finding_id,
                 &TriageOutcome {
                     verdict,
@@ -2078,11 +2078,8 @@ mod tests {
     }
 
     fn write_findings_snapshot(target: &Path, run_id: &str, value: serde_json::Value) {
-        let leaf = kuzushi_core::run_artifacts::derived_run_artifact_spec("findings.json")
-            .expect("findings artifact must be in shared derived spec")
-            .leaf;
         std::fs::write(
-            run_dir(target, run_id).join(leaf),
+            run_dir(target, run_id).join("findings.json"),
             serde_json::to_string_pretty(&value).unwrap(),
         )
         .unwrap();

@@ -18,7 +18,7 @@ are **read-only** — they must not edit code.
 Read-only correctness audit. Do not edit any files. Produce a findings report only.
 
 Kuzushi is a Rust code-analysis tool. Its core promise is that a result is only
-labeled "confirmed/validated" when a verification step actually ran and parsed
+labeled "confirmed" or "verified" when a verification step actually ran and parsed
 cleanly. I want you to find every place where that promise can silently break —
 where a parse failure, a missing field, or an unexpected type quietly resolves to
 a default verdict instead of erroring or being logged.
@@ -184,7 +184,7 @@ Report:
    whitespace-normalized or truncated such that two different code locations could
    produce the same signature. Confirm whether location is part of identity; if not,
    describe a concrete collision.
-2. Collision recording: when a collision is detected, is location similarity validated,
+2. Collision recording: when a collision is detected, is location similarity checked,
    or are they merged blindly?
 3. Dedup on the triage path: does the "triage all" branch skip fingerprints that
    already have a persisted verdict, or does it re-triage the same fingerprint every

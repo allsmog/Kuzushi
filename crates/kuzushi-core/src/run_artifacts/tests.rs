@@ -2,7 +2,7 @@
 mod tests {
     use super::super::*;
     use crate::artifact_contract::{
-        CANONICAL_RUN_ARTIFACTS, DERIVED_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS,
+        CANONICAL_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS,
         TOOL_RESULT_ARTIFACTS,
     };
     use std::fs;
@@ -619,78 +619,6 @@ mod tests {
                 "promptHash",
             ],
         );
-    }
-
-    #[test]
-    fn run_context_schema_covers_rich_snapshot_keys() {
-        let schema = run_context_schema();
-        let rich = representative_rich_context_snapshot();
-
-        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
-        assert_serialized_fields_are_declared(&schema, &rich);
-    }
-
-    #[test]
-    fn run_attack_surface_schema_covers_rich_snapshot_keys() {
-        let schema = run_attack_surface_schema();
-        let rich = representative_rich_attack_surface_snapshot();
-
-        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
-        assert_serialized_fields_are_declared(&schema, &rich);
-    }
-
-    #[test]
-    fn run_threat_model_schema_covers_rich_snapshot_keys() {
-        let schema = run_threat_model_schema();
-        let rich = representative_rich_threat_model_snapshot();
-
-        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
-        assert_serialized_fields_are_declared(&schema, &rich);
-    }
-
-    #[test]
-    fn run_recommendations_schema_covers_rich_snapshot_keys() {
-        let schema = run_recommendations_schema();
-        let rich = representative_rich_recommendations_snapshot();
-        let enveloped = representative_data_wrapped_recommendations_snapshot();
-
-        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
-        assert_serialized_fields_are_declared(&schema, &rich);
-        assert_serialized_fields_are_declared(&schema, &enveloped);
-        assert_recommendation_entries_match_schema(&schema, &rich);
-        assert_recommendation_report_matches_schema(&schema, &enveloped["data"]);
-        assert_recommendation_report_envelope_aliases_match_schema(&schema);
-    }
-
-    #[test]
-    fn run_strategy_schema_covers_rich_snapshot_keys() {
-        let schema = run_strategy_schema();
-        let rich = representative_rich_strategy_snapshot();
-
-        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
-        assert_serialized_fields_are_declared(&schema, &rich);
-        assert_strategy_proposal_entries_match_schema(&schema, &rich);
-    }
-
-    #[test]
-    fn run_findings_schema_covers_rich_snapshot_keys() {
-        let schema = run_findings_schema();
-        let rich = representative_rich_findings_snapshot();
-
-        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
-        assert_finding_entries_match_schema(&schema, &rich);
-    }
-
-    #[test]
-    fn run_proof_schema_covers_rich_snapshot_keys() {
-        let schema = run_proof_schema();
-        let rich = representative_rich_proof_snapshot();
-        let verification = representative_verification_proof_snapshot();
-
-        assert_schema_declares_no_fields(&schema, &["runStatus", "run_status"]);
-        assert_serialized_fields_are_declared(&schema, &rich);
-        assert_serialized_fields_are_declared(&schema, &verification);
-        assert_proof_finding_entries_match_schema(&schema, &rich);
     }
 
     #[test]
@@ -1892,65 +1820,12 @@ mod tests {
         assert!(cas_object_path(tmp.path(), hash).is_file());
     }
 
-    #[test]
-    fn canonical_snapshot_artifacts_record_domain_object_kinds() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-domain-object-kinds";
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", Some("sast:scan".to_string()), "target")
-                .complete(),
-        )
-        .unwrap();
-
-        for (leaf, expected_kind) in [
-            ("context.json", "context-snapshot"),
-            ("attack-surface.json", "attack-surface-snapshot"),
-            ("findings.json", "finding-observation-batch"),
-            ("proof.json", "proof-snapshot"),
-            ("failures.json", "diagnostic-bundle"),
-        ] {
-            let spec = crate::artifact_contract::derived_run_artifact_spec(leaf)
-                .or_else(|| crate::artifact_contract::canonical_run_artifact_spec(leaf))
-                .unwrap();
-            write_run_artifact_json(
-                tmp.path(),
-                run_id,
-                leaf,
-                spec.label,
-                &serde_json::json!({"status": "recorded"}),
-            )
-            .unwrap();
-            let manifest: serde_json::Value = serde_json::from_str(
-                &fs::read_to_string(run_artifact_path(tmp.path(), run_id, "artifacts.json"))
-                    .unwrap(),
-            )
-            .unwrap();
-            assert_eq!(
-                manifest_object_kind_for_path(&manifest, leaf),
-                Some(expected_kind)
-            );
-        }
-    }
-
     fn cas_object_path(target: &Path, hash: &str) -> PathBuf {
         crate::workspace::workspace_objects_dir(target)
             .join("blake3")
             .join(&hash[0..2])
             .join(&hash[2..4])
             .join(hash)
-    }
-
-    fn manifest_object_kind_for_path<'a>(
-        manifest: &'a serde_json::Value,
-        leaf: &str,
-    ) -> Option<&'a str> {
-        manifest["objects"]
-            .as_array()?
-            .iter()
-            .find(|object| object["path"].as_str().is_some_and(|path| path.ends_with(leaf)))?
-            .pointer("/objectRef/kind")?
-            .as_str()
     }
 
     #[test]
@@ -2334,7 +2209,7 @@ mod tests {
     }
 
     #[test]
-    fn final_summary_preserves_producer_owned_derived_snapshots() {
+    fn final_summary_preserves_producer_owned_declared_artifacts() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = new_run_id("marker-refresh");
         let summary = RunSummary::running(
@@ -2384,11 +2259,18 @@ mod tests {
         let manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
 
         assert!(metadata.contains("\"status\": \"paused\""));
-        for spec in DERIVED_RUN_ARTIFACTS {
+        for leaf in [
+            "context.json",
+            "attack-surface.json",
+            "threat-model.json",
+            "recommendations.json",
+            "strategy.json",
+            "findings.json",
+            "proof.json",
+        ] {
             assert!(
-                !run_artifact_path(tmp.path(), &run_id, spec.leaf).exists(),
-                "{}",
-                spec.leaf
+                !run_artifact_path(tmp.path(), &run_id, leaf).exists(),
+                "{leaf}"
             );
         }
         assert!(placeholder_report.contains("Status: paused"));
@@ -2408,6 +2290,23 @@ mod tests {
             "artifacts.json",
         ] {
             assert!(dir.join(leaf).exists(), "missing canonical artifact {leaf}");
+        }
+    }
+
+    fn assert_retired_snapshot_artifacts_absent(target: &Path, run_id: &str) {
+        let dir = run_dir(target, run_id);
+        let summary = load_run_summary(target, run_id).unwrap();
+        let manifest = load_run_artifacts(target, run_id).unwrap();
+        for leaf in RETIRED_SNAPSHOT_LEAVES {
+            assert!(!dir.join(leaf).exists(), "retired artifact {leaf} was written");
+            assert!(
+                !summary.artifacts.iter().any(|artifact| artifact.path.ends_with(leaf)),
+                "summary contains retired artifact {leaf}"
+            );
+            assert!(
+                !manifest.iter().any(|artifact| artifact.path.ends_with(leaf)),
+                "manifest contains retired artifact {leaf}"
+            );
         }
     }
 
@@ -2488,6 +2387,16 @@ mod tests {
             );
         }
     }
+
+    const RETIRED_SNAPSHOT_LEAVES: &[&str] = &[
+        "context.json",
+        "attack-surface.json",
+        "threat-model.json",
+        "strategy.json",
+        "recommendations.json",
+        "findings.json",
+        "proof.json",
+    ];
 
     fn runtime_platform_label() -> String {
         format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
@@ -2778,7 +2687,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_promotes_result_snapshots_to_canonical_files() {
+    fn tool_run_complete_keeps_domain_snapshots_inside_result_json() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-snapshots";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "context:build");
@@ -2815,37 +2724,43 @@ mod tests {
         );
 
         let dir = run_dir(tmp.path(), run_id);
-        assert!(fs::read_to_string(dir.join("context.json"))
-            .unwrap()
-            .contains("repoContext"));
-        let attack_surface = fs::read_to_string(dir.join("attack-surface.json")).unwrap();
-        assert!(attack_surface.contains("/login"));
-        assert!(attack_surface.contains("/upload"));
-        assert!(attack_surface.contains("file_upload_parse_path"));
-        assert!(fs::read_to_string(dir.join("threat-model.json"))
-            .unwrap()
-            .contains("STRIDE"));
-        assert!(fs::read_to_string(dir.join("recommendations.json"))
-            .unwrap()
-            .contains("semgrep:scan"));
-        assert!(fs::read_to_string(dir.join("findings.json"))
-            .unwrap()
-            .contains("demo"));
-        assert!(fs::read_to_string(dir.join("proof.json"))
-            .unwrap()
-            .contains("code_cited"));
+        let result =
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&result).unwrap();
+
+        assert_eq!(
+            output["data"]["snapshot"]["repoContext"]["languages"],
+            serde_json::json!(["Rust"])
+        );
+        assert_eq!(
+            output["data"]["snapshot"]["attackSurfaceMap"]["surfaces"][1]["path"],
+            serde_json::json!("/upload")
+        );
+        assert_eq!(
+            output["data"]["document"]["methodology"],
+            serde_json::json!("STRIDE")
+        );
+        assert_eq!(
+            output["recommendations"][0]["tool"],
+            serde_json::json!("semgrep:scan")
+        );
+        assert_eq!(
+            output["data"]["findings"][0]["ruleId"],
+            serde_json::json!("demo")
+        );
+        assert_eq!(
+            output["data"]["proof"]["states"][0],
+            serde_json::json!("code_cited")
+        );
         assert!(fs::read_to_string(dir.join("report.md"))
             .unwrap()
             .contains("Snapshot Report"));
         assert!(fs::read_to_string(dir.join("report.sarif"))
             .unwrap()
             .contains("\"version\": \"2.1.0\""));
+        assert_retired_snapshot_artifacts_absent(tmp.path(), run_id);
 
         let summary = load_run_summary(tmp.path(), run_id).unwrap();
-        assert!(summary
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.path.ends_with("context.json")));
         assert!(summary
             .artifacts
             .iter()
@@ -2898,7 +2813,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_prefers_core_findings_snapshot() {
+    fn tool_run_complete_keeps_core_findings_inside_result_json() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-core-findings";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "dep-hygiene:check");
@@ -2924,29 +2839,31 @@ mod tests {
             }),
         );
 
-        let body = fs::read_to_string(run_artifact_path(tmp.path(), run_id, "findings.json"))
-            .unwrap();
-        let findings = serde_json::from_str::<serde_json::Value>(&body).unwrap();
+        let body =
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
-        assert_eq!(findings[0]["fingerprint"], serde_json::json!("dep-fp"));
-        assert_eq!(findings[0]["tool"], serde_json::json!("dep-hygiene"));
-        assert!(findings[0].get("packageName").is_none());
-
-        let proof_body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
-        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
-
-        assert_eq!(proof["source"], serde_json::json!("normalized-findings"));
-        assert_eq!(proof["runtimeVerification"], serde_json::json!(false));
-        assert_eq!(proof["countsByState"]["signal_only"], serde_json::json!(1));
         assert_eq!(
-            proof["findings"][0]["staticProofState"],
+            output["data"]["coreFindings"][0]["fingerprint"],
+            serde_json::json!("dep-fp")
+        );
+        assert_eq!(
+            output["data"]["coreFindings"][0]["tool"],
+            serde_json::json!("dep-hygiene")
+        );
+        assert_eq!(
+            output["data"]["findings"][0]["packageName"],
+            serde_json::json!("lodash")
+        );
+        assert_eq!(
+            output["data"]["coreFindings"][0]["staticProofState"],
             serde_json::json!("signal_only")
         );
+        assert_retired_snapshot_artifacts_absent(tmp.path(), run_id);
     }
 
     #[test]
-    fn tool_run_complete_promotes_root_core_findings_snapshot() {
+    fn tool_run_complete_keeps_root_core_findings_inside_result_json() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-root-core-findings";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "codeql:scan");
@@ -2968,23 +2885,18 @@ mod tests {
             }),
         );
 
-        let findings_body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "findings.json")).unwrap();
-        let findings = serde_json::from_str::<serde_json::Value>(&findings_body).unwrap();
-        assert_eq!(findings[0]["fingerprint"], serde_json::json!("codeql-fp"));
-        assert_eq!(findings[0]["ruleId"], serde_json::json!("js/sql-injection"));
-
-        let proof_body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
-        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+        let body =
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&body).unwrap();
         assert_eq!(
-            proof["countsByState"]["source_sink_linked"],
-            serde_json::json!(1)
+            output["coreFindings"][0]["fingerprint"],
+            serde_json::json!("codeql-fp")
         );
         assert_eq!(
-            proof["findings"][0]["filePath"],
+            output["coreFindings"][0]["filePath"],
             serde_json::json!("src/app.ts")
         );
+        assert_retired_snapshot_artifacts_absent(tmp.path(), run_id);
     }
 
     #[test]
@@ -3015,7 +2927,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_marks_runtime_reviewed_and_attempted_states_as_runtime_proof() {
+    fn tool_run_complete_keeps_runtime_proof_states_inside_result_json() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-runtime-proof-state";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "verify:finding");
@@ -3035,25 +2947,27 @@ mod tests {
             }),
         );
 
-        let proof_body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
-        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+        let body =
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
-        assert_eq!(proof["runtimeVerification"], serde_json::json!(true));
-        assert_eq!(proof["proofLevel"], serde_json::json!("runtime-and-static"));
-        assert_eq!(proof["countsByState"]["runtime_reviewed"], serde_json::json!(1));
         assert_eq!(
-            proof["countsByState"]["execution_attempted"],
-            serde_json::json!(1)
+            output["data"]["coreFindings"][0]["staticProofState"],
+            serde_json::json!("runtime_reviewed")
         );
         assert_eq!(
-            proof["countsByState"]["execution_rejected"],
-            serde_json::json!(1)
+            output["data"]["coreFindings"][1]["staticProofState"],
+            serde_json::json!("execution_attempted")
         );
+        assert_eq!(
+            output["data"]["coreFindings"][2]["staticProofState"],
+            serde_json::json!("execution_rejected")
+        );
+        assert_retired_snapshot_artifacts_absent(tmp.path(), run_id);
     }
 
     #[test]
-    fn tool_run_complete_ignores_nested_properties_proof_state() {
+    fn tool_run_complete_keeps_nested_properties_proof_state_inside_result_json() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-proof-state-properties";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "codeql:scan");
@@ -3084,27 +2998,23 @@ mod tests {
             }),
         );
 
-        let proof_body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
-        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+        let body =
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
         assert_eq!(
-            proof["countsByState"]["source_sink_linked"],
-            serde_json::json!(1)
+            output["data"]["coreFindings"][0]["staticProofState"],
+            serde_json::json!("source-sink-linked")
         );
         assert_eq!(
-            proof["countsByState"]["runtime_confirmed"],
-            serde_json::Value::Null
+            output["data"]["coreFindings"][1]["properties"]["proof_state"],
+            serde_json::json!("runtime_confirmed")
         );
-        assert_eq!(proof["runtimeVerification"], serde_json::json!(false));
-        assert_eq!(
-            proof["findings"][0]["staticProofState"],
-            serde_json::json!("source_sink_linked")
-        );
+        assert_retired_snapshot_artifacts_absent(tmp.path(), run_id);
     }
 
     #[test]
-    fn tool_run_complete_promotes_root_proof_snapshot() {
+    fn tool_run_complete_keeps_root_proof_inside_result_json() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-root-proof";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "verify:finding");
@@ -3121,15 +3031,16 @@ mod tests {
             }),
         );
 
-        let proof_body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
-        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+        let body =
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
-        assert_eq!(proof["proofLevel"], serde_json::json!(3));
+        assert_eq!(output["proof"]["proofLevel"], serde_json::json!(3));
         assert_eq!(
-            proof["proofVerdict"],
+            output["proof"]["proofVerdict"],
             serde_json::json!("needs-runtime-evidence")
         );
+        assert_retired_snapshot_artifacts_absent(tmp.path(), run_id);
     }
 
     #[test]
@@ -3181,7 +3092,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_promotes_full_module_recommendation_report() {
+    fn tool_run_complete_keeps_root_recommendation_report_inside_result_json() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-recommendations";
         let record = ToolRunRecord::new(
@@ -3226,23 +3137,27 @@ mod tests {
         );
 
         let body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "recommendations.json")).unwrap();
-        let report = serde_json::from_str::<serde_json::Value>(&body).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
-        assert_eq!(report["summary"], serde_json::json!("2 recommendations for /repo"));
-        assert_eq!(report["signals"]["sourceFiles"], serde_json::json!(12));
         assert_eq!(
-            report["capabilities"]["availableToolCount"],
+            output["summary"],
+            serde_json::json!("2 recommendations for /repo")
+        );
+        assert_eq!(output["signals"]["sourceFiles"], serde_json::json!(12));
+        assert_eq!(
+            output["capabilities"]["availableToolCount"],
             serde_json::json!(5)
         );
         assert_eq!(
-            report["recommendations"][0]["tool"],
+            output["recommendations"][0]["tool"],
             serde_json::json!("threat-model:build")
         );
         assert_eq!(
-            report["recommendations"][0]["signals"][0],
+            output["recommendations"][0]["signals"][0],
             serde_json::json!("frameworks: Falcon, Litestar, Sanic")
         );
+        assert_retired_snapshot_artifacts_absent(tmp.path(), run_id);
     }
 
     #[test]
@@ -3294,7 +3209,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_promotes_data_wrapped_recommendation_report() {
+    fn tool_run_complete_keeps_data_wrapped_recommendation_report_inside_result_json() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-data-recommendations";
         let record = ToolRunRecord::new(
@@ -3335,18 +3250,22 @@ mod tests {
         );
 
         let body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "recommendations.json")).unwrap();
-        let report = serde_json::from_str::<serde_json::Value>(&body).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
-        assert_eq!(report["summary"], serde_json::json!("1 recommendation for /repo"));
         assert_eq!(
-            report["signals"]["frameworks"],
+            output["data"]["summary"],
+            serde_json::json!("1 recommendation for /repo")
+        );
+        assert_eq!(
+            output["data"]["signals"]["frameworks"],
             serde_json::json!(["Falcon", "Litestar", "Sanic"])
         );
         assert_eq!(
-            report["recommendations"][0]["signals"][0],
+            output["data"]["recommendations"][0]["signals"][0],
             serde_json::json!("frameworks: Falcon, Litestar, Sanic")
         );
+        assert_retired_snapshot_artifacts_absent(tmp.path(), run_id);
     }
 
     #[test]
@@ -3673,46 +3592,6 @@ mod tests {
         serde_json::from_str(include_str!("../../../../schemas/run.trace.schema.json")).unwrap()
     }
 
-    fn run_context_schema() -> serde_json::Value {
-        serde_json::from_str(include_str!("../../../../schemas/run.context.schema.json")).unwrap()
-    }
-
-    fn run_attack_surface_schema() -> serde_json::Value {
-        serde_json::from_str(include_str!(
-            "../../../../schemas/run.attack-surface.schema.json"
-        ))
-        .unwrap()
-    }
-
-    fn run_threat_model_schema() -> serde_json::Value {
-        serde_json::from_str(include_str!(
-            "../../../../schemas/run.threat-model.schema.json"
-        ))
-        .unwrap()
-    }
-
-    fn run_recommendations_schema() -> serde_json::Value {
-        serde_json::from_str(include_str!(
-            "../../../../schemas/run.recommendations.schema.json"
-        ))
-        .unwrap()
-    }
-
-    fn run_strategy_schema() -> serde_json::Value {
-        serde_json::from_str(include_str!("../../../../schemas/run.strategy.schema.json")).unwrap()
-    }
-
-    fn run_findings_schema() -> serde_json::Value {
-        serde_json::from_str(include_str!(
-            "../../../../schemas/run.findings.schema.json"
-        ))
-        .unwrap()
-    }
-
-    fn run_proof_schema() -> serde_json::Value {
-        serde_json::from_str(include_str!("../../../../schemas/run.proof.schema.json")).unwrap()
-    }
-
     fn representative_run_summary() -> RunSummary {
         RunSummary::running("run-schema", "tool", Some("agentic:test".to_string()), "target")
             .complete()
@@ -3828,199 +3707,6 @@ mod tests {
             .with_severity("info")
             .with_started_at_ms(1_700_000_000_000)
             .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:abc")
-    }
-
-    fn representative_rich_context_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "filesIndexed": 42,
-            "repoContext": {
-                "languages": ["TypeScript", "Rust"],
-                "frameworks": ["Django", "Spring"]
-            },
-            "appModel": {
-                "routes": [{"id": "route-users"}],
-                "outboundClients": [{"id": "stripe"}],
-                "dataStores": [{"id": "postgres"}],
-                "backgroundJobs": [{"id": "sync"}]
-            }
-        })
-    }
-
-    fn representative_rich_attack_surface_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "summary": {
-                "surfaceCount": 1,
-                "highRisk": 1,
-                "maxRiskScore": 82,
-                "byRiskTier": {"high": 1},
-                "byKind": {"http_route": 1}
-            },
-            "surfaces": [{
-                "id": "route-users",
-                "kind": "http_route",
-                "framework": "Spring",
-                "risk": {
-                    "rank": 1,
-                    "score": 82,
-                    "tier": "high",
-                    "reasons": ["auth boundary"]
-                }
-            }]
-        })
-    }
-
-    fn representative_rich_threat_model_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "version": "2.0",
-            "methodology": "stride",
-            "dfd": {
-                "nodes": [{"id": "app"}],
-                "flows": [{"id": "flow-public"}],
-                "trustBoundaries": [{"id": "tb-public"}]
-            },
-            "threats": [{
-                "id": "T-001",
-                "relatedCwe": ["CWE-20"],
-                "affectedFiles": [{"filePath": "src/app.ts"}]
-            }],
-            "attackSurface": {
-                "entryPoints": [{"name": "handle_request"}]
-            },
-            "narrative": {
-                "overview": "deterministic model",
-                "inputCategories": {
-                    "dataEgressFlows": ["GET /reports/download"]
-                }
-            },
-            "degradation": {
-                "mode": "deterministic-no-runtime"
-            }
-        })
-    }
-
-    fn representative_rich_recommendations_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "summary": "1 recommendation for /repo",
-            "target": "/repo",
-            "signals": {
-                "sourceFiles": 12,
-                "frameworks": ["Falcon", "Litestar", "Sanic"],
-                "attackSurfaceHighRisk": 2
-            },
-            "capabilities": {
-                "availableToolCount": 5,
-                "recommendedToolCount": 1,
-                "skippedMissingTools": []
-            },
-            "recommendations": [{
-                "moduleId": "semgrep",
-                "tool": "threat-model:build",
-                "priority": "medium",
-                "reason": "attack-surface signals exist",
-                "signals": ["frameworks: Falcon, Litestar, Sanic"],
-                "requiresRuntime": false,
-                "nextInput": {"target": "/repo"}
-            }],
-            "warnings": [],
-            "errors": []
-        })
-    }
-
-    fn representative_data_wrapped_recommendations_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "status": "completed",
-            "data": representative_rich_recommendations_snapshot()
-        })
-    }
-
-    fn representative_rich_strategy_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "source": "module-recommender:recommend",
-            "strategyProposals": [{
-                "id": "review-codeql-scan",
-                "phase": "review",
-                "baseStrategy": "module recommender defaults",
-                "recommendedStrategy": "run codeql:scan",
-                "correctedStrategy": "run codeql:scan with authz focus",
-                "appliedCorrections": [{
-                    "id": "correction-review-1-authz",
-                    "scope": "workspace",
-                    "author": "operator",
-                    "reason": "tighten review phase",
-                    "fromStrategy": "run codeql:scan",
-                    "toStrategy": "run codeql:scan with authz focus"
-                }],
-                "rationale": "small enough repository with CodeQL language coverage",
-                "expectedCostUsd": null,
-                "expectedRuntime": "local pass",
-                "preflight": {
-                    "status": "ready",
-                    "notes": ["language: TypeScript"]
-                },
-                "resourceRisk": "low",
-                "status": "proposed",
-                "sourceRunId": "run-recommend",
-                "tool": "codeql:scan",
-                "nextInput": {"target": "/repo"},
-                "createdAtMs": 1,
-                "updatedAtMs": 2
-            }]
-        })
-    }
-
-    fn representative_rich_findings_snapshot() -> serde_json::Value {
-        serde_json::json!([{
-            "id": "F-1",
-            "fingerprint": "semgrep:src/app.ts:7",
-            "tool": "semgrep",
-            "ruleId": "js/sql-injection",
-            "title": "SQL injection",
-            "message": "query uses request input",
-            "severity": "high",
-            "confidence": "medium",
-            "filePath": "src/app.ts",
-            "startLine": 7,
-            "endLine": 9,
-            "staticProofState": "source_sink_linked",
-            "properties": {"scanner": "semgrep"},
-            "cwe": ["CWE-89"],
-            "evidence": "source to sink",
-            "suppressed": false,
-            "snoozedUntil": "2026-06-01T00:00:00Z",
-            "remediation": "parameterize the query",
-            "references": ["https://cwe.mitre.org/data/definitions/89.html"]
-        }])
-    }
-
-    fn representative_rich_proof_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "status": "completed",
-            "summary": "1 proof state(s) recorded from normalized findings",
-            "source": "normalized-findings",
-            "proofLevel": "runtime-and-static",
-            "runtimeVerification": true,
-            "countsByState": {
-                "runtime_confirmed": 1
-            },
-            "findings": [{
-                "fingerprint": "semgrep:src/app.ts:7",
-                "tool": "semgrep",
-                "ruleId": "js/sql-injection",
-                "filePath": "src/app.ts",
-                "startLine": 7,
-                "staticProofState": "runtime_confirmed"
-            }]
-        })
-    }
-
-    fn representative_verification_proof_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "kind": "verification",
-            "proofLevel": 4,
-            "proofVerdict": "exploited",
-            "verified": 1,
-            "results": [{"findingId": "F-1", "verdict": "confirmed"}]
-        })
     }
 
     fn assert_required_schema_fields_exist(schema: &serde_json::Value, value: &serde_json::Value) {
@@ -4274,121 +3960,6 @@ mod tests {
                 artifact_schema.contains_key(field),
                 "event artifact schema missing field {field}"
             );
-        }
-    }
-
-    fn assert_recommendation_entries_match_schema(
-        schema: &serde_json::Value,
-        value: &serde_json::Value,
-    ) {
-        let recommendations = value["recommendations"].as_array().unwrap();
-        assert_recommendations_match_schema(schema, recommendations);
-    }
-
-    fn assert_recommendation_report_matches_schema(
-        schema: &serde_json::Value,
-        report: &serde_json::Value,
-    ) {
-        let report_schema = schema["definitions"]["recommendationReport"]["properties"]
-            .as_object()
-            .unwrap();
-        for field in report.as_object().unwrap().keys() {
-            assert!(
-                report_schema.contains_key(field),
-                "recommendation report schema missing field {field}"
-            );
-        }
-        let recommendations = report["recommendations"].as_array().unwrap();
-        assert_recommendations_match_schema(schema, recommendations);
-    }
-
-    fn assert_recommendation_report_envelope_aliases_match_schema(schema: &serde_json::Value) {
-        let properties = schema["properties"].as_object().unwrap();
-        let report_schema = schema["definitions"]["recommendationReport"]["properties"]
-            .as_object()
-            .unwrap();
-
-        assert!(properties.get("recommendation_report").is_none());
-        assert_eq!(
-            report_schema["recommendationReport"]["$ref"],
-            serde_json::json!("#/definitions/recommendationReport")
-        );
-        assert!(report_schema.get("recommendation_report").is_none());
-    }
-
-    fn assert_recommendations_match_schema(
-        schema: &serde_json::Value,
-        recommendations: &[serde_json::Value],
-    ) {
-        let recommendation_schema = schema["definitions"]["recommendation"]["properties"]
-            .as_object()
-            .unwrap();
-        for recommendation in recommendations {
-            for field in recommendation.as_object().unwrap().keys() {
-                assert!(
-                    recommendation_schema.contains_key(field),
-                    "recommendation schema missing field {field}"
-                );
-            }
-        }
-    }
-
-    fn assert_strategy_proposal_entries_match_schema(
-        schema: &serde_json::Value,
-        value: &serde_json::Value,
-    ) {
-        let proposal_schema = schema["definitions"]["strategyProposal"]["properties"]
-            .as_object()
-            .unwrap();
-        for proposal in value["strategyProposals"].as_array().unwrap() {
-            for field in proposal.as_object().unwrap().keys() {
-                assert!(
-                    proposal_schema.contains_key(field),
-                    "strategy proposal schema missing field {field}"
-                );
-            }
-            let correction_schema = schema["definitions"]["appliedCorrection"]["properties"]
-                .as_object()
-                .unwrap();
-            for correction in proposal["appliedCorrections"].as_array().unwrap() {
-                for field in correction.as_object().unwrap().keys() {
-                    assert!(
-                        correction_schema.contains_key(field),
-                        "applied strategy correction schema missing field {field}"
-                    );
-                }
-            }
-        }
-    }
-
-    fn assert_finding_entries_match_schema(schema: &serde_json::Value, value: &serde_json::Value) {
-        let finding_schema = schema["definitions"]["finding"]["properties"]
-            .as_object()
-            .unwrap();
-        for finding in value.as_array().unwrap() {
-            for field in finding.as_object().unwrap().keys() {
-                assert!(
-                    finding_schema.contains_key(field),
-                    "finding schema missing field {field}"
-                );
-            }
-        }
-    }
-
-    fn assert_proof_finding_entries_match_schema(
-        schema: &serde_json::Value,
-        value: &serde_json::Value,
-    ) {
-        let finding_schema = schema["definitions"]["proofFinding"]["properties"]
-            .as_object()
-            .unwrap();
-        for finding in value["findings"].as_array().unwrap() {
-            for field in finding.as_object().unwrap().keys() {
-                assert!(
-                    finding_schema.contains_key(field),
-                    "proof finding schema missing field {field}"
-                );
-            }
         }
     }
 

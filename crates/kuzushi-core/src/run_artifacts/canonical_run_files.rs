@@ -1,16 +1,12 @@
 use super::artifact_manifest::record_canonical_run_artifacts;
-use super::canonical_proof::proof_snapshot_value;
 use super::canonical_run_markers::{
     write_empty_failures_marker, write_missing_report_marker,
 };
-use super::canonical_recommendations::recommendations_snapshot_value;
 use super::run_dir;
-use super::write_run_artifact_json;
 use super::write_run_artifact_text;
 use super::RunArtifact;
 use crate::artifact_contract::{
-    canonical_run_artifact_spec, derived_run_artifact_spec, optional_run_artifact_spec,
-    CanonicalRunArtifactSpec,
+    canonical_run_artifact_spec, optional_run_artifact_spec, CanonicalRunArtifactSpec,
 };
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -40,30 +36,15 @@ pub(crate) fn ensure_canonical_run_files(
     Ok(())
 }
 
-pub(crate) fn record_canonical_snapshot_artifacts(
+pub(crate) fn record_report_artifacts(
     target: &Path,
     run_id: &str,
     output: &Value,
 ) -> Vec<RunArtifact> {
     let mut artifacts = Vec::new();
-    record_json_snapshot(&mut artifacts, target, run_id, output, context_snapshot());
-    record_json_snapshot(&mut artifacts, target, run_id, output, attack_surface_snapshot());
-    record_json_snapshot(&mut artifacts, target, run_id, output, threat_model_snapshot());
-    record_recommendations_snapshot(&mut artifacts, target, run_id, output);
-    record_json_snapshot(&mut artifacts, target, run_id, output, findings_snapshot());
-    record_proof_snapshot(&mut artifacts, target, run_id, output);
-    record_report_artifacts(&mut artifacts, target, run_id, output);
+    record_markdown_report_artifact(&mut artifacts, target, run_id, output);
+    record_sarif_report_artifact(&mut artifacts, target, run_id, output);
     artifacts
-}
-
-fn record_report_artifacts(
-    artifacts: &mut Vec<RunArtifact>,
-    target: &Path,
-    run_id: &str,
-    output: &Value,
-) {
-    record_markdown_report_artifact(artifacts, target, run_id, output);
-    record_sarif_report_artifact(artifacts, target, run_id, output);
 }
 
 fn record_markdown_report_artifact(
@@ -100,99 +81,9 @@ fn push_text_artifact(
     }
 }
 
-struct JsonSnapshotSpec<'a> {
-    leaf: &'a str,
-    pointers: &'a [&'a str],
-}
-
-fn context_snapshot() -> JsonSnapshotSpec<'static> {
-    JsonSnapshotSpec {
-        leaf: "context.json",
-        pointers: &["/data/snapshot", "/data/context", "/context", "/contextSnapshot"],
-    }
-}
-
-fn attack_surface_snapshot() -> JsonSnapshotSpec<'static> {
-    JsonSnapshotSpec {
-        leaf: "attack-surface.json",
-        pointers: &[
-            "/data/snapshot/attackSurfaceMap",
-            "/data/attackSurfaceMap",
-            "/data/attackSurface",
-            "/attackSurfaceMap",
-            "/attackSurface",
-        ],
-    }
-}
-
-fn threat_model_snapshot() -> JsonSnapshotSpec<'static> {
-    JsonSnapshotSpec {
-        leaf: "threat-model.json",
-        pointers: &["/data/document", "/data/threatModel", "/document", "/threatModel"],
-    }
-}
-
-fn findings_snapshot() -> JsonSnapshotSpec<'static> {
-    JsonSnapshotSpec {
-        leaf: "findings.json",
-        pointers: &["/data/coreFindings", "/data/findings", "/coreFindings", "/findings"],
-    }
-}
-
-fn record_json_snapshot(
-    artifacts: &mut Vec<RunArtifact>,
-    target: &Path,
-    run_id: &str,
-    output: &Value,
-    spec: JsonSnapshotSpec<'_>,
-) {
-    let Some(value) = value_at(output, spec.pointers) else {
-        return;
-    };
-    let artifact_spec = derived_artifact_spec(spec.leaf);
-    if let Ok(artifact) =
-        write_run_artifact_json(target, run_id, artifact_spec.leaf, artifact_spec.label, value)
-    {
-        artifacts.push(artifact);
-    }
-}
-
-fn record_recommendations_snapshot(
-    artifacts: &mut Vec<RunArtifact>,
-    target: &Path,
-    run_id: &str,
-    output: &Value,
-) {
-    let Some(value) = recommendations_snapshot_value(output) else {
-        return;
-    };
-    let spec = derived_artifact_spec("recommendations.json");
-    if let Ok(artifact) = write_run_artifact_json(target, run_id, spec.leaf, spec.label, value) {
-        artifacts.push(artifact);
-    }
-}
-
-fn record_proof_snapshot(
-    artifacts: &mut Vec<RunArtifact>,
-    target: &Path,
-    run_id: &str,
-    output: &Value,
-) {
-    let Some(value) = proof_snapshot_value(output) else {
-        return;
-    };
-    let spec = derived_artifact_spec("proof.json");
-    if let Ok(artifact) = write_run_artifact_json(target, run_id, spec.leaf, spec.label, &value) {
-        artifacts.push(artifact);
-    }
-}
 
 fn required_artifact_spec(leaf: &str) -> &'static CanonicalRunArtifactSpec {
     canonical_run_artifact_spec(leaf).expect("canonical snapshot artifact must be in shared spec")
-}
-
-fn derived_artifact_spec(leaf: &str) -> &'static CanonicalRunArtifactSpec {
-    derived_run_artifact_spec(leaf).expect("derived snapshot artifact must be in shared spec")
 }
 
 fn report_artifact_spec() -> &'static CanonicalRunArtifactSpec {

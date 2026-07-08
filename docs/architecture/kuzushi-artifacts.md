@@ -96,42 +96,12 @@ metadata, parent-step linkage, severity, timing, and LLM audit metadata.
 Trace streams use canonical snake_case fields only, including `module_id`,
 `parent_step`, `started_at_ms`, `cost_usd`, and `prompt_hash`; obsolete
 camelCase trace aliases are rejected instead of normalized.
-`schemas/run.context.schema.json` is the machine-readable contract for
-`context.json`, covering the deterministic absence marker plus known rich
-context snapshot fields such as indexed file counts, repository context, and
-application model. The schema and report reader also accept wrapped producer
-snapshots under `context` and `contextSnapshot`.
-`schemas/run.attack-surface.schema.json` is the machine-readable contract for
-`attack-surface.json`, covering the deterministic absence marker plus known
-rich attack-surface snapshot fields such as surface lists, summary counts, risk
-tiers, kind counts, and per-surface risk metadata.
-`schemas/run.threat-model.schema.json` is the machine-readable contract for
-`threat-model.json`, covering the deterministic absence marker plus known rich
-threat-model document fields such as methodology, DFD nodes/flows/trust
-boundaries, threats, related CWE aliases, narrative input categories including
-camelCase and snake_case data-egress flow aliases, and deterministic
-degradation metadata.
-`schemas/run.recommendations.schema.json` is the machine-readable contract for
-`recommendations.json`, covering the deterministic absence marker plus the full
-module recommender report shape, including signals, capabilities, recommended
-tools, priorities, runtime requirements, and next-input hints. It also
-documents full-report envelopes under `data`, `recommendationReport`, and
-nested `data.recommendationReport` producer envelopes.
-`schemas/run.strategy.schema.json` is the machine-readable contract for
-`strategy.json`, covering the deterministic absence marker plus strategy
-proposal snapshots, phase, base/recommended/corrected strategy lineage,
-preflight status, resource risk, proposal status, source run id, next input,
-and applied correction metadata.
-`schemas/run.findings.schema.json` is the machine-readable contract for
-`findings.json`, covering the deterministic absence marker plus finding arrays
-with location, severity, confidence, CWE/evidence, proof-state aliases, and
-durable lifecycle metadata. Finding arrays may be emitted directly or wrapped
-under `coreFindings`, `core_findings`, or `findings`.
-`schemas/run.proof.schema.json` is the machine-readable contract for
-`proof.json`, covering the deterministic absence marker plus static proof
-summaries, verification proof snapshots, proof levels, verdicts, runtime proof
-flags, state counts, and proof finding entries. Static and verification
-snapshots may also be wrapped under `proof`, `proofs`, or `verification`.
+Context, attack-surface, threat-model, recommendations, strategy, findings, and
+proof payloads are no longer canonical per-run snapshot files. A tool may still
+emit any of those as explicit artifacts through `artifacts.json`, but the product
+does not synthesize or require fixed snapshot leaves for them. Their durable
+source is either the event log/CAS object it cites or the SQLite projection that
+can be rebuilt from those sources.
 The schema contract uses canonical run metadata, event, failure handoff, and
 trace fields only. Remaining alias coverage is limited to external producer
 payloads that have not been converted in the current slice. The architecture

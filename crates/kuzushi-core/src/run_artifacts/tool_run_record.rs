@@ -1,5 +1,5 @@
 use super::*;
-use super::canonical_run_files::record_canonical_snapshot_artifacts;
+use super::canonical_run_files::record_report_artifacts;
 use super::output_declared_artifacts::record_output_declared_artifacts;
 use super::tool_run_failure_result::failed_tool_result_with_context;
 use super::tool_run_record_events::{
@@ -75,11 +75,7 @@ pub fn record_tool_run_complete(record: ToolRunRecord<'_>, output: &Value) {
         record.run_id,
         output,
     ));
-    artifacts.extend(record_canonical_snapshot_artifacts(
-        record.target,
-        record.run_id,
-        output,
-    ));
+    artifacts.extend(record_report_artifacts(record.target, record.run_id, output));
     let output = result_output_for_status(record, status, output, &mut artifacts);
     artifacts.extend(result_artifact(record, &output));
     let summary = completed_summary(record, &output, artifacts);

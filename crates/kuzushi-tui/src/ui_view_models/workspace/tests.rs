@@ -74,10 +74,10 @@ fn workspace_model_projects_workspace_summary_and_rollup() {
 }
 
 #[test]
-fn plain_workspace_model_projects_missing_workspace_rows() {
+fn plain_workspace_projection_projects_missing_workspace_rows() {
     let app = ShellApp::new(V2Config::default(), None);
 
-    let model = plain_workspace_model(&app);
+    let model = plain_workspace_projection(&app);
 
     assert_eq!(model.title, "WORKSPACE");
     assert!(model.summary_rows.contains(&"target: none".to_string()));
@@ -92,7 +92,7 @@ fn plain_workspace_model_projects_missing_workspace_rows() {
 }
 
 #[test]
-fn plain_workspace_model_projects_active_workspace_rows() {
+fn plain_workspace_projection_projects_active_workspace_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.domain_mut()
         .set_workspace_view(crate::app::WorkspaceView {
@@ -106,7 +106,7 @@ fn plain_workspace_model_projects_active_workspace_rows() {
             status: "workspace ready".to_string(),
         });
 
-    let model = plain_workspace_model(&app);
+    let model = plain_workspace_projection(&app);
 
     assert!(model
         .summary_rows

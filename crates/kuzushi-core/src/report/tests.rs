@@ -106,7 +106,7 @@ fn builds_markdown_report_from_latest_completed_non_report_run() {
 }
 
 #[test]
-fn report_marks_malformed_canonical_json_as_present() {
+fn report_marks_malformed_declared_json_as_present() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-bad-context", "context:build");
     write_run_summary(temp.path(), &source).unwrap();
@@ -115,6 +115,12 @@ fn report_marks_malformed_canonical_json_as_present() {
         "{not-json",
     )
     .unwrap();
+    write_declared_json_artifact_manifest(
+        temp.path(),
+        "run-bad-context",
+        "context.json",
+        "context snapshot",
+    );
 
     let report = build_run_report(temp.path(), Some("run-bad-context")).unwrap();
 
@@ -331,12 +337,18 @@ fn report_surfaces_non_file_jsonl_artifacts_as_present_malformed() {
 }
 
 #[test]
-fn report_surfaces_non_file_json_artifacts_as_present_malformed() {
+fn report_surfaces_non_file_declared_json_artifacts_as_present_malformed() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-non-file-json", "agentic-sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
     let dir = run_dir(temp.path(), "run-non-file-json");
     fs::create_dir(dir.join("context.json")).unwrap();
+    write_declared_json_artifact_manifest(
+        temp.path(),
+        "run-non-file-json",
+        "context.json",
+        "context snapshot",
+    );
 
     let report = build_run_report(temp.path(), Some("run-non-file-json")).unwrap();
 
@@ -349,25 +361,28 @@ fn report_surfaces_non_file_json_artifacts_as_present_malformed() {
 }
 
 #[test]
-fn report_marks_non_object_canonical_json_as_malformed() {
+fn report_summarizes_non_object_declared_json() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-non-object-context", "context:build");
     write_run_summary(temp.path(), &source).unwrap();
     let dir = run_dir(temp.path(), "run-non-object-context");
     fs::write(dir.join("context.json"), "[]").unwrap();
+    write_declared_json_artifact_manifest(
+        temp.path(),
+        "run-non-object-context",
+        "context.json",
+        "context snapshot",
+    );
 
     let report = build_run_report(temp.path(), Some("run-non-object-context")).unwrap();
 
-    assert!(report
-        .report_markdown
-        .contains("context.json: present - malformed JSON: expected object"));
     let context = report
         .canonical_artifacts
         .iter()
         .find(|artifact| artifact.file == "context.json")
         .unwrap();
     assert!(context.present);
-    assert_eq!(context.summary, "malformed JSON: expected object");
+    assert_eq!(context.summary, "0 finding(s)");
 }
 
 #[test]
@@ -2861,4 +2876,22 @@ fn completed_summary(target: &std::path::Path, run_id: &str, tool: &str) -> RunS
     )
     .complete()
     .with_findings(Some(2))
+}
+
+fn write_declared_json_artifact_manifest(
+    target: &std::path::Path,
+    run_id: &str,
+    leaf: &str,
+    label: &str,
+) {
+    let body = serde_json::to_string_pretty(&json!({
+        "runId": run_id,
+        "artifacts": [{
+            "label": label,
+            "path": leaf,
+            "kind": "json"
+        }]
+    }))
+    .unwrap();
+    fs::write(run_dir(target, run_id).join("artifacts.json"), body).unwrap();
 }

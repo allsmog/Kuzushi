@@ -1,8 +1,7 @@
 use super::*;
 use crate::artifact_contract::{
-    canonical_run_artifact_spec, derived_run_artifact_spec, optional_run_artifact_spec,
-    tool_input_artifact_spec, tool_result_artifact_spec, CanonicalRunArtifactSpec,
-    CANONICAL_RUN_ARTIFACTS,
+    canonical_run_artifact_spec, optional_run_artifact_spec, tool_input_artifact_spec,
+    tool_result_artifact_spec, CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS,
 };
 use crate::content_store::ObjectRef;
 use serde_json::Value;
@@ -218,7 +217,6 @@ fn known_manifest_artifact_spec(artifact: &Value) -> Option<&'static CanonicalRu
         .and_then(Value::as_str)
         .and_then(manifest_artifact_leaf)?;
     canonical_run_artifact_spec(leaf)
-        .or_else(|| derived_run_artifact_spec(leaf))
         .or_else(|| optional_run_artifact_spec(leaf))
         .or_else(|| tool_input_artifact_spec(leaf))
         .or_else(|| tool_result_artifact_spec(leaf))

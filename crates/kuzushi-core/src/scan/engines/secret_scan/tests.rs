@@ -25,6 +25,13 @@ mod tests {
             "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyzABCDEFGH",
         )
         .unwrap();
+        fs::create_dir_all(temp.path().join(".kuzushi/v3/objects/blake3/aa")).unwrap();
+        fs::write(
+            temp.path()
+                .join(".kuzushi/v3/objects/blake3/aa/ignored.env"),
+            "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyzABCDEFGH",
+        )
+        .unwrap();
 
         let report = scan_for_secrets(
             temp.path(),

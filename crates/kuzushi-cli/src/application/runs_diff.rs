@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use kuzushi_core::findings::{ReviewDecisionVerdict, TriageVerdict};
-use kuzushi_core::run_artifacts::derived_run_artifact_spec;
 use kuzushi_core::{
     load_run_summary, run_artifact_path, workspace_findings_db_path, FindingStore, WorkspaceTarget,
 };
@@ -281,9 +280,7 @@ fn load_run_findings(target: &Path, run_id: &str) -> Result<BTreeMap<String, Run
 }
 
 fn run_findings_artifact_leaf() -> &'static str {
-    derived_run_artifact_spec("findings.json")
-        .expect("findings artifact must be in shared derived spec")
-        .leaf
+    "findings.json"
 }
 
 fn finding_array(value: &Value) -> Vec<&Value> {

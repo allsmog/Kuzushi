@@ -5,7 +5,7 @@ turn LLM/tool text into a structured verdict, severity, boolean, or confidence,
 looking for places where a parse failure, missing field, or unexpected type
 resolves to a *default verdict* instead of erroring or being logged.
 
-Core promise under test: a result is only labeled "confirmed/validated" when a
+Core promise under test: a result is only labeled "confirmed" or "verified" when a
 verification step actually ran and parsed cleanly.
 
 ## How to read the direction column

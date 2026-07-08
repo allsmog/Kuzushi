@@ -37,44 +37,6 @@ pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 6] = [
     },
 ];
 
-pub(crate) const DERIVED_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 7] = [
-    CanonicalRunArtifactSpec {
-        leaf: "context.json",
-        label: "context snapshot",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "attack-surface.json",
-        label: "attack surface",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "threat-model.json",
-        label: "threat model",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "recommendations.json",
-        label: "recommendations",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "strategy.json",
-        label: "strategy proposals",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "findings.json",
-        label: "findings",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "proof.json",
-        label: "proof",
-        kind: "json",
-    },
-];
-
 pub(crate) const OPTIONAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 1] =
     [CanonicalRunArtifactSpec {
         leaf: "report.sarif",
@@ -99,10 +61,6 @@ pub(crate) fn canonical_run_artifact_spec(leaf: &str) -> Option<&'static Canonic
     CANONICAL_RUN_ARTIFACTS
         .iter()
         .find(|spec| spec.leaf == leaf)
-}
-
-pub(crate) fn derived_run_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
-    DERIVED_RUN_ARTIFACTS.iter().find(|spec| spec.leaf == leaf)
 }
 
 pub(crate) fn optional_run_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {

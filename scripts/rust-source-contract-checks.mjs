@@ -19,14 +19,14 @@ export function checkRustSourceContractParsers() {
 
 function checkArrayConstantBodyParser() {
   const source = `
-const JSON_SNAPSHOT_FILES: &[(&str, &str)] = &[
-    ("context.json", "empty context snapshot"),
-    ("findings.json", "empty findings"),
+const JSON_FIXTURE_FILES: &[(&str, &str)] = &[
+    ("alpha.json", "alpha fixture"),
+    ("beta.json", "beta fixture"),
 ];
 `;
-  const body = rustArrayConstantBody(source, "JSON_SNAPSHOT_FILES");
-  return body?.includes('("context.json", "empty context snapshot")') &&
-    body.includes('("findings.json", "empty findings")')
+  const body = rustArrayConstantBody(source, "JSON_FIXTURE_FILES");
+  return body?.includes('("alpha.json", "alpha fixture")') &&
+    body.includes('("beta.json", "beta fixture")')
     ? []
     : ["rust source parser: array constant body parser drift"];
 }

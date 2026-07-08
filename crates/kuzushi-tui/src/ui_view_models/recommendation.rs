@@ -457,9 +457,7 @@ impl RecommendationSource {
 }
 
 fn recommendations_artifact_leaf() -> &'static str {
-    kuzushi_core::run_artifacts::derived_run_artifact_spec("recommendations.json")
-        .expect("recommendations artifact must be in shared derived spec")
-        .leaf
+    "recommendations.json"
 }
 
 struct RecommendationLatestRunId {

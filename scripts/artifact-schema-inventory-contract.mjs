@@ -45,12 +45,12 @@ function schemaFilePathHelperDriftFailure() {
       "schemas/run.summary.schema.json",
       "schemas/run.events.schema.json",
       "schemas/module.manifest.schema.json",
-      "run.context.schema.json",
+      "run.extra.schema.json",
     ],
     "schema inventory path",
   );
   return pathFailures.join("\n") ===
-    "schema inventory path: schemas/module.manifest.schema.json\nschema inventory path: run.context.schema.json"
+    "schema inventory path: schemas/module.manifest.schema.json\nschema inventory path: run.extra.schema.json"
     ? null
     : `artifact schema inventory path helper drift: got ${pathFailures.join(", ")}`;
 }

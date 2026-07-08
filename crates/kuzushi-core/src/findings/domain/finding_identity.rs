@@ -29,7 +29,6 @@ pub(crate) struct FindingIdentityInput<'a> {
     pub rule_id: &'a str,
     pub title: &'a str,
     pub file_path: &'a str,
-    pub start_line: u32,
     pub message: &'a str,
     pub evidence: &'a [FindingEvidence],
 }
@@ -40,7 +39,6 @@ pub(crate) fn finding_identity_key_for_finding(finding: &Finding) -> FindingIden
         rule_id: &finding.rule_id,
         title: &finding.title,
         file_path: &finding.file_path,
-        start_line: finding.start_line,
         message: &finding.message,
         evidence: &finding.evidence,
     })
@@ -66,8 +64,7 @@ pub fn compute_finding_identity_id(target_id: &str, identity_key: &str) -> Strin
 fn stable_identity_key(input: &FindingIdentityInput<'_>) -> String {
     let weakness = weakness_key(input);
     let symbol = crate::identity::finding_identity::normalize_path(input.file_path);
-    let snippet =
-        evidence_snippet(input.evidence).unwrap_or_else(|| location_snippet(&symbol, input.start_line));
+    let snippet = evidence_snippet(input.evidence).unwrap_or_else(|| text_locator(input));
     crate::identity::compute_stable_fp_v3(crate::identity::StableFindingInput {
         tool_family: tool_family_from_fingerprint(input.fingerprint),
         rule_id: &weakness,
@@ -82,8 +79,17 @@ fn stable_identity_key(input: &FindingIdentityInput<'_>) -> String {
     })
 }
 
-fn location_snippet(symbol: &str, start_line: u32) -> String {
-    format!("location:{symbol}:{}", start_line.max(1))
+fn text_locator(input: &FindingIdentityInput<'_>) -> String {
+    let parts = [input.title, input.message]
+        .into_iter()
+        .map(crate::identity::finding_identity::normalize_finding_text)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        "finding".to_string()
+    } else {
+        format!("text:{}", parts.join("\u{1f}"))
+    }
 }
 
 fn weakness_key(input: &FindingIdentityInput<'_>) -> String {
@@ -181,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_evidence_identity_includes_location() {
+    fn empty_evidence_identity_ignores_line_number() {
         let first = Finding {
             fingerprint: "fp3-first".to_string(),
             rule_id: "CWE-89".to_string(),
@@ -195,6 +201,27 @@ mod tests {
         let mut second = first.clone();
         second.fingerprint = "fp3-second".to_string();
         second.start_line = 500;
+
+        let first_key = finding_identity_key_for_finding(&first);
+        let second_key = finding_identity_key_for_finding(&second);
+
+        assert_eq!(first_key.key, second_key.key);
+    }
+
+    #[test]
+    fn empty_evidence_identity_uses_text_locator() {
+        let first = Finding {
+            fingerprint: "fp3-first".to_string(),
+            rule_id: "CWE-89".to_string(),
+            title: "sql injection".to_string(),
+            file_path: "src/db.rs".to_string(),
+            start_line: 10,
+            message: "query sink".to_string(),
+            evidence: Vec::new(),
+            ..Finding::default()
+        };
+        let mut second = first.clone();
+        second.message = "command sink".to_string();
 
         let first_key = finding_identity_key_for_finding(&first);
         let second_key = finding_identity_key_for_finding(&second);

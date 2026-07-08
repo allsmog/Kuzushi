@@ -5,6 +5,7 @@ pub(crate) const DEFAULT_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub(crate) const DEFAULT_MAX_FINDINGS: usize = 1000;
 
 pub(crate) const DEFAULT_EXCLUDE_DIRS: &[&str] = &[
+    ".kuzushi",
     ".git",
     ".hg",
     ".svn",

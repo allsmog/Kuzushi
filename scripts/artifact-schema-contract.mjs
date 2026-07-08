@@ -111,40 +111,13 @@ const requiredAliasGroupsBySchema = {
   ],
 };
 
-const snapshotEnvelopeFieldsBySchema = {
-  "schemas/run.context.schema.json": ["context", "contextSnapshot"],
-  "schemas/run.findings.schema.json": ["coreFindings", "findings"],
-  "schemas/run.proof.schema.json": ["proof"],
-  "schemas/run.recommendations.schema.json": [
-    "data",
-    "recommendationReport",
-  ],
-};
+const snapshotEnvelopeFieldsBySchema = {};
 
-const routePatternBySchema = {
-  "schemas/run.attack-surface.schema.json": [
-    ["properties", "route"],
-    ["definitions", "surface", "properties", "route"],
-  ],
-  "schemas/run.context.schema.json": [
-    ["definitions", "appRoute", "properties", "path"],
-    ["definitions", "appRoute", "properties", "route"],
-  ],
-};
+const routePatternBySchema = {};
 
-const proofStateEnumBySchema = {
-  "schemas/run.findings.schema.json": [["definitions", "proofState"]],
-  "schemas/run.proof.schema.json": [["definitions", "proofState"]],
-};
+const proofStateEnumBySchema = {};
 
-const proofStateRefBySchema = {
-  "schemas/run.findings.schema.json": [
-    ["definitions", "finding", "properties", "staticProofState"],
-  ],
-  "schemas/run.proof.schema.json": [
-    ["definitions", "proofFinding", "properties", "staticProofState"],
-  ],
-};
+const proofStateRefBySchema = {};
 
 const expectedProofStates = [
   "signal_only",
@@ -274,25 +247,12 @@ const schemaEnumSpecs = {
   "schemas/run.artifacts.schema.json": [
     artifactKindSpec([["definitions", "artifact", "properties", "kind"]]),
   ],
-  "schemas/run.attack-surface.schema.json": attackSurfaceEnumSpecs,
-  "schemas/run.context.schema.json": [
-    routeMethodSpec([["definitions", "appRoute", "properties", "method"]]),
-  ],
   "schemas/run.failures.schema.json": [
     artifactKindSpec([["definitions", "artifact", "properties", "kind"]]),
     runStatusSpec([
       ["properties", "status"],
       ["definitions", "failure", "properties", "status"],
     ]),
-  ],
-  "schemas/run.findings.schema.json": findingEnumSpecs,
-  "schemas/run.recommendations.schema.json": [
-    {
-      name: "priority",
-      path: ["definitions", "priority"],
-      values: ["high", "medium", "low"],
-      refs: [["definitions", "recommendation", "properties", "priority"]],
-    },
   ],
   "schemas/run.events.schema.json": [
     {
@@ -339,64 +299,11 @@ const schemaEnumSpecs = {
     },
     artifactKindSpec([["definitions", "artifact", "properties", "kind"]]),
   ],
-  "schemas/run.threat-model.schema.json": [
-    {
-      name: "methodology",
-      path: ["definitions", "methodology"],
-      values: ["pasta", "stride", "dread"],
-      refs: [["properties", "methodology"]],
-    },
-  ],
-  "schemas/run.proof.schema.json": [
-    {
-      name: "proofKind",
-      path: ["definitions", "proofKind"],
-      values: proofKindValues,
-      refs: [["properties", "kind"]],
-    },
-    {
-      name: "proofLevel",
-      path: ["definitions", "proofLevel", "anyOf", 0],
-      values: proofLevelValues,
-      refs: [["properties", "proofLevel"]],
-    },
-    {
-      name: "proofVerdict",
-      path: ["definitions", "proofVerdict"],
-      values: proofVerdictValues,
-      refs: [["properties", "proofVerdict"]],
-    },
-  ],
 };
 
-for (const file of [
-  "schemas/run.attack-surface.schema.json",
-  "schemas/run.context.schema.json",
-  "schemas/run.findings.schema.json",
-  "schemas/run.proof.schema.json",
-  "schemas/run.recommendations.schema.json",
-  "schemas/run.threat-model.schema.json",
-]) {
-  requiredAliasGroupsBySchema[file] = [
-    { path: [], kind: "declared", fields: ["runId", "status", "runStatus"] },
-  ];
-  schemaEnumSpecs[file] = [
-    ...(schemaEnumSpecs[file] ?? []),
-    runStatusSpec([
-      ["properties", "status"],
-      ["properties", "runStatus"],
-    ]),
-  ];
-}
 for (const [file, fields] of Object.entries(snapshotEnvelopeFieldsBySchema)) {
   requiredAliasGroupsBySchema[file].push({ path: [], kind: "declared", fields });
 }
-schemaEnumSpecs["schemas/run.attack-surface.schema.json"].push(
-  routeMethodSpec([
-    ["properties", "method"],
-    ["definitions", "surface", "properties", "method"],
-  ]),
-);
 
 export function checkCanonicalRunSchemas(root) {
   return [
@@ -461,11 +368,9 @@ function checkSchemaDocument(relativeFile, schema) {
 }
 
 function checkProofLevelNumericBranch(relativeFile, schema) {
-  if (relativeFile !== "schemas/run.proof.schema.json") return [];
-  const branch = schemaNode(schema, ["definitions", "proofLevel", "anyOf", 1]);
-  return branch?.type === "integer" && branch?.minimum === 1 && branch?.maximum === 4
-    ? []
-    : [`${relativeFile}: proofLevel numeric branch must constrain integer 1..4`];
+  void relativeFile;
+  void schema;
+  return [];
 }
 
 function schemaAcceptsObject(schema) {

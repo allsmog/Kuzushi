@@ -37,7 +37,6 @@ const retiredUiPaths = [
 ];
 const retiredUiDependencies = ["ink", "react", "react-dom", "@types/react", "@types/react-dom"];
 const retiredUiRuntimePackages = new Set(["ink", "react", "react-dom"]);
-const nonRuntimeTsxPrefixes = ["packages/kuzushi-tui-kit/"];
 const deletedClaudeCliRuntimePackages = new Set(["@anthropic-ai/claude-agent-sdk"]);
 const retiredRuntimeWordingPatterns = [
   { label: "Ink shell wording", regex: /\bInk\b/ },
@@ -213,12 +212,7 @@ function relative(file) {
 function tsxSourceFailures() {
   return checkedSourceRoots()
     .flatMap((root) => walk(root, new Set([".tsx"])))
-    .filter((file) => !isNonRuntimeTsxSource(relative(file)))
     .map((file) => `${relative(file)} is a TSX source file; shell UI belongs in Rust Ratatui.`);
-}
-
-function isNonRuntimeTsxSource(rel) {
-  return nonRuntimeTsxPrefixes.some((prefix) => rel.startsWith(prefix));
 }
 
 function checkedSourceRoots() {
@@ -275,8 +269,6 @@ function retiredRuntimeWordingFailures(files) {
 
 function retiredUiImportFailures(files) {
   return files.flatMap((file) => {
-    const rel = relative(file);
-    if (isNonRuntimeTsxSource(rel)) return [];
     const text = readFileSync(file, "utf8");
     return importSpecifiers(text)
       .filter((specifier) => retiredUiRuntimePackages.has(packageName(specifier)))

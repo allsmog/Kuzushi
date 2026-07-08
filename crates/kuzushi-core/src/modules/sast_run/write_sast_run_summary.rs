@@ -114,7 +114,7 @@ fn scan_run_artifacts(
     result: &Value,
 ) -> Vec<crate::run_artifacts::RunArtifact> {
     let mut artifacts = vec![summary_artifact];
-    artifacts.extend(crate::run_artifacts::record_canonical_snapshot_artifacts(
+    artifacts.extend(crate::run_artifacts::record_report_artifacts(
         workspace.root(),
         run_id,
         result,

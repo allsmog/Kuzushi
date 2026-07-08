@@ -78,12 +78,6 @@ fn assert_canonical_run_files(run_dir: &Path) {
         "run.json",
         "events.jsonl",
         "trace.jsonl",
-        "context.json",
-        "attack-surface.json",
-        "threat-model.json",
-        "recommendations.json",
-        "findings.json",
-        "proof.json",
         "failures.json",
         "report.md",
         "artifacts.json",
@@ -117,6 +111,8 @@ fn assert_strict_plain(label: &str, output: &str) {
 fn plain_shell_script(script: &str) -> String {
     let tmp = tempfile::tempdir().unwrap();
     let mut child = kuzushi()
+        .env("KUZUSHI_SKIP_ONBOARDING", "1")
+        .env("KUZUSHI_AUTO_OPEN_ACTIVITY", "false")
         .args(["--plain", "shell", "--target"])
         .arg(tmp.path())
         .stdin(Stdio::piped())
@@ -561,7 +557,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
     let fingerprint = finding.fingerprint.clone();
     let finding_id = store.insert_finding("run-detail", &finding).unwrap();
     store
-        .save_triage(
+        .record_auto_triage(
             finding_id,
             &TriageOutcome {
                 verdict: TriageVerdict::TruePositive,

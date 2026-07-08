@@ -91,15 +91,6 @@ export const tokenChecks = [
     ],
   },
   {
-    label: "canonical recommendation promotion envelope aliases",
-    file: "crates/kuzushi-core/src/run_artifacts/canonical_recommendations.rs",
-    tokens: [
-      "/data",
-      "/recommendationReport",
-      "/data/recommendationReport",
-    ],
-  },
-  {
     label: "TUI recommendation view model artifact envelope aliases",
     file: "crates/kuzushi-tui/src/ui_view_models/recommendation.rs",
     tokens: [
@@ -173,16 +164,9 @@ export const tokenChecks = [
     ],
   },
   {
-    label: "canonical run file creation writes every required placeholder",
+    label: "canonical run file creation writes required v3 placeholders",
     file: "crates/kuzushi-core/src/run_artifacts/canonical_run_files.rs",
     tokens: [
-      "JSON_SNAPSHOT_FILES",
-      "context.json",
-      "attack-surface.json",
-      "threat-model.json",
-      "recommendations.json",
-      "findings.json",
-      "proof.json",
       'write_empty_failures_marker(dir.join(required_artifact_spec("failures.json").leaf)',
       "write_json_if_missing(",
       'required_artifact_spec("artifacts.json").leaf',

@@ -4,22 +4,15 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   runArtifactManifestSchemaFields,
-  runAttackSurfaceSchemaFields,
-  runContextSchemaFields,
   runEventsSchemaFields,
   runFailuresSchemaFields,
-  runFindingsSchemaFields,
-  runProofSchemaFields,
-  runRecommendationsSchemaFields,
   runSummarySchemaFields,
-  runThreatModelSchemaFields,
   runTraceSchemaFields,
   schemaAliasContractFields,
 } from "./artifact-contract-fields.mjs";
 import {
   checkArtifactManifestContractHelpers,
   checkCanonicalManifestInventory,
-  checkCanonicalSnapshotInventory,
   checkCanonicalSpecialWriterInventory,
   checkCliRunsPathConsumers,
   checkContextSnapshotPathHelper,
@@ -40,10 +33,8 @@ import {
   checkTaintIrisNextArtifactPathHelpers,
   checkThreatIntelCatalogPathHelper,
   checkThreatLeadsPathHelpers,
-  checkTuiAttackSurfaceArtifactLeaf,
   checkTuiFailureHandoffArtifactLeaf,
   checkTuiPrereqChainPathHelpers,
-  checkTuiRecommendationArtifactLeaf,
   checkTuiRunsRootHelper,
   checkTuiRunTimelineArtifactLeaves,
   checkTuiThreatModelArtifactLeaf,
@@ -185,11 +176,11 @@ const checks = [
     sharedInventory: "CANONICAL_RUN_ARTIFACTS",
   },
   {
-    label: "optional SARIF promotion regression",
+    label: "optional SARIF report artifact regression",
     file: "crates/kuzushi-core/src/run_artifacts/tests.rs",
     artifacts: optionalRunArtifacts,
     functions: [
-      "tool_run_complete_promotes_result_snapshots_to_canonical_files",
+      "tool_run_complete_keeps_domain_snapshots_inside_result_json",
       "tool_run_complete_rejects_snake_case_report_artifacts",
     ],
   },
@@ -246,36 +237,6 @@ const checks = [
     file: "schemas/run.trace.schema.json",
     artifacts: ["trace.jsonl", ...runTraceSchemaFields],
   },
-  {
-    label: "run context schema",
-    file: "schemas/run.context.schema.json",
-    artifacts: runContextSchemaFields,
-  },
-  {
-    label: "run attack-surface schema",
-    file: "schemas/run.attack-surface.schema.json",
-    artifacts: runAttackSurfaceSchemaFields,
-  },
-  {
-    label: "run threat-model schema",
-    file: "schemas/run.threat-model.schema.json",
-    artifacts: runThreatModelSchemaFields,
-  },
-  {
-    label: "run recommendations schema",
-    file: "schemas/run.recommendations.schema.json",
-    artifacts: runRecommendationsSchemaFields,
-  },
-  {
-    label: "run findings schema",
-    file: "schemas/run.findings.schema.json",
-    artifacts: runFindingsSchemaFields,
-  },
-  {
-    label: "run proof schema",
-    file: "schemas/run.proof.schema.json",
-    artifacts: runProofSchemaFields,
-  },
 ];
 
 const failures = [
@@ -287,7 +248,6 @@ const failures = [
   ...checkReportJsonlArtifactSummary(root),
   ...checkFailureFollowUpInventory(root),
   ...checkFailureMissingArtifactInventory(root),
-  ...checkCanonicalSnapshotInventory(root),
   ...checkCanonicalSpecialWriterInventory(root),
   ...checkRunMetadataWriterInventory(root),
   ...checkWorkspaceStatePathHelpers(root),
@@ -301,8 +261,6 @@ const failures = [
   ...checkTaintIrisNextArtifactPathHelpers(root),
   ...checkTuiPrereqChainPathHelpers(root),
   ...checkHomeCockpitArtifactRail(root),
-  ...checkTuiAttackSurfaceArtifactLeaf(root),
-  ...checkTuiRecommendationArtifactLeaf(root),
   ...checkTuiFailureHandoffArtifactLeaf(root),
   ...checkTuiThreatModelArtifactLeaf(root),
   ...checkTuiRunTimelineArtifactLeaves(root),

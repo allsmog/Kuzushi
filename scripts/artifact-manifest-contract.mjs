@@ -266,24 +266,6 @@ export function checkFailureMissingArtifactInventory(root) {
   ].filter(Boolean);
 }
 
-export function checkCanonicalSnapshotInventory(root) {
-  const file = "crates/kuzushi-core/src/run_artifacts/canonical_run_files.rs";
-  const sourcePath = path.join(root, file);
-  if (!existsSync(sourcePath)) return [`canonical snapshot inventory: missing ${file}`];
-  const actual = tupleSpecs(
-    rustArrayConstantBody(readFileSync(sourcePath, "utf8"), "JSON_SNAPSHOT_FILES"),
-    "json",
-  ).map((artifact) => artifact.path);
-  const expected = requiredSnapshotJsonArtifacts();
-  return [
-    ...missingEntries(expected, actual, "canonical snapshot writer missing artifact"),
-    ...missingEntries(actual, expected, "canonical snapshot writer has uncontracted artifact"),
-    ...duplicateEntries(actual).map(
-      (artifact) => `canonical snapshot writer duplicates artifact ${artifact}`,
-    ),
-  ];
-}
-
 export function checkCanonicalSpecialWriterInventory(root) {
   const file = "crates/kuzushi-core/src/run_artifacts/canonical_run_files.rs";
   const sourcePath = path.join(root, file);
@@ -1694,8 +1676,8 @@ const cliRunsPathRequirementsByFile = {
   "crates/kuzushi-cli/src/application/runs_diff.rs": [
     { needle: "run_artifact_path(", message: "CLI runs diff must use run_artifact_path" },
     {
-      needle: 'canonical_run_artifact_spec("findings.json")',
-      message: "CLI runs diff must use shared findings artifact spec",
+      needle: "run_findings_artifact_leaf()",
+      message: "CLI runs diff must centralize findings artifact leaf",
     },
   ],
   "crates/kuzushi-cli/src/application/runs_prune.rs": [
@@ -2267,21 +2249,12 @@ function reportReaderSourceFailures(source) {
     source.includes("canonical_report_text_specs")
       ? null
       : "report reader must centralize canonical text artifact selection",
-    source.includes('canonical_run_artifact_spec("findings.json")')
+    source.includes("load_declared_json_artifacts")
       ? null
-      : "report reader must use shared findings artifact spec for JSON shape",
-    source.includes("fn findings_artifact_leaf() -> &'static str")
+      : "report reader must summarize explicit declared JSON artifacts",
+    source.includes("is_shared_report_leaf")
       ? null
-      : "report reader must centralize findings artifact leaf for JSON shape",
-    source.includes('canonical_run_artifact_spec("recommendations.json")')
-      ? null
-      : "report reader must use shared recommendations artifact spec for JSON shape",
-    source.includes("fn recommendations_artifact_leaf() -> &'static str")
-      ? null
-      : "report reader must centralize recommendations artifact leaf for JSON shape",
-    source.includes("file == findings_artifact_leaf() || file == recommendations_artifact_leaf()")
-      ? null
-      : "report reader JSON shape exceptions must use shared artifact leaves",
+      : "report reader declared JSON loader must skip shared report leaves",
   ].filter(Boolean);
 }
 

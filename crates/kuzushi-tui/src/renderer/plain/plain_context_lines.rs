@@ -1,7 +1,8 @@
 use super::*;
 use crate::ui_view_models::{
-    plain_context_model, plain_workspace_model, project_model, strategy_queue_model,
-    PlainContextModel, PlainWorkspaceModel, ProjectModel, StrategyQueueModel, StrategyQueueRow,
+    plain_context_model, plain_workspace_projection, project_model, strategy_queue_model,
+    PlainContextModel, PlainWorkspaceProjection, ProjectModel, StrategyQueueModel,
+    StrategyQueueRow,
 };
 
 pub(crate) fn plain_context_lines(app: &ShellApp, width: usize) -> Vec<String> {
@@ -16,25 +17,25 @@ pub(crate) fn plain_context_lines(app: &ShellApp, width: usize) -> Vec<String> {
     lines
 }
 
-fn plain_context_snapshot_lines(snapshot: ContextScreenSnapshot, width: usize) -> Vec<String> {
+fn plain_context_snapshot_lines(view: ContextScreenSnapshot, width: usize) -> Vec<String> {
     let mut lines = vec![
         format!(
             " KUZUSHI  target {}  ctx ✓ {}  model {}  module {}  cost {}",
-            snapshot.status.target,
-            snapshot.status.ctx,
-            snapshot.status.model,
-            snapshot.status.module,
-            snapshot.status.cost
+            view.status.target,
+            view.status.ctx,
+            view.status.model,
+            view.status.module,
+            view.status.cost
         ),
         "─".repeat(width),
         String::new(),
     ];
-    lines.extend(snapshot.body_rows);
+    lines.extend(view.body_rows);
     lines.push(String::new());
     lines.push("─".repeat(width));
-    lines.push(context_footer_stage_line(width, &snapshot.footer));
-    lines.push(context_footer_keybind_line(&snapshot.footer));
-    lines.push(match snapshot.footer.prompt_module {
+    lines.push(context_footer_stage_line(width, &view.footer));
+    lines.push(context_footer_keybind_line(&view.footer));
+    lines.push(match view.footer.prompt_module {
         Some(module) => format!(" kuzushi ({module})>"),
         None => " kuzushi>".to_string(),
     });
@@ -71,7 +72,7 @@ fn push_plain_context_summary(lines: &mut Vec<String>, model: &PlainContextModel
 
 pub(crate) fn plain_workspace_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
-    let model = plain_workspace_model(app);
+    let model = plain_workspace_projection(app);
 
     push_plain_workspace_summary(&mut lines, &model, width);
     lines
@@ -177,7 +178,7 @@ fn strategy_queue_plain_rows(row: &StrategyQueueRow) -> Vec<String> {
 
 fn push_plain_workspace_summary(
     lines: &mut Vec<String>,
-    model: &PlainWorkspaceModel,
+    model: &PlainWorkspaceProjection,
     width: usize,
 ) {
     lines.push(String::new());

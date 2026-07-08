@@ -146,7 +146,7 @@ fn seed_true_positive_finding(repo: &std::path::Path) -> String {
     let fingerprint = finding.fingerprint.clone();
     let finding_id = store.insert_finding("run-seeded", &finding).unwrap();
     store
-        .save_triage(
+        .record_auto_triage(
             finding_id,
             &TriageOutcome {
                 verdict: TriageVerdict::TruePositive,
@@ -3182,7 +3182,7 @@ fn seed_triaged_finding(repo: &std::path::Path) -> Finding {
     );
     let finding_id = store.insert_finding("run-1", &finding).unwrap();
     store
-        .save_triage(
+        .record_auto_triage(
             finding_id,
             &TriageOutcome {
                 verdict: TriageVerdict::TruePositive,
@@ -3257,7 +3257,7 @@ fn seed_findings(repo: &std::path::Path) {
     let high_id = store.insert_finding("run-1", &high).unwrap();
     store.insert_finding("run-1", &low).unwrap();
     store
-        .save_triage(
+        .record_auto_triage(
             high_id,
             &TriageOutcome {
                 verdict: TriageVerdict::TruePositive,

@@ -1,5 +1,5 @@
 use crate::artifact_contract::{
-    CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS, DERIVED_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS,
+    CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS,
     TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
 };
 use serde_json::Value;
@@ -11,7 +11,6 @@ pub(super) fn artifact_manifest_summary(value: &Value) -> Option<String> {
     let mut parts = vec![format!("{} artifact(s)", artifacts.len())];
     parts.extend(kind_segment(artifacts));
     parts.extend(canonical_segment(artifacts));
-    parts.extend(derived_segment(artifacts));
     parts.extend(optional_segment(artifacts));
     parts.extend(tool_input_segment(artifacts));
     parts.extend(tool_result_segment(artifacts));
@@ -36,15 +35,6 @@ fn canonical_segment(artifacts: &[Value]) -> Option<String> {
 
 fn canonical_artifact(artifact: &Value) -> bool {
     manifest_path_matches(artifact, &CANONICAL_RUN_ARTIFACTS)
-}
-
-fn derived_segment(artifacts: &[Value]) -> Option<String> {
-    let count = artifacts.iter().filter(|artifact| derived_artifact(artifact)).count();
-    (count > 0).then(|| format!("derived {count}"))
-}
-
-fn derived_artifact(artifact: &Value) -> bool {
-    manifest_path_matches(artifact, &DERIVED_RUN_ARTIFACTS)
 }
 
 fn optional_segment(artifacts: &[Value]) -> Option<String> {

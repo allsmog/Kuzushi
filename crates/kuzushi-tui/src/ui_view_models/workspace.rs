@@ -29,7 +29,7 @@ pub(crate) struct WorkspaceRollupRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PlainWorkspaceModel {
+pub(crate) struct PlainWorkspaceProjection {
     pub(crate) title: &'static str,
     pub(crate) summary_rows: Vec<String>,
     pub(crate) empty_rows: Vec<String>,
@@ -54,13 +54,13 @@ pub(crate) fn workspace_model(app: &ShellApp) -> WorkspaceModel {
     }
 }
 
-pub(crate) fn plain_workspace_model(app: &ShellApp) -> PlainWorkspaceModel {
-    PlainWorkspaceModel::from_workspace_model(workspace_model(app))
+pub(crate) fn plain_workspace_projection(app: &ShellApp) -> PlainWorkspaceProjection {
+    PlainWorkspaceProjection::from_workspace_model(workspace_model(app))
 }
 
-impl PlainWorkspaceModel {
+impl PlainWorkspaceProjection {
     fn from_workspace_model(model: WorkspaceModel) -> Self {
-        PlainWorkspaceModel {
+        PlainWorkspaceProjection {
             title: "WORKSPACE",
             summary_rows: vec![
                 format!("status: {}", model.status),

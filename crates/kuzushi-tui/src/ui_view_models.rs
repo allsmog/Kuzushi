@@ -309,8 +309,8 @@ pub(crate) use workbench_depth::{
     TraceLeg, Waypoint, WorkbenchModel,
 };
 pub(crate) use workspace::{
-    findings_db_relative_path, plain_workspace_model, workspace_model, PlainWorkspaceModel,
-    WorkspaceModel, WorkspaceRollupRow,
+    findings_db_relative_path, plain_workspace_projection, workspace_model,
+    PlainWorkspaceProjection, WorkspaceModel, WorkspaceRollupRow,
 };
 
 pub use crate::{

@@ -7,10 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) use write_run_artifact_json::*;
 mod artifact_manifest;
-mod canonical_proof;
 mod canonical_run_files;
 mod canonical_run_markers;
-mod canonical_recommendations;
 mod jsonl_numbering;
 mod llm_audit;
 mod output_declared_artifacts;
@@ -31,7 +29,7 @@ mod trace_step_builder;
 mod write_run_artifact_json;
 mod write_run_artifact_text;
 
-pub(crate) use canonical_run_files::record_canonical_snapshot_artifacts;
+pub(crate) use canonical_run_files::record_report_artifacts;
 pub use artifact_manifest::{load_run_artifacts, RunArtifactManifest};
 pub use run_artifact::RunArtifact;
 pub use run_events::{append_run_event, next_run_event_number, RunEvent};
@@ -73,10 +71,6 @@ pub fn canonical_run_artifact_specs() -> Vec<RunArtifactSpec> {
         .iter()
         .map(public_run_artifact_spec)
         .collect()
-}
-
-pub fn derived_run_artifact_spec(leaf: &str) -> Option<RunArtifactSpec> {
-    crate::artifact_contract::derived_run_artifact_spec(leaf).map(public_run_artifact_spec)
 }
 
 pub fn canonical_run_artifact_spec(leaf: &str) -> Option<RunArtifactSpec> {
