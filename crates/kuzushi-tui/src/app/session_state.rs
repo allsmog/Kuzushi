@@ -111,6 +111,7 @@ impl SessionState {
         self.trusted_workflow_auto_accept
     }
 
+    #[cfg(test)]
     pub(crate) fn set_trusted_workflow_auto_accept(&mut self, enabled: bool) {
         self.trusted_workflow_auto_accept = enabled;
     }

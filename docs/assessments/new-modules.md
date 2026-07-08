@@ -1,6 +1,8 @@
 # New Built-in Modules — Assessment
 
-_Snapshot: refreshed during the Rust port. Companion to docs/quality/GAPS.md._
+_Snapshot: refreshed during the Rust port. Historical gap-ledger companion docs
+were removed after the shipped Rust/v3 cutover; use this file only as module
+assessment context._
 
 This document audits the current built-in CopilotModule catalog and proposes
 the next batch of modules to ship. The goal is to fill **real product gaps**

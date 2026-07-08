@@ -56,7 +56,6 @@ pub struct RouterState {
     replay: RunArtifactRouteState,
     trace: RunArtifactRouteState,
     patch: PatchRouteState,
-    pwn: PwnRouteState,
 }
 
 impl RouterState {
@@ -262,6 +261,7 @@ impl RouterState {
         self.update_available_snapshot = snapshot;
     }
 
+    #[cfg(test)]
     pub(crate) fn navigation(&self) -> &NavigationRouteState {
         &self.navigation
     }
@@ -492,14 +492,6 @@ impl RouterState {
 
     pub(crate) fn patch_mut(&mut self) -> &mut PatchRouteState {
         &mut self.patch
-    }
-
-    pub(crate) fn pwn(&self) -> &PwnRouteState {
-        &self.pwn
-    }
-
-    pub(crate) fn pwn_mut(&mut self) -> &mut PwnRouteState {
-        &mut self.pwn
     }
 }
 
@@ -735,6 +727,7 @@ impl NavigationRouteState {
         self.history.pop()
     }
 
+    #[cfg(test)]
     pub(crate) fn contains_history(&self, view: &crate::app::ShellView) -> bool {
         self.history.contains(view)
     }
@@ -1137,6 +1130,7 @@ impl DefaultScrollRouteState {
         self.offset
     }
 
+    #[cfg(test)]
     pub(crate) fn set(&mut self, offset: u16) {
         self.offset = offset;
     }
@@ -1232,6 +1226,7 @@ impl TuneRouteState {
         self.cursor
     }
 
+    #[cfg(test)]
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
         self.cursor = cursor;
     }
@@ -1259,6 +1254,7 @@ impl PromptsRouteState {
         self.cursor
     }
 
+    #[cfg(test)]
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
         self.cursor = cursor;
     }
@@ -1287,6 +1283,7 @@ impl ActorDetailRouteState {
         self.filter
     }
 
+    #[cfg(test)]
     pub(crate) fn set_filter(&mut self, filter: crate::app::ActorDetailFilter) {
         self.filter = filter;
     }
@@ -1382,12 +1379,14 @@ impl InterruptionRouteState {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PwnRouteState {
     selected_panel: usize,
     selected_row: usize,
 }
 
+#[cfg(test)]
 impl PwnRouteState {
     pub(crate) fn selected_panel(&self) -> usize {
         self.selected_panel

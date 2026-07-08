@@ -252,11 +252,6 @@ impl EngagementState {
         self.pending_prereq_prompt.clone()
     }
 
-    pub(crate) fn clear_prereq_flow(&mut self) {
-        self.pending_chain = None;
-        self.pending_prereq_prompt = None;
-    }
-
     pub(crate) fn clear_finished_final_tool(&mut self, tool_name: &str) -> bool {
         let finished = self
             .pending_chain

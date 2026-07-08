@@ -94,8 +94,8 @@ pub use routes::{
     AuthPickerRouteState, AuthRouteState, CatalogRouteState, CommandPaletteRouteState,
     DefaultScrollRouteState, FilePickerRouteState, FindingsRouteState, HelpRouteState,
     ModelCatalogRouteState, ModelPickerRouteState, NavigationRouteState, PlanningPickerRouteState,
-    PwnRouteState, RouterState, SceneRouteState, ScrollRouteState, TargetPickerRouteState,
-    ToolsRouteState, WorkbenchRouteState,
+    RouterState, SceneRouteState, ScrollRouteState, TargetPickerRouteState, ToolsRouteState,
+    WorkbenchRouteState,
 };
 pub use sast_task_row::AuthLoginView;
 pub use sast_task_row::CompletionCycle;
@@ -130,6 +130,6 @@ pub use workbench_nav::NavBounds;
 pub use workbench_nav::NavEffect;
 pub use workbench_nav::WorkbenchDepth;
 pub use workbench_nav::WorkbenchNav;
-pub use workbench_review_state::{
-    PendingDecision, ReviewCommand, ReviewMode, ReviewRow, WorkbenchReviewState,
-};
+#[cfg(test)]
+pub use workbench_review_state::ReviewCommand;
+pub use workbench_review_state::{PendingDecision, ReviewMode, ReviewRow, WorkbenchReviewState};

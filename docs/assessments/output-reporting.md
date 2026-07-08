@@ -39,10 +39,10 @@ Lower-priority observations:
   canonical `high`, `medium`, and `info` buckets. Keep producer-level severity
   enums narrow as scanner surfaces mature.
 - `/since <ref>` does not affect `summary.json` — the "diff scope" only lives in the shell view.
-- `summary.json` now has the same machine-readable metadata contract as
-  `run.json` in `schemas/run.summary.schema.json`; richer per-artifact schemas
-  can still be added for canonical snapshots such as `findings.json` and
-  `proof.json`.
+- `run.json` is the machine-readable run metadata contract in
+  `schemas/run.summary.schema.json`; richer per-artifact schemas should be
+  added only for producer-declared artifacts or shared canonical files, not for
+  retired synthesized snapshots.
 
 ## Sample current PR comment vs. proposed PR comment
 

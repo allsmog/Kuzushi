@@ -24,11 +24,12 @@ V3 source of truth is:
   committed in the same transaction as the projected rows.
 
 Files such as `context.json`, `attack-surface.json`, `findings.json`, and
-`proof.json` are run-scoped exports or deterministic absence markers. When a
-producer emits durable payloads for those files, the run recorder also writes
-the payload to the content-addressed store and records the object reference in
-`artifacts.json`. Readers may inspect the JSON files for replay and reports,
-but new state transitions must go through the storage writer actor.
+`proof.json` are no longer synthesized per-run snapshot files. A producer may
+still declare those names, or any other JSON sidecar, in `artifacts.json` when
+it intentionally writes an export. Otherwise, domain payloads stay inside
+`result.json`, the content-addressed object store, or the event/projection
+state they derive from. New state transitions must go through the storage
+writer actor.
 
 ## Per-Run Bundle Files
 
@@ -39,17 +40,14 @@ Every run should converge on these files:
 | `run.json` | Run metadata: canonical `runId`, kind, tool, target, status, `startedAtUnix`/completed time, model/provider/prompt hashes/cost where relevant, and reproducibility fingerprints such as house rules. |
 | `events.jsonl` | Ordered run events for replay and plain progress. |
 | `trace.jsonl` | Runtime trace steps, including LLM model, provider, prompt hash, latency, and cost when a model call occurs. |
-| `context.json` | Derived repository context export used by the run, or deterministic absence marker. |
-| `attack-surface.json` | Derived attack-surface export used by scanners, threat modeling, and recommender, or deterministic absence marker. |
-| `threat-model.json` | Derived threat-model export or deterministic absence marker. |
-| `recommendations.json` | Derived module recommender export or deterministic absence marker. |
-| `strategy.json` | Derived strategy proposal export or deterministic absence marker. |
-| `findings.json` | Derived finding-observation export for this run, or deterministic absence marker. |
-| `proof.json` | Derived proof/verification export referenced by this run, or deterministic absence marker. |
 | `failures.json` | Empty success marker or bounded failure-to-LLM handoff for partial/failed runs. |
 | `report.md` | Human-readable report for the run. |
-| `report.sarif` | Optional SARIF output when a scanner/report can produce it cleanly; reports summarize runs, results, levels, rule IDs, and affected files when present. |
 | `artifacts.json` | Manifest of written artifacts with label/path/kind and CAS object references when available. |
+
+Direct tool runs also write `input.json` and `result.json`. `report.sarif` is
+optional and appears only when a scanner/report producer returns `reportSarif`
+or `data.reportSarif`. Any other JSON file under the run directory is a
+producer-declared artifact, not part of the canonical bundle.
 
 The target should also maintain:
 
@@ -108,16 +106,17 @@ payloads that have not been converted in the current slice. The architecture
 gate checks that those temporary alias fields are explicit and that canonical
 artifact fields stay required.
 The same gate also checks vocabulary fields that must stay aligned with Rust
-producers: artifact kind, run/failure/snapshot status, run kind, event and
-trace kind/severity, LLM audit call kind, route path shape, attack-surface
-kind/risk tier, route method, recommendation priority, threat-model
-methodology, finding severity/confidence, proof kind, proof level,
-proof-state aliases, and proof verdicts.
+producers: artifact kind, run/failure status, run kind, event and trace
+kind/severity, LLM audit call kind, route path shape, attack-surface kind/risk
+tier, route method, recommendation priority, threat-model methodology, finding
+severity/confidence, proof kind, proof level, proof-state aliases, and proof
+verdicts.
 
-`attack-surface.json` entries include deterministic `risk` metadata:
-`rank`, `score`, `tier`, and explanatory `reasons`. The summary also exposes
-`highRisk`, `maxRiskScore`, and `byRiskTier` so the recommender and TUI can
-prioritize boundaries without reimplementing scoring.
+When a producer declares an `attack-surface.json` export, entries include
+deterministic `risk` metadata: `rank`, `score`, `tier`, and explanatory
+`reasons`. The summary also exposes `highRisk`, `maxRiskScore`, and
+`byRiskTier` so the recommender and TUI can prioritize boundaries without
+reimplementing scoring.
 
 ## Current Rust Substrate
 
@@ -129,13 +128,6 @@ The current Rust substrate already writes:
 - `.kuzushi/v3/runs/<runId>/trace.jsonl`
 - `.kuzushi/v3/runs/<runId>/input.json`
 - `.kuzushi/v3/runs/<runId>/result.json`
-- `.kuzushi/v3/runs/<runId>/context.json`
-- `.kuzushi/v3/runs/<runId>/attack-surface.json`
-- `.kuzushi/v3/runs/<runId>/threat-model.json`
-- `.kuzushi/v3/runs/<runId>/recommendations.json`
-- `.kuzushi/v3/runs/<runId>/strategy.json`
-- `.kuzushi/v3/runs/<runId>/findings.json`
-- `.kuzushi/v3/runs/<runId>/proof.json`
 - `.kuzushi/v3/runs/<runId>/failures.json`
 - `.kuzushi/v3/runs/<runId>/report.md`; the recorder writes a deterministic
   placeholder when no producer report is available and replaces it when a
@@ -146,14 +138,13 @@ The current Rust substrate already writes:
 
 This is sufficient for current run replay and failure handoff, but it is not
 the durable state contract. Context, attack-surface, threat-model,
-recommendation, strategy, findings, proof, and report files may be deterministic
-placeholder markers until producer modules return rich snapshot fields. The run
-recorder promotes known result fields into standard run export files and records them in
-`artifacts.json`; module-specific producers should prefer those fields over
-ad-hoc side files. `module-recommender:recommend` results are preserved as the
-full recommendation report, including repository signals and capability
-coverage, rather than only the recommendation list. It also records
-producer-declared artifacts from top-level
+recommendation, strategy, findings, and proof data are not promoted into fixed
+snapshot leaves by the run recorder. They remain in `result.json`, CAS/event
+state, SQLite projections, or producer-declared artifacts recorded in
+`artifacts.json`. `module-recommender:recommend` results are preserved as the
+full recommendation report inside the result envelope, including repository
+signals and capability coverage, rather than being promoted to a sidecar list.
+The recorder still records producer-declared artifacts from top-level
 `artifacts` and nested `data.artifacts` into `run.json` and `artifacts.json`,
 so module-owned reports and sidecar outputs stay discoverable even when they
 are not one of the standard filenames.

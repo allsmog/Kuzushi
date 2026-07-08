@@ -345,15 +345,6 @@ impl WorkbenchPage {
         }
     }
 
-    pub fn phase(self) -> WorkflowPhase {
-        match self {
-            Self::Terrain => WorkflowPhase::Map,
-            Self::Coverage => WorkflowPhase::Hunt,
-            Self::Review => WorkflowPhase::Confirm,
-            Self::Ship => WorkflowPhase::Fix,
-        }
-    }
-
     pub fn title(self) -> &'static str {
         match self {
             Self::Terrain => "AIM",
@@ -371,10 +362,6 @@ impl WorkbenchPage {
     pub fn prev(self) -> Self {
         let index = self.index();
         Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
-    }
-
-    pub fn from_digit(index: usize) -> Option<Self> {
-        Self::ALL.get(index.checked_sub(1)?).copied()
     }
 
     pub fn position(self) -> usize {

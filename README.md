@@ -460,6 +460,7 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/v3/options.json` | optional project/workspace tool option overrides |
 | `.kuzushi/v3/index.sqlite3` | scan, shell, and run-mode tool persistence |
 | `.kuzushi/v3/log/events-*.jsonl` | append-only event log for v3 projection, review decisions, run lifecycle, verification, patch attempts, and audit events |
+| `.kuzushi/v3/objects/blake3/` | content-addressed blobs, JSON objects, snapshots, and derived payloads referenced by artifacts/events |
 | `.kuzushi/v3/scene-taint-flow.json` | persisted attack-path snapshot for `/scene`, Activity, and workbench views |
 | `.kuzushi/v3/scene-exploit-chains.json` | persisted exploit-chain snapshot for `/scene`, Activity, and workbench views |
 | `.kuzushi/v3/strategy-queue.jsonl` | persisted strategy proposals, status, outcome, cost, and correction history |
@@ -471,19 +472,13 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/v3/runs/<runId>/run.json` | canonical run metadata, status, cost, LLM audit, and artifact list |
 | `.kuzushi/v3/runs/<runId>/events.jsonl` | tool lifecycle events |
 | `.kuzushi/v3/runs/<runId>/trace.jsonl` | ordered trace steps for replay and activity views |
-| `.kuzushi/v3/runs/<runId>/context.json` | run-scoped context snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/attack-surface.json` | run-scoped attack-surface snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/threat-model.json` | run-scoped threat-model snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/recommendations.json` | run-scoped recommendation snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/strategy.json` | run-scoped strategy proposal snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/findings.json` | normalized finding snapshot or explicit skipped marker |
-| `.kuzushi/v3/runs/<runId>/proof.json` | proof-state snapshot or explicit skipped marker |
 | `.kuzushi/v3/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
 | `.kuzushi/v3/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown` and `data.reportMarkdown` output fields |
 | `.kuzushi/v3/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
 | `.kuzushi/v3/runs/<runId>/input.json` | prepared tool input for direct tool runs |
 | `.kuzushi/v3/runs/<runId>/result.json` | tool result envelope for direct tool runs |
 | `.kuzushi/v3/runs/<runId>/report.sarif` | optional SARIF report promoted from `reportSarif` and `data.reportSarif` output fields |
+| `.kuzushi/v3/runs/<runId>/<declared artifact>` | producer-declared sidecar artifacts such as context, attack-surface, findings, proof, or module-owned reports; only present when explicitly declared in `artifacts.json` |
 | `.kuzushi/v3/runs/<runId>/triage.jsonl` | `sast:scan --triage` and post-scan triage |
 | `.kuzushi/v3/runs/<runId>/verify.jsonl` | `sast:scan` with verify/auto-patch inputs |
 | `x-ray/` | `x-ray:run` |

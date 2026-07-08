@@ -34,11 +34,11 @@ Target-owned state lives under:
 ```
 
 The run directory remains an operator-facing replay/export bundle. It is not a
-second mutable state store. Snapshot-style run files such as `context.json`,
-`attack-surface.json`, `findings.json`, and `proof.json` are derived exports or
-deterministic absence markers. When they contain durable data, the run recorder
-also stores the payload in the content-addressed object store and records the
-object reference in `artifacts.json`.
+second mutable state store. Snapshot-style files such as `context.json`,
+`attack-surface.json`, `findings.json`, and `proof.json` are no longer
+synthesized as fixed run leaves. A producer may declare those files explicitly
+in `artifacts.json`, but otherwise those payloads live in `result.json`, CAS
+objects, events, or rebuilt SQLite projections.
 
 ## Source Of Truth
 

@@ -22,19 +22,13 @@ past runs from disk alone?**
 | `trace.jsonl`     | Rust `TraceHandle` / TUI broadcast sink | traced tool/runtime steps | **yes** |
 | `input.json`      | Rust tool-run recorder                  | prepared direct tool input | tool runs |
 | `result.json`     | Rust tool-run recorder                  | direct tool result envelope | tool runs |
-| `context.json`    | canonical snapshot promotion            | run start / producer output | **yes** |
-| `attack-surface.json` | canonical snapshot promotion        | run start / producer output | **yes** |
-| `threat-model.json` | canonical snapshot promotion          | run start / producer output | **yes** |
-| `recommendations.json` | canonical snapshot promotion       | run start / producer output | **yes** |
-| `strategy.json`   | canonical strategy snapshot promotion  | run start / producer output | **yes** |
-| `findings.json`   | canonical snapshot promotion            | run start / producer output | **yes** |
-| `proof.json`      | canonical snapshot promotion            | run start / producer output | **yes** |
 | `failures.json`   | Rust failure handoff writer             | run start / failed tool output | **yes** |
 | `report.md`       | report producer or placeholder writer   | run start / report output | **yes** |
 | `report.sarif`    | optional SARIF-capable producers        | producer output      | optional |
 | `artifacts.json`  | Rust artifact manifest writer           | artifact registration | **yes** |
+| producer-declared sidecars | individual tool producers | explicit artifact declaration | optional |
 
-### 1.2 SQLite — `.kuzushi/index.sqlite3`
+### 1.2 SQLite — `.kuzushi/v3/index.sqlite3`
 
 The Rust findings store carries finding rows and supporting workspace state.
 Run-level reproducibility and trace data live under `.kuzushi/v3/runs/<runId>/`;
@@ -59,7 +53,7 @@ CLI and TUI replay surfaces consume that on-disk format directly.
 | **House-rules fingerprints** (`.kuzushi/house-rules/`) | yes in Rust `run.json` / `summary.json` when present |
 | **Threat-model digest** (`.kuzushi/threat-model.json`) | yes in Rust `run.json` / `summary.json` when present |
 | **Loaded module specifiers** (`--load`, package paths) | yes (`loadedModules`; Rust static registry entries are recorded as `builtin:<id>`) |
-| Findings list                                   | yes (`findings.json`, findings store) |
+| Findings list                                   | yes (v3 findings projection; some producers may also declare JSON exports) |
 | Per-event audit trail                           | yes (`events.jsonl`, `trace.jsonl`) |
 
 Cross-run query story today: **shell-only**. No `kuzushi runs query`,
@@ -79,9 +73,9 @@ Rust CLI tests. A disk-budget policy is still future work.
 | # | Change                                                                                                       | Where                                                            | Confidence |
 | - | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ---------- |
 | 1 | Keep `summary.json` always-on with reproducibility metadata. Rust now covers version, platform, build git ids, target git metadata, model, config hash, LLM-call metadata, bounded/redacted CLI argv, env fingerprints, prompt override fingerprints, house-rules fingerprints, and threat-model digest. | `crates/kuzushi-core/src/run_artifacts/` | **high** |
-| 2 | Keep canonical run artifacts always-on and independent of optional producer output. | `crates/kuzushi-core/src/run_artifacts/` | **high** |
+| 2 | Keep the small canonical run bundle always-on and independent of optional producer output. Domain snapshots are explicit artifacts or result-envelope data, not synthesized leaves. | `crates/kuzushi-core/src/run_artifacts/` | **high** |
 | 3 | Add `kuzushi runs prune --older-than-days <n>` and `--keep-last <n>`, with `--dry-run`. Implemented in Rust with safe run-id checks and `.kuzushi/v3/latest` repair. | `crates/kuzushi-cli/src/application/runs.rs` | **high** |
-| 4 | Add `kuzushi runs diff <a> <b>` showing new / fixed / drifted findings. Implemented in Rust against canonical `findings.json` snapshots with plain and JSON output. | `crates/kuzushi-cli/src/application/runs_diff.rs` | **high** |
+| 4 | Add `kuzushi runs diff <a> <b>` showing new / fixed / drifted findings. Implemented in Rust against declared finding exports when present, with plain and JSON output. | `crates/kuzushi-cli/src/application/runs_diff.rs` | **high** |
 | 5 | Improve `/show runs` to surface duration, finding count, status. Rust CLI `kuzushi runs list` and `kuzushi runs show` now show completed-run duration; `kuzushi runs list --status <status[,status]>` filters by run status with explicit status validation. | `crates/kuzushi-tui/src/ui_view_models/run_trace.rs`, `crates/kuzushi-cli/src/application/runs.rs`, and `crates/kuzushi-cli/src/presentation/runs_output.rs` | **high** |
 | 6 | Keep `kuzushi runs trace <runId> --json` jq-friendly and consider an `--all` variant only if trace/event files diverge. | `crates/kuzushi-cli/src/application/runs.rs` | **high** |
 | 7 | Shell `/replay <runId>` and `/trace <runId>` should keep consuming the same `.kuzushi/v3/runs/<runId>/` artifacts as CLI `kuzushi runs show/trace`. | `crates/kuzushi-tui/src/ui_view_models/run_trace.rs` | **high** |
@@ -159,8 +153,8 @@ fields are additive; nothing in the v0 schema is renamed or removed.
 
 ## 4 · Diff surface — `kuzushi runs diff <a> <b>`
 
-Reads `.kuzushi/v3/runs/<runId>/findings.json` for both runs, fingerprint-keys
-the canonical finding snapshots, and emits four sets:
+Reads declared finding exports for both runs when producers provide them,
+fingerprint-keys the finding snapshots, and emits four sets:
 
 - **new** — fingerprint present in B, absent from A
 - **fixed** — fingerprint present in A, absent from B

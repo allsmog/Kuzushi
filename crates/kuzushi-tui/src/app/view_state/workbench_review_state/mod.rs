@@ -1,3 +1,4 @@
+#[cfg(test)]
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::widgets::ListState;
 
@@ -34,13 +35,16 @@ pub struct ReviewRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewMode {
     Browse,
+    #[cfg(test)]
     DeepTrace,
+    #[cfg(test)]
     TriageDraft {
         buffer: String,
         cursor: usize,
         target_fp: String,
         read_watermark: u64,
     },
+    #[cfg(test)]
     SuppressDraft {
         buffer: String,
         cursor: usize,
@@ -49,10 +53,6 @@ pub enum ReviewMode {
     },
     Conflict {
         message: String,
-        target_fp: String,
-    },
-    Pending {
-        command_id: String,
         target_fp: String,
     },
 }
@@ -69,6 +69,7 @@ pub struct PendingDecision {
     pub target_fp: String,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewCommand {
     DecideTriage {
@@ -84,6 +85,7 @@ pub enum ReviewCommand {
 }
 
 impl WorkbenchReviewState {
+    #[cfg(test)]
     pub fn replace_frame(&mut self, frame: Vec<ReviewRow>, read_watermark: u64, generation: u64) {
         self.frame = frame;
         self.read_watermark = read_watermark;
@@ -92,12 +94,14 @@ impl WorkbenchReviewState {
         self.ledger_scroll.select(Some(self.cursor));
     }
 
+    #[cfg(test)]
     pub fn selected(&self) -> Option<&ReviewRow> {
         self.frame.get(self.cursor)
     }
 
     pub fn read_watermark_for(&self, stable_fp: &str) -> Option<u64> {
-        match &self.mode {
+        #[cfg(test)]
+        if let Some(read_watermark) = match &self.mode {
             ReviewMode::TriageDraft {
                 target_fp,
                 read_watermark,
@@ -108,14 +112,18 @@ impl WorkbenchReviewState {
                 read_watermark,
                 ..
             } if target_fp == stable_fp => Some(*read_watermark),
-            _ => self
-                .frame
-                .iter()
-                .any(|row| row.stable_fp == stable_fp)
-                .then_some(self.read_watermark),
+            _ => None,
+        } {
+            return Some(read_watermark);
         }
+
+        self.frame
+            .iter()
+            .any(|row| row.stable_fp == stable_fp)
+            .then_some(self.read_watermark)
     }
 
+    #[cfg(test)]
     pub fn route_key(&mut self, key: KeyEvent) -> Option<ReviewCommand> {
         if key.kind != KeyEventKind::Press {
             return None;
@@ -128,6 +136,7 @@ impl WorkbenchReviewState {
         }
     }
 
+    #[cfg(test)]
     fn route_browse_key(&mut self, key: KeyEvent) -> Option<ReviewCommand> {
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => self.move_cursor(1),
@@ -143,14 +152,17 @@ impl WorkbenchReviewState {
         None
     }
 
+    #[cfg(test)]
     fn route_triage_key(&mut self, key: KeyEvent) -> Option<ReviewCommand> {
         self.edit_draft(key, DraftKind::Triage)
     }
 
+    #[cfg(test)]
     fn route_suppress_key(&mut self, key: KeyEvent) -> Option<ReviewCommand> {
         self.edit_draft(key, DraftKind::Suppress)
     }
 
+    #[cfg(test)]
     fn route_blocking_key(&mut self, key: KeyEvent) -> Option<ReviewCommand> {
         if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
             self.mode = ReviewMode::Browse;
@@ -159,6 +171,7 @@ impl WorkbenchReviewState {
         None
     }
 
+    #[cfg(test)]
     fn move_cursor(&mut self, delta: isize) {
         if self.frame.is_empty() {
             self.cursor = 0;
@@ -170,6 +183,7 @@ impl WorkbenchReviewState {
         self.ledger_scroll.select(Some(self.cursor));
     }
 
+    #[cfg(test)]
     fn jump(&mut self, to_start: bool) {
         self.cursor = if to_start {
             0
@@ -179,6 +193,7 @@ impl WorkbenchReviewState {
         self.ledger_scroll.select(Some(self.cursor));
     }
 
+    #[cfg(test)]
     fn toggle_deep_trace(&mut self) {
         self.mode = match self.mode {
             ReviewMode::DeepTrace => ReviewMode::Browse,
@@ -186,6 +201,7 @@ impl WorkbenchReviewState {
         };
     }
 
+    #[cfg(test)]
     fn begin_triage(&mut self) {
         let Some(row) = self.selected() else {
             return;
@@ -199,6 +215,7 @@ impl WorkbenchReviewState {
         };
     }
 
+    #[cfg(test)]
     fn begin_suppression(&mut self) {
         let Some(row) = self.selected() else {
             return;
@@ -211,6 +228,7 @@ impl WorkbenchReviewState {
         };
     }
 
+    #[cfg(test)]
     fn edit_draft(&mut self, key: KeyEvent, kind: DraftKind) -> Option<ReviewCommand> {
         match key.code {
             KeyCode::Esc => {
@@ -225,6 +243,7 @@ impl WorkbenchReviewState {
         }
     }
 
+    #[cfg(test)]
     fn commit_draft(&mut self, kind: DraftKind) -> Option<ReviewCommand> {
         match std::mem::replace(&mut self.mode, ReviewMode::Browse) {
             ReviewMode::TriageDraft {
@@ -257,12 +276,14 @@ impl WorkbenchReviewState {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DraftKind {
     Triage,
     Suppress,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModeKind {
     Browse,
@@ -271,15 +292,17 @@ enum ModeKind {
     Blocking,
 }
 
+#[cfg(test)]
 fn mode_kind(mode: &ReviewMode) -> ModeKind {
     match mode {
         ReviewMode::Browse | ReviewMode::DeepTrace => ModeKind::Browse,
         ReviewMode::TriageDraft { .. } => ModeKind::TriageDraft,
         ReviewMode::SuppressDraft { .. } => ModeKind::SuppressDraft,
-        ReviewMode::Pending { .. } | ReviewMode::Conflict { .. } => ModeKind::Blocking,
+        ReviewMode::Conflict { .. } => ModeKind::Blocking,
     }
 }
 
+#[cfg(test)]
 fn edit_active_buffer(mode: &mut ReviewMode, code: KeyCode) {
     let Some((buffer, cursor)) = draft_parts(mode) else {
         return;
@@ -307,6 +330,7 @@ fn edit_active_buffer(mode: &mut ReviewMode, code: KeyCode) {
     }
 }
 
+#[cfg(test)]
 fn draft_parts(mode: &mut ReviewMode) -> Option<(&mut String, &mut usize)> {
     match mode {
         ReviewMode::TriageDraft { buffer, cursor, .. }
@@ -315,6 +339,7 @@ fn draft_parts(mode: &mut ReviewMode) -> Option<(&mut String, &mut usize)> {
     }
 }
 
+#[cfg(test)]
 fn byte_index(value: &str, char_pos: usize) -> usize {
     value
         .char_indices()
@@ -323,6 +348,7 @@ fn byte_index(value: &str, char_pos: usize) -> usize {
         .unwrap_or(value.len())
 }
 
+#[cfg(test)]
 fn non_empty(value: String) -> Option<String> {
     let trimmed = value.trim().to_string();
     (!trimmed.is_empty()).then_some(trimmed)

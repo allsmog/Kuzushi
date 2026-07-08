@@ -9,7 +9,6 @@ captures rather than as a live work queue.
   were resolved when the runtime moved to Rust and `src/` shrank to the
   module-loading host. The keep/delete rationale sections are still useful
   precedent for future audits.
-- `GAPS.md` — module-ecosystem gap audit; all in-scope gaps shipped.
 - `TOFIX.md` — product-fix ledger for the systems-hunt/runtime hardening
   pass; remaining open items are tracked in issues, not here.
 - `TUI_UX_AUDIT.md` — Ratatui shell UX audit. Open items that still
@@ -17,4 +16,5 @@ captures rather than as a live work queue.
   several were fixed in later TUI passes.
 
 Live engineering rules live in `CLAUDE.md`/`AGENTS.md`; architecture
-contracts live in `PORT_PLAN.md` and `docs/assessments/`.
+contracts live in `docs/architecture/` and current assessments live in
+`docs/assessments/`.

@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(crate) fn parse_json_value_from_agent_text(text: &str) -> Result<Value> {
     Ok(parse_json_value_from_agent_text_with_strategy(text)?.value)
 }

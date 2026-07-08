@@ -5,9 +5,12 @@ Accepted scope from the 5 Phase A assessments + user review. Sibling docs:
 - `_column-ownership.md` — ownership matrix
 - `01-consolidation-and-naming.md` — A1
 - `02-dead-code.md` — A2
-- `03-migration-hygiene.md` — A3
 - `04-constraints.md` — A4
 - `05-denormalization.md` — A5
+
+The old A3 migration-hygiene note was removed after the Rust/v3 storage
+cutover. Current migration and persistence guidance lives in
+`docs/architecture/v3-persistence.md`.
 
 ## Accepted this pass (v100 reset + Commit 2 + Commit 3)
 

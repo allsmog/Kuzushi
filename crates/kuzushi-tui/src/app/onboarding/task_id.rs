@@ -172,10 +172,6 @@ impl PlanningTaskId {
         matches!(self, PlanningTaskId::AttachFiles)
     }
 
-    pub fn dispatches_tool(self) -> bool {
-        !self.is_inline_action()
-    }
-
     /// Relative artifact path under the workspace root used to determine
     /// whether the task has already been run. `None` for action tasks
     /// (Hunt/Confirm/Fix and reverse-engineering) that don't cache a
@@ -194,12 +190,6 @@ impl PlanningTaskId {
             _ => return None,
         };
         Some(path)
-    }
-
-    /// Whether this task builds a reusable on-disk artifact whose presence is
-    /// detected for reuse. Action tasks (scans, triage, patch) always run.
-    pub fn produces_artifact(self) -> bool {
-        self.artifact_relative_path().is_some()
     }
 
     /// External CLI prerequisite for this task. `Some(name)` means the
@@ -239,11 +229,21 @@ mod tests {
 
     #[test]
     fn map_tasks_build_artifacts_actions_do_not() {
-        assert!(PlanningTaskId::GatherRepoContext.produces_artifact());
-        assert!(PlanningTaskId::BuildCodePropertyGraph.produces_artifact());
-        assert!(!PlanningTaskId::ScanSemgrep.produces_artifact());
-        assert!(!PlanningTaskId::TriageFindings.produces_artifact());
-        assert!(!PlanningTaskId::ReverseEngineerBinary.produces_artifact());
+        assert!(PlanningTaskId::GatherRepoContext
+            .artifact_relative_path()
+            .is_some());
+        assert!(PlanningTaskId::BuildCodePropertyGraph
+            .artifact_relative_path()
+            .is_some());
+        assert!(PlanningTaskId::ScanSemgrep
+            .artifact_relative_path()
+            .is_none());
+        assert!(PlanningTaskId::TriageFindings
+            .artifact_relative_path()
+            .is_none());
+        assert!(PlanningTaskId::ReverseEngineerBinary
+            .artifact_relative_path()
+            .is_none());
     }
 
     #[test]

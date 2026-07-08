@@ -94,7 +94,8 @@ The 13 JSON/near-JSON columns currently on `findings` (the plan says 12; I count
 
 **Keep**, with two notes for Phase B:
 
-- Document it as a `run-scoped Finding[] snapshot, pre-triage, pre-filter` in the fresh schema comment.
+- Document it as a run-scoped `Finding[]` checkpoint, pre-triage and
+  pre-filter, rather than a canonical run artifact.
 - Consider renaming to `scan_findings_json` in v100 to disambiguate from the `findings` table (cross-ref to A1 naming).
 
 ---
