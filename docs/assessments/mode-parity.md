@@ -46,14 +46,17 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
   (`ShellView::Jobs`) is a live control surface over the shared
   `.kuzushi/v3/runs/` format: it merges the single live `Run` (shared `JobHub`
   slot + `ActivitySession`) and queued steer items with recent on-disk
-  `RunSummary` rows, de-duped by `run_id`. `jobs -k <id>` reuses the existing
-  `CancelActiveJobs` path or dequeues a pending steer item. The steer queue
-  (`queue`, plus auto-queue of a `run` submitted while busy) is the
-  lowest-precedence "next tool" mechanism — deterministic order **chain → plan
-  → steer** — and only one live `Run` exists at a time, so queued items always
-  render as pending, never running. `background`/`bg` (and Activity `b`) drops
-  to the Workbench without cancelling. The CLI `runs list/show/trace` is the
-  headless analogue over the same shared artefacts.
+  `RunSummary` rows, de-duped by `run_id` (a disk `running` row with no live
+  twin renders `Stale`/"running?"). `jobs -k <id>` dequeues a pending steer item
+  or emits a scoped `CancelJob(JobKind)` that aborts only the addressed slot.
+  The steer queue (`queue`, plus auto-queue of a `run` submitted while busy) is
+  the lowest-precedence "next tool" mechanism — deterministic order **chain →
+  plan → steer**, drained centrally in `apply_job_event` on every terminal job
+  event and guarded against a pending chain/prereq-prompt/planning-queue. Only
+  one live `Run` exists at a time, so queued items always render as pending,
+  never running. `background`/`bg` (and Activity `b`) drops to the Workbench
+  without cancelling. The CLI `runs list/show/trace` is the headless analogue
+  over the same shared artefacts.
 - **`--ci` is scan-only.** Headless `kuzushi run` always emits JSON on stdout
   and writes run artifacts for machine consumers; it does not have a `--json`
   flag.
