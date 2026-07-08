@@ -115,21 +115,42 @@ fn sarif_result(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
         "rank": sarif_rank(&record.proof_confidence),
         "properties": sarif_properties(record),
     });
-    if let Some(suppressions) = sarif_suppressions(record) {
-        result["suppressions"] = suppressions;
+    // Both rule-based suppressions and human dismissals contribute an entry.
+    // An empty vec leaves the array absent (SARIF treats absent as
+    // "unsuppressed", an empty array as "checked, none found"), so we never
+    // assert a suppression check we did not perform.
+    let suppressions = sarif_suppressions(record);
+    if !suppressions.is_empty() {
+        result["suppressions"] = json!(suppressions);
     }
     result
 }
 
-/// Standard SARIF `result.suppressions[]`. A suppressed finding is emitted
-/// (never dropped) and marked with a `kind: "external"` suppression so
-/// SARIF consumers can honor it. `None` leaves the array absent for
-/// non-suppressed findings (SARIF treats absent as unsuppressed).
-fn sarif_suppressions(record: &WorkspaceFindingExportRecord) -> Option<serde_json::Value> {
-    if !record.suppressed {
-        return None;
+/// Standard SARIF `result.suppressions[]`. A finding is emitted (never dropped)
+/// with one entry per suppression cause: a rule-based suppression
+/// (`record.suppressed`) and/or a human dismissal (`record.dismissal`, already
+/// gated on author == Human upstream). Machine auto-triage never populates
+/// `dismissal`, so it never asserts a human accepted the risk.
+fn sarif_suppressions(record: &WorkspaceFindingExportRecord) -> Vec<serde_json::Value> {
+    let mut suppressions = Vec::new();
+    if record.suppressed {
+        suppressions.push(json!({ "kind": "external", "status": "accepted" }));
     }
-    Some(json!([{ "kind": "external", "status": "accepted" }]))
+    if let Some(dismissal) = record.dismissal.as_ref() {
+        suppressions.push(json!({
+            "kind": "external",
+            "status": "accepted",
+            "justification": format!("{}: {}", dismissal.reason, dismissal.note),
+            "properties": {
+                "kuzushiDismissReason": dismissal.reason,
+                "kuzushiDismissedBy": dismissal.actor,
+                "kuzushiDismissedAt": dismissal.at,
+                "kuzushiNote": dismissal.note,
+                "kuzushiTriageState": record.triage_state,
+            },
+        }));
+    }
+    suppressions
 }
 
 /// SARIF `rank` (0.0–100.0, higher = more significant) derived from the coarse

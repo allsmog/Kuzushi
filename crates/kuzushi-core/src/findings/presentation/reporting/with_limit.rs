@@ -134,6 +134,14 @@ impl FindingListFilter {
         })
     }
 
+    /// Adds triage-lifecycle state constraints from raw CLI/tool strings
+    /// (e.g. `dismissed`, `fixed`, `open`). Compiles into the same
+    /// `triage_state` filter used by the `state:` expression and tool option.
+    pub fn with_triage_states(mut self, states: Vec<String>) -> Result<Self> {
+        self.triage_state.extend(parsed_triage_states(states)?);
+        Ok(self)
+    }
+
     pub fn from_filter_expression(expression: &str) -> Result<Self> {
         let mut filter = Self::default();
         filter.apply_filter_expression(expression)?;
@@ -203,6 +211,27 @@ impl FindingListFilter {
             && source_matches(self, finding)
             && file_path_matches(self, finding)
             && run_id_matches(self, finding)
+    }
+
+    /// True when the filter constrains derived triage-lifecycle states
+    /// (`open`/`reviewing`/`confirmed`/`to_fix`/`dismissed`/`fixed`/`removed`).
+    pub fn has_derived_triage_state_filter(&self) -> bool {
+        self.triage_state.iter().any(|state| state.is_derived())
+    }
+
+    /// Derived phase: whether the finding's derived triage state satisfies the
+    /// derived filter states. Legacy states are ignored (matched separately).
+    pub fn matches_triage_lifecycle(&self, derived: &FindingTriageState) -> bool {
+        let derived_filters: Vec<FindingTriageStateFilter> = self
+            .triage_state
+            .iter()
+            .copied()
+            .filter(|state| state.is_derived())
+            .collect();
+        derived_filters.is_empty()
+            || derived_filters
+                .iter()
+                .any(|state| state.matches_derived(derived))
     }
 
     pub fn has_provenance_filter(&self) -> bool {
@@ -276,18 +305,13 @@ fn parsed_part_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
         .collect()
 }
 
-fn triage_state_matches(state: FindingTriageStateFilter, finding: &Finding) -> bool {
+fn legacy_triage_state_matches(state: FindingTriageStateFilter, finding: &Finding) -> bool {
     match state {
         FindingTriageStateFilter::Untriaged => finding.triage.is_none(),
         FindingTriageStateFilter::Triaged => finding.triage.is_some(),
-        FindingTriageStateFilter::Open => finding_is_open(finding),
-    }
-}
-
-fn finding_is_open(finding: &Finding) -> bool {
-    match finding.triage.as_ref() {
-        None => true,
-        Some(triage) => matches!(triage.verdict, TriageVerdict::NeedsReview),
+        // Derived states (open/reviewing/confirmed/to_fix/dismissed/fixed/removed)
+        // are evaluated in the store layer via the lifecycle fold.
+        _ => false,
     }
 }
 
@@ -314,12 +338,20 @@ fn severity_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
     filter.severity.is_empty() || filter.severity.contains(&finding.severity)
 }
 
+/// Pure phase: only the legacy `untriaged`/`triaged` filter states are
+/// evaluated here. Derived states (`open`/`dismissed`/`fixed`/...) are matched
+/// against the projected lifecycle in `FindingListFilter::matches_triage_lifecycle`.
 fn triage_state_filter_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
-    filter.triage_state.is_empty()
-        || filter
-            .triage_state
+    let legacy: Vec<FindingTriageStateFilter> = filter
+        .triage_state
+        .iter()
+        .copied()
+        .filter(|state| !state.is_derived())
+        .collect();
+    legacy.is_empty()
+        || legacy
             .iter()
-            .any(|state| triage_state_matches(*state, finding))
+            .any(|state| legacy_triage_state_matches(*state, finding))
 }
 
 fn verdict_matches(
@@ -765,17 +797,6 @@ mod triage_band_and_state_tests {
             vec![ConfidenceBand::Low]
         );
         assert!(FindingListFilter::from_filter_expression("band:bogus").is_err());
-    }
-
-    #[test]
-    fn state_open_is_untriaged_or_needs_review() {
-        let filter = FindingListFilter::from_filter_expression("state:open").unwrap();
-        assert!(matches(&filter, &untriaged()));
-        assert!(matches(&filter, &triaged(TriageVerdict::NeedsReview, 0.6)));
-        assert!(!matches(
-            &filter,
-            &triaged(TriageVerdict::TruePositive, 0.9)
-        ));
     }
 
     #[test]

@@ -12,6 +12,8 @@ fn decision(stable_fp: &str, read_watermark: u64) -> DecisionWrite {
         confidence_millis: 1000,
         read_watermark,
         updates_finding_triage: false,
+        dismiss_reason: None,
+        dismissed_by: None,
     }
 }
 
@@ -124,6 +126,9 @@ fn finding_lifecycle(event_kind: EventKind) -> FindingLifecycleWrite {
         actor: "state-machine".to_string(),
         run_id: None,
         suppression: None,
+        tool: None,
+        last_seen_run_id: None,
+        reconciled_against_run_id: None,
     }
 }
 
@@ -257,7 +262,10 @@ fn storage_writer_records_file_deleted_projection() {
     assert_eq!(receipt.committed_seq, 3);
     let conn = rusqlite::Connection::open(db_path).unwrap();
     assert_eq!(count_where(&conn, "indexed_files", "1 = 1"), 0);
-    assert_eq!(count_where(&conn, "file_deletions", "path = 'src/db.rs'"), 1);
+    assert_eq!(
+        count_where(&conn, "file_deletions", "path = 'src/db.rs'"),
+        1
+    );
 }
 
 #[test]
@@ -266,7 +274,9 @@ fn storage_writer_records_attack_surface_projection() {
     let db_path = tmp.path().join("index.sqlite3");
     let mut writer = StorageWriter::open(tmp.path().join("log"), &db_path).unwrap();
 
-    let receipt = writer.record_attack_surface_indexed(attack_surface()).unwrap();
+    let receipt = writer
+        .record_attack_surface_indexed(attack_surface())
+        .unwrap();
 
     assert_eq!(receipt.committed_seq, 1);
     let conn = rusqlite::Connection::open(db_path).unwrap();
@@ -292,7 +302,9 @@ fn storage_writer_checkpoint_appends_event_and_artifact() {
     let tmp = tempfile::tempdir().unwrap();
     let mut writer =
         StorageWriter::open(tmp.path().join("log"), tmp.path().join("index.sqlite3")).unwrap();
-    writer.record_finding_observation(observation("obs3_before_checkpoint")).unwrap();
+    writer
+        .record_finding_observation(observation("obs3_before_checkpoint"))
+        .unwrap();
 
     let receipt = writer.record_checkpoint().unwrap();
 
@@ -301,7 +313,11 @@ fn storage_writer_checkpoint_appends_event_and_artifact() {
     let checkpoint_path = tmp
         .path()
         .join("log/checkpoints/checkpoint-000000000002.json");
-    assert!(checkpoint_path.exists(), "expected {}", checkpoint_path.display());
+    assert!(
+        checkpoint_path.exists(),
+        "expected {}",
+        checkpoint_path.display()
+    );
     let checkpoint: EventEnvelope =
         serde_json::from_str(&std::fs::read_to_string(checkpoint_path).unwrap()).unwrap();
     assert_eq!(checkpoint.event_kind, EventKind::ProjectionCheckpointed);
@@ -328,7 +344,11 @@ fn storage_writer_compact_appends_event_checkpoint_and_returns_live() {
     let checkpoint_path = tmp
         .path()
         .join("log/checkpoints/checkpoint-000000000002.json");
-    assert!(checkpoint_path.exists(), "expected {}", checkpoint_path.display());
+    assert!(
+        checkpoint_path.exists(),
+        "expected {}",
+        checkpoint_path.display()
+    );
     let log = EventLog::open(tmp.path().join("log")).unwrap();
     let events = log.read_all().unwrap();
     assert_eq!(events[1].event_kind, EventKind::CompactionCompleted);
@@ -431,7 +451,9 @@ fn storage_writer_records_verification_event_and_projection() {
     let db_path = tmp.path().join("index.sqlite3");
     let mut writer = StorageWriter::open(tmp.path().join("log"), &db_path).unwrap();
 
-    let receipt = writer.record_verification(verification("fp3_verified")).unwrap();
+    let receipt = writer
+        .record_verification(verification("fp3_verified"))
+        .unwrap();
 
     assert_eq!(receipt.committed_seq, 1);
     assert_eq!(writer.current_watermark().unwrap(), 1);
@@ -523,14 +545,17 @@ fn storage_writer_records_run_lifecycle_and_state_projection() {
     let mut writer = StorageWriter::open(tmp.path().join("log"), &db_path).unwrap();
 
     writer
-        .execute_command(WriterCommand::Decision(DecisionCommand::RecordRunLifecycle(
-            run_lifecycle(EventKind::RunStarted, "running"),
-        )))
+        .execute_command(WriterCommand::Decision(
+            DecisionCommand::RecordRunLifecycle(run_lifecycle(EventKind::RunStarted, "running")),
+        ))
         .unwrap();
     let receipt = writer
-        .execute_command(WriterCommand::Decision(DecisionCommand::RecordRunLifecycle(
-            run_lifecycle(EventKind::RunCompleted, "completed"),
-        )))
+        .execute_command(WriterCommand::Decision(
+            DecisionCommand::RecordRunLifecycle(run_lifecycle(
+                EventKind::RunCompleted,
+                "completed",
+            )),
+        ))
         .unwrap();
 
     assert_eq!(receipt.committed_seq, 2);
@@ -542,7 +567,15 @@ fn storage_writer_records_run_lifecycle_and_state_projection() {
         .query_row(
             "select run_id, status, findings_count, started_seq, completed_seq from run_states",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .unwrap();
     assert_eq!(events_count, 2);
@@ -573,14 +606,18 @@ fn finding_lifecycle_events_update_stable_finding_status() {
 
     writer
         .execute_command(WriterCommand::Decision(
-            DecisionCommand::RecordFindingLifecycle(finding_lifecycle(EventKind::SuppressionRemoved)),
+            DecisionCommand::RecordFindingLifecycle(finding_lifecycle(
+                EventKind::SuppressionRemoved,
+            )),
         ))
         .unwrap();
     assert_eq!(stable_status(&db_path, "fp3_observed"), "open");
 
     writer
         .execute_command(WriterCommand::Decision(
-            DecisionCommand::RecordFindingLifecycle(finding_lifecycle(EventKind::FindingDisappeared)),
+            DecisionCommand::RecordFindingLifecycle(finding_lifecycle(
+                EventKind::FindingDisappeared,
+            )),
         ))
         .unwrap();
     assert_eq!(stable_status(&db_path, "fp3_observed"), "stale");
@@ -637,7 +674,11 @@ fn rebuild_projection_clears_disposable_rows_and_replays_log() {
     assert_eq!(writer.current_watermark().unwrap(), 2);
     let conn = rusqlite::Connection::open(db_path).unwrap();
     assert_eq!(
-        count_where(&conn, "stable_findings", "stable_fp = 'stale_projection_row'"),
+        count_where(
+            &conn,
+            "stable_findings",
+            "stable_fp = 'stale_projection_row'"
+        ),
         0
     );
     assert_eq!(count_where(&conn, "finding_observations", "1 = 1"), 1);
@@ -705,11 +746,9 @@ fn recovery_rejects_projection_ahead_of_log() {
 
     let error = lifecycle.recover(2, 3).unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("projection watermark 3 is ahead of event log head 2")
-    );
+    assert!(error
+        .to_string()
+        .contains("projection watermark 3 is ahead of event log head 2"));
 }
 
 #[test]
@@ -851,11 +890,16 @@ async fn storage_writer_actor_commits_watcher_and_decision_commands() {
     );
 
     let first = actor
-        .watcher(WatcherCommand::FindingObservation(observation("obs3_actor")))
+        .watcher(WatcherCommand::FindingObservation(observation(
+            "obs3_actor",
+        )))
         .await
         .unwrap();
     let second = actor
-        .decision(DecisionCommand::ReviewDecision(decision("fp3_actor", first.committed_seq)))
+        .decision(DecisionCommand::ReviewDecision(decision(
+            "fp3_actor",
+            first.committed_seq,
+        )))
         .await
         .unwrap();
 
@@ -886,10 +930,12 @@ async fn storage_writer_actor_barrier_reports_projection_watermark() {
 
 #[test]
 fn executable_watcher_events_are_not_coalesced() {
-    assert!(!WriterCommand::Watcher(WatcherCommand::FindingObservation(
-        observation("obs3_not_coalesced")
-    ))
-    .can_be_coalesced());
+    assert!(
+        !WriterCommand::Watcher(WatcherCommand::FindingObservation(observation(
+            "obs3_not_coalesced"
+        )))
+        .can_be_coalesced()
+    );
     assert!(!WriterCommand::Watcher(WatcherCommand::FileIndexed(file_fact())).can_be_coalesced());
     assert!(WriterCommand::Watcher(WatcherCommand::FileFactsChanged {
         path: "src/main.rs".to_string(),

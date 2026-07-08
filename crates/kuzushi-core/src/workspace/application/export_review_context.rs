@@ -7,6 +7,7 @@ use crate::findings::{
 pub struct WorkspaceFindingReviewContext {
     pub(super) decision: ReviewDecision,
     pub(super) triage_verdict: Option<TriageVerdict>,
+    pub(super) decided_at: Option<String>,
     source: WorkspaceFindingReviewSource,
 }
 
@@ -22,6 +23,7 @@ impl WorkspaceFindingReviewContext {
         Self {
             decision,
             triage_verdict,
+            decided_at: None,
             source: WorkspaceFindingReviewSource::Unknown,
         }
     }
@@ -30,6 +32,7 @@ impl WorkspaceFindingReviewContext {
         Self {
             decision: record.decision.clone(),
             triage_verdict: record.triage_verdict,
+            decided_at: Some(record.created_at.clone()),
             source: WorkspaceFindingReviewSource::Unknown,
         }
     }
@@ -48,6 +51,7 @@ impl WorkspaceFindingReviewContext {
         Self {
             decision,
             triage_verdict,
+            decided_at: None,
             source: carried_decision_source(carried_from_durable_identity),
         }
     }
@@ -56,6 +60,7 @@ impl WorkspaceFindingReviewContext {
         finding.triage.as_ref().map(|triage| Self {
             decision: ReviewDecision::from_triage(triage, finding.triaged_by),
             triage_verdict: Some(triage.verdict),
+            decided_at: None,
             source: WorkspaceFindingReviewSource::SelectedFinding,
         })
     }

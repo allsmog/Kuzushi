@@ -21,10 +21,7 @@ pub struct SuppressionLifecycleEvent {
 impl FindingStore {
     /// Current lifecycle status per `stable_fp` from the projection. Absent
     /// entries mean the finding has never had a lifecycle event (default open).
-    pub fn current_statuses_for(
-        &self,
-        stable_fps: &[String],
-    ) -> Result<BTreeMap<String, String>> {
+    pub fn current_statuses_for(&self, stable_fps: &[String]) -> Result<BTreeMap<String, String>> {
         let mut statuses = BTreeMap::new();
         let mut stmt = self
             .conn
@@ -114,6 +111,9 @@ impl FindingStore {
                         origin: event.origin,
                         expires_at_unix: event.expires_at_unix,
                     }),
+                    tool: None,
+                    last_seen_run_id: None,
+                    reconciled_against_run_id: None,
                 },
             )),
         )?;
@@ -129,9 +129,7 @@ struct LatestSuppression {
 fn is_suppression_lifecycle(kind: EventKind) -> bool {
     matches!(
         kind,
-        EventKind::SuppressionAdded
-            | EventKind::SuppressionExpired
-            | EventKind::SuppressionRemoved
+        EventKind::SuppressionAdded | EventKind::SuppressionExpired | EventKind::SuppressionRemoved
     )
 }
 

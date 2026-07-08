@@ -23,7 +23,9 @@ fn scan_target_root(tx: &Connection, scan_id: &str) -> Result<Option<PathBuf>> {
             params![scan_id],
             |row| row.get(0),
         )
-        .with_context(|| format!("scan run {scan_id:?} is required before finding evidence insert"))?;
+        .with_context(|| {
+            format!("scan run {scan_id:?} is required before finding evidence insert")
+        })?;
     let root = PathBuf::from(target);
     Ok(root.is_dir().then_some(root))
 }

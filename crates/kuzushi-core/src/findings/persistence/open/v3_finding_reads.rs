@@ -20,6 +20,31 @@ impl FindingStore {
         self.hydrate_v3_findings(dedupe_latest_by_projected_id(findings))
     }
 
+    /// Projected machine lifecycle for a finding (`stable_findings.current_status`).
+    /// Missing rows default to `Open` — the attention-preserving default.
+    pub(crate) fn stable_lifecycle_status_for_finding(
+        &self,
+        finding: &Finding,
+    ) -> Result<StableLifecycleStatus> {
+        let stable_fp = finding
+            .identity_id
+            .clone()
+            .unwrap_or_else(|| finding.fingerprint.clone());
+        let status: Option<String> = self
+            .conn
+            .query_row(
+                "select current_status from stable_findings where stable_fp = ?1",
+                params![stable_fp],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Could not load stable finding lifecycle status")?;
+        Ok(status
+            .as_deref()
+            .map(StableLifecycleStatus::from_current_status)
+            .unwrap_or(StableLifecycleStatus::Open))
+    }
+
     pub(crate) fn v3_all_findings(&self) -> Result<Vec<Finding>> {
         let mut stmt = self.conn.prepare(
             r#"
@@ -117,10 +142,7 @@ impl FindingStore {
     /// This is what makes the `status:suppressed` / `verdict:suppressed`
     /// filter tokens and the export "suppressed" column functional.
     fn hydrate_suppressed_flag(&self, findings: &mut [Finding]) -> Result<()> {
-        let stable_fps = findings
-            .iter()
-            .map(finding_stable_fp)
-            .collect::<Vec<_>>();
+        let stable_fps = findings.iter().map(finding_stable_fp).collect::<Vec<_>>();
         let statuses = self.current_statuses_for(&stable_fps)?;
         for finding in findings {
             let stable_fp = finding_stable_fp(finding);
@@ -158,7 +180,8 @@ fn dedupe_latest_by_projected_id(findings: Vec<Finding>) -> Vec<Finding> {
         }
         by_key.insert(key, finding);
     }
-    order.into_iter()
+    order
+        .into_iter()
         .filter_map(|key| by_key.remove(&key))
         .collect()
 }
@@ -177,7 +200,12 @@ fn projected_finding_key(finding: &Finding) -> String {
 fn finding_list_order(left: &Finding, right: &Finding) -> std::cmp::Ordering {
     severity_rank(left.severity)
         .cmp(&severity_rank(right.severity))
-        .then_with(|| right.id.unwrap_or_default().cmp(&left.id.unwrap_or_default()))
+        .then_with(|| {
+            right
+                .id
+                .unwrap_or_default()
+                .cmp(&left.id.unwrap_or_default())
+        })
         .then_with(|| left.fingerprint.cmp(&right.fingerprint))
 }
 

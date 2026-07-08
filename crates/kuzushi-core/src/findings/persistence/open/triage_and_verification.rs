@@ -30,17 +30,15 @@ impl FindingStore {
     }
 
     fn finding_ids_for_fingerprint(&self, fingerprint: &str) -> Result<Vec<i64>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                r#"
+        let mut stmt = self.conn.prepare(
+            r#"
                 select distinct cast(json_extract(finding_json, '$.id') as integer) as finding_id
                   from finding_observations
                  where finding_json is not null
                    and json_extract(finding_json, '$.fingerprint') = ?1
                  order by finding_id asc
                 "#,
-            )?;
+        )?;
         let rows = stmt.query_map(params![fingerprint], |row| row.get(0))?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not list sibling findings for triage fingerprint")
@@ -72,7 +70,9 @@ impl FindingStore {
 
     fn triage_update_allowed(&self, finding_id: i64, author: TriageAuthor) -> Result<bool> {
         let Some(finding) = self.v3_finding_by_projected_id(finding_id)? else {
-            anyhow::bail!("finding constraint violation: missing projected finding id {finding_id}");
+            anyhow::bail!(
+                "finding constraint violation: missing projected finding id {finding_id}"
+            );
         };
         if finding.triaged_by == Some(TriageAuthor::Human) && author != TriageAuthor::Human {
             return Ok(false);

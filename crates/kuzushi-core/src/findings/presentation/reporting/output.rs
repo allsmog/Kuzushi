@@ -274,7 +274,10 @@ fn finding_table_row(alias: &str, finding: &Finding, widths: FindingTableWidths)
         pad(alias, widths.alias),
         pad(&short_id(&finding.fingerprint), widths.fingerprint),
         pad(finding.severity.as_str(), widths.severity),
-        pad(ProofConfidence::classify(finding).as_str(), widths.confidence),
+        pad(
+            ProofConfidence::classify(finding).as_str(),
+            widths.confidence
+        ),
         pad(
             FindingVerdictFilter::from_finding(finding).as_export_str(),
             widths.verdict

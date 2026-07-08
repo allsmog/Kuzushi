@@ -178,6 +178,8 @@ fn export_record_does_not_project_non_triage_decision_as_triage() {
             author: TriageAuthor::Human,
             confidence: 1.0,
             rationale: "reviewed under approved suppression policy".to_string(),
+            dismiss_reason: None,
+            actor: None,
         },
         ReviewDecisionVerdict::Suppressed.to_triage_verdict(),
     );
@@ -212,7 +214,10 @@ fn export_record_uses_run_context_when_available() {
     let records = workspace_finding_export_records_with_context(&[finding], &[], &contexts);
 
     assert_eq!(records[0].provenance.run_id.as_deref(), Some("run-ctx"));
-    assert_eq!(records[0].provenance.run_status.as_deref(), Some("completed"));
+    assert_eq!(
+        records[0].provenance.run_status.as_deref(),
+        Some("completed")
+    );
     assert_eq!(
         records[0].provenance.kuzushi_version.as_deref(),
         Some("0.24.0-test")

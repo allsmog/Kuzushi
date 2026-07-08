@@ -18,12 +18,13 @@ pub(crate) use application::{
 };
 pub(crate) use domain::is_runtime_proof_state;
 pub use domain::{
-    compute_dedup_key, compute_root_cause_key, compute_source_signature, extract_cwe,
-    normalize_cwe, ConfidenceBand, Finding, FindingEvidence, FindingSource, PatchAttempt,
-    PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, ProofConfidence, ReviewDecision, ReviewDecisionRecord,
-    ReviewDecisionVerdict, Severity, StaticProofState, StaticProofStateEvent, TriageAuthor,
-    TriageOutcome, TriageVerdict, VulnSource,
+    compute_dedup_key, compute_root_cause_key, compute_source_signature, derive_triage_state,
+    extract_cwe, normalize_cwe, ConfidenceBand, DismissReason, Finding, FindingEvidence,
+    FindingSource, FindingTriageState, PatchAttempt, PatchResult, PatchStatus,
+    PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofConfidence,
+    ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, Severity, StableLifecycleStatus,
+    StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict,
+    VulnSource,
 };
 pub use persistence::{FindingStore, SuppressionLifecycleEvent};
 pub use presentation::{

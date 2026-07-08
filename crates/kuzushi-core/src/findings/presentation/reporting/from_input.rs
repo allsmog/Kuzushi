@@ -34,7 +34,7 @@ impl FindingVerdictFilter {
 
     pub(in crate::findings) fn from_review_decision(decision: ReviewDecisionVerdict) -> Self {
         match decision {
-            ReviewDecisionVerdict::Confirmed => Self::TruePositive,
+            ReviewDecisionVerdict::Confirmed | ReviewDecisionVerdict::ToFix => Self::TruePositive,
             ReviewDecisionVerdict::RejectedFalsePositive => Self::FalsePositive,
             ReviewDecisionVerdict::NeedsReview => Self::NeedsReview,
             ReviewDecisionVerdict::AcceptedRisk => Self::ByDesign,
@@ -57,20 +57,54 @@ impl FindingVerdictFilter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FindingTriageStateFilter {
+    // Legacy states, matched on the presence of triage metadata.
     Untriaged,
     Triaged,
-    /// Still being worked: no verdict yet, or a verdict of "needs review".
-    /// Distinct from review-completeness `open` (`completeness:open`).
+    // Derived triage-lifecycle states, matched via `derive_triage_state` in the
+    // store layer. `Open` = still being worked (no verdict yet, or "needs
+    // review"); distinct from review-completeness `open` (`completeness:open`).
     Open,
+    Reviewing,
+    Confirmed,
+    ToFix,
+    Dismissed,
+    Fixed,
+    Removed,
 }
 
 impl FindingTriageStateFilter {
     pub fn from_input(value: &str) -> Result<Self> {
         match value.trim() {
-            "new" | "pending" | "untriaged" => Ok(Self::Untriaged),
+            "new" | "untriaged" => Ok(Self::Untriaged),
             "triaged" | "classified" => Ok(Self::Triaged),
-            "open" | "working" => Ok(Self::Open),
+            "open" | "working" | "pending" => Ok(Self::Open),
+            "reviewing" | "in_review" | "in-review" | "review" => Ok(Self::Reviewing),
+            "confirmed" => Ok(Self::Confirmed),
+            "to_fix" | "to-fix" | "tofix" => Ok(Self::ToFix),
+            "dismissed" | "dismiss" => Ok(Self::Dismissed),
+            "fixed" => Ok(Self::Fixed),
+            "removed" | "gone" => Ok(Self::Removed),
             other => anyhow::bail!("unknown findings:list state filter {other:?}"),
+        }
+    }
+
+    /// True for states whose evaluation requires the derived triage lifecycle
+    /// (and therefore the projected `stable_findings.current_status`).
+    pub fn is_derived(self) -> bool {
+        !matches!(self, Self::Untriaged | Self::Triaged)
+    }
+
+    /// Whether a derived `FindingTriageState` satisfies this filter variant.
+    pub fn matches_derived(self, derived: &FindingTriageState) -> bool {
+        match self {
+            Self::Open => matches!(derived, FindingTriageState::Open),
+            Self::Reviewing => matches!(derived, FindingTriageState::Reviewing),
+            Self::Confirmed => matches!(derived, FindingTriageState::Confirmed),
+            Self::ToFix => matches!(derived, FindingTriageState::ToFix),
+            Self::Dismissed => derived.is_dismissed(),
+            Self::Fixed => matches!(derived, FindingTriageState::Fixed),
+            Self::Removed => matches!(derived, FindingTriageState::Removed),
+            Self::Untriaged | Self::Triaged => false,
         }
     }
 }

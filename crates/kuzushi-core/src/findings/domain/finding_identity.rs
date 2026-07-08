@@ -66,8 +66,8 @@ pub fn compute_finding_identity_id(target_id: &str, identity_key: &str) -> Strin
 fn stable_identity_key(input: &FindingIdentityInput<'_>) -> String {
     let weakness = weakness_key(input);
     let symbol = crate::identity::finding_identity::normalize_path(input.file_path);
-    let snippet =
-        evidence_snippet(input.evidence).unwrap_or_else(|| location_snippet(&symbol, input.start_line));
+    let snippet = evidence_snippet(input.evidence)
+        .unwrap_or_else(|| location_snippet(&symbol, input.start_line));
     crate::identity::compute_stable_fp_v3(crate::identity::StableFindingInput {
         tool_family: tool_family_from_fingerprint(input.fingerprint),
         rule_id: &weakness,

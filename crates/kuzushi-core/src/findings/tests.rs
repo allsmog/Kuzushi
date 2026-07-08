@@ -1432,6 +1432,8 @@ mod tests {
                     author: TriageAuthor::Human,
                     confidence: 1.0,
                     rationale: "suppressed by approved review policy".to_string(),
+                    dismiss_reason: None,
+                    actor: None,
                 },
             )
             .unwrap();
@@ -1473,6 +1475,8 @@ mod tests {
                 author: TriageAuthor::Auto,
                 confidence: 0.5,
                 rationale: "automation tried to defer".to_string(),
+                dismiss_reason: None,
+                actor: None,
             },
         );
 
@@ -1506,6 +1510,8 @@ mod tests {
                 author: TriageAuthor::Human,
                 confidence: 1.0,
                 rationale: "   ".to_string(),
+                dismiss_reason: None,
+                actor: None,
             },
         );
 
@@ -2411,6 +2417,8 @@ mod tests {
                     author: TriageAuthor::Human,
                     confidence: 1.0,
                     rationale: "suppressed by approved review policy".to_string(),
+                    dismiss_reason: None,
+                    actor: None,
                 },
             )
             .unwrap();
@@ -2895,5 +2903,360 @@ mod tests {
             "first wording",
         );
         assert_eq!(one.fingerprint, other_line.fingerprint);
+    }
+
+    // ---- Findings dismissal + re-scan reconciler (state machine) ----
+
+    fn semgrep_finding(rule: &str, line: u32, msg: &str) -> Finding {
+        Finding::new_semgrep(rule, "src/app.ts", line, Some(line), Severity::High, msg)
+    }
+
+    fn state_filter_count(store: &FindingStore, expr: &str) -> usize {
+        let filter = FindingListFilter::from_filter_expression(expr).unwrap();
+        store
+            .list_findings_filtered(&filter)
+            .unwrap()
+            .findings
+            .len()
+    }
+
+    #[test]
+    fn rescan_marks_vanished_finding_removed_when_tool_reran() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let vanished = semgrep_finding("demo.gone", 10, "will vanish");
+        store.insert_finding("run-a", &vanished).unwrap();
+        store.record_run_finished("run-a", "completed", 1).unwrap();
+
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        // A different semgrep finding keeps the tool "exercised" in run-b.
+        store
+            .insert_finding("run-b", &semgrep_finding("demo.other", 20, "still here"))
+            .unwrap();
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        assert_eq!(state_filter_count(&store, "state:removed"), 1);
+        assert_eq!(state_filter_count(&store, "state:fixed"), 0);
+    }
+
+    #[test]
+    fn rescan_marks_confirmed_finding_fixed() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let real = semgrep_finding("demo.real", 10, "confirmed bug");
+        let id = store.insert_finding("run-a", &real).unwrap();
+        store
+            .append_user_review_decision(
+                id,
+                &ReviewDecision {
+                    verdict: ReviewDecisionVerdict::Confirmed,
+                    author: TriageAuthor::Human,
+                    confidence: 1.0,
+                    rationale: "verified reachable".to_string(),
+                    dismiss_reason: None,
+                    actor: None,
+                },
+            )
+            .unwrap();
+        store.record_run_finished("run-a", "completed", 1).unwrap();
+
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-b", &semgrep_finding("demo.other", 20, "still here"))
+            .unwrap();
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        assert_eq!(state_filter_count(&store, "state:fixed"), 1);
+        assert_eq!(state_filter_count(&store, "state:removed"), 0);
+    }
+
+    #[test]
+    fn rescan_does_not_stale_findings_from_untouched_tools() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding(
+                "run-a",
+                &semgrep_finding("demo.gone", 10, "semgrep finding"),
+            )
+            .unwrap();
+        store.record_run_finished("run-a", "completed", 1).unwrap();
+
+        // run-b only exercises codeql; the semgrep finding must NOT be staled.
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let codeql = Finding::new_tool(
+            "codeql",
+            "cql.rule",
+            "src/other.rs",
+            5,
+            Some(5),
+            Severity::Medium,
+            "codeql finding",
+        );
+        store.insert_finding("run-b", &codeql).unwrap();
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        assert_eq!(state_filter_count(&store, "state:removed"), 0);
+        assert_eq!(state_filter_count(&store, "state:open"), 2);
+    }
+
+    #[test]
+    fn failed_rescan_never_reconciles() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-a", &semgrep_finding("demo.gone", 10, "finding"))
+            .unwrap();
+        store.record_run_finished("run-a", "completed", 1).unwrap();
+
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-b", &semgrep_finding("demo.other", 20, "finding"))
+            .unwrap();
+        store.record_run_finished("run-b", "failed", 1).unwrap();
+
+        assert_eq!(state_filter_count(&store, "state:removed"), 0);
+    }
+
+    #[test]
+    fn reconcile_is_idempotent() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-a", &semgrep_finding("demo.gone", 10, "finding"))
+            .unwrap();
+        store.record_run_finished("run-a", "completed", 1).unwrap();
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-b", &semgrep_finding("demo.other", 20, "finding"))
+            .unwrap();
+        // First reconcile already ran inside record_run_finished below.
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        let second = store.reconcile_disappeared_findings("run-b").unwrap();
+        assert!(
+            second.disappeared.is_empty(),
+            "already-stale findings must not be re-emitted"
+        );
+    }
+
+    #[test]
+    fn dismissed_finding_round_trips_and_stays_dismissed_after_disappearing() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let fp_finding = semgrep_finding("demo.fp", 10, "false positive");
+        let id = store.insert_finding("run-a", &fp_finding).unwrap();
+        store
+            .append_dismissal(
+                id,
+                DismissReason::UsedInTests,
+                "only used in tests",
+                "alice",
+            )
+            .unwrap();
+        store.record_run_finished("run-a", "completed", 1).unwrap();
+
+        let latest = store
+            .latest_review_decision(id)
+            .unwrap()
+            .expect("dismissal decision");
+        assert_eq!(
+            latest.decision.dismiss_reason,
+            Some(DismissReason::UsedInTests)
+        );
+        assert_eq!(latest.decision.actor.as_deref(), Some("alice"));
+        assert_eq!(state_filter_count(&store, "state:dismissed"), 1);
+
+        // The finding vanishes in a later semgrep run: it stays Dismissed,
+        // never flips to Fixed/Removed.
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-b", &semgrep_finding("demo.other", 20, "still here"))
+            .unwrap();
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        assert_eq!(state_filter_count(&store, "state:dismissed"), 1);
+        assert_eq!(state_filter_count(&store, "state:fixed"), 0);
+        assert_eq!(state_filter_count(&store, "state:removed"), 0);
+    }
+
+    #[test]
+    fn append_dismissal_rejects_empty_note() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = semgrep_finding("demo.x", 10, "finding");
+        let id = store.insert_finding("run-a", &finding).unwrap();
+        let result = store.append_dismissal(id, DismissReason::WontFix, "   ", "alice");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("note cannot be empty"));
+    }
+
+    fn confirmed_human_decision() -> ReviewDecision {
+        ReviewDecision {
+            verdict: ReviewDecisionVerdict::Confirmed,
+            author: TriageAuthor::Human,
+            confidence: 1.0,
+            rationale: "verified reachable".to_string(),
+            dismiss_reason: None,
+            actor: None,
+        }
+    }
+
+    #[test]
+    fn scoped_same_tool_rerun_does_not_fabricate_removed() {
+        // A confirmed/open finding in src/db must NOT show Fixed/Removed after a
+        // semgrep re-run scoped to a *different* subdir (src/api).
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-a", &semgrep_finding("demo.db", 10, "sqli in src/db"))
+            .unwrap();
+        store.record_run_finished("run-a", "completed", 1).unwrap();
+
+        // Same tool, but the run scanned only a subdir — different scope.
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo/src/api"), "running")
+            .unwrap();
+        store
+            .insert_finding(
+                "run-b",
+                &semgrep_finding("demo.api", 20, "issue in src/api"),
+            )
+            .unwrap();
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        assert_eq!(
+            state_filter_count(&store, "state:removed"),
+            0,
+            "a subdir-scoped re-run must not stale out-of-scope findings"
+        );
+        assert_eq!(state_filter_count(&store, "state:fixed"), 0);
+        assert_eq!(state_filter_count(&store, "state:open"), 2);
+    }
+
+    #[test]
+    fn agentic_rehunt_never_marks_confirmed_finding_fixed() {
+        // A non-deterministic engine (taint-iris-next) must NEVER retire a
+        // finding: a re-hunt that happens not to re-surface a real bug is not
+        // evidence the bug is fixed.
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("hunt-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let real = Finding::new_tool(
+            "taint-iris-next",
+            "tin.sqli",
+            "src/db.rs",
+            10,
+            Some(10),
+            Severity::High,
+            "confirmed sqli",
+        );
+        let id = store.insert_finding("hunt-a", &real).unwrap();
+        store
+            .append_user_review_decision(id, &confirmed_human_decision())
+            .unwrap();
+        store.record_run_finished("hunt-a", "completed", 1).unwrap();
+
+        // Same target, same tool, but a flaky re-hunt returns a different flow.
+        store
+            .record_run_started("hunt-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding(
+                "hunt-b",
+                &Finding::new_tool(
+                    "taint-iris-next",
+                    "tin.xss",
+                    "src/api.rs",
+                    5,
+                    Some(5),
+                    Severity::Medium,
+                    "different flow",
+                ),
+            )
+            .unwrap();
+        store.record_run_finished("hunt-b", "completed", 1).unwrap();
+
+        assert_eq!(
+            state_filter_count(&store, "state:fixed"),
+            0,
+            "agentic re-hunt must not fabricate Fixed"
+        );
+        assert_eq!(state_filter_count(&store, "state:confirmed"), 1);
+    }
+
+    #[test]
+    fn auto_retriage_after_human_confirm_still_yields_fixed() {
+        // A human Confirmed followed by a later automated re-triage must not be
+        // masked: on same-scope disappearance the finding is Fixed, not Removed.
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let id = store
+            .insert_finding("run-a", &semgrep_finding("demo.real", 10, "confirmed bug"))
+            .unwrap();
+        store
+            .append_user_review_decision(id, &confirmed_human_decision())
+            .unwrap();
+        store
+            .save_triage_with_author(
+                id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::NeedsReview,
+                    confidence: 0.5,
+                    rationale: "automated re-triage".to_string(),
+                    ..Default::default()
+                },
+                TriageAuthor::Auto,
+            )
+            .unwrap();
+        store.record_run_finished("run-a", "completed", 1).unwrap();
+
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-b", &semgrep_finding("demo.other", 20, "still here"))
+            .unwrap();
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        assert_eq!(
+            state_filter_count(&store, "state:fixed"),
+            1,
+            "human Confirm must survive a later automated re-triage"
+        );
+        assert_eq!(state_filter_count(&store, "state:removed"), 0);
     }
 }

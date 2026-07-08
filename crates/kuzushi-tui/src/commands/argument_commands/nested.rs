@@ -24,6 +24,7 @@ pub(crate) fn parse_nested_shell_command(
         "queue" => parse_queue_command(args),
         "strategy" | "strategies" => parse_strategy_command(args),
         "decision" | "review" => parse_review_decision_command(args),
+        "dismiss" => parse_dismiss_command(args),
         "patch" => parse_patch_command(args),
         "workspace" => parse_workspace_command(args.to_vec()),
         "pwn" => parse_pwn_command(args),
@@ -140,6 +141,24 @@ fn parse_review_decision_command(args: &[&str]) -> ShellCommand {
     ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
         verdict: verdict.to_string(),
         reason,
+    })
+}
+
+fn parse_dismiss_command(args: &[&str]) -> ShellCommand {
+    let Some(reason) = args.first().copied() else {
+        return ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
+            "dismiss".to_string(),
+        ));
+    };
+    let note = args.get(1..).unwrap_or_default().join(" ");
+    if note.trim().is_empty() {
+        return ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(format!(
+            "dismiss {reason}"
+        )));
+    }
+    ShellCommand::ReviewDecision(ReviewDecisionCommand::Dismiss {
+        reason: reason.to_string(),
+        note,
     })
 }
 

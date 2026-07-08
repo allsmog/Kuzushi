@@ -1,6 +1,8 @@
 use super::*;
 use crate::commands::ReviewDecisionCommand;
-use kuzushi_core::findings::{Finding, ReviewDecision, ReviewDecisionVerdict, TriageAuthor};
+use kuzushi_core::findings::{
+    DismissReason, Finding, ReviewDecision, ReviewDecisionVerdict, TriageAuthor,
+};
 
 impl ShellApp {
     pub(crate) fn reduce_review_decision_command(
@@ -11,11 +13,14 @@ impl ShellApp {
             ReviewDecisionCommand::Record { verdict, reason } => {
                 self.reduce_current_finding_review_decision(verdict, reason)
             }
+            ReviewDecisionCommand::Dismiss { reason, note } => {
+                self.reduce_current_finding_dismissal(reason, note)
+            }
             ReviewDecisionCommand::Unsupported(raw) => {
                 self.log(
                     "review",
                     format!(
-                        "unsupported review command `{raw}`. Next: decision <verdict> <reason>"
+                        "unsupported review command `{raw}`. Next: decision <verdict> <reason> | dismiss <reason> <note>"
                     ),
                 );
                 Vec::new()
@@ -42,6 +47,8 @@ impl ShellApp {
             author: TriageAuthor::Human,
             confidence: 1.0,
             rationale: reason,
+            dismiss_reason: None,
+            actor: None,
         };
         let read_watermark = self
             .router
@@ -55,6 +62,44 @@ impl ShellApp {
             read_watermark,
             target: self.target_owned(),
         })]
+    }
+
+    fn reduce_current_finding_dismissal(&mut self, reason: &str, note: &str) -> Vec<ShellEffect> {
+        let Some(reason) = self.parse_dismiss_reason_or_log(reason) else {
+            return Vec::new();
+        };
+        let Some(note) = self.non_empty_review_decision_reason_or_log(note) else {
+            return Vec::new();
+        };
+        let Some((alias, finding)) = self.current_review_finding_or_log() else {
+            return Vec::new();
+        };
+        let decision = ReviewDecision::dismissal(reason, &note, "operator");
+        let read_watermark = self
+            .router
+            .workbench()
+            .review()
+            .read_watermark_for(finding_stable_fp(&finding));
+        vec![ShellEffect::RecordReviewDecision(ReviewDecisionApply {
+            alias,
+            decision,
+            finding,
+            read_watermark,
+            target: self.target_owned(),
+        })]
+    }
+
+    fn parse_dismiss_reason_or_log(&mut self, value: &str) -> Option<DismissReason> {
+        let reason = DismissReason::from_str(value);
+        if reason.is_none() {
+            self.log(
+                "review",
+                format!(
+                    "unknown dismissal reason `{value}`. Next: dismiss false_positive|acceptable_risk|wont_fix|used_in_tests|no_time_to_fix <note>"
+                ),
+            );
+        }
+        reason
     }
 
     fn parse_review_decision_verdict_or_log(

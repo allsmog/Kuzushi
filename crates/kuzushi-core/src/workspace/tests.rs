@@ -2,8 +2,9 @@
 mod tests {
     use super::super::*;
     use crate::findings::{
-        Finding, FindingEvidence, FindingStore, ReviewDecision, ReviewDecisionVerdict, Severity,
-        StaticProofState, TriageAuthor, TriageOutcome, TriageVerdict,
+        DismissReason, Finding, FindingEvidence, FindingStore, ReviewDecision,
+        ReviewDecisionVerdict, Severity, StaticProofState, TriageAuthor, TriageOutcome,
+        TriageVerdict,
     };
     use crate::run_artifacts::{write_run_summary, RunSummary};
     use std::fs;
@@ -77,6 +78,8 @@ mod tests {
                 author: TriageAuthor::Human,
                 confidence: 1.0,
                 rationale: "reviewed under approved suppression policy".to_string(),
+                dismiss_reason: None,
+                actor: None,
             },
         )
         .unwrap();
@@ -605,6 +608,92 @@ mod tests {
     }
 
     #[test]
+    fn sarif_export_emits_suppression_for_dismissed_finding() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        seed_workspace_with_findings(&workspace, 2);
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let dismissed_id = store.list_findings(10).unwrap()[0]
+            .id
+            .expect("persisted finding id");
+        store
+            .append_dismissal(
+                dismissed_id,
+                DismissReason::FalsePositive,
+                "sanitized upstream",
+                "alice",
+            )
+            .unwrap();
+
+        let output = tmp.path().join("out.sarif");
+        export_workspace_findings(&workspace, &output, None).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+
+        let results = document["runs"][0]["results"].as_array().unwrap();
+        let suppressed: Vec<&serde_json::Value> = results
+            .iter()
+            .filter(|result| result.get("suppressions").is_some())
+            .collect();
+        assert_eq!(suppressed.len(), 1, "exactly one dismissed finding");
+        let suppression = &suppressed[0]["suppressions"][0];
+        assert_eq!(suppression["kind"], "external");
+        assert_eq!(suppression["status"], "accepted");
+        assert_eq!(
+            suppression["justification"],
+            "false_positive: sanitized upstream"
+        );
+        assert_eq!(
+            suppression["properties"]["kuzushiDismissReason"],
+            "false_positive"
+        );
+        assert_eq!(suppression["properties"]["kuzushiDismissedBy"], "alice");
+        // Non-dismissed results carry no suppressions key at all.
+        assert!(results
+            .iter()
+            .any(|result| result.get("suppressions").is_none()));
+    }
+
+    #[test]
+    fn sarif_export_omits_suppression_for_automated_dismissal() {
+        // An LLM auto-triage that maps to a dismissal-style verdict must NOT
+        // emit a SARIF suppression (which asserts a human accepted the risk).
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        seed_workspace_with_findings(&workspace, 2);
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let finding_id = store.list_findings(10).unwrap()[0]
+            .id
+            .expect("persisted finding id");
+        store
+            .save_triage_with_author(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::FalsePositive,
+                    confidence: 0.8,
+                    rationale: "model believes this is a false positive".to_string(),
+                    cost_usd: 0.0,
+                },
+                TriageAuthor::Auto,
+            )
+            .unwrap();
+
+        let output = tmp.path().join("out.sarif");
+        export_workspace_findings(&workspace, &output, None).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+
+        for run in document["runs"].as_array().unwrap() {
+            for result in run["results"].as_array().unwrap() {
+                assert!(
+                    result.get("suppressions").is_none(),
+                    "automated triage must not emit a SARIF suppression"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn exports_workspace_findings_to_csv() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
@@ -1057,5 +1146,73 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("must be empty"));
+    }
+
+    #[test]
+    fn human_confirmed_decision_masks_later_auto_retriage_in_export() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("run-1", workspace.root(), "completed")
+            .unwrap();
+
+        // Create a finding and record human Confirmed decision
+        let finding = fixture_finding("fixture/human-confirmed", Severity::High, 10);
+        let finding_id = store.insert_finding("run-1", &finding).unwrap();
+        store
+            .save_triage_with_author(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.9,
+                    rationale: "human confirmed this is real".to_string(),
+                    cost_usd: 0.0,
+                },
+                TriageAuthor::Human,
+            )
+            .unwrap();
+
+        // Simulate an automated re-triage that tries to change the verdict to FalsePositive
+        // (e.g., a later LLM run changing its mind)
+        store
+            .save_triage_with_author(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::FalsePositive,
+                    confidence: 0.7,
+                    rationale: "auto re-triage thinks this is fp".to_string(),
+                    cost_usd: 0.0,
+                },
+                TriageAuthor::Auto,
+            )
+            .unwrap();
+
+        // Export should use the human decision (Confirmed), not the auto re-triage
+        let output = tmp.path().join("export.json");
+        export_workspace_findings_with_options(
+            &workspace,
+            &output,
+            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+                .with_completeness(WorkspaceExportCompleteness::Complete),
+        )
+        .unwrap();
+
+        let export_json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+        let exported = &export_json["findings"][0];
+
+        // The exported triage_state must reflect the human decision (confirmed),
+        // not the auto re-triage (open). This is the core fix: the export path
+        // now uses the latest HUMAN decision, not the latest ANY-author decision.
+        assert_eq!(
+            exported["triageState"], "confirmed",
+            "human Confirmed decision must be preserved in export despite later auto re-triage"
+        );
+        // Verify the decision author is human, not auto
+        assert_eq!(
+            exported["reviewDecisionAuthor"], "human",
+            "review decision author must be human, not auto"
+        );
     }
 }

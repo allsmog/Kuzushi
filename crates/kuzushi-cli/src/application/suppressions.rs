@@ -77,6 +77,8 @@ fn append_suppressed_review_decision(
             author: TriageAuthor::Human,
             confidence: 1.0,
             rationale: reason.to_string(),
+            dismiss_reason: None,
+            actor: None,
         },
     )
 }

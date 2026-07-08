@@ -16,6 +16,11 @@ pub struct DecisionWrite {
     pub confidence_millis: u16,
     pub read_watermark: u64,
     pub updates_finding_triage: bool,
+    /// SARIF-ecosystem dismissal reason (`used_in_tests`, ...) when this
+    /// decision dismisses the finding. `None` for ordinary triage decisions.
+    pub dismiss_reason: Option<String>,
+    /// Resolved operator name for a dismissal (labeling default, not a role).
+    pub dismissed_by: Option<String>,
 }
 
 impl DecisionWrite {
@@ -38,6 +43,8 @@ impl DecisionWrite {
             "confidenceMillis": self.confidence_millis,
             "readWatermark": self.read_watermark,
             "updatesFindingTriage": self.updates_finding_triage,
+            "dismissReason": self.dismiss_reason,
+            "dismissedBy": self.dismissed_by,
         })
     }
 }
@@ -195,6 +202,11 @@ pub struct FindingLifecycleWrite {
     /// `FindingReopened`. The projector reads only `stableFp`, so these
     /// fields are additive audit context ignored by existing consumers.
     pub suppression: Option<SuppressionEventMeta>,
+    /// Per-tool scoping evidence emitted by the re-scan reconciler
+    /// (`FindingDisappeared` / `FindingReopened`).
+    pub tool: Option<String>,
+    pub last_seen_run_id: Option<String>,
+    pub reconciled_against_run_id: Option<String>,
 }
 
 /// Rich audit context carried on a rule-based suppression lifecycle event.
@@ -216,6 +228,9 @@ impl FindingLifecycleWrite {
             "statement": meta.statement,
             "origin": meta.origin,
             "expiresAtUnix": meta.expires_at_unix,
+            "tool": self.tool,
+            "lastSeenRunId": self.last_seen_run_id,
+            "reconciledAgainstRunId": self.reconciled_against_run_id,
         })
     }
 }

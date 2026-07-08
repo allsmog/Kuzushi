@@ -57,12 +57,18 @@ fn reconcile_suppresses_then_is_idempotent() {
 
     // Hydration makes the suppressed flag live.
     let reloaded = store.list_findings(10).unwrap();
-    assert!(reloaded[0].suppressed, "finding should hydrate as suppressed");
+    assert!(
+        reloaded[0].suppressed,
+        "finding should hydrate as suppressed"
+    );
 
     // Second reconcile over unchanged state appends nothing.
     let report2 = evaluate_suppressions(&reloaded, &rules, None, 1000);
     let summary2 = reconcile_suppression_events(&store, &report2, "tester").unwrap();
-    assert!(summary2.is_noop(), "reconcile must be idempotent: {summary2:?}");
+    assert!(
+        summary2.is_noop(),
+        "reconcile must be idempotent: {summary2:?}"
+    );
 }
 
 #[test]
@@ -92,7 +98,10 @@ fn expired_rule_reopens_previously_suppressed_finding() {
     let report2 = evaluate_suppressions(&reloaded, &lapsed, None, 1000);
     let summary = reconcile_suppression_events(&store, &report2, "system:sweep").unwrap();
     assert_eq!(summary.expired, 1);
-    assert!(!store.list_findings(10).unwrap()[0].suppressed, "expiry must reopen");
+    assert!(
+        !store.list_findings(10).unwrap()[0].suppressed,
+        "expiry must reopen"
+    );
 }
 
 fn workspace_store(tmp: &std::path::Path) -> (WorkspaceTarget, FindingStore) {
@@ -134,7 +143,10 @@ fn deleting_ignore_comment_reopens_the_finding() {
     // Delete the comment (keep line numbering) → next sweep reopens it.
     std::fs::write(&source, "fn main() {\n\n    run_query(input);\n}\n").unwrap();
     let second = run_suppression_sweep(&store, &workspace, "test").unwrap();
-    assert_eq!(second.summary.removed, 1, "deleting the comment must reopen");
+    assert_eq!(
+        second.summary.removed, 1,
+        "deleting the comment must reopen"
+    );
     assert!(!store.list_findings(10).unwrap()[0].suppressed);
 }
 
@@ -162,6 +174,8 @@ fn lapsing_rule_never_reopens_a_manual_dismissal() {
                 author: TriageAuthor::Human,
                 confidence: 1.0,
                 rationale: "reviewed by hand".to_string(),
+                dismiss_reason: None,
+                actor: None,
             },
         )
         .unwrap();
@@ -184,7 +198,10 @@ fn lapsing_rule_never_reopens_a_manual_dismissal() {
     save_suppression_rules(&workspace, &[lapsed]).unwrap();
 
     let sweep = run_suppression_sweep(&store, &workspace, "test").unwrap();
-    assert_eq!(sweep.summary.expired, 0, "manual dismissal must not be reopened");
+    assert_eq!(
+        sweep.summary.expired, 0,
+        "manual dismissal must not be reopened"
+    );
     assert!(
         store.list_findings(10).unwrap()[0].suppressed,
         "human dismissal survives the lapsing rule"

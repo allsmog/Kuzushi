@@ -8,7 +8,7 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(
             r#"
             select id, finding_id, identity_id, decision_verdict, triage_verdict,
-                   confidence, rationale, author, created_at
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
               from review_decisions
              where finding_id = ?1
              order by created_at asc, id asc
@@ -26,7 +26,7 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(
             r#"
             select id, finding_id, identity_id, decision_verdict, triage_verdict,
-                   confidence, rationale, author, created_at
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
               from review_decisions
              where identity_id = ?1
              order by created_at asc, id asc
@@ -51,7 +51,7 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(
             r#"
             select id, finding_id, identity_id, decision_verdict, triage_verdict,
-                   confidence, rationale, author, created_at
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
               from review_decisions
              where finding_id = ?1
              order by created_at desc, id desc
@@ -70,7 +70,7 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(
             r#"
             select id, finding_id, identity_id, decision_verdict, triage_verdict,
-                   confidence, rationale, author, created_at
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
               from review_decisions
              where identity_id = ?1
              order by created_at desc, id desc
@@ -92,6 +92,58 @@ impl FindingStore {
         self.latest_review_decision_for_identity(&identity_id)
     }
 
+    /// Most recent HUMAN-authored decision for a finding's identity. The triage
+    /// fold must ignore a later automated re-triage so an LLM verdict cannot
+    /// mask a human `Confirmed`/dismissal (which would flip a `Fixed` to
+    /// `Removed`, or resurrect a dismissed finding).
+    pub fn latest_human_review_decision_for_finding_identity(
+        &self,
+        finding_id: i64,
+    ) -> Result<Option<ReviewDecisionRecord>> {
+        let Some(identity_id) = self.identity_id_for_finding(finding_id)? else {
+            return self.latest_human_review_decision(finding_id);
+        };
+        self.latest_human_review_decision_for_identity(&identity_id)
+    }
+
+    fn latest_human_review_decision(
+        &self,
+        finding_id: i64,
+    ) -> Result<Option<ReviewDecisionRecord>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            select id, finding_id, identity_id, decision_verdict, triage_verdict,
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+              from review_decisions
+             where finding_id = ?1 and author = 'human'
+             order by created_at desc, id desc
+             limit 1
+            "#,
+        )?;
+        stmt.query_row(params![finding_id], review_decision_record_from_row)
+            .optional()
+            .context("Could not load latest human review decision")
+    }
+
+    fn latest_human_review_decision_for_identity(
+        &self,
+        identity_id: &str,
+    ) -> Result<Option<ReviewDecisionRecord>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            select id, finding_id, identity_id, decision_verdict, triage_verdict,
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+              from review_decisions
+             where identity_id = ?1 and author = 'human'
+             order by created_at desc, id desc
+             limit 1
+            "#,
+        )?;
+        stmt.query_row(params![identity_id], review_decision_record_from_row)
+            .optional()
+            .context("Could not load latest human review decision for identity")
+    }
+
     pub fn append_user_review_decision(
         &self,
         finding_id: i64,
@@ -106,6 +158,27 @@ impl FindingStore {
             anyhow::bail!("review decision reason cannot be empty");
         }
         self.append_review_decision(finding_id, decision, false)
+    }
+
+    /// Appends an immutable dismissal event through the existing single-writer
+    /// actor. Rejects an empty note (same policy as `append_user_review_decision`).
+    pub fn append_dismissal(
+        &self,
+        finding_id: i64,
+        reason: DismissReason,
+        note: &str,
+        actor: &str,
+    ) -> Result<i64> {
+        if note.trim().is_empty() {
+            anyhow::bail!("dismissal note cannot be empty");
+        }
+        let actor = if actor.trim().is_empty() {
+            "operator"
+        } else {
+            actor.trim()
+        };
+        let decision = ReviewDecision::dismissal(reason, note.trim(), actor);
+        self.append_review_decision(finding_id, &decision, false)
     }
 
     pub(in crate::findings::persistence::open) fn append_review_decision_from_triage(
@@ -155,6 +228,10 @@ impl FindingStore {
                 confidence_millis: confidence_millis(decision.confidence),
                 read_watermark,
                 updates_finding_triage,
+                dismiss_reason: decision
+                    .dismiss_reason
+                    .map(|reason| reason.as_str().to_string()),
+                dismissed_by: decision.actor.clone(),
             })),
         )?;
         Ok(receipt
@@ -179,6 +256,8 @@ fn review_decision_record_from_row(
     let decision_verdict: String = row.get(3)?;
     let triage_verdict: Option<String> = row.get(4)?;
     let author: String = row.get(7)?;
+    let dismiss_reason: Option<String> = row.get(9)?;
+    let dismissed_by: Option<String> = row.get(10)?;
     Ok(ReviewDecisionRecord {
         id: row.get(0)?,
         finding_id: row.get(1)?,
@@ -194,6 +273,8 @@ fn review_decision_record_from_row(
             })?,
             confidence: row.get(5)?,
             rationale: row.get(6)?,
+            dismiss_reason: dismiss_reason.as_deref().and_then(DismissReason::from_str),
+            actor: dismissed_by,
         },
         triage_verdict: triage_verdict
             .as_deref()

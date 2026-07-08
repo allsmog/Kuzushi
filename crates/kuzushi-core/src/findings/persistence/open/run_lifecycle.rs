@@ -30,6 +30,12 @@ impl FindingStore {
             findings_count: Some(findings_count as u64),
             actor: "finding-store".to_string(),
         })?;
+        // Only a fully-completed re-scan can honestly retire a prior finding.
+        // Allowlist (not `!= failed`) so a future canceled/partial status can
+        // never silently enable reconciliation on this honesty-critical path.
+        if status == "completed" && self.v3_storage_paths().is_some() {
+            self.reconcile_disappeared_findings(id)?;
+        }
         Ok(())
     }
 
