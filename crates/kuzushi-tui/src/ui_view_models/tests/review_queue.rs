@@ -246,3 +246,35 @@ fn human_rejected(mut finding: Finding) -> Finding {
     finding.triaged_by = Some(TriageAuthor::Human);
     finding
 }
+
+#[test]
+fn workflow_groups_map_every_review_decision_without_merging_opposites() {
+    assert_eq!(
+        workflow_group("needs_review", None),
+        ReviewWorkflowGroup::NeedsReview
+    );
+    assert_eq!(
+        workflow_group("confirmed", None),
+        ReviewWorkflowGroup::Confirmed
+    );
+    assert_eq!(
+        workflow_group("to_fix", None),
+        ReviewWorkflowGroup::Confirmed
+    );
+    assert_eq!(
+        workflow_group("accepted_risk", None),
+        ReviewWorkflowGroup::Deferred
+    );
+    assert_eq!(
+        workflow_group("rejected_false_positive", None),
+        ReviewWorkflowGroup::Closed
+    );
+    assert_eq!(
+        workflow_group("suppressed", None),
+        ReviewWorkflowGroup::Closed
+    );
+    assert_eq!(
+        workflow_group("rejected_false_positive", Some("reappeared")),
+        ReviewWorkflowGroup::NeedsReview
+    );
+}

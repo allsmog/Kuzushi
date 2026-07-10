@@ -72,7 +72,7 @@ fn normalize_run_status(status: &str) -> Result<String> {
     if run_status_allowed(&normalized) {
         return Ok(normalized);
     }
-    bail!("unknown run status {status:?}; expected running, completed, failed, interrupted, partial, or skipped")
+    bail!("unknown run status {status:?}; expected running, completed, failed, canceled, interrupted, partial, or skipped")
 }
 
 fn normalized_status_text(status: &str) -> String {
@@ -82,7 +82,7 @@ fn normalized_status_text(status: &str) -> String {
 fn run_status_allowed(status: &str) -> bool {
     matches!(
         status,
-        "running" | "completed" | "failed" | "interrupted" | "partial" | "skipped"
+        "running" | "completed" | "failed" | "canceled" | "interrupted" | "partial" | "skipped"
     )
 }
 
@@ -115,4 +115,24 @@ fn run_trace_artifact_leaf() -> &'static str {
     canonical_run_artifact_spec("trace.jsonl")
         .expect("trace artifact must be in shared canonical spec")
         .leaf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canceled_status_filter_is_canonical_and_distinct_from_interrupted() {
+        let canceled = RunSummary::running("run-c", "tool", None, "target").canceled("operator");
+        let interrupted =
+            RunSummary::running("run-i", "tool", None, "target").interrupted("watchdog");
+
+        let filtered =
+            filter_runs_by_status(vec![canceled, interrupted], &[" CANCELED ".to_string()])
+                .unwrap();
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].run_id, "run-c");
+        assert_eq!(filtered[0].status, "canceled");
+    }
 }

@@ -1,7 +1,9 @@
 use super::*;
 
-use crate::ui_view_models::{command_palette_model, CommandPaletteModel};
+use crate::ui_view_models::{command_palette_model, CommandPaletteModel, PaletteRow};
 use crate::{CommandPaletteFooter, CommandPaletteStatus};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 pub(crate) fn command_palette_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     command_palette_model_lines(command_palette_model(app), area.width as usize)
@@ -13,7 +15,12 @@ fn command_palette_model_lines(model: CommandPaletteModel, width: usize) -> Vec<
         raw("─".repeat(width)),
         blank(),
     ];
-    lines.extend(model.body_rows.into_iter().map(raw));
+    lines.extend(
+        model
+            .rows
+            .into_iter()
+            .map(|row| palette_row_line(row, width)),
+    );
     lines.push(blank());
     lines.push(raw("─".repeat(width)));
     lines.push(raw(palette_footer_stage_line(width, &model.footer)));
@@ -24,6 +31,106 @@ fn command_palette_model_lines(model: CommandPaletteModel, width: usize) -> Vec<
         lines.push(raw(" kuzushi>"));
     }
     lines
+}
+
+fn palette_row_line(row: PaletteRow, width: usize) -> Line<'static> {
+    match row {
+        PaletteRow::Query(query) => Line::from(vec![
+            Span::styled(" › ", theme::label()),
+            Span::styled(fit(&query, width.saturating_sub(3)), theme::primary()),
+        ]),
+        PaletteRow::Summary(summary) => Line::styled(fit(&summary, width), theme::muted()),
+        PaletteRow::Section(label) => divider(label, width.min(u16::MAX as usize) as u16),
+        PaletteRow::Match {
+            label,
+            kind,
+            description,
+            selected,
+        } => palette_match_line(label, kind, description, selected, width),
+        PaletteRow::Empty(value) => {
+            Line::styled(fit(&format!(" ∅ {value}"), width), theme::muted())
+        }
+        PaletteRow::Guidance(value) => Line::styled(fit(&value, width), theme::muted()),
+        PaletteRow::Blank => blank(),
+        PaletteRow::Legacy(value) => legacy_palette_line(value, width),
+    }
+}
+
+fn palette_match_line(
+    label: String,
+    kind: &'static str,
+    description: String,
+    selected: bool,
+    width: usize,
+) -> Line<'static> {
+    let marker = if selected { "▸" } else { " " };
+    let kind_width = usize::from(width >= 32) * 7;
+    let label_ceiling = width.saturating_sub(kind_width + 6);
+    let label_width = (width * 3 / 10).clamp(8, 25).min(label_ceiling);
+    let description_width = width.saturating_sub(label_width + kind_width + 6);
+    let body = format!(
+        "{marker} {} {} · {}",
+        pad(&label, label_width),
+        pad(kind, kind_width),
+        fit(&description, description_width),
+    );
+    let style = if selected {
+        theme::selection()
+    } else {
+        theme::primary()
+    };
+    Line::styled(pad(&fit(&body, width), width), style)
+}
+
+fn legacy_palette_line(value: String, width: usize) -> Line<'static> {
+    if value.trim_start().starts_with('▸') {
+        return Line::styled(pad(&fit(&value, width), width), theme::selection());
+    }
+    raw(fit(&value, width))
+}
+
+pub(crate) fn render_command_palette_overlay(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    let model = command_palette_model(app);
+    let row_count = model.rows.len();
+    let modal = command_palette_rect(area, row_count);
+    let row_width = modal.width.saturating_sub(2) as usize;
+    let rows = model
+        .rows
+        .into_iter()
+        .map(|row| palette_row_line(row, row_width))
+        .collect::<Vec<_>>();
+    render_overlay_backdrop(frame, area);
+    frame.render_widget(Clear, modal);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::subtle())
+        .title(Span::styled(" COMMAND PALETTE ", theme::heading()));
+    let inner = block.inner(modal);
+    frame.render_widget(block, modal);
+    frame.render_widget(Paragraph::new(rows), inner);
+}
+
+fn command_palette_rect(area: Rect, row_count: usize) -> Rect {
+    let width = area.width.saturating_sub(4).min(96);
+    let requested_height = row_count.saturating_add(2).min(u16::MAX as usize) as u16;
+    let height = requested_height.min(area.height.saturating_sub(2)).max(3);
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(area.width.saturating_sub(width) / 2),
+            Constraint::Length(width),
+            Constraint::Min(0),
+        ])
+        .split(area);
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(area.height.saturating_sub(height) / 3),
+            Constraint::Length(height),
+            Constraint::Min(0),
+        ])
+        .split(horizontal[1]);
+    vertical[1]
 }
 
 fn palette_status_line(status: &CommandPaletteStatus) -> Line<'static> {

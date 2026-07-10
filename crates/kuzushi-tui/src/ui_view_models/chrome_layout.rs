@@ -7,6 +7,16 @@ fn activity_supplies_own_chrome(app: &ShellApp) -> bool {
     matches!(app.shell_view(), ShellView::Activity)
 }
 
+fn onboarding_supplies_own_guidance(app: &ShellApp) -> bool {
+    matches!(
+        app.shell_view(),
+        ShellView::TargetPicker
+            | ShellView::ModelPicker
+            | ShellView::AuthMethodPicker
+            | ShellView::PlanningPicker
+    )
+}
+
 pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
     // ModuleRun, Quickstart, and Logs hide the embedded transcript strip
     // so they paint full-screen. ModuleRun keeps the prompt; Quickstart
@@ -14,6 +24,7 @@ pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> 
     // transcript so a strip would be redundant. Activity hides all generic
     // chrome via `activity_supplies_own_chrome`.
     if activity_supplies_own_chrome(app)
+        || onboarding_supplies_own_guidance(app)
         || hides_transcript_chrome(&app.shell_view())
         || terminal_height < 12
     {
@@ -27,7 +38,10 @@ pub(crate) fn keybind_footer_chrome_height(
     terminal_height: u16,
     terminal_width: u16,
 ) -> u16 {
-    if activity_supplies_own_chrome(app) || terminal_height < 8 {
+    if activity_supplies_own_chrome(app)
+        || onboarding_supplies_own_guidance(app)
+        || terminal_height < 8
+    {
         return 0;
     }
     if terminal_width < 70 && terminal_height >= 9 {
@@ -103,6 +117,15 @@ mod tests {
         assert_eq!(transcript_chrome_height(&app, 24), 0);
         assert_eq!(keybind_footer_chrome_height(&app, 24, 80), 0);
         assert_eq!(status_footer_chrome_height(&app, 24), 0);
+    }
+
+    #[test]
+    fn onboarding_gates_keep_only_local_guidance_and_status() {
+        let app = app_in_view(ShellView::TargetPicker);
+
+        assert_eq!(transcript_chrome_height(&app, 24), 0);
+        assert_eq!(keybind_footer_chrome_height(&app, 24, 60), 0);
+        assert_eq!(status_footer_chrome_height(&app, 24), 1);
     }
 
     #[test]

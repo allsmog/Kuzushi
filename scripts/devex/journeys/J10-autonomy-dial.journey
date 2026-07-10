@@ -1,0 +1,28 @@
+# J10 — Autonomy dial
+# Ctrl+↑ / Ctrl+↓ and the autonomy/posture verb across recon/hunt/confirm/fix.
+# The ⛭ chip must show ⚠ only when it actually throttles the walker; raising
+# the dial must never forge phase progress.
+name: Autonomy dial
+env: KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TMP_TARGET
+wait-for: 30 kuzushi>
+snap: dial-default
+expect: ⛭
+ask: Default posture — does the ⛭ chip show the default rung (fix/unconstrained) with no ⚠ when nothing is throttled?
+submit: autonomy recon
+wait: 2
+snap: dial-recon
+expect: recon
+ask: Lowered to recon — does the chip update immediately, and does a ⚠ appear ONLY if the current phase walker is actually throttled by the new ceiling?
+keys: C-Up
+wait: 2
+snap: dial-ctrl-up
+ask: Ctrl+↑ chord — did the rung raise by exactly one step, and is the change announced (chip + event line), not silent?
+keys: C-Down C-Down
+wait: 2
+snap: dial-ctrl-down
+ask: Ctrl+↓ twice — same honesty check downward; did the phase chip (組 …) stay UNCHANGED (raising/lowering the dial must not forge phase progress)?
+submit: posture fix
+wait: 2
+snap: dial-back-to-fix
+expect: fix

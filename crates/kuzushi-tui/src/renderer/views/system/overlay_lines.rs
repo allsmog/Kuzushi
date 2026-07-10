@@ -2,6 +2,8 @@ use super::*;
 use crate::ui_view_models::{
     boot_splash_model, quit_confirm_model, BootSplashModel, QuitConfirmModel,
 };
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 mod confirm_dialog;
 mod keymap;
@@ -30,6 +32,121 @@ pub(crate) fn keymap_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
 pub(crate) fn update_available_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     update_available::update_available_lines(app, area)
+}
+
+pub(crate) fn render_system_overlay(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    let lines = contextual_overlay_lines(app, area);
+    if lines.is_empty() || area.width < 8 || area.height < 5 {
+        return;
+    }
+    let modal = overlay_rect(area, lines.len());
+    render_overlay_backdrop(frame, area);
+    frame.render_widget(Clear, modal);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme::subtle())
+        .title(Span::styled(
+            overlay_title(app.shell_view()),
+            theme::heading(),
+        ));
+    let inner = block.inner(modal);
+    frame.render_widget(block, modal);
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+fn contextual_overlay_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let width = area.width.saturating_sub(6).min(92);
+    let body_area = Rect { width, ..area };
+    let lines = match app.shell_view() {
+        ShellView::ConfirmDialog => confirm_dialog_lines(app, body_area),
+        ShellView::QuitConfirm => quit_confirm_lines(app, body_area),
+        ShellView::ThemePicker => theme_picker_lines(app, body_area),
+        ShellView::Keymap => keymap_lines(app, body_area),
+        ShellView::UpdateAvailable => update_available_lines(app, body_area),
+        _ => return Vec::new(),
+    };
+    strip_full_screen_chrome(lines)
+}
+
+fn strip_full_screen_chrome(mut lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    if lines.first().is_some_and(is_status_line) {
+        lines.remove(0);
+        remove_leading_rule_and_blank(&mut lines);
+    }
+    if let Some(index) = lines.iter().rposition(is_rule_line) {
+        lines.truncate(index);
+    }
+    while lines.last().is_some_and(is_blank_line) {
+        lines.pop();
+    }
+    lines
+}
+
+fn remove_leading_rule_and_blank(lines: &mut Vec<Line<'static>>) {
+    if lines.first().is_some_and(is_rule_line) {
+        lines.remove(0);
+    }
+    if lines.first().is_some_and(is_blank_line) {
+        lines.remove(0);
+    }
+}
+
+fn is_status_line(line: &Line<'_>) -> bool {
+    line_text(line).trim_start().starts_with("KUZUSHI")
+}
+
+fn is_rule_line(line: &Line<'_>) -> bool {
+    let text = line_text(line);
+    !text.is_empty() && text.chars().all(|ch| ch == '─')
+}
+
+fn is_blank_line(line: &Line<'_>) -> bool {
+    line_text(line).trim().is_empty()
+}
+
+fn line_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>()
+}
+
+fn overlay_rect(area: Rect, line_count: usize) -> Rect {
+    let width = area.width.saturating_sub(4).min(96);
+    let requested = line_count.saturating_add(2).min(u16::MAX as usize) as u16;
+    let height = requested.min(area.height.saturating_sub(2)).max(3);
+    centered_rect(area, width, height)
+}
+
+fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(area.width.saturating_sub(width) / 2),
+            Constraint::Length(width),
+            Constraint::Min(0),
+        ])
+        .split(area);
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(area.height.saturating_sub(height) / 3),
+            Constraint::Length(height),
+            Constraint::Min(0),
+        ])
+        .split(horizontal[1]);
+    vertical[1]
+}
+
+fn overlay_title(view: ShellView) -> &'static str {
+    match view {
+        ShellView::ConfirmDialog => " CONFIRM ",
+        ShellView::QuitConfirm => " QUIT ",
+        ShellView::ThemePicker => " THEME ",
+        ShellView::Keymap => " KEYMAP ",
+        ShellView::UpdateAvailable => " UPDATE AVAILABLE ",
+        _ => " OVERLAY ",
+    }
 }
 
 pub(in crate::renderer) fn overlay_header(

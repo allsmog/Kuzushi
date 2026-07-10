@@ -1,41 +1,33 @@
 use super::*;
-use crate::ui_view_models::{ReviewQueueModel, ReviewQueueRow, SeverityTone};
+use crate::ui_view_models::{ReviewQueueModel, ReviewQueueRow, ReviewWorkflowGroup, SeverityTone};
 use kuzushi_core::ProofConfidence;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Line, Span};
 
 const REVIEW_FULL_SIGNAL_MIN_WIDTH: usize = 96;
-const REVIEW_FULL_METADATA_MIN_WIDTH: usize = 160;
-const REVIEW_COMPACT_DECISION_MIN_WIDTH: usize = 56;
+const REVIEW_FULL_METADATA_MIN_WIDTH: usize = 96;
 
 pub(in crate::renderer::views::workbench) fn review_queue_pane_lines(
     model: &ReviewQueueModel,
     inner: Rect,
 ) -> Vec<Line<'static>> {
     if model.rows.is_empty() {
-        return review_queue_empty_lines(model);
+        return review_queue_empty_lines(model, inner.width as usize);
     }
     populated_review_queue_pane_lines(model, inner)
 }
 
-fn review_queue_empty_lines(model: &ReviewQueueModel) -> Vec<Line<'static>> {
+fn review_queue_empty_lines(model: &ReviewQueueModel, width: usize) -> Vec<Line<'static>> {
     let reason = model
         .empty_reason
         .as_deref()
         .unwrap_or("no review rows match this mode");
-    let details = [
-        reason,
-        "scanner findings were not changed; only this review queue is empty.",
-        model.header.as_str(),
-    ];
-    let ctas = [
-        ("findings", "clear the filter and reload all findings"),
-        (
-            "findings filter completeness:open",
-            "show findings still awaiting review",
-        ),
-    ];
-    pane_empty_state("review queue empty", &details, &ctas)
+    vec![
+        Line::styled("∅ review queue empty", theme::muted()),
+        Line::raw(fit(reason, width)),
+        Line::styled("▸ findings", theme::accent()),
+        Line::styled("▸ filter completeness:open", theme::accent()),
+    ]
 }
 
 fn populated_review_queue_pane_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'static>> {
@@ -49,19 +41,72 @@ fn populated_review_queue_pane_lines(model: &ReviewQueueModel, inner: Rect) -> V
             theme::muted(),
         ));
     }
+    let display_rows = review_queue_display_rows(model);
     let chrome_rows = lines.len();
     let visible = (inner.height as usize).saturating_sub(chrome_rows).max(1);
-    let start = viewport_start_for_cursor(model.rows.len(), visible, review_queue_cursor(model));
+    let cursor = review_queue_display_cursor(&display_rows);
+    let start = viewport_start_for_cursor(display_rows.len(), visible, cursor);
     let width = inner.width as usize;
     lines.extend(
-        model
-            .rows
+        display_rows
             .iter()
             .skip(start)
             .take(visible)
-            .map(|row| review_queue_row_line(row, width)),
+            .map(|row| review_queue_display_line(row, width)),
     );
     lines
+}
+
+enum ReviewQueueDisplayRow<'a> {
+    Group(ReviewWorkflowGroup, usize),
+    Finding(&'a ReviewQueueRow),
+}
+
+fn review_queue_display_rows(model: &ReviewQueueModel) -> Vec<ReviewQueueDisplayRow<'_>> {
+    let mut rows = Vec::new();
+    for group in ReviewWorkflowGroup::ALL {
+        append_review_group(&mut rows, &model.rows, group);
+    }
+    rows
+}
+
+fn append_review_group<'a>(
+    display: &mut Vec<ReviewQueueDisplayRow<'a>>,
+    rows: &'a [ReviewQueueRow],
+    group: ReviewWorkflowGroup,
+) {
+    let group_rows = rows
+        .iter()
+        .filter(|row| row.workflow_group == group)
+        .collect::<Vec<_>>();
+    if group_rows.is_empty() {
+        return;
+    }
+    display.push(ReviewQueueDisplayRow::Group(group, group_rows.len()));
+    display.extend(group_rows.into_iter().map(ReviewQueueDisplayRow::Finding));
+}
+
+fn review_queue_display_cursor(rows: &[ReviewQueueDisplayRow<'_>]) -> usize {
+    rows.iter()
+        .position(|row| matches!(row, ReviewQueueDisplayRow::Finding(finding) if finding.selected))
+        .unwrap_or(0)
+}
+
+fn review_queue_display_line(row: &ReviewQueueDisplayRow<'_>, width: usize) -> Line<'static> {
+    match row {
+        ReviewQueueDisplayRow::Group(group, count) => review_group_line(*group, *count, width),
+        ReviewQueueDisplayRow::Finding(finding) => review_queue_row_line(finding, width),
+    }
+}
+
+fn review_group_line(group: ReviewWorkflowGroup, count: usize, width: usize) -> Line<'static> {
+    let label = format!("{} · {count}", group.label());
+    let fill = width.saturating_sub(label.chars().count() + 4);
+    Line::from(vec![
+        Span::styled("── ", theme::subtle()),
+        Span::styled(label, theme::label()),
+        Span::styled(format!(" {}", "─".repeat(fill)), theme::subtle()),
+    ])
 }
 
 fn review_queue_reconciliation_line(model: &ReviewQueueModel) -> String {
@@ -71,18 +116,16 @@ fn review_queue_reconciliation_line(model: &ReviewQueueModel) -> String {
     )
 }
 
-fn review_queue_cursor(model: &ReviewQueueModel) -> usize {
-    model.rows.iter().position(|row| row.selected).unwrap_or(0)
-}
-
 fn review_queue_row_line(row: &ReviewQueueRow, width: usize) -> Line<'static> {
-    let marker = if row.selected { ">" } else { " " };
     let signals = review_queue_signal_text(row, width);
     let signals_width = review_queue_signal_width(width);
     let chip = review_queue_confidence_chip(row, width);
     let title_budget = review_queue_title_budget(width, signals_width, chip.chars().count());
+    if row.selected {
+        return selected_review_queue_row(row, width, &signals, signals_width, &chip, title_budget);
+    }
     Line::from(vec![
-        Span::styled(marker.to_string(), review_queue_row_marker_style(row)),
+        Span::styled(" ", theme::muted()),
         Span::styled(
             pad(&row.alias, 7),
             review_queue_row_style(row, theme::label()),
@@ -110,35 +153,51 @@ fn review_queue_row_line(row: &ReviewQueueRow, width: usize) -> Line<'static> {
     ])
 }
 
+fn selected_review_queue_row(
+    row: &ReviewQueueRow,
+    width: usize,
+    signals: &str,
+    signals_width: usize,
+    chip: &str,
+    title_budget: usize,
+) -> Line<'static> {
+    let body = format!(
+        "▸{} {} {} {} {}",
+        pad(&row.alias, 7),
+        severity_glyph(row.severity_tone),
+        chip,
+        pad(signals, signals_width),
+        fit(&review_queue_title_text(row, width), title_budget),
+    );
+    Line::styled(pad(&fit(&body, width), width), theme::selection())
+}
+
 /// The confidence chip that sits between the severity glyph and the decision
 /// signals. Full word (`CONFIRMED`) at readable widths, a one-char marker
 /// (`✓ ◇ ? !`) when the row is too narrow to spend on a word.
 fn review_queue_confidence_chip(row: &ReviewQueueRow, width: usize) -> String {
     if width < REVIEW_FULL_METADATA_MIN_WIDTH {
-        return proof_confidence_marker(row.proof_confidence).to_string();
+        return proof_confidence_code(row).to_string();
     }
     row.proof_confidence_label.clone()
 }
 
-fn proof_confidence_marker(confidence: ProofConfidence) -> &'static str {
-    match confidence {
-        ProofConfidence::Confirmed => "✓",
-        ProofConfidence::Likely => "◇",
-        ProofConfidence::Unverified => "?",
-        ProofConfidence::Dismissed => "!",
+fn proof_confidence_code(row: &ReviewQueueRow) -> &'static str {
+    let evidence = row.evidence_state.to_ascii_lowercase();
+    if evidence.contains("runtime") {
+        "rt"
+    } else if evidence.contains("source") || evidence.contains("linked") {
+        "src"
+    } else if row.proof_confidence == ProofConfidence::Likely {
+        "sig"
+    } else {
+        "unv"
     }
 }
 
 fn review_queue_signal_text(row: &ReviewQueueRow, width: usize) -> String {
-    if width < REVIEW_COMPACT_DECISION_MIN_WIDTH {
-        return review_queue_compact_decision(row).to_string();
-    }
     if width < REVIEW_FULL_SIGNAL_MIN_WIDTH {
-        return format!(
-            "{} {}",
-            row.priority_label,
-            review_queue_compact_decision(row)
-        );
+        return review_queue_compact_decision(row).to_string();
     }
     fit(
         &review_queue_full_signal_summary(row),
@@ -147,10 +206,8 @@ fn review_queue_signal_text(row: &ReviewQueueRow, width: usize) -> String {
 }
 
 fn review_queue_signal_width(width: usize) -> usize {
-    if width < REVIEW_COMPACT_DECISION_MIN_WIDTH {
-        1
-    } else if width < REVIEW_FULL_SIGNAL_MIN_WIDTH {
-        12
+    if width < REVIEW_FULL_SIGNAL_MIN_WIDTH {
+        10
     } else if width >= REVIEW_FULL_METADATA_MIN_WIDTH {
         width.saturating_sub(58).clamp(88, 140)
     } else {
@@ -200,12 +257,15 @@ fn review_queue_decision_label(row: &ReviewQueueRow) -> &str {
 
 fn review_queue_compact_decision(row: &ReviewQueueRow) -> &'static str {
     if row.decision_conflict.is_some() {
-        return "!";
+        return "conflict";
     }
-    if row.decision_complete {
-        "✓"
-    } else {
-        "?"
+    match row.decision.as_str() {
+        "confirmed" => "confirmed",
+        "rejected_false_positive" | "false_positive" => "false-pos",
+        "suppressed" => "suppressed",
+        "deferred" => "deferred",
+        "accepted_risk" => "risk",
+        _ => "open",
     }
 }
 
@@ -213,18 +273,11 @@ fn review_queue_decision_style(row: &ReviewQueueRow) -> ratatui::style::Style {
     if row.decision_conflict.is_some() {
         return theme::warn();
     }
-    if row.decision_complete {
-        theme::success()
-    } else {
-        theme::muted()
-    }
-}
-
-fn review_queue_row_marker_style(row: &ReviewQueueRow) -> ratatui::style::Style {
-    if row.selected {
-        theme::selection()
-    } else {
-        theme::muted()
+    match row.decision.as_str() {
+        "confirmed" => theme::success(),
+        "rejected_false_positive" | "false_positive" | "suppressed" => theme::accent(),
+        "deferred" | "accepted_risk" => theme::warn(),
+        _ => theme::muted(),
     }
 }
 
@@ -277,6 +330,7 @@ mod tests {
             evidence_state: "evidence:1".to_string(),
             next_action: "validate".to_string(),
             selected: true,
+            workflow_group: ReviewWorkflowGroup::NeedsReview,
         }
     }
 
@@ -327,7 +381,10 @@ mod tests {
         let row = review_row();
         let narrow = line_text(review_queue_row_line(&row, 60));
         assert!(!narrow.contains("CONFIRMED"), "{narrow}");
-        assert!(narrow.contains('✓'), "{narrow}");
+        assert!(narrow.contains("unv"), "{narrow}");
+        assert!(narrow.contains("open"), "{narrow}");
+        assert!(!narrow.contains("review-order"), "{narrow}");
+        assert!(!narrow.contains('✓'), "{narrow}");
     }
 
     #[test]
@@ -356,17 +413,13 @@ mod tests {
             rows: Vec::new(),
         };
 
-        let text = lines_text(review_queue_empty_lines(&model));
+        let text = lines_text(review_queue_empty_lines(&model, 80));
 
         assert!(text.contains("review queue empty"), "{text}");
-        assert!(
-            text.contains("scanner findings were not changed; only this review queue is empty."),
-            "{text}"
-        );
         assert!(
             text.contains("all visible findings have terminal decisions"),
             "{text}"
         );
-        assert!(text.contains("findings filter completeness:open"), "{text}");
+        assert!(text.contains("filter completeness:open"), "{text}");
     }
 }

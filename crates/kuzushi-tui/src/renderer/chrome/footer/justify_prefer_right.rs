@@ -9,13 +9,13 @@ pub(crate) fn justify_prefer_right(left: String, right: String, width: usize) ->
         return fit(&left, width);
     }
     let right = fit(&right, width);
-    let right_len = right.chars().count();
+    let right_len = display_width(&right);
     if right_len + 1 >= width {
         return right;
     }
     let left_budget = width.saturating_sub(right_len + 1);
     let left = fit(&left, left_budget);
-    let left_len = left.chars().count();
+    let left_len = display_width(&left);
     let pad = width.saturating_sub(left_len + right_len);
     format!("{left}{}{}", " ".repeat(pad), right)
 }
@@ -210,4 +210,21 @@ fn looks_like_physical_key(key: &str) -> bool {
                 | "Up"
                 | "Down"
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn right_atom_survives_double_width_left_labels() {
+        let line = justify_prefer_right(
+            "mode:shell · 組 map 1/4 · ⛭ 掛 fix · workbench".to_string(),
+            "7 findings".to_string(),
+            60,
+        );
+
+        assert_eq!(display_width(&line), 60);
+        assert!(line.ends_with("7 findings"), "{line}");
+    }
 }

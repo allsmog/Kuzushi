@@ -107,9 +107,10 @@ pub(crate) struct WorkbenchViewModel {
     pub(crate) report_cta: Option<WorkbenchHint>,
     pub(crate) state: WorkbenchState,
     pub(crate) focus: WorkbenchPane,
+    pub(crate) zoom: Option<WorkbenchPane>,
 }
 
-pub(crate) const WORKBENCH_REPORT_COMMAND: &str = "workspace export findings report.sarif";
+pub(crate) const WORKBENCH_REPORT_COMMAND: &str = "findings export report.sarif sarif";
 
 const REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     WorkbenchHint {
@@ -212,6 +213,7 @@ pub(crate) fn workbench_view_model(app: &ShellApp) -> WorkbenchViewModel {
         report_cta,
         state,
         focus: app.router.workbench().focus(),
+        zoom: app.router.workbench().zoom().pane(),
     }
 }
 
@@ -742,7 +744,7 @@ mod tests {
             .set_page(Some(WorkbenchPage::Ship));
 
         let model = workbench_view_model(&app);
-        let expected = "workspace export findings report.sarif --completeness open";
+        let expected = "findings export report.sarif sarif --completeness open";
         let report_hints = model
             .command_bar_hints
             .iter()

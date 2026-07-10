@@ -1,6 +1,15 @@
 use super::view_keybinding_helpers::{bind, bind_char};
 use super::*;
 
+pub(super) fn catalog_keybindings() -> Vec<ViewKeybinding> {
+    vec![bind(
+        HotkeyTrigger::Enter,
+        "Enter",
+        "use selected row",
+        ViewHotkeyAction::CatalogActivate,
+    )]
+}
+
 pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
     // j/k/g/G scroll comes from the shared `scroll_keybindings()` base.
     let mut bindings = vec![
@@ -130,7 +139,7 @@ fn workbench_movement_keybindings() -> Vec<ViewKeybinding> {
 }
 
 fn workbench_center_keybindings() -> Vec<ViewKeybinding> {
-    vec![
+    let mut bindings = vec![
         bind_char(
             'd',
             "d",
@@ -161,7 +170,20 @@ fn workbench_center_keybindings() -> Vec<ViewKeybinding> {
             "center view",
             ViewHotkeyAction::WorkbenchCenterPrev,
         ),
+    ];
+    bindings.extend(workbench_zoom_keybindings());
+    bindings
+}
+
+fn workbench_zoom_keybindings() -> [ViewKeybinding; 2] {
+    [
         bind_char('z', "z", "zoom viz", ViewHotkeyAction::WorkbenchZoomCenter),
+        bind_char(
+            'Z',
+            "Z",
+            "zoom pane",
+            ViewHotkeyAction::WorkbenchTogglePaneZoom,
+        ),
     ]
 }
 
@@ -188,6 +210,7 @@ fn workbench_action_keybindings() -> Vec<ViewKeybinding> {
         bind_char('n', "n/N", "page", ViewHotkeyAction::WorkbenchPageNext),
         bind_char('N', "n/N", "page", ViewHotkeyAction::WorkbenchPagePrev),
         bind_char('v', "v", "validate", ViewHotkeyAction::WorkbenchValidate),
+        bind_char('x', "x", "suppress", ViewHotkeyAction::WorkbenchSuppress),
         bind_char('c', "c", "chain", ViewHotkeyAction::WorkbenchOrderChain),
         bind_char('D', "D", "cluster", ViewHotkeyAction::WorkbenchCluster),
     ]);

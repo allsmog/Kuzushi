@@ -125,6 +125,7 @@ impl ShellApp {
             &request.run_id,
         )));
         self.set_scan_cancel(Some(cancel));
+        self.set_scan_abort_reason(None);
         self.findings_mut().clear();
         *self.selected_finding_mut() = None;
         self.engagement.set_phase(crate::app::WorkflowPhase::Hunt);
@@ -192,7 +193,13 @@ impl ShellApp {
         target: Option<PathBuf>,
         explicit_input: Option<serde_json::Value>,
     ) -> Option<ScanStartRequest> {
-        let target_path = self.scan_target_path(target);
+        let Some(target_path) = self.scan_target_path(target) else {
+            self.log(
+                "error",
+                "scan needs an explicit target; use `scan .` to consent to cwd",
+            );
+            return None;
+        };
         let workspace = self.scan_workspace(&target_path)?;
         let run_id = new_run_id("scan");
         let effective_options = if explicit_input.is_some() {
@@ -214,10 +221,8 @@ impl ShellApp {
         })
     }
 
-    fn scan_target_path(&self, target: Option<PathBuf>) -> PathBuf {
-        target
-            .or_else(|| self.target_owned())
-            .unwrap_or_else(|| PathBuf::from("."))
+    fn scan_target_path(&self, target: Option<PathBuf>) -> Option<PathBuf> {
+        target.or_else(|| self.target_owned())
     }
 
     fn scan_workspace(&mut self, target_path: &PathBuf) -> Option<WorkspaceTarget> {

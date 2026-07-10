@@ -4,15 +4,27 @@ use crate::renderer::views::runs::run_diff_lines;
 use crate::ShellView;
 
 pub(crate) fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    primary_shell_view_lines(app, area)
-        .or_else(|| threat_run_shell_view_lines(app, area))
-        .or_else(|| system_shell_view_lines(app, area))
-        .or_else(|| workspace_session_shell_view_lines(app, area))
+    shell_view_lines_for(app, area, app.shell_view())
+}
+
+pub(crate) fn shell_view_lines_for(
+    app: &ShellApp,
+    area: Rect,
+    view: ShellView,
+) -> Vec<Line<'static>> {
+    primary_shell_view_lines(app, area, view)
+        .or_else(|| threat_run_shell_view_lines(app, area, view))
+        .or_else(|| system_shell_view_lines(app, area, view))
+        .or_else(|| workspace_session_shell_view_lines(app, area, view))
         .unwrap_or_else(|| home_lines(app, area))
 }
 
-fn primary_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
-    Some(match &app.shell_view() {
+fn primary_shell_view_lines(
+    app: &ShellApp,
+    area: Rect,
+    view: ShellView,
+) -> Option<Vec<Line<'static>>> {
+    Some(match view {
         ShellView::Home => home_lines(app, area),
         ShellView::Catalog => catalog_view_lines(app, area),
         ShellView::Recommend => recommend_lines(app, area),
@@ -34,8 +46,12 @@ fn primary_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'stat
     })
 }
 
-fn threat_run_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
-    Some(match &app.shell_view() {
+fn threat_run_shell_view_lines(
+    app: &ShellApp,
+    area: Rect,
+    view: ShellView,
+) -> Option<Vec<Line<'static>>> {
+    Some(match view {
         ShellView::Tune => tune_lines(app, area),
         ShellView::Threat => viewport_lines(
             threat_lines(app, area, app.router.threat().view()),
@@ -68,14 +84,22 @@ fn threat_run_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'s
     })
 }
 
-fn system_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
-    system_document_shell_view_lines(app, area)
-        .or_else(|| system_overlay_shell_view_lines(app, area))
-        .or_else(|| system_picker_shell_view_lines(app, area))
+fn system_shell_view_lines(
+    app: &ShellApp,
+    area: Rect,
+    view: ShellView,
+) -> Option<Vec<Line<'static>>> {
+    system_document_shell_view_lines(app, area, view)
+        .or_else(|| system_overlay_shell_view_lines(app, area, view))
+        .or_else(|| system_picker_shell_view_lines(app, area, view))
 }
 
-fn system_document_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
-    Some(match &app.shell_view() {
+fn system_document_shell_view_lines(
+    app: &ShellApp,
+    area: Rect,
+    view: ShellView,
+) -> Option<Vec<Line<'static>>> {
+    Some(match view {
         ShellView::Help => viewport_lines(
             help_lines(app, area),
             area.height,
@@ -108,8 +132,12 @@ fn system_document_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Li
     })
 }
 
-fn system_overlay_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
-    Some(match &app.shell_view() {
+fn system_overlay_shell_view_lines(
+    app: &ShellApp,
+    area: Rect,
+    view: ShellView,
+) -> Option<Vec<Line<'static>>> {
+    Some(match view {
         ShellView::BootSplash => boot_splash_lines(app, area),
         ShellView::QuitConfirm => quit_confirm_lines(app, area),
         ShellView::ConfirmDialog => confirm_dialog_lines(app, area),
@@ -121,8 +149,12 @@ fn system_overlay_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Lin
     })
 }
 
-fn system_picker_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
-    Some(match &app.shell_view() {
+fn system_picker_shell_view_lines(
+    app: &ShellApp,
+    area: Rect,
+    view: ShellView,
+) -> Option<Vec<Line<'static>>> {
+    Some(match view {
         ShellView::CommandPalette => command_palette_lines(app, area),
         ShellView::ModelPicker => model_picker_lines(app, area),
         ShellView::AuthMethodPicker => {
@@ -135,8 +167,12 @@ fn system_picker_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line
     })
 }
 
-fn workspace_session_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
-    Some(match &app.shell_view() {
+fn workspace_session_shell_view_lines(
+    app: &ShellApp,
+    area: Rect,
+    view: ShellView,
+) -> Option<Vec<Line<'static>>> {
+    Some(match view {
         ShellView::Options => options_lines(app, area, app.router.options()),
         ShellView::SastTasks => sast_tasks_lines(app, area),
         ShellView::Context => context_lines(app, area),

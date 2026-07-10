@@ -104,6 +104,59 @@ fn app_drain_marks_timed_out_tool_abort_requested() {
 }
 
 #[test]
+fn unresponsive_worker_escalates_to_synthetic_failure_after_grace() {
+    let (tx, rx) = mpsc::channel::<()>();
+    let mut config = V2Config::default();
+    config.runtime.worker_watchdog_timeout_ms = Some(5);
+    let mut app = ShellApp::new(config, None);
+    let ticket = app.jobs_mut().start(JobKind::Run, "semgrep:scan");
+    let generation = ticket.generation();
+    let cancel = ticket.cancel.clone();
+    app.set_running_tool_for_test("semgrep:scan");
+    app.set_tool_cancel_for_test(cancel.clone());
+    app.register_worker_handle_with_watchdog(
+        "tool",
+        generation,
+        std::thread::spawn(move || {
+            // Simulates a worker blocked in a syscall: never polls the token,
+            // never emits a terminal event.
+            let _ = rx.recv();
+        }),
+        cancel.clone(),
+    );
+
+    std::thread::sleep(Duration::from_millis(15));
+
+    // Watchdog fires: cooperative cancel requested, but the worker ignores it,
+    // so the slot stays lit and overlap-reject would block all new work.
+    assert!(app.drain_background_events());
+    assert!(cancel.is_cancelled());
+    assert!(app.has_running_work());
+    assert!(app.jobs().is_running(JobKind::Run));
+
+    // Before the grace window elapses, no synthetic failure is emitted.
+    assert!(!app.jobs_mut().fail_unresponsive_slots(Instant::now()));
+    assert!(app.has_running_work());
+
+    // Grace elapses with still no terminal event: a synthetic Failed terminal
+    // event releases the slot through the normal job-event path.
+    let after_grace = Instant::now() + WORKER_UNRESPONSIVE_GRACE;
+    assert!(app.jobs_mut().fail_unresponsive_slots(after_grace));
+    assert!(app.drain_background_events());
+    assert!(!app.has_running_work());
+    assert!(!app.jobs().is_running(JobKind::Run));
+
+    // The slot is free again: new work is accepted while the hung thread
+    // is left alone (never killed, still parked on the channel).
+    let next = app.jobs_mut().start(JobKind::Run, "next:tool");
+    assert!(app.jobs().is_running(JobKind::Run));
+    drop(next);
+    drop(ticket);
+    drop(tx);
+    assert!(wait_for_app_handle_reap(&mut app));
+}
+
+#[test]
 fn app_drain_reaps_finished_worker_handles() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.register_worker_handle("test", WorkerGeneration::new(9), std::thread::spawn(|| {}));

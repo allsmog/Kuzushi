@@ -22,10 +22,6 @@ pub(super) use review_queue::review_queue_pane_lines;
 pub(super) use ship::{ship_chain_lines, ship_export_lines, ship_patch_lines};
 pub(super) use source::{source_pane_lines, source_title};
 
-pub(super) fn sep() -> Span<'static> {
-    Span::styled(theme::STATUS_SEPARATOR, theme::subtle())
-}
-
 fn pane_empty_state(
     glyph_label: &str,
     explanations: &[&str],

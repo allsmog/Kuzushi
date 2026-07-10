@@ -84,6 +84,10 @@ impl ShellApp {
     }
 
     fn open_or_log_scene_ready(&mut self, page: VizPage) {
+        if matches!(self.shell_view(), ShellView::Activity) {
+            self.log_scene_ready(page, "showing in Activity output");
+            return;
+        }
         if self.can_auto_open_viz_now() {
             self.open_scene_to_page(page);
         } else {

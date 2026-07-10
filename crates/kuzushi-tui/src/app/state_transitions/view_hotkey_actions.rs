@@ -55,6 +55,7 @@ impl ShellApp {
             ViewHotkeyAction::WorkbenchCenterNext => self.cycle_workbench_center_mode(1),
             ViewHotkeyAction::WorkbenchCenterPrev => self.cycle_workbench_center_mode(-1),
             ViewHotkeyAction::WorkbenchZoomCenter => self.open_workbench_center_viz(),
+            ViewHotkeyAction::WorkbenchTogglePaneZoom => self.toggle_workbench_pane_zoom(),
             ViewHotkeyAction::WorkbenchOpen => self.workbench_open_focused(),
             ViewHotkeyAction::WorkbenchPageNext => {
                 self.set_workbench_page(crate::ui_view_models::active_workbench_page(self).next())
@@ -64,6 +65,7 @@ impl ShellApp {
             }
             ViewHotkeyAction::WorkbenchPage(page) => self.set_workbench_page(page),
             ViewHotkeyAction::WorkbenchValidate => return Some(self.validate_workbench_finding()),
+            ViewHotkeyAction::WorkbenchSuppress => return Some(self.draft_workbench_suppression()),
             ViewHotkeyAction::WorkbenchOrderChain => return Some(self.order_workbench_chain()),
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
             ViewHotkeyAction::Back if self.focus_workbench_findings_before_back() => {}
@@ -109,6 +111,7 @@ impl ShellApp {
     fn jump_findings_selection(&mut self, to_start: bool) {
         let len = crate::ui_view_models::visible_findings_len(self);
         self.router.findings_mut().jump(to_start, len);
+        self.reset_workbench_detail_scroll();
     }
 
     fn set_workbench_page(&mut self, page: WorkbenchPage) {
@@ -164,6 +167,14 @@ impl ShellApp {
         self.open_scene_to_page(page);
     }
 
+    fn toggle_workbench_pane_zoom(&mut self) {
+        if !self.workbench_is_review_page() {
+            self.log("workbench", "pane zoom is available on the review page");
+            return;
+        }
+        self.router.workbench_mut().toggle_zoom();
+    }
+
     fn focus_workbench_findings_before_back(&mut self) -> bool {
         if self.shell_view() != ShellView::Workbench
             || self.router.workbench().focus() != WorkbenchPane::Details
@@ -206,6 +217,7 @@ impl ShellApp {
     fn step_findings_cursor(&mut self, delta: isize) {
         let len = crate::ui_view_models::visible_findings_len(self);
         self.router.findings_mut().step_direction(delta, len);
+        self.reset_workbench_detail_scroll();
     }
 
     fn workbench_jump(&mut self, to_start: bool) {
@@ -217,6 +229,7 @@ impl ShellApp {
             WorkbenchPane::Findings => {
                 let len = crate::ui_view_models::visible_findings_len(self);
                 self.router.findings_mut().jump(to_start, len);
+                self.reset_workbench_detail_scroll();
             }
             WorkbenchPane::Source | WorkbenchPane::Center | WorkbenchPane::Details => {
                 self.jump_scroll_region(to_start);
@@ -273,6 +286,25 @@ impl ShellApp {
             tool: Some("verify:exploit".to_string()),
             input: Some(input),
         })
+    }
+
+    fn draft_workbench_suppression(&mut self) -> InputUpdate {
+        let Some((alias, finding)) = crate::ui_view_models::current_finding_for_detail(self) else {
+            self.log("suppress", "no finding selected — choose a finding first");
+            return InputUpdate::handled();
+        };
+        let reference = alias.unwrap_or(finding.fingerprint);
+        self.set_input(format!("suppress {reference} --reason "));
+        self.set_input_mode(InputMode::Prompt);
+        self.log("suppress", "draft loaded — enter a reason and submit");
+        InputUpdate::handled()
+    }
+
+    fn reset_workbench_detail_scroll(&mut self) {
+        self.router
+            .workbench_mut()
+            .scroll_mut()
+            .set(WorkbenchPane::Details, 0);
     }
 
     fn order_workbench_chain(&mut self) -> InputUpdate {
@@ -497,6 +529,13 @@ impl ShellApp {
             return InputUpdate::handled();
         }
         match action {
+            ViewHotkeyAction::CatalogActivate => {
+                let Some(module) = self.catalog_cursor_module_id() else {
+                    self.log("module", "catalog has no selectable module row");
+                    return InputUpdate::handled();
+                };
+                self.reduce_hotkey_command(ShellCommand::Use(module))
+            }
             ViewHotkeyAction::ThreatView(view) => {
                 self.router.threat_mut().open(view);
                 self.set_shell_view(ShellView::Threat);

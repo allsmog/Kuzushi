@@ -66,6 +66,7 @@
         "running",
         "completed",
         "failed",
+        "canceled",
         "interrupted",
         "partial",
         "skipped",

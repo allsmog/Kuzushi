@@ -1,0 +1,31 @@
+# J9 — Jobs / steer queue
+# Launch work, open jobs, queue a second tool while the first runs, then
+# scoped-cancel. Known risk: steer-queue starvation (branch review).
+# Keyless variant rides the offline demo; the queue window is short, so
+# judge captures and re-run keyed for a wider window.
+name: Jobs and steer queue
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+keys: d
+wait-for: 5 ACTIVITY
+# Queue a tool while the demo run is live — should land in the steer queue.
+type: queue run secret-scan:scan {}
+keys: Enter
+wait: 1
+snap: steer-queued-mid-run
+ask: Queueing while busy — did the shell say the tool was QUEUED (pending), not silently dropped and not falsely running?
+submit: jobs
+wait: 2
+snap: jobs-live-and-queued
+ask: Jobs view — one live run max; queued steer items render as pending; live vs. stale-disk rows labeled truthfully?
+wait: 3
+snap: jobs-after-drain
+ask: Steer drain — after the live run finished, did the queued tool actually dispatch (chain → plan → steer order), or did it starve?
+submit: queue
+wait: 2
+snap: queue-view
+expect-not: unknown command
+ask: `queue` — does the steer queue surface show honest pending/dispatched state, and does `jobs -k <id>` (scoped cancel) look reachable from here?

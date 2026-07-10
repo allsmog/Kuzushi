@@ -95,8 +95,10 @@ impl ActivityDeckPage {
 pub enum DagTaskState {
     Queued,
     Active,
+    Canceling,
     Done,
     Failing,
+    Blocked,
     Canceled,
     Skipped,
 }
@@ -323,6 +325,7 @@ impl ActivitySession {
             row.state,
             DagTaskState::Done
                 | DagTaskState::Failing
+                | DagTaskState::Blocked
                 | DagTaskState::Skipped
                 | DagTaskState::Canceled
         ) {
@@ -333,6 +336,34 @@ impl ActivitySession {
             row.started_at = Some(Instant::now());
         }
         row.completed_at = Some(Instant::now());
+    }
+
+    pub fn mark_task_skipped(&mut self, tool_name: &str) {
+        let task_id = collapse_doubled_tail(tool_name);
+        let module_id = task_id.split(':').next().unwrap_or(&task_id).to_string();
+        let row = self
+            .tasks
+            .entry(task_id.clone())
+            .or_insert_with(|| DagTaskRow::queued(task_id, module_id, Vec::new()));
+        row.state = DagTaskState::Skipped;
+        row.started_at.get_or_insert_with(Instant::now);
+        row.completed_at = Some(Instant::now());
+        row.last_label = "tool reported skipped".to_string();
+        finalize_activity_row_details(row);
+    }
+
+    pub fn mark_task_blocked(&mut self, tool_name: &str, reason: &str) {
+        let task_id = collapse_doubled_tail(tool_name);
+        let module_id = task_id.split(':').next().unwrap_or(&task_id).to_string();
+        let row = self
+            .tasks
+            .entry(task_id.clone())
+            .or_insert_with(|| DagTaskRow::queued(task_id, module_id, Vec::new()));
+        row.state = DagTaskState::Blocked;
+        row.started_at.get_or_insert_with(Instant::now);
+        row.completed_at = Some(Instant::now());
+        row.last_label = reason.to_string();
+        finalize_activity_row_details(row);
     }
 
     pub fn apply_step(&mut self, step: RunTraceStep) {
@@ -495,6 +526,14 @@ impl ActivitySession {
             mark_activity_row_canceled(row, now);
         }
         mark_subsystems_canceled(&mut self.subsystem_aggregate);
+    }
+
+    pub fn mark_active_tasks_canceling(&mut self) {
+        let now = Instant::now();
+        for row in self.tasks.values_mut().filter(|row| row_can_cancel(row)) {
+            mark_activity_row_canceling(row, now);
+        }
+        mark_subsystems_canceling(&mut self.subsystem_aggregate);
     }
 
     pub fn mark_incomplete_tasks_after_success(&mut self, context: ActivityTerminalContext) {
@@ -713,22 +752,51 @@ fn row_can_cancel(row: &&mut DagTaskRow) -> bool {
 }
 
 fn cancelable_task_state(state: DagTaskState) -> bool {
-    matches!(state, DagTaskState::Queued | DagTaskState::Active)
+    matches!(
+        state,
+        DagTaskState::Queued | DagTaskState::Active | DagTaskState::Canceling
+    )
 }
 
 fn terminal_task_state(state: DagTaskState) -> bool {
     matches!(
         state,
-        DagTaskState::Done | DagTaskState::Failing | DagTaskState::Canceled | DagTaskState::Skipped
+        DagTaskState::Done
+            | DagTaskState::Failing
+            | DagTaskState::Blocked
+            | DagTaskState::Canceled
+            | DagTaskState::Skipped
     )
 }
 
 fn mark_activity_row_canceled(row: &mut DagTaskRow, now: Instant) {
+    if row.state == DagTaskState::Queued {
+        mark_never_started_row_skipped(row, now, "not run after cancel");
+        return;
+    }
     row.state = DagTaskState::Canceled;
     row.started_at.get_or_insert(now);
     row.completed_at = Some(now);
     row.last_label = "cancel requested; waiting for cleanup".to_string();
     mark_active_details_canceled(row);
+}
+
+fn mark_activity_row_canceling(row: &mut DagTaskRow, now: Instant) {
+    if row.state == DagTaskState::Queued {
+        mark_never_started_row_skipped(row, now, "not run after cancel");
+        return;
+    }
+    row.state = DagTaskState::Canceling;
+    row.started_at.get_or_insert(now);
+    row.completed_at = None;
+    row.last_label = "cancel requested; cleanup in progress".to_string();
+}
+
+fn mark_never_started_row_skipped(row: &mut DagTaskRow, now: Instant, label: &str) {
+    row.state = DagTaskState::Skipped;
+    row.completed_at = Some(now);
+    row.last_label = label.to_string();
+    finalize_activity_row_details(row);
 }
 
 fn mark_activity_row_success_terminal(
@@ -737,7 +805,7 @@ fn mark_activity_row_success_terminal(
     context: ActivityTerminalContext,
 ) {
     match row.state {
-        DagTaskState::Active => {
+        DagTaskState::Active | DagTaskState::Canceling => {
             row.state = DagTaskState::Done;
             row.completed_at = Some(now);
             finalize_activity_row_details(row);
@@ -754,7 +822,7 @@ fn mark_activity_row_success_terminal(
 
 fn mark_activity_row_failure_terminal(row: &mut DagTaskRow, now: Instant) {
     match row.state {
-        DagTaskState::Active => {
+        DagTaskState::Active | DagTaskState::Canceling => {
             row.state = DagTaskState::Failing;
             row.completed_at = Some(now);
             row.severity = Some("danger".to_string());
@@ -1025,7 +1093,7 @@ fn finalize_activity_row_details(row: &mut DagTaskRow) {
         return;
     }
     let terminal_state = match row.state {
-        DagTaskState::Failing => DagTaskDetailState::Failing,
+        DagTaskState::Failing | DagTaskState::Blocked => DagTaskDetailState::Failing,
         DagTaskState::Canceled => DagTaskDetailState::Canceled,
         _ => DagTaskDetailState::Done,
     };
@@ -1043,6 +1111,8 @@ fn next_activity_row_state(
 ) -> DagTaskState {
     match (step.severity.as_deref(), step.kind.as_str(), current) {
         (_, _, DagTaskState::Canceled) => DagTaskState::Canceled,
+        (_, _, DagTaskState::Blocked) => DagTaskState::Blocked,
+        (_, _, DagTaskState::Canceling) => DagTaskState::Canceling,
         (_, _, DagTaskState::Skipped) => DagTaskState::Skipped,
         (Some("danger"), _, _) if !rolled_up_child => DagTaskState::Failing,
         (_, _, DagTaskState::Failing) => DagTaskState::Failing,
@@ -1064,7 +1134,11 @@ fn mark_activity_row_times(row: &mut DagTaskRow) {
 fn activity_row_is_terminal(row: &DagTaskRow) -> bool {
     matches!(
         row.state,
-        DagTaskState::Done | DagTaskState::Failing | DagTaskState::Canceled | DagTaskState::Skipped
+        DagTaskState::Done
+            | DagTaskState::Failing
+            | DagTaskState::Blocked
+            | DagTaskState::Canceled
+            | DagTaskState::Skipped
     )
 }
 
@@ -1119,7 +1193,9 @@ fn subsystem_state(
 fn subsystem_priority_state(states: &[DagTaskState]) -> DagTaskState {
     [
         DagTaskState::Failing,
+        DagTaskState::Blocked,
         DagTaskState::Canceled,
+        DagTaskState::Canceling,
         DagTaskState::Active,
     ]
     .into_iter()
@@ -1144,6 +1220,26 @@ fn mark_subsystems_canceled(aggregate: &mut SubsystemAggregate) {
     cancel_hidden_subsystem_tasks(aggregate);
     sync_or_mark_empty_subsystems_canceled(aggregate);
     aggregate.last_label = "cancel requested; waiting for cleanup".to_string();
+}
+
+fn mark_subsystems_canceling(aggregate: &mut SubsystemAggregate) {
+    if !subsystems_have_tasks(aggregate) {
+        return;
+    }
+    for state in aggregate.hidden_task_states.values_mut() {
+        if *state == DagTaskState::Active {
+            *state = DagTaskState::Canceling;
+        } else if *state == DagTaskState::Queued {
+            *state = DagTaskState::Canceled;
+        }
+    }
+    aggregate.state = match aggregate.state {
+        DagTaskState::Active => DagTaskState::Canceling,
+        DagTaskState::Queued => DagTaskState::Canceled,
+        state => state,
+    };
+    aggregate.active_count = 0;
+    aggregate.last_label = "cancel requested; cleanup in progress".to_string();
 }
 
 fn subsystems_have_tasks(aggregate: &SubsystemAggregate) -> bool {
@@ -1312,6 +1408,23 @@ mod tests {
         let row = session.tasks.get("triage:run").unwrap();
         assert_eq!(row.state, DagTaskState::Canceled);
         assert_eq!(row.last_label, "cancel requested; waiting for cleanup");
+        assert!(row.completed_at.is_some());
+    }
+
+    #[test]
+    fn canceling_marks_never_started_rows_skipped() {
+        let mut session = ActivitySession::new("r-1");
+        session.tasks.insert(
+            "codeql:scan".to_string(),
+            DagTaskRow::queued("codeql:scan".to_string(), "codeql".to_string(), Vec::new()),
+        );
+
+        session.mark_active_tasks_canceling();
+
+        let row = session.tasks.get("codeql:scan").unwrap();
+        assert_eq!(row.state, DagTaskState::Skipped);
+        assert_eq!(row.last_label, "not run after cancel");
+        assert!(row.started_at.is_none());
         assert!(row.completed_at.is_some());
     }
 

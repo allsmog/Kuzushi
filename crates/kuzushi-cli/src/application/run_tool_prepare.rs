@@ -40,6 +40,9 @@ struct CliToolRunBootstrap {
     run_id: String,
 }
 
+/// `target` arrives pre-resolved by `resolve_run_target` (the shared
+/// `target_or_global` precedence policy); this function only constructs the
+/// workspace and never substitutes cwd for a missing target.
 pub(crate) fn prepare_cli_tool_run(
     tool: String,
     input: String,

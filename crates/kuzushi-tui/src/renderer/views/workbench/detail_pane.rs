@@ -29,18 +29,18 @@ fn detail_lines_for_model(
     report_command: Option<&str>,
 ) -> Vec<Line<'static>> {
     let mut lines = detail_title_lines(detail, budget);
-    push_claim_section(&mut lines, detail, budget);
     push_signals_section(&mut lines, detail, budget);
+    push_next_section(&mut lines, detail, budget, report_command);
     push_evidence_section(
         &mut lines,
         &detail.evidence,
         detail.evidence_overflow,
         budget,
     );
-    push_analysis_section(&mut lines, detail, budget);
     push_verification_section(&mut lines, detail, budget);
+    push_analysis_section(&mut lines, detail, budget);
+    push_claim_section(&mut lines, detail, budget);
     push_decision_section(&mut lines, detail, budget);
-    push_next_section(&mut lines, detail, budget, report_command);
     push_fix_section(&mut lines, detail, budget);
     push_message_section(&mut lines, detail, budget);
     push_provenance_section(&mut lines, detail, budget);
@@ -62,7 +62,7 @@ fn push_signals_section(
     detail: &FindingDetailModel,
     budget: usize,
 ) {
-    push_section_header(lines, "SIGNALS");
+    push_section_header(lines, "STATUS");
     push_detail_kv(lines, "severity", &detail.severity_label, budget);
     push_wrapped(
         lines,
@@ -82,20 +82,6 @@ fn push_signals_section(
         budget,
         "  ",
         proof_detail_style(detail.proof_tier),
-    );
-    push_wrapped(
-        lines,
-        &format!("current decision: {}", detail.decision),
-        budget,
-        "  ",
-        theme::label(),
-    );
-    push_wrapped(
-        lines,
-        &format!("decision confidence: {}", detail.confidence),
-        budget,
-        "  ",
-        theme::muted(),
     );
 }
 
@@ -560,13 +546,12 @@ mod tests {
 
         assert!(text.contains("CLAIM"), "{text}");
         assert!(text.contains("alias: F-0001"), "{text}");
-        assert!(text.contains("SIGNALS"), "{text}");
+        assert!(text.contains("STATUS"), "{text}");
         assert!(text.contains("severity: high"), "{text}");
         assert!(text.contains("lifecycle status: candidate"), "{text}");
         assert!(text.contains("evidence state: evidence:1"), "{text}");
         assert!(text.contains("proof summary: ? unverified"), "{text}");
         assert!(text.contains("current decision: needs_review"), "{text}");
-        assert!(text.contains("decision confidence: -"), "{text}");
         assert!(text.contains("ANALYSIS"), "{text}");
         assert!(text.contains("static proof: not recorded"), "{text}");
         assert!(text.contains("VERIFICATION"), "{text}");
@@ -577,7 +562,7 @@ mod tests {
         assert!(text.contains("DECISION"), "{text}");
         assert!(text.contains("PROVENANCE"), "{text}");
         assert_detail_provenance_lines(&text);
-        assert!(!text.contains("STATUS"), "{text}");
+        assert!(!text.contains("SIGNALS"), "{text}");
         assert!(!text.contains("TRIAGE"), "{text}");
         assert!(text.contains("NEXT"), "{text}");
         assert!(text.contains("validate: `verify F-0001`"), "{text}");
@@ -610,13 +595,13 @@ mod tests {
         assert_sections_in_order(
             &text,
             &[
-                "CLAIM",
-                "SIGNALS",
-                "EVIDENCE",
-                "ANALYSIS",
-                "VERIFICATION",
-                "DECISION",
+                "STATUS",
                 "NEXT",
+                "EVIDENCE",
+                "VERIFICATION",
+                "ANALYSIS",
+                "CLAIM",
+                "DECISION",
                 "SCANNER MESSAGE",
                 "PROVENANCE",
             ],
@@ -683,8 +668,10 @@ mod tests {
     fn detail_actions_include_report_command_when_available() {
         let text = detail_text(Some(WORKBENCH_REPORT_COMMAND));
 
-        assert!(text.contains("`workspace export findings"), "{text}");
-        assert!(text.contains("report.sarif`"), "{text}");
+        assert!(
+            text.contains("`findings export report.sarif sarif`"),
+            "{text}"
+        );
         assert!(text.contains("validate: `verify F-0001`"), "{text}");
         assert!(text.contains("report:"), "{text}");
         assert!(!text.contains("o open in editor"), "{text}");

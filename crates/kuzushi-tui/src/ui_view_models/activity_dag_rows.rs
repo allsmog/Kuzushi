@@ -50,12 +50,37 @@ fn task_status_rows(
     width: usize,
     now: Instant,
 ) -> Vec<ActivityDagPaneRow> {
-    session
+    let hidden_not_run = (!route.verbose_subsystems)
+        .then(|| {
+            session
+                .tasks
+                .values()
+                .filter(|row| activity_row_is_never_started(row))
+                .count()
+        })
+        .unwrap_or(0);
+    let mut rows = session
         .tasks
         .values()
         .enumerate()
+        .filter(|(_, row)| route.verbose_subsystems || !activity_row_is_never_started(row))
         .flat_map(|(index, row)| task_pane_rows(route, row, index, width, now))
-        .collect()
+        .collect::<Vec<_>>();
+    if hidden_not_run > 0 {
+        rows.push(ActivityDagPaneRow {
+            text: fit(
+                &format!("  {hidden_not_run} not run · V shows tasks"),
+                width,
+            ),
+            tone: ActivityDagRowTone::Muted,
+        });
+    }
+    rows
+}
+
+fn activity_row_is_never_started(row: &DagTaskRow) -> bool {
+    row.state == DagTaskState::Queued
+        || (row.state == DagTaskState::Skipped && row.started_at.is_none())
 }
 
 fn append_subsystem_row(
@@ -191,8 +216,10 @@ fn dag_row_tone(state: DagTaskState) -> ActivityDagRowTone {
     match state {
         DagTaskState::Done => ActivityDagRowTone::Done,
         DagTaskState::Active => ActivityDagRowTone::Active,
+        DagTaskState::Canceling => ActivityDagRowTone::Active,
         DagTaskState::Queued => ActivityDagRowTone::Queued,
         DagTaskState::Failing => ActivityDagRowTone::Failing,
+        DagTaskState::Blocked => ActivityDagRowTone::Failing,
         DagTaskState::Canceled => ActivityDagRowTone::Canceled,
         DagTaskState::Skipped => ActivityDagRowTone::Muted,
     }
@@ -219,8 +246,10 @@ fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant, selected: bool) ->
     let symbol = match row.state {
         DagTaskState::Done => "✓",
         DagTaskState::Active => spinner_frame(now),
+        DagTaskState::Canceling => "×",
         DagTaskState::Queued => "·",
         DagTaskState::Failing => "!",
+        DagTaskState::Blocked => "▣",
         DagTaskState::Canceled => "×",
         DagTaskState::Skipped => "⊘",
     };
@@ -343,7 +372,9 @@ fn dag_subsystems_row_text(
 fn subsystem_row_tone(state: DagTaskState) -> ActivityDagRowTone {
     match state {
         DagTaskState::Failing => ActivityDagRowTone::Failing,
+        DagTaskState::Blocked => ActivityDagRowTone::Failing,
         DagTaskState::Active => ActivityDagRowTone::Active,
+        DagTaskState::Canceling => ActivityDagRowTone::Active,
         DagTaskState::Done => ActivityDagRowTone::Done,
         DagTaskState::Canceled => ActivityDagRowTone::Canceled,
         DagTaskState::Skipped => ActivityDagRowTone::Muted,
@@ -354,7 +385,9 @@ fn subsystem_row_tone(state: DagTaskState) -> ActivityDagRowTone {
 fn subsystem_state_label(state: DagTaskState) -> &'static str {
     match state {
         DagTaskState::Failing => "failing",
+        DagTaskState::Blocked => "blocked",
         DagTaskState::Active => "active",
+        DagTaskState::Canceling => "canceling",
         DagTaskState::Done => "done",
         DagTaskState::Canceled => "canceled",
         DagTaskState::Skipped => "not run",
@@ -369,22 +402,15 @@ fn elapsed_label(row: &DagTaskRow, now: Instant) -> String {
     };
     let end = row.completed_at.unwrap_or(now);
     let elapsed = end.saturating_duration_since(started);
-    let secs = elapsed.as_secs_f64();
-    if secs >= 60.0 {
-        format!("{:.0}m{:02.0}s", (secs / 60.0).floor(), secs % 60.0)
-    } else if secs >= 10.0 {
-        format!("{secs:>4.1}s")
-    } else if secs >= 1.0 {
-        format!("{secs:>4.2}s")
+    let secs = elapsed.as_secs();
+    if secs >= 3_600 {
+        format!("{}h{}m", secs / 3_600, (secs % 3_600) / 60)
+    } else if secs >= 60 {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    } else if secs >= 1 {
+        format!("{secs}s")
     } else {
-        let ms = elapsed.as_millis();
-        if ms == 0 {
-            "  <1ms".to_string()
-        } else if ms < 1000 {
-            format!("{ms:>4}ms")
-        } else {
-            format!("{secs:>4.2}s")
-        }
+        "<1s".to_string()
     }
 }
 
@@ -419,18 +445,34 @@ mod tests {
         session.subsystem_aggregate =
             SubsystemAggregate::test_seeded(2, "preflight", DagTaskState::Queued);
 
-        let route = ActivityRouteState::default();
+        let mut route = ActivityRouteState::default();
+        route.verbose_subsystems = true;
         let rows = activity_dag_pane_rows(&session, &route, 40, Instant::now(), None);
 
         assert_eq!(rows.len(), 5);
         assert!(rows[0].text.contains("semgrep:scan"));
         assert_eq!(rows[0].tone, ActivityDagRowTone::Queued);
         assert!(rows[1].text.contains("subsystems (2)"));
-        assert!(rows[1].text.contains("hidden"));
+        assert!(rows[1].text.contains("expanded"));
         assert_eq!(rows[1].tone, ActivityDagRowTone::Muted);
         assert!(rows[2].text.contains("legend:"));
         assert!(rows[3].text.contains("ACTIONS"));
         assert!(rows[4].text.contains("no trace events"));
+    }
+
+    #[test]
+    fn never_started_skipped_tasks_stay_collapsed_until_verbose() {
+        let mut session = ActivitySession::new("r-1");
+        let mut row =
+            DagTaskRow::queued("codeql:scan".to_string(), "codeql".to_string(), Vec::new());
+        row.state = DagTaskState::Skipped;
+        row.last_label = "not run in this scan".to_string();
+        session.tasks.insert(row.task_id.clone(), row);
+
+        let route = ActivityRouteState::default();
+        let rows = activity_dag_pane_rows(&session, &route, 60, Instant::now(), None);
+        assert!(rows.iter().any(|row| row.text.contains("1 not run")));
+        assert!(!rows.iter().any(|row| row.text.contains("codeql:scan")));
     }
 
     #[test]

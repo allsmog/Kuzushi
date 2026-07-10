@@ -99,7 +99,7 @@ impl FindingRef {
 }
 
 /// Conjunctive match predicate: every `Some(_)` field must match, and at
-/// least one field must be `Some` (validated at parse time). Compiled form:
+/// least one field must be `Some` (enforced at parse time). Compiled form:
 /// path globs are `globset::GlobMatcher`.
 #[derive(Debug, Clone)]
 pub struct SuppressionPredicate {

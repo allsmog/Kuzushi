@@ -85,8 +85,14 @@ mod tests {
     fn credentialed_providers_end_with_the_offline_demo_row() {
         for provider in ["anthropic", "openai", "openai-codex"] {
             let rows = auth_method_rows(provider);
-            assert_eq!(rows.first().map(|row| row.kind), Some(AuthMethodRowKind::ApiKey));
-            assert_eq!(rows.last().map(|row| row.kind), Some(AuthMethodRowKind::OfflineDemo));
+            assert_eq!(
+                rows.first().map(|row| row.kind),
+                Some(AuthMethodRowKind::ApiKey)
+            );
+            assert_eq!(
+                rows.last().map(|row| row.kind),
+                Some(AuthMethodRowKind::OfflineDemo)
+            );
             assert!(rows.iter().any(|row| row.kind == AuthMethodRowKind::OAuth));
         }
     }

@@ -32,6 +32,7 @@ impl SteerQueue {
         self.items.pop_front()
     }
 
+    #[cfg(test)]
     pub(crate) fn peek(&self) -> Option<&QueuedCommand> {
         self.items.front()
     }
@@ -40,6 +41,7 @@ impl SteerQueue {
         self.items.len()
     }
 
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
@@ -52,6 +54,14 @@ impl SteerQueue {
     /// `queued-<n>` (1-based, in queue order). Used to target `jobs -k`.
     pub(crate) fn synthetic_id(index: usize) -> String {
         format!("queued-{}", index + 1)
+    }
+
+    /// Drop every pending item (operator full-stop, e.g. Ctrl+C abort).
+    /// Returns the drained commands so the caller can report exactly what was
+    /// dropped instead of silently discarding queued work (CLAUDE.md: honest
+    /// state).
+    pub(crate) fn drain_all(&mut self) -> Vec<QueuedCommand> {
+        self.items.drain(..).collect()
     }
 
     /// Remove a queued item named by its synthetic `queued-<n>` id (1-based).
@@ -97,6 +107,19 @@ mod tests {
         assert_eq!(removed.raw, "run a");
         assert_eq!(queue.len(), 1);
         assert_eq!(queue.peek().unwrap().raw, "run b");
+    }
+
+    #[test]
+    fn drain_all_empties_the_queue_and_returns_the_dropped_items() {
+        let mut queue = SteerQueue::default();
+        queue.enqueue(cmd("run a"));
+        queue.enqueue(cmd("run b"));
+        let dropped = queue.drain_all();
+        assert_eq!(dropped.len(), 2);
+        assert_eq!(dropped[0].raw, "run a");
+        assert_eq!(dropped[1].raw, "run b");
+        assert!(queue.is_empty());
+        assert!(queue.drain_all().is_empty());
     }
 
     #[test]

@@ -3,7 +3,7 @@ use crate::ui_view_models::{
     jobs_registry_model, ui_runs_root_relative_path, JobRow, JobRunStatus,
 };
 
-const JOBS_COLUMN_WIDTHS: [usize; 6] = [16, 8, 11, 8, 20, 8];
+const JOBS_COLUMN_WIDTHS: [usize; 6] = [10, 8, 11, 8, 20, 8];
 
 /// The `jobs` registry: the operator control surface over live + recent runs.
 /// Extends the historical Runs timeline with elapsed, current step, queued
@@ -16,7 +16,7 @@ pub(crate) fn jobs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let widths = column_widths(area);
     lines.push(aligned_header(
         &[
-            "runId", "kind", "status", "elapsed", "step", "findings", "target",
+            "run ref", "kind", "status", "elapsed", "step", "findings", "target",
         ],
         &widths,
     ));
@@ -46,7 +46,10 @@ fn column_widths(area: Rect) -> [usize; 7] {
 fn job_row_line(row: &JobRow, widths: &[usize; 7]) -> Line<'static> {
     Line::from(vec![
         Span::styled(
-            format!("{}  ", pad(&fit(&row.run_id, widths[0]), widths[0])),
+            format!(
+                "{}  ",
+                pad(&crate::app::compact_run_reference(&row.run_id), widths[0])
+            ),
             theme::accent(),
         ),
         Span::styled(
@@ -99,6 +102,7 @@ fn job_status_style(status: JobRunStatus) -> Style {
         JobRunStatus::Completed => theme::success(),
         JobRunStatus::Partial | JobRunStatus::Interrupted => theme::warn(),
         JobRunStatus::Failed => theme::danger(),
+        JobRunStatus::Canceled => theme::warn(),
         // Stale (unverified disk `running`) reads muted, not confident green.
         JobRunStatus::Stale | JobRunStatus::Skipped | JobRunStatus::Unknown => theme::muted(),
     }

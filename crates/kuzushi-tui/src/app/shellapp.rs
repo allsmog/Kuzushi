@@ -26,6 +26,15 @@ impl ShellApp {
 
     #[doc(hidden)]
     pub fn set_shell_view(&mut self, view: ShellView) {
+        let current = self.shell_view();
+        if contextual_overlay_view(view) && !contextual_overlay_view(current) {
+            self.router.set_overlay_origin(Some(current));
+        } else if !contextual_overlay_view(view) {
+            self.router.set_overlay_origin(None);
+        }
+        if view != ShellView::Workbench && !contextual_overlay_view(view) {
+            self.router.workbench_mut().clear_zoom();
+        }
         self.router.set_current(view);
     }
 
@@ -515,8 +524,20 @@ impl ShellApp {
         self.runtime_state.tool_run_mut().clear_finished_run_slot();
     }
 
-    pub(crate) fn request_tool_abort_flag(&mut self) {
-        self.runtime_state.tool_run_mut().request_abort();
+    pub(crate) fn request_tool_abort_flag(&mut self, reason: AbortReason) {
+        self.runtime_state.tool_run_mut().request_abort(reason);
+    }
+
+    pub(crate) fn tool_abort_reason(&self) -> Option<AbortReason> {
+        self.runtime_state.tool_run().abort_reason()
+    }
+
+    pub(crate) fn scan_abort_reason(&self) -> Option<AbortReason> {
+        self.runtime_state.scan_abort_reason()
+    }
+
+    pub(crate) fn set_scan_abort_reason(&mut self, reason: Option<AbortReason>) {
+        self.runtime_state.set_scan_abort_reason(reason);
     }
 
     pub(crate) fn input(&self) -> &str {
@@ -828,4 +849,16 @@ impl ShellApp {
     pub(crate) fn set_session_thinking_level(&mut self, thinking_level: Option<String>) {
         self.session.set_thinking_level(thinking_level);
     }
+}
+
+fn contextual_overlay_view(view: ShellView) -> bool {
+    matches!(
+        view,
+        ShellView::CommandPalette
+            | ShellView::ConfirmDialog
+            | ShellView::QuitConfirm
+            | ShellView::ThemePicker
+            | ShellView::Keymap
+            | ShellView::UpdateAvailable
+    )
 }

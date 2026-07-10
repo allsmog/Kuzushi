@@ -16,6 +16,18 @@ impl ShellApp {
             ReviewDecisionCommand::Dismiss { reason, note } => {
                 self.reduce_current_finding_dismissal(reason, note)
             }
+            ReviewDecisionCommand::Suppress {
+                reference,
+                reason,
+                author,
+                days,
+            } => vec![ShellEffect::RecordSuppression(SuppressionApply {
+                target: self.target_owned(),
+                reference: reference.clone(),
+                reason: reason.clone(),
+                author: author.clone(),
+                days: *days,
+            })],
             ReviewDecisionCommand::Unsupported(raw) => {
                 self.log(
                     "review",
@@ -42,6 +54,9 @@ impl ShellApp {
         let Some((alias, finding)) = self.current_review_finding_or_log() else {
             return Vec::new();
         };
+        if verdict == ReviewDecisionVerdict::Suppressed {
+            return vec![self.default_suppression_effect(alias, &finding, reason)];
+        }
         let decision = ReviewDecision {
             verdict,
             author: TriageAuthor::Human,
@@ -50,19 +65,122 @@ impl ShellApp {
             dismiss_reason: None,
             actor: None,
         };
+        vec![self.current_finding_decision_effect(alias, finding, decision)]
+    }
+
+    fn default_suppression_effect(
+        &self,
+        alias: Option<String>,
+        finding: &Finding,
+        reason: String,
+    ) -> ShellEffect {
+        ShellEffect::RecordSuppression(SuppressionApply {
+            target: self.target_owned(),
+            reference: alias.unwrap_or_else(|| finding.fingerprint.clone()),
+            reason,
+            author: "operator".to_string(),
+            days: 90,
+        })
+    }
+
+    fn current_finding_decision_effect(
+        &self,
+        alias: Option<String>,
+        finding: Finding,
+        decision: ReviewDecision,
+    ) -> ShellEffect {
         let read_watermark = self
             .router
             .workbench()
             .review()
             .read_watermark_for(finding_stable_fp(&finding))
             .or_else(|| self.findings_read_watermark_for(&finding));
-        vec![ShellEffect::RecordReviewDecision(ReviewDecisionApply {
+        ShellEffect::RecordReviewDecision(ReviewDecisionApply {
             alias,
             decision,
             finding,
             read_watermark,
             target: self.target_owned(),
-        })]
+        })
+    }
+
+    pub(crate) fn record_suppression_effect(
+        &mut self,
+        apply: SuppressionApply,
+    ) -> Vec<ShellEffect> {
+        let Some(target) = apply.target.as_deref() else {
+            self.log("error", "suppress needs an active target");
+            return Vec::new();
+        };
+        let workspace = match WorkspaceTarget::new(target) {
+            Ok(workspace) => workspace,
+            Err(error) => {
+                self.log(
+                    "error",
+                    format!("could not open suppression workspace: {error}"),
+                );
+                return Vec::new();
+            }
+        };
+        match self.persist_suppression(&workspace, &apply) {
+            Ok((message, fingerprint)) => {
+                self.log("suppress", message);
+                let filter = self.active_findings_filter();
+                let mut effects = vec![ShellEffect::RefreshFindings(FindingsRefresh {
+                    announce: false,
+                    filter: filter.clone(),
+                })];
+                if filter.is_some() {
+                    effects.push(ShellEffect::ReportFilteredFindingMovement(
+                        FilteredFindingMovementNotice { fingerprint },
+                    ));
+                }
+                effects
+            }
+            Err(error) => {
+                self.log("error", format!("suppression not recorded: {error}"));
+                Vec::new()
+            }
+        }
+    }
+
+    fn persist_suppression(
+        &self,
+        workspace: &WorkspaceTarget,
+        apply: &SuppressionApply,
+    ) -> anyhow::Result<(String, String)> {
+        let store = kuzushi_core::FindingStore::open(workspace.findings_db_path())?;
+        let report = store.list_findings_filtered(&kuzushi_core::FindingListFilter::with_limit(
+            kuzushi_core::FindingListFilter::MAX_LIMIT,
+        ))?;
+        let finding = kuzushi_core::resolve_finding_alias(&report.findings, &apply.reference)
+            .or(store.get_finding_by_reference(&apply.reference)?)
+            .ok_or_else(|| anyhow::anyhow!("no finding matches {:?}", apply.reference))?;
+        let expires_at_unix = current_unix().saturating_add(apply.days.saturating_mul(86_400));
+        let result = kuzushi_core::suppressions::record_finding_suppression(
+            workspace,
+            &finding,
+            kuzushi_core::suppressions::FindingSuppressionRequest {
+                reason: apply.reason.clone(),
+                author: apply.author.clone(),
+                expires_at_unix,
+            },
+        )?;
+        Ok((
+            format!(
+                "recorded {} for {} · decision #{} · expires {}{}",
+                result.record.id,
+                apply.reference,
+                result.decision_id,
+                expires_at_unix,
+                if result.structured_rule_written {
+                    ""
+                } else {
+                    " · free-text reason saved without a structured rule"
+                }
+            ),
+            finding.fingerprint,
+        ))
     }
 
     fn findings_read_watermark_for(&self, finding: &Finding) -> Option<u64> {
@@ -245,6 +363,13 @@ impl ShellApp {
             self.log("review", "row moved because the active filter excludes it");
         }
     }
+}
+
+fn current_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 pub(crate) fn finding_stable_fp(finding: &Finding) -> &str {

@@ -18,31 +18,70 @@ impl ShellApp {
     }
 
     pub(crate) fn request_active_abort(&mut self) -> bool {
+        self.request_active_abort_with_reason(AbortReason::Operator)
+    }
+
+    pub(crate) fn request_active_abort_with_reason(&mut self, reason: AbortReason) -> bool {
         let mut requested = false;
-        requested |= self.request_scan_abort();
-        requested |= self.request_tool_abort();
+        requested |= self.request_scan_abort_for(reason);
+        requested |= self.request_tool_abort_for(reason);
         requested |= self.request_agent_abort();
         requested |= self.request_plan_abort();
         requested |= self.request_threat_abort();
         if requested {
-            if let Some(session) = self.activity_mut() {
-                session.mark_active_tasks_canceled();
+            if self.engagement.has_running_tool() || !self.engagement.planning_queues_empty() {
+                self.engagement.pause_planning_queue();
+                self.log(
+                    "planning",
+                    "planning queue paused after stop request; type `next` to review and resume",
+                );
             }
+            if let Some(session) = self.activity_mut() {
+                session.mark_active_tasks_canceling();
+            }
+            // A full-stop abort must not leave queued work behind: the
+            // canceled worker's terminal event drains the steer queue
+            // (`advance_steer_queue` in `apply_job_event`), so anything left
+            // here would launch as fresh work seconds after the operator said
+            // "stop". Drop the queue on the same stage that cancels jobs and
+            // tell the operator exactly what was dropped.
+            self.drop_queued_steer_items_for_abort();
         }
         requested
     }
 
+    fn drop_queued_steer_items_for_abort(&mut self) {
+        let dropped = self.steer_queue_mut().drain_all();
+        if dropped.is_empty() {
+            return;
+        }
+        let summaries: Vec<&str> = dropped.iter().map(|cmd| cmd.summary.as_str()).collect();
+        self.log(
+            "queue",
+            format!(
+                "stop requested; dropped {} queued item(s): {} (re-queue after the abort if still wanted)",
+                dropped.len(),
+                summaries.join(", ")
+            ),
+        );
+    }
+
     pub(crate) fn request_scan_abort(&mut self) -> bool {
+        self.request_scan_abort_for(AbortReason::Operator)
+    }
+
+    fn request_scan_abort_for(&mut self, reason: AbortReason) -> bool {
         if !self.can_request_scan_abort() {
             return false;
         }
 
-        self.apply_scan_abort_request();
+        self.apply_scan_abort_request(reason);
         true
     }
 
-    fn apply_scan_abort_request(&mut self) {
+    fn apply_scan_abort_request(&mut self, reason: AbortReason) {
         self.cancel_run_job_or_scan_token();
+        self.set_scan_abort_reason(Some(reason));
         self.mark_scan_abort_requested();
         self.announce_scan_abort_requested();
     }
@@ -76,6 +115,10 @@ impl ShellApp {
     }
 
     pub(crate) fn request_tool_abort(&mut self) -> bool {
+        self.request_tool_abort_for(AbortReason::Operator)
+    }
+
+    fn request_tool_abort_for(&mut self, reason: AbortReason) -> bool {
         let Some(tool_name) = self.running_tool_name_owned() else {
             return false;
         };
@@ -83,7 +126,7 @@ impl ShellApp {
             return false;
         }
         self.cancel_run_job_or_tool_token();
-        self.request_tool_abort_flag();
+        self.request_tool_abort_flag(reason);
         self.log(
             "tool",
             format!("{tool_name} cancel requested; waiting for the worker to stop"),

@@ -194,6 +194,30 @@ fn discovers_entrypoint_clusters_without_their_own_manifest() {
     assert!(!entrypoints.contains(&"pkg/transport"), "{entrypoints:?}");
 }
 
+#[test]
+fn entrypoint_cluster_discovery_is_bounded_to_known_roots() {
+    let temp = tempfile::tempdir().unwrap();
+    for index in 0..(ENTRYPOINT_CLUSTER_BUDGET + 80) {
+        touch_dir(temp.path(), &format!("apps/service-{index:04}"));
+    }
+    touch_dir(temp.path(), "unrelated/deep/tree");
+
+    let tree = discover_nested_project_scopes(temp.path());
+    let entrypoints = tree
+        .scopes
+        .iter()
+        .filter(|scope| scope.kind == NestedProjectKind::EntrypointCluster)
+        .collect::<Vec<_>>();
+
+    assert_eq!(entrypoints.len(), ENTRYPOINT_CLUSTER_BUDGET);
+    assert!(entrypoints
+        .iter()
+        .all(|scope| scope.rel_path.starts_with("apps/")));
+    assert!(!entrypoints
+        .iter()
+        .any(|scope| scope.rel_path.starts_with("unrelated/")));
+}
+
 fn package_scope_paths(tree: &NestedProjectScopeTree) -> Vec<&str> {
     tree.scopes
         .iter()

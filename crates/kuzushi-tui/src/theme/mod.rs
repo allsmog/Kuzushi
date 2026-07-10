@@ -163,7 +163,10 @@ pub fn proof_confidence_tone(confidence: kuzushi_core::ProofConfidence) -> Style
 }
 
 pub fn selection() -> Style {
-    let config = active_theme();
+    selection_for_config(active_theme())
+}
+
+fn selection_for_config(config: ThemeConfig) -> Style {
     if config.no_color {
         return Style::default().add_modifier(Modifier::REVERSED);
     }
@@ -369,6 +372,10 @@ mod tests {
             disabled_for_config(config),
             Style::default().add_modifier(Modifier::DIM)
         );
+        assert_eq!(
+            selection_for_config(config),
+            Style::default().add_modifier(Modifier::REVERSED)
+        );
     }
 
     #[test]
@@ -398,6 +405,22 @@ mod tests {
         assert!(subtle_for_config(config)
             .add_modifier
             .contains(Modifier::DIM));
+        assert_eq!(selection_for_config(config).bg, Some(Color::Blue));
+    }
+
+    #[test]
+    fn selection_remains_visible_in_truecolor_and_high_contrast() {
+        let truecolor = ThemeConfig::default();
+        let high_contrast = ThemeConfig {
+            high_contrast: true,
+            ..ThemeConfig::default()
+        };
+
+        assert_eq!(selection_for_config(truecolor).bg, Some(T_ACCENT));
+        assert_eq!(selection_for_config(high_contrast).bg, Some(T_ACCENT));
+        assert!(selection_for_config(high_contrast)
+            .add_modifier
+            .contains(Modifier::BOLD));
     }
 
     #[test]

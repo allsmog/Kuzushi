@@ -2,40 +2,79 @@ use super::*;
 use crate::app::TargetCandidate;
 
 pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(divider("CHOOSE A TARGET", area.width));
+    let mut lines = target_picker_intro(area.width);
+    lines.extend(target_candidate_lines(app, area.width));
+    lines.extend(target_picker_footer(area.width));
+    lines
+}
+
+fn target_picker_intro(width: u16) -> Vec<Line<'static>> {
+    let mut lines = vec![divider("CHOOSE A TARGET", width), blank()];
+    lines.extend(
+        wrap_text(
+            "Kuzushi anchors scans, findings, and artifacts to a target directory.",
+            width as usize,
+        )
+        .into_iter()
+        .map(|line| muted(&line)),
+    );
+    lines.extend(
+        wrap_text(
+            "Nothing defaults to cwd silently — pick it, a repo, or a persisted scope explicitly.",
+            width as usize,
+        )
+        .into_iter()
+        .map(|line| muted(&line)),
+    );
     lines.push(blank());
-    lines.push(muted(
-        "Kuzushi anchors scans, findings, and artifacts to a target directory.",
-    ));
-    lines.push(muted(
-        "Nothing defaults to cwd silently — pick it, a repo, or a submodule explicitly.",
-    ));
-    lines.push(blank());
+    lines
+}
+
+fn target_candidate_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
     let candidates = app.router.target_picker().candidates();
     let label_width = candidate_label_width(candidates);
-    for (idx, candidate) in candidates.iter().enumerate() {
-        lines.push(target_picker_row(
-            app,
-            idx,
-            candidate,
-            label_width,
-            area.width,
-        ));
-    }
+    candidates
+        .iter()
+        .enumerate()
+        .map(|(index, candidate)| target_picker_row(app, index, candidate, label_width, width))
+        .collect()
+}
+
+fn target_picker_footer(width: u16) -> Vec<Line<'static>> {
+    let mut lines = vec![blank()];
+    lines.extend(
+        wrap_text(
+            "any other directory: Esc, then `target <path>`",
+            width as usize,
+        )
+        .into_iter()
+        .map(|line| muted(&line)),
+    );
+    lines.extend(
+        wrap_text(
+            "no repo or no key yet: press `d` for the offline fixture",
+            width as usize,
+        )
+        .into_iter()
+        .map(|line| muted(&line)),
+    );
     lines.push(blank());
-    lines.push(muted("any other directory: Esc, then `target <path>`"));
-    lines.push(muted(
-        "no repo or no key yet: press `d` for the offline fixture",
+    lines.push(responsive_keybind_hint_line(
+        width as usize,
+        &[
+            ("↑/↓/j/k", "move"),
+            (":", "type a command"),
+            ("d", "offline fixture"),
+            ("Enter", "select"),
+            ("Esc/q", "browse without a target"),
+        ],
+        &[
+            ("↑/↓", "move"),
+            ("Enter", "select"),
+            ("d", "demo"),
+            ("Esc", "browse"),
+        ],
     ));
-    lines.push(blank());
-    lines.push(keybind_hint_line(&[
-        ("↑/↓/j/k", "move"),
-        (":", "type a command"),
-        ("d", "offline fixture"),
-        ("Enter", "select"),
-        ("Esc/q", "browse without a target"),
-    ]));
     lines
 }
 
@@ -54,22 +93,16 @@ fn target_picker_row(
     label_width: usize,
     width: u16,
 ) -> Line<'static> {
-    let marker = if idx == app.router.target_picker().cursor() {
-        ">"
-    } else {
-        " "
-    };
     let body = format!(
-        "  {marker} {label:<label_width$}   {hint}",
+        "{label:<label_width$}   {hint}",
         label = candidate.label,
         hint = candidate_hint(candidate),
     );
-    let style = if idx == app.router.target_picker().cursor() {
-        theme::success().add_modifier(Modifier::BOLD)
-    } else {
-        theme::primary()
-    };
-    Line::styled(fit(&body, width as usize), style)
+    selection_band(
+        &body,
+        idx == app.router.target_picker().cursor(),
+        width as usize,
+    )
 }
 
 fn candidate_hint(candidate: &TargetCandidate) -> String {

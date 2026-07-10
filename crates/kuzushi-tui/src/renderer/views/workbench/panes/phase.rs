@@ -4,9 +4,7 @@ use crate::ui_view_models::{
     cached_findings_heatmap, cached_risk_by_module, recommendation_model, ModuleRisk,
     RecommendationRow,
 };
-use kuzushi_core::engagement::{ENGAGEMENT_DIR, HARNESS_FILE};
 use ratatui::prelude::{Line, Span};
-use std::fs;
 
 pub(in crate::renderer::views::workbench) fn terrain_attack_surface_lines(
     app: &ShellApp,
@@ -70,13 +68,16 @@ pub(in crate::renderer::views::workbench) fn terrain_material_lines(
 
 fn harness_material_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
     let mut lines = vec![Line::styled("HARNESS", theme::accent())];
-    let Some(target) = app.target_path_buf() else {
+    if app.target().is_none() {
         lines.push(Line::styled("  no target selected", theme::muted()));
         lines.push(command_hint("target <path>", "select workspace", width));
         return lines;
-    };
-    let path = target.join(ENGAGEMENT_DIR).join(HARNESS_FILE);
-    let Ok(body) = fs::read_to_string(&path) else {
+    }
+    let body = app
+        .workbench_cache()
+        .borrow_mut()
+        .harness_file(app.target());
+    let Some(body) = body else {
         lines.push(Line::styled("  not seeded", theme::muted()));
         lines.push(command_hint("aim <focus>", "seed focus and engines", width));
         return lines;

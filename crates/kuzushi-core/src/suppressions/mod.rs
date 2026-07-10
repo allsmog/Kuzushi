@@ -15,7 +15,8 @@ pub mod persistence;
 
 pub use application::{
     compile_scope_rule, compile_whitebox_rules, effective_suppression_rules,
-    reconcile_suppression_events, run_suppression_sweep, scan_ignore_comments, EffectiveRules,
+    reconcile_suppression_events, record_finding_suppression, run_suppression_sweep,
+    scan_ignore_comments, EffectiveRules, FindingSuppressionRequest, FindingSuppressionResult,
     IgnoreCommentScan, SuppressionReconcileSummary, SuppressionSweep,
 };
 pub use domain::{

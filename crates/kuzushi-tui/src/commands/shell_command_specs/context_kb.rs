@@ -78,6 +78,7 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &[
             "/workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
             "findings export <path> [format] [--completeness open|complete] [--allow-empty]",
+            "export <path> [format] [--completeness open|complete] [--allow-empty]",
         ],
         category: ShellCommandCategory::ContextKb,
         description: "export findings; choose all/open/complete and pass --allow-empty for metadata-only exports",

@@ -1,0 +1,23 @@
+# J6 — Recon intake
+# Persona: operator with an httpx export. Goal: reach recon:import.
+# Known risk: flagged UNREACHABLE (BLOCKER) in the July devex audit — this
+# journey exists to confirm whether an operator can get there at all.
+name: Recon intake (recon:import reachability)
+env: KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+shell: mkdir -p @TMP_TARGET/.kuzushi && printf '[in_scope]\nhosts = ["example.com"]\n' > @TMP_TARGET/.kuzushi/scope.toml
+shell: printf '{"url":"https://example.com","status_code":200,"title":"Example"}\n' > @ART/httpx.json
+launch: --target @TMP_TARGET
+wait-for: 30 kuzushi>
+submit: help
+wait: 2
+snap: help-recon-discoverability
+ask: Can an operator discover recon intake from `help` at all? (July blocker: recon:import unreachable.)
+submit: use recon
+wait: 2
+snap: use-recon
+ask: `use recon` — does the module surface list an import verb with usage guidance?
+submit: recon:import httpx @ART/httpx.json
+wait: 8
+snap: recon-import-result
+expect-not: unknown tool
+ask: Did recon:import actually run (materialize the export into the recon store), refuse with an ACTIONABLE error, or dead-end? Is the scope gate (scope.toml) surfaced honestly?

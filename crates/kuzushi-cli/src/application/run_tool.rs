@@ -1,6 +1,7 @@
 #[cfg(test)]
 pub(crate) use super::run_tool_prepare::start_cli_tool_run_with_loaded_modules;
 use super::run_tool_prepare::{prepare_cli_tool_run, PreparedCliToolRun};
+use crate::tool_requirements::resolve_run_target;
 use crate::tool_run_artifacts::{fail_cli_tool_run, finish_cli_tool_run};
 use anyhow::Result;
 use kuzushi_core::run_artifacts::{
@@ -18,10 +19,11 @@ pub(crate) fn run_tool_command(
     input: String,
     options: Vec<String>,
     autonomy: Option<String>,
-    target: Option<PathBuf>,
+    global_target: Option<PathBuf>,
     load: Vec<String>,
 ) -> Result<()> {
     let input = resolve_run_input(input)?;
+    let target = resolve_run_target(global_target);
     let tool_label = tool.clone();
     match prepare_cli_tool_run(tool, input, options, autonomy, target, load) {
         Ok(run) => {

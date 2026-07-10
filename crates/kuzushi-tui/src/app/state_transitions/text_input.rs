@@ -26,34 +26,11 @@ impl ShellApp {
 
     pub(super) fn handle_enter_key(&mut self) -> InputUpdate {
         let raw = self.take_input();
-        if let Some(update) = self.submit_catalog_cursor_for_empty_enter(&raw) {
-            return update;
-        }
         let update = self.reduce_submitted_line(&raw);
         InputUpdate {
             handled: update.handled,
             effects: update.effects,
         }
-    }
-
-    pub(super) fn submit_catalog_cursor_for_empty_enter(
-        &mut self,
-        raw: &str,
-    ) -> Option<InputUpdate> {
-        if !raw.is_empty()
-            || !matches!(self.shell_view(), ShellView::Catalog)
-            || !self.router.catalog().is_expanded()
-        {
-            return None;
-        }
-        let Some(id) = self.catalog_cursor_module_id() else {
-            return None;
-        };
-        let update = self.reduce_submitted_line(&format!("use {id}"));
-        Some(InputUpdate {
-            handled: update.handled,
-            effects: update.effects,
-        })
     }
 
     pub(super) fn clear_conversation_preserving_input(&mut self) -> Vec<ShellEffect> {
@@ -65,7 +42,7 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_paste(&mut self, text: &str) -> InputUpdate {
-        if text.is_empty() {
+        if text.is_empty() || self.input_mode() == InputMode::Navigate {
             return InputUpdate::ignored();
         }
         let normalised = normalise_paste_text(text);
@@ -180,6 +157,10 @@ impl ShellApp {
         self.router
             .findings_mut()
             .step_direction(amount as isize, len);
+        self.router
+            .workbench_mut()
+            .scroll_mut()
+            .set(crate::app::WorkbenchPane::Details, 0);
     }
 
     fn workbench_pane_for_mouse(&self, column: u16, row: u16) -> Option<crate::app::WorkbenchPane> {

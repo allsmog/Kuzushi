@@ -149,6 +149,27 @@ pub enum AutonomyDecision {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutonomyRefusal {
+    pub tool_name: String,
+    pub needed: WorkflowPhase,
+    pub ceiling: WorkflowPhase,
+}
+
+impl std::fmt::Display for AutonomyRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{} is a {} action but autonomy posture is capped at {}; raise posture (Ctrl+Up) to authorize",
+            self.tool_name,
+            self.needed.word(),
+            self.ceiling.word()
+        )
+    }
+}
+
+impl std::error::Error for AutonomyRefusal {}
+
 /// Pure autonomy gate. No IO, no model, no runtime. Refuses tools above the
 /// posture ceiling; otherwise allows (flagging mutating tools for approval).
 pub fn gate(tool_name: &str, posture: AutonomyPosture) -> AutonomyDecision {

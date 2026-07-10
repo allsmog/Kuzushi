@@ -63,6 +63,7 @@ pub(crate) enum ShellEffect {
     Quit,
     FinishShellQuit,
     RecordReviewDecision(ReviewDecisionApply),
+    RecordSuppression(SuppressionApply),
     UpdatePromptMutationStatus(PromptMutationStatusUpdate),
     RefreshPwnState,
     RefreshProgramScope,
@@ -298,8 +299,19 @@ pub(crate) struct ScanRunRecord {
 }
 
 pub(crate) enum ScanRunOutcome {
-    Complete { findings_count: usize },
-    Failed { error: String },
+    Complete {
+        findings_count: usize,
+    },
+    Failed {
+        error: String,
+    },
+    Canceled {
+        reason: String,
+        findings_count: Option<usize>,
+    },
+    Interrupted {
+        reason: String,
+    },
 }
 
 pub(crate) struct ScanStageTraceRecord {
@@ -318,11 +330,22 @@ pub(crate) struct ToolRunRecordEffect {
 pub(crate) enum ToolRunRecordOutcome {
     Complete { result: serde_json::Value },
     Failed { error: String },
+    Canceled { reason: String },
+    Interrupted { reason: String },
+    Refused { reason: String },
 }
 
 pub(crate) struct FindingsRefresh {
     pub(crate) announce: bool,
     pub(crate) filter: Option<String>,
+}
+
+pub(crate) struct SuppressionApply {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) reference: String,
+    pub(crate) reason: String,
+    pub(crate) author: String,
+    pub(crate) days: u64,
 }
 
 pub(crate) struct FilteredFindingMovementNotice {
@@ -707,7 +730,7 @@ impl ShellApp {
         // non-Run job must not blank the still-live Run job's rows.
         if kind == JobKind::Run {
             if let Some(session) = self.activity_mut() {
-                session.mark_active_tasks_canceled();
+                session.mark_active_tasks_canceling();
             }
         }
     }
@@ -759,10 +782,46 @@ impl ShellApp {
 
 fn resolve_run_artifact_selector(app: &mut ShellApp, open: &OpenRunArtifact) -> Option<String> {
     if open.selector != "latest" {
-        return Some(open.selector.clone());
+        return resolve_known_run_reference(app, open);
     }
     let latest_path = latest_run_pointer_path(app, open)?;
     read_latest_run_id(app, &latest_path)
+}
+
+fn resolve_known_run_reference(app: &mut ShellApp, open: &OpenRunArtifact) -> Option<String> {
+    let mut candidates = open
+        .target
+        .as_deref()
+        .and_then(|target| kuzushi_core::list_run_summaries(target).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|summary| summary.run_id)
+        .collect::<Vec<_>>();
+    if let Some(session) = app.activity() {
+        candidates.push(session.run_id.clone());
+    }
+    match resolve_run_reference(&open.selector, candidates.iter().map(String::as_str)) {
+        RunReferenceResolution::Resolved(run_id) => Some(run_id),
+        RunReferenceResolution::Ambiguous(matches) => {
+            app.log(
+                "error",
+                format!(
+                    "run reference {:?} is ambiguous: {}",
+                    open.selector,
+                    matches
+                        .iter()
+                        .map(|id| compact_run_reference(id))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            );
+            None
+        }
+        RunReferenceResolution::Missing => {
+            app.log("error", format!("run {:?} was not found", open.selector));
+            None
+        }
+    }
 }
 
 fn latest_run_pointer_path(app: &mut ShellApp, open: &OpenRunArtifact) -> Option<PathBuf> {

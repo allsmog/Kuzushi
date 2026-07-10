@@ -136,6 +136,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
         app.set_shell_view(ShellView::PromptsEditor);
+        app.set_input_mode(InputMode::Navigate);
         let path = kuzushi_core::prompt_override_path(temp.path(), "sast", "scan");
 
         let update = app.reduce_key(key(KeyCode::Char('s')));
@@ -157,6 +158,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
         app.set_shell_view(ShellView::Tune);
+        app.set_input_mode(InputMode::Navigate);
         let path = house_rule_path(temp.path());
 
         let update = app.reduce_key(key(KeyCode::Enter));

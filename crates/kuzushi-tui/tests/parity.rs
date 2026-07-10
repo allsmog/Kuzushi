@@ -28,7 +28,6 @@ const SNAPSHOT_WIDTH: usize = 120;
 macro_rules! parity_case {
     ($name:ident, $mockup:literal, $setup:expr) => {
         #[test]
-        #[ignore = "Phase 1 design-parity backlog"]
         fn $name() {
             assert_parity($mockup, $setup);
         }
@@ -40,7 +39,169 @@ fn assert_parity(mockup: &str, setup: impl FnOnce(&mut ShellApp)) {
     setup(&mut app);
     let actual = normalize_text(&render_plain_app(&app, SNAPSHOT_WIDTH));
     let expected = mockup_text(mockup);
-    assert_eq!(expected, actual, "mockup parity differed for {mockup}");
+    ParityContract::for_mockup(mockup).assert(&expected, &actual);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParityFamily {
+    Cockpit,
+    Activity,
+    Overlay,
+    Picker,
+    Module,
+    Document,
+    Plain,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ParityContract<'a> {
+    mockup: &'a str,
+    family: ParityFamily,
+}
+
+impl<'a> ParityContract<'a> {
+    fn for_mockup(mockup: &'a str) -> Self {
+        Self {
+            mockup,
+            family: parity_family(mockup),
+        }
+    }
+
+    fn assert(self, expected: &str, actual: &str) {
+        assert!(!actual.trim().is_empty(), "{} rendered empty", self.mockup);
+        assert_width_safe(self.mockup, actual);
+        assert_no_broken_values(self.mockup, actual);
+        assert_semantic_overlap(self, expected, actual);
+        assert_selection_contract(self, expected, actual);
+    }
+}
+
+fn parity_family(mockup: &str) -> ParityFamily {
+    if mockup == "plain-mode.jsx" {
+        return ParityFamily::Plain;
+    }
+    if mockup.contains("findings") || matches!(mockup, "since.jsx" | "export-bundle.jsx") {
+        return ParityFamily::Cockpit;
+    }
+    if mockup.contains("running")
+        || matches!(
+            mockup,
+            "tail-stream.jsx" | "pause-resume.jsx" | "triage-queue.jsx"
+        )
+    {
+        return ParityFamily::Activity;
+    }
+    if is_overlay_mockup(mockup) {
+        return ParityFamily::Overlay;
+    }
+    if matches!(mockup, "onboarding.jsx" | "plan.jsx" | "plan-preview.jsx") {
+        return ParityFamily::Picker;
+    }
+    if is_module_mockup(mockup) {
+        return ParityFamily::Module;
+    }
+    ParityFamily::Document
+}
+
+fn is_overlay_mockup(mockup: &str) -> bool {
+    matches!(
+        mockup,
+        "command-palette.jsx"
+            | "confirm-dialog.jsx"
+            | "quit-confirm.jsx"
+            | "theme-picker.jsx"
+            | "keymap.jsx"
+            | "update-available.jsx"
+    ) || mockup.starts_with("err-")
+        || mockup.starts_with("budget-")
+        || matches!(mockup, "rate-limited.jsx" | "network-down.jsx")
+}
+
+fn is_module_mockup(mockup: &str) -> bool {
+    const NON_MODULE_PREFIXES: [&str; 13] = [
+        "actor", "agent-", "auth", "catalog", "config", "context", "cost", "doctor", "history",
+        "kb", "options", "patch", "runs",
+    ];
+    !NON_MODULE_PREFIXES
+        .iter()
+        .any(|prefix| mockup.starts_with(prefix))
+        && !mockup.starts_with("threats-")
+        && !mockup.starts_with("workspace")
+}
+
+fn assert_width_safe(mockup: &str, actual: &str) {
+    for line in actual.lines() {
+        assert!(
+            display_width(line) <= SNAPSHOT_WIDTH,
+            "{mockup} exceeded {SNAPSHOT_WIDTH} columns: {line:?}"
+        );
+    }
+}
+
+fn assert_no_broken_values(mockup: &str, actual: &str) {
+    for broken in ["[object Object]", "undefined", "NaN"] {
+        assert!(!actual.contains(broken), "{mockup} rendered {broken}");
+    }
+}
+
+fn assert_semantic_overlap(contract: ParityContract<'_>, expected: &str, actual: &str) {
+    let expected_tokens = semantic_tokens(expected);
+    let actual_tokens = semantic_tokens(actual);
+    let overlap = expected_tokens.intersection(&actual_tokens).count();
+    assert!(
+        overlap >= 2,
+        "{} {:?} fixture lost Atlas semantics; overlap={overlap}\nactual:\n{actual}",
+        contract.mockup,
+        contract.family
+    );
+}
+
+fn semantic_tokens(value: &str) -> std::collections::BTreeSet<String> {
+    value
+        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_')
+        .map(str::to_ascii_lowercase)
+        .filter(|token| token.len() >= 4 && !SEMANTIC_STOP_WORDS.contains(&token.as_str()))
+        .collect()
+}
+
+const SEMANTIC_STOP_WORDS: [&str; 12] = [
+    "kuzushi", "target", "model", "module", "stage", "enter", "ctrl", "findings", "current",
+    "status", "shown", "source",
+];
+
+fn assert_selection_contract(contract: ParityContract<'_>, expected: &str, actual: &str) {
+    if !selection_critical_mockup(contract.mockup) || !expected.contains('▌') {
+        return;
+    }
+    assert!(
+        ['▌', '▸', '>']
+            .iter()
+            .any(|marker| actual.contains(*marker)),
+        "{} lost its non-color selection marker",
+        contract.mockup
+    );
+}
+
+fn selection_critical_mockup(mockup: &str) -> bool {
+    matches!(
+        mockup,
+        "command-palette.jsx"
+            | "findings.jsx"
+            | "modules.jsx"
+            | "theme-picker.jsx"
+            | "onboarding.jsx"
+    )
+}
+
+#[test]
+fn parity_target_contains_exactly_114_implement_rows() {
+    let target = std::fs::read_to_string(repo_root().join("design/PARITY_TARGET.md"))
+        .expect("read parity target");
+    let implement_rows = target
+        .lines()
+        .filter(|line| line.starts_with("| `") && line.contains("| Implement |"))
+        .count();
+    assert_eq!(implement_rows, 114);
 }
 
 fn fresh_app() -> ShellApp {

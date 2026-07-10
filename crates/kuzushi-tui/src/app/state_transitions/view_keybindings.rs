@@ -1,6 +1,7 @@
 use super::view_keybinding_groups::{
-    activity_keybindings, actor_detail_keybindings, home_keybindings, prompts_editor_keybindings,
-    recommend_keybindings, threat_keybindings, tune_keybindings, workbench_keybindings,
+    activity_keybindings, actor_detail_keybindings, catalog_keybindings, home_keybindings,
+    prompts_editor_keybindings, recommend_keybindings, threat_keybindings, tune_keybindings,
+    workbench_keybindings,
 };
 use super::view_keybinding_helpers::{
     back_keybinding, bind, pause_scan_keybindings, resume_scan_keybindings, scroll_keybindings,
@@ -25,6 +26,7 @@ impl ShellApp {
 
     fn view_specific_keybindings(&self) -> Vec<ViewKeybinding> {
         match self.shell_view() {
+            ShellView::Catalog => catalog_keybindings(),
             ShellView::Home => home_keybindings(),
             ShellView::Workbench => workbench_keybindings(),
             ShellView::Recommend => recommend_keybindings(),

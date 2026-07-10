@@ -13,7 +13,9 @@ impl ShellApp {
     }
 
     pub(crate) fn run_background_maintenance(&mut self) -> bool {
-        self.reap_worker_handles() | self.cancel_timed_out_workers()
+        self.reap_worker_handles()
+            | self.cancel_timed_out_workers()
+            | self.apply_project_scope_discovery_results()
     }
 
     pub(crate) fn drain_job_events(&mut self) -> bool {
@@ -87,9 +89,9 @@ impl ShellApp {
             ShellEvent::Scan(ScanEvent::Finished { .. } | ScanEvent::Failed { .. }) => {
                 !self.tool_is_running() && self.scan().is_some_and(|scan| scan.running)
             }
-            ShellEvent::Tool(ToolEvent::Finished { .. } | ToolEvent::Failed { .. }) => {
-                !self.scan().is_some_and(|scan| scan.running)
-            }
+            ShellEvent::Tool(
+                ToolEvent::Finished { .. } | ToolEvent::Failed { .. } | ToolEvent::Refused { .. },
+            ) => !self.scan().is_some_and(|scan| scan.running),
             ShellEvent::Agent(_) | ShellEvent::Plan(_) | ShellEvent::Threat(_) => {
                 event.is_terminal()
             }

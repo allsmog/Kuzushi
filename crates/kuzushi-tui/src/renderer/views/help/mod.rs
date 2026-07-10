@@ -35,20 +35,33 @@ fn help_header_lines(
     examples: &[&str],
     width: u16,
 ) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        blank(),
-        divider("HELP", width),
-        muted(&fit(intro, width as usize)),
-        muted(&fit(glossary, width as usize)),
-    ];
+    let mut lines = vec![blank(), divider("HELP", width)];
+    lines.extend(
+        wrap_text(intro, width as usize)
+            .into_iter()
+            .map(|line| muted(&line)),
+    );
+    lines.extend(
+        wrap_text(glossary, width as usize)
+            .into_iter()
+            .map(|line| muted(&line)),
+    );
     if let Some(note) = filter_note {
-        lines.push(muted(&fit(note, width as usize)));
+        lines.extend(
+            wrap_text(note, width as usize)
+                .into_iter()
+                .map(|line| muted(&line)),
+        );
     }
     if !examples.is_empty() {
-        lines.push(muted(&fit(
-            &format!("Examples: {}", examples.join("  ·  ")),
-            width as usize,
-        )));
+        lines.extend(
+            wrap_text(
+                &format!("Examples: {}", examples.join("  ·  ")),
+                width as usize,
+            )
+            .into_iter()
+            .map(|line| muted(&line)),
+        );
     }
     lines
 }

@@ -130,7 +130,7 @@ pub(crate) use chrome_layout::{
     keybind_footer_chrome_height, status_footer_chrome_height, transcript_chrome_height,
 };
 pub(crate) use code_context::{selected_finding_code_model, CodePaneModel, CodePaneRow};
-pub(crate) use command_palette::{command_palette_model, CommandPaletteModel};
+pub(crate) use command_palette::{command_palette_model, CommandPaletteModel, PaletteRow};
 pub(crate) use config::{
     config_model, plain_config_model, ConfigModel, ConfigModelRow, ConfigModelTable,
     ConfigSummaryRow, PlainConfigModel, PlainConfigModelRow,
@@ -148,9 +148,10 @@ pub(crate) use display_text::{
 };
 pub(crate) use failure_handoff::{failure_handoff_model, FailureHandoffModel};
 pub(crate) use finding_summary::{
-    ci_result_findings_summary, findings_count_summary_with_total, status_footer_findings_summary,
-    status_footer_findings_summary_from_counts, status_footer_findings_summary_with_total,
-    SeverityCounts,
+    ci_result_findings_summary, compact_status_footer_findings_summary_from_counts,
+    compact_status_footer_findings_summary_with_total, findings_count_summary_with_total,
+    status_footer_findings_summary, status_footer_findings_summary_from_counts,
+    status_footer_findings_summary_with_total, SeverityCounts,
 };
 pub(crate) use findings::{
     current_finding_for_detail, findings_model, selected_finding_detail_model,
@@ -234,7 +235,7 @@ pub(crate) use report_preview::{
 };
 pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
 pub(crate) use review_queue::{
-    review_queue_model, ReviewQueueMode, ReviewQueueModel, ReviewQueueRow,
+    review_queue_model, ReviewQueueMode, ReviewQueueModel, ReviewQueueRow, ReviewWorkflowGroup,
 };
 pub(crate) use routing::{
     has_run_activity, plain_render_mode, routing_mode, routing_mode_segment, uses_activity_frame,

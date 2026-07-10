@@ -14,7 +14,7 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
-        if !self.input().is_empty() {
+        if self.input_mode() != InputMode::Navigate || !self.input().is_empty() {
             return InputUpdate::ignored();
         }
         // First view-specific handler that claims the key wins; the hotkey

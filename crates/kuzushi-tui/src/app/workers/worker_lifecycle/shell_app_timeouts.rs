@@ -56,7 +56,23 @@ impl ShellApp {
             self.log_worker_timeout(worker);
             self.mark_worker_timeout_requested(worker);
         }
-        !timed_out.is_empty()
+        let escalated = self.fail_unresponsive_workers();
+        !timed_out.is_empty() || escalated
+    }
+
+    /// Escalation for non-cooperative workers: once the watchdog cancel's
+    /// grace window elapses with no terminal event, emit a synthetic failure
+    /// so the job slot is released and new work is accepted. The hung OS
+    /// thread is not killed; only the logical slot is freed honestly.
+    fn fail_unresponsive_workers(&mut self) -> bool {
+        let escalated = self.jobs_mut().fail_unresponsive_slots(Instant::now());
+        if escalated {
+            self.log(
+                "error",
+                "worker unresponsive after watchdog cancel grace; releasing job slot with synthetic failure".to_string(),
+            );
+        }
+        escalated
     }
 
     fn worker_watchdog(&self, cancel: ScanCancellation) -> Option<WorkerWatchdog> {
@@ -86,6 +102,8 @@ impl ShellApp {
         if !self.jobs().is_current_generation(kind, worker.generation) {
             return;
         }
+        self.jobs_mut()
+            .schedule_unresponsive_escalation(kind, worker.generation, Instant::now());
         match worker.label {
             "scan" => self.mark_scan_timeout(),
             "tool" => self.mark_tool_timeout(),
@@ -97,6 +115,7 @@ impl ShellApp {
     }
 
     fn mark_scan_timeout(&mut self) {
+        self.set_scan_abort_reason(Some(AbortReason::Watchdog));
         if let Some(scan) = self.scan_mut() {
             scan.stage = "timeout reached; cancel requested".to_string();
             scan.abort_requested = true;
@@ -108,7 +127,7 @@ impl ShellApp {
         let Some(tool_name) = self.running_tool_name_owned() else {
             return;
         };
-        self.request_tool_abort_flag();
+        self.request_tool_abort_flag(AbortReason::Watchdog);
         self.set_paused_activity(tool_name, "timeout reached; cancel requested");
     }
 

@@ -62,6 +62,17 @@ mod tests {
         assert_eq!(parse_command("/findings"), ShellCommand::Findings);
         assert_eq!(parse_command("/f"), ShellCommand::Findings);
         assert_eq!(
+            parse_command(
+                "suppress F-0002 --reason documentation-example --author alice --days 30"
+            ),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Suppress {
+                reference: "F-0002".to_string(),
+                reason: "documentation-example".to_string(),
+                author: "alice".to_string(),
+                days: 30,
+            })
+        );
+        assert_eq!(
             parse_command("findings filter state:new rank:high run:scan-1"),
             ShellCommand::FindingsFilter("state:new rank:high run:scan-1".to_string())
         );
@@ -424,6 +435,11 @@ mod tests {
             ShellCommand::Context(ContextCommand::Regen("repo".to_string()))
         );
         assert_eq!(parse_command("project model"), ShellCommand::ProjectModel);
+        assert_eq!(parse_command("queue"), ShellCommand::ShowJobs);
+        assert_eq!(
+            parse_command("queue run secret-scan:scan {}"),
+            ShellCommand::QueueCommand("run secret-scan:scan {}".to_string())
+        );
         assert_eq!(
             parse_command("strategy"),
             ShellCommand::Strategy(StrategyCommand::Show)
@@ -614,6 +630,49 @@ mod tests {
         );
         assert_eq!(parse_command("/exit"), ShellCommand::Quit);
         assert_eq!(parse_command("/quit"), ShellCommand::Quit);
+    }
+
+    #[test]
+    fn recon_import_compiles_native_syntax_into_descriptor_input() {
+        let ShellCommand::RunTool {
+            tool: Some(tool),
+            input: Some(input),
+        } = parse_command("recon:import httpx ./recon/httpx.json")
+        else {
+            panic!("expected native recon import route");
+        };
+        let input: serde_json::Value = serde_json::from_str(&input).unwrap();
+        assert_eq!(tool, "recon:import");
+        assert_eq!(input["tool"], "httpx");
+        assert_eq!(input["path"], "./recon/httpx.json");
+
+        assert!(matches!(
+            parse_command("recon:import"),
+            ShellCommand::RunTool {
+                tool: Some(tool),
+                input: None,
+            } if tool == "recon:import"
+        ));
+    }
+
+    #[test]
+    fn export_aliases_report_the_complete_canonical_usage() {
+        for command in [
+            "export",
+            "findings export",
+            "workspace export",
+            "workspace export findings",
+        ] {
+            let ShellCommand::Workspace(WorkspaceCommand::Unsupported(message)) =
+                parse_command(command)
+            else {
+                panic!("expected usage for {command}");
+            };
+            assert!(
+                message.contains("usage: findings export <path> [format]"),
+                "unexpected usage for {command}: {message}"
+            );
+        }
     }
 
     #[test]

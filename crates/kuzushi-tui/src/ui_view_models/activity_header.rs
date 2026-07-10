@@ -117,7 +117,9 @@ struct ActivityTaskCounts {
     total: usize,
     done: usize,
     running: usize,
+    canceling: usize,
     failing: usize,
+    blocked: usize,
     canceled: usize,
     skipped: usize,
 }
@@ -128,7 +130,9 @@ impl ActivityTaskCounts {
             total: session.tasks.len(),
             done: task_count(session, DagTaskState::Done),
             running: task_count(session, DagTaskState::Active),
+            canceling: task_count(session, DagTaskState::Canceling),
             failing: task_count(session, DagTaskState::Failing),
+            blocked: task_count(session, DagTaskState::Blocked),
             canceled: task_count(session, DagTaskState::Canceled),
             skipped: task_count(session, DagTaskState::Skipped),
         }
@@ -141,6 +145,8 @@ fn task_progress(counts: ActivityTaskCounts) -> String {
         format!("{} running", counts.running),
     ];
     append_terminal_count(&mut parts, counts.failing, "! failed");
+    append_terminal_count(&mut parts, counts.blocked, "▣ blocked");
+    append_terminal_count(&mut parts, counts.canceling, "× canceling");
     append_terminal_count(&mut parts, counts.canceled, "× canceled");
     append_terminal_count(&mut parts, counts.skipped, "⊘ skipped");
     parts.join("  ·  ")

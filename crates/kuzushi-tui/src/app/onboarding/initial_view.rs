@@ -14,7 +14,9 @@ pub enum InitialOnboardingPhase {
     ModelPicker,
     /// Inline credential entry (API-key paste / OAuth / offline demo) for a
     /// credentialed provider whose credentials are missing.
-    AuthMethodPicker { provider: String },
+    AuthMethodPicker {
+        provider: String,
+    },
     PlanningPicker,
     Catalog,
 }
@@ -119,10 +121,6 @@ pub fn skip_onboarding_env() -> bool {
         ),
         Err(_) => false,
     }
-}
-
-pub fn provider_has_multiple_auth_methods(provider: &str) -> bool {
-    matches!(provider, "anthropic" | "openai" | "openai-codex")
 }
 
 #[cfg(test)]
@@ -282,13 +280,5 @@ mod tests {
             initial_onboarding_phase(&i),
             InitialOnboardingPhase::Catalog
         );
-    }
-
-    #[test]
-    fn known_multi_auth_providers() {
-        assert!(provider_has_multiple_auth_methods("anthropic"));
-        assert!(provider_has_multiple_auth_methods("openai"));
-        assert!(provider_has_multiple_auth_methods("openai-codex"));
-        assert!(!provider_has_multiple_auth_methods("local"));
     }
 }

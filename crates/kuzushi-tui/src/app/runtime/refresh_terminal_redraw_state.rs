@@ -104,10 +104,47 @@ pub(crate) fn run_plain_shell(
         .collect::<Vec<_>>();
 
     if commands.is_empty() {
-        print!("{}", render_plain_app(&app, 80));
+        print!("{}", plain_launch_summary(&app));
         return Ok(());
     }
 
-    print!("{}", render_plain_scripted_session(&mut app, &commands, 80));
+    let report = execute_plain_scripted_session(&mut app, &commands, 80);
+    print!("{}", report.output);
+    if report.failed {
+        anyhow::bail!("plain scripted session failed; see the result above");
+    }
     Ok(())
+}
+
+fn plain_launch_summary(app: &ShellApp) -> String {
+    let target = app
+        .target()
+        .map(|target| target.display().to_string())
+        .unwrap_or_else(|| "none".to_string());
+    let next = if app.target().is_some() {
+        "printf 'findings\n' | kuzushi --plain --target <path>"
+    } else {
+        "printf 'scan .\n' | kuzushi --plain"
+    };
+    format!(
+        "KUZUSHI PLAIN SESSION SUMMARY\nstatus: idle\ntarget: {target}\ncommands: 0\nNext: {next}\n"
+    )
+}
+
+#[cfg(test)]
+mod plain_summary_tests {
+    use super::*;
+
+    #[test]
+    fn bare_plain_summary_is_self_contained_and_non_interactive() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let output = plain_launch_summary(&app);
+
+        assert!(output.contains("PLAIN SESSION SUMMARY"));
+        assert!(output.contains("status: idle"));
+        assert!(output.contains("target: none"));
+        assert!(output.contains("commands: 0"));
+        assert!(!output.contains("press "));
+        assert!(!output.contains("kuzushi>"));
+    }
 }

@@ -45,14 +45,20 @@ fn discover_target_candidates_with_recent(
     cwd: &Path,
     recent_paths: &[PathBuf],
 ) -> Vec<TargetCandidate> {
-    let scope_tree = kuzushi_core::discover_nested_project_scopes(cwd);
-    let nested_scopes = nested_scope_candidates(cwd, &scope_tree);
+    let scope_tree = kuzushi_core::load_nested_project_scopes(cwd).ok().flatten();
+    let nested_scopes = scope_tree
+        .as_ref()
+        .map(|tree| nested_scope_candidates(cwd, tree))
+        .unwrap_or_default();
     let nested_scope_paths = candidate_paths(&nested_scopes);
     let mut candidates = vec![TargetCandidate {
         path: cwd.to_path_buf(),
         label: ".".to_string(),
         hint: directory_hint(cwd, "current directory"),
-        scope: scope_tree.root_scope().map(TargetCandidateScope::from),
+        scope: scope_tree
+            .as_ref()
+            .and_then(NestedProjectScopeTree::root_scope)
+            .map(TargetCandidateScope::from),
     }];
     candidates.extend(nested_scopes);
     candidates.extend(child_candidates(cwd, &nested_scope_paths));
@@ -404,6 +410,7 @@ mod tests {
             "#,
         )
         .expect("gitmodules");
+        kuzushi_core::discover_and_save_nested_project_scopes(dir.path()).unwrap();
 
         let candidates = discover_target_candidates(dir.path());
 
@@ -438,6 +445,7 @@ mod tests {
             "#,
         )
         .expect("gitmodules");
+        kuzushi_core::discover_and_save_nested_project_scopes(dir.path()).unwrap();
 
         let candidates = discover_target_candidates(dir.path());
         let api = candidates
@@ -454,6 +462,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         touch_dir(dir.path(), "vendor");
         touch_dir(dir.path(), "node_modules");
+        kuzushi_core::discover_and_save_nested_project_scopes(dir.path()).unwrap();
 
         let candidates = discover_target_candidates(dir.path());
 

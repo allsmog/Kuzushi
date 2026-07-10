@@ -1,12 +1,14 @@
 use super::*;
 pub(crate) use super::*;
 
+pub(crate) use abort_reason::*;
 pub(crate) use agent_chat::*;
 pub(crate) use agent_session::*;
 pub(crate) use approval::*;
 pub(crate) use artifacts::*;
 pub(crate) use background_events::*;
 pub(crate) use catalog::*;
+pub(crate) use command_palette::*;
 pub(crate) use command_router::*;
 pub(crate) use ctrl_c_arm_window::*;
 pub(crate) use domain_cache::*;
@@ -22,8 +24,10 @@ pub(crate) use log::*;
 pub(crate) use options::*;
 pub(crate) use plan::*;
 pub(crate) use prereq_chain::*;
+pub(crate) use project_scope_discovery::*;
 pub(crate) use prompts::*;
 pub(crate) use pwn::*;
+pub(crate) use run_reference::*;
 pub(crate) use runtime::*;
 pub(crate) use runtime_state::*;
 pub(crate) use sast_tasks::*;
@@ -46,6 +50,7 @@ pub use view_state::*;
 pub(crate) use with_next_step::*;
 pub(crate) use workers::*;
 pub(crate) use workspace_context::*;
+mod abort_reason;
 mod agent_chat;
 mod agent_chat_state;
 mod agent_session;
@@ -68,6 +73,7 @@ mod log;
 mod options;
 mod plan;
 mod prereq_chain;
+mod project_scope_discovery;
 mod pwn;
 #[cfg(test)]
 use self::runtime::{mouse_capture_setting_enabled, render_plain_scripted_session};
@@ -90,6 +96,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 mod onboarding;
 mod prompts;
 mod reducers;
+mod run_reference;
 mod runtime;
 mod runtime_state;
 mod sast_tasks;
@@ -132,10 +139,9 @@ pub use onboarding::{
     applicable_tasks_for_phase, artifact_state as planning_artifact_state, auth_method_row_kinds,
     auth_method_rows, build_execution_plan, cli_is_on_path, direct_dependencies, direct_dependents,
     discover_target_candidates, initial_onboarding_phase, initial_onboarding_phase_for,
-    model_recommended_in_phase, provider_has_multiple_auth_methods, recommended_tasks_for_phase,
-    record_recent_target, AuthMethodRow, AuthMethodRowKind,
-    row_disposition, skip_onboarding_env, toggle_planning_row, topological_order,
-    transitive_dependencies, ArtifactState as PlanningArtifactState, FailedPlanningTask,
+    model_recommended_in_phase, recommended_tasks_for_phase, record_recent_target, row_disposition,
+    skip_onboarding_env, toggle_planning_row, topological_order, transitive_dependencies,
+    ArtifactState as PlanningArtifactState, AuthMethodRow, AuthMethodRowKind, FailedPlanningTask,
     InitialOnboardingPhase, OnboardingInputs, PendingRetry, PickerFocus, PlanningOptionEdit,
     PlanningOptionOverrides, PlanningTaskId, PlanningTaskRow, RetryAdjustment, RowDisposition,
     TargetCandidate, TargetCandidateScope, TargetProfile, ToggleOutcome, WorkflowPhase,

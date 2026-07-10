@@ -12,8 +12,11 @@ fn tools_model_lists_registry_tools() {
     assert!(all_tool_rows(&model)
         .iter()
         .any(|row| row.cells[0] == "sast:scan"));
-    assert!(model.groups.iter().any(|group| group.label == "HUNT"
-        && group.rows.iter().any(|row| row.cells[0] == "sast:scan")));
+    assert!(model
+        .groups
+        .iter()
+        .any(|group| group.label == "HUNT"
+            && group.rows.iter().any(|row| row.cells[0] == "sast:scan")));
     assert!(all_tool_rows(&model)
         .iter()
         .all(|row| !row.cells[1].is_empty()));
@@ -74,9 +77,7 @@ fn tools_model_filters_by_phase_key() {
 #[test]
 fn tools_model_unknown_key_yields_no_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.router
-        .tools_mut()
-        .open(Some("bogus:value".to_string()));
+    app.router.tools_mut().open(Some("bogus:value".to_string()));
 
     let model = tools_model(&app);
 

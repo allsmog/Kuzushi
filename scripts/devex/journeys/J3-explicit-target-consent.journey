@@ -1,0 +1,27 @@
+# J3 — Explicit-target consent (PR #64 promise)
+# Persona: user sitting in a repo dir runs bare `kuzushi`. The picker may
+# OFFER cwd as a row but must require an explicit Enter; Esc opts into
+# targetless browsing; nothing silently falls back to cwd.
+# Launch 1 takes the Esc (decline) path, launch 2 the explicit-Enter path.
+name: Explicit-target consent
+cwd: @TMP_TARGET
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+snap: picker-offers-cwd
+expect: Nothing defaults to cwd silently
+expect: git repo
+ask: Is "you are about to scan THIS directory" unmistakable — does the cwd row identify the directory clearly?
+keys: Escape
+wait: 3
+snap: after-esc-targetless
+ask: After Esc — is the shell honestly targetless (no silent cwd fallback in the status chrome), and does it say how to pick a target later?
+submit: quit
+wait: 2
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+keys: Enter
+wait: 3
+snap: after-explicit-enter
+ask: After explicit Enter on the cwd row — does the status chrome now show the chosen target, and is it clearly the result of MY explicit consent (not a default)?

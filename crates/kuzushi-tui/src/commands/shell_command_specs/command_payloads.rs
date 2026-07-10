@@ -56,8 +56,20 @@ pub enum PatchCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewDecisionCommand {
-    Record { verdict: String, reason: String },
-    Dismiss { reason: String, note: String },
+    Record {
+        verdict: String,
+        reason: String,
+    },
+    Dismiss {
+        reason: String,
+        note: String,
+    },
+    Suppress {
+        reference: String,
+        reason: String,
+        author: String,
+        days: u64,
+    },
     Unsupported(String),
 }
 

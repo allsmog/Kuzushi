@@ -107,6 +107,27 @@ pub(crate) fn keybind_hint_line(pairs: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
+pub(crate) fn responsive_keybind_hint_line(
+    width: usize,
+    wide: &[(&str, &str)],
+    compact: &[(&str, &str)],
+) -> Line<'static> {
+    let pairs = if keybind_hint_width(wide) <= width {
+        wide
+    } else {
+        compact
+    };
+    keybind_hint_line(pairs)
+}
+
+fn keybind_hint_width(pairs: &[(&str, &str)]) -> usize {
+    let content = pairs
+        .iter()
+        .map(|(key, hint)| display_width(key) + 1 + display_width(hint))
+        .sum::<usize>();
+    content + 1 + pairs.len().saturating_sub(1) * 3
+}
+
 #[cfg(test)]
 mod detail_wrapped_tests {
     use super::*;

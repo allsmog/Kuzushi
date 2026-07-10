@@ -1,0 +1,34 @@
+# J7 — Findings triage & dismissal
+# Walk findings, dismiss a false positive, suppress one, record a decision.
+# Runs keylessly on demo findings. Judge: is dismissal/suppression state
+# honest and durable — can the operator tell a SUPPRESSED finding from a
+# GONE one?
+name: Findings triage and dismissal
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+keys: d
+wait-for: 90 run completed
+keys: Escape
+wait: 2
+submit: findings
+wait: 3
+snap: findings-before
+submit: open F-0001
+wait: 3
+snap: finding-open
+ask: Finding detail — are dismiss / suppress / decision actions signposted from here, or does the operator have to guess verbs?
+submit: decision false-positive not exploitable in this deployment
+wait: 3
+snap: decision-recorded
+ask: Decision — was the human review decision recorded and acknowledged honestly (or was the verb syntax rejected with a helpful message)?
+submit: suppress F-0002 --reason documentation-example --author operator --days 90
+wait: 3
+snap: suppress-attempt
+ask: Suppress — did suppression require evidence/expiry as promised, and is the outcome stated plainly?
+submit: findings
+wait: 3
+snap: findings-after
+ask: After triage — can you tell the suppressed/dismissed finding from a GONE one in the list (distinct signifier, not silent disappearance)?

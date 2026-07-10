@@ -110,7 +110,8 @@ mod workspace_module;
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
 pub use catalog_query::{RuntimeFilter, ToolQuery};
 pub use autonomy::{
-    gate as autonomy_gate, tool_phase, AutonomyDecision, AutonomyPosture, WorkflowPhase,
+    gate as autonomy_gate, tool_phase, AutonomyDecision, AutonomyPosture, AutonomyRefusal,
+    WorkflowPhase,
 };
 pub use contracts::ToolExecutionContext;
 pub use contracts::{

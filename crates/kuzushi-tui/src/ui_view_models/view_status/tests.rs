@@ -5,7 +5,7 @@ use kuzushi_core::V2Config;
 fn view_status_defaults_to_modules_catalog() {
     let app = ShellApp::new(V2Config::default(), None);
 
-    assert_eq!(view_status_segment(&app), "modules");
+    assert_eq!(view_status_segment(&app), "catalog");
 }
 
 #[test]

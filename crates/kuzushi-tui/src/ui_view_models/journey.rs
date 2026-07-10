@@ -258,6 +258,9 @@ fn phase_next_action(current: WorkflowPhase, progress: JourneyProgress) -> Strin
             current.position(),
             WorkflowPhase::ORDER.len()
         ),
+        WorkflowPhase::Confirm if progress.finding_total == 0 => {
+            "no findings to review — return to Hunt or import findings".to_string()
+        }
         WorkflowPhase::Confirm => format!(
             "triage & verify — {} of {} findings need review",
             progress.unreviewed_findings(),
@@ -278,6 +281,9 @@ fn phase_next_summary(current: WorkflowPhase, progress: JourneyProgress) -> Stri
         WorkflowPhase::Hunt => {
             "崩 hunt · map artifacts ready — scan for the full hunt or next to choose tools"
                 .to_string()
+        }
+        WorkflowPhase::Confirm if progress.finding_total == 0 => {
+            "作 confirm · no findings to review — return to Hunt or import findings".to_string()
         }
         WorkflowPhase::Confirm => format!(
             "作 confirm · {} findings need review — next to continue",

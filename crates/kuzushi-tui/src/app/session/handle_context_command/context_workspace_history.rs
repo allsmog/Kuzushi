@@ -41,6 +41,10 @@ impl ShellApp {
 
     fn show_unsupported_workspace_command(&mut self, raw: &str) {
         self.set_shell_view(ShellView::Workspace);
+        if raw.starts_with("usage: ") {
+            self.log("error", raw);
+            return;
+        }
         self.log(
             "error",
             format!(

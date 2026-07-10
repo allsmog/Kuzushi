@@ -10,7 +10,7 @@ pub(crate) fn view_status_segment(app: &ShellApp) -> String {
 fn primary_view_status(app: &ShellApp) -> Option<String> {
     match &app.shell_view() {
         ShellView::Home => Some("home".to_string()),
-        ShellView::Catalog => Some(focused_or_default(app, "modules")),
+        ShellView::Catalog => Some("catalog".to_string()),
         ShellView::Recommend => Some("recommend".to_string()),
         ShellView::Module => Some(focused_or_default(app, "module")),
         ShellView::ModuleRun => Some(module_run_status(app)),
@@ -42,7 +42,18 @@ fn threat_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Replay => Some("replay".to_string()),
         ShellView::Trace => Some("trace".to_string()),
         ShellView::Activity => Some("activity".to_string()),
+        ShellView::Scene => Some(format!("viz:{}", viz_page_slug(app.router.scene().page()))),
         _ => None,
+    }
+}
+
+fn viz_page_slug(page: crate::scene3d::VizPage) -> &'static str {
+    match page {
+        crate::scene3d::VizPage::AttackSurface => "terrain",
+        crate::scene3d::VizPage::AttackPath => "path",
+        crate::scene3d::VizPage::Dfd => "dfd",
+        crate::scene3d::VizPage::Heatmap => "heatmap",
+        crate::scene3d::VizPage::ExploitChain => "chain",
     }
 }
 

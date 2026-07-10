@@ -1,0 +1,27 @@
+# J11 — "What can this thing do?"
+# Persona: returning user who forgot the verbs. help → tools/modules →
+# ghost-text. Known risk: 67 flat tools + dead ghost-text = discoverability
+# wall.
+name: Discoverability — what can this thing do
+env: KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TMP_TARGET
+wait-for: 30 kuzushi>
+submit: help
+wait: 2
+snap: help
+ask: `help` — is it grouped by operator task (scan/triage/export/...) or an alphabetical wall? Could a returning user find their next verb in <10s?
+submit: tools
+wait: 2
+snap: tools
+ask: `tools` — 67-flat-tools wall check: is the list navigable (grouped, searchable, paged) or a scroll dump?
+submit: modules
+wait: 2
+snap: modules
+ask: `modules` — do module rows say what each is FOR, and does the catalog point at `use <module>` as the next step?
+keys: Escape
+wait: 1
+type: sc
+wait: 1
+snap: ghost-text
+ask: Ghost-text — with a partial verb typed ("sc"), does completion/ghost-text offer anything, or is it dead (July finding)?
+keys: Escape

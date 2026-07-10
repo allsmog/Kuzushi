@@ -20,6 +20,44 @@ pub(crate) enum ReviewQueueMode {
     All,
 }
 
+/// Operator-workflow grouping for the review queue. This is deliberately
+/// independent of severity: proof and decision state determine what the
+/// operator can do next, while severity remains visible inside each row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReviewWorkflowGroup {
+    NeedsReview,
+    Confirmed,
+    Deferred,
+    Closed,
+}
+
+impl ReviewWorkflowGroup {
+    pub(crate) const ALL: [Self; 4] = [
+        Self::NeedsReview,
+        Self::Confirmed,
+        Self::Deferred,
+        Self::Closed,
+    ];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::NeedsReview => "NEEDS REVIEW",
+            Self::Confirmed => "CONFIRMED",
+            Self::Deferred => "DEFERRED / RISK",
+            Self::Closed => "CLOSED",
+        }
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            Self::NeedsReview => 0,
+            Self::Confirmed => 1,
+            Self::Deferred => 2,
+            Self::Closed => 3,
+        }
+    }
+}
+
 impl ReviewQueueMode {
     pub(crate) fn label(self) -> &'static str {
         match self {
@@ -66,6 +104,7 @@ pub(crate) struct ReviewQueueRow {
     pub(crate) evidence_state: String,
     pub(crate) next_action: String,
     pub(crate) selected: bool,
+    pub(crate) workflow_group: ReviewWorkflowGroup,
 }
 
 pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> ReviewQueueModel {
@@ -75,22 +114,9 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
         app.findings(),
         app.review_decisions(),
     );
-    let all_rows = projected_visible_finding_pairs(app)
-        .into_iter()
-        .enumerate()
-        .map(|(index, (alias, finding))| {
-            let decision = review_index.effective_decision_for(&finding);
-            ReviewQueueRow::from_finding(
-                index,
-                app.router.findings().cursor(),
-                alias,
-                &finding,
-                decision.as_ref(),
-                base.as_deref(),
-                selected_key.as_deref(),
-            )
-        })
-        .collect::<Vec<_>>();
+    let mut all_rows =
+        projected_review_queue_rows(app, &review_index, base.as_deref(), selected_key.as_deref());
+    all_rows.sort_by_key(|row| row.workflow_group.rank());
     let open_count = all_rows.iter().filter(|row| !row.review_complete()).count();
     let complete_count = all_rows.len().saturating_sub(open_count);
     let rows = filter_review_rows(all_rows, mode);
@@ -107,6 +133,30 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
         empty_reason: review_queue_empty_reason(total_count, visible_count, mode),
         rows,
     }
+}
+
+fn projected_review_queue_rows(
+    app: &ShellApp,
+    review_index: &EffectiveReviewStateIndex,
+    base: Option<&str>,
+    selected_key: Option<&str>,
+) -> Vec<ReviewQueueRow> {
+    projected_visible_finding_pairs(app)
+        .into_iter()
+        .enumerate()
+        .map(|(index, (alias, finding))| {
+            let decision = review_index.effective_decision_for(&finding);
+            ReviewQueueRow::from_finding(
+                index,
+                app.router.findings().cursor(),
+                alias,
+                &finding,
+                decision.as_ref(),
+                base,
+                selected_key,
+            )
+        })
+        .collect()
 }
 
 fn filter_review_rows(rows: Vec<ReviewQueueRow>, mode: ReviewQueueMode) -> Vec<ReviewQueueRow> {
@@ -161,6 +211,9 @@ impl ReviewQueueRow {
         selected_key: Option<&str>,
     ) -> Self {
         let projection = project_finding(finding, Some(alias.clone()));
+        let decision_label = effective_review_decision_label(finding, decision);
+        let decision_conflict = effective_review_decision_conflict_label(finding, decision);
+        let workflow_group = workflow_group(&decision_label, decision_conflict.as_deref());
         Self {
             alias,
             identity_label: finding_identity_label(finding),
@@ -171,8 +224,8 @@ impl ReviewQueueRow {
             confidence_label: effective_review_confidence_label(finding, decision),
             priority_label: format!("review-order:{}", index + 1),
             lifecycle_status: lifecycle_status_label(finding),
-            decision: effective_review_decision_label(finding, decision),
-            decision_conflict: effective_review_decision_conflict_label(finding, decision),
+            decision: decision_label,
+            decision_conflict,
             decision_complete: effective_review_decision_complete(finding, decision),
             decision_author: effective_review_author_label(finding, decision),
             title: projection.title,
@@ -183,11 +236,24 @@ impl ReviewQueueRow {
             evidence_state: evidence_state_label(finding),
             next_action: review_next_action_label(finding, decision),
             selected: review_row_selected(index, cursor, finding, selected_key),
+            workflow_group,
         }
     }
 
     fn review_complete(&self) -> bool {
         self.decision_complete && self.decision_conflict.is_none()
+    }
+}
+
+fn workflow_group(decision: &str, conflict: Option<&str>) -> ReviewWorkflowGroup {
+    if conflict.is_some() {
+        return ReviewWorkflowGroup::NeedsReview;
+    }
+    match decision {
+        "confirmed" | "to_fix" => ReviewWorkflowGroup::Confirmed,
+        "deferred" | "accepted_risk" => ReviewWorkflowGroup::Deferred,
+        "rejected_false_positive" | "false_positive" | "suppressed" => ReviewWorkflowGroup::Closed,
+        _ => ReviewWorkflowGroup::NeedsReview,
     }
 }
 

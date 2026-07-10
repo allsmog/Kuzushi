@@ -161,24 +161,16 @@ fn enforce_autonomy_posture(
 ) -> Result<()> {
     use crate::modules::autonomy::{gate, AutonomyDecision};
     match gate(name, posture) {
-        AutonomyDecision::Refuse { needed, ceiling } => {
-            anyhow::bail!(posture_refusal_message(name, needed, ceiling))
-        }
+        AutonomyDecision::Refuse { needed, ceiling } => Err(
+            crate::modules::autonomy::AutonomyRefusal {
+                tool_name: name.to_string(),
+                needed,
+                ceiling,
+            }
+            .into(),
+        ),
         AutonomyDecision::Allow | AutonomyDecision::RequireApproval => Ok(()),
     }
-}
-
-fn posture_refusal_message(
-    name: &str,
-    needed: crate::modules::autonomy::WorkflowPhase,
-    ceiling: crate::modules::autonomy::WorkflowPhase,
-) -> String {
-    format!(
-        "{name} is a {} action but autonomy posture is capped at {}; \
-         raise posture (Ctrl+Up) to authorize",
-        needed.word(),
-        ceiling.word()
-    )
 }
 
 fn runtime_requirement_is_deferred_to_executor(name: &str) -> bool {

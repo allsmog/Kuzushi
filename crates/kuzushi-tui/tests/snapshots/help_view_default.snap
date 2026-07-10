@@ -57,6 +57,10 @@ scan [target] - open the guided workflow for a target; `scan .` opts into cwd
   aliases / examples: scan ., /scan [target]
 run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthand
   aliases / examples: run ., /run <tool> [json], run . [json]
+recon:import <amass|httpx|nuclei|nmap-xml> <path> - import an external reconnaissance export through the registered
+recon tool
+aliases / examples: recon import <amass|httpx|nuclei|nmap-xml> <path>, /recon:import <amass|httpx|nuclei|nmap-xml>
+<path>
 ask <question> - explicit agent question
   aliases / examples: /ask <question>, ?text
 queue <tool|verb> - queue a command to run after the current one finishes
@@ -128,7 +132,8 @@ workspace reindex - refresh the v3 content-addressed workspace index
 workspace export findings <path> [format] [--completeness open|complete] [--allow-empty] - export findings; choose
 all/open/complete and pass --allow-empty for metadata-only exports
 aliases / examples: /workspace export findings <path> [format] [--completeness open|complete] [--allow-empty], findings
-export <path> [format] [--completeness open|complete] [--allow-empty]
+export <path> [format] [--completeness open|complete] [--allow-empty], export <path> [format] [--completeness
+open|complete] [--allow-empty]
 workspace scope init - write an editable .kuzushi/scope.toml scaffold
   aliases / examples: /workspace scope init
 
@@ -147,6 +152,9 @@ aliases / examples: decision confirmed reviewed source-linked evidence, decision
 review rejected_false_positive reviewed data flow
 dismiss <reason> <note> - dismiss the selected finding with an auditable reason
   aliases / examples: dismiss false_positive not reachable in prod, dismiss used_in_tests test fixture only
+suppress <id> --reason <text> [--author operator] [--days 90] - record an expiring suppression rule and matching human
+review decision
+  aliases / examples: /suppress F-0001 --reason false-positive
 show aliases [prefix] - list finding aliases
   aliases / examples: /show aliases [prefix]
 show runs - recent run artifacts

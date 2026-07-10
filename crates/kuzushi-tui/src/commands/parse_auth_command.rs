@@ -93,12 +93,12 @@ pub(crate) fn parse_workspace_command(parts: Vec<&str>) -> ShellCommand {
         Some("export") => match parts.get(1).copied() {
             Some("findings") => parse_workspace_findings_export_args(
                 parts.get(2..).unwrap_or_default(),
-                "workspace export findings",
+                "findings export",
             ),
             Some(other) => ShellCommand::Workspace(WorkspaceCommand::Unsupported(format!(
                 "workspace export {other}"
             ))),
-            None => ShellCommand::Unknown("workspace export".to_string()),
+            None => parse_workspace_findings_export_args(&[], "findings export"),
         },
         Some("scope") => match parts.get(1).copied() {
             Some("init") => ShellCommand::Workspace(WorkspaceCommand::ScopeInit),
@@ -124,7 +124,9 @@ pub(crate) fn parse_workspace_findings_export_args(
 ) -> ShellCommand {
     let Some((output, format, completeness, allow_empty)) = workspace_findings_export_args(args)
     else {
-        return ShellCommand::Unknown(missing_label.to_string());
+        return ShellCommand::Workspace(WorkspaceCommand::Unsupported(format!(
+            "usage: {missing_label} <path> [format] [--completeness open|complete] [--allow-empty] (format: json|jsonl|sarif|csv|markdown-bundle)"
+        )));
     };
     ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
         output,

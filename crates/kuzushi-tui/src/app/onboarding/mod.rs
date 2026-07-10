@@ -19,9 +19,7 @@ mod target_candidates;
 mod task_id;
 mod task_row;
 
-pub use auth_rows::{
-    auth_method_row_kinds, auth_method_rows, AuthMethodRow, AuthMethodRowKind,
-};
+pub use auth_rows::{auth_method_row_kinds, auth_method_rows, AuthMethodRow, AuthMethodRowKind};
 pub use controls::{
     build_execution_plan, row_disposition, toggle_planning_row, RowDisposition, ToggleOutcome,
 };
@@ -30,8 +28,8 @@ pub use dependencies::{
 };
 pub use failure::{FailedPlanningTask, PendingRetry, RetryAdjustment};
 pub use initial_view::{
-    initial_onboarding_phase, initial_onboarding_phase_for, provider_has_multiple_auth_methods,
-    skip_onboarding_env, InitialOnboardingPhase, OnboardingInputs,
+    initial_onboarding_phase, initial_onboarding_phase_for, skip_onboarding_env,
+    InitialOnboardingPhase, OnboardingInputs,
 };
 pub use phase::WorkflowPhase;
 pub(crate) use planning_options::{planning_task_explicit_input, planning_task_preset_input};

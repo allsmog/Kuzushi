@@ -152,9 +152,24 @@ impl ShellApp {
     }
 
     fn refresh_active_scope_tree(&mut self, root: &Path) {
-        if let Some(tree) = self.refresh_nested_project_scopes(root) {
-            self.set_active_scope(active_scope_from_tree(&tree, None));
+        match kuzushi_core::load_nested_project_scopes(root) {
+            Ok(Some(tree)) => {
+                self.workbench_cache()
+                    .borrow_mut()
+                    .cache_persisted_project_scope_tree(root, tree.clone());
+                self.set_active_scope(active_scope_from_tree(&tree, None));
+            }
+            Ok(None) => self.set_active_scope(Some(root_target_scope())),
+            Err(error) => {
+                self.set_active_scope(Some(root_target_scope()));
+                self.log(
+                    "scope:mapping",
+                    format!("persisted project scopes unavailable; using root: {error}"),
+                );
+            }
         }
+        self.runtime_state
+            .start_project_scope_discovery(root.to_path_buf());
     }
 
     pub(crate) fn reduce_target_revision_command(&mut self, reference: &str) -> Vec<ShellEffect> {
@@ -201,10 +216,7 @@ impl ShellApp {
     }
 
     fn refresh_target_scope_after_revision_switch(&mut self, target: &Path) {
-        let preferred_scope = self.active_scope().map(|scope| scope.id.clone());
-        if let Some(tree) = self.refresh_nested_project_scopes(target) {
-            self.set_active_scope(active_scope_from_tree(&tree, preferred_scope.as_deref()));
-        }
+        self.refresh_active_scope_tree(target);
     }
 
     fn log_target_revision_switch(&mut self, previous_sha: &str, current_sha: &str) {
@@ -284,29 +296,42 @@ impl ShellApp {
         component_scope_from_state(&state, raw)
     }
 
-    fn refresh_nested_project_scopes(
-        &mut self,
-        root: &std::path::Path,
-    ) -> Option<kuzushi_core::NestedProjectScopeTree> {
-        match kuzushi_core::discover_and_save_nested_project_scopes(root) {
-            Ok(tree) => {
-                self.workbench_cache()
-                    .borrow_mut()
-                    .cache_persisted_project_scope_tree(root, tree.clone());
-                let nested_count = tree.scopes.len().saturating_sub(1);
-                if nested_count > 0 {
-                    self.log(
-                        "target",
-                        format!("project scopes refreshed: {nested_count} nested scope(s)"),
-                    );
-                }
-                Some(tree)
-            }
-            Err(error) => {
-                self.log("target", format!("project scope discovery failed: {error}"));
-                None
-            }
+    pub(crate) fn apply_project_scope_discovery_results(&mut self) -> bool {
+        let results = self.runtime_state.drain_project_scope_discovery();
+        let changed = !results.is_empty();
+        for result in results {
+            self.apply_project_scope_discovery_result(result);
         }
+        changed
+    }
+
+    fn apply_project_scope_discovery_result(&mut self, result: ProjectScopeDiscoveryResult) {
+        match result.tree {
+            Ok(tree) => self.apply_discovered_project_scopes(&result.root, tree),
+            Err(error) => self.log(
+                "scope:mapping",
+                format!("project scope discovery failed; root remains usable: {error}"),
+            ),
+        }
+    }
+
+    fn apply_discovered_project_scopes(
+        &mut self,
+        root: &Path,
+        tree: kuzushi_core::NestedProjectScopeTree,
+    ) {
+        let preferred = self.active_scope().map(|scope| scope.id.clone());
+        self.workbench_cache()
+            .borrow_mut()
+            .cache_persisted_project_scope_tree(root, tree.clone());
+        self.set_active_scope(active_scope_from_tree(&tree, preferred.as_deref()));
+        self.log(
+            "scope:mapping",
+            format!(
+                "project scopes ready: {} nested scope(s)",
+                tree.scopes.len().saturating_sub(1)
+            ),
+        );
     }
 
     pub(crate) fn show_story(&mut self) {
@@ -353,6 +378,14 @@ fn active_scope_from_tree(
         .and_then(|id| tree.scopes.iter().find(|scope| scope.id == id))
         .or_else(|| tree.root_scope())
         .map(TargetCandidateScope::from)
+}
+
+fn root_target_scope() -> TargetCandidateScope {
+    TargetCandidateScope {
+        id: kuzushi_core::workspace::ROOT_SCOPE_ID.to_string(),
+        kind: kuzushi_core::NestedProjectKind::Root,
+        rel_path: ".".to_string(),
+    }
 }
 
 fn component_scope_from_state(

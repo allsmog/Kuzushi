@@ -4,14 +4,70 @@ import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
 export async function mcpToolsForRequest(request) {
   if (!agentMcpsEnabled(request)) return { tools: [], close: async () => {} };
+  const mcpServers = mcpServerConfig(request);
   const client = new MultiServerMCPClient({
-    mcpServers: mcpServerConfig(request),
+    mcpServers,
     onConnectionError: (server, error) => {
-      throw new Error(`requested MCP server ${server} failed to start: ${error?.message ?? error}`);
+      throw new Error(mcpConnectionFailureMessage(server, error, mcpServers));
     },
   });
   const tools = await client.getTools();
   return { tools, close: async () => client.close?.() };
+}
+
+export function mcpConnectionFailureMessage(server, error, serverConfig = {}) {
+  const name = mcpServerName(server);
+  const command = mcpServerCommand(name, server, serverConfig);
+  const cause = mcpFailureCause(error ?? server?.error ?? server?.cause ?? server?.reason);
+  return `requested MCP server ${name} failed to start (command: ${command}): ${cause}`;
+}
+
+function mcpServerName(server) {
+  if (typeof server === "string" && server.trim().length > 0) return server;
+  for (const candidate of [server?.name, server?.serverName, server?.server?.name]) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) return candidate;
+  }
+  return "unknown";
+}
+
+function mcpServerCommand(name, server, serverConfig) {
+  for (const candidate of [
+    serverConfig?.[name]?.command,
+    server?.command,
+    server?.config?.command,
+  ]) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) return candidate;
+  }
+  return "unknown";
+}
+
+function mcpFailureCause(error) {
+  const direct = nonEmptyString(error);
+  if (direct) return direct;
+  const nested = firstNonEmptyString([
+    error?.message,
+    error?.error?.message,
+    error?.cause?.message,
+  ]);
+  return nested ?? serializedFailure(error) ?? "connection failed without a reported cause";
+}
+
+function firstNonEmptyString(candidates) {
+  return candidates.map(nonEmptyString).find(Boolean);
+}
+
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function serializedFailure(error) {
+  if (!error || typeof error !== "object") return undefined;
+  try {
+    const serialized = JSON.stringify(error);
+    return serialized && serialized !== "{}" ? serialized : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function agentMcpsEnabled(request) {

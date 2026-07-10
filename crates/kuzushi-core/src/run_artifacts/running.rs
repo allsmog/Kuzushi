@@ -170,6 +170,22 @@ impl RunSummary {
         self
     }
 
+    pub fn canceled(mut self, reason: impl Into<String>) -> Self {
+        self.status = "canceled".to_string();
+        self.completed_at_unix = Some(now_unix());
+        self.error = Some(reason.into());
+        self.process_id = None;
+        self
+    }
+
+    pub fn skipped(mut self, reason: impl Into<String>) -> Self {
+        self.status = "skipped".to_string();
+        self.completed_at_unix = Some(now_unix());
+        self.error = Some(reason.into());
+        self.process_id = None;
+        self
+    }
+
     pub fn with_process_id(mut self, process_id: u32) -> Self {
         self.process_id = Some(process_id);
         self

@@ -35,6 +35,36 @@ pub(crate) fn status_footer_findings_summary_from_counts(
     status_footer_findings_summary_from_counts_with_loaded(total, total, counts)
 }
 
+pub(crate) fn compact_status_footer_findings_summary_from_counts(
+    total: usize,
+    counts: SeverityCounts,
+) -> String {
+    compact_status_footer_findings_summary_with_loaded(total, total, counts)
+}
+
+pub(crate) fn compact_status_footer_findings_summary_with_total(
+    findings: &[Finding],
+    total: usize,
+) -> String {
+    compact_status_footer_findings_summary_with_loaded(
+        findings.len(),
+        total,
+        SeverityCounts::from_findings(findings),
+    )
+}
+
+fn compact_status_footer_findings_summary_with_loaded(
+    loaded: usize,
+    total: usize,
+    counts: SeverityCounts,
+) -> String {
+    let mut parts = vec![loaded_findings_label(loaded, total)];
+    append_nonzero_severity(&mut parts, counts.critical, "C");
+    append_nonzero_severity(&mut parts, counts.high, "H");
+    append_nonzero_severity(&mut parts, counts.medium, "M");
+    parts.join(" · ")
+}
+
 pub(crate) fn status_footer_findings_summary_from_counts_with_loaded(
     loaded: usize,
     total: usize,

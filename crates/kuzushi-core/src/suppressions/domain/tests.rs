@@ -147,7 +147,7 @@ fn scope_status_only_matches_host_bearing_findings() {
 
     let mut predicate = SuppressionPredicate::empty();
     predicate.scope_status = Some(crate::workspace::ScopeVerdict::OutOfScope);
-    let rules = vec![rule("sup-scope", SuppressionOrigin::ScopeToml, predicate)];
+    let rules = [rule("sup-scope", SuppressionOrigin::ScopeToml, predicate)];
 
     let report = evaluate_suppressions(&[http, code], &[rules[0].clone()], Some(&scope), 1000);
     // http finding host is out-of-scope (allow-list present, unmatched) → suppressed.

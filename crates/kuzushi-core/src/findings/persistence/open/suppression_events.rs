@@ -6,7 +6,7 @@ use crate::storage_v3::writer_actor::{
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Rule-based suppression lifecycle event, keyed by finding fingerprint.
-/// The `event_kind` is validated by the writer actor to be one of the
+/// The writer actor checks that `event_kind` is one of the
 /// `Suppression*` kinds.
 pub struct SuppressionLifecycleEvent {
     pub event_kind: EventKind,

@@ -14,6 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const PACKAGE_ROOT_SCAN_BUDGET: usize = 50_000;
+const ENTRYPOINT_CLUSTER_BUDGET: usize = 512;
 const CONVENTIONAL_ENTRYPOINT_PARENTS: &[&str] = &["cmd", "services", "apps"];
 
 pub fn discover_nested_project_scopes(root: impl AsRef<Path>) -> NestedProjectScopeTree {
@@ -489,28 +490,35 @@ fn discover_dependency_roots(root: &Path) -> Vec<(NestedProjectKind, String)> {
 }
 
 fn discover_entrypoint_clusters(root: &Path) -> Vec<String> {
-    let Ok(inventory) = crate::repository_inventory::build_repository_inventory(root) else {
-        return Vec::new();
-    };
-    let mut clusters = inventory
-        .entrypoints
+    let mut clusters = CONVENTIONAL_ENTRYPOINT_PARENTS
         .iter()
-        .filter_map(|entrypoint| entrypoint_cluster_path(&entrypoint.path))
+        .flat_map(|parent| direct_entrypoint_clusters(root, parent))
+        .take(ENTRYPOINT_CLUSTER_BUDGET)
         .collect::<Vec<_>>();
     clusters.sort();
     clusters.dedup();
     clusters
 }
 
-fn entrypoint_cluster_path(path: &str) -> Option<String> {
-    let normalized = normalize_relative_path(path)?;
-    let mut parts = normalized.split('/');
-    let parent = parts.next()?;
-    if !CONVENTIONAL_ENTRYPOINT_PARENTS.contains(&parent) {
+fn direct_entrypoint_clusters(root: &Path, parent: &str) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(root.join(parent)) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entrypoint_cluster_for_entry(parent, &entry.path()))
+        .collect()
+}
+
+fn entrypoint_cluster_for_entry(parent: &str, path: &Path) -> Option<String> {
+    if !path.is_dir() {
         return None;
     }
-    let child = parts.next()?;
-    (!child.is_empty()).then(|| format!("{parent}/{child}"))
+    let child = path.file_name()?.to_string_lossy();
+    if child.starts_with('.') || ignored_dir(&child) {
+        return None;
+    }
+    normalize_relative_path(&format!("{parent}/{child}"))
 }
 
 fn dependency_scope_for_entry(path: &Path) -> Option<(NestedProjectKind, String)> {

@@ -53,6 +53,7 @@ impl HotkeyTrigger {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewHotkeyAction {
+    CatalogActivate,
     WorkbenchCyclePane,
     WorkbenchCyclePanePrev,
     WorkbenchScrollNext,
@@ -63,11 +64,13 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchCenterNext,
     WorkbenchCenterPrev,
     WorkbenchZoomCenter,
+    WorkbenchTogglePaneZoom,
     WorkbenchOpen,
     WorkbenchPageNext,
     WorkbenchPagePrev,
     WorkbenchPage(WorkbenchPage),
     WorkbenchValidate,
+    WorkbenchSuppress,
     WorkbenchOrderChain,
     WorkbenchCluster,
     RecommendCursorPrevious,

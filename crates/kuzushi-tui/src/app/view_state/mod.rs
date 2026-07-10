@@ -44,6 +44,7 @@ mod update_available;
 mod workbench_cache;
 mod workbench_nav;
 mod workbench_review_state;
+mod workbench_zoom;
 pub use activity::is_hidden_module_id;
 pub use activity::ActivityDeckPage;
 pub use activity::ActivityRouteState;
@@ -133,3 +134,4 @@ pub use workbench_nav::WorkbenchNav;
 #[cfg(test)]
 pub use workbench_review_state::ReviewCommand;
 pub use workbench_review_state::{PendingDecision, ReviewMode, ReviewRow, WorkbenchReviewState};
+pub use workbench_zoom::WorkbenchZoom;

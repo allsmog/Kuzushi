@@ -5,9 +5,14 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(divider("CHOOSE A MODEL", area.width));
     lines.push(blank());
-    lines.push(muted(
-        "Kuzushi does not silently pick a model for you. Select one to continue.",
-    ));
+    lines.extend(
+        wrap_text(
+            "Kuzushi does not silently pick a model for you. Select one to continue.",
+            area.width as usize,
+        )
+        .into_iter()
+        .map(|line| muted(&line)),
+    );
     lines.push(blank());
     let choices = visible_model_choices(app.config().model.as_deref());
     let widths = picker_column_widths(&choices);
@@ -16,13 +21,22 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
     }
     lines.push(offline_demo_action_line(area.width));
     lines.push(blank());
-    lines.push(keybind_hint_line(&[
-        ("↑/↓/j/k", "move"),
-        ("d/demo", "offline fixture"),
-        (":", "type a command"),
-        ("Enter", "confirm"),
-        ("Esc/q", "defer (you'll need to /model later)"),
-    ]));
+    lines.push(responsive_keybind_hint_line(
+        area.width as usize,
+        &[
+            ("↑/↓/j/k", "move"),
+            ("d/demo", "offline fixture"),
+            (":", "type a command"),
+            ("Enter", "confirm"),
+            ("Esc/q", "defer (you'll need to /model later)"),
+        ],
+        &[
+            ("↑/↓", "move"),
+            ("Enter", "select"),
+            ("d", "demo"),
+            ("Esc", "defer"),
+        ],
+    ));
     lines
 }
 
@@ -57,33 +71,51 @@ fn model_picker_row(
     (label_width, provider_width): (usize, usize),
     width: u16,
 ) -> Line<'static> {
-    let marker = if idx == app.router.model_picker().cursor() {
-        ">"
-    } else {
-        " "
-    };
     let auth_hint = auth_hint_for(choice);
     let provider_effort = provider_effort_cell(choice);
-    let body = format!(
-        "  {marker} {label:<label_width$}   {provider_effort:<provider_width$}   {auth_hint}",
+    let full = format!(
+        "{label:<label_width$}   {provider_effort:<provider_width$}   {auth_hint}",
         label = choice.label,
     );
-    let style = if idx == app.router.model_picker().cursor() {
-        theme::success().add_modifier(Modifier::BOLD)
-    } else {
-        theme::primary()
-    };
-    Line::styled(fit(&body, width as usize), style)
+    let body = responsive_model_row(choice, &full, label_width, width as usize);
+    selection_band(
+        &body,
+        idx == app.router.model_picker().cursor(),
+        width as usize,
+    )
+}
+
+fn responsive_model_row(
+    choice: &ModelChoice,
+    full: &str,
+    label_width: usize,
+    width: usize,
+) -> String {
+    let budget = width.saturating_sub(4);
+    if display_width(full) <= budget {
+        return full.to_string();
+    }
+    let status = compact_auth_hint(choice);
+    let status_width = display_width(status);
+    let label_width = label_width.min(budget.saturating_sub(status_width + 2));
+    format!("{}  {status}", pad(choice.label, label_width))
+}
+
+fn compact_auth_hint(choice: &ModelChoice) -> &'static str {
+    match (choice.provider, auth_ready_for_provider(choice.provider)) {
+        (_, true) => "ready",
+        ("openai-codex", false) => "OAuth login needed",
+        (_, false) => "credentials needed",
+    }
 }
 
 fn offline_demo_action_line(width: u16) -> Line<'static> {
-    Line::styled(
-        fit(
-            "  demo  Try offline fixture   local/no auth   deterministic scan",
-            width as usize,
-        ),
-        theme::muted(),
-    )
+    let body = if width >= 80 {
+        "  demo  Try offline fixture   local/no auth   deterministic scan"
+    } else {
+        "  demo  offline fixture · deterministic · no auth"
+    };
+    Line::styled(fit(body, width as usize), theme::muted())
 }
 
 fn auth_hint_for(choice: &ModelChoice) -> String {

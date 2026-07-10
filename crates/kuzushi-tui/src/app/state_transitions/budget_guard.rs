@@ -40,7 +40,7 @@ impl ShellApp {
 
     pub(crate) fn abort_for_budget(&mut self) {
         self.advisory_mut().budget_halt = None;
-        let requested = self.request_active_abort();
+        let requested = self.request_active_abort_with_reason(AbortReason::Budget);
         self.log(
             "budget",
             format!(

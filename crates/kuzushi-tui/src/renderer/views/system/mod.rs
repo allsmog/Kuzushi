@@ -34,14 +34,14 @@ mod overlay_lines;
 mod tools_lines;
 pub(crate) use auth_lines::auth_lines;
 pub(crate) use auth_provider_rows::{auth_provider_line, auth_provider_lines};
-pub(crate) use command_palette_lines::command_palette_lines;
+pub(crate) use command_palette_lines::{command_palette_lines, render_command_palette_overlay};
 pub(crate) use config_lines::config_lines;
 pub(crate) use cost_lines::cost_budget_bar;
 pub(crate) use cost_lines::cost_lines;
 pub(crate) use health_lines::health_lines;
 pub(crate) use interruption_lines::interruption_lines;
 pub(crate) use overlay_lines::{
-    boot_splash_lines, confirm_dialog_lines, keymap_lines, quit_confirm_lines, theme_picker_lines,
-    update_available_lines,
+    boot_splash_lines, confirm_dialog_lines, keymap_lines, quit_confirm_lines,
+    render_system_overlay, theme_picker_lines, update_available_lines,
 };
 pub(crate) use tools_lines::tools_lines;

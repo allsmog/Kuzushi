@@ -126,8 +126,9 @@ fn reconcile_suppressions_before_scan(
     store: &FindingStore,
     workspace: &WorkspaceTarget,
 ) -> Result<()> {
-    let sweep = kuzushi_core::suppressions::run_suppression_sweep(store, workspace, "system:scan-start")
-        .context("suppression sweep failed at scan start; refusing to gate on stale state")?;
+    let sweep =
+        kuzushi_core::suppressions::run_suppression_sweep(store, workspace, "system:scan-start")
+            .context("suppression sweep failed at scan start; refusing to gate on stale state")?;
     if !sweep.summary.is_noop() {
         eprintln!(
             "suppressions: {} added, {} reopened by expiry, {} reopened by rule removal",

@@ -1,0 +1,39 @@
+# J16 — Headless / plain parity
+# --plain and a non-TTY pipe of the same commands. Plain output must stay
+# useful (no ANSI dependency, no interaction-only state) and honor the
+# mode-parity contract in docs/assessments/mode-parity.md.
+name: Headless and plain parity
+cwd: @TMP_TARGET
+env: HOME=@TMP_HOME
+launch-raw: @KUZUSHI --plain; printf '\nEXIT:%s\n' $?
+wait: 8
+snap: bare-plain-summary
+expect: SESSION SUMMARY
+expect: EXIT:0
+ask: Bare --plain — is the output a self-contained non-interactive summary with no prompt or interaction-only advice?
+launch-raw: @KUZUSHI --plain --target @TMP_TARGET findings 2>&1 | head -40
+wait: 8
+snap: plain-findings
+ask: --plain findings — line-oriented, no box drawing, no ANSI requirement, honest about zero findings on a fresh target?
+launch-raw: @KUZUSHI --target @TMP_TARGET findings 2>&1 | cat | head -40
+wait: 8
+snap: nontty-pipe-findings
+ask: Non-TTY pipe (no --plain) — did it auto-degrade to plain output identical in substance to --plain, or leak interactive chrome/escape codes?
+launch-raw: @KUZUSHI demo 2>&1 | tail -30
+wait-for: 120 finding
+wait: 2
+snap: nontty-demo
+ask: Piped `kuzushi demo` — does the headless run narrate progress and findings usefully without the TUI (mode-parity: same value, plain surface)?
+launch-raw: @KUZUSHI --plain --target @TMP_TARGET tools 2>&1 | head -30
+wait: 8
+snap: plain-tools
+ask: --plain tools — is the catalog usable for scripting (stable names, one per line), with no hidden interaction-only state?
+launch-raw: @KUZUSHI --plain scan; printf '\nEXIT:%s\n' $?
+wait: 8
+snap: implicit-scan-refused
+expect: explicit target
+expect-not: EXIT:0
+launch-raw: @KUZUSHI --plain scan @TMP_TARGET; printf '\nEXIT:%s\n' $?
+wait: 30
+snap: explicit-scan-terminal
+ask: Explicit scripted scan — did the process wait for terminal state, emit its run reference/bundle, and return a status-derived exit code?

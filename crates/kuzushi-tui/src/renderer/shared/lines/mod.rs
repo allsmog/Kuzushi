@@ -61,6 +61,7 @@ pub(crate) use detail::category_divider;
 pub(crate) use detail::detail;
 pub(crate) use detail::divider;
 pub(crate) use detail::keybind_hint_line;
+pub(crate) use detail::responsive_keybind_hint_line;
 pub(crate) use empty_state_panel::empty_state_panel;
 pub(crate) use empty_state_panel::indent;
 pub(crate) use empty_state_panel::next_action_line;

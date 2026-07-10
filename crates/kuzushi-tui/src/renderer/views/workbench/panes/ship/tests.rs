@@ -61,7 +61,7 @@ fn export_preview_uses_active_review_completeness_filter() {
     assert!(text.contains("1 of 2 findings in preview"), "{text}");
     assert!(text.contains("format:sarif completeness:open"), "{text}");
     assert!(
-        text.contains("workspace export findings report.sarif --completeness open"),
+        text.contains("findings export report.sarif sarif --completeness open"),
         "{text}"
     );
     assert!(

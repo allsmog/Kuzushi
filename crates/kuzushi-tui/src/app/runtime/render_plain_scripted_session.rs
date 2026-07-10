@@ -1,28 +1,68 @@
 use super::*;
 
+#[cfg(test)]
 pub(crate) fn render_plain_scripted_session(
     app: &mut ShellApp,
     commands: &[&str],
     width: usize,
 ) -> String {
+    execute_plain_scripted_session(app, commands, width).output
+}
+
+pub(crate) struct PlainSessionReport {
+    pub(crate) output: String,
+    pub(crate) failed: bool,
+}
+
+pub(crate) fn execute_plain_scripted_session(
+    app: &mut ShellApp,
+    commands: &[&str],
+    width: usize,
+) -> PlainSessionReport {
     let mut output = String::new();
+    let mut failed = false;
     for (index, command) in commands.iter().enumerate() {
         if index > 0 {
             output.push('\n');
         }
         let log_start = app.log_len();
         submit_plain_scripted_command(app, command);
-        app_background_changed(app, None);
+        wait_for_plain_work(app);
+        failed |= plain_command_failed(app, log_start);
         output.push_str(&render_plain_command_result(app, width, command, log_start));
         if app.should_quit() {
             break;
         }
     }
-    output
+    PlainSessionReport { output, failed }
+}
+
+fn wait_for_plain_work(app: &mut ShellApp) {
+    app_background_changed(app, None);
+    while app.has_running_work() {
+        std::thread::sleep(Duration::from_millis(10));
+        app_background_changed(app, None);
+    }
+    app_background_changed(app, None);
+}
+
+fn plain_command_failed(app: &ShellApp, log_start: usize) -> bool {
+    app.log_lines().iter().skip(log_start).any(|line| {
+        line.prefix == "error"
+            || (line.prefix == "result"
+                && matches!(
+                    line.body.split_whitespace().next(),
+                    Some("failed" | "canceled" | "interrupted")
+                ))
+    })
 }
 
 fn submit_plain_scripted_command(app: &mut ShellApp, command: &str) {
     match crate::commands::parse_command(command) {
+        ShellCommand::Scan(None) if app.target().is_none() => app.log(
+            "error",
+            "scripted scan needs an explicit target; use `scan .` to consent to cwd",
+        ),
         ShellCommand::Scan(target) => {
             update_and_execute_effects(app, Msg::Cmd(ShellCommand::ScriptedScan(target)));
         }
@@ -57,6 +97,21 @@ mod tests {
         assert!(app.scan().is_some_and(|scan| scan.running));
         assert_eq!(app.shell_view(), ShellView::Activity);
         assert_ne!(app.shell_view(), ShellView::PlanningPicker);
+    }
+
+    #[test]
+    fn targetless_scripted_scan_is_a_failed_plain_outcome() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let report = execute_plain_scripted_session(&mut app, &["scan"], 80);
+
+        assert!(report.failed);
+        assert!(
+            report.output.contains("explicit target"),
+            "{}",
+            report.output
+        );
+        assert!(!app.has_running_work());
     }
 }
 

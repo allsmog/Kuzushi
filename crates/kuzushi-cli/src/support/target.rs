@@ -18,7 +18,7 @@ pub(crate) fn require_cli_target(
 ) -> Result<PathBuf> {
     target_or_global(command_target, global_target).ok_or_else(|| {
         anyhow::anyhow!(
-            "{command} needs a target: pass `--target <path>` (or `--target .` to use the current directory). Bug-bounty workflows require explicit scope."
+            "{command} needs a target (an explicit target is required): pass `--target <path>` (or `--target .` to use the current directory). Bug-bounty workflows require explicit scope."
         )
     })
 }

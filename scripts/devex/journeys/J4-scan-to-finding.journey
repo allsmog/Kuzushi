@@ -1,0 +1,30 @@
+# J4 — Bounty operator, scan to finding
+# Persona: bug-bounty hunter WITH a key. Workbench → next (phase rail) →
+# scan → findings → open <id>. Needs a live model key; skips honestly if
+# absent. Point @TARGET at a real fixture repo with KUZUSHI_DEVEX_TARGET.
+name: Bounty operator, scan to finding
+require-any-env: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: KUZUSHI_REDUCED_MOTION=1
+launch: --target @TARGET
+wait-for: 30 kuzushi>
+snap: workbench-landing
+ask: Workbench landing — does the phase chip (組 map 1/4 style) match on-disk reality for a fresh target, or is progress fabricated?
+submit: next
+wait: 3
+snap: phase-rail
+ask: `next` — does the phase rail (Map→Hunt→Confirm→Fix) tell the operator what the CURRENT phase needs, with an obvious next action?
+submit: scan
+wait-for: 30 ACTIVITY
+snap: scan-running
+wait-for: 600 completed
+snap: scan-done
+keys: Escape
+wait: 2
+submit: findings
+wait: 3
+snap: findings-list
+ask: Findings — does confidence-first sort hold (Confirmed above Unverified), and is Confirmed-vs-guess visually distinguishable?
+submit: open F-0001
+wait: 3
+snap: finding-detail
+ask: Finding detail — is the evidence real and legible, and does the status line honestly reflect triage/verification state?

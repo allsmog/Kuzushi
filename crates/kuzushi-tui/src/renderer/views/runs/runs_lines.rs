@@ -83,6 +83,7 @@ fn run_timeline_status_style(status: PastRunStatus) -> Style {
             theme::warn()
         }
         PastRunStatus::Skipped => theme::muted(),
+        PastRunStatus::Canceled => theme::warn(),
         PastRunStatus::Failed | PastRunStatus::Malformed => theme::danger(),
         PastRunStatus::Unknown => theme::muted(),
     }

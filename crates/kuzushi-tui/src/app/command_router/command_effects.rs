@@ -547,6 +547,7 @@ impl ShellApp {
     }
 
     fn open_modules_view(&mut self) {
+        self.clear_focused_module();
         self.set_shell_view(ShellView::Catalog);
         self.router.catalog_mut().expand();
         self.router.modules_mut().open();
@@ -791,8 +792,7 @@ impl ShellApp {
 
     fn resolve_live_job_kind(&self, run_id: &str) -> Option<crate::app::JobKind> {
         use crate::app::JobKind;
-        if self.jobs().is_running(JobKind::Run) && self.live_run_id().is_some_and(|id| id == run_id)
-        {
+        if self.live_run_matches_reference(run_id) {
             return Some(JobKind::Run);
         }
         match run_id {
@@ -801,6 +801,20 @@ impl ShellApp {
             "agent" if self.jobs().is_running(JobKind::Agent) => Some(JobKind::Agent),
             _ => None,
         }
+    }
+
+    fn live_run_matches_reference(&self, run_id: &str) -> bool {
+        use crate::app::JobKind;
+        if !self.jobs().is_running(JobKind::Run) {
+            return false;
+        }
+        let Some(live_id) = self.live_run_id() else {
+            return false;
+        };
+        matches!(
+            resolve_run_reference(run_id, [live_id.as_str()]),
+            RunReferenceResolution::Resolved(_)
+        )
     }
 
     fn live_run_id(&self) -> Option<String> {

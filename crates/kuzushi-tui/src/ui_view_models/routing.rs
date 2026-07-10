@@ -140,7 +140,7 @@ fn routing_state(app: &ShellApp) -> (bool, bool, bool, bool) {
         has_run_activity(app),
         has_agent_activity(app),
         has_plan_activity(app),
-        app.focused_module().is_some(),
+        app.focused_module().is_some() && !matches!(app.shell_view(), ShellView::Catalog),
     )
 }
 

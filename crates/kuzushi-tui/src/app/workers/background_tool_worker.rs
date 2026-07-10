@@ -23,6 +23,10 @@ pub(crate) enum ToolEvent {
         tool_name: String,
         error: String,
     },
+    Refused {
+        tool_name: String,
+        error: String,
+    },
 }
 
 #[derive(Debug)]
@@ -119,6 +123,16 @@ fn tool_result_event(tool_name: String, result: Result<serde_json::Value>) -> To
 }
 
 fn failed_tool_event(tool_name: String, error: anyhow::Error) -> ToolEvent {
+    if error.chain().any(|cause| {
+        cause
+            .downcast_ref::<kuzushi_core::modules::AutonomyRefusal>()
+            .is_some()
+    }) {
+        return ToolEvent::Refused {
+            tool_name,
+            error: format!("{error:#}"),
+        };
+    }
     ToolEvent::Failed {
         tool_name,
         // `{:#}` walks the full anyhow chain so operators see the

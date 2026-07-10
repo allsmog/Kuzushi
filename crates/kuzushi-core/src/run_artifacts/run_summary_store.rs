@@ -190,10 +190,102 @@ fn interrupted_summary(mut summary: RunSummary, process_id: u32) -> RunSummary {
     summary
 }
 
+#[cfg(target_os = "linux")]
 fn process_is_alive(process_id: u32) -> bool {
     let proc_root = Path::new("/proc");
     if !proc_root.exists() {
         return true;
     }
     proc_root.join(process_id.to_string()).exists()
+}
+
+/// `kill(pid, 0)` probes process existence without delivering a signal:
+/// `0` means alive, `EPERM` means alive but owned by another user, and
+/// `ESRCH` (or any other error) means no such process.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn process_is_alive(process_id: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(process_id) else {
+        // A pid that cannot be represented on this platform can never
+        // name a live process (and would alias `kill(-1, 0)` if cast).
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    let probe = unsafe { libc::kill(pid, 0) };
+    probe == 0 || last_errno_is_eperm()
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn last_errno_is_eperm() -> bool {
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// No portable liveness probe exists here; claiming "dead" would fabricate
+/// an interrupted state, so the summary is left untouched.
+#[cfg(not(unix))]
+fn process_is_alive(_process_id: u32) -> bool {
+    true
+}
+
+#[cfg(test)]
+mod liveness_tests {
+    use super::*;
+
+    #[test]
+    fn current_process_is_alive() {
+        assert!(process_is_alive(std::process::id()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reaped_child_process_is_not_alive() {
+        assert!(!process_is_alive(spawn_dead_process_id()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn running_summary_with_dead_pid_is_repaired_to_interrupted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let summary = RunSummary::running("run-dead-pid", "scan", None, "target")
+            .with_process_id(spawn_dead_process_id());
+        write_run_summary(tmp.path(), &summary).unwrap();
+
+        let loaded = list_run_summaries(tmp.path()).unwrap();
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].status, "interrupted");
+        assert!(loaded[0].completed_at_unix.is_some());
+        assert!(loaded[0].process_id.is_none());
+        assert!(loaded[0]
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no longer running"));
+    }
+
+    #[test]
+    fn running_summary_with_live_pid_is_left_running() {
+        let tmp = tempfile::tempdir().unwrap();
+        let summary = RunSummary::running("run-live-pid", "scan", None, "target")
+            .with_process_id(std::process::id());
+        write_run_summary(tmp.path(), &summary).unwrap();
+
+        let loaded = list_run_summaries(tmp.path()).unwrap();
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].status, "running");
+        assert_eq!(loaded[0].process_id, Some(std::process::id()));
+    }
+
+    /// Spawn and reap a short-lived child so its pid is known-dead.
+    #[cfg(unix)]
+    fn spawn_dead_process_id() -> u32 {
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn `true`");
+        let pid = child.id();
+        child.wait().expect("reap child");
+        pid
+    }
 }

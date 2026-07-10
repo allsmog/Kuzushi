@@ -77,27 +77,13 @@ impl ShellApp {
     }
 
     fn maybe_open_scan_findings_output(&mut self, findings_count: usize) {
-        // Findings are refreshed above. If the operator allows viz auto-open,
-        // the Activity output can switch to the review list when it has not
-        // been manually pinned; otherwise leave their page alone.
         if findings_count == 0 {
             return;
         }
-        self.maybe_switch_activity_deck_to_findings();
-        if !matches!(self.shell_view(), ShellView::Activity) {
-            self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
-        }
-    }
-
-    fn maybe_switch_activity_deck_to_findings(&mut self) {
-        if !self.ui().auto_open_viz() {
-            return;
-        }
-        if self.activity().is_some() && self.router.activity().can_auto_switch_deck() {
-            self.router
-                .activity_mut()
-                .set_deck_page(crate::ActivityDeckPage::Findings);
-        }
+        // `auto_open_viz_page` owns both the pin check and the Activity-deck
+        // projection. A finding-producing scan therefore lands on Heatmap in
+        // an unpinned Activity view, while a pinned deck remains untouched.
+        self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
     }
 
     fn mark_scan_panel_completed(&mut self, run_id: &str, findings_count: usize) {
@@ -191,6 +177,22 @@ impl ShellApp {
                 &record.target_label,
                 &error,
             ),
+            ScanRunOutcome::Canceled {
+                reason,
+                findings_count,
+            } => record_scan_canceled_artifacts(
+                record.target.as_deref(),
+                &record.run_id,
+                &record.target_label,
+                &reason,
+                findings_count,
+            ),
+            ScanRunOutcome::Interrupted { reason } => record_scan_interrupted_artifacts(
+                record.target.as_deref(),
+                &record.run_id,
+                &record.target_label,
+                &reason,
+            ),
         }
     }
 }
@@ -212,12 +214,13 @@ fn record_scan_completion_artifacts(
         None,
         None,
     );
-    write_run_summary(
+    write_scan_terminal_summary(
         target,
         run_id,
-        "complete",
-        Some(findings_count as u64),
         target_label,
+        "completed",
+        None,
+        Some(findings_count),
     );
     append_run_status_event(
         target,
@@ -245,9 +248,68 @@ fn record_scan_failure_artifacts(
         None,
         None,
     );
-    write_run_summary(target, run_id, "failed", None, target_label);
+    write_scan_terminal_summary(target, run_id, target_label, "failed", Some(error), None);
     append_run_status_event(target, run_id, "sast:scan", "failed", "sast:scan failed");
     write_run_failure_handoff(target, run_id, "sast:scan", "failed", error);
+}
+
+fn record_scan_canceled_artifacts(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    target_label: &str,
+    reason: &str,
+    findings_count: Option<usize>,
+) {
+    append_trace_step(target, run_id, "tool", "scan canceled", None, None);
+    write_scan_terminal_summary(
+        target,
+        run_id,
+        target_label,
+        "canceled",
+        Some(reason),
+        findings_count,
+    );
+    append_run_status_event(target, run_id, "sast:scan", "canceled", reason);
+}
+
+fn record_scan_interrupted_artifacts(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    target_label: &str,
+    reason: &str,
+) {
+    append_trace_step(target, run_id, "refused", "scan interrupted", None, None);
+    write_scan_terminal_summary(
+        target,
+        run_id,
+        target_label,
+        "interrupted",
+        Some(reason),
+        None,
+    );
+    append_run_status_event(target, run_id, "sast:scan", "interrupted", reason);
+}
+
+fn write_scan_terminal_summary(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    target_label: &str,
+    status: &str,
+    reason: Option<&str>,
+    findings_count: Option<usize>,
+) {
+    let Some(target) = target else { return };
+    let seed = kuzushi_core::load_run_summary(target, run_id)
+        .unwrap_or_else(|_| kuzushi_core::RunSummary::running(run_id, "shell", None, target_label));
+    let seed = seed.with_findings(findings_count.map(|count| count as u64));
+    let summary = match status {
+        "completed" => seed.complete(),
+        "failed" => seed.failed(reason.unwrap_or("scan failed")),
+        "canceled" => seed.canceled(reason.unwrap_or("scan canceled")),
+        "interrupted" => seed.interrupted(reason.unwrap_or("scan interrupted")),
+        _ => seed,
+    };
+    let _ = kuzushi_core::write_run_summary(target, &summary);
 }
 
 fn completed_task_durations(session: &crate::app::ActivitySession) -> Vec<(String, u64)> {

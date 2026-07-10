@@ -13,6 +13,7 @@ pub struct EngagementState {
     planning_run_queue: VecDeque<PlanningTaskId>,
     planning_expanded_queue: VecDeque<PlanningRunStep>,
     planning_running_tool: Option<String>,
+    planning_paused: bool,
     planning_picker_route: PlanningPickerRouteState,
     pending_chain: Option<PrereqChain>,
     pending_prereq_prompt: Option<PendingPrereqPrompt>,
@@ -140,11 +141,22 @@ impl EngagementState {
     pub(crate) fn queue_plan(&mut self, plan: Vec<PlanningTaskId>) {
         self.planning_run_queue = plan.into_iter().collect();
         self.planning_expanded_queue.clear();
+        self.planning_paused = false;
     }
 
     pub(crate) fn clear_planning_queue(&mut self) {
         self.planning_run_queue.clear();
         self.planning_expanded_queue.clear();
+        self.planning_paused = false;
+    }
+
+    pub(crate) fn pause_planning_queue(&mut self) {
+        self.planning_paused = true;
+        self.planning_running_tool = None;
+    }
+
+    pub(crate) fn planning_paused(&self) -> bool {
+        self.planning_paused
     }
 
     pub(crate) fn pending_planning_step_count(&self) -> usize {

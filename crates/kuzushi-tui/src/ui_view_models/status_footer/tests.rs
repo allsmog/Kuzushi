@@ -16,7 +16,7 @@ fn status_footer_model_reports_idle_shell_segments() {
 
     // Routing + view only: target/ctx/model are the top cockpit strip's job,
     // so each session fact is stated once per screen.
-    assert_eq!(model.left_segments, ["mode:shell", "modules"]);
+    assert_eq!(model.left_segments, ["mode:shell", "catalog"]);
     assert_eq!(model.right_segments, ["0 findings"]);
     assert!(!model.warning);
 }
@@ -209,7 +209,7 @@ fn status_footer_model_prefers_active_scan_status() {
 
     assert_eq!(
         model.left_segments,
-        ["mode:run", "modules", "openai:gpt-5.2", "running: semgrep"]
+        ["mode:run", "catalog", "openai:gpt-5.2", "running: semgrep"]
     );
 }
 
@@ -226,7 +226,7 @@ fn status_footer_model_reflects_active_tool_model_override() {
         model.left_segments,
         [
             "mode:run",
-            "modules",
+            "catalog",
             "openai:gpt-tool (tool)",
             "triage:run: active"
         ]

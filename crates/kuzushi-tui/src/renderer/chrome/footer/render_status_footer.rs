@@ -7,8 +7,13 @@ pub(crate) fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &Shel
     }
 
     let model = status_footer_model(app);
-    let left = join_segments(&model.left_segments);
-    let right = join_segments(&model.right_segments);
+    let compact = area.width < 80;
+    let left = footer_segments(&model.left_segments, &model.compact_left_segments, compact);
+    let right = footer_segments(
+        &model.right_segments,
+        &model.compact_right_segments,
+        compact,
+    );
     // Prefer the right segment when widths are tight: the top status strip
     // already shows mode + target + ctx, so on narrow terminals truncating
     // the duplicated left side keeps findings count + ctrl-c hint visible.
@@ -19,4 +24,8 @@ pub(crate) fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &Shel
         theme::primary()
     };
     frame.render_widget(Paragraph::new(Line::styled(text, style)), area);
+}
+
+fn footer_segments(wide: &[String], compact: &[String], use_compact: bool) -> String {
+    join_segments(if use_compact { compact } else { wide })
 }

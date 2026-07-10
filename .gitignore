@@ -66,6 +66,9 @@ workspace/
 !crates/*/src/workspace/
 !crates/*/src/workspace/**
 
+# TUI DevEx audit harness — per-run tmux pane captures (see scripts/devex/README.md)
+scripts/devex/artifacts/
+
 # design-sync (Claude Design) — converter scratch + build output.
 # Durable sync inputs under .design-sync/ stay tracked (config.json, NOTES.md,
 # conventions.md, previews/, overrides/).

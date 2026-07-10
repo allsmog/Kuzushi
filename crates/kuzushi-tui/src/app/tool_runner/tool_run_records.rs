@@ -1,6 +1,9 @@
 use kuzushi_core::run_artifacts::{
-    load_run_failures, record_tool_run_complete as record_core_tool_run_complete,
-    record_tool_run_failed as record_core_tool_run_failed, FailureToLlmContext, ToolRunRecord,
+    load_run_failures, record_tool_run_canceled as record_core_tool_run_canceled,
+    record_tool_run_complete as record_core_tool_run_complete,
+    record_tool_run_failed as record_core_tool_run_failed,
+    record_tool_run_interrupted as record_core_tool_run_interrupted,
+    record_tool_run_refused as record_core_tool_run_refused, FailureToLlmContext, ToolRunRecord,
 };
 
 pub(crate) fn record_tool_run_complete(
@@ -15,6 +18,51 @@ pub(crate) fn record_tool_run_complete(
     let record = ToolRunRecord::new(target, run_id, "tool", tool_name);
     record_core_tool_run_complete(record, result);
     failure_context_for_tool_run(target, run_id)
+}
+
+pub(crate) fn record_tool_run_canceled(
+    target: Option<&std::path::Path>,
+    run_id: Option<&str>,
+    tool_name: &str,
+    reason: &str,
+) {
+    let (Some(target), Some(run_id)) = (target, run_id) else {
+        return;
+    };
+    record_core_tool_run_canceled(
+        ToolRunRecord::new(target, run_id, "tool", tool_name),
+        reason,
+    );
+}
+
+pub(crate) fn record_tool_run_interrupted(
+    target: Option<&std::path::Path>,
+    run_id: Option<&str>,
+    tool_name: &str,
+    reason: &str,
+) {
+    let (Some(target), Some(run_id)) = (target, run_id) else {
+        return;
+    };
+    record_core_tool_run_interrupted(
+        ToolRunRecord::new(target, run_id, "tool", tool_name),
+        reason,
+    );
+}
+
+pub(crate) fn record_tool_run_refused(
+    target: Option<&std::path::Path>,
+    run_id: Option<&str>,
+    tool_name: &str,
+    reason: &str,
+) {
+    let (Some(target), Some(run_id)) = (target, run_id) else {
+        return;
+    };
+    record_core_tool_run_refused(
+        ToolRunRecord::new(target, run_id, "tool", tool_name),
+        reason,
+    );
 }
 
 pub(crate) fn record_tool_run_failed(

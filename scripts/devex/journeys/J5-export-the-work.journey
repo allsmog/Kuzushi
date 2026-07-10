@@ -1,0 +1,30 @@
+# J5 — Export the work
+# Doc says "continues J4", but the offline demo also persists findings, so
+# this runs keylessly: demo → findings exist → is the path from "I have
+# findings" to "I have a submittable artifact" discoverable without docs?
+# Known risk: export was uncommitted / orphaned in prior audits.
+name: Export the work
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+keys: d
+wait-for: 90 run completed
+snap: demo-findings-ready
+keys: Escape
+wait: 2
+submit: help
+wait: 2
+snap: help-for-export
+ask: Discoverability — from `help`, can an operator find how to export findings without reading docs?
+submit: export
+wait: 3
+snap: export-verb
+expect: findings export <path> [format]
+ask: Bare `export` — does it print the complete canonical usage, including the required output path?
+submit: findings export @ART/report.sarif sarif
+wait: 5
+snap: export-sarif
+expect: report.sarif
+ask: Canonical findings export — did it write a SARIF file and say where? (Also try json|csv|markdown-bundle when judging by hand.)

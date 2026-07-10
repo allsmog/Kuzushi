@@ -65,28 +65,25 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
-        let update = self.handle_empty_input_view_key(key, modifiers);
-        if update.handled {
-            return update;
+        match self.input_mode() {
+            InputMode::Prompt => self.reduce_prompt_key(key, modifiers),
+            InputMode::Navigate => self.reduce_navigate_key(key, modifiers),
         }
-        if self.handle_navigation_or_history_key(key, modifiers) {
+    }
+
+    fn reduce_prompt_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> InputUpdate {
+        if self.handle_cursor_key(key, modifiers) || self.handle_history_key(key, modifiers) {
             return InputUpdate::handled();
         }
         self.handle_text_key(key)
     }
 
-    fn handle_navigation_or_history_key(
-        &mut self,
-        key: KeyEvent,
-        modifiers: KeyModifierState,
-    ) -> bool {
-        if self.handle_unhandled_navigation_key(key, modifiers) {
-            return true;
+    fn reduce_navigate_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> InputUpdate {
+        let update = self.handle_empty_input_view_key(key, modifiers);
+        if update.handled {
+            return update;
         }
-        if self.handle_cursor_key(key, modifiers) {
-            return true;
-        }
-        self.handle_history_key(key, modifiers)
+        InputUpdate::handled_if(self.handle_unhandled_navigation_key(key, modifiers))
     }
 
     fn record_operator_interaction(&mut self) {

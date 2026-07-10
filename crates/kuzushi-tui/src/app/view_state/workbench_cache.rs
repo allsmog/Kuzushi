@@ -4,9 +4,10 @@ use cache_entries::{
     canonical_target_base, project_scope_tree_for_target, read_json_file,
     run_summary_index_for_target, source_file_stamp, GitMetadataCache, JsonFileCache,
     PromptMutationsCache, RunSummaryCache, RunSummaryCacheKey, ScopeTreeCache, SourceFileCache,
-    StrategyQueueCache, TargetBaseCache,
+    SourceFileStamp, StrategyQueueCache, TargetBaseCache,
 };
 use finding_alias_cache::FindingAliasCache;
+use kuzushi_core::engagement::{ENGAGEMENT_DIR, HARNESS_FILE};
 use kuzushi_core::{
     Finding, NestedProjectScopeTree, RunSummary, RunTargetGitMetadata, WorkspaceTarget,
 };
@@ -40,6 +41,7 @@ pub(crate) struct WorkbenchCache {
     scope_tree: Option<ScopeTreeCache>,
     strategy_queue: Option<StrategyQueueCache>,
     prompt_mutations: Option<PromptMutationsCache>,
+    harness_file: Option<HarnessFileCache>,
     json_files: BTreeMap<PathBuf, JsonFileCache>,
     map_artifacts: MapArtifactsCache,
     prompt_overrides: PromptOverrideCache,
@@ -221,6 +223,29 @@ impl WorkbenchCache {
         self.prompt_mutations = None;
     }
 
+    /// Cached read of the engagement harness file
+    /// (`<target>/engagement/harness.toml`); `None` when the target is unset
+    /// or the harness file is missing/unreadable.
+    pub(crate) fn harness_file(&mut self, target: Option<&Path>) -> Option<String> {
+        let target = target?;
+        let path = harness_file_path(target);
+        let stamp = source_file_stamp(&path).ok();
+        if let Some(cache) = self
+            .harness_file
+            .as_ref()
+            .filter(|cache| cache.target == target && cache.stamp == stamp)
+        {
+            return cache.contents.clone();
+        }
+        let contents = std::fs::read_to_string(&path).ok();
+        self.harness_file = Some(HarnessFileCache {
+            target: target.to_path_buf(),
+            stamp,
+            contents: contents.clone(),
+        });
+        contents
+    }
+
     pub(crate) fn json_file(&mut self, path: &Path) -> JsonFileState {
         let stamp = source_file_stamp(path).ok();
         if let Some(cache) = self
@@ -290,4 +315,15 @@ impl WorkbenchCache {
     pub(crate) fn cache_dfd_model(&mut self, key: DfdModelCacheKey, model: DfdModel) {
         self.view_models.cache_dfd_model(key, model);
     }
+}
+
+pub(crate) fn harness_file_path(target: &Path) -> PathBuf {
+    target.join(ENGAGEMENT_DIR).join(HARNESS_FILE)
+}
+
+#[derive(Debug)]
+struct HarnessFileCache {
+    target: PathBuf,
+    stamp: Option<SourceFileStamp>,
+    contents: Option<String>,
 }

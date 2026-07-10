@@ -45,7 +45,8 @@ pub use running::{
     RunSummary, RunTargetGitMetadata, RunTraceStep,
 };
 pub use tool_run_record::{
-    record_tool_run_complete, record_tool_run_failed, record_tool_run_started,
+    record_tool_run_canceled, record_tool_run_complete, record_tool_run_failed,
+    record_tool_run_interrupted, record_tool_run_refused, record_tool_run_started,
     record_tool_run_started_with_metadata, record_tool_run_started_with_reproducibility,
     tool_run_output_cost_usd, tool_run_output_findings_count, ToolRunRecord,
 };

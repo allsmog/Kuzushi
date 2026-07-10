@@ -32,7 +32,9 @@ impl ShellEvent {
         match self {
             Self::Trace(_) | Self::Scan(ScanEvent::Stage(_)) => false,
             Self::Scan(ScanEvent::Finished { .. } | ScanEvent::Failed { .. }) => true,
-            Self::Tool(ToolEvent::Finished { .. } | ToolEvent::Failed { .. }) => true,
+            Self::Tool(
+                ToolEvent::Finished { .. } | ToolEvent::Failed { .. } | ToolEvent::Refused { .. },
+            ) => true,
             Self::Agent(AgentEvent::Answered { .. } | AgentEvent::Failed { .. }) => true,
             Self::Plan(PlanEvent::Proposed(_) | PlanEvent::Failed { .. }) => true,
             Self::Threat(

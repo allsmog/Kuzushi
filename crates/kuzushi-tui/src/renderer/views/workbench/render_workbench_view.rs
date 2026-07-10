@@ -1,6 +1,6 @@
 use super::detail_pane::detail_pane_lines;
 use super::panes::{
-    center_pane_lines, hunt_control_lines, review_queue_pane_lines, sep, ship_chain_lines,
+    center_pane_lines, hunt_control_lines, review_queue_pane_lines, ship_chain_lines,
     ship_export_lines, ship_patch_lines, source_pane_lines, source_title,
     terrain_attack_surface_lines, terrain_material_lines, terrain_visual_lines,
 };
@@ -14,7 +14,7 @@ use crate::ui_view_models::{
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::style::Modifier;
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Paragraph, Wrap};
 
 const FOUR_COLUMN_MIN_WIDTH: u16 = 150;
 const REVIEW_GRID_MIN_WIDTH: u16 = 100;
@@ -28,7 +28,14 @@ const STACKED_MIN_BODY_HEIGHT: u16 = 21;
 /// drawn by the shell chrome below `area`.
 pub(crate) fn render_workbench_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let model = workbench_view_model(app);
-    let top_lines = top_bar_lines(&model.top_bar, &model.command_bar_hints);
+    let mut top_lines = top_bar_lines(
+        &model.top_bar,
+        &model.command_bar_hints,
+        area.width as usize,
+    );
+    if let Some(pane) = model.zoom {
+        top_lines.push(zoom_status_line(pane));
+    }
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -38,6 +45,23 @@ pub(crate) fn render_workbench_view(frame: &mut Frame<'_>, area: Rect, app: &She
         .split(area);
     frame.render_widget(Paragraph::new(top_lines), outer[0]);
     render_body(frame, outer[1], app, &model);
+}
+
+fn zoom_status_line(pane: WorkbenchPane) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(" ▸ ZOOM ", theme::warn()),
+        Span::styled(workbench_pane_label(pane), theme::primary()),
+        Span::styled(" · Tab pane · Z restore cockpit", theme::muted()),
+    ])
+}
+
+fn workbench_pane_label(pane: WorkbenchPane) -> &'static str {
+    match pane {
+        WorkbenchPane::Source => "SOURCE",
+        WorkbenchPane::Center => "CENTER",
+        WorkbenchPane::Findings => "FINDINGS",
+        WorkbenchPane::Details => "DETAILS",
+    }
 }
 
 fn render_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &WorkbenchViewModel) {
@@ -58,6 +82,10 @@ fn render_review_body(
     app: &ShellApp,
     model: &WorkbenchViewModel,
 ) {
+    if let Some(pane) = model.zoom {
+        render_zoomed_review_pane(frame, area, app, model, pane);
+        return;
+    }
     if app.router.workbench().depth_stack() {
         let depth_model = crate::ui_view_models::workbench_depth_model(app);
         super::depth_stack::render_workbench_depth(
@@ -73,6 +101,21 @@ fn render_review_body(
         WorkbenchLayout::ReviewGrid => render_review_grid_body(frame, area, app, model),
         WorkbenchLayout::Stacked => render_stacked_body(frame, area, app, model),
         WorkbenchLayout::ShortReview => render_short_review_body(frame, area, app, model),
+    }
+}
+
+fn render_zoomed_review_pane(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+    pane: WorkbenchPane,
+) {
+    match pane {
+        WorkbenchPane::Source => render_source(frame, area, app, model),
+        WorkbenchPane::Center => render_center(frame, area, app, model),
+        WorkbenchPane::Findings => render_review_queue_pane(frame, area, &model.review_queue, true),
+        WorkbenchPane::Details => render_detail_pane(frame, area, app, model),
     }
 }
 
@@ -103,11 +146,48 @@ fn render_terrain_body(
     app: &ShellApp,
     model: &WorkbenchViewModel,
 ) {
-    if area.width < 110 {
+    if area.width < REVIEW_GRID_MIN_WIDTH {
         render_compact_terrain(frame, area, app, model);
         return;
     }
+    if area.width < FOUR_COLUMN_MIN_WIDTH {
+        render_terrain_grid(frame, area, app, model);
+        return;
+    }
     render_terrain_columns(frame, area, app, model);
+}
+
+fn render_terrain_grid(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) {
+    let panes = three_pane_grid_areas(area);
+    render_page_pane(
+        frame,
+        panes[0],
+        "AIM - ATTACK SURFACE",
+        terrain_attack_surface_lines(app, panes[0].width.saturating_sub(2) as usize),
+        app,
+        model,
+    );
+    render_page_pane(
+        frame,
+        panes[1],
+        "DFD / AIM",
+        terrain_visual_lines(app, panes[1].width.saturating_sub(2) as usize),
+        app,
+        model,
+    );
+    render_page_pane(
+        frame,
+        panes[2],
+        "SEEDS & MATERIALS",
+        terrain_material_lines(app, panes[2].width.saturating_sub(2) as usize),
+        app,
+        model,
+    );
 }
 
 fn render_compact_terrain(
@@ -172,11 +252,55 @@ fn render_terrain_columns(
 }
 
 fn render_ship_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &WorkbenchViewModel) {
-    if area.width < 100 {
+    if area.width < REVIEW_GRID_MIN_WIDTH {
         render_compact_ship(frame, area, app, model);
         return;
     }
+    if area.width < FOUR_COLUMN_MIN_WIDTH {
+        render_ship_grid(frame, area, app, model);
+        return;
+    }
     render_ship_columns(frame, area, app, model);
+}
+
+fn render_ship_grid(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &WorkbenchViewModel) {
+    let panes = three_pane_grid_areas(area);
+    render_page_pane(
+        frame,
+        panes[0],
+        "EXPLOIT CHAINS",
+        ship_chain_lines(app, panes[0].width.saturating_sub(2) as usize),
+        app,
+        model,
+    );
+    render_page_pane(
+        frame,
+        panes[1],
+        "PATCH QUEUE",
+        ship_patch_lines(app, panes[1].width.saturating_sub(2) as usize),
+        app,
+        model,
+    );
+    render_page_pane(
+        frame,
+        panes[2],
+        "EXPORT",
+        ship_export_lines(app, panes[2].width.saturating_sub(2) as usize),
+        app,
+        model,
+    );
+}
+
+fn three_pane_grid_areas(area: Rect) -> [Rect; 3] {
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(44), Constraint::Percentage(56)])
+        .split(area);
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(columns[1]);
+    [columns[0], right[0], right[1]]
 }
 
 fn render_compact_ship(
@@ -404,7 +528,10 @@ fn render_short_review_body(
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
         .split(area);
-    let findings_title = format!("{} · 2/4 panes", model.review_queue.header);
+    let findings_title = format!(
+        "REVIEW QUEUE {} · 2/4 panes",
+        model.review_queue.visible_count
+    );
     render_review_queue_pane_with_title(
         frame,
         rows[0],
@@ -490,40 +617,20 @@ fn render_pane(
 }
 
 fn bordered_block(title: &str, focused: bool) -> Block<'static> {
-    let title_style = if focused {
-        theme::accent().add_modifier(Modifier::BOLD)
-    } else {
-        theme::muted()
-    };
-    Block::default()
-        .borders(Borders::ALL)
-        .border_style(if focused {
-            theme::accent()
-        } else {
-            theme::subtle()
-        })
-        .border_type(if focused {
-            BorderType::Thick
-        } else {
-            BorderType::Plain
-        })
-        .title(Span::styled(title.to_string(), title_style))
+    cockpit_pane_block(
+        Line::from(Span::styled(
+            title.to_string(),
+            cockpit_title_style(focused),
+        )),
+        focused,
+    )
 }
 
 fn center_bordered_block(center: &WorkbenchCenter, focused: bool, width: u16) -> Block<'static> {
-    Block::default()
-        .borders(Borders::ALL)
-        .border_style(if focused {
-            theme::accent()
-        } else {
-            theme::subtle()
-        })
-        .border_type(if focused {
-            BorderType::Thick
-        } else {
-            BorderType::Plain
-        })
-        .title(Line::from(center_title_spans(center, focused, width)))
+    cockpit_pane_block(
+        Line::from(center_title_spans(center, focused, width)),
+        focused,
+    )
 }
 
 fn center_title_spans(center: &WorkbenchCenter, focused: bool, width: u16) -> Vec<Span<'static>> {
@@ -544,7 +651,7 @@ fn center_tab_span(tab: &WorkbenchCenterTab, focused: bool) -> Span<'static> {
         label.push('·');
     }
     let style = if tab.active {
-        theme::accent().add_modifier(Modifier::BOLD)
+        theme::label()
     } else if tab.empty {
         theme::subtle()
     } else if focused {
@@ -763,69 +870,95 @@ fn clamped_paragraph_scroll(scroll: u16, line_count: usize, viewport_height: u16
 
 // ── top bar ────────────────────────────────────────────────────────────────
 
-fn top_bar_lines(top: &WorkbenchTopBar, hints: &[WorkbenchHint]) -> Vec<Line<'static>> {
-    let mut lines = vec![identity_line(top)];
-    if let Some(line) = journey_line(top) {
-        lines.push(line);
-    }
-    lines.push(command_hint_line(hints));
+fn top_bar_lines(
+    top: &WorkbenchTopBar,
+    hints: &[WorkbenchHint],
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![identity_line(top, width)];
+    lines.extend(journey_lines(top, width));
+    lines.push(command_hint_line(hints, width));
     lines
 }
 
-fn identity_line(top: &WorkbenchTopBar) -> Line<'static> {
-    let mut spans = vec![
-        Span::styled(top.brand.to_string(), theme::heading()),
-        Span::raw(" "),
-        Span::styled("› ", theme::subtle()),
-        Span::styled("workbench".to_string(), theme::accent()),
-        sep(),
-        Span::styled("target:".to_string(), theme::muted()),
-        Span::styled(top.project.clone(), theme::label()),
-    ];
-    if top.phase_rail.is_empty() {
-        if let Some(phase) = &top.phase {
-            spans.push(sep());
-            spans.push(Span::styled("phase:".to_string(), theme::muted()));
-            spans.push(Span::styled(phase.clone(), theme::accent()));
-        }
+fn identity_line(top: &WorkbenchTopBar, width: usize) -> Line<'static> {
+    let mut spans = Vec::new();
+    let mut used = 0;
+    for (text, style) in identity_atoms(top) {
+        push_top_atom(&mut spans, &mut used, width, text, style);
     }
-    spans.push(sep());
-    spans.push(Span::styled("page:".to_string(), theme::muted()));
-    spans.push(Span::styled(
-        top.page.title().to_ascii_lowercase(),
-        theme::label(),
-    ));
-    spans.push(sep());
-    spans.push(live_span(top.live));
-    spans.push(sep());
-    spans.push(Span::styled(
-        format!("modules:{}", top.target),
-        theme::muted(),
-    ));
     Line::from(spans)
 }
 
-fn live_span(live: bool) -> Span<'static> {
-    if live {
-        Span::styled("● LIVE", theme::success())
+fn identity_atoms(top: &WorkbenchTopBar) -> Vec<(String, ratatui::style::Style)> {
+    let live_atom = if top.live {
+        ("● LIVE".to_string(), theme::success())
     } else {
-        Span::styled("○ idle", theme::subtle())
-    }
+        ("○ idle".to_string(), theme::subtle())
+    };
+    let mut atoms = vec![
+        (top.brand.to_string(), theme::heading()),
+        (format!("target:{}", top.project), theme::label()),
+        (
+            format!("page:{}", top.page.title().to_ascii_lowercase()),
+            theme::label(),
+        ),
+        live_atom,
+    ];
+    atoms.extend(identity_phase_atom(top));
+    atoms.push((format!("modules:{}", top.target), theme::muted()));
+    atoms
 }
 
-fn command_hint_line(hints: &[WorkbenchHint]) -> Line<'static> {
+fn identity_phase_atom(top: &WorkbenchTopBar) -> Option<(String, ratatui::style::Style)> {
+    if !top.phase_rail.is_empty() {
+        return None;
+    }
+    top.phase
+        .as_ref()
+        .map(|phase| (format!("phase:{phase}"), theme::muted()))
+}
+
+fn push_top_atom(
+    spans: &mut Vec<Span<'static>>,
+    used: &mut usize,
+    width: usize,
+    text: String,
+    style: ratatui::style::Style,
+) -> bool {
+    let separator_width = usize::from(*used > 0) * 3;
+    let atom_width = text.chars().count();
+    if used.saturating_add(separator_width + atom_width) > width {
+        return false;
+    }
+    if *used > 0 {
+        spans.push(Span::styled(" · ", theme::subtle()));
+    }
+    spans.push(Span::styled(text, style));
+    *used += separator_width + atom_width;
+    true
+}
+
+fn command_hint_line(hints: &[WorkbenchHint], width: usize) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
-    for (index, hint) in hints.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::raw("   "));
-        }
-        spans.push(Span::styled(
+    let mut used = 1;
+    for hint in hints {
+        let atom = format!(
+            "{}{} {}",
             hint_prefix(hint.verb.as_ref()),
-            theme::subtle(),
-        ));
-        spans.push(Span::styled(hint.verb.to_string(), theme::accent()));
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(hint.label.to_string(), theme::muted()));
+            hint.verb,
+            hint.label
+        );
+        let atom_width = atom.chars().count();
+        let separator = if used > 1 { 3 } else { 0 };
+        if used + separator + atom_width > width {
+            continue;
+        }
+        if separator > 0 {
+            spans.push(Span::raw(" · "));
+        }
+        spans.push(Span::styled(atom, theme::muted()));
+        used += separator + atom_width;
     }
     Line::from(spans)
 }
@@ -838,17 +971,62 @@ fn hint_prefix(verb: &str) -> &'static str {
     }
 }
 
-fn journey_line(top: &WorkbenchTopBar) -> Option<Line<'static>> {
+fn journey_lines(top: &WorkbenchTopBar, width: usize) -> Vec<Line<'static>> {
     if top.phase_rail.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = phase_rail_line(&top.phase_rail, width)
+        .into_iter()
+        .collect::<Vec<_>>();
+    lines.extend(phase_next_lines(top.phase_next_summary.as_deref(), width));
+    lines
+}
+
+fn phase_rail_line(statuses: &[JourneyPhaseStatus], width: usize) -> Option<Line<'static>> {
+    let rail_text = statuses
+        .iter()
+        .map(|status| format!("{}{}", status.phase_label, status.state_symbol))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    if width < 100 || rail_text.chars().count() >= width {
         return None;
     }
     let mut spans = vec![Span::raw(" ")];
-    append_phase_rail_spans(&mut spans, &top.phase_rail);
-    if let Some(summary) = &top.phase_next_summary {
-        spans.push(Span::raw("   "));
-        append_next_summary_spans(&mut spans, summary);
-    }
+    append_phase_rail_spans(&mut spans, statuses);
     Some(Line::from(spans))
+}
+
+fn phase_next_lines(summary: Option<&str>, width: usize) -> Vec<Line<'static>> {
+    let Some(summary) = summary else {
+        return Vec::new();
+    };
+    wrap_text(
+        compact_next_summary(summary, width),
+        width.saturating_sub(8).max(16),
+    )
+    .into_iter()
+    .enumerate()
+    .map(|(index, chunk)| next_action_line(index, chunk))
+    .collect()
+}
+
+fn compact_next_summary(summary: &str, width: usize) -> &str {
+    if width >= 100 {
+        return summary;
+    }
+    summary
+        .split_once(" — ")
+        .map(|(head, _)| head)
+        .unwrap_or(summary)
+}
+
+fn next_action_line(index: usize, chunk: String) -> Line<'static> {
+    let lead = if index == 0 {
+        Span::styled(" ▸ NEXT ", theme::warn())
+    } else {
+        Span::raw("        ")
+    };
+    Line::from(vec![lead, Span::styled(chunk, theme::primary())])
 }
 
 fn append_phase_rail_spans(spans: &mut Vec<Span<'static>>, statuses: &[JourneyPhaseStatus]) {
@@ -862,16 +1040,6 @@ fn append_phase_rail_spans(spans: &mut Vec<Span<'static>>, statuses: &[JourneyPh
     }
 }
 
-fn append_next_summary_spans(spans: &mut Vec<Span<'static>>, summary: &str) {
-    spans.push(Span::styled("▸ NEXT ", theme::warn()));
-    if let Some((head, tail)) = summary.split_once(" — ") {
-        spans.push(Span::styled(head.to_string(), theme::primary()));
-        spans.push(Span::styled(format!(" — {tail}"), theme::muted()));
-    } else {
-        spans.push(Span::styled(summary.to_string(), theme::primary()));
-    }
-}
-
 // ── plain / non-TTY path ─────────────────────────────────────────────────────
 
 /// Line-based projection of the Workbench for plain/non-TTY output. Text only:
@@ -879,7 +1047,11 @@ fn append_next_summary_spans(spans: &mut Vec<Span<'static>>, summary: &str) {
 /// for the layout structure); center content reuses the same lines.
 pub(crate) fn workbench_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let model = workbench_view_model(app);
-    let mut lines = top_bar_lines(&model.top_bar, &model.command_bar_hints);
+    let mut lines = top_bar_lines(
+        &model.top_bar,
+        &model.command_bar_hints,
+        area.width as usize,
+    );
     lines.push(blank());
     if model.page != WorkbenchPage::Review {
         append_phase_page_plain_lines(&mut lines, app, &model, area);
@@ -1011,5 +1183,15 @@ mod tests {
             workbench_layout(Rect::new(0, 0, 150, 30)),
             WorkbenchLayout::FourColumn
         );
+    }
+
+    #[test]
+    fn common_width_phase_pages_use_two_column_grid() {
+        let panes = three_pane_grid_areas(Rect::new(0, 0, 120, 30));
+        assert_eq!(panes[0].height, 30);
+        assert_eq!(panes[1].x, panes[2].x);
+        assert_eq!(panes[1].width, panes[2].width);
+        assert_eq!(panes[1].height + panes[2].height, 30);
+        assert!(panes.iter().all(|pane| pane.width >= 50));
     }
 }

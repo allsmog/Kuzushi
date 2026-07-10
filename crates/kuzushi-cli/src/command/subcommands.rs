@@ -59,7 +59,7 @@ pub(crate) enum RunsCommand {
     List {
         #[arg(long, help = crate::support::TARGET_HELP)]
         target: Option<PathBuf>,
-        /// Filter by run status: running, completed, failed, interrupted, partial, skipped.
+        /// Filter by run status: running, completed, failed, canceled, interrupted, partial, skipped.
         #[arg(long, value_delimiter = ',')]
         status: Vec<String>,
         /// Emit the run list as machine-readable JSON.

@@ -6,9 +6,9 @@ assertion_line: 89
 
  -- ACTIVITY  run r-snapshot  ·  2/3 done  ·  1 running ----------------------------------------------------------------
  -- TASKS                                    |  -- OUTPUT
-# + context:build                        <1… | views  [findings·]  surface·   dfd·   heatmap·   path·   chain·
-  + semgrep:scan                         <1… | -- FINDINGS ------------------------------------------------
-  * triage:run                           <1… |   opens the guided workflow for the target.
+# + context:build                         <… | views  [findings·]  surface·   dfd·   heatmap·   path·   chain·
+  + semgrep:scan                          <… | -- FINDINGS ------------------------------------------------
+  * triage:run                            <… |   opens the guided workflow for the target.
      + triage start                          |
      + evidence-collect                      |
      + stage1 kept 14/14                     |

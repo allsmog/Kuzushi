@@ -1,0 +1,33 @@
+# J8 — Interrupt mid-run (⭐ single most important honesty check)
+# Start work, two-stage Ctrl+C mid-flight, immediately capture Jobs +
+# Activity. Known risk: canceled→✓done bug — a killed job rendering as
+# successfully completed.
+# Keyless variant: interrupt the offline demo scan ~1s in. The demo is fast,
+# so the interrupt window is tight — judge the captures, and re-run with a
+# real keyed scan (KUZUSHI_DEVEX_TARGET + J4) for a wider window.
+name: Interrupt mid-run honesty
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+keys: d
+wait-for: 5 ACTIVITY
+snap: mid-run-before-interrupt
+keys: C-c
+wait-for: 2 canceling
+snap: cancel-requested
+expect: canceling
+ask: Cancel request — does live work move to CANCELING while cleanup is active instead of becoming terminal early?
+wait: 3
+snap: canceled-terminal
+ask: Terminal state — is operator-stopped work marked CANCELED, while watchdog/process-loss remains INTERRUPTED?
+submit: jobs
+wait: 3
+snap: jobs-after-interrupt
+expect-not: ✓ done
+ask: Jobs view — does the operator-stopped run say canceled with a copyable 8-character ref, and are stale disk rows labeled as unverifiable rather than "running"?
+submit: activity
+wait: 2
+snap: activity-after-interrupt
+ask: Activity view — do the task rows for the interrupted run show an honest terminal state (no fabricated completion glyphs)?

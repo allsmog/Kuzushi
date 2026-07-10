@@ -11,6 +11,7 @@ impl ShellApp {
         changed |= self.expire_stale_advisory(AdvisoryKind::Throttle, now);
         changed |= self.expire_stale_advisory(AdvisoryKind::Notice, now);
         changed |= self.advance_spinner(now);
+        changed |= self.advance_liveness_clock(now);
         changed |= self.advance_scene(now);
         changed
     }
@@ -80,6 +81,15 @@ impl ShellApp {
         }
         self.ui_mut().advance_spinner(now);
         true
+    }
+
+    fn advance_liveness_clock(&mut self, now: Instant) -> bool {
+        if !self.has_running_work() {
+            self.ui_mut().clear_liveness_redraw();
+            return false;
+        }
+        self.ui_mut()
+            .liveness_redraw_due(now, Duration::from_secs(1))
     }
 
     /// Clear the animation when work finishes so no frozen glyph lingers.

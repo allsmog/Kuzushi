@@ -31,14 +31,9 @@ struct ScoredTool<'a> {
 const YOUR_TOOLS_LABEL: &str = "YOUR TOOLS";
 
 pub(crate) fn tools_model(app: &ShellApp) -> ToolsModel {
-    let filter = app.router.tools().filter_clone();
+    let filter = app.router.tools().filter();
     let shelf = app.tool_shelf();
-    let query = filter
-        .as_deref()
-        .map(ToolQuery::parse)
-        .transpose()
-        .ok()
-        .flatten();
+    let query = filter.map(ToolQuery::parse).transpose().ok().flatten();
 
     let matched = if filter.is_some() && query.is_none() {
         // A parse error yields no matches; the `find`/`tools` effect logs why.
@@ -57,7 +52,7 @@ pub(crate) fn tools_model(app: &ShellApp) -> ToolsModel {
         groups,
         visible_count,
         total_count: app.registry().tools_with_modules().count(),
-        filter,
+        filter: filter.map(str::to_string),
     }
 }
 
@@ -109,7 +104,10 @@ fn phase_group(matched: &[ScoredTool<'_>], phase: ToolPhase) -> Option<ToolGroup
         .filter(|scored| scored.tool.phase == phase)
         .collect();
     in_phase.sort_by(|a, b| b.score.cmp(&a.score).then(a.tool.name.cmp(&b.tool.name)));
-    let rows: Vec<ToolRow> = in_phase.iter().map(|scored| tool_row(scored.tool)).collect();
+    let rows: Vec<ToolRow> = in_phase
+        .iter()
+        .map(|scored| tool_row(scored.tool))
+        .collect();
     (!rows.is_empty()).then_some(ToolGroup {
         label: phase.label(),
         hint: phase.hint(),

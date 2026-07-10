@@ -1,3 +1,4 @@
+use super::AbortReason;
 use kuzushi_core::ScanCancellation;
 
 #[derive(Debug, Default)]
@@ -7,7 +8,7 @@ pub(crate) struct ToolRunState {
     ambient: Option<String>,
     run_id: Option<String>,
     active_model_override: Option<String>,
-    abort_requested: bool,
+    abort_reason: Option<AbortReason>,
 }
 
 impl ToolRunState {
@@ -44,11 +45,15 @@ impl ToolRunState {
     }
 
     pub(crate) fn abort_requested(&self) -> bool {
-        self.abort_requested
+        self.abort_reason.is_some()
     }
 
-    pub(crate) fn request_abort(&mut self) {
-        self.abort_requested = true;
+    pub(crate) fn abort_reason(&self) -> Option<AbortReason> {
+        self.abort_reason
+    }
+
+    pub(crate) fn request_abort(&mut self, reason: AbortReason) {
+        self.abort_reason = Some(reason);
     }
 
     pub(crate) fn is_ambient(&self, name: &str) -> bool {
@@ -67,7 +72,7 @@ impl ToolRunState {
         self.ambient = None;
         self.run_id = Some(run_id);
         self.active_model_override = model_override;
-        self.abort_requested = false;
+        self.abort_reason = None;
     }
 
     pub(crate) fn finish(&mut self) {
@@ -75,12 +80,12 @@ impl ToolRunState {
         self.cancel = None;
         self.ambient = None;
         self.active_model_override = None;
-        self.abort_requested = false;
+        self.abort_reason = None;
     }
 
     pub(crate) fn clear_finished_run_slot(&mut self) {
         self.cancel = None;
-        self.abort_requested = false;
+        self.abort_reason = None;
     }
 
     #[cfg(test)]
@@ -100,7 +105,7 @@ impl ToolRunState {
 
     #[cfg(test)]
     pub(crate) fn set_abort_requested_for_test(&mut self, requested: bool) {
-        self.abort_requested = requested;
+        self.abort_reason = requested.then_some(AbortReason::Operator);
     }
 
     #[cfg(test)]

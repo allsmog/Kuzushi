@@ -175,7 +175,7 @@ pub enum ShellView {
     /// (queued / active / done / failing per task), right shows a tagged
     /// reasoning feed `[module:verb]`. Session state lives in `DomainCache`.
     Activity,
-    /// Fuzzy command palette (Ctrl+G). Filters every `SHELL_COMMAND_SPECS`
+    /// Fuzzy command palette (Ctrl+G). Filters every `SHELL_COMMAND_SPEC_GROUPS`
     /// entry by the command-palette route query; Enter loads the selected command's
     /// canonical head into the prompt (never auto-executes). State lives on
     /// `app.router.command_palette()`.

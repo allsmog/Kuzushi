@@ -151,7 +151,7 @@ mod compare_findings_by_confidence_tests {
 
     #[test]
     fn confidence_first_puts_low_confirmed_above_critical_unverified() {
-        let mut findings = vec![
+        let mut findings = [
             finding("crit", Severity::Critical, None),
             finding("low", Severity::Low, Some(confirmed())),
         ];
@@ -163,7 +163,7 @@ mod compare_findings_by_confidence_tests {
 
     #[test]
     fn severity_is_the_tie_break_when_confidence_matches() {
-        let mut findings = vec![
+        let mut findings = [
             finding("low", Severity::Low, None),
             finding("crit", Severity::Critical, None),
         ];

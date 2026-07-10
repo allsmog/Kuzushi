@@ -16,7 +16,8 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
             "/findings filter <expr>",
         ],
         category: ShellCommandCategory::FindingsEvidence,
-        description: "filter findings by severity, confidence (proof), review decision, or completeness",
+        description:
+            "filter findings by severity, confidence (proof), review decision, or completeness",
     },
     ShellCommandSpec {
         command: "component <scope|path|all>",
@@ -52,6 +53,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         ],
         category: ShellCommandCategory::FindingsEvidence,
         description: "dismiss the selected finding with an auditable reason",
+    },
+    ShellCommandSpec {
+        command: "suppress <id> --reason <text> [--author operator] [--days 90]",
+        aliases: &["/suppress F-0001 --reason false-positive"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "record an expiring suppression rule and matching human review decision",
     },
     ShellCommandSpec {
         command: "show aliases [prefix]",

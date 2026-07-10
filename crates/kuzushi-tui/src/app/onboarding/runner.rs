@@ -264,10 +264,7 @@ impl ShellApp {
         &mut self,
         tool_name: &str,
     ) -> Vec<ShellEffect> {
-        let Some(running) = self.engagement.running_tool() else {
-            return Vec::new();
-        };
-        if running != tool_name {
+        if !self.completed_current_planning_tool(tool_name) {
             return Vec::new();
         }
         self.engagement.clear_running_tool();
@@ -276,7 +273,7 @@ impl ShellApp {
         // an MCP wasn't attached.
         self.log_mcp_attachment_plan();
         if self.planning_queues_empty() {
-            return self.advance_to_next_phase();
+            return self.finish_current_planning_phase();
         }
         vec![ShellEffect::DispatchNextPlanningTask(
             PlanningTaskDispatch {
@@ -286,6 +283,22 @@ impl ShellApp {
                 success_view: None,
             },
         )]
+    }
+
+    fn completed_current_planning_tool(&self, tool_name: &str) -> bool {
+        !self.engagement.planning_paused()
+            && self
+                .engagement
+                .running_tool()
+                .is_some_and(|running| running == tool_name)
+    }
+
+    fn finish_current_planning_phase(&mut self) -> Vec<ShellEffect> {
+        if self.current_phase_has_failures() {
+            self.open_retry_gate();
+            return Vec::new();
+        }
+        self.advance_to_next_phase()
     }
 
     /// Steps of a confirmed plan waiting behind a non-plan tool. Zero while
@@ -423,7 +436,18 @@ impl ShellApp {
     }
 
     fn resume_or_advance_planning_queue(&mut self) -> Vec<ShellEffect> {
+        if self.engagement.planning_paused() {
+            self.log(
+                "planning",
+                "planning queue remains paused; type `next` to review and resume",
+            );
+            return Vec::new();
+        }
         if self.planning_queues_empty() {
+            if self.current_phase_has_failures() {
+                self.open_retry_gate();
+                return Vec::new();
+            }
             return self.advance_to_next_phase();
         }
         vec![ShellEffect::DispatchNextPlanningTask(
@@ -433,6 +457,16 @@ impl ShellApp {
                 success_view: None,
             },
         )]
+    }
+
+    fn current_phase_has_failures(&self) -> bool {
+        let Some(phase) = self.engagement.current_phase() else {
+            return false;
+        };
+        self.engagement
+            .failed_tasks()
+            .iter()
+            .any(|failed| failed.task.phase() == phase)
     }
 
     /// After a phase's queue drains (or the operator skips it), open the next

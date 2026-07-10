@@ -10,10 +10,12 @@ fn routing_mode_defaults_to_shell() {
 }
 
 #[test]
-fn routing_mode_reports_module_for_focused_module() {
+fn catalog_routing_ignores_stale_module_focus_but_module_view_reports_it() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_focused_module(Some("sast".to_string()));
 
+    assert_eq!(routing_mode(&app), RoutingMode::Shell);
+    app.set_shell_view(ShellView::Module);
     assert_eq!(routing_mode(&app), RoutingMode::Module);
 }
 

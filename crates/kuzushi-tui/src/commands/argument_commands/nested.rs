@@ -8,6 +8,11 @@ pub(crate) fn parse_nested_shell_command(
     let command = match verb {
         "options" => options_command(args, OptionsFilter::Standard),
         "findings" | "f" => parse_findings_command(args),
+        "export" => parse_workspace_findings_export_args(args, "findings export"),
+        "recon:import" | "recon-import" => parse_recon_import_command(args),
+        "recon" if args.first() == Some(&"import") => {
+            parse_recon_import_command(args.get(1..).unwrap_or_default())
+        }
         "auth" => parse_auth_command(args),
         "threats" => parse_threat_command(args),
         "show" => parse_show_command(args, original),
@@ -25,12 +30,33 @@ pub(crate) fn parse_nested_shell_command(
         "strategy" | "strategies" => parse_strategy_command(args),
         "decision" | "review" => parse_review_decision_command(args),
         "dismiss" => parse_dismiss_command(args),
+        "suppress" => parse_suppress_command(args),
         "patch" => parse_patch_command(args),
         "workspace" => parse_workspace_command(args.to_vec()),
         "pwn" => parse_pwn_command(args),
         _ => return None,
     };
     Some(command)
+}
+
+fn parse_recon_import_command(args: &[&str]) -> ShellCommand {
+    let Some(tool) = args.first() else {
+        return ShellCommand::RunTool {
+            tool: Some("recon:import".to_string()),
+            input: None,
+        };
+    };
+    let path = args.get(1..).unwrap_or_default().join(" ");
+    if path.trim().is_empty() {
+        return ShellCommand::RunTool {
+            tool: Some("recon:import".to_string()),
+            input: Some(serde_json::json!({ "tool": tool }).to_string()),
+        };
+    }
+    ShellCommand::RunTool {
+        tool: Some("recon:import".to_string()),
+        input: Some(serde_json::json!({ "tool": tool, "path": path }).to_string()),
+    }
 }
 
 fn parse_runs_command(args: &[&str]) -> ShellCommand {
@@ -57,7 +83,7 @@ fn parse_jobs_command(args: &[&str]) -> ShellCommand {
 fn parse_queue_command(args: &[&str]) -> ShellCommand {
     let rest = args.join(" ");
     if rest.trim().is_empty() {
-        ShellCommand::Unknown("queue".to_string())
+        ShellCommand::ShowJobs
     } else {
         ShellCommand::QueueCommand(rest)
     }
@@ -160,6 +186,60 @@ fn parse_dismiss_command(args: &[&str]) -> ShellCommand {
         reason: reason.to_string(),
         note,
     })
+}
+
+fn parse_suppress_command(args: &[&str]) -> ShellCommand {
+    let Some(reference) = args.first() else {
+        return unsupported_suppress();
+    };
+    let mut reason = Vec::new();
+    let mut author = "operator".to_string();
+    let mut days = 90_u64;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index] {
+            "--reason" => index += collect_suppress_reason(args, index + 1, &mut reason),
+            "--author" => {
+                let Some(value) = args.get(index + 1) else {
+                    return unsupported_suppress();
+                };
+                author = (*value).to_string();
+                index += 2;
+            }
+            "--days" => {
+                let Some(value) = args.get(index + 1).and_then(|value| value.parse().ok()) else {
+                    return unsupported_suppress();
+                };
+                days = value;
+                index += 2;
+            }
+            _ => return unsupported_suppress(),
+        }
+    }
+    if reason.is_empty() {
+        return unsupported_suppress();
+    }
+    ShellCommand::ReviewDecision(ReviewDecisionCommand::Suppress {
+        reference: (*reference).to_string(),
+        reason: reason.join(" "),
+        author,
+        days,
+    })
+}
+
+fn collect_suppress_reason(args: &[&str], start: usize, reason: &mut Vec<String>) -> usize {
+    let mut index = start;
+    while index < args.len() && !matches!(args[index], "--author" | "--days") {
+        reason.push(args[index].to_string());
+        index += 1;
+    }
+    index.saturating_sub(start).saturating_add(1)
+}
+
+fn unsupported_suppress() -> ShellCommand {
+    ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
+        "suppress <id> --reason <text> [--author operator] [--days 90]".to_string(),
+    ))
 }
 
 fn parse_patch_command(args: &[&str]) -> ShellCommand {

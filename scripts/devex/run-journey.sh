@@ -1,0 +1,401 @@
+#!/usr/bin/env bash
+# run-journey.sh — tmux-driven DevEx audit harness for the Kuzushi TUI.
+#
+# Drives the Rust Ratatui shell through scripted keystroke journeys
+# (docs/devex/tui-devex-audit-journeys.md, J1–J16) and captures per-step
+# tmux panes for signifier↔state↔intent review.
+#
+# Usage:
+#   ./scripts/devex/run-journey.sh J1            # one journey
+#   ./scripts/devex/run-journey.sh J1 J8 J4      # several
+#   ./scripts/devex/run-journey.sh all           # J1..J16
+#   ./scripts/devex/run-journey.sh --list        # catalog
+#   ./scripts/devex/run-journey.sh --size 60x20 J1   # size override (J14 matrix)
+#   KUZUSHI_BIN=... KUZUSHI_DEVEX_TARGET=... override binary / @TARGET token.
+#
+# Verdicts are honest: `expect:` lines are machine-checked substrings
+# (PASS/FAIL); `ask:` lines are human-judgment invariant questions emitted as
+# REVIEW items next to their snapshot — never faked into a pass.
+set -eo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
+JOURNEY_DIR="$SCRIPT_DIR/journeys"
+ARTIFACT_ROOT="$SCRIPT_DIR/artifacts"
+DEFAULT_SIZE="110x32"
+DEFAULT_WAIT_FOR_TIMEOUT=20
+
+# shellcheck source=lib.sh
+. "$SCRIPT_DIR/lib.sh"
+
+usage() {
+  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+# ---------------------------------------------------------------------------
+# journey catalog
+# ---------------------------------------------------------------------------
+journey_file_for() { # J7 / j7 / J07 -> path
+  local id n
+  id=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')
+  n=${id#J}; n=${n#0}
+  set -- "$JOURNEY_DIR/J$n-"*.journey
+  [ -f "$1" ] || devex_die "no journey file matches J$n under $JOURNEY_DIR"
+  printf '%s' "$1"
+}
+
+journey_name_of() {
+  sed -n 's/^name:[[:space:]]*//p' "$1" | head -1
+}
+
+list_journeys() {
+  local f
+  for f in "$JOURNEY_DIR"/J*.journey; do
+    printf '  %-42s %s\n' "$(basename "$f" .journey)" "$(journey_name_of "$f")"
+  done
+}
+
+# ---------------------------------------------------------------------------
+# per-journey state (reset in run_journey)
+# ---------------------------------------------------------------------------
+SESSION="" JDIR="" REPORT="" LAST_SNAP="" LAST_SNAP_NAME="(no snapshot yet)"
+SNAP_IDX=0 PASS_N=0 FAIL_N=0 REVIEW_N=0
+J_COLS=0 J_ROWS=0 J_CWD="" SESSION_STARTED=0
+ENV_PREFIX=""    # accumulated `env -u K K=V` prefix, consumed by next launch
+TMP_HOME="" FIXTURE_TARGET=""
+
+report() { # <TAG> <text>
+  printf '  [%s] %s\n' "$1" "$2" | tee -a "$REPORT"
+}
+
+pass()   { PASS_N=$((PASS_N + 1));     report PASS   "$1"; }
+fail()   { FAIL_N=$((FAIL_N + 1));     report FAIL   "$1"; }
+review() { REVIEW_N=$((REVIEW_N + 1)); report REVIEW "$1"; }
+
+# ---------------------------------------------------------------------------
+# tokens available to journey files
+# ---------------------------------------------------------------------------
+ensure_tmp_home() {
+  TMP_HOME="$JDIR/home"
+  mkdir -p "$TMP_HOME"
+}
+
+ensure_fixture_target() {
+  FIXTURE_TARGET="$JDIR/fixture-target"
+  [ -d "$FIXTURE_TARGET" ] && return 0
+  mkdir -p "$FIXTURE_TARGET"
+  git -C "$FIXTURE_TARGET" init -q 2>/dev/null || true
+  printf 'import os\n\ndef run(cmd):\n    os.system(cmd)  # command injection fixture\n' \
+    > "$FIXTURE_TARGET/app.py"
+  printf '# fixture credentials (AWS documentation example key — not real)\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n' \
+    > "$FIXTURE_TARGET/config.env"
+}
+
+expand_tokens() {
+  local s=$1
+  s=${s//@KUZUSHI/$KUZUSHI_BIN}
+  s=${s//@REPO/$REPO_ROOT}
+  s=${s//@ART/$JDIR}
+  case $s in *@TMP_HOME*)   ensure_tmp_home;       s=${s//@TMP_HOME/$TMP_HOME};; esac
+  case $s in *@TMP_TARGET*) ensure_fixture_target; s=${s//@TMP_TARGET/$FIXTURE_TARGET};; esac
+  case $s in *@TARGET*)
+    if [ -n "$KUZUSHI_DEVEX_TARGET" ]; then s=${s//@TARGET/$KUZUSHI_DEVEX_TARGET}
+    else ensure_fixture_target; s=${s//@TARGET/$FIXTURE_TARGET}; fi;;
+  esac
+  printf '%s' "$s"
+}
+
+# ---------------------------------------------------------------------------
+# directives
+# ---------------------------------------------------------------------------
+ensure_session() {
+  [ "$SESSION_STARTED" = 1 ] && return 0
+  devex_session_start "$SESSION" "$J_COLS" "$J_ROWS" "$J_CWD"
+  SESSION_STARTED=1
+  sleep 0.5
+}
+
+d_size() { # COLSxROWS (ignored when --size override is set)
+  [ "$SESSION_STARTED" = 1 ] && devex_die "size: must precede the first launch/keys/snap"
+  [ -n "$SIZE_OVERRIDE" ] && return 0
+  J_COLS=${1%x*}; J_ROWS=${1#*x}
+}
+
+d_cwd() {
+  local dir; dir=$(expand_tokens "$1")
+  mkdir -p "$dir"
+  if [ "$SESSION_STARTED" = 1 ]; then
+    devex_send_line "$SESSION" "cd $(devex_shell_quote "$dir")"
+  else
+    J_CWD=$dir
+  fi
+}
+
+d_env() { # K=V [K=V...]
+  local kv
+  for kv in $1; do
+    ENV_PREFIX="$ENV_PREFIX$(devex_shell_quote "$(expand_tokens "$kv")") "
+  done
+}
+
+d_env_unset() { # K [K...]
+  local k
+  # `env` requires option flags before NAME=VALUE assignments on macOS.
+  # Prepending keeps `env-unset:` valid regardless of directive order.
+  for k in $1; do ENV_PREFIX="-u $k $ENV_PREFIX"; done
+}
+
+d_require_env() { # all named vars must be set, else skip journey
+  local k
+  for k in $1; do
+    if [ -z "$(eval "printf '%s' \"\${$k}\"")" ]; then
+      report SKIP "requires \$$k — not set in this environment"
+      return 3
+    fi
+  done
+}
+
+d_require_any_env() { # at least one named var must be set
+  local k
+  for k in $1; do
+    [ -n "$(eval "printf '%s' \"\${$k}\"")" ] && return 0
+  done
+  report SKIP "requires one of: $1 — none set in this environment"
+  return 3
+}
+
+d_shell() { # host-side setup command (fixture seeding etc.)
+  local cmd; cmd=$(expand_tokens "$1")
+  sh -c "$cmd" || fail "shell setup failed: $cmd"
+}
+
+launch_cmd() { # assemble `env -u K K=V ... <cmd>`
+  local tail=$1 prefix=""
+  [ -n "$ENV_PREFIX" ] && prefix="env $ENV_PREFIX"
+  printf '%s' "$prefix$tail"
+}
+
+d_launch() { # args appended to the kuzushi binary ('' = bare launch)
+  ensure_session
+  local args cmd; args=$(expand_tokens "$1")
+  cmd=$(launch_cmd "$(devex_shell_quote "$KUZUSHI_BIN")${args:+ $args}")
+  ENV_PREFIX=""
+  devex_send_line "$SESSION" "$cmd"
+  report step "launch: kuzushi${args:+ $args}"
+}
+
+d_launch_raw() { # full shell command line (pipes, --plain, non-TTY checks)
+  ensure_session
+  local raw cmd; raw=$(expand_tokens "$1")
+  cmd=$(launch_cmd "$raw")
+  ENV_PREFIX=""
+  devex_send_line "$SESSION" "$cmd"
+  report step "launch-raw: $raw"
+}
+
+d_keys() { # raw tmux send-keys tokens: Enter Escape C-c C-Up j k ...
+  ensure_session
+  # shellcheck disable=SC2086
+  tmux send-keys -t "$SESSION" $1
+  report step "keys: $1"
+}
+
+d_type() { # literal text, no Enter
+  ensure_session
+  tmux send-keys -t "$SESSION" -l -- "$(expand_tokens "$1")"
+  report step "type: $1"
+}
+
+d_submit() { # literal text + Enter (the common "type a verb" case)
+  ensure_session
+  # Normalize both strict shell input states to Prompt mode. F2 always enters
+  # Navigate and Esc always returns from Navigate to Prompt, so this pair is
+  # idempotent even when a previous journey step changed modes.
+  tmux send-keys -t "$SESSION" F2 Escape
+  devex_send_line "$SESSION" "$(expand_tokens "$1")"
+  report step "submit: $1"
+}
+
+d_wait() { sleep "$1"; }
+
+d_wait_for() { # [timeout-secs] <substring>  — poll the pane, bounded, honest
+  ensure_session
+  local timeout=$DEFAULT_WAIT_FOR_TIMEOUT needle=$1 waited=0
+  case $needle in
+    [0-9]*' '*) timeout=${needle%% *}; needle=${needle#* };;
+  esac
+  needle=$(expand_tokens "$needle")
+  # Include the exact timeout boundary: a two-second SLO gets checks at
+  # 0.0, 0.5, 1.0, 1.5, and 2.0 seconds rather than failing at 1.5.
+  while [ "$waited" -le "$((timeout * 2))" ]; do
+    if devex_pane_contains "$SESSION" "$needle"; then
+      pass "wait-for \"$needle\" (within ${timeout}s)"
+      return 0
+    fi
+    sleep 0.5; waited=$((waited + 1))
+  done
+  fail "wait-for \"$needle\" timed out after ${timeout}s"
+}
+
+d_snap() { # <label> — capture plain + ANSI panes
+  ensure_session
+  SNAP_IDX=$((SNAP_IDX + 1))
+  local label base
+  label=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-')
+  base=$(printf '%02d-%s' "$SNAP_IDX" "$label")
+  devex_capture "$SESSION" "$JDIR/$base.txt" "$JDIR/$base.ansi"
+  LAST_SNAP="$JDIR/$base.txt"; LAST_SNAP_NAME="$base"
+  report snap "$base.txt (+ .ansi)"
+}
+
+d_expect() { # fixed substring, case-insensitive, against last snapshot
+  local needle; needle=$(expand_tokens "$1")
+  [ -n "$LAST_SNAP" ] || { fail "expect \"$needle\" — no snapshot taken yet"; return; }
+  if grep -Fiq -- "$needle" "$LAST_SNAP"; then
+    pass "$LAST_SNAP_NAME contains \"$needle\""
+  else
+    fail "$LAST_SNAP_NAME missing \"$needle\""
+  fi
+}
+
+d_expect_not() {
+  local needle; needle=$(expand_tokens "$1")
+  [ -n "$LAST_SNAP" ] || { fail "expect-not \"$needle\" — no snapshot taken yet"; return; }
+  if grep -Fiq -- "$needle" "$LAST_SNAP"; then
+    fail "$LAST_SNAP_NAME unexpectedly contains \"$needle\""
+  else
+    pass "$LAST_SNAP_NAME free of \"$needle\""
+  fi
+}
+
+d_ask() { # human-judgment checkpoint — recorded, never auto-verdicted
+  review "($LAST_SNAP_NAME) $1"
+}
+
+dispatch() { # <directive> <value>
+  case $1 in
+    name)            printf '%s\n' "$2" >> "$REPORT";;
+    note)            printf '  note: %s\n' "$2" >> "$REPORT";;
+    size)            d_size "$2";;
+    cwd)             d_cwd "$2";;
+    env)             d_env "$2";;
+    env-unset)       d_env_unset "$2";;
+    require-env)     d_require_env "$2" || return $?;;
+    require-any-env) d_require_any_env "$2" || return $?;;
+    shell)           d_shell "$2";;
+    launch)          d_launch "$2";;
+    launch-raw)      d_launch_raw "$2";;
+    keys)            d_keys "$2";;
+    type)            d_type "$2";;
+    submit)          d_submit "$2";;
+    wait)            d_wait "$2";;
+    wait-for)        d_wait_for "$2";;
+    snap)            d_snap "$2";;
+    expect)          d_expect "$2";;
+    expect-not)      d_expect_not "$2";;
+    ask)             d_ask "$2";;
+    *)               devex_die "unknown directive '$1:' (in $CURRENT_FILE)";;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# journey loop
+# ---------------------------------------------------------------------------
+run_journey() { # <journey-file> <run-dir>
+  CURRENT_FILE=$1
+  local id line directive value declared_size rc=0
+  id=$(basename "$1" .journey)
+  JDIR="$2/${id%%-*}"
+  mkdir -p "$JDIR"
+  REPORT="$JDIR/report.txt"
+  : > "$REPORT"
+  SESSION="kzx-devex-$(printf '%s' "${id%%-*}" | tr '[:upper:]' '[:lower:]')-$$"
+  LAST_SNAP="" LAST_SNAP_NAME="(no snapshot yet)" SNAP_IDX=0
+  PASS_N=0 FAIL_N=0 REVIEW_N=0 SESSION_STARTED=0 ENV_PREFIX=""
+  J_COLS=${RUN_SIZE%x*} J_ROWS=${RUN_SIZE#*x} J_CWD=$REPO_ROOT
+  TMP_HOME="" FIXTURE_TARGET=""
+
+  if [ -z "$SIZE_OVERRIDE" ]; then
+    declared_size=$(sed -n 's/^size:[[:space:]]*//p' "$1" | head -1)
+    if [ -n "$declared_size" ]; then
+      J_COLS=${declared_size%x*}
+      J_ROWS=${declared_size#*x}
+    fi
+  fi
+
+  printf '\n=== %s — %s (%sx%s) ===\n' "$id" "$(journey_name_of "$1")" "$J_COLS" "$J_ROWS"
+  while IFS= read -r line <&3 || [ -n "$line" ]; do
+    case $line in ''|'#'*) continue;; esac
+    directive=${line%%:*}
+    value=${line#*:}; value=${value# }
+    dispatch "$directive" "$value" </dev/null || { rc=$?; break; }
+  done 3< "$1"
+
+  devex_session_kill "$SESSION"
+  {
+    printf 'result: %s pass / %s fail / %s review-for-human\n' "$PASS_N" "$FAIL_N" "$REVIEW_N"
+    printf 'artifacts: %s\n' "$JDIR"
+  } | tee -a "$REPORT"
+
+  [ "$rc" = 3 ] && return 3
+  [ "$FAIL_N" -gt 0 ] && return 1
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+main() {
+  local ids="" size_flag="" arg
+  SIZE_OVERRIDE=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      -h|--help) usage;;
+      --list) list_journeys; exit 0;;
+      --size) shift; size_flag=$1;;
+      --bin)  shift; KUZUSHI_BIN=$1;;
+      all) ids="1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16";;
+      [Jj]*) ids="$ids ${1#[Jj]}";;
+      *) devex_log "unknown argument: $1"; usage 1;;
+    esac
+    shift
+  done
+  [ -n "$ids" ] || usage 1
+
+  command -v tmux >/dev/null || devex_die "tmux is required (brew install tmux)"
+  KUZUSHI_BIN=${KUZUSHI_BIN:-$REPO_ROOT/target/debug/kuzushi}
+  [ -x "$KUZUSHI_BIN" ] \
+    || devex_die "kuzushi binary not found at $KUZUSHI_BIN — build with 'cargo build -p kuzushi-cli' or set KUZUSHI_BIN"
+  KUZUSHI_DEVEX_TARGET=${KUZUSHI_DEVEX_TARGET:-}
+  SIZE_OVERRIDE=$size_flag
+  RUN_SIZE=${size_flag:-$DEFAULT_SIZE}
+
+  local run_dir stamp
+  stamp=$(date +%Y%m%d-%H%M%S)
+  run_dir="$ARTIFACT_ROOT/$stamp"
+  mkdir -p "$run_dir"
+  ln -sfn "$stamp" "$ARTIFACT_ROOT/latest"
+
+  devex_register_cleanup
+
+  local n rc total_fail=0 total_skip=0 summary=""
+  for n in $ids; do
+    rc=0
+    run_journey "$(journey_file_for "J$n")" "$run_dir" || rc=$?
+    case $rc in
+      0) summary="$summary
+  J$n  ok      ($PASS_N pass, $REVIEW_N review)";;
+      3) total_skip=$((total_skip + 1)); summary="$summary
+  J$n  SKIP    (missing required env)";;
+      *) total_fail=$((total_fail + 1)); summary="$summary
+  J$n  FAIL    ($FAIL_N failing check(s), $PASS_N pass, $REVIEW_N review)";;
+    esac
+  done
+
+  printf '\n=== summary ===%s\n\nartifacts: %s\n' "$summary" "$run_dir"
+  printf 'review items are honest open questions — judge each snapshot against signifier<->state<->intent.\n'
+  [ "$total_fail" -eq 0 ] || exit 1
+}
+
+main "$@"

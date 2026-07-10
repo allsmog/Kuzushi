@@ -59,6 +59,7 @@ impl AuthPickerRouteState {
         self.cursor
     }
 
+    #[cfg(test)]
     pub(crate) fn row_count(&self) -> usize {
         self.rows.len()
     }
@@ -79,6 +80,7 @@ impl AuthPickerRouteState {
         self.selected_kind() == Some(AuthMethodRowKind::ApiKey)
     }
 
+    #[cfg(test)]
     pub(crate) fn is_offline_demo_row(&self) -> bool {
         self.selected_kind() == Some(AuthMethodRowKind::OfflineDemo)
     }

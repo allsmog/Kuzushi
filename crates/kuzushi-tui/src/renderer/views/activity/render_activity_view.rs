@@ -8,7 +8,7 @@ use crate::ui_view_models::{
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::style::Modifier;
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 use std::time::Instant;
 
 /// Render the Activity view's body region with a true Ratatui horizontal
@@ -117,17 +117,13 @@ fn render_dag_pane_widget(
     // `── DAG ──...` divider style mirrors design/mockups/_shared.jsx
     // `sectionHeader` (lines 94-100): leading "── ", labelled segment in
     // c-label, trailing fill in c-subtle.
-    let block = Block::default()
-        .borders(Borders::RIGHT)
-        .border_style(if title.focused {
-            theme::accent()
-        } else {
-            theme::subtle()
-        })
-        .title(Span::styled(
+    let block = cockpit_pane_block(
+        Line::from(Span::styled(
             title.block_title.clone(),
             pane_title_style(title),
-        ));
+        )),
+        title.focused,
+    );
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
@@ -158,10 +154,13 @@ fn render_feed_pane_widget(
 ) {
     let inner_width = area.width.saturating_sub(2) as usize;
     let lines = feed_pane_lines(activity, inner_width);
-    let block = Block::default().borders(Borders::NONE).title(Span::styled(
-        title.block_title.clone(),
-        pane_title_style(title),
-    ));
+    let block = cockpit_pane_block(
+        Line::from(Span::styled(
+            title.block_title.clone(),
+            pane_title_style(title),
+        )),
+        title.focused,
+    );
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 

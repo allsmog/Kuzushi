@@ -78,6 +78,35 @@ fn jobhub_drops_non_terminal_events_when_channel_is_full() {
 }
 
 #[test]
+fn jobhub_unresponsive_escalation_fails_slot_once_after_grace() {
+    let mut hub = JobHub::default();
+    let ticket = hub.start(JobKind::Run, "hung:tool");
+    let generation = ticket.generation();
+    let now = std::time::Instant::now();
+
+    // A stale generation must not arm the escalation.
+    hub.schedule_unresponsive_escalation(JobKind::Run, WorkerGeneration::new(999), now);
+    assert!(!hub.fail_unresponsive_slots(now + WORKER_UNRESPONSIVE_GRACE));
+
+    hub.schedule_unresponsive_escalation(JobKind::Run, generation, now);
+    assert!(!hub.fail_unresponsive_slots(now)); // grace not yet elapsed
+
+    let after_grace = now + WORKER_UNRESPONSIVE_GRACE;
+    assert!(hub.fail_unresponsive_slots(after_grace));
+    assert!(!hub.fail_unresponsive_slots(after_grace)); // single-shot
+
+    let events = hub.drain(4);
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        &events[0],
+        ShellEvent::Tool(ToolEvent::Failed { tool_name, error })
+            if tool_name == "hung:tool" && error.contains("worker unresponsive")
+    ));
+    assert!(events[0].is_terminal());
+    ticket.complete();
+}
+
+#[test]
 fn jobhub_cancel_arms_slot_token() {
     let mut hub = JobHub::default();
     let ticket = hub.start(JobKind::Agent, "agent");

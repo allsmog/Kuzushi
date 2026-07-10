@@ -4,8 +4,8 @@ assertion_line: 33
 ---
  KUZUSHI › workbench · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
-Kuzushi › workbench · target:no target · page:confirm · o idle · modules:all modules
- type next guided workflow   type scan run scan   type options sast:scan tune scanners   type ask ask the agent
+Kuzushi · target:no target · page:confirm · o idle · modules:all modules
+ type next guided workflow · type scan run scan · type options sast:scan tune scanners · type ask ask the agent
 
  -- SOURCE · 0 files ---------------------------------------------------------------------------------------------------
        ∅  no source tree
@@ -21,13 +21,10 @@ Kuzushi › workbench · target:no target · page:confirm · o idle · modules:a
        > open <id>             pin a finding
 
  -- REVIEW QUEUE - showing 0 of 0 - 0 open - 0 complete ----------------------------------------------------------------
-       ∅  review queue empty
-       no findings loaded for review
-       scanner findings were not changed; only this review queue is empty.
-       REVIEW QUEUE - showing 0 of 0 - 0 open - 0 complete
-
-       > findings              clear the filter and reload all findings
-       > findings filter completeness:open  show findings still awaiting review
+∅ review queue empty
+no findings loaded for review
+> findings
+> filter completeness:open
 
  -- DETAILS ------------------------------------------------------------------------------------------------------------
 no finding selected — move through FINDINGS to preview details here.

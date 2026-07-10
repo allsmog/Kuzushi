@@ -9,6 +9,7 @@ use std::time::Instant;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RouterState {
     current: crate::app::ShellView,
+    overlay_origin: Option<crate::app::ShellView>,
     focused_module: Option<String>,
     auth_screen_snapshot: Option<crate::app::AuthScreenSnapshot>,
     boot_splash_snapshot: Option<crate::app::BootSplashSnapshot>,
@@ -65,6 +66,14 @@ impl RouterState {
 
     pub(crate) fn set_current(&mut self, view: crate::app::ShellView) {
         self.current = view;
+    }
+
+    pub(crate) fn overlay_origin(&self) -> Option<crate::app::ShellView> {
+        self.overlay_origin
+    }
+
+    pub(crate) fn set_overlay_origin(&mut self, origin: Option<crate::app::ShellView>) {
+        self.overlay_origin = origin;
     }
 
     pub(crate) fn focused_module(&self) -> Option<&str> {
@@ -498,6 +507,7 @@ impl RouterState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkbenchRouteState {
     focus: crate::app::WorkbenchPane,
+    zoom: crate::app::WorkbenchZoom,
     page: Option<crate::app::WorkbenchPage>,
     center_mode: crate::app::WorkbenchCenterMode,
     scroll: crate::app::WorkbenchPaneScroll,
@@ -510,6 +520,7 @@ impl Default for WorkbenchRouteState {
     fn default() -> Self {
         Self {
             focus: crate::app::WorkbenchPane::Findings,
+            zoom: crate::app::WorkbenchZoom::default(),
             page: None,
             center_mode: crate::app::WorkbenchCenterMode::default(),
             scroll: crate::app::WorkbenchPaneScroll::default(),
@@ -527,6 +538,19 @@ impl WorkbenchRouteState {
 
     pub(crate) fn set_focus(&mut self, focus: crate::app::WorkbenchPane) {
         self.focus = focus;
+        self.zoom.follow_focus(focus);
+    }
+
+    pub(crate) fn zoom(&self) -> crate::app::WorkbenchZoom {
+        self.zoom
+    }
+
+    pub(crate) fn toggle_zoom(&mut self) {
+        self.zoom.toggle(self.focus);
+    }
+
+    pub(crate) fn clear_zoom(&mut self) {
+        self.zoom.clear();
     }
 
     pub(crate) fn page(&self) -> Option<crate::app::WorkbenchPage> {
@@ -1199,10 +1223,6 @@ impl ToolsRouteState {
 
     pub(crate) fn filter(&self) -> Option<&str> {
         self.filter.as_deref()
-    }
-
-    pub(crate) fn filter_clone(&self) -> Option<String> {
-        self.filter.clone()
     }
 }
 

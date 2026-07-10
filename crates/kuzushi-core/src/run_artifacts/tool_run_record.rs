@@ -109,6 +109,41 @@ pub fn record_tool_run_failed(record: ToolRunRecord<'_>, error: &str) {
     let _ = write_run_summary(record.target, &summary);
 }
 
+pub fn record_tool_run_canceled(record: ToolRunRecord<'_>, reason: &str) {
+    record_interrupted_tool_run(record, "canceled", reason);
+}
+
+pub fn record_tool_run_interrupted(record: ToolRunRecord<'_>, reason: &str) {
+    record_interrupted_tool_run(record, "interrupted", reason);
+}
+
+pub fn record_tool_run_refused(record: ToolRunRecord<'_>, reason: &str) {
+    let artifacts = existing_run_artifacts(record);
+    let summary = artifacts
+        .into_iter()
+        .fold(summary_seed(record).skipped(reason), RunSummary::with_artifact);
+    append_tool_event(record, "skipped", reason);
+    append_done_trace(record, "skipped", None);
+    let _ = write_run_summary(record.target, &summary);
+}
+
+fn record_interrupted_tool_run(record: ToolRunRecord<'_>, status: &str, reason: &str) {
+    let artifacts = existing_run_artifacts(record);
+    let seed = summary_seed(record);
+    let summary = if status == "canceled" {
+        seed.canceled(reason)
+    } else {
+        seed.interrupted(reason)
+    };
+    let summary = artifacts
+        .into_iter()
+        .fold(summary, RunSummary::with_artifact);
+    let message = format!("tool {status}: {reason}");
+    append_tool_event(record, status, &message);
+    append_done_trace(record, status, None);
+    let _ = write_run_summary(record.target, &summary);
+}
+
 pub fn tool_run_output_cost_usd(output: &Value) -> Option<f64> {
     output
         .get("costUsd")
@@ -121,6 +156,7 @@ pub fn tool_run_output_findings_count(output: &Value) -> Option<u64> {
     output
         .pointer("/data/findingsCount")
         .or_else(|| output.get("findingsCount"))
+        .or_else(|| output.pointer("/data/count"))
         .and_then(Value::as_u64)
         .or_else(|| {
             output

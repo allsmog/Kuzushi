@@ -2279,6 +2279,37 @@ mod tests {
         assert_manifest_has_canonical_run_artifacts(&manifest_artifacts);
     }
 
+    #[test]
+    fn canceled_summary_is_terminal_and_preserves_run_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = new_run_id("canceled");
+        let summary = RunSummary::running(
+            run_id.clone(),
+            "shell",
+            Some("sast:scan".to_string()),
+            tmp.path().display().to_string(),
+        )
+        .with_cost(Some(0.42))
+        .with_findings(Some(3))
+        .canceled("operator cancel");
+
+        write_run_summary(tmp.path(), &summary).unwrap();
+
+        let loaded = load_run_summary(tmp.path(), &run_id).unwrap();
+        let failures = load_run_failures(tmp.path(), &run_id).unwrap();
+        let report = fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "report.md"))
+            .unwrap();
+        assert_eq!(loaded.status, "canceled");
+        assert_eq!(loaded.tool.as_deref(), Some("sast:scan"));
+        assert_eq!(loaded.cost_usd, Some(0.42));
+        assert_eq!(loaded.findings, Some(3));
+        assert!(loaded.completed_at_unix.is_some());
+        assert_eq!(loaded.process_id, None);
+        assert_eq!(failures.status, "canceled");
+        assert!(failures.failures.is_empty());
+        assert!(report.contains("Status: canceled"));
+    }
+
     fn assert_canonical_run_files_exist(target: &Path, run_id: &str) {
         let dir = run_dir(target, run_id);
         for leaf in [

@@ -43,6 +43,7 @@ pub fn write_run_summary(
     // synthetic agent runs would land in the cwd's .kuzushi/v3/runs and
     // pollute test workspaces (cwd is `crates/<name>` during cargo test).
     let Some(target) = target else { return };
+    let status = canonical_run_status(status);
     let mut summary = kuzushi_core::RunSummary::running(
         run_id.to_string(),
         "shell",
@@ -53,7 +54,12 @@ pub fn write_run_summary(
     .with_loaded_modules(
         kuzushi_core::ModuleRegistry::with_v2_builtins().loaded_module_specifiers(),
     );
-    summary.status = canonical_run_status(status).to_string();
+    summary.status = status.to_string();
+    if status == "running" {
+        // Stamp our pid so a crashed/killed shell run is repairable to
+        // "interrupted" instead of lingering as an immortal "running" row.
+        summary = summary.with_process_id(std::process::id());
+    }
     let _ = kuzushi_core::write_run_summary(target, &summary);
 }
 
@@ -97,6 +103,8 @@ fn canonical_run_status(status: &str) -> &'static str {
     match status.to_ascii_lowercase().as_str() {
         "complete" | "completed" => "completed",
         "failed" => "failed",
+        "canceled" | "cancelled" => "canceled",
+        "interrupted" => "interrupted",
         "partial" => "partial",
         "skipped" => "skipped",
         "paused" => "paused",
@@ -125,6 +133,39 @@ pub fn append_trace_step(
         .with_cost_usd(cost_usd);
     let _ =
         kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step);
+}
+
+#[cfg(test)]
+mod run_summary_pid_tests {
+    use super::write_run_summary;
+
+    #[test]
+    fn running_shell_summary_carries_current_process_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_run_summary(Some(tmp.path()), "shell-run-1", "running", None, "target");
+
+        let summary = kuzushi_core::load_run_summary(tmp.path(), "shell-run-1").unwrap();
+
+        assert_eq!(summary.status, "running");
+        assert_eq!(summary.process_id, Some(std::process::id()));
+    }
+
+    #[test]
+    fn completed_shell_summary_carries_no_process_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_run_summary(
+            Some(tmp.path()),
+            "shell-run-2",
+            "completed",
+            Some(3),
+            "target",
+        );
+
+        let summary = kuzushi_core::load_run_summary(tmp.path(), "shell-run-2").unwrap();
+
+        assert_eq!(summary.status, "completed");
+        assert_eq!(summary.process_id, None);
+    }
 }
 
 pub fn append_llm_trace_step(

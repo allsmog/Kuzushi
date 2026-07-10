@@ -127,10 +127,11 @@ fn jobs_registry_model_downgrades_orphaned_running_summary() {
     let model = jobs_registry_model(&app, 20);
 
     assert_eq!(model.rows.len(), 1);
-    // On Linux the dead-PID probe downgrades the orphan to `interrupted`.
-    // Elsewhere (no /proc) liveness can't be verified, so a disk `running` row
-    // with no live twin renders as `Stale` ("running?"), never confident green.
-    let expected = if cfg!(target_os = "linux") {
+    // Every unix now probes liveness: Linux via `/proc/<pid>`, darwin and other
+    // unix via `kill(pid, 0)`. A dead PID is therefore downgraded to
+    // `interrupted` on all unix. Only non-unix (no probe) still can't verify a
+    // disk `running` row with no live twin, so it renders as `Stale` ("running?").
+    let expected = if cfg!(unix) {
         JobRunStatus::Interrupted
     } else {
         JobRunStatus::Stale

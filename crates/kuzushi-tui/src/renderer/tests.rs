@@ -784,6 +784,7 @@ fn renders_expanded_catalog_readably_on_narrow_terminal() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, crate::commands::ShellCommand::Modules);
+    app.set_input_mode(crate::InputMode::Navigate);
     *app.findings_mut() = (0..82)
         .map(|index| {
             Finding::new_semgrep(
@@ -817,6 +818,7 @@ fn expanded_catalog_uses_design_sections_without_dag_column() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, crate::commands::ShellCommand::Modules);
+    app.set_input_mode(crate::InputMode::Navigate);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2056,7 +2058,7 @@ fn renders_help_grouped_by_operator_workflow() {
     // the SESSION group) is taller than the help view fit in previously;
     // render into a taller viewport so every group, including SESSION, is
     // actually painted instead of scrolled out of the test buffer.
-    let backend = TestBackend::new(110, 140);
+    let backend = TestBackend::new(110, 240);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Help);
@@ -2956,7 +2958,7 @@ fn view_status_segment_reflects_actual_view_not_focused_module() {
     assert_eq!(view_status_segment(&app), "help");
 
     app.set_shell_view(ShellView::Catalog);
-    assert_eq!(view_status_segment(&app), "modules");
+    assert_eq!(view_status_segment(&app), "catalog");
 
     app.set_shell_view(ShellView::Tools);
     assert_eq!(view_status_segment(&app), "tools");
@@ -3518,6 +3520,7 @@ fn catalog_j_k_moves_row_cursor_and_highlights_row() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, crate::commands::ShellCommand::Modules);
+    app.set_input_mode(crate::InputMode::Navigate);
 
     // Cursor starts at 0; `j` advances it.
     let before = app.router.catalog().cursor();
@@ -3554,6 +3557,7 @@ fn catalog_enter_runs_use_for_cursor_row() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, crate::commands::ShellCommand::Modules);
+    app.set_input_mode(crate::InputMode::Navigate);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
@@ -3573,6 +3577,7 @@ fn catalog_g_and_uppercase_g_jump_cursor_to_bounds() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, crate::commands::ShellCommand::Modules);
+    app.set_input_mode(crate::InputMode::Navigate);
     let total = app.catalog_module_count();
     assert!(total > 0);
 
@@ -3898,7 +3903,7 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
 
     assert!(rendered.contains("CHOOSE A TARGET"));
     assert!(rendered.contains("git repo"));
-    assert!(rendered.contains("> api"), "cursor marks the selected row");
+    assert!(rendered.contains("▸ api"), "cursor marks the selected row");
     assert!(rendered.contains("previous kuzushi target"));
     assert!(rendered.contains("git submodule"));
     assert!(
@@ -3924,7 +3929,7 @@ fn model_picker_renders_offline_demo_escape_hatch() {
     assert!(rendered.contains("CHOOSE A MODEL"));
     assert!(rendered.contains("Try offline fixture"));
     assert!(rendered.contains("local/no auth"));
-    assert!(rendered.contains("d/demo"));
+    assert!(rendered.contains("d demo"));
 }
 
 #[test]
@@ -3940,7 +3945,7 @@ fn auth_picker_renders_selectable_offline_demo_row() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("CHOOSE AUTH METHOD"));
-    assert!(rendered.contains("> Offline demo"));
+    assert!(rendered.contains("▸ Offline demo"));
     assert!(rendered.contains("no key, model, or scanner binary"));
 }
 
@@ -4742,20 +4747,125 @@ fn repeat_finding<'a>(
 }
 
 #[test]
-fn workbench_renders_pane_borders_at_wide_and_narrow_widths() {
+fn workbench_renders_lightweight_pane_rails_at_wide_and_narrow_widths() {
     let wide = render_workbench_for_test(120, 24);
-    assert!(wide.contains("┌"), "{wide}");
+    assert!(wide.contains("│"), "{wide}");
+    assert!(!wide.contains("┌"), "{wide}");
     assert!(wide.contains("SOURCE"), "{wide}");
     assert!(wide.contains("CODE"), "{wide}");
     assert!(wide.contains("REVIEW QUEUE"), "{wide}");
-    assert!(wide.contains("CLAIM"), "{wide}");
+    assert!(wide.contains("STATUS"), "{wide}");
     assert!(!wide.contains("2/4 shown"), "{wide}");
 
     let narrow = render_workbench_for_test(80, 16);
-    assert!(narrow.contains("┌"), "{narrow}");
+    assert!(narrow.contains("│"), "{narrow}");
+    assert!(!narrow.contains("┌"), "{narrow}");
     assert!(narrow.contains("REVIEW QUEUE"), "{narrow}");
     assert!(narrow.contains("F-0001"), "{narrow}");
     assert!(narrow.contains("2/4 panes"), "{narrow}");
+}
+
+#[test]
+fn workbench_preserves_priority_atoms_at_atlas_breakpoints() {
+    for (width, height) in [(60, 20), (80, 24), (120, 36), (160, 40)] {
+        let rendered = render_workbench_for_test(width, height);
+        assert!(rendered.contains("Kuzushi"), "{width}x{height}: {rendered}");
+        assert!(
+            rendered.contains("REVIEW QUEUE"),
+            "{width}x{height}: {rendered}"
+        );
+        assert!(rendered.contains("F-0001"), "{width}x{height}: {rendered}");
+        assert!(rendered.contains("STATUS"), "{width}x{height}: {rendered}");
+        assert!(
+            rendered.contains("mode:shell"),
+            "{width}x{height}: {rendered}"
+        );
+        assert!(!rendered.contains("┌"), "{width}x{height}: {rendered}");
+    }
+}
+
+#[test]
+fn narrow_workbench_footer_uses_complete_compact_atoms() {
+    let rendered = render_workbench_for_test(60, 20);
+    assert!(rendered.contains("mode:shell"), "{rendered}");
+    assert!(rendered.contains("workbench"), "{rendered}");
+    assert!(rendered.contains("1 finding · 1 H"), "{rendered}");
+    assert!(
+        rendered.contains("REVIEW QUEUE 1 · 2/4 panes"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn command_palette_overlay_keeps_workbench_context_and_selection_marker() {
+    let backend = TestBackend::new(160, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = workbench_app_with_findings();
+    app.open_command_palette();
+    app.palette_input('s');
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("COMMAND PALETTE"), "{rendered}");
+    assert!(rendered.contains('▸'), "{rendered}");
+    assert!(rendered.contains("Kuzushi"), "{rendered}");
+    assert!(rendered.contains("target:no target"), "{rendered}");
+
+    let selection_bg = theme::selection().bg.unwrap();
+    let selected_cells = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .filter(|cell| cell.bg == selection_bg)
+        .count();
+    assert!(
+        selected_cells <= 96,
+        "only the modal selection owns the accent background: {selected_cells}"
+    );
+}
+
+#[test]
+fn atlas_selection_band_fills_the_available_row() {
+    let line = selection_band("row", true, 24);
+    let text = line
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+    assert_eq!(display_width(&text), 24);
+    assert!(text.starts_with(" ▸ row"));
+}
+
+#[test]
+fn narrow_model_picker_preserves_complete_action_atoms() {
+    let backend = TestBackend::new(60, 20);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::ModelPicker);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+    assert!(rendered.contains("credentials needed"), "{rendered}");
+    assert!(rendered.contains("auth required"), "{rendered}");
+    assert!(rendered.contains("Enter select"), "{rendered}");
+    assert!(!rendered.contains("needs..."), "{rendered}");
+}
+
+#[test]
+fn system_overlay_uses_modal_frame_over_origin_view() {
+    let backend = TestBackend::new(160, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = workbench_app_with_findings();
+    app.set_shell_view(ShellView::ThemePicker);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("THEME"), "{rendered}");
+    assert!(rendered.contains("Kuzushi"), "{rendered}");
+    assert!(rendered.contains("│"), "{rendered}");
 }
 
 fn render_workbench_for_test(width: u16, height: u16) -> String {
@@ -4777,7 +4887,7 @@ fn workbench_renders_review_grid_at_common_terminal_widths() {
 
     assert!(rendered.contains("CODE"), "{rendered}");
     assert!(rendered.contains("REVIEW QUEUE"), "{rendered}");
-    assert!(rendered.contains("CLAIM"), "{rendered}");
+    assert!(rendered.contains("STATUS"), "{rendered}");
     assert!(rendered.contains("SOURCE"), "{rendered}");
     assert!(!rendered.contains("2/4 shown"), "{rendered}");
 }
@@ -4811,7 +4921,7 @@ fn workbench_top_bar_renders_compact_journey_phase_with_target() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("› workbench"), "{rendered}");
+    assert!(rendered.contains("Kuzushi"), "{rendered}");
     assert!(rendered.contains("target:"), "{rendered}");
     assert!(!rendered.contains("phase:"), "{rendered}");
     assert!(rendered.contains("組 map"), "{rendered}");
@@ -4886,7 +4996,7 @@ fn workbench_lines_plain_shows_top_bar_findings_and_dfd_empty_hint() {
     // preview. DFD is still available by focusing the center pane explicitly.
     assert!(rendered.contains("Kuzushi"), "{rendered}");
     assert!(
-        rendered.contains("workspace export findings report.sarif"),
+        rendered.contains("findings export report.sarif sarif"),
         "{rendered}"
     );
     assert!(rendered.contains("F-0001"), "{rendered}");
@@ -4932,7 +5042,7 @@ fn workbench_ship_plain_shows_report_preview_counts() {
 
 #[test]
 fn workbench_selected_finding_gets_readable_details_pane() {
-    let backend = TestBackend::new(180, 42);
+    let backend = TestBackend::new(180, 64);
     let mut terminal = Terminal::new(backend).unwrap();
     let temp = tempfile::tempdir().unwrap();
     let source_path = temp.path().join("src/main/java/Demo.java");
@@ -4984,28 +5094,41 @@ fn workbench_selected_finding_gets_readable_details_pane() {
     assert!(rendered.contains("SELECT * FROM accounts"), "{rendered}");
     assert!(!rendered.contains("┌DFD"), "{rendered}");
     assert!(rendered.contains("F-0001 · HIGH"), "{rendered}");
-    assert!(rendered.contains("workspace export findings"), "{rendered}");
-    let claim_pos = rendered.find("CLAIM").expect("claim section");
-    let signals_pos = rendered[claim_pos..]
-        .find("SIGNALS")
-        .map(|offset| claim_pos + offset)
-        .expect("signals section");
-    let evidence_pos = rendered[signals_pos..]
+    assert!(
+        rendered.contains("findings export report.sarif sarif"),
+        "{rendered}"
+    );
+    let status_pos = rendered.find("STATUS").expect("status section");
+    let next_pos = rendered[status_pos..]
+        .find("NEXT")
+        .map(|offset| status_pos + offset)
+        .expect("next section");
+    let evidence_pos = rendered[next_pos..]
         .find("source-sink")
-        .map(|offset| signals_pos + offset)
+        .map(|offset| next_pos + offset)
         .expect("evidence section");
-    let analysis_pos = rendered[evidence_pos..]
-        .find("ANALYSIS")
-        .map(|offset| evidence_pos + offset)
-        .expect("analysis section");
-    let verification_pos = rendered[analysis_pos..]
+    let verification_pos = rendered[evidence_pos..]
         .find("VERIFICATION")
-        .map(|offset| analysis_pos + offset)
+        .map(|offset| evidence_pos + offset)
         .expect("verification section");
-    assert!(claim_pos < signals_pos, "{rendered}");
-    assert!(signals_pos < evidence_pos, "{rendered}");
-    assert!(evidence_pos < analysis_pos, "{rendered}");
-    assert!(analysis_pos < verification_pos, "{rendered}");
+    let analysis_pos = rendered[verification_pos..]
+        .find("ANALYSIS")
+        .map(|offset| verification_pos + offset)
+        .expect("analysis section");
+    let claim_pos = rendered[analysis_pos..]
+        .find("CLAIM")
+        .map(|offset| analysis_pos + offset)
+        .expect("claim section");
+    let decision_pos = rendered[claim_pos..]
+        .find("DECISION")
+        .map(|offset| claim_pos + offset)
+        .expect("decision section");
+    assert!(status_pos < next_pos, "{rendered}");
+    assert!(next_pos < evidence_pos, "{rendered}");
+    assert!(evidence_pos < verification_pos, "{rendered}");
+    assert!(verification_pos < analysis_pos, "{rendered}");
+    assert!(analysis_pos < claim_pos, "{rendered}");
+    assert!(claim_pos < decision_pos, "{rendered}");
     assert!(!rendered.contains("proof state:"), "{rendered}");
     assert!(rendered.contains("prepareStatement"), "{rendered}");
     assert!(rendered.contains("source-sink"), "{rendered}");

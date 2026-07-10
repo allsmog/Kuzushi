@@ -1,0 +1,24 @@
+# J14 — Narrow terminal (responsive matrix)
+# Re-run the J1 walk at 60x20. Exercises adaptive-footer wrap (<70 cols) and
+# compact-Workbench collapse. For the 80x24 cell of the matrix, re-run:
+#   ./scripts/devex/run-journey.sh --size 80x24 J14
+name: Narrow terminal (60x20)
+size: 60x20
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch:
+wait-for: 2 CHOOSE A TARGET
+snap: narrow-target-gate
+ask: 60 cols — is the target gate readable, does the footer wrap to two lines instead of truncating behind a +more chip?
+keys: Enter
+wait: 3
+snap: narrow-model-gate
+keys: d
+wait-for: 90 run completed
+snap: narrow-demo-result
+ask: Compact Workbench/Activity — do findings and detail text stay readable, with nothing truncated behind chrome?
+submit: findings
+wait: 3
+snap: narrow-findings
+ask: Findings at 60x20 — severity/confidence signifiers still visible per row, or clipped?

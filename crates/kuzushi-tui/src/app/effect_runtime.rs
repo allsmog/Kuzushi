@@ -48,6 +48,7 @@ impl EffectRuntime {
                 | ShellEffect::OpenFinding(_)
                 | ShellEffect::OpenGuidedScan(_)
                 | ShellEffect::RecordReviewDecision(_)
+                | ShellEffect::RecordSuppression(_)
                 | ShellEffect::RecordStrategyCorrection(_)
                 | ShellEffect::SelectComponent(_)
                 | ShellEffect::StartOfflineDemoFixtureScan
@@ -76,12 +77,22 @@ impl EffectRuntime {
                 app.finalize_guided_scan_open_effect();
                 Vec::new()
             }
+            ShellEffect::OpenFinding(open) => app.resolve_open_finding_effect(open),
+            ShellEffect::OpenGuidedScan(open) => app.open_guided_scan(open.target),
+            remaining => Self::execute_remaining_chained_effect(app, remaining),
+        }
+    }
+
+    fn execute_remaining_chained_effect(
+        app: &mut ShellApp,
+        effect: ShellEffect,
+    ) -> Vec<ShellEffect> {
+        match effect {
             ShellEffect::FireNextApprovedStrategy(fire) => {
                 app.fire_next_approved_strategy_effect(fire)
             }
-            ShellEffect::OpenFinding(open) => app.resolve_open_finding_effect(open),
-            ShellEffect::OpenGuidedScan(open) => app.open_guided_scan(open.target),
             ShellEffect::RecordReviewDecision(apply) => app.record_review_decision_effect(apply),
+            ShellEffect::RecordSuppression(apply) => app.record_suppression_effect(apply),
             ShellEffect::RecordStrategyCorrection(record) => {
                 app.record_strategy_correction_effect(record)
             }

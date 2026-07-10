@@ -1,0 +1,50 @@
+# J15 — Palette / TERM matrix
+# Known risk: truecolor-only palette breaks macOS Terminal. The .ansi
+# captures (-e) are the evidence here — judge escape sequences + legibility,
+# not merely non-crash. Deliberately leaves KUZUSHI_REDUCED_MOTION unset on
+# the first launch so motion itself can be audited.
+name: Palette and TERM matrix
+cwd: @TMP_TARGET
+env: HOME=@TMP_HOME TERM=xterm-256color
+env-unset: COLORTERM
+launch:
+wait-for: 25 CHOOSE A TARGET
+snap: 256color-target-gate
+ask: TERM=xterm-256color (emulated macOS Terminal) — inspect the .ansi capture: are colors 256-safe (38;5;N) or truecolor-only (38;2;R;G;B), and is the screen legible?
+wait: 2
+snap: 256color-motion
+ask: Motion — compare consecutive captures: is the spinner advancing smoothly, and does it stay legible at 256 colors?
+keys: C-g
+type: recon
+keys: Down
+snap: 256color-palette-selection
+expect: ▸
+ask: Palette — is the selected recon command/tool/module row visible through both the non-color marker and theme styling?
+keys: Escape
+submit: quit
+wait: 2
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_THEME=high-contrast KUZUSHI_REDUCED_MOTION=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+snap: high-contrast-gate
+ask: KUZUSHI_THEME=high-contrast — bright white + bold palette active in the .ansi capture, and still legible?
+keys: C-g
+type: recon
+keys: Down
+snap: high-contrast-palette-selection
+expect: ▸
+keys: Escape
+submit: quit
+wait: 2
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+snap: reduced-motion-gate
+wait: 2
+snap: reduced-motion-second
+ask: KUZUSHI_REDUCED_MOTION=1 — diff the two captures: is the spinner actually frozen?
+keys: C-g
+type: recon
+keys: Down
+snap: truecolor-palette-selection
+expect: ▸

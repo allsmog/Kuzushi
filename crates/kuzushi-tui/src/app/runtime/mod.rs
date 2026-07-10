@@ -30,6 +30,7 @@ mod terminal_loop_event;
 mod tests;
 mod workspace_watcher;
 pub(super) use render_plain_scripted_session::mouse_capture_setting_enabled;
+#[cfg(test)]
 pub(super) use render_plain_scripted_session::render_plain_scripted_session;
 pub use run_shell::run_shell;
 pub use run_shell::run_shell_with_plain;

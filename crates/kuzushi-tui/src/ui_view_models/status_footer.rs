@@ -1,5 +1,7 @@
 use super::{
-    active_project_scope_label, autonomy_footer_segment, findings_model, journey_footer_segment,
+    active_project_scope_label, autonomy_footer_segment,
+    compact_status_footer_findings_summary_from_counts,
+    compact_status_footer_findings_summary_with_total, findings_model, journey_footer_segment,
     routing_mode_segment, scan_status, status_footer_findings_summary_from_counts,
     status_footer_findings_summary_with_total, view_status_segment, ShellApp,
 };
@@ -10,6 +12,8 @@ use crate::ShellView;
 pub(crate) struct StatusFooterModel {
     pub(crate) left_segments: Vec<String>,
     pub(crate) right_segments: Vec<String>,
+    pub(crate) compact_left_segments: Vec<String>,
+    pub(crate) compact_right_segments: Vec<String>,
     pub(crate) warning: bool,
 }
 
@@ -18,6 +22,8 @@ pub(crate) fn status_footer_model(app: &ShellApp) -> StatusFooterModel {
     StatusFooterModel {
         left_segments: status_footer_left_segments(app),
         right_segments: status_footer_right_segments(app, warning),
+        compact_left_segments: vec![routing_mode_segment(app), view_status_segment(app)],
+        compact_right_segments: compact_status_footer_right_segments(app, warning),
         warning,
     }
 }
@@ -115,12 +121,28 @@ fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
     segments
 }
 
+fn compact_status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
+    let mut segments = vec![compact_status_footer_findings_segment(app)];
+    if warning {
+        segments.insert(0, "Ctrl+C again".to_string());
+    }
+    segments
+}
+
 fn status_footer_findings_segment(app: &ShellApp) -> String {
     if matches!(app.shell_view(), ShellView::Workbench) {
         let findings = findings_model(app);
         return status_footer_findings_summary_from_counts(findings.total, findings.counts);
     }
     status_footer_findings_summary_with_total(app.findings(), app.findings_total_count())
+}
+
+fn compact_status_footer_findings_segment(app: &ShellApp) -> String {
+    if matches!(app.shell_view(), ShellView::Workbench) {
+        let findings = findings_model(app);
+        return compact_status_footer_findings_summary_from_counts(findings.total, findings.counts);
+    }
+    compact_status_footer_findings_summary_with_total(app.findings(), app.findings_total_count())
 }
 
 fn status_footer_activity(app: &ShellApp) -> Option<FooterActivity> {

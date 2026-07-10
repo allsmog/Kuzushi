@@ -9,6 +9,7 @@ pub(crate) struct UiPrefs {
     last_operator_interaction: Option<Instant>,
     spinner_phase: u8,
     last_spinner_advance: Option<Instant>,
+    last_liveness_redraw: Option<Instant>,
     force_full_redraw: bool,
     should_quit: bool,
     ctrl_c_armed_at: Option<Instant>,
@@ -24,6 +25,7 @@ impl UiPrefs {
             last_operator_interaction: None,
             spinner_phase: 0,
             last_spinner_advance: None,
+            last_liveness_redraw: None,
             force_full_redraw: false,
             should_quit: false,
             ctrl_c_armed_at: None,
@@ -93,6 +95,21 @@ impl UiPrefs {
         true
     }
 
+    pub(crate) fn liveness_redraw_due(&mut self, now: Instant, frame: Duration) -> bool {
+        let due = self
+            .last_liveness_redraw
+            .map(|previous| now.duration_since(previous) >= frame)
+            .unwrap_or(true);
+        if due {
+            self.last_liveness_redraw = Some(now);
+        }
+        due
+    }
+
+    pub(crate) fn clear_liveness_redraw(&mut self) {
+        self.last_liveness_redraw = None;
+    }
+
     #[cfg(test)]
     pub(crate) fn set_last_spinner_advance_for_test(&mut self, instant: Instant) {
         self.last_spinner_advance = Some(instant);
@@ -135,6 +152,23 @@ impl UiPrefs {
 
     pub(crate) fn set_viewport(&mut self, viewport: TerminalViewport) {
         self.viewport = viewport;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn liveness_redraw_clock_advances_once_per_second() {
+        let mut prefs = UiPrefs::new(true, true);
+        let start = Instant::now();
+
+        assert!(prefs.liveness_redraw_due(start, Duration::from_secs(1)));
+        assert!(
+            !prefs.liveness_redraw_due(start + Duration::from_millis(999), Duration::from_secs(1))
+        );
+        assert!(prefs.liveness_redraw_due(start + Duration::from_secs(1), Duration::from_secs(1)));
     }
 }
 
