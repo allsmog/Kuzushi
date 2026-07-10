@@ -2,13 +2,19 @@ import { Glyph } from "./Glyph";
 import { Row } from "./Row";
 import type { Tone } from "./tokens";
 
-/** A proposal's disposition in the hunt queue. */
-export type ProposalState = "proposed" | "kept" | "skipped";
+/**
+ * A proposal's disposition in the hunt queue, mirroring the Rust
+ * `proposal_marker` set: awaiting a keep/skip decision, kept (approved), skipped
+ * (rejected), running (dispatched, in flight), or failed.
+ */
+export type ProposalState = "proposed" | "kept" | "skipped" | "running" | "failed";
 
 const MARK: Record<ProposalState, { glyph: string; tone: Tone }> = {
   proposed: { glyph: "▸", tone: "accent" },
   kept: { glyph: "✓", tone: "success" },
   skipped: { glyph: "✗", tone: "subtle" },
+  running: { glyph: "⠿", tone: "accent" },
+  failed: { glyph: "!", tone: "danger" },
 };
 
 export interface ProposalRowProps {

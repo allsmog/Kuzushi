@@ -30,14 +30,20 @@ Don't write CSS classes or color literals. Every text-bearing component takes a
 semantic `tone` from the 8-role theme plus the severity scale:
 
 `primary` · `muted` · `subtle` · `accent` · `label` · `heading` · `success` ·
-`warn` · `danger` · `selection` · `critical` · `high` · `medium` · `low`
+`warn` · `danger` · `selection` · `critical` · `high` · `medium` · `low` ·
+`info` · `unknown` · `dim`
 
 - `Glyph tone="…"` colors any text run or status glyph (`✓ ✗ ● ▸ ◆ … ⏵ ·`).
 - `Row tone="…"` colors a whole line; `Row selected` paints the j/k cursor
-  highlight (inverse accent), and `Row cols={N}` extends it full-width.
+  highlight (inverse accent — the whole row's tones yield to it), and
+  `Row cols={N}` extends it full-width.
 - `LogLine kind="…"` picks the leading glyph and tone for you. Kinds:
   `in` · `run` · `ok` · `err` · `agent` · `flow` · `find` · `log`.
-- `SeverityBadge level="…"` — `critical` · `high` · `medium` · `low`.
+- `SeverityBadge level="…"` — `critical` · `high` · `medium` · `low` · `info`
+  (`glyph` renders the compact `C/H/M/L/I/?` letter).
+- `ProofBadge state="…"` — the confidence ladder `confirmed` (✓ green) ·
+  `likely` (◇ blue) · `unverified` (? grey) · `dismissed` (· dim). `dim` is
+  reserved for this dismissed/de-emphasized band.
 
 One inherited rule: `accent` (#7fb8ff) is reserved for next-action callouts and
 selection — never decoration.
@@ -47,8 +53,20 @@ selection — never decoration.
 - `styles.css` (and the sheet it imports) defines the palette as `--kz-*`
   custom properties and the `kz-*` classes — read it before restyling.
 - Each component ships a `<Name>.prompt.md` (usage) and `<Name>.d.ts` (the prop
-  contract). The eight components: `TermFrame`, `StatusStrip`, `Row`, `Glyph`,
-  `SectionHeader`, `LogLine`, `Footer`, `SeverityBadge`.
+  contract). The roster, by role:
+  - **Frame & primitives** — `TermFrame`, `Row`, `Glyph`, `SectionHeader`,
+    `LogLine`, `StatusStrip`, `Footer`.
+  - **Badges & chips** — `SeverityBadge`, `ProofBadge`, `StatusChip`
+    (`● LIVE` / `ctx: built` / `scope: on`).
+  - **Control room** — `PhaseRail` (組 map → 崩 hunt → 作 confirm → 掛 fix),
+    `MeterBar` (ratio-toned budget/coverage bar), `ProposalRow` (hunt queue),
+    `EngineChips` (cpg/codeql/lsp readiness), `AutonomyDial` (`⛭` posture),
+    `NextCallout` (`▸ NEXT`).
+  - **Cockpit** — `CockpitPane` (the Atlas left-rail pane chrome),
+    `ReviewQueueRow` (confidence-first findings row).
+  - **Diagrams** — `Heatmap` (module × severity), `AttackPath` (source→sink
+    boxes), `DataFlowLadder` (taint legs), `AttackTree` (`☠` goal + OR/AND
+    gates), `DfdDiagram` (trust-zone data-flow).
 
 ### Idiomatic example
 

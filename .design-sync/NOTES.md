@@ -7,6 +7,37 @@ web React, not a native terminal binary. The kit's tokens mirror
 `crates/kuzushi-tui/src/theme/mod.rs` and its primitives mirror
 `design/mockups/_shared.jsx`. Keep them in step when the shell theme changes.
 
+**Atlas reconciliation (2026-07):** kit expanded 8 → **23 components** to mirror
+the Atlas cockpit. The 5 control-room components were corrected to current TUI
+semantics (`ProofBadge` → confidence ladder confirmed/likely/unverified/dismissed
+· success/accent/muted/dim; `PhaseRail` → journey glyphs ✓●!⊘·; `EngineChips` →
+cpg/codeql/lsp ready/build/opt-in; `MeterBar` → ratio auto-tone; `ProposalRow` →
++running/failed). New chrome: `CockpitPane` (left-rail pane), `AutonomyDial`,
+`NextCallout`, `StatusChip`, `ReviewQueueRow`. New diagrams: `Heatmap`,
+`AttackPath`, `DataFlowLadder`, `AttackTree`, `DfdDiagram`. A `dim` tone was
+added (mirrors Rust `disabled()`). The palette itself did NOT drift — HEAD's
+`theme/mod.rs` colours still match the kit tokens 1:1; the Atlas theme diff was
+capability-downsampling + `proof_confidence_tone`, not new colours. Which Rust
+renderer each new component mirrors is documented in its `.tsx` doc comment.
+
+## Preview authoring — width is clip-not-wrap
+
+`cols` on `TermFrame`/`Row` (and `Heatmap`) fixes the monospace grid width but
+does **not** wrap or truncate — content wider than `cols` clips at the frame
+edge (and a selection band ends mid-text). When authoring a preview, budget the
+frame width for the **longest** row in the stack including all trailing meta,
+then add a few cells of slack. Rules of thumb learned this run:
+- Wide composed rows (`ReviewQueueRow`, `ProposalRow`) — frame `cols` ~10 over
+  the row `cols`; row `cols` ~2 under the frame.
+- `Heatmap` has its OWN `cols` prop — set it a few cells under the TermFrame
+  `cols` so padded rows land flush (each severity cell is a fixed 8-char field).
+- `DataFlowLadder` / `AttackTree` / `DfdDiagram` take no `cols` prop; width is
+  bounded by the longest label — keep chain/flow labels short (~<50 chars) and
+  wrap in `TermFrame cols={72..80}`. `DfdDiagram` auto-sizes its boxes to the
+  widest zone/node label, so one long label widens every box.
+- Kanji (組/崩/作/掛) and box-drawing (`╭╮╰╯│─▶●○◆◇▣☠⛭`) render cleanly in the
+  capture font (JetBrains Mono) — no tofu.
+
 ## Build / run quirks
 
 - The kit is **isolated from the Kuzushi CLI**: it is not a pnpm-workspace

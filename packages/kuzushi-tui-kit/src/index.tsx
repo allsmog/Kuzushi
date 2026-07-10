@@ -26,7 +26,33 @@ export {
   type ProposalRowProps,
   type ProposalState,
 } from "./ProposalRow";
-export { EngineChips, type EngineChipsProps, type EngineChip } from "./EngineChips";
+export {
+  EngineChips,
+  type EngineChipsProps,
+  type EngineChip,
+  type EngineState,
+} from "./EngineChips";
+export { CockpitPane, type CockpitPaneProps } from "./CockpitPane";
+export { AutonomyDial, type AutonomyDialProps, type AutonomyRung } from "./AutonomyDial";
+export { NextCallout, type NextCalloutProps } from "./NextCallout";
+export { StatusChip, type StatusChipProps } from "./StatusChip";
+export { ReviewQueueRow, type ReviewQueueRowProps } from "./ReviewQueueRow";
+export { Heatmap, type HeatmapProps, type HeatmapModule } from "./Heatmap";
+export { AttackPath, type AttackPathProps, type AttackStage } from "./AttackPath";
+export {
+  DataFlowLadder,
+  type DataFlowLadderProps,
+  type FlowLeg,
+  type LegKind,
+} from "./DataFlowLadder";
+export { AttackTree, type AttackTreeProps, type AttackChain } from "./AttackTree";
+export {
+  DfdDiagram,
+  type DfdDiagramProps,
+  type TrustZone,
+  type DfdNode,
+  type NodeKind,
+} from "./DfdDiagram";
 export {
   DEFAULT_THEME_TOKENS,
   HIGH_CONTRAST_THEME_TOKENS,

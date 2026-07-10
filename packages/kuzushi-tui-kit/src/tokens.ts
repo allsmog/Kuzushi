@@ -24,7 +24,8 @@ export type Tone =
   | "medium"
   | "low"
   | "info"
-  | "unknown";
+  | "unknown"
+  | "dim";
 
 /** Console line kinds — each maps to a leading glyph and a tone. */
 export type LogKind =

@@ -66,6 +66,13 @@
   --kz-sev-unknown:    #cfd6e0;
 }
 
+/* High contrast never dims — the Rust `disabled_for_config` promotes disabled
+   text to full-weight primary rather than dimming it. */
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-dim {
+  color: var(--kz-primary);
+  opacity: 1;
+}
+
 /* ── Terminal window ─────────────────────────────────────────────── */
 
 .kz-frame {
@@ -126,6 +133,12 @@
   background: var(--kz-sel-bg);
   font-weight: 700;
 }
+/* The selection band inverts the whole row (accent bg + term-bg fg), matching
+   the Rust `selection()` style — so per-glyph tones inside a selected row yield
+   to the band's foreground and stay legible instead of colouring on colour. */
+.kz-row--selected :is([class*="kz-tone-"], .kz-badge) {
+  color: var(--kz-sel-fg);
+}
 
 /* ── Semantic text tones ─────────────────────────────────────────── */
 
@@ -146,6 +159,9 @@
 .kz-tone-low      { color: var(--kz-sev-low); }
 .kz-tone-info     { color: var(--kz-sev-info); }
 .kz-tone-unknown  { color: var(--kz-sev-unknown); }
+/* `dim` mirrors the Rust `disabled()` style — muted colour + DIM modifier —
+   used for a dismissed finding. High contrast drops the dimming (below). */
+.kz-tone-dim      { color: var(--kz-muted); opacity: 0.55; }
 
 :is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-primary,
 :is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-accent,
@@ -165,3 +181,28 @@
 /* ── Severity / status chip ──────────────────────────────────────── */
 
 .kz-badge { font-weight: 700; }
+
+/* ── Cockpit pane (the Atlas left-rail chrome) ───────────────────────
+   Mirrors the Rust `cockpit_pane_block`: one stable vertical rail on the
+   left (not a full box), the title sitting on the rail. Focus lights the
+   rail + title accent; unfocused stays subtle/muted. */
+
+.kz-pane {
+  display: block;
+  border-left: 2px solid var(--kz-subtle);
+  padding-left: 10px;
+}
+.kz-pane + .kz-pane { margin-top: 10px; }
+
+.kz-pane__title {
+  color: var(--kz-muted);
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.kz-pane--focused { border-left-color: var(--kz-accent); }
+.kz-pane--focused .kz-pane__title { color: var(--kz-accent); }
+
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-pane__title {
+  color: var(--kz-heading);
+}
