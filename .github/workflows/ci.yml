@@ -159,6 +159,10 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+      # Config JSON Schema is derived from the Rust source of truth
+      # (kuzushi_core::V2Config via schemars). Fail if the committed
+      # generated/schemas/kuzushi-v3-config.json drifts from the model.
+      - run: cargo xtask codegen --check
       - run: cargo build --workspace
       - run: cargo build -p kuzushi-cli --release
       - run: node scripts/stage-native-binary.mjs

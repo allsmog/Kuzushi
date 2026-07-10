@@ -69,11 +69,11 @@ raw-output structs.
 |---|---|---|---|
 | 0 | Guardrails / TS ratchet | **DONE** | `.ts-budget=63`, `ci/ts-budget.sh`, CI wired, `pnpm check:ts-budget`. Coexists with `check-retired-ts-runtime.mjs`. |
 | 1 | Native agent runtime (replace LangGraph bridge) | **SCAFFOLD LANDED** | Native tool loop, config flag, and factory seam are in and unit-tested offline (see below). Remaining: live-API parity harness, OAuth refresh port, `rmcp` MCP client, OpenAI `chat/completions`, and flipping the default. Live parity still needs provider credentials + network the sandbox lacks. |
-| 2 | Retire dynamic module host | **BLOCKED on 1** | Needs the Phase-1 `rmcp` client. Plan recommends target C (MCP), bridge A (frozen subprocess protocol). Requires a plugin-author deprecation window. |
-| 3 | Invert schema source of truth to Rust | **BLOCKED / re-scope** | See corrections above. Config half entangled with legacy-vs-v3 decision; LLM-IO half is downstream of Phase 1. |
-| 4 | Delete module SDK + parity refs | **BLOCKED on 2** | Deletes `src/modules/**`, `src/testing/**`, etc. |
-| 5 | npm distribution endgame | **BLOCKED on 1–4** | `dependencies:{}`, launcher-only `package.json`. |
-| 6 | Tooling / web-kit / fixtures | **PARTLY INDEPENDENT** | `kuzushi-tui-kit` + `.design-sync` are already on the permanent allowlist. Husky→lefthook and benchmark/perf harness ports can proceed independently but are low-value until later phases land. |
+| 2 | Retire dynamic module host | **SPEC + DEPRECATION LANDED** | [Module Protocol v1](../module-protocol-v1.md) freezes the describe/execute/execute-runtime contract; Node host marked deprecated in `CHANGELOG.md`. Code deletion (option A/C) still needs the Phase-1 `rmcp` client and MCP adapters in the four external plugin repos. |
+| 3 | Invert schema source of truth to Rust (config) | **SCAFFOLD LANDED** | `schemars` on `kuzushi_core::V2Config`; `cargo xtask codegen[ --check]` emits/gates `generated/schemas/kuzushi-v3-config.json` from the Rust source of truth; wired into CI + 3 xtask tests. Remaining: LLM-IO schemas (downstream of Phase 1's raw-output structs) and a decision on the legacy zod `KuzushiConfig` (`generated/schemas/kuzushi-config.json`) — kept as-is because it describes a different, legacy config shape. |
+| 4 | Delete module SDK + parity refs | **BLOCKED on 2 (build-breaking now)** | Deleting `src/modules/**` / `src/testing/**` removes the published `kuzushi`/`kuzushi/modules`/`kuzushi/testing` SDK surface (a public contract). Gate: finish Phase 2 code deletion + confirm no external npm dependents. Doing it now would break the SDK exports and the retained-TS checks. |
+| 5 | npm distribution endgame | **BLOCKED on 1–4 (build-breaking now)** | `dependencies:{}` is physically impossible while the **default** runtime spawns `node scripts/langgraph-bridge.mjs` (needs `@langchain/*`, `undici`) and the Node module host. Removing those deps breaks the shipping product until Phase 1 flips to `native` **and** Phase 2 deletes the Node host. |
+| 6 | Tooling / web-kit / fixtures | **PARTIAL** | Permanent fixture/design allowlist is enforced (Phase 0 `ts-budget.sh`). `kuzushi-tui-kit` + `.design-sync` are web-by-nature and stay allowlisted (or move to a design repo — external). Husky→lefthook is deferred (dev-only, low value, no bearing on the zero-Node runtime goal). |
 
 ## Phase 1 scaffold — what landed
 
@@ -124,6 +124,31 @@ Remaining Phase 1 work (needs network / provider creds, so out of sandbox scope)
    concrete `LangGraphRuntime` for `with_cancellation`, a larger but mechanical
    rewire), then flip the default to `native` for one alpha before deleting the
    bridge.
+
+## Phase 2 & 3 — what landed
+
+- **Phase 3 (config schema inverted to Rust).** `schemars` derives `JsonSchema`
+  on `V2Config` + its nested types. New `xtask` crate: `cargo xtask codegen`
+  emits `generated/schemas/kuzushi-v3-config.json` from the Rust model;
+  `cargo xtask codegen --check` fails on drift and is wired into the `rust-cli`
+  CI job. Three `xtask` tests guard determinism, v3-field presence, and
+  committed-file freshness. The legacy zod `generated/schemas/kuzushi-config.json`
+  is deliberately untouched — it describes a **different** (legacy, flat) config
+  shape, not the v3 config; retiring it is a separate decision, not a byte-diff.
+- **Phase 2 (module host).** [`docs/module-protocol-v1.md`](../module-protocol-v1.md)
+  freezes the host wire contract; the bundled Node host is deprecated in
+  `CHANGELOG.md`. No code deletion — that needs the `rmcp` client and adapters
+  in the four external plugin repos.
+
+## Known blocker (pre-existing, not from this work)
+
+`kuzushi-tui` does not compile at branch HEAD: `renderer/views/workspace/mod.rs`
+(committed) declares modules `project_model_lines` and `strategy_queue_lines`
+whose `.rs` files were never tracked in git. This fails `cargo build/clippy
+--workspace` and, transitively, `kuzushi-cli` — independent of every change in
+this plan. Individual touched crates (`kuzushi-core`, `kuzushi-openai`, `xtask`)
+build and test green in isolation; `kuzushi-cli` was compile-verified with
+throwaway stubs. Full-workspace CI stays red until those two files are restored.
 
 ## Definition of done (from the plan)
 

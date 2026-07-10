@@ -20,6 +20,7 @@ members = [
   "crates/kuzushi-openai",
   "crates/kuzushi-sandbox",
   "crates/kuzushi-tui",
+  "xtask",
 ]
 resolver = "2"
 
@@ -122,6 +123,7 @@ dirs = "6.0"
 libc = "0.2"
 ratatui = "0.29"
 rusqlite = { version = "0.32", features = ["bundled"] }
+schemars = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3.14"

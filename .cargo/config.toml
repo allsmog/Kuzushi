@@ -1,0 +1,3 @@
+[alias]
+# `cargo xtask …` runs the workspace automation crate (schema codegen, etc.).
+xtask = "run --quiet --package xtask --"

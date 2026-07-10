@@ -44,6 +44,10 @@ roxmltree = "0.20"
 # per-architecture variants without shelling out to nm/objdump.
 goblin = { version = "0.10", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
 rusqlite.workspace = true
+# schemars derives the JSON Schema for the operator config model (V2Config)
+# so `cargo xtask codegen` can emit generated/schemas/kuzushi-v3-config.json
+# from the Rust source of truth instead of a parallel hand-maintained schema.
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"

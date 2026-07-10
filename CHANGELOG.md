@@ -5,6 +5,30 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+**Added:**
+
+- Native, zero-Node agent runtime behind `runtime.agent_runtime = "bridge" |
+  "native"` (default `bridge`). The native path adds an Anthropic Messages
+  tool-use loop to `AnthropicOAuthRuntime` and a `build_agent_runtime` factory
+  (wired into `kuzushi run`), with no silent fallback between backends. See
+  [docs/typescript-removal/STATUS.md](./docs/typescript-removal/STATUS.md).
+- Config JSON Schema is now derived from the Rust source of truth
+  (`kuzushi_core::V2Config` via `schemars`) and emitted by `cargo xtask codegen`
+  to `generated/schemas/kuzushi-v3-config.json`; `cargo xtask codegen --check`
+  gates drift in CI.
+- [Kuzushi Module Protocol v1](./docs/module-protocol-v1.md): the frozen
+  `describe`/`execute`/`execute-runtime` JSON-over-stdio contract a module host
+  implements, so the host can be reimplemented in any language.
+
+**Deprecated:**
+
+- The bundled Node dynamic-module host
+  (`scripts/kuzushi-dynamic-module-host.mjs`) is deprecated. It remains the
+  default host during the migration window, but Protocol v1 is now the contract
+  and the host is slated to move to an external package / be replaced by MCP
+  server modules (see the Protocol v1 migration path). Plugin authors should
+  target Protocol v1 rather than the in-repo host script.
+
 **Fixed:**
 
 - `cargo test --workspace` release blockers: the BDD onboarding skip-path

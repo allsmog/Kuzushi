@@ -2,7 +2,7 @@ use super::*;
 
 pub const DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS: u64 = 6 * 60 * 60 * 1_000;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct V2Config {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -23,7 +23,7 @@ impl Default for V2Config {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct GuidedPhaseConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34,7 +34,7 @@ pub struct GuidedPhaseConfig {
     pub fix: PhaseTemplateConfig,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum GuidedPhase {
     Map,
@@ -54,7 +54,7 @@ impl GuidedPhase {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct PhaseTemplateConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -69,7 +69,7 @@ pub struct PhaseTemplateConfig {
     pub prompt_variant: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct OperatorConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -90,7 +90,7 @@ pub struct OperatorConfig {
 /// zero-Node path. Both ship during parity testing; the default flips to
 /// `native` only once golden-run parity is proven (see
 /// `docs/typescript-removal/STATUS.md`).
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentRuntimeSelector {
     #[default]
@@ -113,7 +113,7 @@ impl AgentRuntimeSelector {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct RuntimeConfig {
     pub kind: RuntimeKind,
@@ -149,7 +149,7 @@ impl Default for RuntimeConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct AnthropicOauthConfig {
     /// Path to the OAuth credentials bag (default: `~/.kuzushi/oauth-credentials.json`).
@@ -169,7 +169,7 @@ pub fn default_oauth_credentials_path(home_dir: impl AsRef<Path>) -> PathBuf {
     crate::workspace::workspace_state_root(home_dir).join(OAUTH_CREDENTIALS_FILE)
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeKind {
     LangGraph,
