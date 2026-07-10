@@ -173,11 +173,17 @@ rather than one bespoke renderer per file.
 | `x-ray-scanning.jsx` | Implement | `x-ray:run`, Activity/ModuleRun | Running variant. |
 | `x-ray.jsx` | Implement | `x-ray:run`, `x-ray:read` | Visible built-in module. |
 
-## Harness Order
+## Harness Contract
 
-1. Build the extractor and ignored parity test harness against the `Implement`
-   rows.
-2. Generate fixture families by target view, not by filename.
-3. Add `Defer` rows only when their backend/command contract graduates.
-4. Keep `Cut` rows out of `PARITY_STATUS.md` so they do not inflate the debt
-   count.
+1. Every `Implement` row owns a real Rust fixture and a cockpit-native
+   `ParityContract`; the Atlas supplies semantic hierarchy, not a requirement
+   to recreate standalone screens that Kuzushi has folded into Workbench,
+   Activity, or contextual overlays.
+2. Fixture-family tests assert width safety, real state vocabulary, selection
+   markers, and freedom from broken serialized values. Ratatui buffer tests own
+   responsive geometry and style invariants.
+3. Run `cargo test -p kuzushi-tui --test parity`, then regenerate verified
+   status with `node scripts/mockup-to-text.mjs --status
+   design/PARITY_STATUS.md --verified`.
+4. Add `Defer` rows only when their backend/command contract graduates, and
+   keep `Cut` rows out of `PARITY_STATUS.md`.

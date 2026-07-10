@@ -1,5 +1,46 @@
 Kuzushi Terminal Cockpit — Product, Architecture & UI Implementation Guide
 
+## Atlas-native visual contract
+
+The dense cockpit is Kuzushi's information architecture. The Screen Atlas is
+its visual grammar: orient → now → act → decide → recall → command. Atlas
+mockups that describe the same product state are fixture variants of the
+existing Workbench, Activity, document, picker, module, or overlay family; they
+do not create parallel routes.
+
+- One action/selection region carries the accent. Severity and failure colors
+  remain semantic rather than decorative.
+- Cockpit panes use stable subtle rails. Focus changes rail/title emphasis,
+  never geometry; `Z` temporarily zooms the focused Workbench pane and `Tab`
+  moves the zoom with focus.
+- Review rows group by operator workflow (`NEEDS REVIEW`, `CONFIRMED`,
+  `DEFERRED / RISK`, `CLOSED`) while preserving confidence-first order inside
+  each group.
+- Palette, confirmation, quit, theme, keymap, and update surfaces are
+  contextual overlays over the originating view. Pickers remain dedicated
+  onboarding gates.
+- Every selection has a non-color marker and a full selection band. Complete
+  priority atoms survive at 60, 80, 120, and 160 columns; secondary prose is
+  dropped before commands, totals, state, or `NEXT` are clipped.
+- TTY and plain output consume the same view models. Plain output flattens
+  rails and overlays into width-safe text without changing status vocabulary.
+
+Visual acceptance regression guards:
+
+- Selected bands are padded to the pane width; styling trailing cells is part
+  of the contract, not just the visible `▸` prefix.
+- A contextual overlay restyles its preserved origin as a muted backdrop so
+  only the modal selection owns the accent.
+- Never-started Activity tasks project as skipped/not run and remain collapsed
+  behind `V`; canceling/canceled is reserved for work that actually started.
+- At 100–149 columns, review uses the 2×2 cockpit and phase pages use a nested
+  two-column grid. Three/four full-height columns begin at 150 columns.
+- Compact status chrome measures Unicode display width and emits complete
+  totals (`7 findings · 3 H · 3 M`) instead of clipping a priority atom.
+- Onboarding gates own their local guidance. Generic transcript/keybind chrome
+  is suppressed so Target, Model, Credentials, and Planning retain one next
+  action at 60×20.
+
 1. Executive Diagnosis
 
 What Kuzushi already supports (confirmed). The hard, load-bearing infrastructure for a review cockpit already exists:

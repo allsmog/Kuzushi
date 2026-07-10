@@ -58,6 +58,23 @@ The target should also maintain:
 `latest` points to the most recent run id for quick shell, replay, and failure
 handoff lookup.
 
+### Run lifecycle vocabulary
+
+Run metadata and lifecycle events use one additive status vocabulary across
+scan, shell, run, Jobs, Timeline, replay, and reports:
+
+- `running` and `paused` are non-terminal;
+- `completed`, `partial`, and `skipped` are normal terminal projections;
+- `failed` means execution genuinely failed;
+- `canceled` means an operator or budget policy requested cancellation and
+  cleanup reached a terminal result;
+- `interrupted` is reserved for watchdog escalation, process loss, and
+  abnormal shutdown.
+
+An active cancellation request is presented as `canceling` in the TUI but is
+not persisted as a terminal run status. Existing `interrupted` artifacts remain
+valid and keep their original abnormal-termination meaning.
+
 Operators can prune accumulated run directories with
 `kuzushi runs prune --older-than-days <n>` and/or `--keep-last <n>`.
 `--dry-run` reports the selected run ids without deleting them. The Rust CLI
@@ -198,6 +215,8 @@ Allowed status values:
 - `partial`
 - `skipped`
 - `failed`
+- `canceled`
+- `interrupted`
 
 `fallback_context` is optional on the direct result. For partial/failed runs,
 the durable fallback handoff belongs in `failures.json`.

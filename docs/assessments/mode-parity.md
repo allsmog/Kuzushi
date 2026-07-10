@@ -30,10 +30,10 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 | Prompt override files | ◐ | ◐ | ◐ | Direct prompt-aware tools load `.kuzushi/prompts/<module>/<verb>.md` when the matching `_PROMPT` option is unset; `sast:scan` forwards its `sast/triage.md` and `sast/verify.md` overrides to internal stages. |
 | Runtime no-silent-fallback policy | ✓ | ✓ | ✓ | Runtime-backed tools resolve a configured or explicit input model and fail on incompatible provider/runtime pairs; project-local model steering is rejected. |
 | Findings store support | ✓ | ✓ | ✓ | Tools that require a store use the shared `tool_needs_finding_store` predicate before mode dispatch. |
-| Trace/run artifacts | ✓ | ✓ | ✓ | Tool dispatch writes canonical run artifacts where the mode starts a traced run. |
+| Trace/run artifacts | ✓ | ✓ | ✓ | Tool dispatch writes canonical run artifacts where the mode starts a traced run. Operator/budget cancellation persists as `canceled`; watchdog/process loss persists as `interrupted`. |
 | Workspace target consent | ✓ | ✓ | ✓ | Workspace-backed commands require an explicit target such as `--target <path>` or `--target .`; modes must not silently substitute cwd. |
 | Cancellation | ◐ | ✓ | ◐ | Shell/TUI work has live cancellation controls. Core scan engines accept cancellation tokens, but headless CLI scan/run do not currently install a dedicated SIGINT handler. |
-| Plain/scripted output | ✓ | ✓ | ✓ | Plain output should reuse the same view-model or line-builder data as TTY output. |
+| Plain/scripted output | ✓ | ✓ | ✓ | Plain output reuses the same projections as TTY output. Bare `--plain` emits a self-contained summary; scripted scan requires an explicit target, waits for terminal completion, writes its run bundle, and exits nonzero for invalid, failed, canceled, or interrupted outcomes. |
 | Interactive views | N/A | ✓ | N/A | Workbench, Activity, replay/trace, prompt editor, and guided pickers are shell-only. |
 | Machine output | ✓ | N/A | ✓ | Scan has CI/scripted output; headless `run` always prints the tool result as pretty JSON on stdout. |
 
@@ -42,6 +42,9 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 - **Interactive shell views** are shell-only: Workbench, Activity dashboard,
   replay/trace, jobs registry, prompt tuning, actor detail, guided phase picker,
   model/auth pickers, and two-stage idle Ctrl+C.
+- **Prompt/Navigate input modes are shell-only.** Prompt mode owns all printable
+  text and submission. `F2` enters Navigate mode, where view bindings operate
+  and printable keys never edit the command; `Esc` returns to Prompt mode.
 - **Ordered onboarding gate is shell-only.** The interactive front door runs a
   single ordered gate — Target → Model → Credentials → Planning — via the pure
   `initial_onboarding_phase` fn. A bare `kuzushi` (no `--target`) opens the

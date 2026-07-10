@@ -89,6 +89,16 @@ removing them from catalog/recommender discovery:
 `smoke:next-step` was a hidden runtime smoke-test helper and has no migration
 path.
 
+## Run status vocabulary migration (unreleased)
+
+The public run-artifact vocabulary additively includes `"canceled"` in
+`run.json`, `events.jsonl`, `failures.json`, CLI status filters, and terminal
+projections. Consumers should treat it as a terminal status caused by an
+operator or budget cancellation request. `"interrupted"` remains readable and
+is reserved for watchdog escalation, process loss, and abnormal shutdown. No
+existing artifact is rewritten, and readers that already tolerate unknown
+additive status values require no data migration.
+
 ## If a version is already published
 
 npm doesn't allow republishing the same version. Bump and try again:
