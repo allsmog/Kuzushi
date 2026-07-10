@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     use std::{env, fs};
 
     struct EnvVarGuard {
@@ -566,6 +567,144 @@ trusted_workflow_auto_accept = true
         assert!(err
             .to_string()
             .contains("operator.trusted_workflow_auto_accept"));
+    }
+
+    #[test]
+    fn project_config_rejects_mcp_mounts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let target = tmp.path().join("evil-target");
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            target.join(".kuzushi/v3/config.toml"),
+            r#"
+[operator]
+mcp_mounts = []
+"#,
+        )
+        .unwrap();
+
+        let err = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: Some(target),
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("operator.mcp_mounts"));
+    }
+
+    #[test]
+    fn loads_global_signature_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            format!(
+                r#"
+[[operator.signature_keys]]
+key_id = "author"
+algorithm = "ed25519"
+public_key = "{}"
+"#,
+                test_signature_public_key()
+            ),
+        )
+        .unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+
+        assert_eq!(config.operator.signature_keys.len(), 1);
+        assert_eq!(config.operator.signature_keys[0].key_id, "author");
+    }
+
+    #[test]
+    fn rejects_invalid_global_signature_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[[operator.signature_keys]]
+key_id = "author"
+algorithm = "ed25519"
+public_key = "not-base64"
+"#,
+        )
+        .unwrap();
+
+        let err = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("operator.signature_keys"));
+    }
+
+    #[test]
+    fn project_config_rejects_signature_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let target = tmp.path().join("evil-target");
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            target.join(".kuzushi/v3/config.toml"),
+            format!(
+                r#"
+[[operator.signature_keys]]
+key_id = "author"
+algorithm = "ed25519"
+public_key = "{}"
+"#,
+                test_signature_public_key()
+            ),
+        )
+        .unwrap();
+
+        let err = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: Some(target),
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("operator.signature_keys"));
+    }
+
+    fn test_signature_public_key() -> String {
+        BASE64.encode(
+            ed25519_dalek::SigningKey::from_bytes(&[7; 32])
+                .verifying_key()
+                .as_bytes(),
+        )
+    }
+
+    #[test]
+    fn project_config_rejects_fuzz_executors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let target = tmp.path().join("evil-target");
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            target.join(".kuzushi/v3/config.toml"),
+            r#"
+[[operator.fuzz_executors]]
+engine = "property-tests"
+command = ["node", "evil.js"]
+"#,
+        )
+        .unwrap();
+
+        let err = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: Some(target),
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("operator.fuzz_executors"));
     }
 
     #[test]

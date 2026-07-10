@@ -35,9 +35,9 @@ productized today.
   descriptors, and migration references.
 - **Dynamic `file://`, local path, and `package:` module loading is supported
   through the native CLI's global `--load` flag for shell and headless `run`.**
-  The Node bridge is trusted-only: each specifier must be listed in
-  `operator.trusted_modules`. Untrusted analyzers must use the v3 sandbox
-  plugin path instead of the dynamic Node bridge.
+  `file://` modules execute as KWP workers only after the host hashes the exact
+  resolved bundle and finds an active `kuzushi.lock` approval for the bundle
+  digest and descriptor hash.
 - **MCP servers and deferred plugin adapters are exact, explicit integrations.**
   Rust MCP servers are exposed through `kuzushi mcp serve <backend>` and the
   agent bridge. The legacy `mcp:` module specifier remains a parsed
@@ -421,7 +421,10 @@ ctx.reportOutput?.("npm install: added 142 packages in 3.4s");
 ```
 
 Both are best-effort and optional — the `?.` matters in unit tests where no
-bus is wired.
+bus is wired. KWP-backed dynamic modules that publish to the bus go through
+`kuzushi/bus/publish`; the host checks `grant.bus.produce`, stamps module
+origin, and records workspace-backed publishes in
+`.kuzushi/v3/runs/<runId>/kwp-bus.jsonl`.
 
 ## 10. `costUsd`
 
@@ -460,11 +463,67 @@ without a kuzushi release.
 
 The native Rust CLI accepts dynamic module specifiers via the global
 `--load <specifier>` flag for `kuzushi shell` and `kuzushi run`. The loader
-delegates to `scripts/kuzushi-dynamic-module-host.mjs`, imports the module
-entry, and consumes the descriptor JSON returned by that host. Each specifier
-must be listed under `[operator].trusted_modules` in the global config.
-Untrusted third-party analyzers must be packaged for the v3 sandbox plugin
-runtime, where capabilities are explicit and ambient process access is denied.
+hashes the resolved `file://` bundle, checks `kuzushi.lock`, then starts a
+Node KWP worker over JSON-RPC stdio. Descriptor probing happens only after the
+digest has an active lockfile approval, uses the same stripped environment and
+Node file-read-only permission shape as the serve worker, and imports the
+canonical resolved bundle path. Execution performs a live `initialize`
+handshake, validates the returned descriptor hash against `kuzushi.lock`, then
+invokes `tools/call`; worker stdout is redirected to tagged stderr before the
+module is imported so import-time logs cannot corrupt protocol stdout. The old
+`[operator].trusted_modules` list is deprecated
+compatibility state; it is not the trust decision for `file://` workers.
+When a worker exceeds `runtime.worker_watchdog_timeout_ms`, the host sends
+`notifications/cancelled`, exposes that to Node modules through `ctx.signal`,
+records `invocation.cancel`, drops stale results, and then kills the one-shot
+worker.
+Every brokered capability call from that worker carries the host-issued
+`invocationId` and epoch; the host rejects missing, mismatched, stale, or
+post-settlement authority before dispatching `fs`, `runtime`, `net`, `mcp`,
+`fuzz`, `findings`, `artifacts`, or `bus` handlers.
+
+Approve a local module before loading it:
+
+```sh
+kuzushi kwp approve file:///abs/path/to/my-module.mjs --grant grant.toml
+kuzushi --load file:///abs/path/to/my-module.mjs run my-module:tool --input '{}'
+```
+
+Workspace-backed KWP runs also write broker decisions and invocation lifecycle
+events to `.kuzushi/v3/runs/<runId>/kwp-audit.jsonl`. Inspect them with:
+
+```sh
+kuzushi kwp audit --target /abs/path/to/workspace --run-id run_... --json
+```
+
+The audit command recomputes the hash-linked record chain and includes an
+`integrity.ok` result in JSON output.
+
+Minimal `kuzushi.lock` shape:
+
+```json
+{
+  "modules": {
+    "sha256:0123...": {
+      "moduleId": "my-module",
+      "digest": "sha256:0123...",
+      "version": "0.0.0",
+      "descriptorHash": "sha256:abcd...",
+      "grant": {
+        "fs": [{ "scope": "workspace", "mode": "ro" }],
+        "artifacts": { "write": true }
+      },
+      "signatureChain": [],
+      "revoked": false
+    }
+  }
+}
+```
+
+An empty `signatureChain` means a local operator approval only. A non-empty
+entry must have the form
+`ed25519:v1:<keyId>:<base64Signature>` and is verified against global
+operator-configured signing keys before the worker process starts.
 
 The retained TypeScript SDK parser also understands four compatibility
 prefixes:
@@ -561,6 +620,36 @@ tool policy. The legacy `mcp:` module specifier remains a parsed compatibility
 form in the TypeScript SDK, but the native CLI does not convert arbitrary MCP
 servers into module tools.
 
+KWP-backed dynamic modules use MCP through the worker broker instead. Operators
+mount aliases in global config under `operator.mcp_mounts`; approved module
+grants then name the alias and allowed tool names. Module code calls
+`ctx.mcp.call("symcc", "compile", args)` and never spawns or connects to the
+MCP server directly. The live `file://` Node worker path validates the mount's
+descriptor hash and verifies returned artifact refs before returning the result
+to the module.
+
+KWP-backed dynamic modules use fuzzing through `ctx.fuzz.run(...)`. Operators
+mount host fuzz executors in global config under `operator.fuzz_executors`;
+approved module grants then name the allowed engines and network policy. The
+live `file://` Node worker path requires both `fuzz` and `artifacts.write`
+grants, denies networked fuzzing by default, and verifies returned artifact
+refs. Module workers do not receive `child_process`, direct shell access, or
+ambient executor credentials.
+
+KWP-backed dynamic modules can ask the network broker to spill response bodies
+to artifacts by passing `responseArtifactPath` and, optionally,
+`responseMediaType` to `ctx.net.fetch(...)`. The host writes the bytes, requires
+`artifacts.write`, verifies the path and SHA-256, returns an artifact ref, and
+omits the inline `bodyBase64`. Network `maxBytesPerInvocation` is cumulative
+across request and response bodies; the live backend caps response reads to the
+remaining invocation budget.
+
+The first-party `agentic-fuzz:hunt` KWP module lives at
+`examples/kwp/agentic-fuzz/module.mjs`. It writes its target plan through
+brokered workspace FS, optionally calls the host-mounted `symcc` MCP alias,
+runs the selected fuzz engine through `ctx.fuzz.run(...)`, and records artifact
+refs before returning them.
+
 ## 17. Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -613,6 +702,6 @@ export default defineModule({
 ```
 
 Ship it with a `module.manifest.json` as shown in §5 and build to
-`./dist/index.js`. Load it in the native shell or headless run path with
-`--load <specifier>` after adding the exact specifier to
-`operator.trusted_modules`.
+`./dist/index.js`. Approve the exact resolved bundle with
+`kuzushi kwp approve <specifier>` and then load it in the native shell or
+headless run path with `--load <specifier>`.

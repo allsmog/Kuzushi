@@ -19,6 +19,9 @@ pub(crate) struct PartialOperatorConfig {
     pub(crate) spend_hard_ceiling_usd: Option<Option<f64>>,
     pub(crate) trusted_workflow_auto_accept: Option<bool>,
     pub(crate) trusted_modules: Option<Vec<String>>,
+    pub(crate) signature_keys: Option<Vec<crate::worker_protocol::SignatureTrustKey>>,
+    pub(crate) mcp_mounts: Option<Vec<McpMountConfig>>,
+    pub(crate) fuzz_executors: Option<Vec<FuzzExecutorConfig>>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -234,6 +237,15 @@ fn forbidden_operator_fields(operator: Option<&PartialOperatorConfig>) -> Vec<&'
             "operator.trusted_modules",
             operator.trusted_modules.is_some(),
         ),
+        (
+            "operator.signature_keys",
+            operator.signature_keys.is_some(),
+        ),
+        ("operator.mcp_mounts", operator.mcp_mounts.is_some()),
+        (
+            "operator.fuzz_executors",
+            operator.fuzz_executors.is_some(),
+        ),
     ]
     .into_iter()
     .filter_map(|(field, present)| present.then_some(field))
@@ -280,6 +292,9 @@ fn merge_operator_config(config: &mut OperatorConfig, patch: PartialOperatorConf
         patch.trusted_workflow_auto_accept,
     );
     apply_patch_field(&mut config.trusted_modules, patch.trusted_modules);
+    apply_patch_field(&mut config.signature_keys, patch.signature_keys);
+    apply_patch_field(&mut config.mcp_mounts, patch.mcp_mounts);
+    apply_patch_field(&mut config.fuzz_executors, patch.fuzz_executors);
 }
 
 fn merge_guided_phase_config(config: &mut GuidedPhaseConfig, patch: PartialGuidedPhaseConfig) {

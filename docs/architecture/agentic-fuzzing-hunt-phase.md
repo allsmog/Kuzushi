@@ -286,9 +286,11 @@ Response:
 }
 ```
 
-Host-side enforcement:
+Host-side enforcement target:
 
-- Fuzz job runs in container or WASM tier only.
+- Fuzz job runs in a host-owned executor. The current KWP slice supports
+  operator-mounted command executors; production hardening should move those
+  commands behind container or WASM isolation.
 - Source tree is mounted read-only unless the grant explicitly allows writes.
 - Worker never gets the real path of source, corpus, crash, or output dirs.
 - Network is disabled inside fuzz execution by default.
@@ -517,12 +519,20 @@ Artifacts: .kuzushi/runs/<runId>/agentic-fuzz/summary.json
 
 ## 13. Implementation plan
 
+Current status: the repo ships a first-party one-file KWP implementation at
+`examples/kwp/agentic-fuzz/module.mjs`. The committed integration test approves
+that exact file digest, loads it through the dynamic `file://` worker path,
+calls optional `symcc` through `kuzushi/mcp/call`, runs the host fuzz executor
+through `kuzushi/fuzz/run`, records artifact refs, and verifies host-computed
+hashes. The remaining work below is the production expansion from that minimum
+useful slice into full scan-phase automation.
+
 ### Phase 1: inert descriptor and docs
 
-- Add `agentic-fuzz` module descriptor.
-- Mark it hidden or experimental until KWP executor lands.
-- Define input/output schemas.
-- Add DAG metadata as inert data.
+- Keep the KWP module descriptor shape stable.
+- Decide whether to surface it as a bundled default module or keep requiring
+  explicit `file://` approval.
+- Add DAG metadata as inert data when scan orchestration consumes the module.
 
 ### Phase 2: KWP runtime foundation
 
@@ -539,7 +549,8 @@ Artifacts: .kuzushi/runs/<runId>/agentic-fuzz/summary.json
 
 ### Phase 4: fuzz executor extension
 
-- Add `kuzushi/fuzz/run` broker extension.
+- Extend the first-pass `kuzushi/fuzz/run` broker extension beyond
+  operator-mounted commands.
 - Implement container executor for at least one engine, preferably `cargo-fuzz` or `libFuzzer` first.
 - Record engine metadata and container image digest.
 - Add reproduction and minimization loop.

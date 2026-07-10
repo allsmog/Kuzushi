@@ -118,7 +118,10 @@ pub use contracts::{
     canonical_tool_phase, BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec,
     OptionType, RuntimeRequirement, ToolDescriptor, ToolPhase,
 };
-pub use dynamic_loader::DynamicModuleLoadOptions;
+pub use dynamic_loader::{
+    approve_dynamic_module, default_dynamic_lockfile_path, inspect_dynamic_module,
+    revoke_dynamic_module, DynamicModuleInspection, DynamicModuleLoadOptions,
+};
 pub use options::coerce_option_value;
 pub use registry::ModuleRegistry;
 pub use runtime_requirements::{

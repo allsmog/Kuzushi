@@ -1,6 +1,20 @@
 # Kuzushi Worker Protocol (KWP) v0.1
 
-Status: draft for implementation review.
+Status: partially implemented for local `file://` Node workers. The live slice
+supports digest-pinned `kuzushi.lock` approvals, load-time digest and descriptor
+hash verification, sanitized/permissioned descriptor probes and Node worker
+spawn, JSON-RPC 2.0 over stdio, brokered filesystem/runtime/artifact/finding
+calls, host-mounted stdio MCP alias calls, a host-mounted fuzz executor path,
+hash-linked run audit logs, and operator
+`kuzushi kwp approve|revoke|inspect|audit` commands. It
+also includes a host-side HTTPS network fetch backend with allowlist checks,
+named-credential validation, unsafe header stripping, DNS/IP SSRF denial,
+response byte limits, and redirects disabled. The MCP path is a first-pass
+stdio mount with per-call process/session isolation and descriptor-hash
+checking. The fuzz path is a first-pass operator-mounted command executor with
+stdin/stdout JSON, deadline kill, grant checks, network-denied-by-default
+policy, and artifact verification; container/WASM fuzz isolation remains
+planned hardening work.
 
 KWP is the JSON-RPC boundary between the trusted Kuzushi host and untrusted module workers. It is the contract used by future uploaded modules, dynamic JavaScript modules, WASM shims, and container-backed scanners.
 
@@ -53,6 +67,9 @@ Responsibilities:
 - Both sides may issue JSON-RPC requests; ids MUST be unique per direction per connection.
 - The host enforces `limits.maxMessageBytes` in both directions. Default: 4 MiB.
 - Bulk data moves through brokered files or artifact references, not inline JSON.
+- Every privileged worker-to-host request carries the host-issued
+  `invocationId` and invocation `epoch`; missing, mismatched, stale, or
+  post-settlement authority is rejected before the broker handler runs.
 
 Conforming messages MUST include the JSON-RPC envelope:
 
@@ -68,10 +85,51 @@ The worker never participates in its own trust decision. Before spawning a worke
 2. Compute the bundle digest.
 3. Locate a matching `kuzushi.lock` entry keyed by digest.
 4. Verify the signature chain: author signature -> ingestion attestation -> operator approval.
+   The current `file://` implementation accepts empty local-approval chains.
+   Non-empty `signatureChain` entries must verify as
+   `ed25519:v1:<keyId>:<base64Signature>` against keys configured in the
+   operator's global config. Target-local configs cannot define signature trust
+   roots.
 5. Verify the normalized descriptor hash when available.
 6. Load the immutable grant for the worker lifetime.
 
 A failed trust check MUST fail closed before any module bytes are imported.
+
+Operator commands:
+
+```sh
+kuzushi kwp approve file:///abs/path/module.mjs --grant grant.toml
+kuzushi kwp inspect file:///abs/path/module.mjs
+kuzushi kwp revoke sha256:<digest>
+kuzushi kwp audit --json
+kuzushi kwp audit --target /abs/workspace --run-id run_... --json
+```
+
+Example grant TOML:
+
+```toml
+[[fs]]
+scope = "workspace"
+mode = "rw"
+maxBytes = 1048576
+
+[runtime]
+maxCostUsdPerInvocation = 1.0
+maxCostUsdPerRun = 5.0
+
+[artifacts]
+write = true
+
+[[mcp]]
+alias = "symcc"
+tools = ["compile", "run_concolic", "export_corpus"]
+mode = "dedicated"
+workspace = "scratch-only"
+
+[fuzz]
+engines = ["cargo-fuzz", "symcc"]
+network = false
+```
 
 ### 4.1 Lockfile entry
 
@@ -88,6 +146,9 @@ interface KuzushiLockEntry {
 ```
 
 The digest is the trust anchor. Package names, file paths, and registry names are locators only.
+When present, each `signatureChain` entry signs the stable
+`kuzushi-kwp-signature-v1` payload containing `moduleId`, `digest`,
+`descriptorHash`, and `version`.
 
 ### 4.2 Spawn environment
 
@@ -103,6 +164,19 @@ PATH=<minimal executor-specific path>
 `KWP_MODULE_ROOT` is read-only from the worker's perspective. OS sandboxing (Landlock/seccomp on Linux, sandbox-exec or equivalent on macOS, job objects on Windows, and container isolation for container tier) is applied by the executor and is outside the wire protocol.
 
 ## 5. Lifecycle
+
+The live `file://` Node path currently implements the minimal serving subset:
+`initialize`, host descriptor-hash validation, `tools/call`, epoch-authorized
+broker calls, deadline kill, and process teardown after the invocation. Deadline settlement sends
+`notifications/cancelled { invocationId, reason: "deadline" }`, exposes
+`ctx.signal` to Node module code, records `invocation.cancel`, and drops any
+worker result that arrives after the host deadline. The one-shot worker path
+uses epoch `1` and validates that epoch on every broker request; reusable-worker
+epoch bumping and recycling remain the next supervisor hardening slice. The
+`kuzushi/module/init`, `kuzushi/module/ready`, and explicit `shutdown` hooks
+below are the protocol contract for that slice;
+correctness today does not depend on worker cooperation because the host kills
+the one-shot worker after settlement or deadline.
 
 ```mermaid
 sequenceDiagram
@@ -295,24 +369,49 @@ kuzushi/fs/stat    { invocationId, scope, path }
 kuzushi/fs/remove  { invocationId, scope, path }
 ```
 
-Paths are forward-slash, scope-relative paths. Absolute paths, empty segments, and `..` segments are schema-rejected. The host also resolves through scope roots and rejects symlink/canonicalization escapes before every filesystem operation.
+Paths are forward-slash, scope-relative paths. Absolute paths, empty segments,
+and `..` segments are schema-rejected. The host also resolves through scope
+roots and rejects symlink/canonicalization escapes before every filesystem
+operation. `maxBytes` and `maxFiles` grants are enforced per invocation across
+brokered reads and writes; an over-budget write is denied before the host
+touches the filesystem. `remove` requires `rw`, denies symlink candidates, and
+removes files or empty directories only.
 
 ### 7.2 Network
 
 ```text
-kuzushi/net/fetch { invocationId, method, url, headers?, body?, timeoutMs? }
+kuzushi/net/fetch {
+  invocationId,
+  method,
+  url,
+  headers?,
+  bodyBase64?,
+  timeoutMs?,
+  credentialName?,
+  responseArtifactPath?,
+  responseMediaType?
+}
 ```
 
 Rules:
 
-- HTTP(S) only in v0.1.
+- HTTPS only in v0.1.
 - URL host/port must match `grant.net.allow`.
-- Redirects are re-checked per hop.
+- Redirects are not followed in the first backend; the worker receives the
+  redirect response and must make a new brokered request if policy allows it.
 - Private, loopback, link-local, multicast, and metadata-service addresses are denied.
 - DNS resolution is broker-owned.
 - Worker-supplied `authorization`, `cookie`, `proxy-*`, and `x-forwarded-*` headers are stripped unless a future grant explicitly permits them.
 - Named credentials are attached host-side and never exposed to the worker.
-- Large responses spill to a workspace artifact and return an artifact reference.
+- `maxBytesPerInvocation` is cumulative across brokered request bodies and
+  response bodies. The live backend rejects over-limit `Content-Length` before
+  reading and caps unknown-length reads to the remaining invocation budget.
+- Responses are returned as `bodyBase64` when they fit the remaining grant byte
+  budget.
+  If the request includes `responseArtifactPath`, the host writes the response
+  body under the active artifact root, requires `artifacts.write`, enforces the
+  artifact byte quota, verifies the path and hash, returns an `artifact` ref,
+  and omits the inline body.
 
 ### 7.3 Runtime
 
@@ -338,6 +437,8 @@ Rules:
 - Topic must match `grant.bus.produce`.
 - Host stamps `origin = { moduleId, digest, invocationId }`.
 - Workers cannot forge origins.
+- Workspace-backed runs append allowed publishes to
+  `.kuzushi/v3/runs/<runId>/kwp-bus.jsonl`.
 - Subscriptions are declared during `initialize`; the host delivers `kuzushi/bus/event` notifications for granted consume topics.
 
 ### 7.5 Findings and artifacts
@@ -345,17 +446,107 @@ Rules:
 v0.1 treats findings and artifacts as first-class privileged channels:
 
 ```text
-kuzushi/findings/create { invocationId, findings }
-kuzushi/artifacts/record { invocationId, path, mediaType }
+kuzushi/findings/create { invocationId, findings[] }
+kuzushi/artifacts/record { invocationId, artifacts[] }
 ```
 
-The host may also accept `findings` and `artifacts` in the final result. In either form, grants are enforced, paths are verified, and provenance is recorded host-side.
+The live `file://` Node worker path persists findings through `FindingStore`
+when the caller supplies a findings store, creates the run lifecycle row before
+insertion, enforces `findings.create`, `maxPerInvocation`, and
+`allowedSeverities`, and stamps the active tool name/run as host-side
+provenance. If no store is available, the broker returns
+`findings.unavailable` instead of pretending to create records.
+
+Artifact refs are arrays of `{ path, mediaType, sha256? }`. The host enforces
+`artifacts.write`, rejects path escapes, requires the referenced file to exist
+under the active workspace/module-data root, enforces the artifact byte quota,
+and fills or verifies the `sha256:` digest. The host may also accept
+`findings` and `artifacts` in the final result; those values are untrusted
+until they pass the same broker checks.
+
+The live stdio worker supervisor enforces
+`runtime.worker_watchdog_timeout_ms` around the full invocation. After the
+deadline expires the host records `invocation.cancel`, sends
+`notifications/cancelled` as a best-effort cooperative signal, returns
+`deadline exceeded`, kills the child process, and drops late worker output or
+broker requests. Worker-reported results received after the deadline are stale
+and are not normalized into a successful `ToolResult`.
+
+### 7.6 MCP aliases
+
+KWP workers call mounted MCP servers only through:
+
+```text
+kuzushi/mcp/call { invocationId, alias, tool, arguments, limits? }
+```
+
+The live `file://` Node worker path builds a host catalog from
+`operator.mcp_mounts`, checks the module grant for `alias + tool`, verifies the
+mounted server's `tools/list` descriptor hash before `tools/call`, and returns
+only normalized `{ structuredContent, artifacts }` results. Returned artifact
+refs are resolved under the active workspace/module-data root, size-checked,
+and hashed before being passed back to the worker.
+
+Current stdio mounts spawn one MCP process per call and pass a host-derived
+`KUZUSHI_MCP_SESSION_ID` to the server. That gives useful session isolation
+now; long-lived shared pools, container-backed mounts, descriptor approval UX,
+per-MCP-call deadlines beyond the invocation watchdog, and richer audit details
+remain follow-up work.
+
+Example operator config:
+
+```toml
+[[operator.mcp_mounts]]
+alias = "symcc"
+command = ["kuzushi-mcp-symcc"]
+descriptor_hash = "sha256:..."
+
+[[operator.mcp_mounts.tools]]
+name = "compile"
+description = "Compile a harness with SymCC instrumentation"
+input_schema = { type = "object" }
+output_schema = { type = "object" }
+```
+
+### 7.7 Fuzz execution
+
+KWP workers request fuzz jobs only through:
+
+```text
+kuzushi/fuzz/run { invocationId, engine, target, inputs?, limits?, sandbox? }
+```
+
+The live `file://` Node worker path checks the module's `fuzz` grant, requires
+an explicit `artifacts.write` grant, rejects path escapes in `projectPath`,
+`harnessPath`, and path-like inputs, enforces per-invocation job/resource
+limits, and denies `sandbox.network = true` unless the grant allows networked
+fuzzing. Returned artifact refs are resolved, byte-limited, and hashed before
+the worker sees them.
+
+Current fuzz executors are operator-mounted commands configured under
+`operator.fuzz_executors`. The host passes a JSON job envelope on stdin and
+expects a `FuzzRunResult` JSON object on stdout. Worker processes never receive
+an exec primitive or the operator's environment.
+
+Example operator config:
+
+```toml
+[[operator.fuzz_executors]]
+engine = "property-tests"
+command = ["kuzushi-fuzz-property-runner"]
+timeout_ms = 60000
+```
+
+This first-pass command backend is intended as the adapter seam for container or
+WASM runners. Operators should mount commands that enforce the requested
+sandbox, especially network denial; full container/WASM enforcement remains
+planned.
 
 ## 8. Cancellation, epochs, deadlines
 
 - `notifications/cancelled` is sent from host to worker with `{ invocationId, reason }`.
-- On cancel, the host deactivates the invocation immediately before waiting for worker cooperation.
-- The worker SHOULD wire cancellation into `AbortSignal`.
+- On cancel, the host deactivates the invocation immediately before waiting for worker cooperation and records `invocation.cancel`.
+- The Node worker host wires cancellation into `ctx.signal` / `AbortSignal`.
 - If the worker does not settle within `cancelGraceMs`, the supervisor recycles the process.
 - The host bumps worker epoch on cancel-all, run restart, grant reload, or recycle.
 - Broker calls and final results check epoch. Stale results are dropped or mapped to fatal stale-result errors.
@@ -431,7 +622,7 @@ The host writes one append-only audit record per broker decision and invocation 
 
 ```jsonc
 {
-  "ts": "...",
+  "tsMs": 1783380000000,
   "runId": "run_...",
   "invocationId": "inv_...",
   "moduleId": "my-module",
@@ -439,23 +630,51 @@ The host writes one append-only audit record per broker decision and invocation 
   "event": "runtime.query",
   "decision": "allow",
   "detail": { "tokens": 1234, "costUsd": 0.0123 },
-  "prev": "sha256:..."
+  "prev": "sha256:...",
+  "hash": "sha256:..."
 }
 ```
 
-The `prev` field hash-links records within a run. This gives the run a tamper-evident provenance chain from `invocation.start` to `invocation.end`.
+Workspace-backed `file://` worker runs persist these records at
+`.kuzushi/v3/runs/<runId>/kwp-audit.jsonl`. The `prev` and `hash` fields
+hash-link records within a run. This gives the run a tamper-evident provenance
+chain from `invocation.start` to `invocation.end`. Operators can inspect the
+records alongside the lockfile audit summary; the command recomputes each
+record hash and reports chain integrity. The same command also includes
+run-local bus publishes from `.kuzushi/v3/runs/<runId>/kwp-bus.jsonl` under
+`runAudit.bus`:
+
+```sh
+kuzushi kwp audit --target /abs/workspace --run-id run_... --json
+```
 
 ## 12. Implementation phases
 
 1. Add digest-pinned `kuzushi.lock` and `TrustVerifier`.
-2. Add `Supervisor` and KWP stdio transport for Node workers.
-3. Move dynamic JS execution behind out-of-process workers without changing author-facing APIs.
-4. Add `CapabilityBroker` for filesystem and runtime.
-5. Add network broker with SSRF hardening and named credentials.
-6. Add event bus, findings, and artifact grants.
+2. Add `Supervisor` and KWP stdio transport for Node workers. The current
+   `file://` path implements one-shot spawn, `initialize`, `tools/call`,
+   deadline kill, stderr tagging, and protocol-only stdout redirection.
+3. Move dynamic JS execution behind out-of-process workers without changing
+   author-facing APIs. Implemented for approved local `file://` modules;
+   descriptor probes and serve workers use stripped environments plus Node
+   file-read permissions.
+4. Add `CapabilityBroker` for filesystem and runtime. Implemented for the live
+   Node worker path with invocation-id plus epoch checks, host-computed runtime
+   cost, and hash-linked broker audit records for workspace-backed runs.
+5. Add network broker with SSRF hardening and named credentials. Initial HTTPS
+   backend is implemented with redirects disabled and grant-gated response
+   artifact spilling.
+6. Add event bus, findings, and artifact grants. Findings persistence,
+   host-verified artifact refs, and run-local durable bus publishes are
+   implemented for `file://` Node workers.
 7. Add WASM executor tier.
 8. Add container executor tier.
-9. Add MCP adapter layer.
+9. Add MCP adapter layer. Initial stdio mounted aliases are implemented for
+   `file://` Node workers; pooled/container supervision and descriptor
+   approval UX remain planned.
+10. Add fuzz executor layer. Initial operator-mounted command executors are
+    implemented for `file://` Node workers; container/WASM isolation,
+    reproduction/minimization, and engine metadata remain planned.
 
 ## 13. Non-negotiable invariants
 
@@ -464,7 +683,7 @@ The `prev` field hash-links records within a run. This gives the run a tamper-ev
 - Grants are immutable for a worker lifetime.
 - No inherited environment secrets.
 - Worker stdout is protocol only.
-- Every privileged call requires an active invocation.
+- Every privileged call requires an active invocation id and current epoch.
 - Broker access stops immediately after result, cancel, deadline, or epoch bump.
 - Runtime cost is host-computed.
 - Artifacts are by reference and host-verified.

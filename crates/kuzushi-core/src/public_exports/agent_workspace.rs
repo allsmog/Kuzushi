@@ -26,11 +26,14 @@ pub use crate::context::context_snapshot_path;
 pub use crate::events::{CoreEvent, EventSink, InMemoryEventSink, ScanProgress};
 pub use crate::module_result::failed_tool_output;
 pub use crate::modules::{
-    agent_runtime_tool_names, autonomy_gate, tool_defaults_to_workspace, tool_needs_finding_store,
-    tool_needs_runtime, tool_phase, tool_requires_agent_runtime, tool_uses_agent_runtime,
-    tool_uses_finding_store, tool_wants_runtime, wants_sast_runtime, AgenticSastPersistedRun,
-    AgenticSastReport, AutonomyDecision, AutonomyPosture, BuiltinModule, DynamicModuleLoadOptions,
-    ModuleMetadata, ModuleRegistry, ToolDescriptor, ToolExecutionContext, WorkflowPhase,
+    agent_runtime_tool_names, approve_dynamic_module, autonomy_gate,
+    default_dynamic_lockfile_path, inspect_dynamic_module, revoke_dynamic_module,
+    tool_defaults_to_workspace, tool_needs_finding_store, tool_needs_runtime, tool_phase,
+    tool_requires_agent_runtime, tool_uses_agent_runtime, tool_uses_finding_store,
+    tool_wants_runtime, wants_sast_runtime, AgenticSastPersistedRun, AgenticSastReport,
+    AutonomyDecision, AutonomyPosture, BuiltinModule, DynamicModuleInspection,
+    DynamicModuleLoadOptions, ModuleMetadata, ModuleRegistry, ToolDescriptor,
+    ToolExecutionContext, WorkflowPhase,
     FINDING_STORE_TOOL_NAMES, FINDING_STORE_TOOL_PREFIXES, RUNTIME_TOOL_NAMES,
     WORKSPACE_TOOL_NAMES, WORKSPACE_TOOL_PREFIXES,
 };

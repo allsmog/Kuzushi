@@ -91,6 +91,75 @@ pub struct OperatorConfig {
     pub trusted_workflow_auto_accept: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trusted_modules: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signature_keys: Vec<crate::worker_protocol::SignatureTrustKey>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_mounts: Vec<McpMountConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fuzz_executors: Vec<FuzzExecutorConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
+pub struct McpMountConfig {
+    pub alias: String,
+    pub command: Vec<String>,
+    pub descriptor_hash: String,
+    pub tools: Vec<McpMountToolConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+}
+
+impl Default for McpMountConfig {
+    fn default() -> Self {
+        Self {
+            alias: String::new(),
+            command: Vec::new(),
+            descriptor_hash: String::new(),
+            tools: Vec::new(),
+            timeout_ms: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
+pub struct McpMountToolConfig {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
+}
+
+impl Default for McpMountToolConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            description: String::new(),
+            input_schema: serde_json::json!({ "type": "object" }),
+            output_schema: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
+pub struct FuzzExecutorConfig {
+    pub engine: crate::worker_protocol::FuzzEngine,
+    pub command: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+}
+
+impl Default for FuzzExecutorConfig {
+    fn default() -> Self {
+        Self {
+            engine: crate::worker_protocol::FuzzEngine::PropertyTests,
+            command: Vec::new(),
+            timeout_ms: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -174,6 +174,78 @@ fn rust_cli_compact_alias_is_a_native_binary() {
 }
 
 #[test]
+fn kwp_audit_json_includes_run_audit_records() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run_id = "run-kwp-audit";
+    let target = kuzushi_core::WorkspaceTarget::new(tmp.path()).unwrap();
+    let audit_path =
+        kuzushi_core::run_artifacts::run_artifact_path(target.root(), run_id, "kwp-audit.jsonl");
+    let bus_path =
+        kuzushi_core::run_artifacts::run_artifact_path(target.root(), run_id, "kwp-bus.jsonl");
+    fs::create_dir_all(audit_path.parent().unwrap()).unwrap();
+    fs::write(
+        &audit_path,
+        r#"{"tsMs":1,"runId":"run-kwp-audit","invocationId":"inv-1","moduleId":"dyn","digest":"sha256:abc","event":"fs.write","decision":"allow","detail":null,"hash":"sha256:first"}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &bus_path,
+        r#"{"tsMs":2,"runId":"run-kwp-audit","invocationId":"inv-1","moduleId":"dyn","digest":"sha256:abc","topic":"topic.allowed","payload":{"ok":true}}
+"#,
+    )
+    .unwrap();
+
+    let output = stdout(
+        kuzushi()
+            .args(["kwp", "audit", "--lockfile"])
+            .arg(tmp.path().join("kuzushi.lock"))
+            .args(["--target"])
+            .arg(tmp.path())
+            .args(["--run-id", run_id, "--json"])
+            .output()
+            .unwrap(),
+    );
+    let body: Value = serde_json::from_str(&output).unwrap();
+
+    assert_eq!(
+        body.pointer("/runAudit/recordCount")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        body.pointer("/runAudit/records/0/event")
+            .and_then(Value::as_str),
+        Some("fs.write")
+    );
+    assert_eq!(
+        body.pointer("/runAudit/integrity/ok")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    let audit_path_text = audit_path.display().to_string();
+    assert_eq!(
+        body.pointer("/runAudit/path").and_then(Value::as_str),
+        Some(audit_path_text.as_str())
+    );
+    assert_eq!(
+        body.pointer("/runAudit/bus/recordCount")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        body.pointer("/runAudit/bus/records/0/topic")
+            .and_then(Value::as_str),
+        Some("topic.allowed")
+    );
+    assert_eq!(
+        body.pointer("/runAudit/bus/records/0/payload/ok")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
 fn auth_ping_rejects_legacy_codex_provider_selector() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");

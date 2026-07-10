@@ -5,6 +5,7 @@ pub(crate) mod demo;
 pub(crate) mod doctor;
 pub(crate) mod export;
 pub(crate) mod findings;
+pub(crate) mod kwp;
 pub(crate) mod permissions;
 pub(crate) mod pr_comment;
 #[cfg(test)]

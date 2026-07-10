@@ -1,6 +1,11 @@
 # MCP Composition over KWP
 
-Status: technical design for review.
+Status: design plus first-pass implementation. Local `file://` KWP Node
+workers can call operator-configured stdio MCP mounts through
+`kuzushi/mcp/call`; the host enforces alias/tool grants, validates the mounted
+server descriptor hash, scopes calls with a host-derived session id, and
+verifies returned artifact refs. Shared pools, container-backed mounts,
+descriptor approval UX, deadlines, and richer audit records remain planned.
 
 This document describes how KWP-backed modules compose shared MCP servers. The motivating case is a `symcc` MCP server used by more than one module: for example, a low-level binary analysis module and the `agentic-fuzz:hunt` module both want to compile/run SymCC-instrumented targets and harvest generated test cases.
 
@@ -60,6 +65,23 @@ interface McpMount {
 ```
 
 Remote MCP servers still need an approval record, but the trust anchor is weaker unless the transport is authenticated and descriptor-pinned. For security tooling such as SymCC, prefer container-backed mounts.
+
+The current stdio implementation is configured in operator-owned config:
+
+```toml
+[[operator.mcp_mounts]]
+alias = "symcc"
+command = ["kuzushi-mcp-symcc"]
+descriptor_hash = "sha256:..."
+
+[[operator.mcp_mounts.tools]]
+name = "compile"
+description = "Compile a harness with SymCC instrumentation"
+input_schema = { type = "object" }
+output_schema = { type = "object" }
+```
+
+Target-local project config cannot define `operator.mcp_mounts`.
 
 ### 2.2 MCP grant
 

@@ -5,7 +5,8 @@ mod pr_comment_args;
 mod subcommands;
 pub(crate) use pr_comment_args::PrCommentArgs;
 pub(crate) use subcommands::{
-    AuthCommand, ConfigCommand, FailOnArg, McpBackend, McpCommand, RunsCommand, ScanModeArg,
+    AuthCommand, ConfigCommand, FailOnArg, KwpCommand, McpBackend, McpCommand, RunsCommand,
+    ScanModeArg,
 };
 
 #[derive(Debug, Subcommand)]
@@ -233,6 +234,11 @@ pub(crate) enum Command {
     Mcp {
         #[command(subcommand)]
         command: McpCommand,
+    },
+    /// Manage Kuzushi Worker Protocol approvals and audits.
+    Kwp {
+        #[command(subcommand)]
+        command: KwpCommand,
     },
     /// Build a Kuzushi PR comment from persisted run artifacts.
     PrComment(PrCommentArgs),

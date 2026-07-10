@@ -21,6 +21,7 @@ kuzushi-openai = { path = "../kuzushi-openai" }
 kuzushi-tui = { path = "../kuzushi-tui" }
 serde_json.workspace = true
 tokio.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

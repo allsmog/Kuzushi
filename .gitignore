@@ -65,6 +65,8 @@ pre-*.png
 workspace/
 !crates/*/src/workspace/
 !crates/*/src/workspace/**
+!crates/*/src/renderer/views/workspace/
+!crates/*/src/renderer/views/workspace/**
 
 # TUI DevEx audit harness — per-run tmux pane captures (see scripts/devex/README.md)
 scripts/devex/artifacts/

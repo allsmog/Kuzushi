@@ -17,8 +17,9 @@ pub struct ModuleRegistry {
     pub(in crate::modules) dynamic_tools: BTreeMap<String, DynamicToolBinding>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(in crate::modules) struct DynamicToolBinding {
     pub(in crate::modules) specifier: String,
     pub(in crate::modules) module_id: String,
+    pub(in crate::modules) verified: Option<crate::worker_protocol::VerifiedModule>,
 }

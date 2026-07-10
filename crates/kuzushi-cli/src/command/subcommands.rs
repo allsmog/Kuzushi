@@ -54,6 +54,64 @@ pub(crate) enum McpCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub(crate) enum KwpCommand {
+    /// Approve a local file:// dynamic module by digest in kuzushi.lock.
+    Approve {
+        /// Dynamic module specifier, usually file:///absolute/path/module.mjs.
+        specifier: String,
+        /// Grant file as JSON or TOML. Omitted means no privileged grants.
+        #[arg(long)]
+        grant: Option<PathBuf>,
+        /// Lockfile path. Defaults to ./kuzushi.lock.
+        #[arg(long)]
+        lockfile: Option<PathBuf>,
+        /// Operator-visible module approval version.
+        #[arg(long, default_value = "0.0.0")]
+        version: String,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mark an approved module digest as revoked in kuzushi.lock.
+    Revoke {
+        /// Digest key, for example sha256:<hex>.
+        digest: String,
+        /// Lockfile path. Defaults to ./kuzushi.lock.
+        #[arg(long)]
+        lockfile: Option<PathBuf>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect a dynamic module's resolved digest and lock status.
+    Inspect {
+        /// Dynamic module specifier, usually file:///absolute/path/module.mjs.
+        specifier: String,
+        /// Lockfile path. Defaults to ./kuzushi.lock.
+        #[arg(long)]
+        lockfile: Option<PathBuf>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a lockfile audit summary.
+    Audit {
+        /// Lockfile path. Defaults to ./kuzushi.lock.
+        #[arg(long)]
+        lockfile: Option<PathBuf>,
+        /// Target workspace containing `.kuzushi/v3/runs/<run-id>/kwp-audit.jsonl`.
+        #[arg(long, help = crate::support::TARGET_HELP)]
+        target: Option<PathBuf>,
+        /// Include KWP audit records for this run id.
+        #[arg(long)]
+        run_id: Option<String>,
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub(crate) enum RunsCommand {
     /// List run summaries.
     List {

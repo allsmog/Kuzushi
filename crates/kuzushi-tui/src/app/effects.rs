@@ -766,7 +766,7 @@ impl ShellApp {
 
     pub(super) fn load_dynamic_module_effect(&mut self, load: DynamicModuleLoad) {
         let options = DynamicModuleLoadOptions {
-            trusted_specifiers: self.config().operator.trusted_modules.clone(),
+            lockfile_path: Some(kuzushi_core::default_dynamic_lockfile_path()),
         };
         match self
             .registry_mut()

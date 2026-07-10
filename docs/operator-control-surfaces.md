@@ -55,9 +55,11 @@ scan-gate policy, then go through the same preparation path as
 `kuzushi run sast:scan` where they are tool input.
 
 Global `--load <specifier>` is supported for shell and headless `run`.
-Specifier trust is controlled by `[operator].trusted_modules`; the dynamic
-Node bridge only loads trusted specifiers. Untrusted analyzers belong in the
-v3 sandbox plugin path.
+For `file://` modules, trust is digest-pinned in `kuzushi.lock`: approve the
+exact resolved bundle with `kuzushi kwp approve <specifier>` before loading it.
+The loader hashes the canonical bundle and checks the lockfile before any
+module bytes are imported. `[operator].trusted_modules` is retained only as
+deprecated compatibility state and is not the `file://` worker trust boundary.
 
 `kuzushi run --autonomy <recon|hunt|confirm|fix>` sets the autonomy ceiling
 for that run. The shared dispatch gate refuses any tool whose engagement phase
@@ -115,7 +117,13 @@ worker_watchdog_timeout_ms = 21600000
 session_budget_usd = 2.50
 spend_hard_ceiling_usd = 10.00
 trusted_workflow_auto_accept = false
+# Deprecated compatibility list; file:// workers use kuzushi.lock approvals.
 trusted_modules = ["file:///absolute/path/to/my-module"]
+
+[[operator.signature_keys]]
+key_id = "trusted-author"
+algorithm = "ed25519"
+public_key = "base64-encoded-ed25519-public-key"
 
 [phases]
 # Optional phase boundary for guided runs: map, hunt, confirm, or fix.
@@ -134,6 +142,11 @@ config, not environment variables. Project configs may set `[phases]` fields;
 `model`, runtime, and `[operator]` fields remain global-only because a target
 repository must not redirect model choice, credentials, process execution, or
 operator trust policy.
+
+`operator.signature_keys` are trust roots for non-empty KWP lockfile
+`signatureChain` entries. Each entry verifies
+`ed25519:v1:<keyId>:<base64Signature>` over the module id, digest, descriptor
+hash, and version recorded in `kuzushi.lock`.
 
 ## Model Selection
 
@@ -238,7 +251,8 @@ Ordinary product behavior should not depend on new env vars. Prefer:
 - tool options for scanner binaries, MCP/CodeQL/Joern tuning, prompt knobs,
   and plugin roots;
 - config for runtime/provider defaults, model, bridge command, thinking level,
-  budgets, and approval policy.
+  budgets, approval policy, host-mounted MCP aliases, and host-mounted fuzz
+  executors.
 
 Compatibility env vars such as `KUZUSHI_MODEL`, `KUZUSHI_V2_MODEL`,
 `KUZUSHI_API_KEY_ENV`, `KUZUSHI_BASE_URL`, `KUZUSHI_LANGGRAPH_BRIDGE`,
