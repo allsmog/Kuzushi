@@ -6397,11 +6397,22 @@ fn session_history_clear_load_resume_pause_and_story_are_explicit() {
         .iter()
         .any(|line| { line.prefix == "load" && line.body.contains("already available") }));
 
-    run_command(&mut app, parse_command("/load file:///tmp/module.js"));
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| { line.prefix == "error" && line.body.contains("is not trusted") }));
+    let dynamic_module_dir = tempfile::tempdir().unwrap();
+    let dynamic_module = dynamic_module_dir.path().join("module.mjs");
+    fs::write(
+        &dynamic_module,
+        format!("// {}\nexport default {{}};\n", dynamic_module.display()),
+    )
+    .unwrap();
+    run_command(
+        &mut app,
+        parse_command(&format!("/load file://{}", dynamic_module.display())),
+    );
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "error"
+            && line.body.contains("is not approved")
+            && line.body.contains("kuzushi kwp approve")
+    }));
 
     run_command(&mut app, parse_command("/pause"));
     assert!(app.log_lines().iter().any(|line| {
