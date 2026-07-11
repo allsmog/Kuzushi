@@ -38,6 +38,7 @@ const requiredPackageFiles = [
   "LICENSES/Apache-2.0.txt",
   "LICENSE",
   "schemas/module.manifest.schema.json",
+  "schemas/kuzushi.lock.schema.json",
   ...canonicalRunSchemaFiles,
 ];
 const allowedPackageEntries = [
@@ -53,6 +54,7 @@ const allowedPackageEntries = [
   "scripts/kuzushi-dynamic-module-host.mjs",
   "scripts/check-native-bindings.mjs",
   "schemas",
+  "examples/kwp/agentic-fuzz",
   "assets/ascii",
   "assets/pashov-xray",
   "README.md",
@@ -193,6 +195,7 @@ const expectedPnpmLockfileRootDependencyVersions = {
   },
   devDependencies: {
     "@biomejs/biome": "2.5.2",
+    "@cfworker/json-schema": "4.1.1",
     "@commitlint/cli": "21.2.0(@types/node@22.19.11)(typescript@5.9.3)",
     "@commitlint/config-conventional": "21.2.0",
     "@types/better-sqlite3": "7.6.13",
@@ -218,6 +221,7 @@ const expectedPnpmLockfileRootDependencyVersions = {
 };
 const expectedPackageDevDependencies = {
   "@biomejs/biome": "^2.4.12",
+  "@cfworker/json-schema": "^4.1.1",
   "@commitlint/cli": "^21.2.0",
   "@commitlint/config-conventional": "^21.2.0",
   "@types/better-sqlite3": "^7.6.13",
