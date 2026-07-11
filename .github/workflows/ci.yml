@@ -152,7 +152,7 @@ jobs:
   rust-cli:
     name: rust-cli
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
