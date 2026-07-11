@@ -108,9 +108,10 @@ with `KUZUSHI_AGENT_MCPS=1`. Useful env vars when debugging:
 The retained TypeScript SDK exposes `parseModuleSpecifier()` for
 `builtin:<id>`, `file://<abs-path>`, `package:<npm-name>`, and
 `mcp:<server-spec>` forms. Rust built-ins are loaded from the Rust registry;
-dynamic `file://`/`package:` loading goes through the Rust dynamic loader and
-host script. Treat that bridge as a compatibility boundary and test it through
-the real `ModuleRegistry` path before documenting new behavior.
+local `file://`/path modules go through digest-pinned `kuzushi.lock` approval
+and the brokered KWP Node worker, while `package:` remains a trusted
+compatibility path through the Rust dynamic loader and host script. Test both
+paths through the real `ModuleRegistry` boundary before documenting behavior.
 
 ### Guardrails for agents editing this repo
 
@@ -328,6 +329,12 @@ is expected to behave identically and should be filed as a parity bug.
   asymmetries.
 
 ### Intentional asymmetries
+
+- **Approved local KWP dynamic modules are shell/run-only in v0.1.** Global
+  `--load file://...` is consumed by the shell and `kuzushi run`; `kuzushi
+  scan` rejects it instead of pretending the dynamic tool is a `sast:scan`
+  task. KWP descriptors may carry inert phase metadata, but dynamic DAG
+  scheduling remains future scan-orchestrator work.
 
 - **Two-stage Ctrl+C, NL planner (`/plan`), prompt editor view, threat
   views, finding alias drill, replay/trace, cost-cap halt card, module-run

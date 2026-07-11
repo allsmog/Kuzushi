@@ -166,7 +166,7 @@ impl CliToolRunBootstrap {
         load: Vec<String>,
         raw_input: &str,
     ) -> Result<CliToolRunSetup> {
-        if let Err(error) = load_dynamic_modules(&mut self.registry, &load) {
+        if let Err(error) = load_dynamic_modules(&mut self.registry, &config, &load) {
             self.record_pre_config_failure(raw_input, &error.to_string());
             return Err(error);
         }

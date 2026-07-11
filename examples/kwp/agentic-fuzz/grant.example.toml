@@ -1,0 +1,21 @@
+[[fs]]
+scope = "workspace"
+mode = "rw"
+maxBytes = 1048576
+maxFiles = 32
+
+[artifacts]
+write = true
+maxBytesPerInvocation = 16777216
+
+[findings]
+create = true
+maxPerInvocation = 64
+allowedSeverities = ["low", "medium", "high", "critical"]
+
+[fuzz]
+engines = ["property-tests"]
+maxJobsPerInvocation = 1
+maxCpuSecondsPerInvocation = 180
+maxArtifactsBytesPerInvocation = 16777216
+network = false

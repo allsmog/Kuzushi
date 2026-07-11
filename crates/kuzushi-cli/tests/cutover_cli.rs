@@ -174,19 +174,41 @@ fn rust_cli_compact_alias_is_a_native_binary() {
 }
 
 #[test]
+fn kwp_help_exposes_the_approval_lifecycle() {
+    let output = stdout(kuzushi().args(["kwp", "--help"]).output().unwrap());
+
+    for command in ["approve", "revoke", "inspect", "audit"] {
+        assert!(output.contains(command), "missing KWP command {command}");
+    }
+}
+
+#[test]
 fn kwp_audit_json_includes_run_audit_records() {
     let tmp = tempfile::tempdir().unwrap();
     let run_id = "run-kwp-audit";
     let target = kuzushi_core::WorkspaceTarget::new(tmp.path()).unwrap();
     let audit_path =
         kuzushi_core::run_artifacts::run_artifact_path(target.root(), run_id, "kwp-audit.jsonl");
+    let anchor_path = kuzushi_core::run_artifacts::run_artifact_path(
+        target.root(),
+        run_id,
+        "kwp-audit.anchor.json",
+    );
     let bus_path =
         kuzushi_core::run_artifacts::run_artifact_path(target.root(), run_id, "kwp-bus.jsonl");
     fs::create_dir_all(audit_path.parent().unwrap()).unwrap();
+    let audit_body = r#"{"tsMs":1,"runId":"run-kwp-audit","invocationId":"inv-1","moduleId":"dyn","digest":"sha256:abc","event":"fs.write","decision":"allow","detail":null,"prev":null}"#;
+    let audit_hash = kuzushi_core::worker_protocol::sha256_digest(audit_body.as_bytes()).0;
     fs::write(
         &audit_path,
-        r#"{"tsMs":1,"runId":"run-kwp-audit","invocationId":"inv-1","moduleId":"dyn","digest":"sha256:abc","event":"fs.write","decision":"allow","detail":null,"hash":"sha256:first"}
-"#,
+        format!(
+            "{{\"tsMs\":1,\"runId\":\"run-kwp-audit\",\"invocationId\":\"inv-1\",\"moduleId\":\"dyn\",\"digest\":\"sha256:abc\",\"event\":\"fs.write\",\"decision\":\"allow\",\"detail\":null,\"hash\":\"{audit_hash}\"}}\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        &anchor_path,
+        format!("{{\"recordCount\":1,\"lastHash\":\"{audit_hash}\"}}"),
     )
     .unwrap();
     fs::write(
@@ -221,7 +243,7 @@ fn kwp_audit_json_includes_run_audit_records() {
     assert_eq!(
         body.pointer("/runAudit/integrity/ok")
             .and_then(Value::as_bool),
-        Some(false)
+        Some(true)
     );
     let audit_path_text = audit_path.display().to_string();
     assert_eq!(
@@ -243,6 +265,17 @@ fn kwp_audit_json_includes_run_audit_records() {
             .and_then(Value::as_bool),
         Some(true)
     );
+}
+
+#[test]
+fn kwp_audit_requires_target_and_run_id_together() {
+    let output = kuzushi()
+        .args(["kwp", "audit", "--run-id", "run-1"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--run-id requires --target"));
 }
 
 #[test]

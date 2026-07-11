@@ -1,5 +1,3 @@
-import type { ExecutionContext } from "./types.js";
-
 /**
  * KWP-hosted MCP call limits. These are requests to the host broker, not
  * guarantees: the host may lower limits or reject the call under the module's
@@ -24,8 +22,9 @@ export interface McpArtifactRef {
 }
 
 export interface McpCallResult<TStructured = unknown> {
-  content: McpContentBlock[];
-  structuredContent?: TStructured;
+  /** Optional raw MCP text blocks; the native broker primarily returns structured content. */
+  content?: McpContentBlock[];
+  structuredContent: TStructured;
   artifacts?: McpArtifactRef[];
 }
 
@@ -62,8 +61,8 @@ export interface McpHandle {
   ): Promise<McpCallResult<TStructured>>;
 }
 
-/** ExecutionContext refinement for KWP-hosted modules with MCP composition. */
-export interface KwpMcpExecutionContext extends ExecutionContext {
+/** Minimal context refinement for KWP-hosted modules with MCP composition. */
+export interface KwpMcpExecutionContext {
   readonly mcp?: McpHandle;
 }
 

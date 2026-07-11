@@ -16,18 +16,18 @@ Approve the exact file digest before loading it:
 ```bash
 kuzushi kwp approve file://$PWD/examples/kwp/agentic-fuzz/module.mjs \
   --lockfile ./kuzushi.lock \
-  --grant ./agentic-fuzz.grant.json
+  --grant ./examples/kwp/agentic-fuzz/grant.example.toml
 ```
 
 Load and run it with an explicit target workspace:
 
 ```bash
-kuzushi run agentic-fuzz:hunt \
-  --target /path/to/workspace \
+kuzushi --target /path/to/workspace \
   --load file://$PWD/examples/kwp/agentic-fuzz/module.mjs \
-  '{"harnessPath":"fuzz-project/harness.js","useSymcc":true}'
+  run agentic-fuzz:hunt \
+  --input '{"projectPath":"fuzz-project","harnessPath":"fuzz-project/harness.js"}'
 ```
 
 The host must also mount a fuzz executor in global operator config. SymCC is
-optional and is only available when a `symcc` MCP mount and matching grant are
-present.
+optional; set `useSymcc: true` only after adding both a `symcc` MCP mount and a
+matching `[[mcp]]` grant.

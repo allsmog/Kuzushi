@@ -1,6 +1,7 @@
 # Agentic Fuzzing as a HUNT Phase
 
-Status: technical design for KWP-backed module implementation.
+Status: technical design plus a run/shell-mode KWP example. Scan/DAG
+integration described below is not implemented yet.
 
 This document answers the concrete question: can a third-party or first-party agentic fuzzing module be added as a `HUNT` phase? Yes. The clean design is a `DagTool`-backed module that runs inside a KWP worker and asks the host broker for exactly the capabilities fuzzing needs: scoped filesystem, optional container execution, optional runtime triage, artifact recording, and findings creation.
 
@@ -190,7 +191,9 @@ interface FuzzFinding {
 }
 ```
 
-The worker may return findings in the final result, but the host only accepts them if the grant includes `findings.create`. Artifact paths are references; the host verifies and hashes them.
+The worker creates findings and records artifact references through explicit
+host broker calls. Privileged keys in the final result are stripped rather than
+treated as a second persistence path.
 
 ## 7. Capability grant
 
@@ -201,9 +204,8 @@ Minimal quick-mode grant:
   "fs": [
     { "scope": "input", "mode": "ro", "maxBytes": 104857600 },
     { "scope": "workspace", "mode": "rw", "maxBytes": 536870912, "maxFiles": 5000 },
-    { "scope": "moduleData", "mode": "rw", "maxBytes": 1073741824, "maxFiles": 20000 }
+    { "scope": "module-data", "mode": "rw", "maxBytes": 1073741824, "maxFiles": 20000 }
   ],
-  "net": null,
   "runtime": {
     "maxCostUsdPerInvocation": 2.0,
     "maxCostUsdPerRun": 10.0,
@@ -221,8 +223,7 @@ Minimal quick-mode grant:
   "artifacts": {
     "write": true,
     "maxBytesPerInvocation": 536870912
-  },
-  "exec": null
+  }
 }
 ```
 
@@ -286,16 +287,19 @@ Response:
 }
 ```
 
-Host-side enforcement target:
+Current host enforcement and remaining executor responsibility:
 
 - Fuzz job runs in a host-owned executor. The current KWP slice supports
   operator-mounted command executors; production hardening should move those
   commands behind container or WASM isolation.
-- Source tree is mounted read-only unless the grant explicitly allows writes.
-- Worker never gets the real path of source, corpus, crash, or output dirs.
-- Network is disabled inside fuzz execution by default.
-- CPU, wall-clock, memory, process count, file count, and artifact byte quotas are enforced by the host.
-- The host records engine version, container image digest, command line, environment, and limits in provenance.
+- The host validates that the request asks for read-only source and no network,
+  resolves paths inside the active workspace, enforces the configured timeout,
+  kills the executor process group on timeout, and checks returned artifact
+  quotas.
+- The mounted command currently receives absolute workspace/project/harness
+  paths and runs with the workspace as its current directory. That command is
+  responsible for OS-level read-only mounts, network isolation, memory/process
+  limits, and any container image provenance it promises.
 
 ## 9. Phases inside `agentic-fuzz:hunt`
 
@@ -348,7 +352,8 @@ Rules:
 
 - Generated harness code is written through `ctx.fs.write("workspace", ...)`.
 - Build and smoke tests run through `kuzushi/fuzz/run` or a future container build extension, not ambient `child_process`.
-- Harness code cannot access network unless the fuzz job explicitly enables it.
+- KWP v0.1 rejects fuzz requests that enable network. The mounted executor must
+  enforce that denial at the OS/container boundary.
 - Harness code and prompts are stored as artifacts for review.
 
 ### 9.3 Seed corpus and dictionaries
@@ -464,7 +469,9 @@ agentic-fuzz/
 └── summary.json
 ```
 
-The host verifies existence, scope containment, media type, and hash for every artifact reference in the final result.
+The module records artifact references through `ctx.artifacts.record`; the host
+verifies existence, scope containment, media type, and hash before returning
+the stamped references.
 
 ## 11. Safety controls
 
@@ -472,10 +479,13 @@ Agentic fuzzing is inherently effectful. The following controls are mandatory:
 
 - No ambient `child_process` or shell access in Node worker.
 - No inherited API keys or environment secrets.
-- No direct workspace path exposure.
-- Fuzz execution runs only in container/WASM tier.
-- Network disabled by default in fuzz jobs.
-- Quotas for CPU, memory, wall-clock, processes, files, and bytes.
+- No direct workspace path exposure to the Node worker context.
+- Fuzz execution runs only through an operator-configured host command. That
+  command should be a container/WASM sandbox for adversarial targets.
+- Network-enabled fuzz requests are rejected; the mounted command must enforce
+  OS-level network denial.
+- Host-enforced wall-clock and artifact quotas; CPU, memory, process, and
+  filesystem isolation remain the mounted command's responsibility.
 - Host-computed runtime cost only.
 - Host-stamped event origins.
 - Host-verified artifact refs.
@@ -487,9 +497,13 @@ Agentic fuzzing is inherently effectful. The following controls are mandatory:
 CLI:
 
 ```text
-kuzushi scan . --tasks agentic-fuzz:hunt --mode standard
-kuzushi run agentic-fuzz:hunt --input '{"mode":"quick","language":"rust"}'
+kuzushi --target /abs/workspace \
+  --load file:///abs/Kuzushi/examples/kwp/agentic-fuzz/module.mjs \
+  run agentic-fuzz:hunt --input '{"mode":"quick","language":"rust","projectPath":"fuzz-project","harnessPath":"fuzz-project/harness.js"}'
 ```
+
+`kuzushi scan` does not load dynamic Node modules in the current slice. The
+scan-pipeline form is the Phase 6 target below, not a currently valid command.
 
 Shell:
 
@@ -520,12 +534,12 @@ Artifacts: .kuzushi/runs/<runId>/agentic-fuzz/summary.json
 ## 13. Implementation plan
 
 Current status: the repo ships a first-party one-file KWP implementation at
-`examples/kwp/agentic-fuzz/module.mjs`. The committed integration test approves
-that exact file digest, loads it through the dynamic `file://` worker path,
-calls optional `symcc` through `kuzushi/mcp/call`, runs the host fuzz executor
-through `kuzushi/fuzz/run`, records artifact refs, and verifies host-computed
-hashes. The remaining work below is the production expansion from that minimum
-useful slice into full scan-phase automation.
+`examples/kwp/agentic-fuzz/module.mjs`. Host and registry integration tests
+cover approval, loading, MCP/fuzz brokering, artifact validation, and findings
+persistence with synthetic modules. The example itself is checked for syntax,
+SDK shape, and lock-grant schema compatibility; it is not an end-to-end fuzz
+engine fixture. The remaining work below is the production expansion from that
+minimum useful slice into full scan-phase automation.
 
 ### Phase 1: inert descriptor and docs
 
@@ -598,7 +612,11 @@ KWP enables agentic fuzzing as a HUNT phase because it gives the module enough p
 
 - Planning and triage run in the worker.
 - Files, network, runtime, artifacts, findings, and execution are brokered.
-- Fuzz engines run in container/WASM tiers, not ambient Node.
+- Fuzz engines run through a host-mounted executor, not ambient Node; operators
+  should mount a container/WASM sandbox until Kuzushi owns that isolation tier.
 - Results flow back as normal module findings and artifacts.
 
-This makes `agentic-fuzz:hunt` a normal Kuzushi module from the operator's perspective and a strictly bounded worker from the host's perspective.
+This makes `agentic-fuzz:hunt` a normal Kuzushi module from the operator's
+perspective while keeping worker privileges brokered. The current fuzz command
+boundary is suitable for trusted operator configuration, not yet for claiming
+host-owned adversarial-code isolation.

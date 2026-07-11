@@ -16,10 +16,11 @@ mod traced_runtime;
 
 pub use application::run_tool_loop;
 pub use domain::{
-    append_structured_output_contract, AgentLoopOutcome, AgentLoopStep, AgentQueryRequest,
-    AgentQueryResponse, AgentRuntime, AgentRuntimeOptions, AgentStructuredOutput, AgentTool,
-    AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, McpAttachment, ModelTier,
-    SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TriageRequest,
+    append_structured_output_contract, AgentLoopOutcome, AgentLoopStep, AgentQueryControl,
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
+    AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
+    McpAttachment, ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult,
+    TriageRequest,
 };
 pub use mcp_probe::{
     mcp_attachment_plan_for_target, plan_contains, McpArtifactSpec, MCP_ARTIFACT_TABLE,

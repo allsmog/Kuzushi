@@ -49,6 +49,17 @@ pub trait AgentRuntime: Send + Sync {
         anyhow::bail!("agent runtime does not support generic LangGraph queries")
     }
 
+    fn query_blocking_controlled(
+        &self,
+        request: AgentQueryRequest,
+        control: AgentQueryControl,
+    ) -> Result<AgentQueryResponse> {
+        control.ensure_active()?;
+        let response = self.query_blocking(request)?;
+        control.ensure_active()?;
+        Ok(response)
+    }
+
     async fn query(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         isolate_blocking(move || self.query_blocking(request))
     }
@@ -123,5 +134,40 @@ pub trait AgentRuntime: Send + Sync {
         request: AgentQueryRequest,
     ) -> Result<AgentQueryResponse> {
         isolate_blocking(move || self.spawn_subagent_blocking(role, request))
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AgentQueryControl {
+    cancellation: Option<crate::scan::ScanCancellation>,
+    deadline: Option<std::time::Instant>,
+}
+
+impl AgentQueryControl {
+    pub fn new(
+        cancellation: Option<crate::scan::ScanCancellation>,
+        deadline: Option<std::time::Instant>,
+    ) -> Self {
+        Self {
+            cancellation,
+            deadline,
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation
+            .as_ref()
+            .is_some_and(crate::scan::ScanCancellation::is_cancelled)
+    }
+
+    pub fn is_expired(&self) -> bool {
+        self.deadline
+            .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+    }
+
+    pub fn ensure_active(&self) -> Result<()> {
+        anyhow::ensure!(!self.is_cancelled(), "agent runtime query was cancelled");
+        anyhow::ensure!(!self.is_expired(), "agent runtime query deadline exceeded");
+        Ok(())
     }
 }

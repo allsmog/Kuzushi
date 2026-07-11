@@ -60,6 +60,9 @@ importers:
       '@biomejs/biome':
         specifier: ^2.4.12
         version: 2.5.2
+      '@cfworker/json-schema':
+        specifier: ^4.1.1
+        version: 4.1.1
       '@commitlint/cli':
         specifier: ^21.2.0
         version: 21.2.0(@types/node@22.19.11)(typescript@5.9.3)

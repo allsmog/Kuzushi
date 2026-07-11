@@ -44,24 +44,32 @@ export type {
   McpHandle,
 } from "./kwp-mcp.js";
 export { McpNotGrantedError, requireMcp } from "./kwp-mcp.js";
-// KWP worker harness — module entrypoints use runWorker(module) when hosted by
-// the Rust supervisor. The same module shape can still be used through MCP shims.
+// Broker handles supplied to plain default-exported modules by the Rust-owned
+// KWP wrapper. Module files must not start their own stdin/JSON-RPC loop.
 export type {
-  JsonRpcConnection,
+  KwpArtifactRef,
+  KwpArtifactsHandle,
   KwpBrokeredResponse,
+  KwpBusHandle,
+  KwpExecutionContext,
+  KwpFindingsHandle,
   KwpFsHandle,
+  KwpFsKind,
+  KwpFsReadOptions,
   KwpFsScope,
+  KwpFsWriteOptions,
   KwpFuzzHandle,
   KwpFuzzRunRequest,
   KwpFuzzRunResult,
   KwpNetHandle,
+  KwpNetRequest,
+  KwpNetRequestInit,
   KwpRuntimeCompletion,
   KwpRuntimeHandle,
   KwpRuntimeQuery,
+  KwpStructuredOutput,
   KwpWorkerExecutionContext,
-  KwpWorkerOptions,
 } from "./kwp-worker.js";
-export { KWP_VERSION, KwpWorkerHarness, runWorker } from "./kwp-worker.js";
 export type { PrintLevel, PrintOptions, PrintSink } from "./print.js";
 export { createArraySink, createPrintSink, stripAnsi } from "./print.js";
 // Registry + specifier parsing — re-export so third parties can do static

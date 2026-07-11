@@ -59,7 +59,8 @@
         "fuzz": { "$ref": "#/$defs/fuzzGrant" },
         "exec": {
           "type": "array",
-          "items": { "$ref": "#/$defs/execGrant" }
+          "items": { "$ref": "#/$defs/execGrant" },
+          "maxItems": 0
         },
         "initCapabilities": { "enum": ["fs-read"] }
       }
@@ -73,7 +74,13 @@
         "mode": { "enum": ["ro", "rw"] },
         "maxBytes": { "type": "integer", "minimum": 0 },
         "maxFiles": { "type": "integer", "minimum": 0 }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "scope": { "const": "input" } } },
+          "then": { "properties": { "mode": { "const": "ro" } } }
+        }
+      ]
     },
     "netGrant": {
       "type": "object",
@@ -156,12 +163,12 @@
           "items": { "type": "string" },
           "default": []
         },
-        "mode": { "enum": ["shared", "dedicated"] },
+        "mode": { "const": "dedicated" },
         "maxCallsPerInvocation": { "type": "integer", "minimum": 0 },
         "maxCpuSecondsPerInvocation": { "type": "integer", "minimum": 0 },
         "maxBytesPerInvocation": { "type": "integer", "minimum": 0 },
         "maxArtifactsBytesPerInvocation": { "type": "integer", "minimum": 0 },
-        "workspace": { "enum": ["read-only", "scratch-only", "read-write"] }
+        "workspace": { "const": "read-write" }
       }
     },
     "fuzzGrant": {
@@ -188,7 +195,7 @@
         "maxJobsPerInvocation": { "type": "integer", "minimum": 0 },
         "maxCpuSecondsPerInvocation": { "type": "integer", "minimum": 0 },
         "maxArtifactsBytesPerInvocation": { "type": "integer", "minimum": 0 },
-        "network": { "type": "boolean", "default": false }
+        "network": { "const": false, "default": false }
       }
     },
     "execGrant": {

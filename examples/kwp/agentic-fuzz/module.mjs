@@ -1,7 +1,17 @@
 const DEFAULT_LIMITS_BY_MODE = {
   quick: { deadlineMs: 30_000, cpuSeconds: 30, artifactBytes: 4_194_304, maxCrashes: 4 },
-  standard: { deadlineMs: 180_000, cpuSeconds: 180, artifactBytes: 16_777_216, maxCrashes: 16 },
-  deep: { deadlineMs: 600_000, cpuSeconds: 600, artifactBytes: 67_108_864, maxCrashes: 64 },
+  standard: {
+    deadlineMs: 180_000,
+    cpuSeconds: 180,
+    artifactBytes: 16_777_216,
+    maxCrashes: 16,
+  },
+  deep: {
+    deadlineMs: 600_000,
+    cpuSeconds: 600,
+    artifactBytes: 67_108_864,
+    maxCrashes: 64,
+  },
 };
 
 export default {
@@ -14,8 +24,14 @@ export default {
       name: "agentic-fuzz:hunt",
       description: "Select a fuzz target and run it through the host fuzz executor.",
       headless: true,
+      runtimeRequirement: "never",
+      phase: "hunt",
+      effect: "workspace-write",
+      approval: "none",
+      workspaceRequirement: "required",
       inputSchema: {
         type: "object",
+        additionalProperties: false,
         properties: {
           mode: {
             type: "string",
@@ -93,7 +109,11 @@ export default {
         const fuzz = await runFuzz(ctx, normalized);
         const artifacts = collectArtifacts([planArtifact], symcc, fuzz);
         const verifiedArtifacts = await recordArtifacts(ctx, artifacts);
-        const findings = crashFindings(fuzz.crashes ?? [], verifiedArtifacts);
+        const findings = crashFindings(
+          fuzz.crashes ?? [],
+          verifiedArtifacts,
+          normalized.harnessPath,
+        );
         const createdFindings = await maybeCreateFindings(ctx, normalized, findings);
 
         return {
@@ -117,7 +137,11 @@ function normalizeInput(input) {
   const mode = enumInput(input, "mode", ["quick", "standard", "deep"], "quick");
   const targetId = safeSegment(stringInput(input, "targetId", "default"));
   const limits = { ...DEFAULT_LIMITS_BY_MODE[mode], ...objectInput(input, "limits") };
-  const outputPath = stringInput(input, "outputPath", `agentic-fuzz/runs/${targetId}/stdout.txt`);
+  const outputPath = stringInput(
+    input,
+    "outputPath",
+    `agentic-fuzz/runs/${targetId}/stdout.txt`,
+  );
   return {
     mode,
     targetId,
@@ -225,17 +249,23 @@ async function maybeCreateFindings(ctx, input, findings) {
   return await ctx.findings.create(findings);
 }
 
-function crashFindings(crashes, artifacts) {
+function crashFindings(crashes, artifacts, harnessPath) {
   return crashes.map((value, index) => {
     const crash = value && typeof value === "object" ? value : {};
     return {
       title: stringInput(crash, "title", `Fuzz crash ${index + 1}`),
       severity: stringInput(crash, "severity", "high"),
       confidence: stringInput(crash, "confidence", "medium"),
-      vulnSource: "agentic-fuzz",
+      filePath: stringInput(crash, "filePath", harnessPath),
+      startLine: 1,
+      vulnSource: "fuzzing",
       ruleId: "agentic-fuzz:crash",
-      message: stringInput(crash, "message", "Brokered fuzzing returned a crash candidate."),
-      evidence: artifacts.map((artifact) => ({ artifact: artifact.path })),
+      message: stringInput(
+        crash,
+        "message",
+        "Brokered fuzzing returned a crash candidate.",
+      ),
+      references: artifacts.map((artifact) => artifact.path),
       reproduction: crash.reproduction ?? null,
     };
   });

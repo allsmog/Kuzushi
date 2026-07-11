@@ -83,7 +83,7 @@ fn dispatch_shell_command(
     }
     let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
     let mut registry = ModuleRegistry::with_v2_builtins();
-    load_dynamic_modules(&mut registry, &load)?;
+    load_dynamic_modules(&mut registry, &config, &load)?;
     run_shell_with_plain(config, workspace.as_ref(), plain, registry)
 }
 
@@ -117,9 +117,11 @@ async fn dispatch_non_scan_command(
 
 pub(crate) fn load_dynamic_modules(
     registry: &mut ModuleRegistry,
+    config: &kuzushi_core::V2Config,
     specifiers: &[String],
 ) -> Result<()> {
     let options = DynamicModuleLoadOptions {
+        trusted_specifiers: config.operator.trusted_modules.clone(),
         lockfile_path: Some(kuzushi_core::default_dynamic_lockfile_path()),
     };
     for specifier in specifiers {

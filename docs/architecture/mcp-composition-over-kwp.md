@@ -5,7 +5,10 @@ workers can call operator-configured stdio MCP mounts through
 `kuzushi/mcp/call`; the host enforces alias/tool grants, validates the mounted
 server descriptor hash, scopes calls with a host-derived session id, and
 verifies returned artifact refs. Shared pools, container-backed mounts,
-descriptor approval UX, deadlines, and richer audit records remain planned.
+descriptor approval UX, and richer audit records remain planned. The live
+grant validator accepts only dedicated mode with a read-write workspace;
+shared and scratch/read-only isolation modes are target design and fail closed
+until their enforcement exists.
 
 This document describes how KWP-backed modules compose shared MCP servers. The motivating case is a `symcc` MCP server used by more than one module: for example, a low-level binary analysis module and the `agentic-fuzz:hunt` module both want to compile/run SymCC-instrumented targets and harvest generated test cases.
 
@@ -161,15 +164,15 @@ Response:
     { "type": "text", "text": "compiled parser with SymCC instrumentation" }
   ],
   "structuredContent": {
-    "artifacts": [
-      { "path": "agentic-fuzz/symcc/parser/instrumented", "mediaType": "application/octet-stream" }
-    ],
     "metadata": {
       "mcpAlias": "symcc",
       "tool": "compile",
       "sessionId": "mcp_sess_..."
     }
-  }
+  },
+  "artifacts": [
+    { "path": "agentic-fuzz/symcc/parser/instrumented", "mediaType": "application/octet-stream" }
+  ]
 }
 ```
 
@@ -346,8 +349,8 @@ Module A:
     {
       "alias": "symcc",
       "tools": ["compile", "run_concolic", "harvest_cases"],
-      "mode": "shared",
-      "workspace": "scratch-only",
+      "mode": "dedicated",
+      "workspace": "read-write",
       "maxCpuSecondsPerInvocation": 300
     }
   ]
@@ -363,8 +366,8 @@ Agentic fuzzing module:
     {
       "alias": "symcc",
       "tools": ["compile", "run_concolic", "harvest_cases", "export_corpus"],
-      "mode": "shared",
-      "workspace": "scratch-only",
+      "mode": "dedicated",
+      "workspace": "read-write",
       "maxCpuSecondsPerInvocation": 600,
       "maxArtifactsBytesPerInvocation": 536870912
     }
@@ -426,16 +429,14 @@ Example worker code:
 
 ```ts
 if (ctx.mcp.has("symcc")) {
-  ctx.reportActivity("compiling harness with SymCC");
   const compiled = await ctx.mcp.call("symcc", "compile", {
     target: selected.sourcePath,
     harness: harness.path,
     output: `agentic-fuzz/symcc/${selected.id}`
   });
 
-  ctx.reportActivity("running concolic exploration");
   const cases = await ctx.mcp.call("symcc", "run_concolic", {
-    binary: compiled.structuredContent.artifacts[0].path,
+    binary: compiled.artifacts[0].path,
     seedCorpus: corpus.path,
     output: `agentic-fuzz/corpus/${selected.id}/symcc`,
     deadlineMs: 120000
@@ -479,7 +480,8 @@ The MCP server returns artifact references; the host verifies and hashes them be
 
 ## 11. Audit
 
-Each MCP call emits records like:
+Each MCP call emits a hash-chained allow/deny record. The live v0.1 record is
+deliberately minimal:
 
 ```jsonc
 {
@@ -488,32 +490,25 @@ Each MCP call emits records like:
   "moduleId": "agentic-fuzz",
   "digest": "sha256:module...",
   "invocationId": "inv_...",
-  "detail": {
-    "alias": "symcc",
-    "tool": "run_concolic",
-    "mcpDescriptorHash": "sha256:...",
-    "sessionId": "mcp_sess_...",
-    "cpuSeconds": 83,
-    "artifactBytes": 10485760
-  },
+  "detail": null,
   "prev": "sha256:..."
 }
 ```
 
-Denied calls are also audited:
+Denied calls are also audited without trusting worker-supplied detail:
 
 ```jsonc
 {
   "event": "mcp.call",
   "decision": "deny",
   "moduleId": "binary-hunt",
-  "detail": {
-    "alias": "symcc",
-    "tool": "export_corpus",
-    "reason": "tool not granted"
-  }
+  "detail": null,
+  "prev": "sha256:..."
 }
 ```
+
+Structured alias/tool/quota detail is planned audit enrichment, not part of the
+current persisted record contract.
 
 ## 12. Required host-side tests
 

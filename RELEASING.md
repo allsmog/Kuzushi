@@ -99,6 +99,23 @@ is reserved for watchdog escalation, process loss, and abnormal shutdown. No
 existing artifact is rewritten, and readers that already tolerate unknown
 additive status values require no data migration.
 
+## Native dynamic-module policy migration (unreleased)
+
+Local `file://` and path modules no longer become executable merely because
+their specifier appears in `[operator].trusted_modules`. Before upgrading,
+operators must run `kuzushi kwp approve <specifier> --grant <grant.toml>` for
+each exact resolved bundle and retain the generated `kuzushi.lock`. Loading
+rehashes the bundle, verifies its descriptor hash and optional Ed25519
+signature chain, then runs it as a brokered KWP worker. Changed bundles require
+fresh approval; revoked or mismatched entries fail before module code runs.
+The old trusted-specifier list remains only for non-local compatibility forms.
+
+The v0.1 KWP Node tier accepts one self-contained entry file. It requires the
+permission-mode network boundary introduced in Node 25, adds a macOS network
+sandbox, and requires Node 26.3.1 or newer on other platforms. Multi-file
+directory bundles must remain on the legacy trusted path until a
+content-addressed bundle format lands.
+
 ## If a version is already published
 
 npm doesn't allow republishing the same version. Bump and try again:

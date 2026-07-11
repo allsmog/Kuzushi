@@ -1,8 +1,9 @@
 # Kuzushi Worker Protocol (KWP) v0.1
 
-Status: partially implemented for local `file://` Node workers. The live slice
+Status: partially implemented for local, single-file `file://` Node workers. The live slice
 supports digest-pinned `kuzushi.lock` approvals, load-time digest and descriptor
-hash verification, sanitized/permissioned descriptor probes and Node worker
+hash verification, private read-only bundle snapshots, live revocation checks,
+sanitized/permissioned descriptor probes, and Node worker
 spawn, JSON-RPC 2.0 over stdio, brokered filesystem/runtime/artifact/finding
 calls, host-mounted stdio MCP alias calls, a host-mounted fuzz executor path,
 hash-linked run audit logs, and operator
@@ -16,7 +17,7 @@ stdin/stdout JSON, deadline kill, grant checks, network-denied-by-default
 policy, and artifact verification; container/WASM fuzz isolation remains
 planned hardening work.
 
-KWP is the JSON-RPC boundary between the trusted Kuzushi host and untrusted module workers. It is the contract used by future uploaded modules, dynamic JavaScript modules, WASM shims, and container-backed scanners.
+KWP is the JSON-RPC boundary between the trusted Kuzushi host and module workers. It is the contract used by future uploaded modules, dynamic JavaScript modules, WASM shims, and container-backed scanners. The protocol is designed for untrusted workers, but the current Node executor remains a defense-in-depth tier for an exact operator-approved digest; a future container/WASM tier is required for a fully adversarial-code boundary.
 
 The protocol is intentionally small: process isolation is the security boundary; every privileged effect is brokered by the host; the registry is a catalog of host-checked descriptors, not a security boundary.
 
@@ -124,7 +125,7 @@ write = true
 alias = "symcc"
 tools = ["compile", "run_concolic", "export_corpus"]
 mode = "dedicated"
-workspace = "scratch-only"
+workspace = "read-write"
 
 [fuzz]
 engines = ["cargo-fuzz", "symcc"]
@@ -141,27 +142,27 @@ interface KuzushiLockEntry {
   descriptorHash: `sha256:${string}`;
   grant: Grant;
   signatureChain: SignatureChain;
-  status: "approved" | "revoked";
+  revoked: boolean;
 }
 ```
 
 The digest is the trust anchor. Package names, file paths, and registry names are locators only.
 When present, each `signatureChain` entry signs the stable
 `kuzushi-kwp-signature-v1` payload containing `moduleId`, `digest`,
-`descriptorHash`, and `version`.
+`descriptorHash`, `version`, and the canonical `grant`.
 
 ### 4.2 Spawn environment
 
-The executor tier creates a child process with a scrubbed environment. It inherits no operator secrets and no ambient API keys.
-
-```text
-KWP_PROTOCOL_VERSION=0.1.0
-KWP_MODULE_ROOT=/abs/path/to/verified/extracted/bundle
-KWP_WORKER_MODE=serve|probe
-PATH=<minimal executor-specific path>
-```
-
-`KWP_MODULE_ROOT` is read-only from the worker's perspective. OS sandboxing (Landlock/seccomp on Linux, sandbox-exec or equivalent on macOS, job objects on Windows, and container isolation for container tier) is applied by the executor and is outside the wire protocol.
+The executor tier creates a child process with a scrubbed environment. It
+inherits only a minimal `PATH`/temporary-directory projection plus the native
+host protocol version; it inherits no operator secrets or ambient API keys.
+The current Node tier requires permission-mode network denial (`--allow-net`,
+introduced in Node 25). Kuzushi never passes that flag, denies child
+processes/workers/addons/WASI, and grants read access only to the host script
+and immutable single-file snapshot. macOS adds a `sandbox-exec` network deny;
+other platforms require Node 26.3.1 or newer, which includes the June 2026
+permission-model fixes. Stronger portable OS/container isolation remains
+future executor-tier work.
 
 ## 5. Lifecycle
 
@@ -183,13 +184,9 @@ sequenceDiagram
   participant H as Host supervisor
   participant W as Worker
 
-  H->>W: initialize {_kuzushi: {module, grant, limits}}
-  W-->>H: result {protocolVersion, module, concurrency}
-  H->>H: validate id, tool names, schemas, topics
-  H->>W: kuzushi/module/init {config}
-  W-->>H: result {}
-  H->>W: kuzushi/module/ready
-  W-->>H: result {}
+  H->>W: initialize {_kuzushi: {protocolVersion, moduleDigest, descriptorHash, grant, limits}}
+  W-->>H: result {protocolVersion, module, hidden, tools, concurrency}
+  H->>H: validate version, id, tool, and descriptor hash
   H->>W: tools/call {name, arguments, _kuzushi}
   W-->>H: result ToolResult
   H->>W: shutdown
@@ -202,19 +199,13 @@ Host request params:
 
 ```jsonc
 {
-  "protocolVersion": "0.1.0",
-  "hostInfo": { "name": "kuzushi", "version": "..." },
   "_kuzushi": {
-    "module": {
-      "id": "my-module",
-      "digest": "sha256:...",
-      "entry": "dist/index.js"
-    },
+    "protocolVersion": "0.1.0",
+    "moduleDigest": "sha256:...",
+    "descriptorHash": "sha256:...",
     "grant": { "...": "see section 9" },
     "limits": {
-      "maxConcurrentInvocations": 1,
-      "defaultDeadlineMs": 120000,
-      "maxMessageBytes": 4194304
+      "maxConcurrentInvocations": 1
     }
   }
 }
@@ -227,56 +218,64 @@ Worker result:
   "protocolVersion": "0.1.0",
   "module": {
     "id": "my-module",
-    "displayName": "My Module",
-    "version": "1.4.2",
-    "category": "defense",
-    "description": "...",
-    "tools": [
-      {
-        "name": "my-module:scan",
-        "description": "Scan target input.",
-        "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
-        "headless": true,
-        "hidden": false,
-        "rank": "normal",
-        "dag": null
-      }
-    ],
-    "events": { "produces": ["my-module/finding"], "consumes": [] }
+    "name": "My Module",
+    "kind": "defense",
+    "description": "..."
   },
+  "hidden": false,
+  "tools": [
+    {
+      "name": "my-module:scan",
+      "description": "Scan target input.",
+      "headless": true,
+      "phase": "operate",
+      "effect": "read",
+      "approval": "none",
+      "workspace_requirement": "required",
+      "finding_store_requirement": "optional",
+      "options": []
+    }
+  ],
   "concurrency": 1
 }
 ```
 
 Host validation after `initialize` is fatal on failure:
 
+- `protocolVersion` MUST equal the host's KWP version.
 - `module.id` MUST match the verified module id.
-- Tool names MUST match `^<module.id>:[a-z0-9][a-z0-9-]*$`.
-- Tool names MUST be unique within the module.
-- Every `inputSchema` MUST compile under the host's JSON Schema dialect.
-- Missing `additionalProperties` on top-level object schemas is treated as `false` by the host.
-- Declared bus topics MUST be subsets of the immutable grant.
-- DAG metadata is inert data; the host MUST NOT execute module-provided predicates or functions.
+- The requested tool MUST be present in the returned `tools` array.
+- The hash of the returned `{module, hidden, tools}` projection MUST match the
+  descriptor hash approved in the live lockfile entry.
 
-### 5.2 Probe mode
+The Node compatibility wrapper performs the module-id prefix, schema-to-option,
+policy, and duplicate-name validation while producing that projection. The
+Rust host trusts only the approved projection hash, not worker assertions.
 
-`KWP_WORKER_MODE=probe` is used by ingestion. Probe mode uses the same worker entrypoint and `initialize` path as serving mode, but with an all-deny grant.
+### 5.2 Descriptor probe
 
-In probe mode:
+Live ingestion launches the same permissioned host wrapper with its `describe`
+command and no worker broker session. It validates and hashes the descriptor,
+then tears the process down before approval or loading continues.
+
+The reusable-worker protocol reserves a future probe mode in which:
 
 - `initialize` MUST return the descriptor.
 - `tools/call` MUST return JSON-RPC `-32601`.
 - The host sends `shutdown` immediately after descriptor extraction.
 
-### 5.3 Module lifecycle hooks
+### 5.3 Future reusable-worker lifecycle hooks
 
-`CopilotModule.init?/ready?/dispose?` map to protocol methods:
+The following hooks are reserved for a reusable-worker supervisor and are not
+sent by the live one-shot path:
 
 - `kuzushi/module/init` receives host-checked config.
 - `kuzushi/module/ready` fires after the host is ready to route invocations.
 - `shutdown` calls `dispose?()`, flushes logs, replies, and exits 0.
 
-Broker access during init is deny-by-default. v0.1 permits filesystem reads only if covered by the grant and `initCapabilities` allows them. Net, runtime, bus, findings, and artifact writes during init are denied unless a future grant extension explicitly permits them.
+When implemented, broker access during init remains deny-by-default. The
+`initCapabilities` field currently serializes as `fs-read` but does not open an
+init broker session in the one-shot path.
 
 ## 6. Tool invocation
 
@@ -355,15 +354,16 @@ This rule closes the background-scavenging channel: after a tool settles, any li
 
 Granted scopes:
 
-- `workspace`: per-run working area and module-visible artifacts.
-- `moduleData`: per-module durable cache.
+- `workspace`: active target workspace, excluding Kuzushi control paths such
+  as `kuzushi.lock` and `.kuzushi/`.
+- `module-data` (SDK compatibility alias `moduleData`): per-module durable cache.
 - `input`: host-provided read-only inputs.
 
 Methods:
 
 ```text
 kuzushi/fs/read    { invocationId, scope, path, offset?, length? }
-kuzushi/fs/write   { invocationId, scope, path, data, append? }
+kuzushi/fs/write   { invocationId, scope, path, dataBase64, append? }
 kuzushi/fs/list    { invocationId, scope, path }
 kuzushi/fs/stat    { invocationId, scope, path }
 kuzushi/fs/remove  { invocationId, scope, path }
@@ -439,7 +439,7 @@ Rules:
 - Workers cannot forge origins.
 - Workspace-backed runs append allowed publishes to
   `.kuzushi/v3/runs/<runId>/kwp-bus.jsonl`.
-- Subscriptions are declared during `initialize`; the host delivers `kuzushi/bus/event` notifications for granted consume topics.
+- KWP v0.1 is publish-only. `bus.consume` is reserved for a later delivery protocol and does not create subscriptions today.
 
 ### 7.5 Findings and artifacts
 
@@ -460,9 +460,9 @@ provenance. If no store is available, the broker returns
 Artifact refs are arrays of `{ path, mediaType, sha256? }`. The host enforces
 `artifacts.write`, rejects path escapes, requires the referenced file to exist
 under the active workspace/module-data root, enforces the artifact byte quota,
-and fills or verifies the `sha256:` digest. The host may also accept
-`findings` and `artifacts` in the final result; those values are untrusted
-until they pass the same broker checks.
+and fills or verifies the `sha256:` digest. Workers must use these explicit
+broker calls: privileged `findings` and `artifacts` keys are recursively
+stripped from final tool results so they cannot bypass broker checks.
 
 The live stdio worker supervisor enforces
 `runtime.worker_watchdog_timeout_ms` around the full invocation. After the
@@ -557,20 +557,20 @@ planned.
 ```ts
 interface Grant {
   fs: Array<{
-    scope: "workspace" | "moduleData" | "input";
+    scope: "workspace" | "module-data" | "input";
     mode: "ro" | "rw";
     maxBytes?: number;
     maxFiles?: number;
   }>;
 
-  net: null | {
+  net?: {
     allow: string[];
     credentials?: string[];
     maxRequestsPerInvocation?: number;
     maxBytesPerInvocation?: number;
   };
 
-  runtime: null | {
+  runtime?: {
     maxCostUsdPerInvocation: number;
     maxCostUsdPerRun: number;
     models?: string[];
@@ -581,23 +581,44 @@ interface Grant {
     consume: string[];
   };
 
-  findings: null | {
+  findings?: {
     create: boolean;
     maxPerInvocation?: number;
     allowedSeverities?: string[];
   };
 
-  artifacts: null | {
+  artifacts?: {
     write: boolean;
     maxBytesPerInvocation?: number;
   };
 
-  exec: null;
-  initCapabilities?: "fsRead";
+  mcp?: Array<{
+    alias: string;
+    tools?: string[];
+    mode: "dedicated";
+    workspace: "read-write";
+    maxCallsPerInvocation?: number;
+    maxCpuSecondsPerInvocation?: number;
+    maxBytesPerInvocation?: number;
+    maxArtifactsBytesPerInvocation?: number;
+  }>;
+
+  fuzz?: {
+    engines?: string[];
+    maxJobsPerInvocation?: number;
+    maxCpuSecondsPerInvocation?: number;
+    maxArtifactsBytesPerInvocation?: number;
+    network?: false;
+  };
+
+  exec?: [];
+  initCapabilities?: "fs-read";
 }
 ```
 
-`exec` is intentionally `null` in KWP core v0.1. Modules that need arbitrary binaries should use the container executor tier so process, filesystem, and network isolation remain explicit.
+`exec` is omitted or empty in KWP core v0.1. Modules that need a fuzz engine
+must use the separately configured host fuzz executor; arbitrary worker-owned
+process execution is not granted.
 
 ## 10. Error codes
 
@@ -629,11 +650,15 @@ The host writes one append-only audit record per broker decision and invocation 
   "digest": "sha256:...",
   "event": "runtime.query",
   "decision": "allow",
-  "detail": { "tokens": 1234, "costUsd": 0.0123 },
+  "detail": null,
   "prev": "sha256:...",
   "hash": "sha256:..."
 }
 ```
+
+Successful broker decisions currently use `detail: null`; denials record the
+host error code/message, and invocation lifecycle records include tool and
+host-computed aggregate runtime cost.
 
 Workspace-backed `file://` worker runs persist these records at
 `.kuzushi/v3/runs/<runId>/kwp-audit.jsonl`. The `prev` and `hash` fields

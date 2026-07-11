@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { KwpExecutionContext, KwpRuntimeHandle } from "../../src/modules/index.js";
+import * as moduleSdk from "../../src/modules/index.js";
 // Import exactly through the public-surface barrel to assert that the
 // `kuzushi/modules` re-exports are wired. Everything asserted here must
 // remain stable across minor releases (see docs/devex/06-module-sdk-assessment.md §6).
@@ -34,6 +36,12 @@ describe("kuzushi/modules public barrel", () => {
       type: "package",
       name: "@kuzushi/x",
     });
+  });
+
+  it("keeps KWP process ownership in the native host", () => {
+    expect(moduleSdk).not.toHaveProperty("runWorker");
+    expect(moduleSdk).not.toHaveProperty("KwpWorkerHarness");
+    expectTypeOf<KwpExecutionContext["runtime"]>().toEqualTypeOf<KwpRuntimeHandle>();
   });
 
   it("keeps retired built-in factory symbols as migration stubs", () => {

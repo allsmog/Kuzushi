@@ -49,8 +49,12 @@ pub(crate) fn write_atomic(path: &Path, contents: &str) -> Result<()> {
         let _ = fs::remove_file(&temp);
         return Err(error).with_context(|| format!("Could not move {} into place", path.display()));
     }
-    sync_parent_dir(path);
-    Ok(())
+    sync_parent_dir(path)
+}
+
+pub(crate) fn write_atomic_bytes(path: &Path, contents: &[u8]) -> Result<()> {
+    let contents = std::str::from_utf8(contents).context("Atomic contents must be UTF-8")?;
+    write_atomic(path, contents)
 }
 
 /// Write the full contents to `temp` and flush them to stable storage before
@@ -65,15 +69,17 @@ fn write_and_sync_temp(temp: &Path, contents: &str) -> std::io::Result<()> {
 /// Persist the directory entry created by the rename. Best-effort: on
 /// platforms that do not allow opening a directory as a file this is a no-op,
 /// which does not weaken the atomicity of the rename itself.
-fn sync_parent_dir(path: &Path) {
+pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
     {
-        if let Ok(dir) = fs::File::open(parent) {
-            let _ = dir.sync_all();
-        }
+        let dir = fs::File::open(parent)
+            .with_context(|| format!("Could not open {}", parent.display()))?;
+        dir.sync_all()
+            .with_context(|| format!("Could not sync {}", parent.display()))?;
     }
+    Ok(())
 }
 
 pub(crate) fn load_jsonl<T>(path: &Path, item_label: &str) -> Result<Vec<T>>

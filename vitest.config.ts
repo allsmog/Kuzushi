@@ -9,6 +9,8 @@ export default defineConfig({
       "tests/modules/loader-import.test.ts",
       "tests/modules/registry-resolution.test.ts",
       "tests/modules/host-handles.test.ts",
+      "tests/modules/kwp-host.test.ts",
+      "tests/modules/kwp-lock-schema.test.ts",
       "tests/langgraph-bridge/mcp-errors.test.ts",
       "tests/langgraph-bridge/mcp-plan.test.ts",
       "tests/langgraph-bridge/schema.test.ts",

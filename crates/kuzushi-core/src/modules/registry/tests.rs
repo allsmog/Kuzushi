@@ -5,16 +5,16 @@ mod tests {
     use crate::config::{FuzzExecutorConfig, McpMountConfig, McpMountToolConfig, V2Config};
     use crate::findings::FindingStore;
     use crate::modules::{approve_dynamic_module, DynamicModuleLoadOptions};
-    use crate::run_artifacts::TraceHandle;
-    use crate::worker_protocol::{
-        descriptor_hash_from_value, ArtifactsGrant, FindingsGrant, FsMode, FsScope,
-        FsScopeGrant, FuzzEngine, FuzzGrant, Grant, HostPattern, KwpAuditLogRecord,
-        McpGrant, McpGrantMode, McpToolDescriptor, McpWorkspaceMode, NetGrant,
-        RuntimeGrant, kwp_audit_log_integrity, read_kwp_audit_log,
-    };
     use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
+    use crate::run_artifacts::TraceHandle;
     use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
     use crate::triage::TriageOutcome;
+    use crate::worker_protocol::{
+        descriptor_hash_from_value, kwp_audit_log_integrity, read_kwp_audit_log, ArtifactsGrant,
+        FindingsGrant, FsMode, FsScope, FsScopeGrant, FuzzEngine, FuzzGrant, Grant, HostPattern,
+        KwpAuditLogRecord, McpGrant, McpGrantMode, McpToolDescriptor, McpWorkspaceMode, NetGrant,
+        RuntimeGrant,
+    };
     use crate::WorkspaceTarget;
     use serde_json::{json, Value};
     use std::collections::BTreeMap;
@@ -369,6 +369,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -425,6 +426,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(tmp.path().join("missing-kuzushi.lock")),
                 },
             )
@@ -473,6 +475,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -485,9 +488,14 @@ export default {
             findings_store: None,
             trace: None,
         };
-        let output = registry.execute_tool("dynenv:check", json!({}), &ctx).unwrap();
+        let output = registry
+            .execute_tool("dynenv:check", json!({}), &ctx)
+            .unwrap();
 
-        assert_eq!(output.pointer("/data/isolated").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            output.pointer("/data/isolated").and_then(Value::as_bool),
+            Some(true)
+        );
     }
 
     #[test]
@@ -527,6 +535,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -539,9 +548,14 @@ export default {
             findings_store: None,
             trace: None,
         };
-        let output = registry.execute_tool("dynstdout:check", json!({}), &ctx).unwrap();
+        let output = registry
+            .execute_tool("dynstdout:check", json!({}), &ctx)
+            .unwrap();
 
-        assert_eq!(output.pointer("/data/protocol").and_then(Value::as_str), Some("clean"));
+        assert_eq!(
+            output.pointer("/data/protocol").and_then(Value::as_str),
+            Some("clean")
+        );
     }
 
     #[test]
@@ -576,6 +590,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -633,6 +648,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -700,6 +716,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -794,6 +811,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -879,6 +897,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -906,22 +925,18 @@ export default {
         );
         assert_eq!(
             output
-                .pointer("/data/recorded/artifacts/0/path")
+                .pointer("/data/artifacts/0/path")
                 .and_then(Value::as_str),
             Some("kwp/out.txt")
         );
-        assert!(
-            output
-                .pointer("/data/recorded/artifacts/0/sha256")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value.starts_with("sha256:"))
-        );
-        assert!(
-            output
-                .pointer("/data/kwp/moduleDigest")
-                .and_then(Value::as_str)
-                .is_some()
-        );
+        assert!(output
+            .pointer("/data/artifacts/0/sha256")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.starts_with("sha256:")));
+        assert!(output
+            .pointer("/data/kwp/moduleDigest")
+            .and_then(Value::as_str)
+            .is_some());
     }
 
     #[test]
@@ -975,6 +990,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -988,7 +1004,9 @@ export default {
             trace: None,
         };
 
-        let output = registry.execute_tool("dynaudit:run", json!({}), &ctx).unwrap();
+        let output = registry
+            .execute_tool("dynaudit:run", json!({}), &ctx)
+            .unwrap();
         let run_id = output
             .pointer("/data/kwp/runId")
             .and_then(Value::as_str)
@@ -1047,6 +1065,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -1117,6 +1136,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -1205,6 +1225,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -1285,6 +1306,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -1356,6 +1378,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -1393,16 +1416,14 @@ export default {
         );
         assert_eq!(
             first
-                .pointer("/data/result/artifacts/0/path")
+                .pointer("/data/artifacts/0/path")
                 .and_then(Value::as_str),
             Some("kwp/symcc/instrumented.txt")
         );
-        assert!(
-            first
-                .pointer("/data/result/artifacts/0/sha256")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value.starts_with("sha256:"))
-        );
+        assert!(first
+            .pointer("/data/artifacts/0/sha256")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.starts_with("sha256:")));
         assert_eq!(
             fs::read_to_string(tmp.path().join("kwp/symcc/instrumented.txt")).unwrap(),
             "instrumented by symcc\n"
@@ -1474,6 +1495,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -1488,24 +1510,26 @@ export default {
             trace: None,
         };
 
-        let output = registry.execute_tool("dynfuzz:hunt", json!({}), &ctx).unwrap();
+        let output = registry
+            .execute_tool("dynfuzz:hunt", json!({}), &ctx)
+            .unwrap();
 
         assert_eq!(
-            output.pointer("/data/result/status").and_then(Value::as_str),
+            output
+                .pointer("/data/result/status")
+                .and_then(Value::as_str),
             Some("completed")
         );
         assert_eq!(
             output
-                .pointer("/data/result/artifacts/0/path")
+                .pointer("/data/artifacts/0/path")
                 .and_then(Value::as_str),
             Some("agentic-fuzz/logs/run.txt")
         );
-        assert!(
-            output
-                .pointer("/data/result/artifacts/0/sha256")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value.starts_with("sha256:"))
-        );
+        assert!(output
+            .pointer("/data/artifacts/0/sha256")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.starts_with("sha256:")));
         assert_eq!(
             fs::read_to_string(tmp.path().join("agentic-fuzz/logs/run.txt")).unwrap(),
             "property fuzz completed\n"
@@ -1568,6 +1592,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -1633,6 +1658,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -1670,7 +1696,10 @@ export default {
             )
             .unwrap();
 
-        assert_eq!(output.pointer("/status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            output.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert_eq!(
             output.pointer("/data/fuzz/status").and_then(Value::as_str),
             Some("completed")
@@ -1684,12 +1713,10 @@ export default {
         assert_artifact_path(&output, "agentic-fuzz/target-plan.json");
         assert_artifact_path(&output, "agentic-fuzz/symcc/parser/instrumented.txt");
         assert_artifact_path(&output, "agentic-fuzz/runs/parser/stdout.txt");
-        assert!(
-            output
-                .pointer("/artifacts/0/sha256")
-                .and_then(Value::as_str)
-                .is_some_and(|value| value.starts_with("sha256:"))
-        );
+        assert!(output
+            .pointer("/artifacts/0/sha256")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.starts_with("sha256:")));
         assert!(
             fs::read_to_string(tmp.path().join("agentic-fuzz/target-plan.json"))
                 .unwrap()
@@ -1747,6 +1774,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -1815,6 +1843,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -1841,11 +1870,7 @@ export default {
         assert_audit_event(&audit, "invocation.end", "deny");
         assert!(audit.iter().any(|record| {
             record.event == "invocation.cancel"
-                && record
-                    .detail
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    == Some("deadline")
+                && record.detail.get("reason").and_then(Value::as_str) == Some("deadline")
         }));
         assert_hash_chain(&audit);
     }
@@ -1854,12 +1879,12 @@ export default {
         McpGrant {
             alias: "symcc".to_string(),
             tools: tools.iter().map(|tool| (*tool).to_string()).collect(),
-            mode: McpGrantMode::Shared,
+            mode: McpGrantMode::Dedicated,
             max_calls_per_invocation: None,
             max_cpu_seconds_per_invocation: None,
             max_bytes_per_invocation: None,
             max_artifacts_bytes_per_invocation: Some(4096),
-            workspace: McpWorkspaceMode::ScratchOnly,
+            workspace: McpWorkspaceMode::ReadWrite,
         }
     }
 
@@ -2127,6 +2152,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
@@ -2196,6 +2222,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
+                    trusted_specifiers: Vec::new(),
                     lockfile_path: Some(lockfile_path),
                 },
             )
