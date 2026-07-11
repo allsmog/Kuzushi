@@ -8,11 +8,20 @@ pub(crate) fn run_background_tool(
     input: serde_json::Value,
     run_id: &str,
     thinking_level: Option<String>,
+    authorization: ExecutionAuthorization,
     trace_handle: Option<TraceHandle>,
     cancel: ScanCancellation,
 ) -> Result<serde_json::Value> {
-    let store = background_findings_store(tool_name, workspace)?;
-    let runtime = background_agent_runtime(&config, tool_name, &input, thinking_level, cancel)?;
+    let store = background_findings_store(&registry, tool_name, workspace)?;
+    let runtime = background_agent_runtime(
+        &registry,
+        &config,
+        tool_name,
+        &input,
+        thinking_level,
+        &cancel,
+        workspace,
+    )?;
     let trace = trace_handle
         .unwrap_or_else(|| TraceHandle::jsonl(workspace.root(), run_id))
         .for_tool(tool_name)
@@ -23,54 +32,70 @@ pub(crate) fn run_background_tool(
         workspace: Some(workspace),
         findings_store: store.as_ref(),
         trace: Some(&trace),
+        cancellation: Some(&cancel),
+        authorization: Default::default(),
     };
-    registry.dispatch_prepared_tool_with_runtime(tool_name, input, &ctx, runtime_ref)
+    let prepared = registry.prepare_dispatch_input(tool_name, input, &ctx, None)?;
+    let prepared = authorize_background_prepared_input(prepared, authorization)?;
+    registry.dispatch_prepared_input_with_runtime(prepared, &ctx, runtime_ref)
+}
+
+fn authorize_background_prepared_input(
+    prepared: kuzushi_core::PreparedToolInput,
+    authorization: ExecutionAuthorization,
+) -> Result<kuzushi_core::PreparedToolInput> {
+    let delegates_patch = prepared.tool_name() == "sast:scan"
+        && prepared
+            .value()
+            .get("autoPatch")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+    let prepared = if delegates_patch {
+        prepared.authorize_requested_with_delegated_tools(authorization, &["patch:finding"])?
+    } else {
+        prepared.authorize_requested(authorization)?
+    };
+    Ok(prepared)
 }
 
 fn background_findings_store(
+    registry: &ModuleRegistry,
     tool_name: &str,
     workspace: &WorkspaceTarget,
 ) -> Result<Option<FindingStore>> {
-    if tool_requires_findings_store(tool_name) {
+    if registry.tool_requires_finding_store(tool_name) {
         return Ok(Some(FindingStore::open(workspace.findings_db_path())?));
     }
     Ok(None)
 }
 
 fn background_agent_runtime(
+    registry: &ModuleRegistry,
     config: &V2Config,
     tool_name: &str,
     input: &serde_json::Value,
     thinking_level: Option<String>,
-    cancel: ScanCancellation,
+    cancel: &ScanCancellation,
+    workspace: &WorkspaceTarget,
 ) -> Result<Option<LangGraphRuntime>> {
-    if !wants_background_runtime(config, tool_name, input) {
+    if !registry.tool_wants_runtime(tool_name, input, config) {
         return Ok(None);
     }
     Ok(Some(
-        LangGraphRuntime::from_config(config, background_current_dir())?
+        LangGraphRuntime::from_config(config, workspace.root().to_path_buf())?
             .with_thinking_level(thinking_level)
-            .with_cancellation(cancel),
+            .with_cancellation(cancel.clone()),
     ))
 }
 
-fn wants_background_runtime(config: &V2Config, tool_name: &str, input: &serde_json::Value) -> bool {
-    if tool_needs_runtime(tool_name, input) {
-        return true;
-    }
-    tool_wants_runtime(tool_name, input, config)
-}
-
-fn background_current_dir() -> PathBuf {
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-}
-
+#[cfg(test)]
 pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
-    tool_needs_finding_store(tool_name)
+    ModuleRegistry::with_v2_builtins().tool_requires_finding_store(tool_name)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use kuzushi_core::tool_uses_agent_runtime;
 
     #[test]
@@ -125,16 +150,18 @@ mod tests {
         config.model = Some("openai:gpt-5.4".to_string());
         let input = serde_json::json!({ "useModelRanking": false });
 
-        assert!(!kuzushi_core::tool_wants_runtime(
-            "module-recommender:recommend",
-            &input,
-            &config,
-        ));
+        assert!(
+            !kuzushi_core::ModuleRegistry::with_v2_builtins().tool_wants_runtime(
+                "module-recommender:recommend",
+                &input,
+                &config,
+            )
+        );
     }
 
     #[test]
     fn recommender_has_finding_store_access() {
-        assert!(super::tool_requires_findings_store(
+        assert!(!super::tool_requires_findings_store(
             "module-recommender:recommend"
         ));
         assert!(super::tool_requires_findings_store(
@@ -144,15 +171,37 @@ mod tests {
             "offense-review:threat-hunt"
         ));
         assert!(super::tool_requires_findings_store("offense:chain"));
-        assert!(super::tool_requires_findings_store(
+        assert!(!super::tool_requires_findings_store(
             "variant:any-future-tool"
         ));
         assert!(super::tool_requires_findings_store("cargo-audit:scan"));
-        assert!(super::tool_requires_findings_store("sbom-scan:scan"));
+        assert!(!super::tool_requires_findings_store("sbom-scan:scan"));
         assert!(super::tool_requires_findings_store("secret-scan:scan"));
         assert!(super::tool_requires_findings_store("android-apk:scan"));
         assert!(!super::tool_requires_findings_store(
             "taint-iris-next:dataflow-plan"
         ));
+    }
+
+    #[test]
+    fn direct_worker_cannot_forge_approval_for_external_effect() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let error = run_background_tool(
+            ModuleRegistry::with_v2_builtins(),
+            V2Config::default(),
+            &workspace,
+            "recon:nmap",
+            serde_json::json!({"target": "127.0.0.1"}),
+            "run-test",
+            None,
+            ExecutionAuthorization::default(),
+            None,
+            ScanCancellation::default(),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("explicit operator authorization"), "{error}");
     }
 }

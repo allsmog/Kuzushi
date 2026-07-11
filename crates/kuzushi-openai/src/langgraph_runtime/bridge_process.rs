@@ -4,6 +4,7 @@ use serde::Serialize;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::bridge_payloads::{
@@ -104,6 +105,8 @@ where
 /// a timeout error instead. Generous default: a single invocation can span a
 /// long agent step with MCP tool calls.
 const DEFAULT_BRIDGE_TIMEOUT: Duration = Duration::from_secs(600);
+const MAX_BRIDGE_STDOUT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_BRIDGE_STDERR_BYTES: usize = 1024 * 1024;
 
 fn bridge_timeout() -> Duration {
     std::env::var("KUZUSHI_BRIDGE_TIMEOUT_MS")
@@ -118,22 +121,51 @@ fn bridge_timeout() -> Duration {
 /// (so a full pipe can't deadlock the child), polls for exit, and kills the
 /// process when the deadline passes.
 fn wait_with_output_deadline(
-    mut child: Child,
+    child: Child,
     label: &str,
     timeout: Duration,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<Output> {
+    wait_with_output_deadline_limits(
+        child,
+        label,
+        timeout,
+        cancellation,
+        MAX_BRIDGE_STDOUT_BYTES,
+        MAX_BRIDGE_STDERR_BYTES,
+    )
+}
+
+pub(super) fn wait_with_output_deadline_limits(
+    mut child: Child,
+    label: &str,
+    timeout: Duration,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<Output> {
     // Match `wait_with_output` semantics: close the child's stdin so a bridge
     // reading until EOF sees the request end instead of blocking forever.
     drop(child.stdin.take());
-    let stdout = spawn_pipe_reader(child.stdout.take());
-    let stderr = spawn_pipe_reader(child.stderr.take());
+    let pipe_failure = Arc::new(Mutex::new(None));
+    let stdout = spawn_pipe_reader(
+        child.stdout.take(),
+        stdout_limit,
+        "stdout",
+        Arc::clone(&pipe_failure),
+    );
+    let stderr = spawn_pipe_reader(
+        child.stderr.take(),
+        stderr_limit,
+        "stderr",
+        Arc::clone(&pipe_failure),
+    );
     let registered = register_bridge_child(child, cancellation)?;
-    let status = wait_status_deadline(&registered, label, timeout, cancellation)?;
+    let status = wait_status_deadline(&registered, label, timeout, cancellation, &pipe_failure)?;
     Ok(Output {
         status,
-        stdout: join_pipe_reader(stdout),
-        stderr: join_pipe_reader(stderr),
+        stdout: join_pipe_reader(stdout, "stdout")?,
+        stderr: join_pipe_reader(stderr, "stderr")?,
     })
 }
 
@@ -153,22 +185,52 @@ fn register_bridge_child(
     registry.register_child(child, process_group_id)
 }
 
+type BridgePipeFailure = Arc<Mutex<Option<String>>>;
+type BridgePipeReader = Option<std::thread::JoinHandle<Result<Vec<u8>>>>;
+
 fn spawn_pipe_reader<R: Read + Send + 'static>(
     pipe: Option<R>,
-) -> Option<std::thread::JoinHandle<Vec<u8>>> {
+    limit: usize,
+    stream: &'static str,
+    failure: BridgePipeFailure,
+) -> BridgePipeReader {
     pipe.map(|mut pipe| {
-        std::thread::spawn(move || {
-            let mut buffer = Vec::new();
-            let _ = pipe.read_to_end(&mut buffer);
-            buffer
+        std::thread::spawn(move || match read_bounded_pipe(&mut pipe, limit, stream) {
+            Ok(bytes) => Ok(bytes),
+            Err(error) => {
+                if let Ok(mut slot) = failure.lock() {
+                    *slot = Some(error.to_string());
+                }
+                Err(error)
+            }
         })
     })
 }
 
-fn join_pipe_reader(handle: Option<std::thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+pub(super) fn read_bounded_pipe(
+    reader: &mut impl Read,
+    limit: usize,
+    stream: &str,
+) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("could not read LangGraph bridge {stream}"))?;
+    anyhow::ensure!(
+        bytes.len() <= limit,
+        "LangGraph bridge {stream} exceeded the {limit}-byte capture limit"
+    );
+    Ok(bytes)
+}
+
+fn join_pipe_reader(handle: BridgePipeReader, stream: &str) -> Result<Vec<u8>> {
+    let Some(handle) = handle else {
+        return Ok(Vec::new());
+    };
     handle
-        .and_then(|handle| handle.join().ok())
-        .unwrap_or_default()
+        .join()
+        .map_err(|_| anyhow::anyhow!("LangGraph bridge {stream} reader panicked"))?
 }
 
 fn wait_status_deadline(
@@ -176,16 +238,33 @@ fn wait_status_deadline(
     label: &str,
     timeout: Duration,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
+    pipe_failure: &BridgePipeFailure,
 ) -> Result<ExitStatus> {
     let deadline = Instant::now() + timeout;
     loop {
         kill_cancelled_bridge(child, label, cancellation)?;
+        kill_bridge_on_pipe_failure(child, pipe_failure)?;
         if let Some(status) = poll_bridge_status(child, label)? {
             return Ok(status);
         }
         kill_expired_bridge(child, label, deadline, timeout)?;
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn kill_bridge_on_pipe_failure(
+    child: &kuzushi_core::scan::RegisteredChild,
+    failure: &BridgePipeFailure,
+) -> Result<()> {
+    let failure = failure
+        .lock()
+        .map_err(|_| anyhow::anyhow!("LangGraph bridge pipe failure state was poisoned"))?
+        .clone();
+    if let Some(failure) = failure {
+        kill_child(child);
+        anyhow::bail!(failure);
+    }
+    Ok(())
 }
 
 fn poll_bridge_status(
@@ -244,7 +323,7 @@ fn configured_bridge_command(command: &[String]) -> Command {
 }
 
 #[cfg(unix)]
-fn configure_bridge_process_group(command: &mut Command) {
+pub(super) fn configure_bridge_process_group(command: &mut Command) {
     use std::os::unix::process::CommandExt;
 
     unsafe {
@@ -258,7 +337,7 @@ fn configure_bridge_process_group(command: &mut Command) {
 }
 
 #[cfg(not(unix))]
-fn configure_bridge_process_group(_command: &mut Command) {}
+pub(super) fn configure_bridge_process_group(_command: &mut Command) {}
 
 #[cfg(unix)]
 fn bridge_process_group_id(child: &Child) -> Option<u32> {

@@ -193,13 +193,15 @@ fn opam_license(text: &str) -> Result<ManifestLicense> {
 
 fn cabal_license(text: &str) -> Result<ManifestLicense> {
     Ok(license_value(
-        text.lines().find_map(|line| colon_line_license(line, "license")),
+        text.lines()
+            .find_map(|line| colon_line_license(line, "license")),
     ))
 }
 
 fn r_description_license(text: &str) -> Result<ManifestLicense> {
     Ok(license_value(
-        text.lines().find_map(|line| colon_line_license(line, "License")),
+        text.lines()
+            .find_map(|line| colon_line_license(line, "License")),
     ))
 }
 
@@ -237,9 +239,8 @@ fn license_elements<'a>(root: Node<'a, 'a>) -> impl Iterator<Item = Node<'a, 'a>
 }
 
 fn is_dotnet_project(path: &Path) -> bool {
-    path_extension(path).is_some_and(|extension| {
-        matches!(extension.as_str(), "csproj" | "fsproj" | "vbproj")
-    })
+    path_extension(path)
+        .is_some_and(|extension| matches!(extension.as_str(), "csproj" | "fsproj" | "vbproj"))
 }
 
 fn is_nimble_file(path: &Path) -> bool {

@@ -42,9 +42,48 @@ fn round_trips_a_rule() {
     assert_eq!(loaded[0].reason, SuppressionReason::FalsePositive);
     assert_eq!(loaded[0].expires_at_unix, Some(1_800_000_000));
     assert_eq!(
-        loaded[0].predicate.finding_id.as_ref().map(|r| r.0.as_str()),
+        loaded[0]
+            .predicate
+            .finding_id
+            .as_ref()
+            .map(|r| r.0.as_str()),
         Some("fi_abc")
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn suppression_writer_rejects_a_symlinked_artifact() {
+    use std::os::unix::fs::symlink;
+
+    let (_dir, workspace) = workspace();
+    let mut outside = tempfile::NamedTempFile::new().expect("outside");
+    std::io::Write::write_all(&mut outside, b"outside").expect("seed outside");
+    workspace.ensure_state_dir().expect("state dir");
+    symlink(outside.path(), workspace.suppressions_path()).expect("symlink artifact");
+
+    let error = save_suppression_rules(&workspace, &[sample_rule("sup-1")])
+        .expect_err("symlink must be rejected");
+
+    assert!(error.to_string().contains("symlink"));
+    assert_eq!(std::fs::read_to_string(outside.path()).unwrap(), "outside");
+}
+
+#[cfg(unix)]
+#[test]
+fn suppression_reader_rejects_an_outside_symlink_without_disclosing_content() {
+    use std::os::unix::fs::symlink;
+
+    let (_dir, workspace) = workspace();
+    let outside = tempfile::NamedTempFile::new().expect("outside");
+    std::fs::write(outside.path(), "OUTSIDE_SUPPRESSIONS_TOKEN").unwrap();
+    workspace.ensure_state_dir().unwrap();
+    symlink(outside.path(), workspace.suppressions_path()).unwrap();
+
+    let error = load_suppression_rules(&workspace).unwrap_err().to_string();
+
+    assert!(error.contains("symlink"), "{error}");
+    assert!(!error.contains("OUTSIDE_SUPPRESSIONS_TOKEN"));
 }
 
 #[test]

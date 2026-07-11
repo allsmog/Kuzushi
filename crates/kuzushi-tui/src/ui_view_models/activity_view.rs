@@ -15,7 +15,7 @@ use super::activity_pane_chrome::{
 use super::activity_plain_rows::{activity_plain_pane_rows, ActivityPlainPaneRow};
 use super::activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
 use super::generated_views_feed::{activity_deck_plain_extra_rows, activity_deck_rows};
-use crate::{ActivityRouteState, ActivitySession, DagTaskState, ShellApp};
+use crate::{ActivityRouteState, ActivitySession, DagTaskState, ShellApp, ViewDataState};
 use kuzushi_core::RunSummary;
 use std::time::Instant;
 
@@ -62,19 +62,32 @@ fn manual_activity_session_is_idle(app: &ShellApp, session: &ActivitySession) ->
 /// activity card (set by both scan refusals and tool failures) and only once
 /// nothing is still running, so an in-flight session never reads as failed.
 fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<ActivityRunOutcome> {
-    use crate::app::LiveActivityPhase;
     if activity_session_still_running(app, session) {
         return None;
     }
-    if let Some(summary) = activity_run_summary(app, session) {
-        if let Some(outcome) = activity_run_summary_outcome(summary) {
-            return Some(outcome);
-        }
-    }
+    activity_run_summary(app, session)
+        .and_then(activity_run_summary_outcome)
+        .or_else(|| live_activity_run_outcome(app))
+}
+
+fn live_activity_run_outcome(app: &ShellApp) -> Option<ActivityRunOutcome> {
+    use crate::app::LiveActivityPhase;
     let activity = app.live_activity()?;
-    matches!(activity.phase, LiveActivityPhase::Refused).then(|| ActivityRunOutcome::Failed {
-        subject: activity.subject.clone(),
-    })
+    match activity.phase {
+        LiveActivityPhase::Partial | LiveActivityPhase::Skipped => {
+            Some(ActivityRunOutcome::Terminal {
+                status: activity.phase.label().to_string(),
+                findings: None,
+                reason: Some(activity.detail.clone()),
+            })
+        }
+        LiveActivityPhase::Failed | LiveActivityPhase::Refused => {
+            Some(ActivityRunOutcome::Failed {
+                subject: activity.subject.clone(),
+            })
+        }
+        _ => None,
+    }
 }
 
 fn activity_session_still_running(app: &ShellApp, session: &ActivitySession) -> bool {
@@ -88,11 +101,14 @@ fn activity_session_still_running(app: &ShellApp, session: &ActivitySession) -> 
 
 fn activity_run_summary(app: &ShellApp, session: &ActivitySession) -> Option<RunSummary> {
     let target = app.target()?;
-    app.workbench_cache()
-        .borrow_mut()
-        .run_summary_index(Some(target), vec![session.run_id.clone()])
-        .get(&session.run_id)
-        .cloned()
+    let ViewDataState::Ready(index) = app
+        .workbench_cache()
+        .borrow()
+        .cached_run_summary_index(Some(target))
+    else {
+        return None;
+    };
+    index.get(&session.run_id).cloned()
 }
 
 fn activity_run_summary_outcome(summary: RunSummary) -> Option<ActivityRunOutcome> {
@@ -387,7 +403,9 @@ mod tests {
     fn activity_deck_shows_selected_artifact_regardless_of_session_tasks() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.domain_mut()
-            .set_taint_flow(Some(crate::TaintFlowSnapshot {
+            .set_taint_flows(vec![crate::TaintFlowSnapshot {
+                finding_fingerprint: None,
+                finding_identity_id: None,
                 cwe: "CWE-89".to_string(),
                 severity: "critical".to_string(),
                 stages: vec![crate::TaintStage {
@@ -396,7 +414,7 @@ mod tests {
                     line: 1,
                     snippet: None,
                 }],
-            }));
+            }]);
         // The active session ran only an unrelated task — no taint-iris and no
         // threat-model — yet the persisted attack path must still pin to the
         // OUTPUT feed, since the views now persist across phases from app state.

@@ -50,7 +50,7 @@ fn shell_view_label(view: &ShellView) -> String {
 fn core_shell_view_label(view: &ShellView) -> Option<&'static str> {
     match view {
         ShellView::Home => Some("Home"),
-        ShellView::Catalog => Some("Catalog"),
+        ShellView::Catalog => Some("Capabilities"),
         ShellView::Recommend => Some("Recommend"),
         ShellView::Module => Some("Module"),
         ShellView::ModuleRun => Some("ModuleRun"),
@@ -279,10 +279,16 @@ fn selected_run(app: &ShellApp) -> Option<String> {
 }
 
 fn selected_revision(app: &ShellApp) -> Option<ScreenRevision> {
-    app.workbench_cache()
-        .borrow_mut()
-        .git_metadata(app.target())
-        .map(ScreenRevision::from)
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_git_metadata(app.target())
+    {
+        crate::app::ViewDataState::Ready(Some(git)) => Some(ScreenRevision::from(git)),
+        crate::app::ViewDataState::Ready(None)
+        | crate::app::ViewDataState::NotRequested
+        | crate::app::ViewDataState::Loading => None,
+    }
 }
 
 fn active_phase(app: &ShellApp) -> Option<String> {

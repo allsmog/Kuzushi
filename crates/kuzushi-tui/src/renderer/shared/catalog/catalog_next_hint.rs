@@ -15,7 +15,7 @@ pub(crate) fn catalog_module_row(
     let description_width = widths.get(1).copied().unwrap_or(24);
     if focused {
         return Line::from(vec![
-            Span::styled("▌ ", theme::accent()),
+            Span::styled("▸ ", theme::accent()),
             Span::styled(
                 format!(
                     "{}  {}",

@@ -110,7 +110,8 @@ pub(in crate::modules) fn run_verify_exploit(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    ctx.workspace
+    let workspace = ctx
+        .workspace
         .context(crate::workspace::active_workspace_required_message(
             "verify:exploit",
         ))?;
@@ -118,5 +119,10 @@ pub(in crate::modules) fn run_verify_exploit(
         .findings_store
         .context("verify:exploit requires a findings store for the active workspace")?;
 
-    crate::verification::adapters::run_verify_exploit_tool(input, store)
+    crate::verification::adapters::run_verify_exploit_tool_for_run(
+        input,
+        workspace.root(),
+        store,
+        ctx.run_id(),
+    )
 }

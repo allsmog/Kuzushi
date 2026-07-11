@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Read;
 
 pub(crate) fn build_url_record(module_id: &str, raw_source: &str) -> Result<AttachmentRecord> {
     let normalized = raw_source.trim();
@@ -27,8 +28,7 @@ pub(crate) fn build_path_record(
     raw_source: &str,
 ) -> Result<AttachmentRecord> {
     let source_path = resolve_safe_attachment_path(workspace, raw_source)?;
-    let bytes = fs::read(&source_path)
-        .with_context(|| format!("Could not read attachment {}", source_path.display()))?;
+    let (content_hash, byte_count) = attachment_fingerprint(&source_path)?;
     let relative = relative_workspace_path(workspace.root(), &source_path);
     Ok(AttachmentRecord {
         id: attachment_id(module_id, "path", &relative),
@@ -41,11 +41,33 @@ pub(crate) fn build_path_record(
             .unwrap_or(&relative)
             .to_string(),
         metadata_only: false,
-        content_hash: Some(fnv1a_hex(&bytes)),
-        byte_count: Some(bytes.len() as u64),
+        content_hash: Some(content_hash),
+        byte_count: Some(byte_count),
         status: "indexed metadata; content ready for local KB import".to_string(),
         updated_at_unix: now_unix(),
     })
+}
+
+fn attachment_fingerprint(path: &Path) -> Result<(String, u64)> {
+    let mut file = crate::bounded_file::open_regular_file(path)
+        .with_context(|| format!("Could not read attachment {}", path.display()))?;
+    let mut hash = 0xcbf29ce484222325_u64;
+    let mut byte_count = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .with_context(|| format!("Could not read attachment {}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        byte_count = byte_count.saturating_add(read as u64);
+        for byte in &buffer[..read] {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    Ok((format!("{hash:016x}"), byte_count))
 }
 
 pub(crate) fn resolve_safe_attachment_path(

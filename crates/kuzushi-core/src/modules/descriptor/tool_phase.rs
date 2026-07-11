@@ -94,10 +94,9 @@ impl ToolPhase {
     }
 }
 
-/// The single canonical mapping from a tool to its journey phase, transcribed
-/// from the TUI's former `tool_group_key`/`fallback_tool_group` tables. Every
-/// built-in tool is stamped with this at registration time so the descriptor
-/// itself carries the truth.
+/// Compatibility mapping for callers that need to classify an unregistered
+/// tool. Built-ins declare phase beside each descriptor and registration does
+/// not consult this helper.
 pub fn canonical_tool_phase(module_id: &str, kind: ModuleKind, tool_name: &str) -> ToolPhase {
     // Per-tool overrides for modules that legitimately span phases: a database
     // build is Map even though the module's scan is Hunt, and binary reversing
@@ -107,14 +106,17 @@ pub fn canonical_tool_phase(module_id: &str, kind: ModuleKind, tool_name: &str) 
         return phase;
     }
     match module_id {
-        "context" | "context-lite" | "recon" | "threat-model" | "workspace" | "x-ray"
-        | "entry-points" | "cpg" | "codeql-db" | "threat-intel" | "randori" | "ndiff" => {
+        "context" | "context-lite" | "module-recommender" | "recon" | "threat-model"
+        | "workspace" | "x-ray" | "entry-points" | "cpg" | "codeql-db" | "threat-intel"
+        | "randori" | "ndiff" => {
             ToolPhase::Map
         }
         "sast" | "semgrep" | "codeql" | "agentic-sast" | "taint-iris" | "taint-iris-next"
         | "secret-scan" | "iac-scan" | "cargo-audit" | "govulncheck" | "dep-hygiene"
         | "android-apk" | "chrome-rce" | "carlini-threat-hunt" | "uaf-hunt" | "exploit-chain"
-        | "systems-hunt" => ToolPhase::Hunt,
+        | "systems-hunt" | "sbom-scan" | "shinsa" | "vendor-assessment" | "pipeline" => {
+            ToolPhase::Hunt
+        }
         "findings" | "triage" | "verify" | "classifier-gate" | "deep-audit" | "threat-leads" => {
             ToolPhase::Confirm
         }

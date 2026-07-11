@@ -67,24 +67,35 @@ impl ShellApp {
     }
 
     pub(crate) fn clear_conversation(&mut self) -> Vec<ShellEffect> {
-        self.jobs_mut().cancel(JobKind::Agent);
-        self.jobs_mut().finish(JobKind::Agent);
+        let live_agent_was_canceled = self.jobs_mut().cancel(JobKind::Agent);
+        if live_agent_was_canceled {
+            let run = crate::app::ClearedAgentRun {
+                run_id: self.agent_chat().and_then(|agent| agent.run_id.clone()),
+                started_secs: self
+                    .agent_chat()
+                    .map(|agent| agent.started_secs)
+                    .unwrap_or_default(),
+                artifact_target: self.agent_artifact_target_owned(),
+            };
+            self.runtime_state.remember_cleared_agent_run(run);
+        } else {
+            self.runtime_state.clear_cleared_agent_run();
+            self.set_agent_cancel(None);
+        }
         self.clear_log();
         *self.selected_finding_mut() = None;
         self.clear_agent_chat();
-        self.set_agent_cancel(None);
         self.set_shell_view(ShellView::Catalog);
         self.log(
             "system",
             "Conversation cleared. Command history retained. Next: history or help",
         );
-        // The Agent slot is force-finished out-of-band above instead of via
-        // its normal terminal ShellEvent, so the centralized steer-queue
-        // drain in `apply_job_event` never runs for it (the worker's
-        // eventual terminal event arrives with a stale generation and is
-        // dropped by `JobHub::drain_one`). Drain here so a steer item queued
-        // while only an agent chat was running doesn't starve after `/clear`.
-        self.advance_steer_queue()
+        // Keep the canceled Agent slot occupied until its current generation
+        // emits a terminal event. Releasing it here would let queued work run
+        // concurrently with a non-cooperative worker that still has workspace
+        // side effects in flight. `apply_job_event` drains steer after the
+        // terminal event releases the slot.
+        Vec::new()
     }
 }
 

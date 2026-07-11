@@ -24,7 +24,7 @@
   "definitions": {
     "traceKind": {
       "type": "string",
-      "enum": ["tool", "reasoning", "tool-progress", "done", "refused"]
+      "enum": ["tool", "reasoning", "tool-progress", "done", "refused", "plan", "llm", "critic"]
     },
     "traceSeverity": {
       "type": "string",

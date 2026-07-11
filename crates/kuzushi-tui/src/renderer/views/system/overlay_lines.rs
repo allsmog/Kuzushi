@@ -58,6 +58,11 @@ fn contextual_overlay_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let width = area.width.saturating_sub(6).min(92);
     let body_area = Rect { width, ..area };
     let lines = match app.shell_view() {
+        ShellView::Catalog => viewport_lines(
+            catalog_lines(app, body_area),
+            area.height.saturating_sub(4),
+            app.router.modules().scroll(),
+        ),
         ShellView::ConfirmDialog => confirm_dialog_lines(app, body_area),
         ShellView::QuitConfirm => quit_confirm_lines(app, body_area),
         ShellView::ThemePicker => theme_picker_lines(app, body_area),
@@ -140,6 +145,7 @@ fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
 
 fn overlay_title(view: ShellView) -> &'static str {
     match view {
+        ShellView::Catalog => " CAPABILITIES ",
         ShellView::ConfirmDialog => " CONFIRM ",
         ShellView::QuitConfirm => " QUIT ",
         ShellView::ThemePicker => " THEME ",

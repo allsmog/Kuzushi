@@ -7,7 +7,7 @@ use super::review_state::{
 };
 use super::workspace::findings_db_relative_path;
 use super::{context_snapshot_state, SeverityCounts, SeverityTone};
-use crate::{ShellApp, VisibleFindingProjection, VisibleFindingsCacheKey};
+use crate::{ShellApp, ViewDataState, VisibleFindingProjection, VisibleFindingsCacheKey};
 use kuzushi_core::findings::{FindingSource, ReviewDecision};
 use kuzushi_core::{
     compare_findings_by_confidence, finding_next_action, finding_remediation_hint,
@@ -396,10 +396,12 @@ pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(Strin
 }
 
 /// Re-order the severity-major aliased pairs into confidence-first *display*
-/// order (`Confirmed` before `Unverified`, severity as the tie-break). Alias
-/// strings stay attached to their findings, so `F-0001` identity — and every
-/// export/CLI ordering keyed off `sorted_finding_alias_indices` — is unchanged;
-/// only the Workbench row/cursor order moves.
+/// order (`Confirmed` before `Unverified`, severity as the tie-break). The
+/// engagement projection preserves that order after duplicate folding;
+/// workflow groups remain row metadata only.
+/// Alias strings stay attached to their findings, so `F-0001` identity — and
+/// every export/CLI ordering keyed off `sorted_finding_alias_indices` — is
+/// unchanged; only the Workbench row/cursor order moves.
 fn confidence_first_display_order(
     app: &ShellApp,
     mut sorted: Vec<(String, usize)>,
@@ -494,7 +496,14 @@ fn cached_alias_for_fingerprint(app: &ShellApp, fingerprint: &str) -> Option<Str
 /// the list shows `crates/foo.rs:12` instead of a full `/Users/...` path. Shared
 /// with the Workbench SOURCE tree so both surfaces relativize identically.
 pub(crate) fn target_base(app: &ShellApp) -> Option<String> {
-    app.workbench_cache().borrow_mut().target_base(app.target())
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_target_base(app.target())
+    {
+        crate::app::ViewDataState::Ready(base) => Some(base),
+        crate::app::ViewDataState::NotRequested | crate::app::ViewDataState::Loading => None,
+    }
 }
 
 /// Strip the target prefix from a `path:line` location when present, leaving a
@@ -670,8 +679,11 @@ fn active_component_rel_path(app: &ShellApp) -> Option<String> {
     let target = app.target()?;
     let state = app
         .workbench_cache()
-        .borrow_mut()
-        .project_scope_tree(Some(target))?;
+        .borrow()
+        .cached_project_scope_tree(Some(target));
+    let ViewDataState::Ready(state) = state else {
+        return None;
+    };
     let tree = match &state {
         crate::app::ProjectScopeTreeState::Persisted(tree) => tree,
         crate::app::ProjectScopeTreeState::RootOnly
@@ -934,20 +946,14 @@ struct FindingRunProvenance {
 }
 
 fn run_summary_index(app: &ShellApp) -> BTreeMap<String, RunSummary> {
-    app.workbench_cache()
-        .borrow_mut()
-        .run_summary_index(app.target(), finding_scan_ids(app))
-}
-
-fn finding_scan_ids(app: &ShellApp) -> Vec<String> {
-    app.findings()
-        .iter()
-        .filter_map(|finding| finding.scan_id.as_deref())
-        .filter(|scan_id| !scan_id.is_empty())
-        .map(ToString::to_string)
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect()
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_run_summary_index(app.target())
+    {
+        ViewDataState::Ready(index) => index,
+        ViewDataState::NotRequested | ViewDataState::Loading => BTreeMap::new(),
+    }
 }
 
 fn finding_run_provenance(

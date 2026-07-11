@@ -11,9 +11,10 @@ pub(super) enum PageScrollKind {
 }
 
 pub(super) fn page_scroll_kind(view: &ShellView, catalog_expanded: bool) -> Option<PageScrollKind> {
-    if matches!(view, ShellView::Catalog) && catalog_expanded {
+    if matches!(view, ShellView::Catalog) {
         return Some(PageScrollKind::Modules);
     }
+    let _ = catalog_expanded;
     PAGE_SCROLL_KINDS
         .iter()
         .find_map(|(candidate, kind)| (candidate == view).then_some(*kind))

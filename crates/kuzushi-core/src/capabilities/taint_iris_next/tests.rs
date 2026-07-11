@@ -245,7 +245,11 @@ mod tests {
         fs::write(kuzushi.join("cpg.bin"), b"CPG\0stub").unwrap();
         let db = kuzushi.join("codeql-db");
         fs::create_dir_all(&db).unwrap();
-        fs::write(db.join("placeholder"), "stub").unwrap();
+        fs::write(
+            db.join("codeql-database.yml"),
+            "primaryLanguage: javascript\n",
+        )
+        .unwrap();
     }
 
     fn evidence_row(cwe: &str, evidence_level: &str) -> TaintIrisNextEvidence {
@@ -476,6 +480,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = run_taint_iris_next_report(
@@ -526,6 +532,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: Some(&trace),
+cancellation: None,
+authorization: Default::default(),
         };
 
         run_taint_iris_next_report(
@@ -570,6 +578,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = ModuleRegistry::with_v2_builtins()
@@ -606,6 +616,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = run_taint_iris_next_report(
@@ -693,6 +705,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let err = run_taint_iris_next_report(
@@ -938,6 +952,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = run_taint_iris_next_report(
@@ -1208,6 +1224,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let result = run_taint_iris_next_report(
             &json!({

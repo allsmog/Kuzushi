@@ -15,7 +15,10 @@ impl ShellApp {
     pub(crate) fn run_background_maintenance(&mut self) -> bool {
         self.reap_worker_handles()
             | self.cancel_timed_out_workers()
+            | self.apply_view_hydration_results()
             | self.apply_project_scope_discovery_results()
+            | self.apply_target_candidate_discovery_results()
+            | self.drain_idle_steer_queue()
     }
 
     pub(crate) fn drain_job_events(&mut self) -> bool {
@@ -125,6 +128,7 @@ impl ShellApp {
         if self.agent_chat().is_some_and(|agent| agent.running) {
             return;
         }
+        self.runtime_state.clear_cleared_agent_run();
         self.set_agent_cancel(None);
     }
 

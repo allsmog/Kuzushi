@@ -2,9 +2,10 @@
 
 A tmux driver that makes the 16 DevEx audit journeys in
 [docs/devex/tui-devex-audit-journeys.md](../../docs/devex/tui-devex-audit-journeys.md)
-repeatable: it launches the Kuzushi TUI in a controlled-size tmux session,
-feeds real keystrokes, and captures per-step pane snapshots (plain `.txt` +
-ANSI `.ansi`) for signifier↔state↔intent review.
+plus the updated-PDF phase reference (J17) repeatable. It launches the Kuzushi
+TUI in a controlled-size tmux session, feeds real keystrokes, and captures
+per-step pane snapshots (plain `.txt` + ANSI `.ansi`) for
+signifier↔state↔intent review.
 
 ## Run it
 
@@ -14,7 +15,7 @@ cargo build -p kuzushi-cli              # harness drives target/debug/kuzushi
 ./scripts/devex/run-journey.sh --list   # journey catalog
 ./scripts/devex/run-journey.sh J1       # one journey
 ./scripts/devex/run-journey.sh J1 J8    # several
-./scripts/devex/run-journey.sh all      # J1..J16
+./scripts/devex/run-journey.sh all      # J1..J17
 ./scripts/devex/run-journey.sh --size 80x24 J14   # environment-matrix cell
 ```
 
@@ -53,6 +54,11 @@ Three kinds of checkpoint, deliberately distinct:
   invariant) are emitted as open questions next to their snapshot. The
   harness never converts these into a verdict.
 - **SKIP** — missing required env (e.g. no API key). Reported, not hidden.
+
+Color-profile checks read the ANSI capture directly. J15 requires indexed
+SGR (`38;5` / `48;5`) for its xterm-256color launch and RGB SGR (`38;2` /
+`48;2`) for truecolor launches; inherited `NO_COLOR` is explicitly removed
+before each matrix cell.
 
 Exit code is non-zero iff any machine check failed.
 

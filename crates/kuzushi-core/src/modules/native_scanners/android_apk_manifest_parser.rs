@@ -2,7 +2,6 @@ use super::*;
 
 use quick_xml::events::Event;
 use quick_xml::Reader;
-use std::fs;
 use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
@@ -84,7 +83,7 @@ impl IntentFilter {
 }
 
 pub(in crate::modules) fn parse_manifest_file(path: &Path) -> Result<ParsedManifest> {
-    let bytes = fs::read(path)
+    let bytes = crate::bounded_file::read_regular_bytes(path, 16 * 1024 * 1024)
         .map_err(|error| anyhow::anyhow!("could not read {}: {error}", path.display()))?;
     parse_manifest_bytes(&bytes)
         .map_err(|error| anyhow::anyhow!("invalid XML in {}: {error}", path.display()))

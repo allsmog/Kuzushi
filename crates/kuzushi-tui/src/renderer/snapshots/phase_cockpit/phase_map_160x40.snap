@@ -1,0 +1,46 @@
+---
+source: Kuzushi TUI.pdf
+sha256: fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545
+phase: map
+size: 160x40
+---
+KUZUSHI · target ./phase-target · view map · ● LIVE · cost $0.37 · ctx:✓ built · model openai:gpt-5.4 · module context
+ 組  map ✓ · 崩  hunt ✓ · 作  confirm ● · 掛  fix ·
+ ▸ NEXT triage & verify — 6 of 6 findings need review
+ next map target · context build build context · attach <path> seed materials · ask ask about terrain · findings export report.sarif sarif export SARIF
+│MAP · RECON
+│ ● LIVE run hase-run · 42s · context:build
+│ ── RECON ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+│02:54:48.001  context:build  indexing bounded source roots · 19ms · $0.0100
+│02:54:48.002  context:build  reading workspace manifests · 20ms · $0.0100
+│02:54:48.003  context:build  indexed 3 source files · 21ms · $0.0100
+│02:54:48.004  context:build  identifying public entrypoints · 22ms · $0.0200
+│02:54:48.005  context:build  mapped external client · 23ms · $0.0100
+│02:54:48.006  context:build  mapped application API · 24ms · $0.0100
+│02:54:48.007  context:build  mapped orders data store · 25ms · $0.0100
+│02:54:48.008  context:build  recording edge trust boundary · 26ms · $0.0200
+│02:54:48.009  context:build  recording data trust boundary · 27ms · $0.0200
+│02:54:48.010  context:build  3 entrypoints · 2 trust zones · 28ms · $0.0100
+│ ── TELEMETRY ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+│coverage  ████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  1 / 2 tasks
+│budget    █████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  $0.37 / $2.00
+│tasks · active 1 · canceling 0 · failed 0 · blocked 0 · canceled 0 · skipped 0
+│artifacts · files 3 · dfd 3n/2f · findings 6 · chains 1
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+│
+mode:run · 作  confirm 3/4 · ⛭ 掛  fix · workbench · openai:gpt-5.4 · ⠋ context:build · 42s · 1/2                             6 findings / 1 crit / 2 high / 2 med
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Ctrl+C request abort   findings list   Esc back   history events
+NAVIGATION MODE — view keys active · Esc returns to prompt

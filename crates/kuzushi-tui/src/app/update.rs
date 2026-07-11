@@ -152,9 +152,34 @@ mod tests {
 
         assert!(result.changed);
         assert_eq!(result.effects.len(), 1);
-        assert!(matches!(result.effects[0], ShellEffect::PrepareScan(_)));
+        assert!(matches!(
+            result.effects[0],
+            ShellEffect::ActivateTarget(TargetActivation {
+                source: TargetActivationSource::ScriptedScan,
+                ..
+            })
+        ));
         assert!(app.scan().is_none());
         assert!(!app.jobs().is_running(JobKind::Run));
+    }
+
+    #[test]
+    fn targetless_scripted_scan_keeps_the_existing_prepare_path() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        let result = update(&mut app, Msg::Cmd(ShellCommand::ScriptedScan(None)));
+
+        assert!(result.changed);
+        assert!(matches!(
+            result.effects.as_slice(),
+            [ShellEffect::PrepareScan(ScanStartPreparation {
+                target: None,
+                ..
+            })]
+        ));
+        assert_eq!(app.target(), Some(workspace.root()));
     }
 
     #[test]
@@ -222,9 +247,11 @@ mod tests {
 
     #[test]
     fn update_terminal_pending_plan_accept_returns_effect_without_executing_it() {
+        let target = tempfile::tempdir().expect("agent target");
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-5.5".to_string());
         let mut app = ShellApp::new(config, None);
+        app.set_target(Some(target.path().to_path_buf()));
         app.set_pending_plan(PlanProposal {
             goal: "g".to_string(),
             summary: "s".to_string(),

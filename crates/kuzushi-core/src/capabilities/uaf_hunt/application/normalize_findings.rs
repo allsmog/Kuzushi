@@ -6,28 +6,32 @@ pub(crate) fn normalize_uaf_hunt_findings(
     raw: &Value,
     max_findings: usize,
 ) -> Result<Vec<Finding>> {
-    let array = raw
-        .get("findings")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let array = uaf_finding_items(raw)?;
     let mut findings = Vec::new();
     for item in array.iter().take(max_findings) {
-        if let Some(finding) = parse_one(item) {
-            findings.push(finding);
-        }
+        findings.push(parse_one(item)?);
     }
     Ok(findings)
 }
 
-fn parse_one(item: &Value) -> Option<Finding> {
-    let rule_id = read_required_str(item, &["ruleId", "rule_id"])?;
-    let file_path = read_required_str(item, &["filePath", "file_path", "file"])?;
+fn uaf_finding_items(raw: &Value) -> Result<&Vec<Value>> {
+    let Some(findings) = raw.get("findings") else {
+        anyhow::bail!("uaf-hunt output parse failed: object missing findings array");
+    };
+    let Some(items) = findings.as_array() else {
+        anyhow::bail!("uaf-hunt output parse failed: findings must be an array");
+    };
+    Ok(items)
+}
+
+fn parse_one(item: &Value) -> Result<Finding> {
+    let rule_id = required_finding_string(item, &["ruleId", "rule_id"], "ruleId")?;
+    let file_path = required_finding_string(item, &["filePath", "file_path", "file"], "filePath")?;
     let start_line = read_u64(item, &["startLine", "start_line", "line"]).unwrap_or(1) as u32;
     let end_line = read_u64(item, &["endLine", "end_line"]).map(|line| line as u32);
     let severity = read_severity(item);
     let full_message = full_message_with_trace(item);
-    Some(Finding::new_tool(
+    Ok(Finding::new_tool(
         "uaf-hunt",
         rule_id,
         file_path,
@@ -36,6 +40,11 @@ fn parse_one(item: &Value) -> Option<Finding> {
         severity,
         full_message,
     ))
+}
+
+fn required_finding_string<'a>(item: &'a Value, keys: &[&str], label: &str) -> Result<&'a str> {
+    read_required_str(item, keys)
+        .ok_or_else(|| anyhow::anyhow!("uaf-hunt finding missing required {label}"))
 }
 
 fn read_required_str<'a>(item: &'a Value, keys: &[&str]) -> Option<&'a str> {

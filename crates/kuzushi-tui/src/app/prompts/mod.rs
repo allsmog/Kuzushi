@@ -5,6 +5,7 @@ use self::{PromptsAction, ShellApp, TuneAction};
 use std::path::PathBuf;
 pub(crate) use tune_action_count::*;
 pub(crate) use unquote_tune_value::*;
+mod document;
 #[cfg(test)]
 mod tests;
 mod tune_action_count;

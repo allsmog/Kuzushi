@@ -50,25 +50,43 @@ fn findings_model_projects_counts_rows_and_selection() {
         model.reconciliation_header,
         "showing 2 of 2 · filters:all · review:all · sorted by priority"
     );
-    assert_eq!(model.rows[0].alias, "F-0001");
-    assert_eq!(model.rows[0].identity_label, "FI-01234567");
-    assert_eq!(model.rows[0].severity_label, "HIGH");
-    assert_eq!(model.rows[0].location, "src/search.ts:12-14");
-    assert_eq!(model.rows[0].run_label, "run:unknown");
-    assert_eq!(model.rows[0].revision_label, "rev:unknown");
-    assert_eq!(model.rows[0].verdict, "tp");
-    assert_eq!(model.rows[0].confidence, "91%");
-    assert_eq!(model.rows[0].priority_label, "p:1");
-    assert_eq!(model.rows[0].lifecycle_status, "candidate");
-    assert_eq!(model.rows[0].decision, "confirmed");
-    assert_eq!(model.rows[0].proof_label, "signal-only");
-    assert_eq!(model.rows[0].proof_marker, "?");
-    assert_eq!(model.rows[0].proof_tier, ProofTier::Suspected);
-    assert_eq!(model.rows[0].source, "semgrep:demo.sql");
-    assert!(model.rows[0].selected);
-    assert_eq!(model.rows[1].proof_label, "unverified");
-    assert_eq!(model.rows[1].proof_marker, "?");
-    assert_eq!(model.rows[1].proof_tier, ProofTier::Suspected);
+    assert_eq!(
+        model
+            .rows
+            .iter()
+            .map(|row| row.alias.as_str())
+            .collect::<Vec<_>>(),
+        vec!["F-0001", "F-0002"],
+        "finding rows keep the documented confidence-first projection"
+    );
+    let high = model
+        .rows
+        .iter()
+        .find(|row| row.alias == "F-0001")
+        .expect("confirmed high row");
+    assert_eq!(high.identity_label, "FI-01234567");
+    assert_eq!(high.severity_label, "HIGH");
+    assert_eq!(high.location, "src/search.ts:12-14");
+    assert_eq!(high.run_label, "run:unknown");
+    assert_eq!(high.revision_label, "rev:unknown");
+    assert_eq!(high.verdict, "tp");
+    assert_eq!(high.confidence, "91%");
+    assert_eq!(high.priority_label, "p:1");
+    assert_eq!(high.lifecycle_status, "candidate");
+    assert_eq!(high.decision, "confirmed");
+    assert_eq!(high.proof_label, "signal-only");
+    assert_eq!(high.proof_marker, "?");
+    assert_eq!(high.proof_tier, ProofTier::Suspected);
+    assert_eq!(high.source, "semgrep:demo.sql");
+    assert!(high.selected);
+    let medium = model
+        .rows
+        .iter()
+        .find(|row| row.alias == "F-0002")
+        .expect("needs-review medium row");
+    assert_eq!(medium.proof_label, "unverified");
+    assert_eq!(medium.proof_marker, "?");
+    assert_eq!(medium.proof_tier, ProofTier::Suspected);
     assert_eq!(model.preview.header, "FINDINGS · 1 triaged · 1 pending");
     assert_eq!(model.preview.rows.len(), 2);
     assert!(model.preview.overflow.is_none());
@@ -462,6 +480,7 @@ fn findings_model_filters_rows_to_active_component_scope() {
             "cli finding",
         ),
     ];
+    app.hydrate_all_view_data_for_test();
 
     let model = findings_model(&app);
 
@@ -493,6 +512,8 @@ fn finding_proof_label_prioritizes_runtime_and_static_evidence() {
         duration_ms: 12,
         cost_usd: 0.0,
         notes: vec![],
+        verification_run_id: None,
+        verified_scan_id: None,
         created_at: "2026-01-01T00:00:00Z".to_string(),
     });
     assert_eq!(finding_proof_label(&verified), "verified L4");
@@ -813,6 +834,8 @@ fn selected_finding_detail_recommends_patch_for_runtime_verified_findings() {
         duration_ms: 12,
         cost_usd: 0.0,
         notes: vec![],
+        verification_run_id: None,
+        verified_scan_id: None,
         created_at: "2026-01-01T00:00:00Z".to_string(),
     });
     *app.findings_mut() = vec![finding];

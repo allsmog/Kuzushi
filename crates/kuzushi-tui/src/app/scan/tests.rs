@@ -20,10 +20,9 @@ mod tests {
         let effects = app.reduce_scan_start(Some(temp.path().to_path_buf()), None);
         EffectRuntime::execute(&mut app, effects);
 
-        assert!(app
-            .log_lines()
-            .iter()
-            .any(|line| line.body.contains("scan already running")));
+        assert!(app.log_lines().iter().any(|line| {
+            line.body.contains("scan start blocked") && line.body.contains("then retry")
+        }));
     }
 
     #[test]
@@ -103,5 +102,52 @@ mod tests {
             .log_lines()
             .iter()
             .any(|line| line.prefix == "scan" && line.body.contains("scan .")));
+    }
+
+    #[test]
+    fn guided_scan_cannot_switch_target_while_tool_work_is_live() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(first.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let prior_view = app.shell_view();
+        app.set_running_tool_for_test("context:build");
+
+        let effects = app.open_guided_scan(Some(second.path().to_path_buf()));
+
+        assert!(effects.is_empty());
+        assert_eq!(app.target(), Some(workspace.root()));
+        assert_eq!(app.shell_view(), prior_view);
+        assert!(app.log_lines().iter().any(|line| {
+            line.prefix == "scan"
+                && line.body.contains("scan start blocked")
+                && line.body.contains("then retry")
+        }));
+    }
+
+    #[test]
+    fn prepared_scan_rechecks_all_live_job_slots_before_dispatch() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let effects = app.prepare_scan_start_effect(ScanStartPreparation {
+            target: Some(workspace.root().to_path_buf()),
+            explicit_input: None,
+        });
+        assert!(matches!(effects.as_slice(), [ShellEffect::StartScan(_)]));
+
+        let plan_ticket = app.jobs_mut().start(JobKind::Plan, "planner");
+        EffectRuntime::execute(&mut app, effects);
+
+        assert!(app.scan_is_none());
+        assert!(!app.jobs().is_running(JobKind::Run));
+        assert!(app.jobs().is_running(JobKind::Plan));
+        assert!(app
+            .log_lines()
+            .iter()
+            .any(|line| { line.prefix == "scan" && line.body.contains("scan start blocked") }));
+
+        app.jobs_mut().finish(JobKind::Plan);
+        plan_ticket.complete();
     }
 }

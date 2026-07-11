@@ -1,16 +1,28 @@
-use super::*;
+#[cfg(test)]
+use std::path::Path;
 
 /// Best-effort: read the suspect file and locate the enclosing function
 /// signature for the finding's `start_line`. Returns `None` when the
 /// file isn't readable or no signature is found within a small look-back
 /// window. Pure-text and language-agnostic — for joern/clang accuracy
 /// we'll route through `IndexFacade` in a future iteration.
+#[cfg(test)]
 pub(crate) fn extract_enclosing_function(
     file_path: &Path,
     start_line: u32,
 ) -> Option<EnclosingFunction> {
-    let raw = std::fs::read_to_string(file_path).ok()?;
+    let raw = crate::bounded_file::read_utf8_text(file_path, 8 * 1024 * 1024).ok()?;
+    extract_enclosing_function_from_source(&raw, start_line)
+}
+
+pub(crate) fn extract_enclosing_function_from_source(
+    raw: &str,
+    start_line: u32,
+) -> Option<EnclosingFunction> {
     let lines: Vec<&str> = raw.lines().collect();
+    if lines.is_empty() {
+        return None;
+    }
     let target_idx = (start_line.saturating_sub(1) as usize).min(lines.len().saturating_sub(1));
 
     // Look back up to 200 lines for a likely function signature. The

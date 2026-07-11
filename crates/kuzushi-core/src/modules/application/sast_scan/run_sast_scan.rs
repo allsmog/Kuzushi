@@ -1,4 +1,5 @@
 use super::*;
+use crate::WorkspaceTarget;
 
 pub(in crate::modules) fn run_sast_scan_with_registry(
     registry: &ModuleRegistry,
@@ -6,9 +7,49 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let (input, whitebox_static) = apply_whitebox_static_sast_policy(input)?;
+    let (mut input, whitebox_static) = apply_whitebox_static_sast_policy(input)?;
     let workspace = sast_workspace(ctx)?;
     let store = sast_store(ctx)?;
+    let primary_run_id = canonical_sast_run_id(&input, ctx);
+    set_canonical_sast_run_id(&mut input, &primary_run_id);
+    ensure_sast_run_started(registry, workspace, &primary_run_id, &input, ctx)?;
+    let result = run_started_sast_scan(
+        registry,
+        input,
+        ctx,
+        runtime,
+        workspace,
+        store,
+        primary_run_id.clone(),
+        whitebox_static,
+    );
+    match result {
+        Ok(output) => Ok(output),
+        Err(error) => {
+            let persistence = crate::run_artifacts::try_record_tool_run_failed(
+                crate::run_artifacts::ToolRunRecord::new(
+                    workspace.root(),
+                    &primary_run_id,
+                    "scan",
+                    "sast:scan",
+                ),
+                &error.to_string(),
+            );
+            Err(error_with_persistence(error, persistence))
+        }
+    }
+}
+
+fn run_started_sast_scan(
+    registry: &ModuleRegistry,
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    primary_run_id: String,
+    whitebox_static: Option<WhiteboxStaticPolicy>,
+) -> Result<Value> {
     let requests = SastScanRequests::from_input(&input)?;
     let options = sast_scan_options(&input, whitebox_static.is_some())?;
     let option_store = sast_subtool_options(ctx, workspace)?;
@@ -22,9 +63,9 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
         store,
         requests: &requests,
         options: &options,
+        primary_run_id: &primary_run_id,
         whitebox_static: whitebox_static.is_some(),
     })?;
-    let primary_run_id = executed.primary_run_id.clone();
     let findings_count = executed.findings_count;
     let (artifacts, result) = executed.into_result(workspace, whitebox_static.as_ref());
     let summary_artifact = write_sast_summary(workspace, &primary_run_id, &artifacts, &result)?;
@@ -32,10 +73,52 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
         workspace,
         &primary_run_id,
         findings_count,
+        &artifacts,
         summary_artifact,
         &result,
     )?;
     Ok(result)
+}
+
+fn canonical_sast_run_id(input: &Value, ctx: &ToolExecutionContext<'_>) -> String {
+    ctx.run_id()
+        .or_else(|| string_input_any(input, &["runId", "run_id"]))
+        .unwrap_or_else(|| crate::run_artifacts::new_run_id("scan"))
+}
+
+fn set_canonical_sast_run_id(input: &mut Value, run_id: &str) {
+    if let Value::Object(object) = input {
+        object.insert("runId".to_string(), json!(run_id));
+        object.remove("run_id");
+    }
+}
+
+fn ensure_sast_run_started(
+    registry: &ModuleRegistry,
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<()> {
+    if crate::run_artifacts::load_run_summary(workspace.root(), run_id).is_ok() {
+        return Ok(());
+    }
+    crate::run_artifacts::try_record_tool_run_started_with_reproducibility(
+        crate::run_artifacts::ToolRunRecord::new(workspace.root(), run_id, "scan", "sast:scan"),
+        input,
+        ctx.config.model.clone(),
+        crate::config::config_hash(ctx.config).ok(),
+        registry.loaded_module_specifiers(),
+    )
+}
+
+fn error_with_persistence(error: anyhow::Error, persistence: Result<()>) -> anyhow::Error {
+    match persistence {
+        Ok(()) => error,
+        Err(persistence) => anyhow::anyhow!(
+            "{error:#}; additionally, run artifact persistence failed: {persistence:#}"
+        ),
+    }
 }
 
 struct SastScanExecutionInput<'a> {
@@ -48,6 +131,7 @@ struct SastScanExecutionInput<'a> {
     store: &'a crate::findings::FindingStore,
     requests: &'a SastScanRequests,
     options: &'a ScanRunOptions,
+    primary_run_id: &'a str,
     whitebox_static: bool,
 }
 
@@ -132,15 +216,15 @@ struct ExecutedSastScan {
 }
 
 fn execute_sast_scan(input: SastScanExecutionInput<'_>) -> Result<ExecutedSastScan> {
-    let reports = input.reports()?;
-    let findings_count = reports.findings_count();
-    let primary_run_id = reports.primary_run_id()?;
-    let run_ids = reports.run_ids(primary_run_id.clone());
+    let primary_run_id = input.primary_run_id.to_string();
     let artifacts = SastRunArtifacts::create(input.workspace, &primary_run_id)?;
-    write_sast_scan_input(&artifacts, input.input)?;
+    write_sast_scan_input(input.workspace, &primary_run_id, &artifacts, input.input)?;
+    let reports = input.reports()?;
+    let run_ids = reports.run_ids(primary_run_id.clone());
     let whitebox_artifacts = input.whitebox_artifacts(&run_ids, &artifacts)?;
     let post_processing = input.post_processing(&run_ids, &artifacts)?;
     let core_findings = findings_for_sast_runs(input.store, &run_ids)?;
+    let findings_count = core_findings.len();
     let lines = input.output_lines(
         primary_run_id.as_str(),
         findings_count,
@@ -249,7 +333,16 @@ fn sast_scan_result(parts: SastScanResultParts<'_>) -> Value {
         .find(|line| !line.trim().is_empty())
         .unwrap_or("sast:scan completed")
         .to_string();
-    crate::module_result::completed_output_result(summary, output, sast_scan_data(parts))
+    let warnings = parts
+        .reports
+        .skipped_engines
+        .iter()
+        .map(|skipped| json!(skipped.warning))
+        .collect::<Vec<_>>();
+    let mut result =
+        crate::module_result::completed_output_result(summary, output, sast_scan_data(parts));
+    result["warnings"] = json!(warnings);
+    result
 }
 
 fn sast_scan_data(parts: SastScanResultParts<'_>) -> Value {
@@ -265,6 +358,7 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Value {
         "coreFindings": parts.core_findings,
         "db": parts.workspace.findings_db_path().display().to_string(),
         "engines": parts.reports.engine_ids.clone(),
+        "skippedEngines": parts.reports.skipped_engines.iter().map(|skipped| skipped.id).collect::<Vec<_>>(),
         "agentic": parts.reports.agentic.as_ref().map(|report| json!(report)),
         "carliniThreatHunt": parts.reports.carlini.as_ref().map(|report| json!(report)),
         "taintIrisNext": parts.reports.taint_iris_next.as_ref().map(|report| json!(report)),
@@ -324,6 +418,7 @@ fn tool_output_cost_usd(output: Option<&Value>) -> f64 {
 
 fn sast_run_ids_json(run_ids: SastRunIds) -> Value {
     json!({
+        "parent": run_ids.primary,
         "native": run_ids.native,
         "agentic": run_ids.agentic,
         "carlini": run_ids.carlini,
@@ -372,5 +467,6 @@ fn sast_artifacts_json(artifacts: &SastRunArtifacts, paths: WhiteboxArtifactPath
         "whiteboxDiff": paths.whitebox_diff,
         "triageJsonl": artifacts.triage_jsonl.display().to_string(),
         "verifyJsonl": artifacts.verify_jsonl.display().to_string(),
+        "patchJsonl": artifacts.patch_jsonl.display().to_string(),
     })
 }

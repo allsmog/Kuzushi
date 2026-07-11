@@ -1,5 +1,6 @@
 use super::artifact_manifest::record_run_artifact;
 use super::RunArtifact;
+use anyhow::Result;
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -8,24 +9,36 @@ pub(crate) fn record_output_declared_artifacts(
     target: &Path,
     run_id: &str,
     output: &Value,
-) -> Vec<RunArtifact> {
-    let mut seen = BTreeSet::new();
+    existing: &[RunArtifact],
+) -> Result<Vec<RunArtifact>> {
+    let mut seen = existing
+        .iter()
+        .map(|artifact| artifact.path.clone())
+        .collect::<BTreeSet<_>>();
     let mut recorded = Vec::new();
     for artifact in output_artifact_candidates(output) {
         if !seen.insert(artifact.path.clone()) {
             continue;
         }
-        if record_run_artifact(target, run_id, &artifact).is_ok() {
-            recorded.push(artifact);
-        }
+        record_run_artifact(target, run_id, &artifact).map_err(|error| {
+            anyhow::anyhow!(
+                "could not record declared artifact {} for run {run_id}: {error:#}",
+                artifact.path
+            )
+        })?;
+        recorded.push(artifact);
     }
-    recorded
+    Ok(recorded)
 }
 
 fn output_artifact_candidates(output: &Value) -> Vec<RunArtifact> {
     let mut artifacts = Vec::new();
     append_artifact_value(&mut artifacts, "artifact", output.get("artifacts"));
-    append_artifact_value(&mut artifacts, "artifact", output.pointer("/data/artifacts"));
+    append_artifact_value(
+        &mut artifacts,
+        "artifact",
+        output.pointer("/data/artifacts"),
+    );
     artifacts
 }
 
@@ -70,7 +83,11 @@ fn artifact_from_object(label: &str, object: &Map<String, Value>) -> Option<RunA
     artifact_from_path(label, path, kind)
 }
 
-pub(crate) fn artifact_from_path(label: &str, path: &str, kind: Option<&str>) -> Option<RunArtifact> {
+pub(crate) fn artifact_from_path(
+    label: &str,
+    path: &str,
+    kind: Option<&str>,
+) -> Option<RunArtifact> {
     RunArtifact::from_declared(label, path, kind)
 }
 

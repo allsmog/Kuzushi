@@ -34,6 +34,7 @@ fn prepare_systems_hunt_run<'a>(
 ) -> Result<SystemsHuntRun<'a>> {
     let target = systems_hunt_target(input, ctx)?;
     let options = SystemsHuntInput::from_tool_input(input)?;
+    artifact_root(&target, &options.artifact_dir)?;
     let parent_step = emit_systems_hunt_start(ctx, &target);
     emit_systems_hunt_progress(ctx, parent_step, "context · gather systems surfaces");
     let context = gather_systems_context(&target, &options)?;

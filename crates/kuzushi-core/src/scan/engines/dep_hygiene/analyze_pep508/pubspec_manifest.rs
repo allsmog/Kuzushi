@@ -16,11 +16,7 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_pubspec_yaml(
         .collect()
 }
 
-fn section_findings(
-    file_path: &Path,
-    value: &YamlValue,
-    section: &str,
-) -> Vec<DepHygieneFinding> {
+fn section_findings(file_path: &Path, value: &YamlValue, section: &str) -> Vec<DepHygieneFinding> {
     value
         .get(section)
         .and_then(YamlValue::as_mapping)
@@ -57,16 +53,21 @@ fn pubspec_finding(
             name,
             constraint,
             DepHygieneSeverity::Medium,
-            format!("{section}: floor-only range; add an upper bound to fix the supply-chain surface"),
+            format!(
+                "{section}: floor-only range; add an upper bound to fix the supply-chain surface"
+            ),
         ));
     }
     None
 }
 
 fn dependency_version(value: &YamlValue) -> Option<&str> {
-    value
-        .as_str()
-        .or_else(|| value.as_mapping()?.get(YamlValue::from("version"))?.as_str())
+    value.as_str().or_else(|| {
+        value
+            .as_mapping()?
+            .get(YamlValue::from("version"))?
+            .as_str()
+    })
 }
 
 fn is_floating_pubspec_constraint(constraint: &str) -> bool {

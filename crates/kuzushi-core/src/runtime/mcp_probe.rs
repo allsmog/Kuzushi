@@ -10,7 +10,7 @@
 //! by the shell's MCP-plan log line (kuzushi-tui).
 
 use crate::runtime::domain::McpAttachment;
-use crate::workspace::artifact_state;
+use crate::workspace::artifact_state_within;
 use std::path::Path;
 
 /// One row of [`MCP_ARTIFACT_TABLE`]. Static for simplicity — the set of
@@ -71,11 +71,36 @@ pub fn mcp_attachment_plan_for_target(target: &Path) -> Vec<McpAttachment> {
     }
     for spec in MCP_ARTIFACT_TABLE {
         let path = target.join(spec.artifact_relative_path);
-        if artifact_state(&path).is_cached() {
+        if mcp_artifact_is_ready(target, spec, &path) {
             plan.push(McpAttachment::new(spec.name, path.display().to_string()));
         }
     }
     plan
+}
+
+fn mcp_artifact_is_ready(target: &Path, spec: &McpArtifactSpec, path: &Path) -> bool {
+    match spec.name {
+        "codeql" => codeql_database_is_ready(target, path),
+        _ => artifact_state_within(target, path).is_cached(),
+    }
+}
+
+fn codeql_database_is_ready(target: &Path, path: &Path) -> bool {
+    if !artifact_state_within(target, path).is_cached() {
+        return false;
+    }
+    if artifact_state_within(target, &path.join("codeql-database.yml")).is_cached() {
+        return true;
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        entry
+            .file_type()
+            .is_ok_and(|kind| kind.is_dir() && !kind.is_symlink())
+            && artifact_state_within(target, &entry.path().join("codeql-database.yml")).is_cached()
+    })
 }
 
 /// True if `plan` contains an entry with the given server `name`.
@@ -128,9 +153,21 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let db = tmp.path().join(".kuzushi/codeql-db");
         std::fs::create_dir_all(&db).unwrap();
-        std::fs::write(db.join("placeholder"), "x").unwrap();
+        std::fs::write(db.join("codeql-database.yml"), "primaryLanguage: rust\n").unwrap();
         let plan = mcp_attachment_plan_for_target(tmp.path());
         assert!(plan_contains(&plan, "codeql"));
+    }
+
+    #[test]
+    fn non_database_directory_does_not_attach_codeql_server() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = tmp.path().join(".kuzushi/codeql-db");
+        std::fs::create_dir_all(&db).unwrap();
+        std::fs::write(db.join("placeholder"), "x").unwrap();
+
+        let plan = mcp_attachment_plan_for_target(tmp.path());
+
+        assert!(!plan_contains(&plan, "codeql"));
     }
 
     #[test]

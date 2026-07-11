@@ -26,11 +26,7 @@ pub(in crate::modules) fn write_whitebox_diff_scope_json(
             json!("whitebox-static PR mode uses only local git diff data; no remote git provider is required"),
         );
     }
-    fs::write(
-        &artifact_path,
-        format!("{}\n", serde_json::to_string_pretty(&report)?),
-    )
-    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    artifacts.write_json("whitebox-diff-scope.json", "whitebox diff scope", &report)?;
     Ok(report)
 }
 
@@ -77,9 +73,10 @@ pub(in crate::modules) fn write_triage_jsonl(
         .unwrap_or_default();
     if results.is_empty() {
         append_jsonl(
-            &artifacts.triage_jsonl,
+            artifacts,
+            SAST_TRIAGE_JSONL_FILE,
             json!({
-                "type": "triage:complete",
+                "type": sast_event_type("triage", triage_output),
                 "data": triage_output.get("data").cloned().unwrap_or(Value::Null),
             }),
         )?;
@@ -88,9 +85,10 @@ pub(in crate::modules) fn write_triage_jsonl(
 
     for result in results {
         append_jsonl(
-            &artifacts.triage_jsonl,
+            artifacts,
+            SAST_TRIAGE_JSONL_FILE,
             json!({
-                "type": "triage:complete",
+                "type": sast_event_type("triage", triage_output),
                 "fingerprint": result.get("fingerprint").cloned().unwrap_or(Value::Null),
                 "data": result,
             }),

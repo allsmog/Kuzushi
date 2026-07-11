@@ -2,14 +2,14 @@
 pub(crate) use super::run_tool_prepare::start_cli_tool_run_with_loaded_modules;
 use super::run_tool_prepare::{prepare_cli_tool_run, PreparedCliToolRun};
 use crate::tool_requirements::resolve_run_target;
-use crate::tool_run_artifacts::{fail_cli_tool_run, finish_cli_tool_run};
+use crate::tool_run_artifacts::finish_cli_tool_run;
 use anyhow::Result;
 use kuzushi_core::run_artifacts::{
     load_run_artifacts, load_run_summary, output_with_run_fallback_context,
 };
 use kuzushi_core::{
-    failed_tool_output, tool_wants_runtime, AgentRuntime, ToolExecutionContext, ToolOptionStore,
-    TraceHandle, WorkspaceTarget,
+    failed_tool_output, tool_result_status, AgentRuntime, ToolExecutionContext, ToolOptionStore,
+    ToolResultStatus, TraceHandle, WorkspaceTarget,
 };
 use kuzushi_openai::LangGraphRuntime;
 use std::path::{Path, PathBuf};
@@ -29,7 +29,7 @@ pub(crate) fn run_tool_command(
         Ok(run) => {
             let output = execute_cli_tool_run(&run)?;
             println!("{}", serde_json::to_string_pretty(&output)?);
-            fail_cli_on_failed_tool_output(&output)
+            fail_cli_on_failure_like_tool_output(&output)
         }
         // Prepare-stage failures (unknown tool, bad JSON, unknown option, missing
         // workspace) must emit the same machine-readable envelope as execution
@@ -68,8 +68,12 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
         Ok(runtime) => runtime,
         Err(error) => {
             let message = error.to_string();
-            fail_cli_tool_run_artifacts(run, &message);
-            return Ok(cli_failed_output_with_fallback_context(run, &message));
+            let output = cli_failed_tool_output(run, &message);
+            return Ok(cli_output_after_persistence(
+                run,
+                output,
+                fail_cli_tool_run_artifacts(run, &message),
+            ));
         }
     };
     let trace = cli_tool_trace(run);
@@ -79,21 +83,47 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
         workspace: run.workspace.as_ref(),
         findings_store: run.store.as_ref(),
         trace: trace.as_ref(),
+        cancellation: None,
+        authorization: Default::default(),
     };
-    let result = run.registry.dispatch_prepared_tool_with_runtime(
-        &run.tool,
-        run.input.clone(),
-        &ctx,
-        runtime_ref,
-    );
+    let result = run
+        .registry
+        .prepare_dispatch_input(&run.tool, run.input.clone(), &ctx, None)
+        .map(authorize_explicit_cli_tool)
+        .and_then(|prepared| {
+            run.registry
+                .dispatch_prepared_input_with_runtime(prepared, &ctx, runtime_ref)
+        });
     handle_cli_tool_result(run, result)
 }
 
+fn authorize_explicit_cli_tool(
+    prepared: kuzushi_core::PreparedToolInput,
+) -> kuzushi_core::PreparedToolInput {
+    let delegates_patch = prepared.tool_name() == "sast:scan"
+        && prepared
+            .value()
+            .get("autoPatch")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+    if delegates_patch {
+        return prepared.authorize_explicit_headless_with_delegated_tools(&["patch:finding"]);
+    }
+    prepared.authorize_explicit_headless()
+}
+
 fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<LangGraphRuntime>> {
-    if tool_wants_runtime(&run.tool, &run.input, &run.config) {
+    if run
+        .registry
+        .tool_wants_runtime(&run.tool, &run.input, &run.config)
+    {
         return Ok(Some(LangGraphRuntime::from_config(
             &run.config,
-            std::env::current_dir()?,
+            run.workspace
+                .as_ref()
+                .map(|workspace| workspace.root())
+                .unwrap_or(&run.artifact_target)
+                .to_path_buf(),
         )?));
     }
     Ok(None)
@@ -119,26 +149,70 @@ fn handle_cli_tool_result(
 ) -> Result<serde_json::Value> {
     match result {
         Ok(output) => {
-            finish_cli_tool_run_artifacts(run, &output);
-            Ok(cli_output_with_fallback_context(run, output))
+            let persistence = finish_cli_tool_run_artifacts(run, &output);
+            Ok(cli_output_after_persistence(run, output, persistence))
         }
         Err(error) => {
             let message = error.to_string();
-            fail_cli_tool_run_artifacts(run, &message);
-            Ok(cli_failed_output_with_fallback_context(run, &message))
+            let output = cli_failed_tool_output(run, &message);
+            Ok(cli_output_after_persistence(
+                run,
+                output,
+                fail_cli_tool_run_artifacts(run, &message),
+            ))
         }
     }
 }
 
-fn cli_failed_output_with_fallback_context(
+fn cli_output_after_persistence(
     run: &PreparedCliToolRun,
-    error: &str,
+    output: serde_json::Value,
+    persistence: Result<()>,
 ) -> serde_json::Value {
-    cli_output_with_fallback_context(run, cli_failed_tool_output(run, error))
+    match persistence {
+        Ok(()) => cli_output_with_fallback_context(run, output),
+        Err(error) => cli_persistence_failure_output(run, output, &error),
+    }
 }
 
 fn cli_failed_tool_output(run: &PreparedCliToolRun, error: &str) -> serde_json::Value {
     failed_tool_output(&run.tool, error, cli_run_artifacts(run))
+}
+
+fn cli_persistence_failure_output(
+    run: &PreparedCliToolRun,
+    original_output: serde_json::Value,
+    error: &anyhow::Error,
+) -> serde_json::Value {
+    let original_output = cli_output_with_fallback_context(run, original_output);
+    let persistence_error = format!("run artifact persistence failed: {error}");
+    let artifacts = original_output
+        .get("artifacts")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let mut output = failed_tool_output(&run.tool, &persistence_error, artifacts);
+    output["summary"] = serde_json::json!(format!("{} result could not be persisted", run.tool));
+    output["errors"] = serde_json::json!(persistence_errors(&persistence_error, &original_output));
+    output["data"] = serde_json::json!({
+        "artifactPersistenceError": persistence_error,
+        "originalResult": original_output,
+    });
+    output_with_run_fallback_context(&run.artifact_target, &run.run_id, output)
+}
+
+fn persistence_errors(persistence_error: &str, original_output: &serde_json::Value) -> Vec<String> {
+    let mut errors = vec![persistence_error.to_string()];
+    errors.extend(
+        original_output
+            .get("errors")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .filter(|error| *error != persistence_error)
+            .map(ToString::to_string),
+    );
+    errors
 }
 
 fn cli_run_artifacts(run: &PreparedCliToolRun) -> serde_json::Value {
@@ -181,30 +255,42 @@ fn output_has_artifacts(object: &serde_json::Map<String, serde_json::Value>) -> 
     }
 }
 
-fn fail_cli_on_failed_tool_output(output: &serde_json::Value) -> Result<()> {
-    if output.get("status").and_then(serde_json::Value::as_str) != Some("failed") {
-        return Ok(());
+fn fail_cli_on_failure_like_tool_output(output: &serde_json::Value) -> Result<()> {
+    let status = tool_result_status(output);
+    if status.is_failure_like() {
+        anyhow::bail!("{}", cli_failure_like_tool_message(output, status));
     }
-    anyhow::bail!("{}", cli_failed_tool_message(output));
+    Ok(())
 }
 
-fn cli_failed_tool_message(output: &serde_json::Value) -> String {
+fn cli_failure_like_tool_message(output: &serde_json::Value, status: ToolResultStatus) -> String {
     output
         .get("errors")
         .and_then(serde_json::Value::as_array)
         .and_then(|errors| errors.first())
         .and_then(serde_json::Value::as_str)
         .or_else(|| output.get("summary").and_then(serde_json::Value::as_str))
-        .unwrap_or("tool returned status=failed")
+        .unwrap_or(match status {
+            ToolResultStatus::Partial => "tool returned status=partial",
+            _ => "tool returned status=failed",
+        })
         .to_string()
 }
 
-fn finish_cli_tool_run_artifacts(run: &PreparedCliToolRun, output: &serde_json::Value) {
-    finish_cli_tool_run(&run.artifact_target, &run.run_id, &run.tool, output);
+fn finish_cli_tool_run_artifacts(
+    run: &PreparedCliToolRun,
+    output: &serde_json::Value,
+) -> Result<()> {
+    finish_cli_tool_run(&run.artifact_target, &run.run_id, &run.tool, output)
 }
 
-fn fail_cli_tool_run_artifacts(run: &PreparedCliToolRun, error: &str) {
-    fail_cli_tool_run(&run.artifact_target, &run.run_id, &run.tool, error);
+fn fail_cli_tool_run_artifacts(run: &PreparedCliToolRun, error: &str) -> Result<()> {
+    crate::tool_run_artifacts::try_fail_cli_tool_run(
+        &run.artifact_target,
+        &run.run_id,
+        &run.tool,
+        error,
+    )
 }
 
 pub(crate) fn run_option_store(
@@ -247,4 +333,56 @@ pub(crate) fn parse_option_override(raw: &str) -> Result<(String, String)> {
         anyhow::bail!("--option key must not be empty");
     }
     Ok((name.to_string(), value.trim().to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        fail_cli_on_failure_like_tool_output, handle_cli_tool_result, prepare_cli_tool_run,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn cli_exit_semantics_follow_the_canonical_tool_result_status() {
+        assert!(fail_cli_on_failure_like_tool_output(&json!({"status": "completed"})).is_ok());
+        assert!(fail_cli_on_failure_like_tool_output(&json!({"status": "skipped"})).is_ok());
+        assert!(fail_cli_on_failure_like_tool_output(&json!({"status": "partial"})).is_err());
+        assert!(fail_cli_on_failure_like_tool_output(&json!({"ok": false})).is_err());
+    }
+
+    #[test]
+    fn persistence_failure_becomes_a_machine_readable_failed_output() {
+        let target = tempfile::tempdir().unwrap();
+        let run = prepare_cli_tool_run(
+            "workspace:status".to_string(),
+            "{}".to_string(),
+            Vec::new(),
+            None,
+            Some(target.path().to_path_buf()),
+            Vec::new(),
+        )
+        .unwrap();
+        let run_dir = kuzushi_core::run_dir(target.path(), &run.run_id);
+        std::fs::remove_dir_all(&run_dir).unwrap();
+        std::fs::write(&run_dir, "not a directory").unwrap();
+
+        let output = handle_cli_tool_result(
+            &run,
+            Ok(json!({
+                "ok": true,
+                "status": "completed",
+                "summary": "workspace ready",
+                "artifacts": [],
+            })),
+        )
+        .unwrap();
+
+        assert_eq!(output["status"], "failed");
+        assert_eq!(output["ok"], false);
+        assert_eq!(output["data"]["originalResult"]["status"], "completed");
+        assert!(output["data"]["artifactPersistenceError"]
+            .as_str()
+            .is_some_and(|error| error.contains("persistence failed")));
+        assert!(fail_cli_on_failure_like_tool_output(&output).is_err());
+    }
 }

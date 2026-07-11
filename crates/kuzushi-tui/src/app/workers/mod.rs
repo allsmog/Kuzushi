@@ -6,9 +6,8 @@ use anyhow::{Context, Result};
 pub(crate) use background_tool_worker::*;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
-    tool_needs_finding_store, tool_needs_runtime, tool_uses_agent_runtime, tool_wants_runtime,
-    AgentQueryRequest, AgentRuntime, FindingStore, ModuleRegistry, ScanCancellation, TraceHandle,
-    V2Config, WorkspaceTarget,
+    tool_uses_agent_runtime, AgentQueryRequest, AgentRuntime, ExecutionAuthorization, FindingStore,
+    ModuleRegistry, ScanCancellation, TraceHandle, V2Config, WorkspaceTarget,
 };
 use kuzushi_openai::LangGraphRuntime;
 pub(crate) use live_trace::*;

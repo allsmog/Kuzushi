@@ -3,12 +3,7 @@ use super::*;
 impl FindingStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Could not create {}", parent.display()))?;
-        }
-        let conn =
-            Connection::open(path).with_context(|| format!("Could not open {}", path.display()))?;
+        let conn = crate::sqlite_connection::open_file(path)?;
         let store = Self {
             conn,
             db_path: Some(path.to_path_buf()),
@@ -24,7 +19,9 @@ impl FindingStore {
         // v3 store so writes still flow through the event log and writer actor.
         let ephemeral_dir =
             tempfile::tempdir().context("Could not create ephemeral findings DB")?;
-        let path = ephemeral_dir.path().join("findings.sqlite3");
+        let canonical_dir = std::fs::canonicalize(ephemeral_dir.path())
+            .context("Could not canonicalize ephemeral findings DB directory")?;
+        let path = canonical_dir.join("findings.sqlite3");
         let store = Self {
             conn: Connection::open(&path)
                 .with_context(|| format!("Could not open {}", path.display()))?,

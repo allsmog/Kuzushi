@@ -1,4 +1,6 @@
 use super::*;
+use anyhow::Context;
+use std::path::Path;
 
 impl ShellApp {
     pub(crate) fn reduce_prompt_set(&mut self, args: &str) -> Vec<ShellEffect> {
@@ -23,56 +25,43 @@ impl ShellApp {
     }
 
     pub(crate) fn write_prompt_override_effect(&mut self, write: PromptOverrideWrite) {
-        if !self.prepare_prompt_set_path(&write.path) {
+        let Some(target) = self.target_path_buf().cloned() else {
+            self.log("error", "could not write prompt override without a target");
             return;
-        }
-        match std::fs::write(&write.path, &write.value) {
-            Ok(_) => self.log(
-                "prompt",
-                format!(
-                    "wrote {} ({} bytes)",
-                    write.path.display(),
-                    write.value.len()
-                ),
-            ),
-            Err(error) => self.log(
-                "error",
-                format!("could not write {}: {error}", write.path.display()),
-            ),
-        }
-    }
-
-    fn prepare_prompt_set_path(&mut self, path: &std::path::Path) -> bool {
-        if !self.ensure_prompt_set_parent(path) {
-            return false;
-        }
-        match prompt_set_path_state(path) {
-            PromptSetPathState::FileOrMissing => true,
-            PromptSetPathState::Unreadable => {
+        };
+        match write_prompt_override(&target, &write) {
+            Ok(_) => {
+                self.finish_prompt_document_write(&write.path, &write.value);
                 self.log(
                     "prompt",
-                    format!("could not set unreadable override at {}", path.display()),
+                    format!(
+                        "wrote {} ({} bytes)",
+                        write.path.display(),
+                        write.value.len()
+                    ),
                 );
-                false
             }
+            Err(error) => self.log(
+                "prompt",
+                format!(
+                    "could not set override at {}: {error}",
+                    write.path.display()
+                ),
+            ),
         }
     }
+}
 
-    fn ensure_prompt_set_parent(&mut self, path: &std::path::Path) -> bool {
-        let Some(parent) = path.parent() else {
-            return true;
-        };
-        match std::fs::create_dir_all(parent) {
-            Ok(_) => true,
-            Err(error) => {
-                self.log(
-                    "error",
-                    format!("could not create {}: {error}", parent.display()),
-                );
-                false
-            }
-        }
-    }
+fn write_prompt_override(target: &Path, write: &PromptOverrideWrite) -> anyhow::Result<()> {
+    let relative = write.path.strip_prefix(target).with_context(|| {
+        format!(
+            "prompt override {} is outside the target",
+            write.path.display()
+        )
+    })?;
+    kuzushi_core::workspace::read_optional_workspace_text(target, &write.path, 1024 * 1024)?;
+    kuzushi_core::workspace::write_workspace_state_file(target, relative, write.value.as_bytes())
+        .map(|_| ())
 }
 
 fn prompt_set_args(args: &str) -> Option<(&str, &str)> {
@@ -90,20 +79,4 @@ fn unquote_prompt_set_value(value: &str) -> &str {
         .strip_prefix('"')
         .and_then(|stripped| stripped.strip_suffix('"'))
         .unwrap_or(value)
-}
-
-enum PromptSetPathState {
-    FileOrMissing,
-    Unreadable,
-}
-
-fn prompt_set_path_state(path: &std::path::Path) -> PromptSetPathState {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => PromptSetPathState::FileOrMissing,
-        Ok(_) => PromptSetPathState::Unreadable,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            PromptSetPathState::FileOrMissing
-        }
-        Err(_) => PromptSetPathState::Unreadable,
-    }
 }

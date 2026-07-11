@@ -11,6 +11,7 @@ pub(crate) use catalog::*;
 pub(crate) use command_palette::*;
 pub(crate) use command_router::*;
 pub(crate) use ctrl_c_arm_window::*;
+pub(crate) use devex_phase_fixture::*;
 pub(crate) use domain_cache::*;
 pub(crate) use editor_state::*;
 pub(crate) use effect_runtime::*;
@@ -41,11 +42,13 @@ pub(crate) use shell_lifecycle::{auth_ready_for_provider, *};
 pub(crate) use shellapp::*;
 pub(crate) use steer_queue::*;
 pub(crate) use strategy::*;
+pub(crate) use target_candidate_discovery::*;
 pub(crate) use threats::*;
 pub(crate) use tool_run_state::*;
 pub(crate) use tool_runner::*;
 pub(crate) use ui_prefs::*;
 pub(crate) use update::*;
+pub(crate) use view_hydration::*;
 pub use view_state::*;
 pub(crate) use with_next_step::*;
 pub(crate) use workers::*;
@@ -87,15 +90,25 @@ use self::workspace_context::{default_context_snapshot_view, default_workspace_v
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::modules::ModuleKind;
 use kuzushi_core::{
-    AgenticSastReport, CarliniThreatHuntReport, Finding, ModuleRegistry, RunTraceStep,
-    ScanCancellation, ScanProgress, ToolOptionStore, V2Config, WorkspaceTarget,
+    AgenticSastReport, CarliniThreatHuntReport, ExecutionAuthorization, Finding, ModuleRegistry,
+    RunTraceStep, ScanCancellation, ScanProgress, ToolOptionStore, V2Config, WorkspaceTarget,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+#[cfg(test)]
+static DEMO_FIXTURE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+fn demo_fixture_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    DEMO_FIXTURE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 mod onboarding;
 mod prompts;
-mod reducers;
 mod run_reference;
 mod runtime;
 mod runtime_state;
@@ -106,21 +119,23 @@ mod services;
 mod session;
 mod session_state;
 mod settings;
-mod state;
 pub(crate) mod state_transitions;
 mod steer_queue;
 mod strategy;
+mod target_candidate_discovery;
 mod task_durations;
 mod threats;
 mod tool_run_state;
 mod tool_runner;
 mod ui_prefs;
 mod update;
+mod view_hydration;
 mod view_state;
 mod workers;
 mod workspace_context;
 
 mod ctrl_c_arm_window;
+mod devex_phase_fixture;
 mod domain_cache;
 mod shell_lifecycle;
 mod shellapp;
@@ -134,6 +149,7 @@ pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
 pub use live_activity::{LiveActivity, LiveActivityPhase};
 pub use log::LogLine;
 pub(crate) use log::{LogState, LOG_LINE_CAPACITY};
+pub(crate) use onboarding::immediate_target_candidate;
 pub(crate) use onboarding::PlanningRunStep;
 pub use onboarding::{
     applicable_tasks_for_phase, artifact_state as planning_artifact_state, auth_method_row_kinds,
@@ -169,10 +185,10 @@ pub use view_state::{
     HelpScreenFooter, HelpScreenSnapshot, HelpScreenStatus, HistorySearch, InputMode,
     InterruptionView, KnowledgeBaseView, Notice, NoticeSeverity, OptionsFilter,
     OptionsScreenFooter, OptionsScreenSnapshot, OptionsScreenStatus, OptionsView, PaneFocus,
-    PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot, RecordedTraceEvent,
-    SastTasksFooter, SastTasksSnapshot, SastTasksStatus, ScanPanelState, ShellView,
-    SubsystemAggregate, ThreatPatch, ThreatView, ThrottleAdvisory, TuneAction, WorkbenchPage,
-    WorkbenchPane, WorkbenchPaneScroll, WorkspaceView,
+    PlanChange, PlanProposal, PromptDocumentMode, PromptDocumentState, PromptsAction, PwnView,
+    ReconSnapshot, RecordedTraceEvent, SastTasksFooter, SastTasksSnapshot, SastTasksStatus,
+    ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView, ThrottleAdvisory,
+    TuneAction, WorkbenchPage, WorkbenchPane, WorkbenchPaneScroll, WorkspaceView,
 };
 pub use view_state::{
     BoundedScroll, DrawerTab, FindingPane, NavBounds, NavEffect, WorkbenchDepth, WorkbenchNav,

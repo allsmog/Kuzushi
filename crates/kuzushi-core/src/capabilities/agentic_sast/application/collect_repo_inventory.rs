@@ -1,4 +1,5 @@
 use super::*;
+use crate::bounded_file::read_source_text_prefix;
 
 pub(crate) fn collect_agentic_repo_inventory(
     root: &Path,
@@ -40,52 +41,98 @@ pub(crate) fn collect_agentic_repo_inventory_inner(
     if files.len() >= max_files {
         return Ok(());
     }
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return Ok(());
-    };
-    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.path());
-    for entry in entries {
+    for entry in sorted_readable_entries(dir) {
         if files.len() >= max_files {
             break;
         }
-        let path = entry.path();
-        let file_name = entry.file_name();
-        if should_skip_path(&file_name.to_string_lossy()) {
-            continue;
-        }
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_dir() {
-            collect_agentic_repo_inventory_inner(
-                root,
-                &path,
-                max_files,
-                max_bytes_per_file,
-                include_patterns,
-                exclude_patterns,
-                files,
-            )?;
-        } else if file_type.is_file() && is_agentic_context_file(&path) {
-            let relative = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .display()
-                .to_string();
-            if !agentic_path_allowed(&relative, include_patterns, exclude_patterns) {
-                continue;
-            }
-            let raw = fs::read(&path).unwrap_or_default();
-            if raw.iter().take(4096).any(|byte| *byte == 0) {
-                continue;
-            }
-            let snippet =
-                String::from_utf8_lossy(&raw[..raw.len().min(max_bytes_per_file)]).to_string();
-            files.push((relative, snippet));
-        }
+        collect_agentic_entry(
+            root,
+            entry,
+            max_files,
+            max_bytes_per_file,
+            include_patterns,
+            exclude_patterns,
+            files,
+        )?;
     }
     Ok(())
+}
+
+fn sorted_readable_entries(dir: &Path) -> Vec<fs::DirEntry> {
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.path());
+    entries
+}
+
+fn collect_agentic_entry(
+    root: &Path,
+    entry: fs::DirEntry,
+    max_files: usize,
+    max_bytes_per_file: usize,
+    include_patterns: &[String],
+    exclude_patterns: &[String],
+    files: &mut Vec<(String, String)>,
+) -> Result<()> {
+    let Some((path, file_type)) = visible_agentic_entry(&entry) else {
+        return Ok(());
+    };
+    if file_type.is_dir() {
+        return collect_agentic_repo_inventory_inner(
+            root,
+            &path,
+            max_files,
+            max_bytes_per_file,
+            include_patterns,
+            exclude_patterns,
+            files,
+        );
+    }
+    if let Some(item) = agentic_inventory_file(
+        root,
+        &path,
+        file_type.is_file(),
+        max_bytes_per_file,
+        include_patterns,
+        exclude_patterns,
+    ) {
+        files.push(item);
+    }
+    Ok(())
+}
+
+fn visible_agentic_entry(entry: &fs::DirEntry) -> Option<(PathBuf, fs::FileType)> {
+    if should_skip_path(&entry.file_name().to_string_lossy()) {
+        return None;
+    }
+    Some((entry.path(), entry.file_type().ok()?))
+}
+
+fn agentic_inventory_file(
+    root: &Path,
+    path: &Path,
+    is_file: bool,
+    max_bytes_per_file: usize,
+    include_patterns: &[String],
+    exclude_patterns: &[String],
+) -> Option<(String, String)> {
+    if !is_file || !is_agentic_context_file(path) {
+        return None;
+    }
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string();
+    if !agentic_path_allowed(&relative, include_patterns, exclude_patterns) {
+        return None;
+    }
+    let snippet = read_source_text_prefix(path, max_bytes_per_file)
+        .ok()
+        .flatten()?;
+    Some((relative, snippet))
 }
 
 pub(crate) fn agentic_path_allowed(

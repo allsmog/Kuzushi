@@ -24,15 +24,18 @@ pub struct IgnoreCommentScan {
 /// IO is bounded to files that already have findings: one read per distinct
 /// path, cached for the call.
 pub fn scan_ignore_comments(workspace_root: &Path, findings: &[Finding]) -> IgnoreCommentScan {
-    let mut cache: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut cache: BTreeMap<String, Result<Vec<String>, String>> = BTreeMap::new();
     let mut rules = Vec::new();
     let mut malformed = Vec::new();
     for finding in findings {
         if finding.file_path.is_empty() || finding.start_line == 0 {
             continue;
         }
-        let lines = file_lines(workspace_root, &finding.file_path, &mut cache);
-        scan_finding(finding, lines, &mut rules, &mut malformed);
+        match file_lines(workspace_root, &finding.file_path, &mut cache) {
+            Ok(lines) => scan_finding(finding, lines, &mut rules, &mut malformed),
+            Err(message) if !malformed.contains(message) => malformed.push(message.clone()),
+            Err(_) => {}
+        }
     }
     IgnoreCommentScan { rules, malformed }
 }
@@ -40,19 +43,18 @@ pub fn scan_ignore_comments(workspace_root: &Path, findings: &[Finding]) -> Igno
 fn file_lines<'a>(
     root: &Path,
     relative: &str,
-    cache: &'a mut BTreeMap<String, Vec<String>>,
-) -> &'a [String] {
+    cache: &'a mut BTreeMap<String, Result<Vec<String>, String>>,
+) -> &'a Result<Vec<String>, String> {
     cache
         .entry(relative.to_string())
         .or_insert_with(|| read_lines(root, relative))
 }
 
-fn read_lines(root: &Path, relative: &str) -> Vec<String> {
+fn read_lines(root: &Path, relative: &str) -> Result<Vec<String>, String> {
     let path = root.join(relative);
-    match std::fs::read_to_string(&path) {
-        Ok(body) => body.lines().map(str::to_string).collect(),
-        Err(_) => Vec::new(),
-    }
+    crate::bounded_file::read_utf8_text_within(root, &path, 16 * 1024 * 1024)
+        .map(|body| body.lines().map(str::to_string).collect())
+        .map_err(|error| format!("{relative}: could not inspect kuzushi-ignore markers: {error}"))
 }
 
 fn scan_finding(
@@ -258,5 +260,31 @@ mod tests {
         scan_finding(&finding, &lines, &mut rules, &mut malformed);
         assert!(rules.is_empty());
         assert!(malformed.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_rejects_symlinked_source_without_reading_outside_text() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            outside.path(),
+            "// kuzushi-ignore: * — false-positive : outside secret\ncode();\n",
+        )
+        .unwrap();
+        std::fs::create_dir(workspace.path().join("src")).unwrap();
+        symlink(outside.path(), workspace.path().join("src/app.rs")).unwrap();
+
+        let scan = scan_ignore_comments(
+            workspace.path(),
+            &[finding_at("fp1", "rust.sqli", 2)],
+        );
+
+        assert!(scan.rules.is_empty());
+        assert_eq!(scan.malformed.len(), 1);
+        assert!(scan.malformed[0].contains("could not inspect"));
+        assert!(!scan.malformed[0].contains("outside secret"));
     }
 }

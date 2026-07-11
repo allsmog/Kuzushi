@@ -47,6 +47,7 @@ impl EffectRuntime {
                 | ShellEffect::FireNextApprovedStrategy(_)
                 | ShellEffect::OpenFinding(_)
                 | ShellEffect::OpenGuidedScan(_)
+                | ShellEffect::RecordScanRun(_)
                 | ShellEffect::RecordReviewDecision(_)
                 | ShellEffect::RecordSuppression(_)
                 | ShellEffect::RecordStrategyCorrection(_)
@@ -79,6 +80,7 @@ impl EffectRuntime {
             }
             ShellEffect::OpenFinding(open) => app.resolve_open_finding_effect(open),
             ShellEffect::OpenGuidedScan(open) => app.open_guided_scan(open.target),
+            ShellEffect::RecordScanRun(record) => app.record_scan_run_effect(record),
             remaining => Self::execute_remaining_chained_effect(app, remaining),
         }
     }
@@ -140,7 +142,8 @@ impl EffectRuntime {
             | ShellEffect::ShowPromptOverride(_)
             | ShellEffect::UpdatePromptMutationStatus(_)
             | ShellEffect::WriteHouseRules(_)
-            | ShellEffect::WritePromptOverride(_)) => Self::execute_content_effect(app, effect),
+            | ShellEffect::WritePromptOverride(_)
+            | ShellEffect::OpenPromptDocument(_)) => Self::execute_content_effect(app, effect),
             other => Self::execute_shell_effect(app, other),
         }
     }
@@ -192,6 +195,7 @@ impl EffectRuntime {
         match effect {
             ShellEffect::DiffPromptOverride(diff) => app.diff_prompt_override_effect(diff),
             ShellEffect::EditPromptOverride(edit) => app.edit_prompt_override_effect(edit),
+            ShellEffect::OpenPromptDocument(open) => app.open_prompt_document_effect(open),
             ShellEffect::ListPromptOverrides(list) => app.list_prompt_overrides_effect(list),
             ShellEffect::RecordPromptMutation(record) => app.record_prompt_mutation_effect(record),
             ShellEffect::RefreshHouseRules(refresh) => app.refresh_house_rules_effect(refresh),
@@ -224,7 +228,6 @@ impl EffectRuntime {
             | ShellEffect::PersistPlanningOptionOverride(_)
             | ShellEffect::PersistOptions(_)
             | ShellEffect::RecordAgentRun(_)
-            | ShellEffect::RecordScanRun(_)
             | ShellEffect::RecordScanStageTrace(_)
             | ShellEffect::RecordToolRun(_)) => Self::execute_persistence_effect(app, effect),
             ShellEffect::ResumeSession(resume) => app.resume_session_effect(resume),
@@ -317,7 +320,6 @@ impl EffectRuntime {
         match effect {
             ShellEffect::PersistCommandHistory => app.persist_command_history(),
             ShellEffect::RecordAgentRun(record) => app.record_agent_run_effect(record),
-            ShellEffect::RecordScanRun(record) => app.record_scan_run_effect(record),
             ShellEffect::RecordScanStageTrace(record) => app.record_scan_stage_trace_effect(record),
             ShellEffect::RecordToolRun(record) => app.record_tool_run_effect(record),
             ShellEffect::PersistGlobalModelSelection(selection) => {

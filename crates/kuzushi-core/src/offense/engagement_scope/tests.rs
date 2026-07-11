@@ -4,7 +4,10 @@ fn authorized_scope(in_scope: &[&str]) -> EngagementScope {
     EngagementScope {
         authorized: true,
         authorization_ref: "HTB:lab".to_string(),
-        in_scope: in_scope.iter().map(|raw| ScopeEntry::parse(raw).unwrap()).collect(),
+        in_scope: in_scope
+            .iter()
+            .map(|raw| ScopeEntry::parse(raw).unwrap())
+            .collect(),
         ..Default::default()
     }
 }
@@ -18,7 +21,10 @@ fn default_scope_denies_everything() {
     let scope = EngagementScope::default();
     let decision = decide(&scope, "10.0.0.5");
     assert!(!decision.is_allowed());
-    assert_eq!(decision.reason(), Some("engagement scope is not marked authorized"));
+    assert_eq!(
+        decision.reason(),
+        Some("engagement scope is not marked authorized")
+    );
 }
 
 #[test]
@@ -92,7 +98,9 @@ fn target_outside_the_window_is_denied() {
     assert!(!denied.is_allowed());
     assert!(denied.reason().unwrap().contains("window"));
     // Inside the window the same target is allowed.
-    assert!(scope.decide(&ScopeTarget::parse("10.0.0.5"), 600).is_allowed());
+    assert!(scope
+        .decide(&ScopeTarget::parse("10.0.0.5"), 600)
+        .is_allowed());
 }
 
 #[test]
@@ -119,8 +127,12 @@ fn scope_round_trips_through_json() {
     let scope: EngagementScope = serde_json::from_value(json.clone()).unwrap();
     assert!(scope.authorized);
     assert_eq!(scope.in_scope.len(), 3);
-    assert!(scope.decide(&ScopeTarget::parse("10.0.0.9"), 150).is_allowed());
-    assert!(!scope.decide(&ScopeTarget::parse("10.0.0.1"), 150).is_allowed());
+    assert!(scope
+        .decide(&ScopeTarget::parse("10.0.0.9"), 150)
+        .is_allowed());
+    assert!(!scope
+        .decide(&ScopeTarget::parse("10.0.0.1"), 150)
+        .is_allowed());
     // Re-serializing yields entries back as their string tokens.
     let reserialized = serde_json::to_value(&scope).unwrap();
     assert_eq!(reserialized["inScope"][0], "10.0.0.0/24");

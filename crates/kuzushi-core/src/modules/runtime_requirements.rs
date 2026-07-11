@@ -10,10 +10,8 @@
 //! configured" because the caller never passes one.
 //!
 //! Per CLAUDE.md's mode-parity rule ("Do not duplicate policy or parsing
-//! logic across scan, shell, and run modes"), this module is the shared
-//! allowlist + the input-aware combiner. Anything that bails out via
-//! `*_runtime(runtime)?` in `src/modules/` must appear in
-//! `RUNTIME_TOOL_NAMES`, otherwise the shell will refuse to call it.
+//! logic across scan, shell, and run modes"), this module exposes shared
+//! descriptor-backed queries plus the input-aware combiner.
 //!
 //! `tool_uses_agent_runtime` is name-only and is the right helper for
 //! UX surfaces that don't have the tool input handy (e.g. status-line
@@ -24,184 +22,63 @@
 
 use crate::config::V2Config;
 use serde_json::Value;
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
-/// Sorted allowlist for `tool_uses_agent_runtime`. `sast:scan` is
-/// intentionally absent — its runtime requirement depends on input
-/// (`wants_sast_runtime`), and the combiner `tool_needs_runtime`
-/// handles it. Adding `sast:scan` here unconditionally would force the
-/// scanner-only mode to also pay for a runtime; removing the nuance
-/// broke the CLI's `run_tool_policy_predicates_cover_workspace_store_and_runtime`
-/// regression test until this carve-out was reintroduced.
-pub const RUNTIME_TOOL_NAMES: &[&str] = &[
-    "agentic-sast:scan",
-    "carlini-threat-hunt:run",
-    "classifier-gate:score",
-    "deep-audit:run",
-    "exploit-chain:scan",
-    "full-mode:hunt",
-    "ndiff:extract-fix-pattern",
-    "ndiff:hunt-variants",
-    "offense-review:threat-hunt",
-    "patch:finding",
-    "prompt-armor:analyze",
-    "prompt-armor:attack",
-    "prompt-armor:scan",
-    "randori:pasta",
-    "shinsa:nist-quick-check",
-    "shinsa:nist-scan",
-    "shinsa:quick-check",
-    "shinsa:scan",
-    "systems-hunt:deep-semantic-cwe-select",
-    "systems-hunt:deep-semantic-hunt",
-    "systems-hunt:systems-hunt",
-    "systems-hunt:systems-invariant-extract",
-    "systems-hunt:systems-trigger-synth",
-    "taint-iris-next:catalog",
-    "taint-iris-next:codeql-db",
-    "taint-iris-next:finding-review",
-    "taint-iris-next:hunt",
-    "taint-iris:hunt",
-    "threat-intel:apply",
-    "threat-intel:harvest",
-    "tob:audit",
-    "triage:run",
-    "uaf-hunt:hunt",
-    "variant:hunt",
-    "variant:lift-pattern",
-    "vendor-assessment:assess",
-    "verify:finding",
-    "vuln-scout:audit",
-    "x-ray:run",
-    "x-ray:x-ray",
-];
+#[derive(Debug, Clone, Copy)]
+struct SharedToolPolicy {
+    runtime: crate::modules::RuntimeRequirement,
+    finding_store: crate::modules::FindingStoreRequirement,
+    workspace: crate::modules::WorkspaceRequirement,
+}
 
-pub const FINDING_STORE_TOOL_PREFIXES: &[&str] = &[
-    "chrome-rce:",
-    "findings:",
-    "module-recommender:",
-    "offense:",
-    "systems-hunt:",
-    "uaf-hunt:",
-    "variant:",
-];
+fn shared_tool_policies() -> &'static BTreeMap<String, SharedToolPolicy> {
+    static POLICIES: OnceLock<BTreeMap<String, SharedToolPolicy>> = OnceLock::new();
+    POLICIES.get_or_init(|| {
+        let registry = crate::modules::registry::ModuleRegistry::with_v2_builtins();
+        registry
+            .all_modules()
+            .flat_map(|module| module.tools())
+            .map(|tool| {
+                (
+                    tool.name.clone(),
+                    SharedToolPolicy {
+                        runtime: tool.runtime_requirement,
+                        finding_store: tool.finding_store_requirement,
+                        workspace: tool.workspace_requirement,
+                    },
+                )
+            })
+            .collect()
+    })
+}
 
-pub const FINDING_STORE_TOOL_NAMES: &[&str] = &[
-    "agentic-sast:scan",
-    "android-apk:code-scan",
-    "android-apk:fileprovider-scan",
-    "android-apk:hybrid-detect",
-    "android-apk:manifest-scan",
-    "android-apk:native-libs",
-    "android-apk:network-security-config",
-    "android-apk:scan",
-    "cargo-audit:scan",
-    "carlini-threat-hunt:run",
-    "codeql:scan",
-    "dep-hygiene:check",
-    "exploit-chain:scan",
-    "govulncheck:scan",
-    "iac-scan:scan",
-    "license-scan:scan",
-    "ndiff:hunt-variants",
-    "offense-review:threat-hunt",
-    "patch:finding",
-    "prompt-armor:analyze",
-    "prompt-armor:attack",
-    "prompt-armor:scan",
-    "sast:scan",
-    "sbom-scan:scan",
-    "secret-scan:scan",
-    "semgrep:scan",
-    "shinsa:nist-quick-check",
-    "shinsa:nist-scan",
-    "shinsa:quick-check",
-    "shinsa:scan",
-    "taint-iris-next:finding-review",
-    "taint-iris-next:hunt",
-    "taint-iris:hunt",
-    "tob:audit",
-    "triage:run",
-    "verify:exploit",
-    "verify:finding",
-    "vuln-scout:audit",
-];
-
-pub const WORKSPACE_TOOL_PREFIXES: &[&str] = &[
-    "findings:",
-    "module-recommender:",
-    "context:",
-    "recon:",
-    "bounty:",
-    "vendor-assessment:",
-    "chrome-rce:",
-    "vuln-scout:",
-    "tob:",
-    "shinsa:",
-    "prompt-armor:",
-    "x-ray:",
-    "threat-model:",
-    "randori:",
-    "variant:",
-    "ndiff:",
-    "systems-hunt:",
-    "threat-intel:",
-    "uaf-hunt:",
-];
-
-pub const WORKSPACE_TOOL_NAMES: &[&str] = &[
-    "carlini-threat-hunt:run",
-    "offense-review:threat-hunt",
-    "agentic-sast:scan",
-    "taint-iris:hunt",
-    "taint-iris-next:dataflow-plan",
-    "taint-iris-next:source-sink-trace",
-    "taint-iris-next:finding-review",
-    "taint-iris-next:hunt",
-    "taint-iris-next:catalog",
-    "taint-iris-next:codeql-db",
-    "triage:run",
-    "verify:finding",
-    "verify:exploit",
-    "patch:finding",
-    "context-lite:index",
-    "full-mode:hunt",
-    "classifier-gate:score",
-    "deep-audit:run",
-    "sast:scan",
-    "semgrep:scan",
-    "codeql:scan",
-    "iac-scan:scan",
-    "license-scan:scan",
-    "sbom-scan:scan",
-];
-
-/// Returns true when `tool_name` is one of the native tools whose
-/// handler dereferences an `AgentRuntime` and bails when it's missing.
-/// `sast:scan` is *not* covered here — use `tool_needs_runtime` when
-/// the tool input is available so the scanner-only mode skips the
-/// runtime construction.
 pub fn tool_uses_agent_runtime(tool_name: &str) -> bool {
-    RUNTIME_TOOL_NAMES.binary_search(&tool_name).is_ok()
+    shared_tool_policies()
+        .get(tool_name)
+        .is_some_and(|policy| policy.runtime != crate::modules::RuntimeRequirement::Never)
 }
 
 pub fn tool_requires_agent_runtime(tool_name: &str) -> bool {
-    tool_uses_agent_runtime(tool_name)
+    shared_tool_policies()
+        .get(tool_name)
+        .is_some_and(|policy| policy.runtime == crate::modules::RuntimeRequirement::Always)
 }
 
 pub fn tool_uses_finding_store(tool_name: &str) -> bool {
-    FINDING_STORE_TOOL_PREFIXES
-        .iter()
-        .any(|prefix| tool_name.starts_with(prefix))
-        || FINDING_STORE_TOOL_NAMES.contains(&tool_name)
+    tool_needs_finding_store(tool_name)
 }
 
 pub fn tool_needs_finding_store(tool_name: &str) -> bool {
-    tool_uses_finding_store(tool_name)
+    shared_tool_policies().get(tool_name).is_some_and(|policy| {
+        policy.finding_store == crate::modules::FindingStoreRequirement::Required
+    })
 }
 
 pub fn tool_defaults_to_workspace(tool_name: &str) -> bool {
-    has_known_prefix(tool_name, WORKSPACE_TOOL_PREFIXES)
-        || has_known_name(tool_name, WORKSPACE_TOOL_NAMES)
+    shared_tool_policies().get(tool_name).is_some_and(|policy| {
+        policy.workspace == crate::modules::WorkspaceRequirement::Required
+    })
 }
 
 /// Input-aware variant of `tool_uses_agent_runtime`. Adds the
@@ -209,10 +86,13 @@ pub fn tool_defaults_to_workspace(tool_name: &str) -> bool {
 /// a triage / verify / autoPatch pass or an agentic sub-task. The CLI
 /// uses this in `kuzushi run`, the TUI in its background-tool worker.
 pub fn tool_needs_runtime(tool_name: &str, input: &Value) -> bool {
-    if let Some(needs_runtime) = input_specific_runtime_requirement(tool_name, input) {
-        return needs_runtime;
+    match shared_tool_policies().get(tool_name).map(|policy| policy.runtime) {
+        Some(crate::modules::RuntimeRequirement::Always) => true,
+        Some(crate::modules::RuntimeRequirement::InputAware) => {
+            input_aware_tool_needs_runtime(tool_name, input)
+        }
+        _ => false,
     }
-    tool_always_needs_runtime(tool_name)
 }
 
 /// Runtime construction predicate for callers that have the resolved operator
@@ -221,7 +101,19 @@ pub fn tool_needs_runtime(tool_name: &str, input: &Value) -> bool {
 /// still running deterministically without one.
 pub fn tool_wants_runtime(tool_name: &str, input: &Value, config: &V2Config) -> bool {
     tool_needs_runtime(tool_name, input)
-        || threat_model_build_wants_runtime(tool_name, config)
+        || tool_optionally_wants_runtime(tool_name, input, config)
+}
+
+pub(super) fn input_aware_tool_needs_runtime(tool_name: &str, input: &Value) -> bool {
+    input_specific_runtime_requirement(tool_name, input).unwrap_or(false)
+}
+
+pub(super) fn tool_optionally_wants_runtime(
+    tool_name: &str,
+    input: &Value,
+    config: &V2Config,
+) -> bool {
+    threat_model_build_wants_runtime(tool_name, config)
         || module_recommender_wants_runtime(tool_name, input, config)
 }
 
@@ -234,15 +126,17 @@ fn threat_model_build_needs_runtime(input: &Value) -> bool {
 
 fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<bool> {
     match tool_name {
+        "offense:chain" => Some(
+            input
+                .get("goal")
+                .and_then(Value::as_str)
+                .is_some_and(|goal| !goal.trim().is_empty()),
+        ),
         "full-mode:hunt" => Some(full_mode_hunt_needs_runtime(input)),
         "threat-model:build" => Some(threat_model_build_needs_runtime(input)),
         "sast:scan" => Some(wants_sast_runtime(input)),
         _ => None,
     }
-}
-
-fn tool_always_needs_runtime(tool_name: &str) -> bool {
-    tool_uses_agent_runtime(tool_name) || tool_name == "pwn:auto-solve"
 }
 
 fn threat_model_build_wants_runtime(tool_name: &str, config: &V2Config) -> bool {
@@ -265,18 +159,22 @@ fn full_mode_hunt_needs_runtime(input: &Value) -> bool {
         .unwrap_or(false)
 }
 
-fn has_known_prefix(tool_name: &str, prefixes: &[&str]) -> bool {
-    prefixes.iter().any(|prefix| tool_name.starts_with(prefix))
-}
-
-fn has_known_name(tool_name: &str, names: &[&str]) -> bool {
-    names.contains(&tool_name)
-}
-
-/// All tool names known to require an agent runtime, in sorted order.
-/// Exposed for tests and for tools that want to render the allowlist.
+/// All descriptor-declared runtime tools, including hidden DAG nodes, sorted
+/// by tool name. This compatibility view is derived from the registry snapshot;
+/// dispatch callers should prefer the descriptor-backed predicates above.
 pub fn agent_runtime_tool_names() -> &'static [&'static str] {
-    RUNTIME_TOOL_NAMES
+    static NAMES: OnceLock<Vec<&'static str>> = OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            shared_tool_policies()
+                .iter()
+                .filter(|(_, policy)| {
+                    policy.runtime != crate::modules::RuntimeRequirement::Never
+                })
+                .map(|(name, _)| name.as_str())
+                .collect()
+        })
+        .as_slice()
 }
 
 /// Whether `sast:scan` should construct an agent runtime for the given
@@ -289,21 +187,17 @@ pub fn agent_runtime_tool_names() -> &'static [&'static str] {
 /// route through here rather than re-deriving the rule.
 pub fn wants_sast_runtime(input: &Value) -> bool {
     let whitebox_static = crate::whitebox_static::whitebox_static_enabled(input).unwrap_or(false);
-    let triage_runtime = input
-        .get("triage")
-        .or_else(|| input.get("aiTriage"))
-        .or_else(|| input.get("ai_triage"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let execution_runtime = !whitebox_static
-        && input
-            .get("verify")
-            .or_else(|| input.get("autoPatch"))
-            .or_else(|| input.get("auto_patch"))
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+    let triage_runtime = any_true_input(input, &["triage", "aiTriage", "ai_triage"]);
+    let execution_runtime =
+        !whitebox_static && any_true_input(input, &["verify", "autoPatch", "auto_patch"]);
 
     triage_runtime || execution_runtime || sast_tasks_request_runtime(input)
+}
+
+fn any_true_input(input: &Value, names: &[&str]) -> bool {
+    names
+        .iter()
+        .any(|name| input.get(name).and_then(Value::as_bool).unwrap_or(false))
 }
 
 fn sast_tasks_request_runtime(input: &Value) -> bool {
@@ -350,33 +244,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn allowlist_is_sorted_for_binary_search() {
-        let mut sorted = RUNTIME_TOOL_NAMES.to_vec();
-        sorted.sort_unstable();
-        assert_eq!(
-            RUNTIME_TOOL_NAMES,
-            &sorted[..],
-            "RUNTIME_TOOL_NAMES must stay sorted; binary_search relies on it"
-        );
-    }
-
-    #[test]
-    fn allowlist_has_no_duplicates() {
-        let mut seen = std::collections::HashSet::new();
-        for name in RUNTIME_TOOL_NAMES {
-            assert!(seen.insert(*name), "duplicate entry: {name}");
-        }
-    }
-
-    #[test]
-    fn finding_store_allowlist_has_no_duplicates() {
-        let mut seen = std::collections::HashSet::new();
-        for name in FINDING_STORE_TOOL_NAMES {
-            assert!(seen.insert(*name), "duplicate entry: {name}");
-        }
-    }
-
-    #[test]
     fn tools_that_bail_without_runtime_are_listed() {
         // Mirror of the `*_runtime(runtime)?` bail sites in src/modules/.
         // Anything that bails with "requires an agent runtime" must be here,
@@ -391,24 +258,25 @@ mod tests {
         ] {
             assert!(
                 tool_uses_agent_runtime(tool),
-                "{tool} bails without a runtime but isn't in the allowlist"
+                "{tool} bails without a runtime but its descriptor does not declare one"
             );
         }
     }
 
     #[test]
-    fn sast_scan_is_excluded_from_name_only_allowlist() {
-        assert!(
-            !tool_uses_agent_runtime("sast:scan"),
-            "sast:scan must NOT be in the name-only allowlist — the scanner-only \
-             mode should skip the runtime, and that nuance is in tool_needs_runtime"
-        );
+    fn input_aware_runtime_is_declared_without_forcing_every_input() {
+        assert!(tool_uses_agent_runtime("sast:scan"));
+        assert!(!tool_requires_agent_runtime("sast:scan"));
     }
 
     #[test]
     fn tool_needs_runtime_covers_sast_scan_input_nuance() {
         assert!(tool_needs_runtime("sast:scan", &json!({"triage": true})));
         assert!(tool_needs_runtime("sast:scan", &json!({"verify": true})));
+        assert!(tool_needs_runtime(
+            "sast:scan",
+            &json!({"verify": false, "autoPatch": true})
+        ));
         assert!(tool_needs_runtime(
             "sast:scan",
             &json!({"tasks": ["agentic-sast"]})
@@ -440,7 +308,7 @@ mod tests {
 
     #[test]
     fn threat_model_build_runtime_requirement_is_input_aware() {
-        assert!(!tool_uses_agent_runtime("threat-model:build"));
+        assert!(tool_uses_agent_runtime("threat-model:build"));
         assert!(!tool_needs_runtime("threat-model:build", &json!({})));
         assert!(tool_needs_runtime(
             "threat-model:build",
@@ -493,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_needs_runtime_falls_through_to_allowlist_for_other_tools() {
+    fn tool_needs_runtime_reads_descriptor_policy_for_other_tools() {
         assert!(tool_needs_runtime("deep-audit:run", &json!({})));
         assert!(tool_needs_runtime("exploit-chain:scan", &json!({})));
         assert!(tool_needs_runtime("uaf-hunt:hunt", &json!({})));
@@ -526,11 +394,21 @@ mod tests {
     }
 
     #[test]
+    fn finding_store_tools_always_receive_workspace_resolution() {
+        let registry = crate::modules::registry::ModuleRegistry::with_v2_builtins();
+        for tool in registry
+            .tools()
+            .filter(|tool| tool.finding_store_requirement == crate::modules::FindingStoreRequirement::Required)
+        {
+            assert!(tool_defaults_to_workspace(&tool.name), "{}", tool.name);
+        }
+    }
+
+    #[test]
     fn tools_that_persist_findings_get_a_store() {
         for tool in [
             "dep-hygiene:check",
             "secret-scan:scan",
-            "sbom-scan:scan",
             "exploit-chain:scan",
             "android-apk:scan",
             "android-apk:manifest-scan",

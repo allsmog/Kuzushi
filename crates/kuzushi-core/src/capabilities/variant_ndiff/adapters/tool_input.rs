@@ -32,35 +32,37 @@ pub(crate) fn resolve_tool_target(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<PathBuf> {
     match input.get("target").and_then(Value::as_str) {
-        Some(target) => resolve_explicit_tool_target(target),
+        Some(target) => resolve_explicit_tool_target(target, ctx),
         None => resolve_context_tool_target(ctx),
     }
 }
 
-fn resolve_explicit_tool_target(target: &str) -> Result<PathBuf> {
+fn resolve_explicit_tool_target(target: &str, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     let trimmed = target.trim();
     if trimmed.is_empty() {
-        return current_tool_target_dir();
+        anyhow::bail!("variant target may not be blank")
     }
-    resolve_tool_target_candidate(PathBuf::from(trimmed))
+    resolve_tool_target_candidate(PathBuf::from(trimmed), ctx)
 }
 
-fn resolve_tool_target_candidate(candidate: PathBuf) -> Result<PathBuf> {
+fn resolve_tool_target_candidate(
+    candidate: PathBuf,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<PathBuf> {
     if candidate.is_absolute() {
         return Ok(candidate);
     }
-    Ok(current_tool_target_dir()?.join(candidate))
+    let workspace = ctx
+        .workspace
+        .context("variant hunt requires an explicit active workspace")?;
+    Ok(workspace.root().join(candidate))
 }
 
 fn resolve_context_tool_target(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     match ctx.workspace {
         Some(workspace) => Ok(workspace.root().to_path_buf()),
-        None => current_tool_target_dir(),
+        None => anyhow::bail!("variant hunt requires an explicit active workspace"),
     }
-}
-
-fn current_tool_target_dir() -> Result<PathBuf> {
-    std::env::current_dir().context("Could not resolve current directory")
 }
 
 pub(crate) fn positive_usize_input(input: &Value, key: &str, default: usize, max: usize) -> usize {

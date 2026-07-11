@@ -11,6 +11,8 @@ mod tests {
             required: false,
             advanced: false,
             evasion: false,
+            path_semantics: None,
+            file_reference_semantics: None,
             default: None,
             choices: Vec::new(),
             aliases: Vec::new(),

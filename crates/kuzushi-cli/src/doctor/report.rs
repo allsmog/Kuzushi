@@ -49,7 +49,7 @@ fn resolve_doctor_workspace(
             checks.push(DoctorCheck::fail(
                 "target",
                 error.to_string(),
-                "Pass --target <repo> or run `kuzushi doctor` from an existing repository directory.",
+                "Pass --target <repo> (or --target . to explicitly use the current directory).",
             ));
             None
         }
@@ -87,7 +87,7 @@ fn record_state_checks(workspace: Option<&WorkspaceTarget>, checks: &mut Vec<Doc
         checks.push(DoctorCheck::fail(
             "state",
             "workspace target was not resolved; state directory was not checked",
-            "Pass --target <repo> or run from the repository root.",
+            "Pass --target <repo> (or --target . to explicitly use the current directory).",
         ));
         checks.push(DoctorCheck::fail(
             "findings-db",

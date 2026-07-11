@@ -8,6 +8,12 @@ pub(super) struct BackgroundToolRun {
     pub(super) trace_handle: TraceHandle,
 }
 
+pub(super) struct BackgroundToolRunSeed {
+    target: PathBuf,
+    run_id: String,
+    target_label: String,
+}
+
 pub(super) struct BackgroundToolDispatch {
     registry: ModuleRegistry,
     pub(super) config: V2Config,
@@ -24,6 +30,7 @@ pub(super) struct BackgroundToolWorkerLaunch {
     tool_name: String,
     input: serde_json::Value,
     thinking_level: Option<String>,
+    authorization: ExecutionAuthorization,
 }
 
 impl BackgroundToolWorkerLaunch {
@@ -33,6 +40,7 @@ impl BackgroundToolWorkerLaunch {
         tool_name: String,
         input: serde_json::Value,
         thinking_level: Option<String>,
+        authorization: ExecutionAuthorization,
     ) -> Self {
         let BackgroundToolDispatch {
             registry,
@@ -49,6 +57,7 @@ impl BackgroundToolWorkerLaunch {
             tool_name,
             input,
             thinking_level,
+            authorization,
         }
     }
 
@@ -82,6 +91,7 @@ impl BackgroundToolWorkerLaunch {
             tool_name: self.tool_name,
             input: self.input,
             thinking_level: self.thinking_level,
+            authorization: self.authorization,
         };
         app.attach_background_tool_run(
             &start.run,
@@ -104,6 +114,7 @@ struct BackgroundToolWorkerStart {
     tool_name: String,
     input: serde_json::Value,
     thinking_level: Option<String>,
+    authorization: ExecutionAuthorization,
 }
 
 impl BackgroundToolWorkerStart {
@@ -117,6 +128,7 @@ impl BackgroundToolWorkerStart {
             tool_name,
             input,
             thinking_level,
+            authorization,
         } = self;
         spawn_job_worker("tool", ticket, move |sink, cancel| {
             background_tool_worker(
@@ -127,6 +139,7 @@ impl BackgroundToolWorkerStart {
                 input,
                 run.run_id,
                 thinking_level,
+                authorization,
                 sink,
                 Some(run.trace_handle),
                 cancel,
@@ -138,24 +151,13 @@ impl BackgroundToolWorkerStart {
 pub(super) fn prepare_background_tool_dispatch(
     registry: &ModuleRegistry,
     config: &V2Config,
-    workspace: &WorkspaceTarget,
-    tool_name: &str,
-    input: &serde_json::Value,
+    seed: BackgroundToolRunSeed,
     ticket: JobTicket,
     trace_budget: LiveTraceBudget,
 ) -> BackgroundToolDispatch {
     let registry = registry.clone();
     let config = config.clone();
-    let loaded_modules = registry.loaded_module_specifiers();
-    let run = prepare_background_tool_run(
-        workspace,
-        tool_name,
-        input,
-        &config,
-        loaded_modules,
-        ticket.sink(),
-        trace_budget.clone(),
-    );
+    let run = prepare_background_tool_run(seed, ticket.sink(), trace_budget.clone());
     BackgroundToolDispatch {
         registry,
         config,
@@ -164,32 +166,42 @@ pub(super) fn prepare_background_tool_dispatch(
     }
 }
 
-fn prepare_background_tool_run(
+pub(super) fn persist_background_tool_run_start(
+    registry: &ModuleRegistry,
+    config: &V2Config,
     workspace: &WorkspaceTarget,
     tool_name: &str,
     input: &serde_json::Value,
-    config: &V2Config,
-    loaded_modules: Vec<String>,
-    sink: JobEventSink,
-    trace_budget: LiveTraceBudget,
-) -> BackgroundToolRun {
+) -> anyhow::Result<BackgroundToolRunSeed> {
     let target = workspace.root().to_path_buf();
     let run_id = new_run_id("tool");
     let target_label = target.display().to_string();
     let record =
         kuzushi_core::run_artifacts::ToolRunRecord::new(&target, &run_id, "tool", tool_name);
-    kuzushi_core::run_artifacts::record_tool_run_started_with_reproducibility(
+    kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
         record,
         input,
         config.model.clone(),
         config_hash(config).ok(),
-        loaded_modules,
-    );
-    let trace_handle = background_tool_trace_handle(&target, &run_id, sink, trace_budget);
-    BackgroundToolRun {
+        registry.loaded_module_specifiers(),
+    )?;
+    Ok(BackgroundToolRunSeed {
         target,
         run_id,
         target_label,
+    })
+}
+
+fn prepare_background_tool_run(
+    seed: BackgroundToolRunSeed,
+    sink: JobEventSink,
+    trace_budget: LiveTraceBudget,
+) -> BackgroundToolRun {
+    let trace_handle = background_tool_trace_handle(&seed.target, &seed.run_id, sink, trace_budget);
+    BackgroundToolRun {
+        target: seed.target,
+        run_id: seed.run_id,
+        target_label: seed.target_label,
         trace_handle,
     }
 }

@@ -132,12 +132,12 @@ pub(crate) fn persist_full_mode_report(
     };
     let store = FindingStore::open(workspace.findings_db_path())?;
     let scan_id = format!("full-mode-{}", uuid::Uuid::new_v4());
-    store.record_run_started(&scan_id, workspace.root(), "running")?;
-    for finding in &report.findings {
-        let _ = store.insert_finding(&scan_id, finding)?;
-    }
-    store.record_run_finished(&scan_id, "completed", report.findings.len())?;
-    Ok(())
+    store.with_run_lifecycle(&scan_id, workspace.root(), || {
+        for finding in &report.findings {
+            let _ = store.insert_finding(&scan_id, finding)?;
+        }
+        Ok(((), report.findings.len()))
+    })
 }
 
 pub(crate) fn run_classifier_score_tool(

@@ -22,11 +22,14 @@ pub(crate) fn router_module() -> BuiltinModule {
         "Agent router",
         ModuleKind::Governance,
         "Per-role model routing. Set MODEL_<ROLE> via `setg` to override models.toml.",
-        vec![tool_with_options(
-            "router:show",
-            "Show effective per-role model routing.",
-            model_specs,
-        )],
+        tools_with_policy(
+            read_policy(ToolPhase::Operate, WorkspaceRequirement::Optional),
+            vec![tool_with_options(
+                "router:show",
+                "Show effective per-role model routing.",
+                model_specs,
+            )],
+        ),
         vec![],
     )
 }

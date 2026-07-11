@@ -1,5 +1,5 @@
 use super::{same_watcher_key, ControlCommand, WriteLane, WriterCommand};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
@@ -37,49 +37,9 @@ pub(super) async fn run_actor(
     mut rx: ActorReceivers,
 ) -> Result<()> {
     let writer = super::super::StorageWriter::open(log_dir, projection_path)?;
-    RunningActor::new(writer, decision_budget).run(&mut rx).await
-}
-
-pub(super) fn run_actor_blocking(
-    log_dir: PathBuf,
-    projection_path: PathBuf,
-    commands: Vec<WriterCommand>,
-) -> Result<Vec<super::super::WriteReceipt>> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("could not create storage writer actor runtime")?;
-    runtime.block_on(dispatch_blocking_commands(
-        log_dir,
-        projection_path,
-        commands,
-    ))
-}
-
-async fn dispatch_blocking_commands(
-    log_dir: PathBuf,
-    projection_path: PathBuf,
-    commands: Vec<WriterCommand>,
-) -> Result<Vec<super::super::WriteReceipt>> {
-    let actor =
-        super::StorageWriterActor::spawn(log_dir, projection_path, super::StorageWriterActorConfig::default());
-    let mut receipts = Vec::with_capacity(commands.len());
-    let command_result = dispatch_commands(&actor, commands, &mut receipts).await;
-    let shutdown_result = actor.shutdown().await;
-    command_result?;
-    shutdown_result?;
-    Ok(receipts)
-}
-
-async fn dispatch_commands(
-    actor: &super::StorageWriterActorHandle,
-    commands: Vec<WriterCommand>,
-    receipts: &mut Vec<super::super::WriteReceipt>,
-) -> Result<()> {
-    for command in commands {
-        receipts.push(actor.dispatch(command).await?);
-    }
-    Ok(())
+    RunningActor::new(writer, decision_budget)
+        .run(&mut rx)
+        .await
 }
 
 struct RunningActor {
@@ -151,10 +111,7 @@ impl RunningActor {
         let _ = envelope.reply.send(result);
     }
 
-    fn queue_shutdown_reply(
-        &mut self,
-        reply: oneshot::Sender<Result<super::super::WriteReceipt>>,
-    ) {
+    fn queue_shutdown_reply(&mut self, reply: oneshot::Sender<Result<super::super::WriteReceipt>>) {
         if self.queues.shutdown.is_some() {
             let _ = reply.send(Err(anyhow::anyhow!(
                 "storage writer actor is already shutting down"

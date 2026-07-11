@@ -145,7 +145,10 @@ fn validate_positive_u64(name: &str, value: Option<u64>) -> Result<()> {
 }
 
 fn validate_optional_non_empty(name: &str, value: &Option<String>) -> Result<()> {
-    if value.as_deref().is_some_and(|value| value.trim().is_empty()) {
+    if value
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty())
+    {
         anyhow::bail!("{name} must not be empty");
     }
     Ok(())
@@ -186,7 +189,10 @@ fn validate_worker_watchdog_timeout(timeout_ms: Option<u64>) -> Result<()> {
 }
 
 fn validate_trusted_modules(specifiers: &[String]) -> Result<()> {
-    if specifiers.iter().any(|specifier| specifier.trim().is_empty()) {
+    if specifiers
+        .iter()
+        .any(|specifier| specifier.trim().is_empty())
+    {
         anyhow::bail!("operator.trusted_modules entries must not be empty");
     }
     Ok(())
@@ -205,37 +211,52 @@ fn validate_signature_keys(keys: &[crate::worker_protocol::SignatureTrustKey]) -
 }
 
 fn validate_mcp_mounts(mounts: &[McpMountConfig]) -> Result<()> {
+    let mut aliases = std::collections::BTreeSet::new();
     for mount in mounts {
+        if !aliases.insert(mount.alias.clone()) {
+            anyhow::bail!("operator.mcp_mounts alias entries must be unique");
+        }
         validate_mcp_mount(mount)?;
     }
     Ok(())
 }
 
 fn validate_mcp_mount(mount: &McpMountConfig) -> Result<()> {
-    validate_optional_non_empty("operator.mcp_mounts.alias", &Some(mount.alias.clone()))?;
-    if mount.command.iter().any(|part| part.trim().is_empty()) || mount.command.is_empty() {
-        anyhow::bail!("operator.mcp_mounts.command entries must not be empty");
-    }
-    validate_optional_non_empty(
+    validate_required_text("operator.mcp_mounts.alias", &mount.alias)?;
+    validate_command("operator.mcp_mounts.command", &mount.command)?;
+    validate_sha256(
         "operator.mcp_mounts.descriptor_hash",
-        &Some(mount.descriptor_hash.clone()),
+        &mount.descriptor_hash,
     )?;
-    if !mount.descriptor_hash.starts_with("sha256:") {
-        anyhow::bail!("operator.mcp_mounts.descriptor_hash must start with sha256:");
-    }
-    if mount.tools.is_empty() {
-        anyhow::bail!("operator.mcp_mounts.tools must not be empty");
-    }
-    for tool in &mount.tools {
-        validate_mcp_mount_tool(tool)?;
-    }
+    validate_mcp_mount_tools(&mount.tools)?;
     validate_positive_u64("operator.mcp_mounts.timeout_ms", mount.timeout_ms)
 }
 
+fn validate_mcp_mount_tools(tools: &[McpMountToolConfig]) -> Result<()> {
+    if tools.is_empty() {
+        anyhow::bail!("operator.mcp_mounts.tools must not be empty");
+    }
+    let mut names = std::collections::BTreeSet::new();
+    for tool in tools {
+        if !names.insert(tool.name.clone()) {
+            anyhow::bail!("operator.mcp_mounts.tools name entries must be unique");
+        }
+        validate_mcp_mount_tool(tool)?;
+    }
+    Ok(())
+}
+
 fn validate_mcp_mount_tool(tool: &McpMountToolConfig) -> Result<()> {
-    validate_optional_non_empty("operator.mcp_mounts.tools.name", &Some(tool.name.clone()))?;
+    validate_required_text("operator.mcp_mounts.tools.name", &tool.name)?;
     if !tool.input_schema.is_object() {
         anyhow::bail!("operator.mcp_mounts.tools.input_schema must be a JSON object");
+    }
+    if tool
+        .output_schema
+        .as_ref()
+        .is_some_and(|schema| !schema.is_object())
+    {
+        anyhow::bail!("operator.mcp_mounts.tools.output_schema must be a JSON object");
     }
     Ok(())
 }
@@ -243,20 +264,42 @@ fn validate_mcp_mount_tool(tool: &McpMountToolConfig) -> Result<()> {
 fn validate_fuzz_executors(executors: &[FuzzExecutorConfig]) -> Result<()> {
     let mut engines = Vec::new();
     for executor in executors {
-        validate_fuzz_executor(executor)?;
         if engines.contains(&executor.engine) {
             anyhow::bail!("operator.fuzz_executors engine entries must be unique");
         }
         engines.push(executor.engine);
+        validate_command("operator.fuzz_executors.command", &executor.command)?;
+        validate_positive_u64("operator.fuzz_executors.timeout_ms", executor.timeout_ms)?;
     }
     Ok(())
 }
 
-fn validate_fuzz_executor(executor: &FuzzExecutorConfig) -> Result<()> {
-    if executor.command.iter().any(|part| part.trim().is_empty()) || executor.command.is_empty() {
-        anyhow::bail!("operator.fuzz_executors.command entries must not be empty");
+fn validate_command(name: &str, command: &[String]) -> Result<()> {
+    if command.is_empty() || command.iter().any(|part| part.trim().is_empty()) {
+        anyhow::bail!("{name} entries must not be empty");
     }
-    validate_positive_u64("operator.fuzz_executors.timeout_ms", executor.timeout_ms)
+    Ok(())
+}
+
+fn validate_required_text(name: &str, value: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        anyhow::bail!("{name} must not be empty");
+    }
+    Ok(())
+}
+
+fn validate_sha256(name: &str, value: &str) -> Result<()> {
+    let Some(digest) = value.strip_prefix("sha256:") else {
+        anyhow::bail!("{name} must start with sha256:");
+    };
+    if digest.len() != 64
+        || !digest
+            .chars()
+            .all(|character| matches!(character, '0'..='9' | 'a'..='f'))
+    {
+        anyhow::bail!("{name} must contain a 64-character hexadecimal digest");
+    }
+    Ok(())
 }
 
 fn is_supported_thinking_level(level: &str) -> bool {

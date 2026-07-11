@@ -1,5 +1,17 @@
 pub(crate) fn module_category_blurb(category: &str) -> (&'static str, &'static str) {
     match category {
+        "CURRENT" => (
+            "PRIMARY",
+            "recommended actions for the workspace's current phase",
+        ),
+        "EXPERT" => (
+            "EXPERT ENGINES",
+            "direct scanners and artifact builders for deliberate use",
+        ),
+        "INTEGRATIONS" => (
+            "INTEGRATIONS",
+            "installed target adapters and explicitly loaded extensions",
+        ),
         "OFFENSE" => (
             "HUNT",
             "scan code, dependencies, and runtime surface for candidates",

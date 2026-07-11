@@ -2,7 +2,6 @@ use super::*;
 use crate::storage_v3::writer_actor::{
     DecisionCommand, StorageWriterActor, VerificationWrite, WriterCommand,
 };
-use std::collections::BTreeMap;
 
 impl FindingStore {
     pub fn record_auto_triage(&self, finding_id: i64, triage: &TriageOutcome) -> Result<()> {
@@ -97,6 +96,16 @@ impl FindingStore {
         &self,
         finding_id: i64,
     ) -> Result<Option<PersistedVerification>> {
+        let Some(target) = self.v3_target_for_finding(finding_id, "verification read")? else {
+            return Ok(None);
+        };
+        self.get_latest_verification_for_stable_fp(&target.stable_fp)
+    }
+
+    fn get_latest_verification_for_stable_fp(
+        &self,
+        stable_fp: &str,
+    ) -> Result<Option<PersistedVerification>> {
         let Some(db_path) = &self.db_path else {
             return Ok(None);
         };
@@ -106,14 +115,14 @@ impl FindingStore {
             r#"
             select proof_level, proof_verdict, backend, language,
                    harness_path, crash_evidence, duration_ms, cost_usd,
-                   notes_json, created_at
+                   notes_json, created_at, verification_run_id, verified_scan_id
             from verification_events
-            where finding_id = ?1
+            where stable_fp = ?1
             order by seq desc
             limit 1
             "#,
         )?;
-        let mut rows = stmt.query(params![finding_id])?;
+        let mut rows = stmt.query(params![stable_fp])?;
         if let Some(row) = rows.next()? {
             return latest_verification_from_row(row).map(Some);
         }
@@ -124,26 +133,14 @@ impl FindingStore {
         &self,
         findings: &mut [Finding],
     ) -> Result<()> {
-        let verification_by_id = self.latest_verifications_by_finding_id(finding_ids(findings))?;
         for finding in findings {
-            if let Some(id) = finding.id {
-                finding.verification = verification_by_id.get(&id).cloned();
-            }
+            let stable_fp = finding
+                .identity_id
+                .as_deref()
+                .unwrap_or(&finding.fingerprint);
+            finding.verification = self.get_latest_verification_for_stable_fp(stable_fp)?;
         }
         Ok(())
-    }
-
-    fn latest_verifications_by_finding_id(
-        &self,
-        finding_ids: Vec<i64>,
-    ) -> Result<BTreeMap<i64, PersistedVerification>> {
-        let mut by_id = BTreeMap::new();
-        for finding_id in finding_ids {
-            if let Some(verification) = self.get_latest_verification(finding_id)? {
-                by_id.insert(finding_id, verification);
-            }
-        }
-        Ok(by_id)
     }
 }
 
@@ -163,6 +160,11 @@ impl FindingStore {
                 stable_fp: target.stable_fp,
                 finding_id: Some(finding_id),
                 identity_id: target.identity_id,
+                verification_run_id: record.verification_run_id.clone(),
+                verified_scan_id: record
+                    .verified_scan_id
+                    .clone()
+                    .or(target.scan_id),
                 proof_level: record.proof_level,
                 proof_verdict: record.proof_verdict.as_str().to_string(),
                 backend: record.backend.as_str().to_string(),
@@ -204,16 +206,8 @@ fn latest_verification_from_row_at(
         duration_ms: row.get::<_, i64>(offset + 6)? as u64,
         cost_usd: row.get(offset + 7)?,
         notes,
+        verification_run_id: row.get(offset + 10)?,
+        verified_scan_id: row.get(offset + 11)?,
         created_at: row.get(offset + 9)?,
     })
-}
-
-fn finding_ids(findings: &[Finding]) -> Vec<i64> {
-    let mut ids = findings
-        .iter()
-        .filter_map(|finding| finding.id)
-        .collect::<Vec<_>>();
-    ids.sort_unstable();
-    ids.dedup();
-    ids
 }

@@ -210,6 +210,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
         let prompt = build_actor_prompt(
@@ -226,7 +228,7 @@ mod tests {
                 flows: Vec::new(),
             },
             &options,
-            &[],
+            &render_carlini_inventory_block(&[]),
             "carlini-threat-hunt:Authenticated_User:0",
         );
 
@@ -245,6 +247,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
         let prompt = build_actor_prompt(
@@ -261,7 +265,10 @@ mod tests {
                 flows: Vec::new(),
             },
             &options,
-            &[("src/auth.rs".to_string(), "fn login() {}".to_string())],
+            &render_carlini_inventory_block(&[(
+                "src/auth.rs".to_string(),
+                "fn login() {}".to_string(),
+            )]),
             "carlini-threat-hunt:Authenticated_User:0",
         );
 
@@ -283,6 +290,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
@@ -292,6 +301,157 @@ mod tests {
         assert!(block.contains("review reset flow"));
         assert!(block.contains("moduleId=\"carlini-threat-hunt\""));
         assert!(crate::workspace::workspace_attachments_path(workspace.root()).exists());
+    }
+
+    #[test]
+    fn tampered_attachment_store_cannot_read_outside_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "outside-secret").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        workspace.ensure_state_dir().unwrap();
+        let record = json!({
+            "version": 1,
+            "attachments": [{
+                "id": "A-tampered", "moduleId": "offense-review",
+                "kind": "path", "source": outside.path(), "title": "outside",
+                "metadataOnly": false, "status": "tampered", "updatedAtUnix": 0
+            }]
+        });
+        fs::write(
+            crate::workspace::workspace_attachments_path(workspace.root()),
+            serde_json::to_vec(&record).unwrap(),
+        )
+        .unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
+        let block = options.attachments_block.unwrap();
+
+        assert!(block.contains("Unsafe attachment"), "{block}");
+        assert!(!block.contains("outside-secret"), "{block}");
+    }
+
+    fn carlini_actor(id: &str, name: &str) -> ActorHunt {
+        ActorHunt {
+            actor: DfdNode {
+                id: id.to_string(),
+                node_type: "external-entity".to_string(),
+                name: name.to_string(),
+                description: format!("{name} actor"),
+                trust_zone: "external".to_string(),
+            },
+            threats: Vec::new(),
+            flows: Vec::new(),
+        }
+    }
+
+    struct RecordingRuntime {
+        prompts: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl crate::runtime::AgentRuntime for RecordingRuntime {
+        fn query_blocking(
+            &self,
+            request: crate::runtime::AgentQueryRequest,
+        ) -> anyhow::Result<crate::runtime::AgentQueryResponse> {
+            self.prompts.lock().unwrap().push(request.prompt.clone());
+            Ok(crate::runtime::AgentQueryResponse {
+                text: r#"{"findings":[]}"#.to_string(),
+                ..crate::runtime::AgentQueryResponse::default()
+            })
+        }
+
+        fn triage_finding_blocking(
+            &self,
+            _request: crate::runtime::TriageRequest,
+        ) -> anyhow::Result<crate::findings::TriageOutcome> {
+            unreachable!("carlini actor hunt does not triage")
+        }
+    }
+
+    #[test]
+    fn inventory_is_rendered_once_but_every_actor_still_receives_full_inventory() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
+
+        let inventory = vec![
+            (
+                "src/alpha.rs".to_string(),
+                "fn alpha_secret() {}".to_string(),
+            ),
+            ("src/beta.rs".to_string(), "fn beta_secret() {}".to_string()),
+        ];
+
+        // Build the shared inventory block exactly once for the whole
+        // K-actor run, mirroring `execute_carlini_threat_hunt_run`. Before
+        // this fix, the block was re-rendered inside `build_actor_prompt`
+        // once per actor iteration (K constructions); now it is built once
+        // and reused.
+        let mut render_calls = 0usize;
+        let inventory_block = {
+            render_calls += 1;
+            render_carlini_inventory_block(&inventory)
+        };
+
+        let actors = vec![
+            carlini_actor("actor-one", "One"),
+            carlini_actor("actor-two", "Two"),
+            carlini_actor("actor-three", "Three"),
+        ];
+
+        let runtime = RecordingRuntime {
+            prompts: std::sync::Mutex::new(Vec::new()),
+        };
+
+        run_carlini_actor_hunts(
+            &runtime,
+            &json!({}),
+            workspace.root(),
+            &options,
+            "anthropic:test-model",
+            &inventory_block,
+            &actors,
+            None,
+        )
+        .unwrap();
+
+        let prompts = runtime.prompts.lock().unwrap().clone();
+
+        // Inventory payload constructed exactly once for the whole run.
+        assert_eq!(render_calls, 1, "inventory block rendered once per run");
+        // One transmission per actor (runs_per_actor defaults to 1). The
+        // inventory bytes still ride each request until the bridge gains
+        // cache_control support; we only stopped re-*building* the payload.
+        assert_eq!(prompts.len(), actors.len());
+
+        for prompt in &prompts {
+            // Correctness: each actor still receives the complete inventory
+            // block verbatim (byte-for-byte the single rendered payload).
+            assert!(prompt.contains(&inventory_block));
+            assert!(prompt.contains("src/alpha.rs"));
+            assert!(prompt.contains("fn alpha_secret"));
+            assert!(prompt.contains("src/beta.rs"));
+            assert!(prompt.contains("fn beta_secret"));
+        }
     }
 
     #[test]
@@ -310,6 +470,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();

@@ -10,6 +10,54 @@ pub(crate) use envelope::{
 #[cfg(test)]
 mod subprocess_failure_summary_tests;
 
+/// Canonical semantic outcome carried by a normalized tool-result envelope.
+///
+/// Executors return `Result<Value>` for transport/dispatch failures, while
+/// product failures such as a missing scanner are represented inside the JSON
+/// envelope. Consumers must classify both layers instead of treating every
+/// Rust `Ok` as a successful tool run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolResultStatus {
+    Completed,
+    Partial,
+    Skipped,
+    Failed,
+}
+
+impl ToolResultStatus {
+    pub const fn is_completed(self) -> bool {
+        matches!(self, Self::Completed)
+    }
+
+    pub const fn is_failure_like(self) -> bool {
+        matches!(self, Self::Partial | Self::Failed)
+    }
+}
+
+/// Classify a raw or normalized result envelope without inventing success from
+/// the outer Rust `Result`. Top-level `ok: false` is authoritative; canonical
+/// top-level status wins over the legacy nested `data.status` spelling.
+pub fn tool_result_status(output: &Value) -> ToolResultStatus {
+    if output.get("ok").and_then(Value::as_bool) == Some(false) {
+        return ToolResultStatus::Failed;
+    }
+    output
+        .get("status")
+        .and_then(Value::as_str)
+        .or_else(|| output.pointer("/data/status").and_then(Value::as_str))
+        .map(canonical_tool_result_status)
+        .unwrap_or(ToolResultStatus::Completed)
+}
+
+fn canonical_tool_result_status(status: &str) -> ToolResultStatus {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "failed" => ToolResultStatus::Failed,
+        "partial" => ToolResultStatus::Partial,
+        "skipped" => ToolResultStatus::Skipped,
+        _ => ToolResultStatus::Completed,
+    }
+}
+
 /// Distill captured subprocess stderr into a single actionable line for an
 /// error message or banner — skipping JVM/stack-frame noise (`at …`,
 /// `… N more`) so the operator sees the cause, not the call stack.
@@ -321,6 +369,26 @@ const MAX_SUMMARY_CHARS: usize = 160;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semantic_status_distinguishes_non_error_failure_envelopes() {
+        assert_eq!(
+            tool_result_status(&json!({"ok": false, "status": "completed"})),
+            ToolResultStatus::Failed
+        );
+        assert_eq!(
+            tool_result_status(&json!({"ok": true, "status": "partial"})),
+            ToolResultStatus::Partial
+        );
+        assert_eq!(
+            tool_result_status(&json!({"data": {"status": "skipped"}})),
+            ToolResultStatus::Skipped
+        );
+        assert_eq!(
+            tool_result_status(&json!({"status": "completed"})),
+            ToolResultStatus::Completed
+        );
+    }
 
     #[test]
     fn non_object_output_normalizes_through_completed_envelope() {

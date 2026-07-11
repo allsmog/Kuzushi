@@ -73,7 +73,10 @@ impl Play for HttpProbePlay {
         let outcome = PlayOutcome::new(self.name(), target).with_observation(response.observe(280));
         if landed {
             Ok(outcome.exploited(
-                format!("{} {} -> {}", self.request.method, self.request.path, response.status),
+                format!(
+                    "{} {} -> {}",
+                    self.request.method, self.request.path, response.status
+                ),
                 evidence,
             ))
         } else {

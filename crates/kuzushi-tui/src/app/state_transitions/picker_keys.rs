@@ -229,11 +229,11 @@ impl ShellApp {
             self.log("error", "no target candidates available");
             return Vec::new();
         };
-        vec![ShellEffect::ActivateTarget(TargetActivation {
+        self.request_target_activation(TargetActivation {
             path: candidate.path,
             selected_scope: candidate.scope,
             source: TargetActivationSource::Picker,
-        })]
+        })
     }
 
     fn defer_target_picker(&mut self) {
@@ -549,6 +549,7 @@ impl ShellApp {
 
     fn handle_planning_step_action_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
+            KeyCode::Char('p') => InputUpdate::handled_with_effects(self.review_planning_prompt()),
             KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('o') => {
                 self.enter_planning_options_pane();
                 InputUpdate::handled()
@@ -685,7 +686,11 @@ impl ShellApp {
     }
 
     fn log_toggle_outcome(&mut self, outcome: &ToggleOutcome) {
-        self.log("planning", toggle_outcome_message(outcome));
+        let message = toggle_outcome_message(outcome);
+        if matches!(outcome, ToggleOutcome::Blocked { .. }) {
+            self.set_warn_notice("planning", message.clone());
+        }
+        self.log("planning", message);
     }
 
     fn select_all_planning_rows(&mut self) {
@@ -1020,5 +1025,26 @@ mod tests {
             .log_lines()
             .iter()
             .all(|line| !line.body.contains("dispatching OAuth login")));
+    }
+
+    #[test]
+    fn blocked_planning_toggle_is_visible_as_a_warning_notice() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let outcome = ToggleOutcome::Blocked {
+            task: PlanningTaskId::GatherRepoContext,
+            dependents: vec![PlanningTaskId::MapEntryPoints],
+        };
+
+        app.log_toggle_outcome(&outcome);
+
+        let notice = app.advisory().notice.as_ref().expect("warning notice");
+        assert_eq!(notice.severity, crate::NoticeSeverity::Warn);
+        assert!(notice
+            .message
+            .contains("cannot uncheck Gather repo context"));
+        assert!(app
+            .log_lines()
+            .iter()
+            .any(|line| line.body == notice.message));
     }
 }

@@ -2,7 +2,11 @@ use super::*;
 use crate::ui_view_models::SeverityTone;
 use ratatui::prelude::{Color, Modifier, Style};
 
+mod cinematic;
 mod config;
+pub(crate) use cinematic::*;
+#[cfg(test)]
+pub(crate) use config::scoped_theme_for_test;
 pub use config::{active_theme, ColorDepth, ThemeConfig};
 
 pub const STATUS_SEPARATOR: &str = " · ";
@@ -277,6 +281,17 @@ fn adapt_color(color: Color, config: ThemeConfig) -> Color {
         ColorDepth::TrueColor => color,
         ColorDepth::Ansi256 => ansi256_color(color),
         ColorDepth::Ansi16 | ColorDepth::None => ansi16_color(color),
+    }
+}
+
+/// Adapt a raw design-system color for low-level buffer painters that cannot
+/// consume a semantic `Style` helper (for example the box-drawing diagrams).
+pub(crate) fn terminal_color(color: Color) -> Color {
+    let config = active_theme();
+    if config.no_color {
+        Color::Reset
+    } else {
+        adapt_color(color, config)
     }
 }
 

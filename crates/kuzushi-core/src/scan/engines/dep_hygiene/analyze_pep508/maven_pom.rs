@@ -50,7 +50,10 @@ fn dependency_name(dependency: Node<'_, '_>) -> Option<String> {
     Some(format!("{group_id}/{artifact_id}"))
 }
 
-fn child_elements<'a>(node: Node<'a, 'a>, name: &'static str) -> impl Iterator<Item = Node<'a, 'a>> {
+fn child_elements<'a>(
+    node: Node<'a, 'a>,
+    name: &'static str,
+) -> impl Iterator<Item = Node<'a, 'a>> {
     node.children()
         .filter(move |child| child.is_element() && child.tag_name().name() == name)
 }

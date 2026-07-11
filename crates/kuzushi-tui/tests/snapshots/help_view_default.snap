@@ -11,7 +11,7 @@ review; randori=threat model; tob/shinsa=plugin adapters.
 Examples: demo  ·  next  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  model 1
 
 NAVIGATION — browse modules and tools
-home - open Kuzushi cockpit home
+home - open the current phase cockpit
   aliases / examples: /home, /
 help - show grouped shell help
   aliases / examples: /help, /h, h, ?
@@ -19,9 +19,9 @@ workbench - open the split-pane command center
   aliases / examples: /workbench
 aim [focus] - seed the engagement harness from the Workbench AIM page
   aliases / examples: aim, /aim, aim sqli, aim idor
-modules - browse native Rust modules
+modules - open phase-native capabilities (Expert engines with e)
   aliases / examples: /modules, /m, m, show modules
-recommend - open latest module recommendations
+recommend - open phase-native recommended capabilities
   aliases / examples: /recommend, rec, /rec
 tools [query] - list or filter routed Rust tools
   aliases / examples: /tools, show tools, tools semgrep, tools --fav
@@ -31,7 +31,7 @@ favorite <tool> - toggle a tool on the per-workspace YOUR TOOLS shelf
   aliases / examples: /favorite <tool>, fav <tool>, /fav <tool>
 doctor - show shell preflight health
   aliases / examples: /doctor, health, /health
-use <module> - focus a module
+use <module> - filter the expert tool inventory by module
   aliases / examples: use semgrep, /use <module>
 back - return to the previous view
   aliases / examples: /back, /b, b
@@ -57,10 +57,9 @@ scan [target] - open the guided workflow for a target; `scan .` opts into cwd
   aliases / examples: scan ., /scan [target]
 run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthand
   aliases / examples: run ., /run <tool> [json], run . [json]
-recon:import <amass|httpx|nuclei|nmap-xml> <path> - import an external reconnaissance export through the registered
-recon tool
-aliases / examples: recon import <amass|httpx|nuclei|nmap-xml> <path>, /recon:import <amass|httpx|nuclei|nmap-xml>
-<path>
+recon:import <amass|httpx|nuclei|nmap-xml|burp-xml|har> <path> - import an external reconnaissance export through the
+registered recon tool
+  aliases / examples: recon import <format> <path>, /recon:import <format> <path>
 ask <question> - explicit agent question
   aliases / examples: /ask <question>, ?text
 queue <tool|verb> - queue a command to run after the current one finishes
@@ -257,8 +256,5 @@ boot - show launch readiness splash
   aliases / examples: /boot, boot-splash, /boot-splash
 quit-confirm - show exit confirmation checklist without quitting
   aliases / examples: /quit-confirm
-pwn - binary exploitation dashboard and pwn:* workflow actions
-aliases / examples: /pwn, pwn target <path>, pwn profile, pwn reverse [function], pwn auto, pwn state, pwn candidates
-<target>
 quit - exit the shell
   aliases / examples: q, /q, exit, /quit, /exit

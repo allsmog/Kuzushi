@@ -153,7 +153,7 @@ fn handle_read_file(target: &Path, call: &ToolCall) -> ToolResult {
 fn read_file_output(target: &Path, call: &ToolCall) -> Result<Value> {
     let file = required_string(call, "file", "missing `file`")?;
     let resolved = resolve_repo_path(target, &file)?;
-    let raw = std::fs::read_to_string(&resolved)?;
+    let raw = crate::bounded_file::read_utf8_text(&resolved, 8 * 1024 * 1024)?;
     let start = read_line_number(call, "startLine").unwrap_or(1).max(1);
     let end = read_line_number(call, "endLine");
     Ok(json!({

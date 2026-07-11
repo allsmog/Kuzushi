@@ -16,8 +16,28 @@ async fn press_key(world: &mut OnboardingWorld, key: String) {
 async fn type_command(world: &mut OnboardingWorld, command: String) {
     let session = world.require_session();
     session
-        .send_keys(&[&command, "Enter"])
-        .expect("tmux send-keys command failed");
+        .send_keys(&["F2"])
+        .expect("tmux navigation-mode entry failed");
+    std::thread::sleep(Duration::from_millis(150));
+    session
+        .send_keys(&["Escape"])
+        .expect("tmux prompt-mode return failed");
+    std::thread::sleep(Duration::from_millis(150));
+    session
+        .send_literal(&command)
+        .expect("tmux literal command input failed");
+    session
+        .send_keys(&["Enter"])
+        .expect("tmux command submission failed");
+    std::thread::sleep(Duration::from_millis(250));
+}
+
+#[when(regex = r#"^I type text "([^"]+)"$"#)]
+async fn type_text(world: &mut OnboardingWorld, value: String) {
+    world
+        .require_session()
+        .send_literal(&value)
+        .expect("tmux literal input failed");
     std::thread::sleep(Duration::from_millis(250));
 }
 
@@ -99,8 +119,60 @@ async fn row_unchecked(world: &mut OnboardingWorld, label: String) {
 async fn status_shows(world: &mut OnboardingWorld, segment: String) {
     let session = world.require_session();
     session
-        .wait_for(&segment, Duration::from_secs(3))
+        .wait_for_status_segment(&segment, Duration::from_secs(3))
         .expect("status segment never appeared");
+}
+
+#[then("the selected target consent is visible")]
+async fn selected_target_consent_visible(world: &mut OnboardingWorld) {
+    assert_target_identity_line(world, "Enter selects");
+}
+
+#[then("the confirmed target is visible")]
+async fn confirmed_target_visible(world: &mut OnboardingWorld) {
+    assert_target_identity_line(world, "Target confirmed");
+}
+
+#[then("the Enter plan summary and controls are visible")]
+async fn plan_confirmation_visible(world: &mut OnboardingWorld) {
+    let snapshot = world.require_session().snapshot().expect("snapshot failed");
+    assert!(
+        snapshot.lines().any(|line| line.contains("Enter:")),
+        "missing Enter summary:\n{snapshot}"
+    );
+    assert!(
+        snapshot.lines().any(|line| line.contains("Space check")),
+        "missing toggle control:\n{snapshot}"
+    );
+    assert!(
+        snapshot.lines().any(|line| line.contains("Enter run")),
+        "missing run control:\n{snapshot}"
+    );
+}
+
+fn assert_target_identity_line(world: &OnboardingWorld, prefix: &str) {
+    let session = world.require_session();
+    session
+        .wait_for(prefix, Duration::from_secs(5))
+        .unwrap_or_else(|error| panic!("target identity never appeared: {error:#}"));
+    let snapshot = session.snapshot().expect("snapshot failed");
+    let name = session
+        .target
+        .file_name()
+        .expect("temp target name")
+        .to_string_lossy();
+    let line = snapshot
+        .lines()
+        .find(|line| line.contains(prefix))
+        .unwrap_or_else(|| panic!("missing `{prefix}` target line:\n{snapshot}"));
+    assert!(
+        line.contains(name.as_ref()),
+        "target line does not name resolved cwd `{name}`: {line}"
+    );
+    assert!(
+        line.contains('/') && line.contains('·'),
+        "target line does not show a resolved path: {line}"
+    );
 }
 
 fn translate_key(key: &str) -> String {

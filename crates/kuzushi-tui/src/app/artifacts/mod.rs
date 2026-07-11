@@ -29,9 +29,10 @@ fn take_display_columns(value: &str, max: usize) -> String {
     out
 }
 
-/// Write minimal run metadata so the runs ledger can list synthetic
-/// agent / scan runs alongside real artefacts. Best-effort; silent on
-/// failure.
+/// Write minimal run metadata so the runs ledger can list synthetic shell
+/// runs alongside real artefacts. Existing metadata is terminalized in place;
+/// callers must not replace the running seed and lose its start/model/artifacts.
+#[cfg(test)]
 pub fn write_run_summary(
     target: Option<&std::path::Path>,
     run_id: &str,
@@ -44,23 +45,135 @@ pub fn write_run_summary(
     // pollute test workspaces (cwd is `crates/<name>` during cargo test).
     let Some(target) = target else { return };
     let status = canonical_run_status(status);
-    let mut summary = kuzushi_core::RunSummary::running(
-        run_id.to_string(),
-        "shell",
-        None,
-        target_label.to_string(),
-    )
-    .with_findings(findings)
-    .with_loaded_modules(
-        kuzushi_core::ModuleRegistry::with_v2_builtins().loaded_module_specifiers(),
-    );
-    summary.status = status.to_string();
-    if status == "running" {
-        // Stamp our pid so a crashed/killed shell run is repairable to
-        // "interrupted" instead of lingering as an immortal "running" row.
-        summary = summary.with_process_id(std::process::id());
+    let seed = kuzushi_core::load_run_summary(target, run_id).unwrap_or_else(|_| {
+        kuzushi_core::RunSummary::running(
+            run_id.to_string(),
+            "shell",
+            None,
+            target_label.to_string(),
+        )
+        .with_loaded_modules(
+            kuzushi_core::ModuleRegistry::with_v2_builtins().loaded_module_specifiers(),
+        )
+    });
+    let mut summary = terminalize_shell_summary(seed, status);
+    if findings.is_some() {
+        summary = summary.with_findings(findings);
     }
     let _ = kuzushi_core::write_run_summary(target, &summary);
+}
+
+#[cfg(test)]
+fn terminalize_shell_summary(
+    mut summary: kuzushi_core::RunSummary,
+    status: &str,
+) -> kuzushi_core::RunSummary {
+    match status {
+        "running" => summary.with_process_id(std::process::id()),
+        "completed" => summary.complete(),
+        "failed" => summary.failed("shell run failed"),
+        "canceled" => summary.canceled("shell run canceled"),
+        "interrupted" => summary.interrupted("shell run interrupted"),
+        "skipped" => summary.skipped("shell run skipped"),
+        "partial" | "paused" => {
+            summary.status = status.to_string();
+            summary
+        }
+        _ => summary,
+    }
+}
+
+pub fn record_agent_run_started(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    input: &serde_json::Value,
+    model: String,
+    config_hash: Option<String>,
+    loaded_modules: Vec<String>,
+) -> anyhow::Result<()> {
+    let Some(target) = target else { return Ok(()) };
+    kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
+        agent_run_record(target, run_id),
+        input,
+        Some(model),
+        config_hash,
+        loaded_modules,
+    )
+}
+
+pub fn record_agent_run_completed(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    answer_chars: usize,
+    latency_ms: Option<u64>,
+    cost_usd: Option<f64>,
+) -> anyhow::Result<()> {
+    let Some(target) = target else { return Ok(()) };
+    let result = serde_json::json!({
+        "ok": true,
+        "status": "completed",
+        "summary": "agent:ask completed",
+        "output": "agent answer recorded",
+        "artifacts": [],
+        "warnings": [],
+        "errors": [],
+        "costUsd": cost_usd,
+        "data": {
+            "answerChars": answer_chars,
+            "latencyMs": latency_ms,
+        },
+    });
+    kuzushi_core::run_artifacts::try_record_tool_run_complete(
+        agent_run_record(target, run_id),
+        &result,
+    )
+}
+
+pub fn record_agent_run_failed(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    error: &str,
+    cost_usd: Option<f64>,
+) -> anyhow::Result<()> {
+    let Some(target) = target else { return Ok(()) };
+    kuzushi_core::run_artifacts::try_record_tool_run_failed(
+        agent_run_record(target, run_id),
+        error,
+    )?;
+    update_recorded_run_cost(target, run_id, cost_usd)
+}
+
+pub fn record_agent_run_canceled(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    reason: &str,
+    cost_usd: Option<f64>,
+) -> anyhow::Result<()> {
+    let Some(target) = target else { return Ok(()) };
+    kuzushi_core::run_artifacts::try_record_tool_run_canceled(
+        agent_run_record(target, run_id),
+        reason,
+    )?;
+    update_recorded_run_cost(target, run_id, cost_usd)
+}
+
+fn agent_run_record<'a>(
+    target: &'a std::path::Path,
+    run_id: &'a str,
+) -> kuzushi_core::run_artifacts::ToolRunRecord<'a> {
+    kuzushi_core::run_artifacts::ToolRunRecord::new(target, run_id, "shell", "agent:ask")
+}
+
+fn update_recorded_run_cost(
+    target: &std::path::Path,
+    run_id: &str,
+    cost_usd: Option<f64>,
+) -> anyhow::Result<()> {
+    let Some(cost_usd) = cost_usd else {
+        return Ok(());
+    };
+    let summary = kuzushi_core::load_run_summary(target, run_id)?;
+    kuzushi_core::write_run_summary(target, &summary.with_cost(Some(cost_usd))).map(|_| ())
 }
 
 pub fn write_run_failure_handoff(
@@ -69,16 +182,17 @@ pub fn write_run_failure_handoff(
     tool: &str,
     status: &str,
     error: &str,
-) {
-    let Some(target) = target else { return };
-    let _ = kuzushi_core::run_artifacts::write_run_failures(
+) -> anyhow::Result<()> {
+    let Some(target) = target else { return Ok(()) };
+    kuzushi_core::run_artifacts::write_run_failures(
         target,
         run_id,
         tool,
         canonical_run_status(status),
         error,
         &[],
-    );
+    )
+    .map(|_| ())
 }
 
 pub fn append_run_status_event(
@@ -87,8 +201,8 @@ pub fn append_run_status_event(
     tool: &str,
     status: &str,
     message: impl Into<String>,
-) {
-    let Some(target) = target else { return };
+) -> anyhow::Result<()> {
+    let Some(target) = target else { return Ok(()) };
     let event = kuzushi_core::run_artifacts::RunEvent::new(
         kuzushi_core::run_artifacts::next_run_event_number(target, run_id),
         "tool",
@@ -96,7 +210,7 @@ pub fn append_run_status_event(
         message,
     )
     .with_tool(tool);
-    let _ = kuzushi_core::run_artifacts::append_run_event(target, run_id, &event);
+    kuzushi_core::run_artifacts::append_run_event(target, run_id, &event).map(|_| ())
 }
 
 fn canonical_run_status(status: &str) -> &'static str {
@@ -175,12 +289,12 @@ pub fn append_llm_trace_step(
     label: &str,
     latency_ms: Option<u64>,
     audit: &AgentCallAudit,
-) {
-    let Some(target) = target else { return };
+) -> anyhow::Result<()> {
+    let Some(target) = target else { return Ok(()) };
     let step = kuzushi_core::RunTraceStep::new(0, kind.to_string(), label.to_string())
         .with_latency_ms(latency_ms)
         .with_cost_usd(audit.cost_usd)
         .with_model_metadata(&audit.model, &audit.provider, &audit.prompt_hash);
-    let _ =
-        kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step);
+    kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step)
+        .map(|_| ())
 }

@@ -3,8 +3,7 @@
 //! shell, and run all agree. Persisted to a sibling state file — never mixed
 //! into the operator's `options.json`, since recents churn on every run.
 
-use crate::fs_atomic::write_atomic;
-use crate::workspace::{workspace_state_dir, WorkspaceTarget};
+use crate::workspace::{workspace_state_dir, write_workspace_state_file, WorkspaceTarget};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -14,6 +13,7 @@ pub const WORKSPACE_TOOL_SHELF_FILE: &str = "tool-shelf.json";
 
 /// Maximum number of recents retained (MRU ring).
 pub const RECENTS_CAP: usize = 10;
+const MAX_TOOL_SHELF_BYTES: usize = 4 * 1024 * 1024;
 
 /// One recorded recent-use entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,22 +103,25 @@ pub fn workspace_tool_shelf_path(root: impl AsRef<Path>) -> PathBuf {
 /// explicit error (no silent reset).
 pub fn load_tool_shelf(target: &WorkspaceTarget) -> Result<ToolShelf> {
     let path = workspace_tool_shelf_path(target.root());
-    match std::fs::read_to_string(&path) {
-        Ok(contents) => serde_json::from_str(&contents)
-            .with_context(|| format!("Could not parse tool shelf at {}", path.display())),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ToolShelf::default()),
-        Err(error) => {
-            Err(error).with_context(|| format!("Could not read tool shelf at {}", path.display()))
-        }
-    }
+    let Some(contents) =
+        crate::workspace::read_optional_workspace_text(target.root(), &path, MAX_TOOL_SHELF_BYTES)?
+    else {
+        return Ok(ToolShelf::default());
+    };
+    serde_json::from_str(&contents)
+        .with_context(|| format!("Could not parse tool shelf at {}", path.display()))
 }
 
 /// Persist the shelf atomically.
 pub fn save_tool_shelf(target: &WorkspaceTarget, shelf: &ToolShelf) -> Result<()> {
     let path = workspace_tool_shelf_path(target.root());
-    let contents = serde_json::to_string_pretty(shelf)
-        .with_context(|| "Could not serialize tool shelf")?;
-    write_atomic(&path, &contents)
+    let contents =
+        serde_json::to_string_pretty(shelf).with_context(|| "Could not serialize tool shelf")?;
+    let relative = path
+        .strip_prefix(target.root())
+        .with_context(|| format!("{} escaped the workspace", path.display()))?;
+    write_workspace_state_file(target.root(), relative, contents.as_bytes())?;
+    Ok(())
 }
 
 /// Load-modify-save a recorded tool use. Used by the dispatch boundary.
@@ -192,6 +195,44 @@ mod tests {
         save_tool_shelf(&target, &shelf).unwrap();
         let loaded = load_tool_shelf(&target).unwrap();
         assert_eq!(loaded, shelf);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tool_shelf_writer_rejects_a_symlinked_artifact() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("workspace");
+        let target = WorkspaceTarget::new(temp.path()).expect("workspace target");
+        let mut outside = tempfile::NamedTempFile::new().expect("outside");
+        std::io::Write::write_all(&mut outside, b"outside").expect("seed outside");
+        target.ensure_state_dir().expect("state dir");
+        symlink(outside.path(), workspace_tool_shelf_path(target.root()))
+            .expect("symlink artifact");
+
+        let error =
+            save_tool_shelf(&target, &ToolShelf::default()).expect_err("symlink must be rejected");
+
+        assert!(error.to_string().contains("symlink"));
+        assert_eq!(std::fs::read_to_string(outside.path()).unwrap(), "outside");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tool_shelf_reader_rejects_an_outside_symlink_without_disclosing_content() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("workspace");
+        let target = WorkspaceTarget::new(temp.path()).expect("workspace target");
+        let outside = tempfile::NamedTempFile::new().expect("outside");
+        std::fs::write(outside.path(), "OUTSIDE_SHELF_TOKEN").unwrap();
+        target.ensure_state_dir().unwrap();
+        symlink(outside.path(), workspace_tool_shelf_path(target.root())).unwrap();
+
+        let error = load_tool_shelf(&target).unwrap_err().to_string();
+
+        assert!(error.contains("symlink"), "{error}");
+        assert!(!error.contains("OUTSIDE_SHELF_TOKEN"));
     }
 
     #[test]

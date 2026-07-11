@@ -1,7 +1,7 @@
 use crate::app::{
-    FailedPlanningTask, PendingPatch, PendingPrereqPrompt, PlanningOptionOverrides,
-    PlanningPickerRouteState, PlanningRunStep, PlanningTaskId, PrereqChain, PrereqPlanAction,
-    PrereqStep, RetryAdjustment, ThreatPatch, WorkflowPhase,
+    ExecutionAuthorization, FailedPlanningTask, PendingPatch, PendingPrereqPrompt,
+    PlanningOptionOverrides, PlanningPickerRouteState, PlanningRunStep, PlanningTaskId,
+    PrereqChain, PrereqPlanAction, PrereqStep, RetryAdjustment, ThreatPatch, WorkflowPhase,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -38,6 +38,10 @@ pub struct EngagementState {
 }
 
 impl EngagementState {
+    pub(crate) fn reset_for_target(&mut self) {
+        *self = Self::default();
+    }
+
     pub(crate) fn current_phase(&self) -> Option<WorkflowPhase> {
         self.workflow_phase
     }
@@ -326,7 +330,7 @@ impl EngagementState {
 
     pub(crate) fn mark_final_chain_tool_dispatched(
         &mut self,
-    ) -> Option<(String, Value, Option<String>)> {
+    ) -> Option<(String, Value, Option<String>, ExecutionAuthorization)> {
         let chain = self.pending_chain.as_mut()?;
         if chain.final_dispatched {
             return None;
@@ -336,6 +340,7 @@ impl EngagementState {
             chain.final_tool.clone(),
             chain.final_input.clone(),
             chain.final_thinking_level.clone(),
+            chain.authorization.clone(),
         ))
     }
 

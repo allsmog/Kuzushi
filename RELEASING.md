@@ -5,6 +5,8 @@ part of every release commit.
 
 ## Prerequisites
 
+- Node.js 22 or newer (`node --version`); this must match `engines.node` in the
+  published package
 - npm login: `npm whoami` should show your username
 - Push access to `github.com/allsmog/Kuzushi`
 - `NPM_TOKEN` secret set in GitHub repo settings (for automated CI releases)
@@ -25,10 +27,12 @@ pnpm build:clean
 pnpm build:native
 pnpm verify:pack
 
-# 2. Bump version (pick one)
-npm version patch --no-git-tag-version   # 0.2.0 -> 0.2.1
-npm version minor --no-git-tag-version   # 0.2.0 -> 0.3.0
-npm version major --no-git-tag-version   # 0.2.0 -> 1.0.0
+# 2. Bump the same version in package.json and workspace Cargo.toml.
+#    Then let Cargo refresh local workspace entries in Cargo.lock.
+npm version prerelease --preid alpha --no-git-tag-version
+# Edit [workspace.package].version in Cargo.toml to that exact value.
+cargo metadata --no-deps --format-version 1 >/dev/null
+pnpm check:release
 
 # 3. Commit and tag
 git add package.json CHANGELOG.md
@@ -47,11 +51,16 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml` which:
 2. Builds native binaries for linux-x64, linux-arm64, darwin-x64,
    darwin-arm64, and win32-x64. Required legs block the release; best-effort
    legs are staged when they build.
-3. Stages all green native binaries into `native/<platform>-<arch>/`.
-4. Runs `pnpm verify:pack` against the staged package.
+3. Stages the CLI and every advertised MCP server from each green build into
+   `native/<platform>-<arch>/`.
+4. Executes each platform's staged CLI plus every advertised MCP health check
+   with an empty inherited `PATH`, runs the platform-specific process/atomic
+   tests, then runs `pnpm verify:pack` against the assembled npm tarball.
 5. Publishes to npm with the multi-platform native payload (requires
    `NPM_TOKEN` secret).
-6. Creates a GitHub Release with changelog, npm tarball, and native archives.
+6. Creates a GitHub Release with changelog, the full Node-capable npm tarball,
+   and CLI-plus-MCP native archives. The native archives intentionally omit
+   Node dependencies; model-backed and dynamic-Node tools use npm or source.
 
 ```sh
 # If you've already published manually, just push the tag:
@@ -78,6 +87,13 @@ Before publishing a release that changes the registry surface, check
 compatibility folds intentionally keep old exact tool names runnable while
 removing them from catalog/recommender discovery:
 
+- shell `home`, `/home`, and `/` -> the phase Workbench
+- shell `modules` -> the contextual Capabilities overlay (`tools` is the raw inventory)
+- `bounty:import-har` -> `recon:import {"tool":"har","path":"..."}`
+- `bounty:import-burp` -> `recon:import {"tool":"burp-xml","path":"..."}`
+- `randori:pasta` -> `threat-model:build {"methodology":"pasta"}`
+- `carlini-threat-hunt:run` -> `offense-review:threat-hunt`
+
 - `taint-iris:hunt` -> `taint-iris-next:hunt`
 - `full-mode:hunt` -> `agentic-sast:scan {"strategy":"chunked"}`
 - `deep-audit:run` -> `triage:run {"strategy":"deep"}`
@@ -88,6 +104,14 @@ removing them from catalog/recommender discovery:
 
 `smoke:next-step` was a hidden runtime smoke-test helper and has no migration
 path.
+
+Optional PromptArmor, Shinsa, Trail of Bits, and Vuln Scout packages are no
+longer bundled or auto-discovered from `node_modules`. Configure an adapter
+explicitly or load it as an approved KWP integration. This prevents development
+dependencies from silently changing the operator and LLM discovery surfaces.
+Keep those packages out of both `dependencies` and `optionalDependencies`;
+`pnpm verify:pack` rejects their accidental reintroduction, including Git URL
+dependencies that would make a fresh npm install depend on GitHub availability.
 
 ## Run status vocabulary migration (unreleased)
 
@@ -109,12 +133,47 @@ rehashes the bundle, verifies its descriptor hash and optional Ed25519
 signature chain, then runs it as a brokered KWP worker. Changed bundles require
 fresh approval; revoked or mismatched entries fail before module code runs.
 The old trusted-specifier list remains only for non-local compatibility forms.
-
 The v0.1 KWP Node tier accepts one self-contained entry file. It requires the
 permission-mode network boundary introduced in Node 25, adds a macOS network
 sandbox, and requires Node 26.3.1 or newer on other platforms. Multi-file
 directory bundles must remain on the legacy trusted path until a
 content-addressed bundle format lands.
+
+Trusted Node modules loaded with `--load` must now declare an explicit native
+policy on every tool: `effect`, `approval`, `workspaceRequirement`, and a
+concrete `phase` for effectful operations. `headless` remains mandatory.
+Target-write and external-action tools must use `approval: "explicit"`.
+Modules that omit this policy fail atomically during description, before any
+tool is registered. This is an intentional fail-closed contract change; add
+the fields described in `docs/modules.md` before upgrading an external module.
+
+Dynamic descriptor options with `type: "path"` must now add a mandatory
+`pathSemantics` value. This is a deliberate fail-closed migration: the host
+does not infer whether an unlabelled path is a workspace read, Kuzushi state
+write, target write, external read/write, or executable. Target-owned option
+stores cannot supply model selectors or executable/external/write-capable
+paths. Update modules and their tests before bumping the Kuzushi peer version.
+The native/Node bridge also performs a protocol-version and exact package
+semver handshake, so custom `KUZUSHI_DYNAMIC_MODULE_HOST` implementations must
+emit the documented version envelope/handshake before payloads.
+
+The old `dispatch_prepared_tool_with_runtime(name, Value, ...)` API remains
+source-compatible, but it now re-runs canonical preparation. New Rust callers
+should use `prepare_dispatch_input` and
+`dispatch_prepared_input_with_runtime`, which carry an opaque preparation
+proof and avoid duplicate validation.
+
+`codeql:create-db outputPath` and `cpg:build outputPath` are now confined to
+the active target's `.kuzushi/` state tree. Before upgrading, move any custom
+destination into `<target>/.kuzushi/`; destinations elsewhere are rejected
+instead of allowing scanner subprocesses to overwrite operator or project
+files.
+
+The empirical Rust API `verify_finding` now requires an explicit
+`workspace_root` argument. Custom callers must pass the same trusted target
+root that owns the finding store. Rust/C finding paths are resolved below that
+root with bounded, no-follow reads; absolute paths outside it, `..` traversal,
+symlinks, and oversized source files now fail as infrastructure input errors.
 
 ## If a version is already published
 

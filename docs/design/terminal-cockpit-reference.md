@@ -13,9 +13,11 @@ do not create parallel routes.
 - Cockpit panes use stable subtle rails. Focus changes rail/title emphasis,
   never geometry; `Z` temporarily zooms the focused Workbench pane and `Tab`
   moves the zoom with focus.
-- Review rows group by operator workflow (`NEEDS REVIEW`, `CONFIRMED`,
-  `DEFERRED / RISK`, `CLOSED`) while preserving confidence-first order inside
-  each group.
+- Review rows project into `NEEDS REVIEW`, `CONFIRMED`, `DEFERRED`, and
+  `CLOSED`. Confidence-first ordering with severity tie-breaking is stable
+  inside each group. Display rows carry the projected finding identity, so
+  keyboard/mouse selection, details, verify, suppress, and patch actions all
+  resolve the same finding even though group headers are not findings.
 - Palette, confirmation, quit, theme, keymap, and update surfaces are
   contextual overlays over the originating view. Pickers remain dedicated
   onboarding gates.
@@ -33,6 +35,14 @@ Visual acceptance regression guards:
   only the modal selection owns the accent.
 - Never-started Activity tasks project as skipped/not run and remain collapsed
   behind `V`; canceling/canceled is reserved for work that actually started.
+- Phase-specific Activity composition retains the real `TASKS` and `OUTPUT`
+  panes. Terminal elapsed time freezes when the run settles.
+- A live run owns the target captured at launch. Target activation clears every
+  target-derived cache before new artifacts hydrate.
+- Proof replay uses the persisted verification run, never the discovery scan;
+  proof carried onto a later observation is visibly marked for revalidation.
+- Findings filters change the visible review set only. Journey totals and phase
+  derive from the unfiltered durable ledger.
 - At 100–149 columns, review uses the 2×2 cockpit and phase pages use a nested
   two-column grid. Three/four full-height columns begin at 150 columns.
 - Compact status chrome measures Unicode display width and emits complete
@@ -40,6 +50,55 @@ Visual acceptance regression guards:
 - Onboarding gates own their local guidance. Generic transcript/keybind chrome
   is suppressed so Target, Model, Credentials, and Planning retain one next
   action at 60×20.
+
+## Updated phase-cockpit reference
+
+`Kuzushi TUI.pdf` is the governing composition reference for the four
+engagement pages. Review provenance:
+
+| Field | Value |
+| --- | --- |
+| SHA-256 | `fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545` |
+| PDF title | `Kuzushi TUI` |
+| Created | 2026-07-09 19:54:48 PDT |
+| Pages | 2 (the four terminal references are 1a–1d on page 1) |
+| Page size | 1206 × 2045.04 pt |
+
+The PDF governs terminal-cell composition, density, hierarchy, color mood,
+meters, proof presentation, and report structure. It does **not** require the
+Ratatui renderer to reproduce macOS traffic lights, the outer rounded window,
+page shadows, background glow, terminal font, blur, or optical bloom. Those
+belong to the terminal emulator or the presentation document, not Kuzushi's
+cell buffer.
+
+| Reference | Phase | Required composition |
+| --- | --- | --- |
+| 1a | Map | Full-width live trace; current operation and elapsed time; real progress, budget, and artifact telemetry; one complete `NEXT`. |
+| 1b | Hunt | `SOURCE`, hunt/proposal state, and `REVIEW QUEUE` across the upper cockpit; `FINDINGS HEATMAP` spanning below. |
+| 1c | Confirm | Selected finding header; finding-keyed `ATTACK PATH`; source-to-sink ladder; `PROOF · REPLAY` sidecar only when persisted verification evidence exists. Replay uses the verification run id, and proof from an earlier scan carries a revalidation warning. |
+| 1d | Fix | `KUZUSHI · BREAKDOWN REPORT`; truthful totals; attack tree and DFD; remediation/patch state; complete findings-export action. |
+
+All four pages consume live Kuzushi presentation models. A missing flow,
+proof, replay, DFD, chain, patch, or report artifact renders concise guidance;
+it never licenses decorative sample evidence. Manual page navigation changes
+the visible composition only and never advances the reality-derived journey
+phase. `scripts/devex/run-journey.sh J17` captures 1a–1d at the canonical
+120×36 size after a keyless offline-demo run and leaves visual fidelity as
+explicit human REVIEW questions alongside machine-checked semantic sections.
+
+The cinematic layer is capability-driven and never operator-fictional:
+
+| Terminal/accessibility profile | Cinematic level | Behavior |
+| --- | --- | --- |
+| Truecolor | Full | RGB backdrop, restrained scanlines, and the blank-cell-only Fix watermark. |
+| ANSI-256 | Indexed | The same hierarchy using indexed colors only; no RGB SGR leakage. |
+| ANSI-16 or no color | Off | Structural rails, markers, words, and glyphs carry the hierarchy without texture. |
+| High contrast | Off | Accessibility contrast wins over decorative texture. |
+
+Reduced motion is independent of color fidelity: it disables the LIVE pulse
+without changing the selected cinematic color level. Background and watermark
+painters skip semantic backgrounds, reversed/selected cells, and existing
+content, so failure/severity states and copyable commands remain authoritative.
 
 1. Executive Diagnosis
 

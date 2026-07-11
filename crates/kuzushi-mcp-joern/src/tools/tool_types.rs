@@ -9,6 +9,3 @@ pub(crate) struct TaintPathsTool;
 pub(crate) struct UnsafeBlocksTool;
 pub(crate) struct FfiBoundariesTool;
 pub(crate) struct MethodAtTool;
-
-#[allow(dead_code)]
-pub(crate) struct NotYetImplemented(pub(crate) &'static str);

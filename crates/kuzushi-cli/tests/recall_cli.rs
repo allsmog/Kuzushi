@@ -32,9 +32,19 @@ fn workspace_root() -> PathBuf {
 
 fn kuzushi_eval_bin() -> PathBuf {
     let workspace = workspace_root();
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                workspace.join(path)
+            }
+        })
+        .unwrap_or_else(|| workspace.join("target"));
     let candidates = [
-        workspace.join("target/debug/kuzushi-eval"),
-        workspace.join("target/release/kuzushi-eval"),
+        target.join("debug/kuzushi-eval"),
+        target.join("release/kuzushi-eval"),
     ];
     for c in &candidates {
         if c.exists() {
@@ -48,7 +58,7 @@ fn kuzushi_eval_bin() -> PathBuf {
         .status()
         .expect("cargo build of kuzushi-eval");
     assert!(status.success(), "could not build kuzushi-eval");
-    workspace.join("target/debug/kuzushi-eval")
+    target.join("debug/kuzushi-eval")
 }
 
 fn load_oracle(slice: &str) -> (PathBuf, Value) {

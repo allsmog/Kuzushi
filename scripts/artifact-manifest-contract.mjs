@@ -162,9 +162,9 @@ function failureFollowUpSourceFailures(source) {
     )
       ? null
       : "optional failure follow-up must use report_artifact_spec().leaf",
-    source.includes("run_artifact_path(target, run_id, failure_artifact_spec().leaf)")
+    source.includes("read_run_artifact_text(target, run_id, failure_artifact_spec().leaf)")
       ? null
-      : "failure follow-up must use failure_artifact_spec().leaf",
+      : "failure loader must read failure_artifact_spec().leaf through the safe reader",
     source.includes("manifest_artifact_spec().leaf")
       ? null
       : "failure follow-up must use manifest_artifact_spec().leaf",
@@ -177,16 +177,17 @@ function failureFollowUpSourceFailures(source) {
 function failureArtifactPathHelperFailures(source, root) {
   return [
     source.includes(
-      "pub(crate) fn run_failure_artifact_path(target: &Path, run_id: &str) -> PathBuf",
+      "pub(crate) fn run_failure_artifact_path(target: &Path, run_id: &str) -> Result<PathBuf>",
     )
       ? null
-      : "failure artifact path helper must stay crate-visible",
-    source.includes("run_artifact_path(target, run_id, failure_artifact_spec().leaf)")
+      : "failure artifact path helper must stay crate-visible and fallible",
+    source.includes("checked_run_artifact_path(target, run_id, failure_artifact_spec().leaf)")
       ? null
-      : "failure artifact path helper must use failure_artifact_spec().leaf",
-    source.includes("let path = run_failure_artifact_path(target.as_ref(), run_id)")
+      : "failure artifact path helper must use failure_artifact_spec().leaf through checked containment",
+    source.includes("read_run_artifact_text(target, run_id, failure_artifact_spec().leaf)") &&
+    source.includes('.require("Run failures artifact")')
       ? null
-      : "failure artifact loader must use run_failure_artifact_path",
+      : "failure artifact loader must use the required safe artifact reader",
     ...reportFailureHandoffPathFailures(root),
   ].filter(Boolean);
 }
@@ -270,7 +271,10 @@ export function checkCanonicalSpecialWriterInventory(root) {
   const file = "crates/kuzushi-core/src/run_artifacts/canonical_run_files.rs";
   const sourcePath = path.join(root, file);
   if (!existsSync(sourcePath)) return [`canonical special writer inventory: missing ${file}`];
-  const source = readFileSync(sourcePath, "utf8");
+  const markerFile = "crates/kuzushi-core/src/run_artifacts/canonical_run_markers.rs";
+  const markerPath = path.join(root, markerFile);
+  if (!existsSync(markerPath)) return [`canonical special writer inventory: missing ${markerFile}`];
+  const source = `${readFileSync(sourcePath, "utf8")}\n${readFileSync(markerPath, "utf8")}`;
   const actual = canonicalSpecialWriterArtifacts(source);
   const expected = requiredSpecialWriterArtifacts();
   return [
@@ -291,9 +295,11 @@ export function checkRunMetadataWriterInventory(root) {
     source.includes('canonical_run_artifact_spec("run.json")')
       ? null
       : "run metadata writer must use shared run metadata spec",
-    source.includes("write_run_summary_file(&dir.join(run_metadata_artifact_spec().leaf)")
+    source.includes("checked_run_artifact_path(") &&
+    source.includes("run_metadata_artifact_spec().leaf") &&
+    source.includes("write_run_summary_file(&metadata_path")
       ? null
-      : "run metadata writer must write run_metadata_artifact_spec().leaf",
+      : "run metadata writer must write the checked run_metadata_artifact_spec().leaf path",
   ].filter(Boolean);
 }
 
@@ -751,11 +757,13 @@ export function checkPatchWorktreePathHelper(root) {
     source.includes("workspace_state_root(repo_root).join(PATCH_WORKTREES_DIR)")
       ? null
       : "patch worktree path helper must derive from workspace_state_root",
-    source.includes("let worktree_base = patch_worktrees_root(repo_root)")
+    source.includes("= patch_worktrees_root(repo_root)") &&
+    source.includes(".strip_prefix(repo_root)")
       ? null
       : "patch worktree creation must use patch_worktrees_root",
     productionSource.includes('join(".kuzushi").join("worktrees")') ||
-    productionSource.includes('join(".kuzushi/worktrees")')
+    productionSource.includes('join(".kuzushi/worktrees")') ||
+    productionSource.includes('Path::new(".kuzushi")')
       ? "patch worktree creation must not hardcode .kuzushi/worktrees"
       : null,
   ].filter(Boolean);
@@ -1547,6 +1555,9 @@ export function checkTuiRunTimelineArtifactLeaves(root) {
   const sourcePath = path.join(root, file);
   if (!existsSync(sourcePath)) return [`TUI run timeline artifact leaves: missing ${file}`];
   const source = readFileSync(sourcePath, "utf8");
+  const usesTypedSummaryEntries =
+    source.includes("RunSummaryEntryState") &&
+    (source.includes(".run_summary_entries(") || source.includes(".cached_run_summary_entries("));
   return [
     source.includes('canonical_run_artifact_spec("run.json")')
       ? null
@@ -1554,13 +1565,14 @@ export function checkTuiRunTimelineArtifactLeaves(root) {
     source.includes("fn run_metadata_artifact_leaf() -> &'static str")
       ? null
       : "TUI run timeline must centralize metadata artifact leaf",
-    source.includes(".join(metadata_leaf)") && source.includes("run_metadata_artifact_leaf()")
+    usesTypedSummaryEntries ||
+    (source.includes(".join(metadata_leaf)") && source.includes("run_metadata_artifact_leaf()"))
       ? null
       : "TUI run timeline canonical metadata path must use shared metadata artifact leaf",
-    source.includes("malformed_past_run_metadata(metadata_leaf)")
+    usesTypedSummaryEntries || source.includes("malformed_past_run_metadata(metadata_leaf)")
       ? null
       : "TUI run timeline canonical malformed label must use shared metadata artifact leaf",
-    source.includes("non_file_past_run_metadata(metadata_leaf)")
+    usesTypedSummaryEntries || source.includes("non_file_past_run_metadata(metadata_leaf)")
       ? null
       : "TUI run timeline canonical non-file label must use shared metadata artifact leaf",
   ].filter(Boolean);
@@ -1667,14 +1679,20 @@ function cliRunsPathConsumerFailure(root, file) {
 const cliRunsPathRequirementsByFile = {
   "crates/kuzushi-cli/src/application/runs.rs": [
     { needle: "runs_root(", message: "CLI runs show must use runs_root" },
-    { needle: "run_artifact_path(", message: "CLI runs trace must use run_artifact_path" },
+    {
+      needle: "read_run_artifact_text(",
+      message: "CLI runs trace must use the safe artifact reader",
+    },
     {
       needle: 'canonical_run_artifact_spec("trace.jsonl")',
       message: "CLI runs trace must use shared trace artifact spec",
     },
   ],
   "crates/kuzushi-cli/src/application/runs_diff.rs": [
-    { needle: "run_artifact_path(", message: "CLI runs diff must use run_artifact_path" },
+    {
+      needle: "read_run_artifact_text(",
+      message: "CLI runs diff must use the safe artifact reader",
+    },
     {
       needle: 'tool_result_artifact_spec("result.json")',
       message: "CLI runs diff must use shared tool-result artifact spec",
@@ -1686,10 +1704,16 @@ const cliRunsPathRequirementsByFile = {
   ],
   "crates/kuzushi-cli/src/application/runs_prune.rs": [
     { needle: "run_dir(", message: "CLI runs prune must use run_dir" },
-    { needle: "latest_run_path(", message: "CLI runs prune must use latest_run_path" },
+    {
+      needle: "repair_latest_run_pointer(",
+      message: "CLI runs prune must use atomic chronological latest repair",
+    },
   ],
   "crates/kuzushi-cli/src/application/pr_comment.rs": [
-    { needle: "run_artifact_path(", message: "CLI PR comment must use run_artifact_path" },
+    {
+      needle: "read_run_artifact_text(",
+      message: "CLI PR comment must use the safe artifact reader",
+    },
     {
       needle: 'tool_result_artifact_spec("result.json")',
       message: "CLI PR comment must use shared tool-result artifact spec",
@@ -1708,13 +1732,14 @@ const cliRunsPathRequirementsByFile = {
 };
 
 function cliRunsPathHardcodes(source) {
+  const productionSource = source.split("#[cfg(test)]")[0];
   return [
     '".kuzushi/v3/latest"',
     'join(".kuzushi/v3/runs")',
     'join(".kuzushi").join("runs")',
     'join(".kuzushi/v3/latest")',
     'join(".kuzushi").join("latest")',
-  ].some((needle) => source.includes(needle));
+  ].some((needle) => productionSource.includes(needle));
 }
 
 function workspaceArtifactKbDiscoveryPathFailures(root) {
@@ -1882,9 +1907,11 @@ function tuiLatestRunConsumerFailure(root, file) {
   const source = readFileSync(sourcePath, "utf8");
   const productionSource = source.split("#[cfg(test)]")[0];
   return [
-    source.includes("ui_latest_run_path(")
+    source.includes("ui_latest_run_path(") ||
+    source.includes(".latest_run_pointer(") ||
+    source.includes(".cached_latest_run_pointer(")
       ? null
-      : `TUI latest-run consumer must use ui_latest_run_path: ${file}`,
+      : `TUI latest-run consumer must use the shared latest-run reader: ${file}`,
     source.includes("ui_run_dir(") ? null : `TUI latest-run consumer must use ui_run_dir: ${file}`,
     productionSource.includes('".kuzushi/v3/latest"')
       ? `TUI latest-run consumer must not hardcode .kuzushi/v3/latest: ${file}`
@@ -1899,7 +1926,11 @@ function tuiRunsRootConsumerFailure(root, file) {
   const usesSharedRoot =
     source.includes("ui_runs_root(") ||
     source.includes("ui_runs_root_relative_path(") ||
-    source.includes("kuzushi_core::runs_root(");
+    source.includes("kuzushi_core::runs_root(") ||
+    source.includes(".run_summary_entries(") ||
+    source.includes(".cached_run_summary_entries(") ||
+    source.includes(".run_artifact_text(") ||
+    source.includes(".cached_run_artifact_text(");
   return [
     usesSharedRoot ? null : `TUI runs-root consumer must use shared helper: ${file}`,
     source.includes(".kuzushi/v3/runs")
@@ -1928,9 +1959,10 @@ function homeCockpitRunMetadataFailures(source) {
     source.includes("fn run_metadata_artifact_leaf() -> &'static str")
       ? null
       : "home cockpit run status must centralize metadata artifact leaf",
-    source.includes("run_dir.join(run_metadata_artifact_leaf())")
+    source.includes("run_artifact_text(app, run, run_metadata_artifact_leaf())") &&
+    source.includes(".cached_run_artifact_text(")
       ? null
-      : "home cockpit run status must use shared metadata artifact leaf",
+      : "home cockpit run status must use the hydrated safe-reader cache with the shared metadata leaf",
     source.includes("malformed_run_metadata_label")
       ? null
       : "home cockpit run status must share malformed metadata label",

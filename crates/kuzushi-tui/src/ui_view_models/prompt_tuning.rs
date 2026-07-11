@@ -1,5 +1,5 @@
 use crate::app::PromptMutationsState;
-use crate::{HouseRulesRead, ShellApp, TuneAction};
+use crate::{HouseRulesRead, ShellApp, TuneAction, ViewDataState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TuneModel {
@@ -293,16 +293,12 @@ fn prompt_mutation_layer_state(
     let Some(target) = app.target_path_buf() else {
         return PromptMutationLayerState::NoTarget;
     };
-    let workspace = match kuzushi_core::WorkspaceTarget::new(target) {
-        Ok(workspace) => workspace,
-        Err(_) => return PromptMutationLayerState::Unreadable,
-    };
     match app
         .workbench_cache()
-        .borrow_mut()
-        .prompt_mutations(Some(&workspace))
+        .borrow()
+        .cached_prompt_mutations(Some(target))
     {
-        Some(PromptMutationsState::Ready(mutations)) => {
+        ViewDataState::Ready(PromptMutationsState::Ready(mutations)) => {
             let Some(mutation) = mutations
                 .into_iter()
                 .rev()
@@ -317,8 +313,10 @@ fn prompt_mutation_layer_state(
                 hash,
             }
         }
-        Some(PromptMutationsState::Unreadable) => PromptMutationLayerState::Unreadable,
-        None => PromptMutationLayerState::Missing,
+        ViewDataState::Ready(PromptMutationsState::Unreadable) => {
+            PromptMutationLayerState::Unreadable
+        }
+        ViewDataState::NotRequested | ViewDataState::Loading => PromptMutationLayerState::Missing,
     }
 }
 
@@ -349,15 +347,18 @@ fn prompt_override_layer_state(
     let path = kuzushi_core::prompt_override_path(target, module, verb);
     match app
         .workbench_cache()
-        .borrow_mut()
-        .prompt_override_hash(&path)
+        .borrow()
+        .cached_prompt_override_hash(target, &path)
     {
-        Ok(Some(hash)) => PromptOverrideLayerState::Present {
+        ViewDataState::Ready(Ok(Some(hash))) => PromptOverrideLayerState::Present {
             path: relative,
             hash,
         },
-        Ok(None) => PromptOverrideLayerState::Missing { path: relative },
-        Err(_) => PromptOverrideLayerState::Unreadable { path: relative },
+        ViewDataState::Ready(Ok(None)) => PromptOverrideLayerState::Missing { path: relative },
+        ViewDataState::Ready(Err(_)) => PromptOverrideLayerState::Unreadable { path: relative },
+        ViewDataState::NotRequested | ViewDataState::Loading => {
+            PromptOverrideLayerState::Missing { path: relative }
+        }
     }
 }
 

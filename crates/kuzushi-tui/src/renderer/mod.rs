@@ -20,6 +20,8 @@ mod plain;
 pub(crate) mod shared;
 mod views;
 
+#[cfg(test)]
+mod phase_composition_contract;
 mod render_app;
 mod section_slot;
 #[cfg(test)]

@@ -1,0 +1,26 @@
+---
+source: Kuzushi TUI.pdf
+sha256: fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545
+phase: confirm
+size: 60x20
+---
+KUZUSHI · target ./phase-target · view confirm · ● LIVE
+ 組  map ✓ · 崩  hunt ✓ · 作  confirm ● · 掛  fix ·
+ ▸ NEXT triage & verify
+│FINDING
+│F-0001  CRITICAL  ✓ verified L4  runtime_verified
+│ATTACK PATH
+│  taint flow   CWE-89 · high
+│
+│DATA-FLOW LADDER
+│DATA-FLOW LADDER  CWE-89 · HIGH · 2 stages
+│ ◇ HTTP query parameter
+│   │ login.rs:12
+│PROOF · REPLAY
+│exploited  L4 · podman
+│▸ verify F-0001  recheck
+mode:run · workbench            6 findings · 1 C · 2 H · 2 M
+────────────────────────────────────────────────────────────
+ Ctrl+C request abort   findings list
+ Esc back   history events
+NAVIGATION MODE — view keys active · Esc returns to prompt

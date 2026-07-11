@@ -6,11 +6,13 @@ pub(crate) struct AgentDispatch {
     pub(super) model: String,
     pub(super) thinking_level: Option<String>,
     pub(super) cwd: PathBuf,
+    pub(super) artifact_target: PathBuf,
     pub(super) prior: AgentChatView,
     pub(super) operator_question: String,
     pub(super) agent_prompt: String,
     pub(super) run_id: String,
     pub(super) started_secs: u64,
+    pub(super) origin_phase: Option<WorkflowPhase>,
     pub(super) screen_context_scope: Option<String>,
     pub(super) failure_context: Option<FailureToLlmContext>,
     pub(super) attached_failure_context: bool,
@@ -39,24 +41,27 @@ pub(super) fn next_agent_run_id() -> (String, u64) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or_default();
-    (format!("agent-{started_secs}"), started_secs)
-}
-
-pub(super) fn agent_cwd(target: Option<&PathBuf>) -> PathBuf {
-    target
-        .cloned()
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
-pub(super) fn agent_target_label(target: Option<&PathBuf>) -> String {
-    target
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| ".".to_string())
+    (kuzushi_core::new_run_id("agent"), started_secs)
 }
 
 pub(super) fn thinking_level_suffix(thinking_level: Option<&str>) -> String {
     thinking_level
         .map(|level| format!(" / {level}"))
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_agent_run_id;
+
+    #[test]
+    fn agent_run_ids_do_not_collide_within_one_second() {
+        let (first, first_started) = next_agent_run_id();
+        let (second, second_started) = next_agent_run_id();
+
+        assert_ne!(first, second);
+        assert!(first.starts_with("agent-"));
+        assert!(second.starts_with("agent-"));
+        assert!(second_started >= first_started);
+    }
 }

@@ -25,7 +25,19 @@ pub(in crate::modules) fn positive_f64_input(
     Ok(Some(parsed))
 }
 
-pub(in crate::modules) fn parse_sast_tasks(input: &Value) -> Result<Vec<String>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::modules) enum SastTaskSelectionSource {
+    Automatic,
+    FilteredAutomatic,
+    Explicit,
+}
+
+pub(in crate::modules) struct SastTaskRequest {
+    pub(in crate::modules) tasks: Vec<String>,
+    pub(in crate::modules) source: SastTaskSelectionSource,
+}
+
+pub(in crate::modules) fn parse_sast_tasks(input: &Value) -> Result<SastTaskRequest> {
     let requested = string_list_input(input, &["tasks", "taskIds", "task_ids"])?;
     let disabled =
         string_list_input(input, &["disabledTasks", "disabled_tasks"])?.unwrap_or_default();
@@ -41,16 +53,30 @@ pub(in crate::modules) fn parse_sast_tasks(input: &Value) -> Result<Vec<String>>
         anyhow::bail!("sast:scan taskMode=manual requires a non-empty tasks array");
     }
 
+    let source = task_selection_source(requested.as_ref(), &disabled);
     let mut tasks = requested.unwrap_or_else(|| default_sast_tasks_for_disabled_filter(&disabled));
 
-    if !disabled.is_empty() {
+    if source == SastTaskSelectionSource::FilteredAutomatic {
         tasks.retain(|task| {
             !disabled
                 .iter()
                 .any(|disabled| same_scan_task(task, disabled))
         });
     }
-    Ok(tasks)
+    Ok(SastTaskRequest { tasks, source })
+}
+
+fn task_selection_source(
+    requested: Option<&Vec<String>>,
+    disabled: &[String],
+) -> SastTaskSelectionSource {
+    if requested.is_some() {
+        SastTaskSelectionSource::Explicit
+    } else if disabled.is_empty() {
+        SastTaskSelectionSource::Automatic
+    } else {
+        SastTaskSelectionSource::FilteredAutomatic
+    }
 }
 
 pub(in crate::modules) fn default_native_sast_tasks() -> Vec<String> {

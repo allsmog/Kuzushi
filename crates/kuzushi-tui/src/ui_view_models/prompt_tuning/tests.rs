@@ -106,6 +106,7 @@ fn prompts_model_builds_stack_for_selected_project_override() {
     let override_path = kuzushi_core::prompt_override_path(temp.path(), "sast", "triage");
     fs::create_dir_all(override_path.parent().unwrap()).unwrap();
     fs::write(&override_path, "focus on auth bypass\n").unwrap();
+    app.hydrate_all_view_data_for_test();
 
     let model = prompts_model(&app);
     let expected_hash = kuzushi_core::prompt_content_sha256("focus on auth bypass\n");
@@ -143,6 +144,7 @@ fn prompts_model_blocks_final_stack_for_pending_mutation_until_approved() {
         kuzushi_core::PromptMutation::new("sast", "triage", "focus authz paths", "operator");
     let expected_hash = mutation.content_hash();
     kuzushi_core::append_prompt_mutation(&workspace, &mutation).unwrap();
+    app.hydrate_all_view_data_for_test();
 
     let pending = prompts_model(&app);
 
@@ -162,6 +164,11 @@ fn prompts_model_blocks_final_stack_for_pending_mutation_until_approved() {
         Some("reviewed"),
     )
     .unwrap();
+    app.workbench_cache()
+        .borrow_mut()
+        .invalidate_prompt_mutations();
+    app.invalidate_view_hydration();
+    app.hydrate_all_view_data_for_test();
     let approved = prompts_model(&app);
 
     assert_eq!(approved.stack.layers[3].state, "approved");

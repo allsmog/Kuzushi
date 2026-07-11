@@ -150,6 +150,18 @@ impl TargetPickerRouteState {
         &self.candidates
     }
 
+    pub(crate) fn replace_candidates(&mut self, candidates: Vec<crate::app::TargetCandidate>) {
+        let selected = self.selected().map(|candidate| candidate.path.clone());
+        self.candidates = candidates;
+        self.cursor = selected
+            .and_then(|path| {
+                self.candidates
+                    .iter()
+                    .position(|candidate| candidate.path == path)
+            })
+            .unwrap_or(0);
+    }
+
     #[cfg(test)]
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
         self.cursor = cursor.min(self.candidates.len().saturating_sub(1));

@@ -18,13 +18,6 @@ pub(crate) enum ProgressKind {
     Done,
     Active,
     Queued,
-    /// Reserved for genuine error states (e.g. scan task crashed,
-    /// preflight check failed).  No call site currently produces it
-    /// because every "task didn't run" path correctly uses `Queued`,
-    /// but keeping the variant + danger-red style makes the API
-    /// honest if/when we need it.
-    #[allow(dead_code)]
-    Failing,
 }
 
 impl ProgressKind {
@@ -34,10 +27,8 @@ impl ProgressKind {
             ProgressKind::Active => theme::warn(),
             // Queued bars stay subtle in the mockup
             // (`design/mockups/sast-running.jsx::bar` passes c-subtle for
-            // the "queued" status); `Failing` should be reserved for true
-            // errors so a deferred task isn't painted danger-red.
+            // the "queued" status).
             ProgressKind::Queued => theme::subtle(),
-            ProgressKind::Failing => theme::danger(),
         }
     }
 
@@ -48,7 +39,6 @@ impl ProgressKind {
             // Pre-flight queued status reads better in muted than subtle —
             // `c-subtle` empty cells need a slightly stronger label.
             ProgressKind::Queued => theme::muted(),
-            ProgressKind::Failing => theme::danger(),
         }
     }
 }

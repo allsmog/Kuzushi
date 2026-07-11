@@ -25,11 +25,7 @@ pub(in crate::modules) fn persist_semgrep_findings(
     };
 
     let run_id = Uuid::new_v4().to_string();
-    store.record_run_started(&run_id, target, "running")?;
-    for finding in findings {
-        store.insert_finding(&run_id, finding)?;
-    }
-    store.record_run_finished(&run_id, "completed", findings.len())?;
+    persist_findings_run(store, &run_id, target, findings)?;
 
     Ok(Some(SemgrepPersistedRun {
         run_id,
@@ -57,11 +53,7 @@ pub(in crate::modules) fn persist_codeql_findings(
     };
 
     let run_id = Uuid::new_v4().to_string();
-    store.record_run_started(&run_id, target, "running")?;
-    for finding in findings {
-        store.insert_finding(&run_id, finding)?;
-    }
-    store.record_run_finished(&run_id, "completed", findings.len())?;
+    persist_findings_run(store, &run_id, target, findings)?;
 
     Ok(Some(CodeqlPersistedRun {
         run_id,
@@ -107,14 +99,24 @@ pub(in crate::modules) fn persist_iac_findings(
 
     workspace.ensure_state_dir()?;
     let run_id = Uuid::new_v4().to_string();
-    store.record_run_started(&run_id, target, "running")?;
-    for finding in findings {
-        store.insert_finding(&run_id, finding)?;
-    }
-    store.record_run_finished(&run_id, "completed", findings.len())?;
+    persist_findings_run(store, &run_id, target, findings)?;
 
     Ok(Some(json!({
         "runId": run_id,
         "findingsDb": workspace.findings_db_path().display().to_string(),
     })))
+}
+
+fn persist_findings_run(
+    store: &FindingStore,
+    run_id: &str,
+    target: &Path,
+    findings: &[Finding],
+) -> Result<()> {
+    store.with_run_lifecycle(run_id, target, || {
+        for finding in findings {
+            store.insert_finding(run_id, finding)?;
+        }
+        Ok(((), findings.len()))
+    })
 }

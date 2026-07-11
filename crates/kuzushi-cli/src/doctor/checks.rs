@@ -56,7 +56,7 @@ pub(crate) fn check_scanner_binary(binary: &'static str) -> DoctorCheck {
         Some(path) => DoctorCheck::ok(binary, format!("found {}", path.display())),
         None => {
             let next = match binary {
-                "semgrep" => "Install Semgrep (`pipx install semgrep` or `brew install semgrep`) or pass a scanner binary in tool input.",
+                "semgrep" => "Semgrep is optional for automatic scans: they skip it visibly and continue with built-in scanners. Install Semgrep (`pipx install semgrep` or `brew install semgrep`) before requesting `--tasks semgrep`.",
                 "codeql" => "Install the CodeQL CLI or pass {\"binary\":\"/path/to/codeql\"} to codeql:scan.",
                 // M2 §2.2 recon-intake adapters consume the output of these
                 // bounty tools but do not invoke them — doctor reports
@@ -132,8 +132,8 @@ fn cargo_audit_capability_check() -> DoctorCheck {
     }
     DoctorCheck::warn(
         "cargo-audit",
-        "`cargo audit` was not found; RustSec advisory checks will fail closed when Cargo.lock is present",
-        "Install cargo-audit with `cargo install cargo-audit` before running cargo-audit advisory checks.",
+        "`cargo audit` was not found; automatic scans skip this optional task visibly, while explicit `--tasks cargo-audit` requests fail closed",
+        "Install cargo-audit with `cargo install cargo-audit` before explicitly requesting cargo-audit advisory checks.",
     )
 }
 

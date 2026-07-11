@@ -8,6 +8,12 @@ async fn fresh_workspace(world: &mut OnboardingWorld) {
     world.ensure_binary();
     world.env.clear();
     world.pending_seeds.clear();
+    world.terminal_size = None;
+}
+
+#[given(regex = r#"^a (\d+) by (\d+) terminal$"#)]
+async fn terminal_size(world: &mut OnboardingWorld, width: u16, height: u16) {
+    world.terminal_size = Some((width, height));
 }
 
 #[given(regex = r#"^the artifact "([^"]+)" is seeded with "(.+)"$"#)]
@@ -73,7 +79,8 @@ async fn launch_shell_without_target(world: &mut OnboardingWorld) {
     world.ensure_binary();
     let binary = world.binary.to_string_lossy().into_owned();
     world.pending_seeds.clear();
-    let session = TmuxSession::launch_targetless(&binary, world.env.clone())
+    let size = world.terminal_size.unwrap_or((200, 50));
+    let session = TmuxSession::launch_targetless_sized(&binary, world.env.clone(), size)
         .expect("tmux session must launch — install tmux and rebuild the CLI if this fails");
     std::thread::sleep(Duration::from_millis(800));
     world.session = Some(session);

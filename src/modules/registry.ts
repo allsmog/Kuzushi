@@ -24,13 +24,6 @@ import {
   type ModuleTool,
 } from "./types.js";
 
-/** Events emitted by the registry itself. */
-export interface ModuleRegistryEvents {
-  "module:loaded": { moduleId: string };
-  "module:unloaded": { moduleId: string };
-  "module:error": { moduleId: string; error: string };
-}
-
 export class ModuleRegistry {
   private readonly modules = new Map<string, CopilotModule>();
   private readonly initialized = new Set<string>();

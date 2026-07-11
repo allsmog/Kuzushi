@@ -364,13 +364,27 @@ is expected to behave identically and should be filed as a parity bug.
   findings pane. There is no operator `setg` toggle back to severity-first, and
   scan/run output and `workspace:export-findings` keep the severity-major
   alias order untouched.
+- **Workbench depth-stack review surface (`setg ui.workbench_depth_stack
+  true`, default off)** — shell-only opt-in that swaps the Workbench findings
+  ring for a 3-level List→Finding→Record drill (nav state in
+  `ui_view_models/workbench_depth.rs`, renderer under
+  `renderer/views/workbench/depth_stack/`); selection stays on the findings
+  cursor, and the default Workbench layout is unchanged when the option is
+  off.
 - **Launch-time target picker (`ShellView::TargetPicker`)** — interactive
   only, and now the **first phase of the ordered onboarding gate** (Target →
   Model → Credentials → Planning). A bare `kuzushi` (no `--target`) on a real
-  TTY opens a picker (cwd + child repos/previous `.kuzushi` targets, via
-  `discover_target_candidates`) before the model/credentials/planning chain;
+  TTY opens a picker (cwd + direct child repos/recent targets/persisted scopes,
+  via `discover_target_candidates`) before the model/credentials/planning chain.
+  Fresh nested-scope discovery runs after activation through the generation-tagged
+  `ProjectScopeDiscoveryRuntime`; stale generations are ignored and the root
+  scope remains immediately usable while discovery completes;
   selection runs the same wiring as the `target <path>` verb and re-enters the
-  gate. The decision is expressed in the pure `initial_onboarding_phase` fn via
+  gate. Target switching is blocked while scan/tool/agent work is live; the
+  operator must finish or cancel and retry. Once activation begins,
+  target-derived caches are cleared as one unit before the
+  new workspace is hydrated, so a missing artifact renders empty instead of
+  retaining data from the previous target. The decision is expressed in the pure `initial_onboarding_phase` fn via
   `OnboardingInputs::allow_target_gate`, which only the interactive launch
   (`run_shell::apply_launch_onboarding` → `ShellApp::launch_onboarding_phase`)
   sets `true`; construction and target activation pass `false`, so headless,
@@ -386,7 +400,9 @@ is expected to behave identically and should be filed as a parity bug.
   shell-only operator orientation. `ui_view_models/journey.rs` derives the
   current 組 map → 崩 hunt → 作 confirm → 掛 fix phase from workspace reality
   (map artifacts on disk, findings, triage/verification state) and reconciles
-  the live walker against that reality instead of forging completion. Home
+  the live walker against that reality instead of forging completion. Journey
+  counts come from the unfiltered findings ledger; a Workbench filter may alter
+  visible rows but never advances the workspace phase. Home
   renders the rail + a phase-driven `▸ NEXT` line, status surfaces use the
   compact `組 map 1/4` style chip, and `next` (typed alias `continue`) reopens
   the phase walker at the derived phase. All of it is target-gated: no
@@ -433,11 +449,14 @@ is expected to behave identically and should be filed as a parity bug.
   output deck if it has not been manually pinned, and open/log the gallery page:
   `scan` → Heatmap (`apply_scan_finished`, only when findings > 0), and
   `viz_page_for_tool(tool_name)` maps the artifact-*emitting* verbs exactly —
-  `taint-iris:hunt`→AttackPath, `exploit-chain:scan`→ExploitChain,
-  `threat-model:build`→Dfd — in `apply_finished_tool_event` (fires before
+  `taint-iris:hunt`→AttackPath and `exploit-chain:scan`→ExploitChain only — in
+  `apply_finished_tool_event` (fires before
   chain/queue advance so a follow-up tool's Activity view supersedes it; gated
   by `viz_page_has_content` so a zero-result run doesn't open an empty page).
-  Prereq/read verbs (`taint-iris-next:catalog`, `threat-model:read`) and
+  `threat-model:build` no longer opens the gallery Dfd page; it routes through
+  `auto_open_workbench_dfd` to the Workbench DFD center pane instead (see
+  `app/command_router/handle_scene_command.rs`). Prereq/read verbs
+  (`taint-iris-next:catalog`, `threat-model:read`) and
   `taint-iris-next:hunt` (which flattens its path into finding text, emitting no
   `flows[]`) are intentionally unmapped. The snapshot caches
   in `app/tool_runner/run_tool/snapshots.rs` populate `app.exploit_chains` /
@@ -455,7 +474,13 @@ is expected to behave identically and should be filed as a parity bug.
   Don't add `--ci` or `--json` to `run`.
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator
   surfaces** that *consume* shared `.kuzushi/v3/runs/<runId>/`
-  artefacts. They are read-only over a shared on-disk format.
+  artefacts. They are read-only over a shared on-disk format. Finding proof
+  stores `verification_run_id` separately from the discovery `scan_id`; the
+  Confirm proof sidecar replays only the verification run and warns when the
+  proof belongs to an earlier observation of the same durable finding.
+- **Prompt/Navigate modes are interactive-only.** Prompt mode owns printable
+  input and submission. `F2` enters Navigate mode, where view bindings operate
+  without editing the prompt; `Esc` returns to Prompt mode.
 - **Jobs registry (`jobs`, `ShellView::Jobs`), steer queue (`queue`),
   and background handoff (`background`/`bg`, Activity `b`)** — shell-only.
   `jobs` is a Metasploit-style live control surface over the shared
@@ -464,6 +489,9 @@ is expected to behave identically and should be filed as a parity bug.
   recent on-disk `RunSummary` rows, de-duped by `run_id` (live supersedes its
   still-`running` disk twin; a disk `running` row with no live twin renders as
   `Stale`/"running?" muted, since its liveness can't be verified off-`/proc`).
+  Operator/budget cancellation persists as `canceled`; watchdog escalation,
+  process loss, and abnormal shutdown persist as `interrupted`. A requested
+  cancellation stays visibly `canceling` until cleanup reaches a terminal row.
   `jobs -k <id>` dequeues a pending steer item, or emits a **scoped**
   `CancelJob(JobKind)` that aborts only the addressed slot (not every live job
   the way `CancelActiveJobs` does) through the existing per-slot abort helpers —
@@ -542,15 +570,24 @@ any TypeScript/React/Ink path.
 
 ### Shell Views
 
-`ShellView` is defined in Rust, not TypeScript. Current variants include:
-`Catalog`, `Module`, `ModuleRun`, `ActorDetail`, `Findings`, `Finding`,
-`PromptsEditor`, `Plan`, `Threat`, `Replay`, `Trace`, `Activity`, `Help`,
-`Config`, `Tools`, `Options`, `SastTasks`, `Context`, `Workspace`,
-`KnowledgeBase`, `AgentChat`, `History`, and `Story`.
+`ShellView` is defined in Rust, not TypeScript (the enum lives in
+`crates/kuzushi-tui/src/app/view_state/sast_task_row.rs`). Current variants:
+`Home`, `Catalog`, `Recommend`, `Module`, `ModuleRun`, `Workbench`, `Tune`,
+`Threat`, `ThreatEditor`, `PromptsEditor`, `ActorDetail`, `Runs`, `Jobs`,
+`RunDiff`, `Replay`, `Trace`, `Help`, `Quickstart`, `Logs`, `Config`,
+`Health`, `Tools`, `Options`, `SastTasks`, `Context`, `ProjectModel`,
+`StrategyQueue`, `Workspace`, `KnowledgeBase`, `FailureHandoff`, `AgentChat`,
+`History`, `Story`, `Auth`, `Cost`, `BootSplash`, `QuitConfirm`,
+`ConfirmDialog`, `ThemePicker`, `Keymap`, `UpdateAvailable`, `Interruption`,
+`Patch`, `Pwn`, `Activity`, `CommandPalette`, `ModelPicker`,
+`AuthMethodPicker`, `TargetPicker`, `PlanningPicker`, `FilePicker`, and
+`Scene`. The old standalone `Findings`, `Finding`, and `Plan` views are gone —
+findings/finding-detail folded into `Workbench`, and planning flows through
+`PlanningPicker`/`StrategyQueue`.
 
 ### Operator Verbs
 
-The command source of truth is `SHELL_COMMAND_SPECS` in
+The command source of truth is `SHELL_COMMAND_SPEC_GROUPS` in
 `crates/kuzushi-tui/src/commands/shell_command_specs/`. Do not maintain a
 second TypeScript router. Common verbs include:
 
@@ -606,6 +643,11 @@ DAG status plus an ACTIONS strip on the left, and an OUTPUT deck on the right
 with task detail, findings, and generated security artifacts. The feed rows are
 fed by `ctx.trace.step(kind, verb, label).emit()` calls in producer code,
 plumbed through `ToolExecutionContext.trace`.
+
+Phase-cockpit Activity headers and telemetry are projections over this same
+session. They do not replace `TASKS` or `OUTPUT`; both remain visible and keep
+their independent focus, scroll, and artifact selection. Run elapsed time is
+captured at the terminal transition so a settled run never keeps ticking.
 
 - **Producer authoring**: see `docs/modules.md` §7.1. Every DAG-participating
   Rust module emits at least `start` + `done` steps; multi-phase modules

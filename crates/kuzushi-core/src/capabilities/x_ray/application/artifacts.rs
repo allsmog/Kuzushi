@@ -56,27 +56,32 @@ pub(crate) fn string_any(value: &Value, keys: &[&str]) -> Option<String> {
 }
 
 pub(crate) fn write_x_ray_artifacts(repo_root: &Path, content: XRayArtifactContent) -> Result<()> {
-    let artifact_dir = repo_root.join("x-ray");
-    fs::create_dir_all(&artifact_dir)
-        .with_context(|| format!("Could not create {}", artifact_dir.display()))?;
-    fs::write(artifact_dir.join(REQUIRED_X_RAY_MD), content.x_ray_markdown)
-        .context("Could not write x-ray.md")?;
-    fs::write(
-        artifact_dir.join(REQUIRED_ENTRY_POINTS_MD),
-        content.entry_points_markdown,
-    )
-    .context("Could not write entry-points.md")?;
-    fs::write(
-        artifact_dir.join(REQUIRED_INVARIANTS_MD),
-        content.invariants_markdown,
-    )
-    .context("Could not write invariants.md")?;
-    fs::write(
-        artifact_dir.join(REQUIRED_ARCHITECTURE_SVG),
-        content.architecture_svg,
-    )
-    .context("Could not write architecture.svg")?;
+    write_x_ray_artifact(repo_root, REQUIRED_X_RAY_MD, &content.x_ray_markdown)?;
+    write_x_ray_artifact(
+        repo_root,
+        REQUIRED_ENTRY_POINTS_MD,
+        &content.entry_points_markdown,
+    )?;
+    write_x_ray_artifact(
+        repo_root,
+        REQUIRED_INVARIANTS_MD,
+        &content.invariants_markdown,
+    )?;
+    write_x_ray_artifact(
+        repo_root,
+        REQUIRED_ARCHITECTURE_SVG,
+        &content.architecture_svg,
+    )?;
     Ok(())
+}
+
+fn write_x_ray_artifact(repo_root: &Path, file_name: &str, content: &str) -> Result<PathBuf> {
+    crate::workspace::write_workspace_file(
+        repo_root,
+        Path::new("x-ray").join(file_name),
+        content.as_bytes(),
+    )
+    .with_context(|| format!("Could not write x-ray/{file_name}"))
 }
 
 pub(crate) fn render_x_ray_run_summary(data: &XRayReportData) -> String {
@@ -126,8 +131,8 @@ pub fn read_x_ray_report_artifacts(
     let repo_root = canonicalize_report_root(repo_root)?;
     let artifact_dir = repo_root.join("x-ray");
     let paths = x_ray_artifact_paths(&artifact_dir);
-    ensure_required_artifacts_exist(&paths)?;
-    let markdown = read_x_ray_markdown(&paths)?;
+    ensure_required_artifacts_exist(&repo_root, &paths)?;
+    let markdown = read_x_ray_markdown(&repo_root, &paths)?;
 
     Ok(XRayReportData {
         target: repo_root.display().to_string(),
@@ -165,16 +170,17 @@ fn x_ray_artifact_paths(artifact_dir: &Path) -> XRayArtifactPaths {
     }
 }
 
-fn read_x_ray_markdown(paths: &XRayArtifactPaths) -> Result<XRayMarkdown> {
+fn read_x_ray_markdown(repo_root: &Path, paths: &XRayArtifactPaths) -> Result<XRayMarkdown> {
     Ok(XRayMarkdown {
-        x_ray: read_artifact_markdown(&paths.x_ray)?,
-        entry_points: read_artifact_markdown(&paths.entry_points)?,
-        invariants: read_artifact_markdown(&paths.invariants)?,
+        x_ray: read_artifact_markdown(repo_root, &paths.x_ray)?,
+        entry_points: read_artifact_markdown(repo_root, &paths.entry_points)?,
+        invariants: read_artifact_markdown(repo_root, &paths.invariants)?,
     })
 }
 
-fn read_artifact_markdown(path: &str) -> Result<String> {
-    fs::read_to_string(path).with_context(|| format!("Unable to read {path}"))
+fn read_artifact_markdown(repo_root: &Path, path: &str) -> Result<String> {
+    crate::bounded_file::read_utf8_text_within(repo_root, Path::new(path), 8 * 1024 * 1024)
+        .with_context(|| format!("Unable to read {path}"))
 }
 
 fn report_repo_name(repo_name: Option<&str>, repo_root: &Path) -> String {
@@ -192,23 +198,81 @@ fn canonicalize_report_root(path: &Path) -> Result<PathBuf> {
     Ok(root)
 }
 
-fn ensure_required_artifacts_exist(paths: &XRayArtifactPaths) -> Result<()> {
+fn ensure_required_artifacts_exist(repo_root: &Path, paths: &XRayArtifactPaths) -> Result<()> {
     let required = [
         PathBuf::from(&paths.x_ray),
         PathBuf::from(&paths.entry_points),
         PathBuf::from(&paths.invariants),
         PathBuf::from(&paths.architecture_svg),
     ];
-    let missing = required
+    let invalid = required
         .iter()
-        .filter(|candidate| !candidate.exists())
+        .filter(|candidate| {
+            crate::workspace::validated_workspace_descendant(
+                repo_root,
+                candidate.strip_prefix(repo_root).unwrap_or(candidate),
+            )
+            .is_err()
+                || !std::fs::symlink_metadata(candidate).is_ok_and(|metadata| {
+                    metadata.file_type().is_file() && !metadata.file_type().is_symlink()
+                })
+        })
         .map(|candidate| candidate.display().to_string())
         .collect::<Vec<_>>();
-    if !missing.is_empty() {
+    if !invalid.is_empty() {
         anyhow::bail!(
-            "X-Ray report is missing required artifact(s): {}",
-            missing.join(", ")
+            "X-Ray report is missing or has unsafe required artifact(s): {}",
+            invalid.join(", ")
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod writer_tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn x_ray_writer_rejects_symlinked_artifact_directory() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        symlink(outside.path(), workspace.path().join("x-ray")).unwrap();
+        let content = XRayArtifactContent {
+            x_ray_markdown: "# X-Ray".to_string(),
+            entry_points_markdown: "# Entry points".to_string(),
+            invariants_markdown: "# Invariants".to_string(),
+            architecture_svg: "<svg/>".to_string(),
+        };
+
+        assert!(write_x_ray_artifacts(workspace.path(), content).is_err());
+        assert!(std::fs::read_dir(outside.path()).unwrap().next().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn x_ray_reader_rejects_symlinked_required_artifact() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let artifact_dir = workspace.path().join("x-ray");
+        std::fs::create_dir(&artifact_dir).unwrap();
+        for (leaf, body) in [
+            (REQUIRED_X_RAY_MD, "# X-Ray"),
+            (REQUIRED_ENTRY_POINTS_MD, "# Entry Points"),
+            (REQUIRED_INVARIANTS_MD, "# Invariants"),
+        ] {
+            std::fs::write(artifact_dir.join(leaf), body).unwrap();
+        }
+        symlink(outside.path(), artifact_dir.join(REQUIRED_ARCHITECTURE_SVG)).unwrap();
+
+        let error = read_x_ray_report_artifacts(workspace.path(), None, "test", 0.0)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("unsafe required artifact"));
+    }
 }

@@ -1,8 +1,6 @@
 //! Crash-safe writes for `.kuzushi` state files.
 
 use anyhow::{Context, Result};
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -30,11 +28,15 @@ static TEMP_WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
 /// nanos), so concurrent writers to one target proceed independently and the
 /// last rename wins — a well-defined "last writer wins" with no torn state.
 ///
-/// Platform note: relies on POSIX rename-replace semantics (atomic overwrite
-/// of an existing destination on the same filesystem). This is the target
-/// platform for `.kuzushi` state; the directory `fsync` is best-effort and
-/// silently skipped where opening a directory handle is not supported.
+/// Platform note: Unix uses rename-replace semantics and requires the parent
+/// directory sync to succeed. Windows uses `MoveFileExW` with
+/// replace-existing and write-through; its additional directory sync remains
+/// best-effort because ordinary directory handles are not portable there.
 pub(crate) fn write_atomic(path: &Path, contents: &str) -> Result<()> {
+    write_atomic_bytes(path, contents.as_bytes())
+}
+
+pub(crate) fn write_atomic_bytes(path: &Path, contents: &[u8]) -> Result<()> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -45,81 +47,95 @@ pub(crate) fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     let temp = temp_sibling(path);
     write_and_sync_temp(&temp, contents)
         .with_context(|| format!("Could not write {}", temp.display()))?;
-    if let Err(error) = fs::rename(&temp, path) {
+    if let Err(error) = replace_file(&temp, path) {
         let _ = fs::remove_file(&temp);
         return Err(error).with_context(|| format!("Could not move {} into place", path.display()));
     }
-    sync_parent_dir(path)
+    sync_parent_dir(path).with_context(|| format!("Could not sync parent of {}", path.display()))
 }
 
-pub(crate) fn write_atomic_bytes(path: &Path, contents: &[u8]) -> Result<()> {
-    let contents = std::str::from_utf8(contents).context("Atomic contents must be UTF-8")?;
-    write_atomic(path, contents)
+#[cfg(not(windows))]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let flags = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH;
+    if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), flags) } == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 /// Write the full contents to `temp` and flush them to stable storage before
 /// the caller renames it into place.
-fn write_and_sync_temp(temp: &Path, contents: &str) -> std::io::Result<()> {
-    let mut file = fs::File::create(temp)?;
-    file.write_all(contents.as_bytes())?;
+fn write_and_sync_temp(temp: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let mut file = create_temp_file(temp)?;
+    file.write_all(contents)?;
     file.sync_all()?;
     Ok(())
 }
 
-/// Persist the directory entry created by the rename. Best-effort: on
-/// platforms that do not allow opening a directory as a file this is a no-op,
-/// which does not weaken the atomicity of the rename itself.
-pub(crate) fn sync_parent_dir(path: &Path) -> Result<()> {
+#[cfg(unix)]
+fn create_temp_file(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(0o600)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn create_temp_file(path: &Path) -> std::io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(path)
+}
+
+/// Persist the directory entry created by the rename.
+#[cfg(unix)]
+pub(crate) fn sync_parent_dir(path: &Path) -> std::io::Result<()> {
     if let Some(parent) = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
     {
-        let dir = fs::File::open(parent)
-            .with_context(|| format!("Could not open {}", parent.display()))?;
-        dir.sync_all()
-            .with_context(|| format!("Could not sync {}", parent.display()))?;
+        fs::File::open(parent)?.sync_all()?;
     }
     Ok(())
 }
 
-pub(crate) fn load_jsonl<T>(path: &Path, item_label: &str) -> Result<Vec<T>>
-where
-    T: DeserializeOwned,
-{
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(error).with_context(|| format!("Could not read {}", path.display()))
+#[cfg(not(unix))]
+pub(crate) fn sync_parent_dir(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        if let Ok(dir) = fs::File::open(parent) {
+            let _ = dir.sync_all();
         }
-    };
-    text.lines()
-        .enumerate()
-        .filter(|(_, line)| !line.trim().is_empty())
-        .map(|(index, line)| {
-            serde_json::from_str::<T>(line)
-                .with_context(|| format!("Could not parse {item_label} line {}", index + 1))
-        })
-        .collect()
-}
-
-pub(crate) fn save_jsonl<T>(path: &Path, values: &[T], item_label: &str) -> Result<()>
-where
-    T: Serialize,
-{
-    let mut lines = Vec::with_capacity(values.len());
-    for value in values {
-        lines.push(
-            serde_json::to_string(value)
-                .with_context(|| format!("Could not serialize {item_label}"))?,
-        );
     }
-    let contents = if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    };
-    write_atomic(path, &contents)
+    Ok(())
 }
 
 pub(crate) fn slug(value: &str, fallback: &str, max_parts: usize) -> String {

@@ -1,9 +1,7 @@
 use kuzushi_core::run_artifacts::{
-    load_run_failures, record_tool_run_canceled as record_core_tool_run_canceled,
-    record_tool_run_complete as record_core_tool_run_complete,
-    record_tool_run_failed as record_core_tool_run_failed,
-    record_tool_run_interrupted as record_core_tool_run_interrupted,
-    record_tool_run_refused as record_core_tool_run_refused, FailureToLlmContext, ToolRunRecord,
+    load_run_failures, try_record_tool_run_canceled, try_record_tool_run_complete,
+    try_record_tool_run_failed, try_record_tool_run_interrupted, try_record_tool_run_refused,
+    FailureToLlmContext, ToolRunRecord,
 };
 
 pub(crate) fn record_tool_run_complete(
@@ -11,13 +9,13 @@ pub(crate) fn record_tool_run_complete(
     run_id: Option<&str>,
     tool_name: &str,
     result: &serde_json::Value,
-) -> Option<FailureToLlmContext> {
+) -> anyhow::Result<Option<FailureToLlmContext>> {
     let (Some(target), Some(run_id)) = (target, run_id) else {
-        return None;
+        return Ok(None);
     };
     let record = ToolRunRecord::new(target, run_id, "tool", tool_name);
-    record_core_tool_run_complete(record, result);
-    failure_context_for_tool_run(target, run_id)
+    try_record_tool_run_complete(record, result)?;
+    Ok(failure_context_for_tool_run(target, run_id))
 }
 
 pub(crate) fn record_tool_run_canceled(
@@ -25,14 +23,14 @@ pub(crate) fn record_tool_run_canceled(
     run_id: Option<&str>,
     tool_name: &str,
     reason: &str,
-) {
+) -> anyhow::Result<()> {
     let (Some(target), Some(run_id)) = (target, run_id) else {
-        return;
+        return Ok(());
     };
-    record_core_tool_run_canceled(
+    try_record_tool_run_canceled(
         ToolRunRecord::new(target, run_id, "tool", tool_name),
         reason,
-    );
+    )
 }
 
 pub(crate) fn record_tool_run_interrupted(
@@ -40,14 +38,14 @@ pub(crate) fn record_tool_run_interrupted(
     run_id: Option<&str>,
     tool_name: &str,
     reason: &str,
-) {
+) -> anyhow::Result<()> {
     let (Some(target), Some(run_id)) = (target, run_id) else {
-        return;
+        return Ok(());
     };
-    record_core_tool_run_interrupted(
+    try_record_tool_run_interrupted(
         ToolRunRecord::new(target, run_id, "tool", tool_name),
         reason,
-    );
+    )
 }
 
 pub(crate) fn record_tool_run_refused(
@@ -55,14 +53,14 @@ pub(crate) fn record_tool_run_refused(
     run_id: Option<&str>,
     tool_name: &str,
     reason: &str,
-) {
+) -> anyhow::Result<()> {
     let (Some(target), Some(run_id)) = (target, run_id) else {
-        return;
+        return Ok(());
     };
-    record_core_tool_run_refused(
+    try_record_tool_run_refused(
         ToolRunRecord::new(target, run_id, "tool", tool_name),
         reason,
-    );
+    )
 }
 
 pub(crate) fn record_tool_run_failed(
@@ -70,13 +68,13 @@ pub(crate) fn record_tool_run_failed(
     run_id: Option<&str>,
     tool_name: &str,
     error: &str,
-) -> Option<FailureToLlmContext> {
+) -> anyhow::Result<Option<FailureToLlmContext>> {
     let (Some(target), Some(run_id)) = (target, run_id) else {
-        return None;
+        return Ok(None);
     };
     let record = ToolRunRecord::new(target, run_id, "tool", tool_name);
-    record_core_tool_run_failed(record, error);
-    failure_context_for_tool_run(target, run_id)
+    try_record_tool_run_failed(record, error)?;
+    Ok(failure_context_for_tool_run(target, run_id))
 }
 
 pub(crate) fn render_failure_context(context: &FailureToLlmContext) -> String {

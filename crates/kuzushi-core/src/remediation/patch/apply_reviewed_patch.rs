@@ -9,12 +9,14 @@ pub struct ReviewedPatchApplyReport {
 }
 
 pub fn apply_reviewed_patch(repo_root: &Path, diff: &str) -> Result<ReviewedPatchApplyReport> {
-    ensure_git_repository(repo_root)?;
+    let control = unattended_patch_control();
+    ensure_git_repository(repo_root, control)?;
     let touched_paths = validated_diff_paths(diff)?;
-    run_git_with_input(repo_root, &["apply", "--check"], diff)
-        .with_context(|| "reviewed patch did not pass `git apply --check`")?;
-    run_git_with_input(repo_root, &["apply"], diff)
-        .with_context(|| "reviewed patch failed during `git apply`")?;
+    run_git_with_input(repo_root, &["apply", "--check"], diff, control).map_err(|error| {
+        anyhow::anyhow!("reviewed patch did not pass `git apply --check`: {error:#}")
+    })?;
+    run_git_with_input(repo_root, &["apply"], diff, control)
+        .map_err(|error| anyhow::anyhow!("reviewed patch failed during `git apply`: {error:#}"))?;
     Ok(ReviewedPatchApplyReport {
         checked: true,
         applied: true,
@@ -48,7 +50,14 @@ fn candidate_paths_from_line(line: &str) -> Vec<&str> {
     if let Some(rest) = line.strip_prefix("diff --git ") {
         return diff_git_paths(rest);
     }
-    for prefix in ["--- ", "+++ ", "rename from ", "rename to ", "copy from ", "copy to "] {
+    for prefix in [
+        "--- ",
+        "+++ ",
+        "rename from ",
+        "rename to ",
+        "copy from ",
+        "copy to ",
+    ] {
         if let Some(rest) = line.strip_prefix(prefix) {
             return vec![trim_diff_metadata(rest)];
         }
@@ -73,7 +82,10 @@ fn normalize_patch_path(raw: &str) -> Result<Option<String>> {
     if raw == "/dev/null" {
         return Ok(None);
     }
-    let path = raw.strip_prefix("a/").or_else(|| raw.strip_prefix("b/")).unwrap_or(raw);
+    let path = raw
+        .strip_prefix("a/")
+        .or_else(|| raw.strip_prefix("b/"))
+        .unwrap_or(raw);
     validate_repository_relative_path(path)?;
     Ok(Some(path.to_string()))
 }
@@ -107,6 +119,7 @@ fn validate_repository_path_component(component: Component<'_>, path: &str) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::{Command, Stdio};
 
     #[test]
     fn apply_reviewed_patch_updates_active_worktree() {
@@ -122,7 +135,10 @@ mod tests {
         assert!(report.checked);
         assert!(report.applied);
         assert_eq!(report.touched_paths, vec!["demo.txt"]);
-        assert_eq!(std::fs::read_to_string(repo.join("demo.txt")).unwrap(), "after\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.join("demo.txt")).unwrap(),
+            "after\n"
+        );
     }
 
     #[test]

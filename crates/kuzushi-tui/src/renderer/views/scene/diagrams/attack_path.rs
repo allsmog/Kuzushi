@@ -29,7 +29,7 @@ pub(crate) fn attack_path_lines(width: usize, model: &TaintFlowPath) -> Vec<Line
     let stages = build_stages(model);
     let box_w = (width.saturating_sub(2 + stages.len().saturating_sub(1) * CONN)
         / stages.len().max(1))
-    .clamp(9, 20);
+    .clamp(9, 32);
     let inner = box_w.saturating_sub(4);
 
     let mut lines = vec![

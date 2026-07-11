@@ -101,9 +101,11 @@ mod tests {
             error: None,
         }));
         ticket.send(ShellEvent::Scan(ScanEvent::Finished {
-            run_id: "run-1".to_string(),
-            findings_count: 0,
-            cost_usd: None,
+            result: serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "data": {"runId": "run-1", "findingsCount": 0},
+            }),
         }));
 
         assert!(apply_pending_background_events(&mut app));

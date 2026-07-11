@@ -15,17 +15,15 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_bower_json(
         .collect()
 }
 
-fn section_findings(
-    file_path: &Path,
-    value: &Value,
-    section: &str,
-) -> Vec<DepHygieneFinding> {
+fn section_findings(file_path: &Path, value: &Value, section: &str) -> Vec<DepHygieneFinding> {
     value
         .get(section)
         .and_then(Value::as_object)
         .into_iter()
         .flat_map(|dependencies| dependencies.iter())
-        .filter_map(|(name, value)| bower_finding(file_path, section, name, dependency_version(value)?))
+        .filter_map(|(name, value)| {
+            bower_finding(file_path, section, name, dependency_version(value)?)
+        })
         .collect()
 }
 
@@ -53,7 +51,9 @@ fn bower_finding(
             name,
             constraint,
             DepHygieneSeverity::Medium,
-            format!("{section}: floor-only range; add an upper bound to fix the supply-chain surface"),
+            format!(
+                "{section}: floor-only range; add an upper bound to fix the supply-chain surface"
+            ),
         ));
     }
     None

@@ -54,6 +54,7 @@ mod module_progress;
 mod module_run;
 mod options;
 mod patch_review;
+mod phase_cockpit;
 mod plan_card;
 mod planning_overview;
 mod prereq_prompt;
@@ -175,8 +176,8 @@ pub(crate) use jobs_registry::{
     jobs_registry_model, JobRow, JobRunStatus, JobSource, JobsRegistryModel,
 };
 pub(crate) use journey::{
-    autonomy_footer_segment, journey_footer_segment, journey_model, journey_phase_segment,
-    JourneyModel, JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone,
+    autonomy_footer_segment, finding_ledger_counts, journey_footer_segment, journey_model,
+    journey_phase_segment, JourneyModel, JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use keymap::{keymap_model, KeymapModel};
@@ -203,6 +204,11 @@ pub(crate) use options::{
     OptionsTableRow, PlainOptionRow, PlainOptionsBody, PlainOptionsModel, PlainOptionsTable,
 };
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
+pub(crate) use phase_cockpit::{
+    phase_cockpit_model, phase_cockpit_model_for_phase, ActivityTaskCountModel, ConfirmPhaseModel,
+    EngagementHeaderModel, FixPhaseModel, HuntPhaseModel, MapArtifactMetric, MapConsoleRow,
+    MapPhaseModel, PhaseCockpitBody, PhaseCockpitModel, ProofReplayModel,
+};
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use planning_overview::{
     enter_plan, format_relative_age, latest_cached_modified, row_outcome, workspace_history,
@@ -246,9 +252,11 @@ pub(crate) use run_diff::{
     run_diff_model, RunDiffChangedRow, RunDiffDecisionSummary, RunDiffFindingRow,
     RunDiffFindingState, RunDiffModel, RunDiffUncertainMatchRow,
 };
+#[cfg(test)]
+pub(crate) use run_paths::ui_latest_run_path;
 pub(crate) use run_paths::{
-    ui_latest_run_path, ui_latest_run_relative_path, ui_run_artifact_relative_path, ui_run_dir,
-    ui_runs_root, ui_runs_root_relative_path,
+    ui_latest_run_relative_path, ui_run_artifact_relative_path, ui_run_dir, ui_runs_root,
+    ui_runs_root_relative_path,
 };
 pub(crate) use run_status::scan_status;
 pub(crate) use run_timeline::{run_timeline_model, PastRunStatus, RunTimelineRow};
@@ -269,8 +277,8 @@ pub(crate) use source_tree::{
 };
 pub(crate) use status_footer::status_footer_model;
 pub(crate) use strategy_queue::{
-    strategy_queue_model, StrategyQueueDetailRow, StrategyQueueEmptyState, StrategyQueueModel,
-    StrategyQueueRow,
+    strategy_queue_model, target_artifact_ready, StrategyQueueDetailRow, StrategyQueueEmptyState,
+    StrategyQueueModel, StrategyQueueRow,
 };
 pub(crate) use theme_picker::{theme_picker_model, ThemePickerModel};
 pub(crate) use threat_dfd_diagram::{
@@ -280,7 +288,7 @@ pub(crate) use threat_model::{
     threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
 };
 pub(crate) use threat_navigation::{threat_nav_model, threat_panel_model, ThreatPanel};
-pub(crate) use threat_patch::threat_patch_card_model;
+pub(crate) use threat_patch::{threat_patch_card_model, ThreatPatchCardModel};
 #[cfg(test)]
 pub(crate) use threat_scope::threat_scope_model_from_doc;
 pub(crate) use threat_scope::{threat_scope_model, ThreatScopeBucket, ThreatScopeTone};

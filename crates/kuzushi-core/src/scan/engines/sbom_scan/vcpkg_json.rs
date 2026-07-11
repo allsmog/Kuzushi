@@ -1,7 +1,7 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_vcpkg_json(path: &Path) -> bool {
@@ -50,7 +50,10 @@ fn dependency_names(value: &Value) -> Vec<String> {
 fn dependency_name(value: &Value) -> Option<String> {
     match value {
         Value::String(name) => clean_name(name),
-        Value::Object(dependency) => dependency.get("name").and_then(Value::as_str).and_then(clean_name),
+        Value::Object(dependency) => dependency
+            .get("name")
+            .and_then(Value::as_str)
+            .and_then(clean_name),
         _ => None,
     }
 }

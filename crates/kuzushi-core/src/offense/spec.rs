@@ -115,12 +115,14 @@ impl PlaySpec {
             ));
         }
         let play = PromptInjectionPlay::new(self.name.clone(), self.request());
-        let play = self.expect_signals.iter().fold(play, |play, signal| {
-            play.expect_leak(signal.clone())
-        });
-        let play = self.refusal_signals.iter().fold(play, |play, signal| {
-            play.treat_as_refusal(signal.clone())
-        });
+        let play = self
+            .expect_signals
+            .iter()
+            .fold(play, |play, signal| play.expect_leak(signal.clone()));
+        let play = self
+            .refusal_signals
+            .iter()
+            .fold(play, |play, signal| play.treat_as_refusal(signal.clone()));
         let play = match &self.canary {
             Some(canary) => play.with_canary(canary.clone()),
             None => play,

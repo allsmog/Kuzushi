@@ -6,7 +6,6 @@ use super::*;
 use ratatui::prelude::{Line, Span};
 
 mod center;
-mod findings;
 mod hunt;
 mod phase;
 mod review_queue;
@@ -22,7 +21,7 @@ pub(super) use review_queue::review_queue_pane_lines;
 pub(super) use ship::{ship_chain_lines, ship_export_lines, ship_patch_lines};
 pub(super) use source::{source_pane_lines, source_title};
 
-fn pane_empty_state(
+pub(super) fn pane_empty_state(
     glyph_label: &str,
     explanations: &[&str],
     ctas: &[(&str, &str)],

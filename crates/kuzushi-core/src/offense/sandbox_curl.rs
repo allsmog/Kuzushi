@@ -181,7 +181,10 @@ mod tests {
             port: Some(8443),
             ..PlayRequest::get("admin")
         };
-        assert_eq!(target_url(&target(), &request), "https://box.htb:8443/admin");
+        assert_eq!(
+            target_url(&target(), &request),
+            "https://box.htb:8443/admin"
+        );
     }
 
     #[test]
@@ -190,11 +193,15 @@ mod tests {
             .with_method("POST")
             .with_body("user=a&pass=b");
         let mut request = request;
-        request.headers.push(("X-Test".to_string(), "1".to_string()));
+        request
+            .headers
+            .push(("X-Test".to_string(), "1".to_string()));
         let argv = build_curl_argv(&target(), &request, 5_000);
         assert!(argv.contains(&"-X".to_string()) && argv.contains(&"POST".to_string()));
         assert!(argv.contains(&"X-Test: 1".to_string()));
-        assert!(argv.contains(&"--data-raw".to_string()) && argv.contains(&"user=a&pass=b".to_string()));
+        assert!(
+            argv.contains(&"--data-raw".to_string()) && argv.contains(&"user=a&pass=b".to_string())
+        );
         assert_eq!(argv.last().unwrap(), "https://box.htb/login");
         // 5000ms rounds to a 5s curl timeout.
         assert!(argv.contains(&"5".to_string()));

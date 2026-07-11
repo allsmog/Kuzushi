@@ -122,6 +122,7 @@ struct PatchExecution<'a> {
     plan: PatchValidationPlan,
     repo_name: String,
     style: PatchStyle,
+    validation_timeout: std::time::Duration,
 }
 
 fn patch_execution<'a>(
@@ -146,13 +147,15 @@ fn patch_execution<'a>(
         .and_then(|name| name.to_str())
         .unwrap_or("repo")
         .to_string();
-    ensure_git_repository(repo_root)?;
+    let control = PatchCommandControl::new(ctx.cancellation, input.validation_timeout);
+    ensure_git_repository(repo_root, control)?;
     Ok(PatchExecution {
         runtime,
         model,
         plan,
         repo_name,
         style: input.style,
+        validation_timeout: input.validation_timeout,
     })
 }
 
@@ -289,7 +292,13 @@ fn run_single_patch_attempt(
         attempt,
     )?;
     emit_patch_guardrail_check(ctx, parent_step, attempt);
-    let validation = validate_patch_in_worktree(repo_root, &synthesis.diff, &execution.plan)?;
+    let validation = validate_patch_in_worktree(
+        ctx,
+        repo_root,
+        &synthesis.diff,
+        &execution.plan,
+        execution.validation_timeout,
+    )?;
     Ok(SinglePatchAttempt {
         diff: synthesis.diff,
         explanation: synthesis.explanation,
@@ -356,14 +365,31 @@ fn emit_patch_guardrail_check(
 }
 
 fn validate_patch_in_worktree(
+    ctx: &ToolExecutionContext<'_>,
     repo_root: &Path,
     diff: &str,
     plan: &PatchValidationPlan,
+    timeout: std::time::Duration,
 ) -> Result<ValidationResult> {
-    let worktree = create_disposable_worktree(repo_root)?;
-    let validation = validate_patch(&worktree, diff, plan);
-    cleanup_worktree(repo_root, &worktree);
-    Ok(validation)
+    let control = PatchCommandControl::new(ctx.cancellation, timeout);
+    let worktree = create_disposable_worktree(repo_root, control)?;
+    let validation = validate_patch(&worktree, diff, plan, control);
+    finish_patch_validation(repo_root, &worktree, control, validation)
+}
+
+fn finish_patch_validation(
+    repo_root: &Path,
+    worktree: &Path,
+    control: PatchCommandControl<'_>,
+    validation: Result<ValidationResult>,
+) -> Result<ValidationResult> {
+    let cleanup = cleanup_worktree(repo_root, worktree, control);
+    match (validation, cleanup) {
+        (Ok(validation), Ok(())) => Ok(validation),
+        (Ok(_), Err(cleanup)) => Err(cleanup),
+        (Err(error), Ok(())) => Err(error),
+        (Err(error), Err(cleanup)) => Err(cleanup.context(error)),
+    }
 }
 
 fn patch_validator_log(history: &[PatchAttempt]) -> String {

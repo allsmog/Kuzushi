@@ -124,7 +124,10 @@ fn require_audit_event_kind(event_kind: EventKind) -> Result<()> {
     ) {
         return Ok(());
     }
-    bail!("event kind {} is not a writer audit event", event_kind.as_str())
+    bail!(
+        "event kind {} is not a writer audit event",
+        event_kind.as_str()
+    )
 }
 
 fn require_run_lifecycle_event_kind(event_kind: EventKind) -> Result<()> {

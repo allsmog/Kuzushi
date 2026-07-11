@@ -2,55 +2,14 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI › catalog · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › capabilities · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
-MODULES · 39 modules
+CAPABILITIES · MAP · 3 actions
+Phase-native actions first. Press e for engines and installed integrations.
 
-> NEXT Run sast — Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
+> NEXT Load Quick map — Build context and entry points
 
--- HUNT scan code, dependencies, and runtime surface for candidates ----------------------------------------------------
-# agentic-sast            LLM-driven detectors that reason about data flow and intent rather than pattern-match.
-  cargo-audit             Run cargo-audit against Rust lockfiles and persist advisory findings.
-  codeql                  GitHub's taint-query semantic analyzer: deeper than pattern scanners but slower.
-  dep-hygiene             Check dependency manifests for stale, vulnerable, or policy-risky packages.
-  govulncheck             Run govulncheck against Go packages and persist reachable vulnerability findings.
-  iac-scan                Scan IaC manifests for security misconfigurations.
-  license-scan            Scan package manifests for missing or copyleft license declarations.
-  offense-review          Model-backed offensive review tools over existing threat-model artifacts.
-  sast                    Full SAST pipeline: context, scanners, AI triage, verification, patch, and report.
-  secret-scan             Fast deterministic secret scanner over source files.
-  semgrep                 Native SAST path using semgrep JSON output.
-  taint-iris-next         Bounded IRIS-style taint analysis with deterministic evidence extraction and agent review.
-  variant                 Lift exploit patterns from confirmed findings and hunt sibling variants.
-  wasm-plugin             Run a capability-scoped Wasm analyzer against the indexed source snapshot.
-
--- MAP build context, recon, inventory, and threat model first ---------------------------------------------------------
-  bounty                  Bug-bounty intake: import Burp Suite XML and HAR captures into the findings ledger as...
-  codeql-db               Create a CodeQL database (.kuzushi/codeql-db/) for downstream taint and security queries.
-  context                 Build and persist repository context snapshots for scanner and shell use.
-  cpg                     Build a Joern Code Property Graph (.kuzushi/cpg.bin) for downstream taint analyses.
-  engagement              Seed target-scoped engagement planning artifacts.
-  entry-points            Deterministic extractor that normalizes attack-surface routes from the context snapshot...
-  ndiff                   Fetch CVE fix context, extract fix patterns, and hunt n-day variants.
-  randori                 Threat-model generation using PASTA stage framing and adversarial scenario review.
-  recon                   Network and web reconnaissance tools.
-  threat-intel            Per-target detector catalog seeded from a project's CVE history.
-  threat-model            Build and read threat-model artifacts and methodology overlays.
-  workspace               Report target and state paths.
-  x-ray                   Repository architecture review that maps entry points, invariants, attack surface, and risk...
-
--- OPERATE configure providers, catalogs, policy, and audit trails -----------------------------------------------------
-  catalog                 List native modules and tools.
-  config                  Inspect effective configuration.
-  module-recommender      Recommend next Kuzushi module tools from local repository, attack-surface, threat-model...
-  router                  Per-role model routing. Set MODEL_<ROLE> via `setg` to override models.toml.
-  sbom-scan               Extract a deterministic dependency inventory from package manifests.
-
--- CONFIRM/FIX triage, verify, patch, and report findings --------------------------------------------------------------
-  android-apk             Unpack, decompile, and analyze Android APKs so Kuzushi's existing Java/Kotlin SAST engines...
-  findings                Persist and inspect findings in SQLite.
-  patch                   Generate and validate a patch for a finding.
-  report                  Build artifact-backed Kuzushi run reports without executing scanners or runtimes.
-  suppress                Compose suppression rules (mute false positives, scope, severity, expiry).
-  triage                  LLM-driven triage of scanner findings with evidence-backed verdicts.
-  verify                  Exploitability verification through proof-of-concept construction and sandboxed execution.
+-- PRIMARY recommended actions for the workspace's current phase -------------------------------------------------------
+> Quick map               Build context and entry points
+  Deep threat map         Build the DFD and threat model
+  Import recon            Load nmap XML into the engagement

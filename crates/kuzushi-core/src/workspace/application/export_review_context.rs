@@ -37,7 +37,10 @@ impl WorkspaceFindingReviewContext {
         }
     }
 
-    pub(super) fn from_record_for_finding(record: &ReviewDecisionRecord, finding: &Finding) -> Self {
+    pub(super) fn from_record_for_finding(
+        record: &ReviewDecisionRecord,
+        finding: &Finding,
+    ) -> Self {
         let mut context = Self::from_record(record);
         context.source = review_source_for_finding(record.finding_id, finding);
         context

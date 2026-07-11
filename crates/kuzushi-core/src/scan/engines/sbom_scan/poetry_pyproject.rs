@@ -25,16 +25,14 @@ pub(super) fn poetry_pyproject_components(
     components
 }
 
-fn poetry_group_components(
-    target: &Path,
-    path: &Path,
-    value: &toml::Value,
-) -> Vec<SbomComponent> {
+fn poetry_group_components(target: &Path, path: &Path, value: &toml::Value) -> Vec<SbomComponent> {
     toml_value_at(value, "tool.poetry.group")
         .and_then(toml::Value::as_table)
         .into_iter()
         .flat_map(|groups| groups.iter())
-        .flat_map(|(group, group_value)| poetry_group_dependencies(target, path, group, group_value))
+        .flat_map(|(group, group_value)| {
+            poetry_group_dependencies(target, path, group, group_value)
+        })
         .collect()
 }
 
@@ -63,7 +61,16 @@ fn dependency_table_components(
         .into_iter()
         .flat_map(|deps| deps.iter())
         .filter(|(name, _)| name.as_str() != PYTHON_RUNTIME_KEY)
-        .map(|(name, value)| component(target, path, "python", scope, name, dependency_version(value)))
+        .map(|(name, value)| {
+            component(
+                target,
+                path,
+                "python",
+                scope,
+                name,
+                dependency_version(value),
+            )
+        })
         .collect()
 }
 

@@ -1,5 +1,12 @@
 use super::*;
+use crate::scene3d::VizPage;
 use std::path::{Component, Path};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FocusedWorkbenchVisualization {
+    Scene(VizPage),
+    ProofReplay,
+}
 
 impl ShellApp {
     pub(super) fn handle_view_hotkey(&mut self, key: KeyEvent) -> InputUpdate {
@@ -54,7 +61,9 @@ impl ShellApp {
             ViewHotkeyAction::WorkbenchToggleCenter => self.toggle_workbench_center_mode(),
             ViewHotkeyAction::WorkbenchCenterNext => self.cycle_workbench_center_mode(1),
             ViewHotkeyAction::WorkbenchCenterPrev => self.cycle_workbench_center_mode(-1),
-            ViewHotkeyAction::WorkbenchZoomCenter => self.open_workbench_center_viz(),
+            ViewHotkeyAction::WorkbenchOpenFocusedVisualization => {
+                self.open_workbench_focused_viz()
+            }
             ViewHotkeyAction::WorkbenchTogglePaneZoom => self.toggle_workbench_pane_zoom(),
             ViewHotkeyAction::WorkbenchOpen => self.workbench_open_focused(),
             ViewHotkeyAction::WorkbenchPageNext => {
@@ -115,14 +124,11 @@ impl ShellApp {
     }
 
     fn set_workbench_page(&mut self, page: WorkbenchPage) {
+        let viewport = self.viewport();
         let workbench = self.router.workbench_mut();
         workbench.set_page(Some(page));
         workbench.scroll_mut().set(WorkbenchPane::Center, 0);
-        if page == WorkbenchPage::Review {
-            workbench.set_focus(WorkbenchPane::Findings);
-        } else {
-            workbench.set_focus(WorkbenchPane::Center);
-        }
+        workbench.set_focus(page.primary_pane_for_viewport(viewport.columns, viewport.rows));
         self.set_shell_view(ShellView::Workbench);
         self.log(
             "workbench",
@@ -135,44 +141,78 @@ impl ShellApp {
     }
 
     fn cycle_workbench_pane(&mut self, reverse: bool) {
-        if !self.workbench_is_review_page() {
-            self.router.workbench_mut().set_focus(WorkbenchPane::Center);
-            return;
-        }
+        let page = crate::ui_view_models::active_workbench_page(self);
         let current = self.router.workbench().focus();
-        let next = if reverse {
-            current.prev()
-        } else {
-            current.next()
-        };
+        let viewport = self.viewport();
+        let next = page.next_interactive_pane_for_viewport(
+            self.router.workbench().center_mode(),
+            current,
+            reverse,
+            viewport.columns,
+            viewport.rows,
+        );
         self.router.workbench_mut().set_focus(next);
     }
 
     fn toggle_workbench_center_mode(&mut self) {
         self.router.workbench_mut().toggle_center_mode();
+        self.normalize_workbench_focus();
     }
 
     fn cycle_workbench_center_mode(&mut self, direction: i32) {
         self.router.workbench_mut().cycle_center_mode(direction);
     }
 
-    fn open_workbench_center_viz(&mut self) {
-        let Some(page) = self.router.workbench().center_mode().scene_page() else {
+    fn open_workbench_focused_viz(&mut self) {
+        let page = crate::ui_view_models::active_workbench_page(self);
+        let pane = self.normalize_workbench_focus();
+        match focused_workbench_visualization(page, pane) {
+            FocusedWorkbenchVisualization::Scene(scene) => self.open_scene_to_page(scene),
+            FocusedWorkbenchVisualization::ProofReplay => self.open_confirm_proof_replay(),
+        }
+    }
+
+    fn open_confirm_proof_replay(&mut self) {
+        let model = crate::ui_view_models::phase_cockpit_model_for_phase(
+            self,
+            kuzushi_core::WorkflowPhase::Confirm,
+        );
+        let crate::ui_view_models::PhaseCockpitBody::Confirm(confirm) = model.body else {
+            return;
+        };
+        let Some(run_id) = confirm.proof.and_then(|proof| proof.replay_run_id) else {
             self.log(
                 "workbench",
-                "CODE has no full visualization; choose DFD/CHAIN/FLOW/RISK",
+                "proof replay unavailable — run `verify <finding>` to record replayable proof",
             );
             return;
         };
-        self.open_scene_to_page(page);
+        self.push_nav_history(self.shell_view());
+        self.router.replay_mut().open(run_id.clone());
+        self.set_shell_view(ShellView::Replay);
+        self.log("replay", run_id);
     }
 
     fn toggle_workbench_pane_zoom(&mut self) {
-        if !self.workbench_is_review_page() {
-            self.log("workbench", "pane zoom is available on the review page");
-            return;
-        }
+        self.normalize_workbench_focus();
         self.router.workbench_mut().toggle_zoom();
+    }
+
+    fn normalize_workbench_focus(&mut self) -> WorkbenchPane {
+        let page = crate::ui_view_models::active_workbench_page(self);
+        let current = self.router.workbench().focus();
+        let viewport = self.viewport();
+        let pane_order = page.interactive_panes_for_viewport(
+            self.router.workbench().center_mode(),
+            viewport.columns,
+            viewport.rows,
+        );
+        if pane_order.contains(&current) {
+            return current;
+        }
+        let primary = page.primary_pane_for_viewport(viewport.columns, viewport.rows);
+        self.router.workbench_mut().set_focus(primary);
+        primary
     }
 
     fn focus_workbench_findings_before_back(&mut self) -> bool {
@@ -181,29 +221,26 @@ impl ShellApp {
         {
             return false;
         }
-        self.router
-            .workbench_mut()
-            .set_focus(WorkbenchPane::Findings);
-        self.log("workbench", "returned to findings — Esc again to leave");
+        let page = crate::ui_view_models::active_workbench_page(self);
+        let focus = page.primary_pane();
+        self.router.workbench_mut().set_focus(focus);
+        self.log(
+            "workbench",
+            format!(
+                "returned to {} — Esc again to leave",
+                page.title().to_ascii_lowercase()
+            ),
+        );
         true
     }
 
     fn workbench_move(&mut self, delta: isize) {
-        if !self.workbench_is_review_page() {
-            self.move_workbench_page_body(delta);
-            return;
-        }
-        match self.router.workbench().focus() {
+        match self.normalize_workbench_focus() {
             WorkbenchPane::Findings => self.step_findings_cursor(delta),
             WorkbenchPane::Source | WorkbenchPane::Center | WorkbenchPane::Details => {
                 self.scroll_by_delta(delta)
             }
         }
-    }
-
-    fn move_workbench_page_body(&mut self, delta: isize) {
-        self.router.workbench_mut().set_focus(WorkbenchPane::Center);
-        self.scroll_by_delta(delta);
     }
 
     fn scroll_by_delta(&mut self, delta: isize) {
@@ -221,11 +258,7 @@ impl ShellApp {
     }
 
     fn workbench_jump(&mut self, to_start: bool) {
-        if !self.workbench_is_review_page() {
-            self.jump_workbench_page_body(to_start);
-            return;
-        }
-        match self.router.workbench().focus() {
+        match self.normalize_workbench_focus() {
             WorkbenchPane::Findings => {
                 let len = crate::ui_view_models::visible_findings_len(self);
                 self.router.findings_mut().jump(to_start, len);
@@ -237,11 +270,6 @@ impl ShellApp {
         }
     }
 
-    fn jump_workbench_page_body(&mut self, to_start: bool) {
-        self.router.workbench_mut().set_focus(WorkbenchPane::Center);
-        self.jump_scroll_region(to_start);
-    }
-
     fn jump_scroll_region(&mut self, to_start: bool) {
         if to_start {
             self.scroll_to_top();
@@ -251,11 +279,19 @@ impl ShellApp {
     }
 
     fn workbench_open_focused(&mut self) {
-        if !self.workbench_is_review_page() {
-            return;
-        }
-        match self.router.workbench().focus() {
-            WorkbenchPane::Center => self.open_workbench_center_viz(),
+        let page = crate::ui_view_models::active_workbench_page(self);
+        match self.normalize_workbench_focus() {
+            WorkbenchPane::Center => self.open_workbench_focused_viz(),
+            WorkbenchPane::Findings if page == WorkbenchPage::Coverage => {
+                let can_open = crate::ui_view_models::visible_finding_at_cursor(self).is_some();
+                if can_open {
+                    self.set_workbench_page(WorkbenchPage::Review);
+                }
+                // Open after the page transition so finding detail remains
+                // focused; otherwise `set_workbench_page` resets focus to the
+                // Confirm composition's primary CENTER pane.
+                self.open_workbench_finding_or_log();
+            }
             WorkbenchPane::Findings => self.open_workbench_finding_or_log(),
             WorkbenchPane::Source | WorkbenchPane::Details => {}
         }
@@ -433,15 +469,19 @@ impl ShellApp {
             );
             return InputUpdate::handled();
         };
+        let effects = self.request_target_activation(TargetActivation {
+            path: target_path,
+            selected_scope: None,
+            source: TargetActivationSource::Command,
+        });
+        if effects.is_empty() {
+            return InputUpdate::handled();
+        }
         self.log(
             "component",
             format!("promoted {} to its own target", component.rel_path),
         );
-        InputUpdate::handled_with_effects(vec![ShellEffect::ActivateTarget(TargetActivation {
-            path: target_path,
-            selected_scope: None,
-            source: TargetActivationSource::Command,
-        })])
+        InputUpdate::handled_with_effects(effects)
     }
 
     fn selected_recommend_component(
@@ -529,13 +569,8 @@ impl ShellApp {
             return InputUpdate::handled();
         }
         match action {
-            ViewHotkeyAction::CatalogActivate => {
-                let Some(module) = self.catalog_cursor_module_id() else {
-                    self.log("module", "catalog has no selectable module row");
-                    return InputUpdate::handled();
-                };
-                self.reduce_hotkey_command(ShellCommand::Use(module))
-            }
+            ViewHotkeyAction::CatalogActivate => self.load_catalog_action(),
+            ViewHotkeyAction::CatalogToggleExpert => self.toggle_catalog_expert(),
             ViewHotkeyAction::ThreatView(view) => {
                 self.router.threat_mut().open(view);
                 self.set_shell_view(ShellView::Threat);
@@ -550,6 +585,31 @@ impl ShellApp {
             }
             _ => InputUpdate::ignored(),
         }
+    }
+
+    fn load_catalog_action(&mut self) -> InputUpdate {
+        let Some(command) = self.catalog_cursor_command() else {
+            self.log("capability", "no capability action is available");
+            return InputUpdate::handled();
+        };
+        self.set_input(command.clone());
+        self.set_input_mode(InputMode::Prompt);
+        self.log(
+            "capability",
+            format!("loaded `{}` — edit if needed, then submit", command.trim()),
+        );
+        InputUpdate::handled()
+    }
+
+    fn toggle_catalog_expert(&mut self) -> InputUpdate {
+        self.router.catalog_mut().toggle_expanded();
+        let message = if self.router.catalog().is_expanded() {
+            "showing expert engines and installed integrations"
+        } else {
+            "showing phase-native actions"
+        };
+        self.log("capability", message);
+        InputUpdate::handled()
     }
 
     fn apply_activity_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
@@ -692,6 +752,101 @@ impl ShellApp {
             .to_string();
         self.router.activity_mut().focus_task = Some(task_id.clone());
         Some(task_id)
+    }
+}
+
+fn focused_workbench_visualization(
+    page: WorkbenchPage,
+    pane: WorkbenchPane,
+) -> FocusedWorkbenchVisualization {
+    match page {
+        WorkbenchPage::Terrain => FocusedWorkbenchVisualization::Scene(VizPage::AttackSurface),
+        WorkbenchPage::Coverage => FocusedWorkbenchVisualization::Scene(VizPage::Heatmap),
+        WorkbenchPage::Review => confirm_visualization(pane),
+        WorkbenchPage::Ship => fix_visualization(pane),
+    }
+}
+
+fn confirm_visualization(pane: WorkbenchPane) -> FocusedWorkbenchVisualization {
+    if pane == WorkbenchPane::Details {
+        FocusedWorkbenchVisualization::ProofReplay
+    } else {
+        FocusedWorkbenchVisualization::Scene(VizPage::AttackPath)
+    }
+}
+
+fn fix_visualization(pane: WorkbenchPane) -> FocusedWorkbenchVisualization {
+    if matches!(pane, WorkbenchPane::Source | WorkbenchPane::Center) {
+        FocusedWorkbenchVisualization::Scene(VizPage::ExploitChain)
+    } else {
+        FocusedWorkbenchVisualization::Scene(VizPage::Dfd)
+    }
+}
+
+#[cfg(test)]
+mod phase_visualization_tests {
+    use super::*;
+
+    fn assert_visualization(
+        page: WorkbenchPage,
+        pane: WorkbenchPane,
+        expected: FocusedWorkbenchVisualization,
+    ) {
+        assert_eq!(focused_workbench_visualization(page, pane), expected);
+    }
+
+    #[test]
+    fn map_and_hunt_panes_open_phase_native_scenes() {
+        assert_visualization(
+            WorkbenchPage::Terrain,
+            WorkbenchPane::Center,
+            FocusedWorkbenchVisualization::Scene(VizPage::AttackSurface),
+        );
+        for pane in [WorkbenchPane::Source, WorkbenchPane::Details] {
+            assert_visualization(
+                WorkbenchPage::Coverage,
+                pane,
+                FocusedWorkbenchVisualization::Scene(VizPage::Heatmap),
+            );
+        }
+    }
+
+    #[test]
+    fn confirm_flow_and_proof_panes_have_distinct_destinations() {
+        for pane in [
+            WorkbenchPane::Source,
+            WorkbenchPane::Center,
+            WorkbenchPane::Findings,
+        ] {
+            assert_visualization(
+                WorkbenchPage::Review,
+                pane,
+                FocusedWorkbenchVisualization::Scene(VizPage::AttackPath),
+            );
+        }
+        assert_visualization(
+            WorkbenchPage::Review,
+            WorkbenchPane::Details,
+            FocusedWorkbenchVisualization::ProofReplay,
+        );
+    }
+
+    #[test]
+    fn fix_tree_and_dfd_panes_open_matching_scenes() {
+        for pane in [WorkbenchPane::Source, WorkbenchPane::Center] {
+            assert_visualization(
+                WorkbenchPage::Ship,
+                pane,
+                FocusedWorkbenchVisualization::Scene(VizPage::ExploitChain),
+            );
+        }
+        for pane in [WorkbenchPane::Findings, WorkbenchPane::Details] {
+            assert_visualization(
+                WorkbenchPage::Ship,
+                pane,
+                FocusedWorkbenchVisualization::Scene(VizPage::Dfd),
+            );
+        }
     }
 }
 

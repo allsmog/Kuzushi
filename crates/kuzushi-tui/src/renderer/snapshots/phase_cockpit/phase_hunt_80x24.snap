@@ -1,0 +1,30 @@
+---
+source: Kuzushi TUI.pdf
+sha256: fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545
+phase: hunt
+size: 80x24
+---
+KUZUSHI · target ./phase-target · view hunt · ● LIVE · cost $0.37 · ctx:✓ built
+ 組  map ✓ · 崩  hunt ✓ · 作  confirm ● · 掛  fix ·
+ ▸ NEXT triage & verify
+ strategy proposal queue · recommend generate proposals · scan fire hunt
+│SOURCE · 6                       │HUNT
+│src/  · 6                        │no queued strategy proposals
+│  api/  · 2                      │       ∅  no hunt proposals
+│    orders.rs  · 1               │       run `recommend` to rank detectors and
+│    upload.rs  · 1               │hunts
+│  auth/  · 2                     │
+│    login.rs  · 1                │       ▸ recommend             generate
+│    session.rs  · 1              │proposals
+│REVIEW QUEUE · 6                 │FINDINGS HEATMAP
+│▸F-0001  C rt open       SQL...  │  module           CRIT HIGH MED  LOW  INFO
+│ F-0002  H sig open              │  ──────────────────────────────────────────
+│Order...                         │▸ auth             █1   ·    █1   ·    ·
+│ F-0003  H sig open              │  api              ·    █1   █1   ·    ·
+│Templ...                         │  web              ·    █1   ·    ·    ·
+│ F-0004  M sig open              │  src              ·    ·    ·    █1   ·
+│Uploa...                         │
+mode:run · 作  confirm 3/4 · ⛭ 掛  fix ·...   6 findings / 1 crit / 2 high / 2 med
+────────────────────────────────────────────────────────────────────────────────
+ Ctrl+C request abort   findings list   Esc back   history events
+NAVIGATION MODE — view keys active · Esc returns to prompt

@@ -2,13 +2,14 @@
 # run-journey.sh — tmux-driven DevEx audit harness for the Kuzushi TUI.
 #
 # Drives the Rust Ratatui shell through scripted keystroke journeys
-# (docs/devex/tui-devex-audit-journeys.md, J1–J16) and captures per-step
-# tmux panes for signifier↔state↔intent review.
+# (docs/devex/tui-devex-audit-journeys.md, J1–J16) plus the updated-PDF phase
+# reference (J17), and captures per-step tmux panes for
+# signifier↔state↔intent review.
 #
 # Usage:
 #   ./scripts/devex/run-journey.sh J1            # one journey
 #   ./scripts/devex/run-journey.sh J1 J8 J4      # several
-#   ./scripts/devex/run-journey.sh all           # J1..J16
+#   ./scripts/devex/run-journey.sh all           # J1..J17
 #   ./scripts/devex/run-journey.sh --list        # catalog
 #   ./scripts/devex/run-journey.sh --size 60x20 J1   # size override (J14 matrix)
 #   KUZUSHI_BIN=... KUZUSHI_DEVEX_TARGET=... override binary / @TARGET token.
@@ -59,7 +60,7 @@ list_journeys() {
 # ---------------------------------------------------------------------------
 # per-journey state (reset in run_journey)
 # ---------------------------------------------------------------------------
-SESSION="" JDIR="" REPORT="" LAST_SNAP="" LAST_SNAP_NAME="(no snapshot yet)"
+SESSION="" JDIR="" REPORT="" LAST_SNAP="" LAST_ANSI="" LAST_SNAP_NAME="(no snapshot yet)"
 SNAP_IDX=0 PASS_N=0 FAIL_N=0 REVIEW_N=0
 J_COLS=0 J_ROWS=0 J_CWD="" SESSION_STARTED=0
 ENV_PREFIX=""    # accumulated `env -u K K=V` prefix, consumed by next launch
@@ -245,7 +246,7 @@ d_snap() { # <label> — capture plain + ANSI panes
   label=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-')
   base=$(printf '%02d-%s' "$SNAP_IDX" "$label")
   devex_capture "$SESSION" "$JDIR/$base.txt" "$JDIR/$base.ansi"
-  LAST_SNAP="$JDIR/$base.txt"; LAST_SNAP_NAME="$base"
+  LAST_SNAP="$JDIR/$base.txt"; LAST_ANSI="$JDIR/$base.ansi"; LAST_SNAP_NAME="$base"
   report snap "$base.txt (+ .ansi)"
 }
 
@@ -267,6 +268,33 @@ d_expect_not() {
   else
     pass "$LAST_SNAP_NAME free of \"$needle\""
   fi
+}
+
+d_expect_ansi_profile() { # indexed | truecolor, against last ANSI snapshot
+  local profile=$1
+  [ -n "$LAST_ANSI" ] || {
+    fail "expect-ansi-profile \"$profile\" — no snapshot taken yet"
+    return
+  }
+  case $profile in
+    indexed)
+      if ! devex_ansi_has_profile "$LAST_ANSI" indexed; then
+        fail "$LAST_SNAP_NAME has no indexed-color SGR (38;5 / 48;5)"
+      elif devex_ansi_has_profile "$LAST_ANSI" truecolor; then
+        fail "$LAST_SNAP_NAME leaks RGB SGR into the indexed-color cell"
+      else
+        pass "$LAST_SNAP_NAME uses indexed-color SGR without RGB SGR"
+      fi
+      ;;
+    truecolor)
+      if devex_ansi_has_profile "$LAST_ANSI" truecolor; then
+        pass "$LAST_SNAP_NAME uses RGB SGR (38;2 / 48;2)"
+      else
+        fail "$LAST_SNAP_NAME has no RGB SGR (38;2 / 48;2)"
+      fi
+      ;;
+    *) devex_die "unknown ANSI profile '$profile' (expected indexed or truecolor)";;
+  esac
 }
 
 d_ask() { # human-judgment checkpoint — recorded, never auto-verdicted
@@ -294,6 +322,7 @@ dispatch() { # <directive> <value>
     snap)            d_snap "$2";;
     expect)          d_expect "$2";;
     expect-not)      d_expect_not "$2";;
+    expect-ansi-profile) d_expect_ansi_profile "$2";;
     ask)             d_ask "$2";;
     *)               devex_die "unknown directive '$1:' (in $CURRENT_FILE)";;
   esac
@@ -311,7 +340,7 @@ run_journey() { # <journey-file> <run-dir>
   REPORT="$JDIR/report.txt"
   : > "$REPORT"
   SESSION="kzx-devex-$(printf '%s' "${id%%-*}" | tr '[:upper:]' '[:lower:]')-$$"
-  LAST_SNAP="" LAST_SNAP_NAME="(no snapshot yet)" SNAP_IDX=0
+  LAST_SNAP="" LAST_ANSI="" LAST_SNAP_NAME="(no snapshot yet)" SNAP_IDX=0
   PASS_N=0 FAIL_N=0 REVIEW_N=0 SESSION_STARTED=0 ENV_PREFIX=""
   J_COLS=${RUN_SIZE%x*} J_ROWS=${RUN_SIZE#*x} J_CWD=$REPO_ROOT
   TMP_HOME="" FIXTURE_TARGET=""
@@ -355,7 +384,7 @@ main() {
       --list) list_journeys; exit 0;;
       --size) shift; size_flag=$1;;
       --bin)  shift; KUZUSHI_BIN=$1;;
-      all) ids="1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16";;
+      all) ids="1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17";;
       [Jj]*) ids="$ids ${1#[Jj]}";;
       *) devex_log "unknown argument: $1"; usage 1;;
     esac

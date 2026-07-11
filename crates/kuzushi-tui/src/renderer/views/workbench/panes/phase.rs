@@ -75,9 +75,9 @@ fn harness_material_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
     }
     let body = app
         .workbench_cache()
-        .borrow_mut()
-        .harness_file(app.target());
-    let Some(body) = body else {
+        .borrow()
+        .cached_harness_file(app.target());
+    let crate::app::ViewDataState::Ready(Some(body)) = body else {
         lines.push(Line::styled("  not seeded", theme::muted()));
         lines.push(command_hint("aim <focus>", "seed focus and engines", width));
         return lines;

@@ -111,6 +111,15 @@ pub struct PersistedVerification {
     pub cost_usd: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// Run that produced the empirical verification. This is deliberately
+    /// distinct from `Finding.scan_id`, which names the discovery observation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_run_id: Option<String>,
+    /// Discovery observation that was current when verification ran. A later
+    /// observation with the same durable identity may reuse the proof, but the
+    /// UI can then label it as requiring revalidation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_scan_id: Option<String>,
     #[serde(default)]
     pub created_at: String,
 }

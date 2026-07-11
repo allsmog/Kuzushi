@@ -1,8 +1,7 @@
-use crate::fs_atomic::write_atomic;
 use crate::workspace::domain::{
     inherited_sections_for_child_scope, normalize_relative_path, project_model_scopes_path,
-    scope_id, scope_sort_key, NestedProjectKind, NestedProjectScope, NestedProjectScopeTree,
-    ROOT_SCOPE_ID,
+    scope_id, scope_sort_key, validated_workspace_descendant, write_workspace_state_file,
+    NestedProjectKind, NestedProjectScope, NestedProjectScopeTree, ROOT_SCOPE_ID,
 };
 use crate::workspace::inventory::{
     generated_vendor_path, ignored_dir, language_for_path, manifest_kind, vendor_dir_kind,
@@ -15,6 +14,8 @@ use std::path::{Path, PathBuf};
 
 const PACKAGE_ROOT_SCAN_BUDGET: usize = 50_000;
 const ENTRYPOINT_CLUSTER_BUDGET: usize = 512;
+const MAX_WORKSPACE_MANIFEST_BYTES: usize = 4 * 1024 * 1024;
+const MAX_SCOPE_TREE_BYTES: usize = 32 * 1024 * 1024;
 const CONVENTIONAL_ENTRYPOINT_PARENTS: &[&str] = &["cmd", "services", "apps"];
 
 pub fn discover_nested_project_scopes(root: impl AsRef<Path>) -> NestedProjectScopeTree {
@@ -80,12 +81,13 @@ fn ordered_scope_tree(scopes: BTreeMap<String, NestedProjectScope>) -> NestedPro
 pub fn load_nested_project_scopes(
     root: impl AsRef<Path>,
 ) -> Result<Option<NestedProjectScopeTree>> {
+    let root = root.as_ref();
     let path = project_model_scopes_path(root);
-    if !path.exists() {
+    let Some(body) =
+        crate::workspace::read_optional_workspace_text(root, &path, MAX_SCOPE_TREE_BYTES)?
+    else {
         return Ok(None);
-    }
-    let body =
-        fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
+    };
     let tree = serde_json::from_str(&body)
         .with_context(|| format!("Could not parse {}", path.display()))?;
     Ok(Some(tree))
@@ -95,9 +97,14 @@ pub fn save_nested_project_scopes(
     root: impl AsRef<Path>,
     tree: &NestedProjectScopeTree,
 ) -> Result<PathBuf> {
+    let root = root.as_ref();
     let path = project_model_scopes_path(root);
     let body = serde_json::to_string_pretty(tree).context("Could not serialize scope tree")?;
-    write_atomic(&path, &body).with_context(|| format!("Could not write {}", path.display()))?;
+    let relative = path
+        .strip_prefix(root)
+        .context("Project scope path escaped the workspace")?;
+    write_workspace_state_file(root, relative, body.as_bytes())
+        .with_context(|| format!("Could not write {}", path.display()))?;
     Ok(path)
 }
 
@@ -119,7 +126,7 @@ fn insert_scope(
     if rel_path == "." {
         return;
     }
-    if !root.join(&rel_path).is_dir() {
+    if !is_workspace_directory(root, Path::new(&rel_path)) {
         return;
     }
     if scopes.values().any(|scope| scope.rel_path == rel_path) {
@@ -147,7 +154,7 @@ fn discover_workspace_member_paths(root: &Path) -> Vec<String> {
 }
 
 fn discover_go_work_members(root: &Path) -> Vec<String> {
-    let Ok(body) = fs::read_to_string(root.join("go.work")) else {
+    let Some(body) = read_workspace_manifest(root, "go.work") else {
         return Vec::new();
     };
     let mut in_use_block = false;
@@ -199,7 +206,7 @@ fn strip_line_comment(line: &str) -> &str {
 }
 
 fn discover_cargo_workspace_members(root: &Path) -> Vec<String> {
-    let Ok(body) = fs::read_to_string(root.join("Cargo.toml")) else {
+    let Some(body) = read_workspace_manifest(root, "Cargo.toml") else {
         return Vec::new();
     };
     let Ok(value) = toml::from_str::<toml::Value>(&body) else {
@@ -218,7 +225,7 @@ fn discover_cargo_workspace_members(root: &Path) -> Vec<String> {
 }
 
 fn discover_node_workspace_members(root: &Path) -> Vec<String> {
-    let Ok(body) = fs::read_to_string(root.join("package.json")) else {
+    let Some(body) = read_workspace_manifest(root, "package.json") else {
         return Vec::new();
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) else {
@@ -249,7 +256,7 @@ fn discover_node_workspace_members(root: &Path) -> Vec<String> {
 }
 
 fn discover_pnpm_workspace_members(root: &Path) -> Vec<String> {
-    let Ok(body) = fs::read_to_string(root.join("pnpm-workspace.yaml")) else {
+    let Some(body) = read_workspace_manifest(root, "pnpm-workspace.yaml") else {
         return Vec::new();
     };
     let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&body) else {
@@ -288,7 +295,7 @@ fn expand_simple_child_glob(root: &Path, pattern: &str) -> Vec<String> {
     let Some(prefix) = pattern.strip_suffix("/*") else {
         return Vec::new();
     };
-    let Some(entries) = sorted_dir_entries(&root.join(prefix)) else {
+    let Some(entries) = sorted_workspace_dir_entries(root, Path::new(prefix)) else {
         return Vec::new();
     };
     entries
@@ -310,8 +317,27 @@ fn child_workspace_member(prefix: &str, entry: fs::DirEntry) -> Option<String> {
 fn existing_member_paths(root: &Path, members: Vec<String>) -> Vec<String> {
     members
         .into_iter()
-        .filter(|member| root.join(member).is_dir())
+        .filter(|member| is_workspace_directory(root, Path::new(member)))
         .collect()
+}
+
+fn read_workspace_manifest(root: &Path, relative: &str) -> Option<String> {
+    crate::workspace::read_optional_workspace_text(
+        root,
+        &root.join(relative),
+        MAX_WORKSPACE_MANIFEST_BYTES,
+    )
+    .ok()
+    .flatten()
+}
+
+fn is_workspace_directory(root: &Path, relative: &Path) -> bool {
+    validated_workspace_descendant(root, relative)
+        .and_then(|path| {
+            fs::symlink_metadata(&path)
+                .with_context(|| format!("Could not inspect {}", path.display()))
+        })
+        .is_ok_and(|metadata| metadata.is_dir())
 }
 
 fn discover_package_roots(root: &Path) -> Vec<String> {
@@ -390,6 +416,12 @@ fn sorted_dir_entries(dir: &Path) -> Option<Vec<fs::DirEntry>> {
     Some(entries)
 }
 
+fn sorted_workspace_dir_entries(root: &Path, relative: &Path) -> Option<Vec<fs::DirEntry>> {
+    let path = validated_workspace_descendant(root, relative).ok()?;
+    fs::symlink_metadata(&path).ok()?.is_dir().then_some(())?;
+    sorted_dir_entries(&path)
+}
+
 fn absorb_package_entry(
     entry: fs::DirEntry,
     rel_dir: &Path,
@@ -452,7 +484,7 @@ fn skip_package_root_dir(name: &str) -> bool {
 }
 
 fn discover_gitmodule_paths(root: &Path) -> Vec<String> {
-    let Ok(body) = fs::read_to_string(root.join(".gitmodules")) else {
+    let Some(body) = read_workspace_manifest(root, ".gitmodules") else {
         return Vec::new();
     };
     body.lines()
@@ -483,7 +515,7 @@ fn discover_dependency_roots(root: &Path) -> Vec<(NestedProjectKind, String)> {
     };
     let mut roots = entries
         .flatten()
-        .filter_map(|entry| dependency_scope_for_entry(&entry.path()))
+        .filter_map(|entry| dependency_scope_for_entry(&entry))
         .collect::<Vec<_>>();
     roots.sort();
     roots
@@ -501,37 +533,37 @@ fn discover_entrypoint_clusters(root: &Path) -> Vec<String> {
 }
 
 fn direct_entrypoint_clusters(root: &Path, parent: &str) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(root.join(parent)) else {
+    let Some(entries) = sorted_workspace_dir_entries(root, Path::new(parent)) else {
         return Vec::new();
     };
     entries
-        .flatten()
-        .filter_map(|entry| entrypoint_cluster_for_entry(parent, &entry.path()))
+        .into_iter()
+        .filter_map(|entry| entrypoint_cluster_for_entry(parent, &entry))
         .collect()
 }
 
-fn entrypoint_cluster_for_entry(parent: &str, path: &Path) -> Option<String> {
-    if !path.is_dir() {
+fn entrypoint_cluster_for_entry(parent: &str, entry: &fs::DirEntry) -> Option<String> {
+    if !entry.file_type().ok()?.is_dir() {
         return None;
     }
-    let child = path.file_name()?.to_string_lossy();
+    let child = entry.file_name().to_string_lossy().to_string();
     if child.starts_with('.') || ignored_dir(&child) {
         return None;
     }
     normalize_relative_path(&format!("{parent}/{child}"))
 }
 
-fn dependency_scope_for_entry(path: &Path) -> Option<(NestedProjectKind, String)> {
-    if !path.is_dir() {
+fn dependency_scope_for_entry(entry: &fs::DirEntry) -> Option<(NestedProjectKind, String)> {
+    if !entry.file_type().ok()?.is_dir() {
         return None;
     }
-    let name = path.file_name()?.to_string_lossy();
+    let name = entry.file_name().to_string_lossy().to_string();
     let kind = match vendor_dir_kind(&name) {
         Some(VendorDirKind::DependencyRoot) => NestedProjectKind::DependencyRoot,
         Some(VendorDirKind::VendoredRoot) => NestedProjectKind::VendoredRoot,
         _ => return None,
     };
-    Some((kind, name.to_string()))
+    Some((kind, name))
 }
 
 #[cfg(test)]

@@ -62,22 +62,82 @@ impl ScanCancellation {
         child: Child,
         process_group_id: Option<u32>,
     ) -> Result<RegisteredChild> {
+        let managed = prepare_managed_child(child, process_group_id)?;
+        self.insert_managed_child(managed)
+    }
+
+    fn insert_managed_child(&self, mut managed: ManagedChild) -> Result<RegisteredChild> {
         let id = self.next_child_id.fetch_add(1, Ordering::SeqCst);
-        let mut children = self
-            .children
-            .lock()
-            .map_err(|_| anyhow::anyhow!("scan cancellation registry was poisoned"))?;
-        children.insert(
-            id,
-            ManagedChild {
-                child,
-                process_group_id,
-            },
-        );
+        let mut children = match self.children.lock() {
+            Ok(children) => children,
+            Err(_) => {
+                kill_managed_child(&mut managed);
+                let _ = managed.child.wait();
+                anyhow::bail!("scan cancellation registry was poisoned");
+            }
+        };
+        if self.is_cancelled() {
+            drop(children);
+            kill_managed_child(&mut managed);
+            let _ = managed.child.wait();
+            anyhow::bail!("operation was cancelled before child process registration");
+        }
+        children.insert(id, managed);
         Ok(RegisteredChild {
             id,
             children: Arc::clone(&self.children),
         })
+    }
+}
+
+fn prepare_managed_child(child: Child, process_group_id: Option<u32>) -> Result<ManagedChild> {
+    #[cfg(windows)]
+    let mut child = child;
+    #[cfg(windows)]
+    let job_handle = match create_kill_on_close_job(&child) {
+        Ok(job_handle) => Some(job_handle),
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
+    Ok(ManagedChild {
+        child,
+        process_group_id,
+        #[cfg(windows)]
+        job_handle,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Stdio;
+
+    #[test]
+    fn child_registered_after_cancellation_is_killed_and_rejected() {
+        let cancellation = ScanCancellation::default();
+        cancellation.cancel();
+        let mut command = Command::new("node");
+        command
+            .args(["-e", "setTimeout(() => {}, 60_000)"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        configure_scanner_process_group(&mut command);
+        let child = command.spawn().unwrap();
+        let process_group_id = child_process_group_id(&child);
+
+        let error = cancellation
+            .register_child(child, process_group_id)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("cancelled before child process registration"),
+            "{error}"
+        );
     }
 }
 

@@ -121,12 +121,7 @@ pub struct ProjectionDb {
 impl ProjectionDb {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Could not create {}", parent.display()))?;
-        }
-        let conn =
-            Connection::open(path).with_context(|| format!("Could not open {}", path.display()))?;
+        let conn = crate::sqlite_connection::open_file(path)?;
         configure_projection_connection(&conn)?;
         create_projection_schema(&conn)?;
         Ok(Self { conn })
@@ -375,7 +370,19 @@ fn configure_projection_connection(conn: &Connection) -> Result<()> {
 pub(crate) fn create_projection_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(PROJECTION_SCHEMA)?;
     migrate_review_decision_dismissal_columns(conn)?;
+    migrate_verification_provenance_columns(conn)?;
     create_optional_fts(conn)?;
+    Ok(())
+}
+
+fn migrate_verification_provenance_columns(conn: &Connection) -> Result<()> {
+    for column in ["verification_run_id", "verified_scan_id"] {
+        if !table_has_column(conn, "verification_events", column)? {
+            conn.execute_batch(&format!(
+                "alter table verification_events add column {column} text"
+            ))?;
+        }
+    }
     Ok(())
 }
 
@@ -394,7 +401,11 @@ fn migrate_review_decision_dismissal_columns(conn: &Connection) -> Result<()> {
 }
 
 fn review_decisions_has_column(conn: &Connection, column: &str) -> Result<bool> {
-    let mut stmt = conn.prepare("pragma table_info(review_decisions)")?;
+    table_has_column(conn, "review_decisions", column)
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut stmt = conn.prepare(&format!("pragma table_info({table})"))?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
         let name: String = row.get(1)?;

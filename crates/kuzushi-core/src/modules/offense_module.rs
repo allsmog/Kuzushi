@@ -10,7 +10,14 @@ pub(crate) fn offense_module() -> BuiltinModule {
         "Offense",
         ModuleKind::Offense,
         "Authorized live-target operations: run declarative attack chains (auth-bypass -> IDOR -> RCE) against a host the engagement scope allows.",
-        vec![offense_chain_tool()],
+        tools_with_policy(
+            external_action_policy(
+                ToolPhase::Hunt,
+                RuntimeRequirement::InputAware,
+                FindingStoreRequirement::Required,
+            ),
+            vec![offense_chain_tool()],
+        ),
         vec![],
     )
 }
@@ -115,27 +122,40 @@ fn run_offense_chain(
         .filter(|goal| !goal.is_empty());
 
     let Some(goal) = goal else {
-        return Ok(crate::offense::execute_offense_chain(
+        return Ok(crate::offense::execute_offense_chain_for_run(
             input,
             workspace.root(),
             ctx.findings_store,
             &observer,
+            ctx.run_id(),
         ));
     };
 
+    run_planned_offense(input, ctx, runtime, workspace.root(), goal, &observer)
+}
+
+fn run_planned_offense(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    workspace_root: &std::path::Path,
+    goal: &str,
+    observer: &TraceHopObserver<'_>,
+) -> Result<Value> {
     let runtime = runtime.context(
         "offense:chain autonomous mode (goal) requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or run a declarative chain instead.",
     )?;
     let model =
         crate::runtime::require_configured_model("offense:chain", ctx.config.model.as_deref())?;
-    Ok(crate::offense::execute_offense_planned(
+    Ok(crate::offense::execute_offense_planned_for_run(
         input,
-        workspace.root(),
+        workspace_root,
         ctx.findings_store,
         runtime,
         &model,
         goal,
-        &observer,
+        observer,
+        ctx.run_id(),
     ))
 }
 

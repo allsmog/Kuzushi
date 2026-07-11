@@ -1,6 +1,7 @@
 use super::*;
 
-use crate::scan::{ScanCancellation, SemgrepScanner};
+use crate::scan::SemgrepScanner;
+#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -56,7 +57,7 @@ pub(in crate::modules) fn run_code_scan(
         "scan",
         &format!("code-scan start · target={}", target.display()),
     );
-    let outcome = match scan_with_android_rules(&input, &target) {
+    let outcome = match scan_with_android_rules(&input, &target, ctx) {
         Ok(outcome) => outcome,
         Err(error) => return Ok(failed_tool_output("android-apk:code-scan", &target, error)),
     };
@@ -83,13 +84,17 @@ struct CodeScanOutcome {
     findings: Vec<Finding>,
 }
 
-fn scan_with_android_rules(input: &Value, workspace_root: &Path) -> Result<CodeScanOutcome> {
+fn scan_with_android_rules(
+    input: &Value,
+    workspace_root: &Path,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<CodeScanOutcome> {
     let scan_root = resolve_jadx_sources(input, workspace_root)?;
     let rules_dir = materialize_rules(workspace_root)?;
-    let ignore_path = materialize_semgrepignore(&scan_root, input)?;
+    let ignore_path = materialize_semgrepignore(workspace_root, &scan_root, input)?;
     let scanner = semgrep_with_rules(input, &rules_dir);
-    let mut findings = scanner
-        .scan_with_cancel(&scan_root, &ScanCancellation::default())
+    let mut findings = ctx
+        .with_cancellation(|cancel| scanner.scan_with_cancel(&scan_root, cancel))
         .map_err(|error| anyhow::anyhow!("semgrep failed: {error}"))?;
     rebrand_findings(&mut findings);
     Ok(CodeScanOutcome {
@@ -130,7 +135,11 @@ com/airbnb/lottie/\n\
 com/bumptech/glide/\n\
 com/google/zxing/\n";
 
-fn materialize_semgrepignore(scan_root: &Path, input: &Value) -> Result<Option<PathBuf>> {
+fn materialize_semgrepignore(
+    workspace_root: &Path,
+    scan_root: &Path,
+    input: &Value,
+) -> Result<Option<PathBuf>> {
     let include_libraries = input
         .get("includeLibraries")
         .and_then(Value::as_bool)
@@ -141,8 +150,15 @@ fn materialize_semgrepignore(scan_root: &Path, input: &Value) -> Result<Option<P
     } else {
         DEFAULT_SEMGREPIGNORE
     };
-    fs::write(&path, contents)
-        .map_err(|error| anyhow::anyhow!("could not write {}: {error}", path.display()))?;
+    let relative = path.strip_prefix(workspace_root).with_context(|| {
+        format!(
+            "android-apk scan root {} must stay inside workspace {}",
+            scan_root.display(),
+            workspace_root.display()
+        )
+    })?;
+    let path =
+        crate::workspace::write_workspace_file(workspace_root, relative, contents.as_bytes())?;
     if include_libraries {
         Ok(None)
     } else {
@@ -151,37 +167,34 @@ fn materialize_semgrepignore(scan_root: &Path, input: &Value) -> Result<Option<P
 }
 
 fn resolve_jadx_sources(input: &Value, workspace_root: &Path) -> Result<PathBuf> {
-    if let Some(raw) = input
+    let candidate = if let Some(raw) = input
         .get("jadxDir")
         .or_else(|| input.get("jadx_dir"))
         .and_then(Value::as_str)
     {
-        let path = PathBuf::from(raw);
-        if path.is_dir() {
-            return Ok(path);
-        }
-    }
-    let candidate = workspace_root
-        .join("android-decompiled")
-        .join("jadx")
-        .join("sources");
-    if !candidate.is_dir() {
-        anyhow::bail!(
+        PathBuf::from(raw)
+    } else {
+        workspace_root
+            .join("android-decompiled")
+            .join("jadx")
+            .join("sources")
+    };
+    validated_android_workspace_dir(workspace_root, &candidate).with_context(|| {
+        format!(
             "android-apk:webview-scan: missing {}. Run `android-apk:prepare` with decompiler=jadx or 'both' first.",
             candidate.display()
-        );
-    }
-    Ok(candidate)
+        )
+    })
 }
 
 fn materialize_rules(workspace_root: &Path) -> Result<PathBuf> {
     let rules_dir = workspace_root.join(".kuzushi").join("android-rules");
-    fs::create_dir_all(&rules_dir)
-        .map_err(|error| anyhow::anyhow!("could not create {}: {error}", rules_dir.display()))?;
     for (name, contents) in ANDROID_RULE_FILES {
-        let path = rules_dir.join(name);
-        fs::write(&path, contents)
-            .map_err(|error| anyhow::anyhow!("could not write {}: {error}", path.display()))?;
+        crate::workspace::write_workspace_state_file(
+            workspace_root,
+            Path::new(".kuzushi/android-rules").join(name),
+            contents.as_bytes(),
+        )?;
     }
     Ok(rules_dir)
 }
@@ -273,6 +286,24 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn materialize_rules_rejects_symlinked_state_directory() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
+        symlink(
+            outside.path(),
+            workspace.path().join(".kuzushi/android-rules"),
+        )
+        .unwrap();
+
+        assert!(materialize_rules(workspace.path()).is_err());
+        assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
+    }
+
     #[test]
     fn semgrep_with_rules_uses_path_as_single_config() {
         let dir = tempdir().unwrap();
@@ -337,7 +368,7 @@ mod tests {
     #[test]
     fn semgrepignore_written_by_default() {
         let dir = tempdir().unwrap();
-        let path = materialize_semgrepignore(dir.path(), &json!({})).unwrap();
+        let path = materialize_semgrepignore(dir.path(), dir.path(), &json!({})).unwrap();
         let path = path.expect("ignore file path returned");
         assert!(path.is_file());
         let contents = std::fs::read_to_string(&path).unwrap();
@@ -356,10 +387,30 @@ mod tests {
         )
         .unwrap();
         let path =
-            materialize_semgrepignore(dir.path(), &json!({"includeLibraries": true})).unwrap();
+            materialize_semgrepignore(dir.path(), dir.path(), &json!({"includeLibraries": true}))
+                .unwrap();
         assert!(path.is_none());
         let contents = std::fs::read_to_string(dir.path().join(".semgrepignore")).unwrap();
         assert!(!contents.contains("com/google/android/gms"));
         assert!(contents.contains("includeLibraries=true"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn semgrepignore_writer_rejects_preplanted_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let scan_root = workspace.path().join("android-decompiled/jadx/sources");
+        fs::create_dir_all(&scan_root).unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "outside sentinel").unwrap();
+        symlink(outside.path(), scan_root.join(".semgrepignore")).unwrap();
+
+        assert!(materialize_semgrepignore(workspace.path(), &scan_root, &json!({})).is_err());
+        assert_eq!(
+            fs::read_to_string(outside.path()).unwrap(),
+            "outside sentinel"
+        );
     }
 }

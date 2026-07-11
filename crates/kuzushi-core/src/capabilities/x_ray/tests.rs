@@ -94,6 +94,8 @@ mod tests {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         }
     }
 
@@ -251,7 +253,7 @@ mod tests {
         fs::write(tmp.path().join("x-ray/x-ray.md"), "# X-Ray\n").unwrap();
 
         let err = read_x_ray_report_artifacts(tmp.path(), None, "rust", 0.0).unwrap_err();
-        assert!(err.to_string().contains("missing required artifact"));
+        assert!(format!("{err:#}").contains("missing or has unsafe required artifact"));
     }
 
     #[test]

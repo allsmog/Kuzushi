@@ -34,20 +34,21 @@ pub fn import_har(workspace: &WorkspaceTarget, path: &Path) -> Result<HarImportS
     let scope = load_program_scope(workspace).context("Could not load scope.toml")?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let run_id = format!("har-{}", Uuid::new_v4());
-    store.record_run_started(&run_id, workspace.root(), "completed")?;
-
-    let mut imported = 0usize;
-    let mut skipped = 0usize;
-    for entry in entries {
-        persist_har_entry(
-            &store,
-            &run_id,
-            scope.as_ref(),
-            entry,
-            &mut imported,
-            &mut skipped,
-        )?;
-    }
+    let (imported, skipped) = store.with_run_lifecycle(&run_id, workspace.root(), || {
+        let mut imported = 0usize;
+        let mut skipped = 0usize;
+        for entry in entries {
+            persist_har_entry(
+                &store,
+                &run_id,
+                scope.as_ref(),
+                entry,
+                &mut imported,
+                &mut skipped,
+            )?;
+        }
+        Ok(((imported, skipped), imported))
+    })?;
 
     Ok(HarImportSummary {
         run_id,
@@ -58,7 +59,7 @@ pub fn import_har(workspace: &WorkspaceTarget, path: &Path) -> Result<HarImportS
 }
 
 fn read_har_document(path: &Path) -> Result<Value> {
-    let body = std::fs::read_to_string(path)
+    let body = crate::bounded_file::read_utf8_text(path, 64 * 1024 * 1024)
         .with_context(|| format!("Could not read HAR file {}", path.display()))?;
     serde_json::from_str(&body)
         .with_context(|| format!("HAR file {} is not valid JSON", path.display()))

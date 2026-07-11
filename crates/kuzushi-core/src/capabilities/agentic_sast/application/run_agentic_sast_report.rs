@@ -245,7 +245,7 @@ impl AgenticSastRun {
         let options = AgenticSastInput::from_tool_input(input)?;
         let model = agentic_sast_model(input, ctx)?;
         let whitebox_static = whitebox_static_profile_requested(input)?;
-        let system_prompt = agentic_sast_system_prompt(whitebox_static);
+        let system_prompt = agentic_sast_prompt_from_input(input, whitebox_static, &target)?;
         let tool_policy = agent_tool_policy_for_input_and_target(input, &target)?;
         let inventory = collect_agentic_repo_inventory_with_filters(
             &target,
@@ -263,6 +263,36 @@ impl AgenticSastRun {
             whitebox_static,
             inventory,
         })
+    }
+}
+
+fn agentic_sast_prompt_from_input(
+    input: &Value,
+    whitebox_static: bool,
+    target: &Path,
+) -> Result<String> {
+    let Some(value) = optional_nonempty_string(input, "AGENTIC_SAST_PROMPT")? else {
+        return Ok(agentic_sast_system_prompt(whitebox_static));
+    };
+    crate::options::resolve_prompt_override_for_key(&value, target, "AGENTIC_SAST_PROMPT")
+}
+
+#[cfg(test)]
+mod prompt_override_tests {
+    use super::*;
+
+    #[test]
+    fn inline_agentic_prompt_replaces_the_builtin_instructions() {
+        let target = tempfile::tempdir().unwrap();
+
+        let prompt = agentic_sast_prompt_from_input(
+            &json!({"AGENTIC_SAST_PROMPT": "Focus on authorization boundaries."}),
+            false,
+            target.path(),
+        )
+        .unwrap();
+
+        assert_eq!(prompt, "Focus on authorization boundaries.");
     }
 }
 

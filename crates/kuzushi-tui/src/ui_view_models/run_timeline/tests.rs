@@ -1,6 +1,7 @@
 use super::*;
 use crate::ui_view_models::ui_run_dir;
-use kuzushi_core::V2Config;
+use kuzushi_core::{RunSummary, RunTargetGitMetadata, V2Config};
+use std::path::{Path, PathBuf};
 
 fn test_run_dir(root: &Path, run_id: &str) -> PathBuf {
     ui_run_dir(Some(root), run_id)
@@ -20,6 +21,7 @@ fn run_timeline_model_includes_active_scan_row() {
         abort_requested: false,
         error: None,
     }));
+    app.hydrate_all_view_data_for_test();
 
     let model = run_timeline_model(&app, 20);
 
@@ -53,6 +55,7 @@ fn run_timeline_model_does_not_show_zero_findings_while_scan_is_running() {
         abort_requested: false,
         error: None,
     }));
+    app.hydrate_all_view_data_for_test();
 
     let model = run_timeline_model(&app, 20);
 
@@ -62,13 +65,7 @@ fn run_timeline_model_does_not_show_zero_findings_while_scan_is_running() {
 #[test]
 fn run_timeline_model_filters_active_scan_from_past_runs() {
     let temp = tempfile::tempdir().unwrap();
-    let run_dir = test_run_dir(temp.path(), "r-2026-05-06T14-31");
-    std::fs::create_dir_all(&run_dir).unwrap();
-    std::fs::write(
-        run_dir.join(run_metadata_artifact_leaf()),
-        r#"{"status":"completed","findings":18,"target":"~/work/acme"}"#,
-    )
-    .unwrap();
+    write_status_run(temp.path(), "r-2026-05-06T14-31", "completed", 18);
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
@@ -81,6 +78,7 @@ fn run_timeline_model_filters_active_scan_from_past_runs() {
         abort_requested: false,
         error: None,
     }));
+    app.hydrate_all_view_data_for_test();
 
     let model = run_timeline_model(&app, 20);
 
@@ -94,16 +92,17 @@ fn run_timeline_model_filters_active_scan_from_past_runs() {
 #[test]
 fn run_timeline_model_surfaces_run_revision_metadata() {
     let temp = tempfile::tempdir().unwrap();
-    let run_dir = test_run_dir(temp.path(), "r-with-revision");
-    std::fs::create_dir_all(&run_dir).unwrap();
-    std::fs::write(
-        run_dir.join(run_metadata_artifact_leaf()),
-        r#"{"status":"completed","findings":18,"targetGit":{"sha":"abcdef1234567890","branch":"main","dirty":true},"target":"~/work/acme"}"#,
-    )
-    .unwrap();
+    let summary =
+        completed_summary("r-with-revision", 18).with_target_git(Some(RunTargetGitMetadata {
+            sha: "abcdef1234567890".to_string(),
+            branch: Some("main".to_string()),
+            dirty: true,
+        }));
+    kuzushi_core::write_run_summary(temp.path(), &summary).unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
 
     let model = run_timeline_model(&app, 20);
 
@@ -123,6 +122,7 @@ fn run_timeline_model_preserves_persisted_terminal_statuses() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
 
     let model = run_timeline_model(&app, 20);
 
@@ -159,6 +159,7 @@ fn run_timeline_model_marks_missing_run_metadata_unknown() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
 
     let model = run_timeline_model(&app, 20);
 
@@ -177,6 +178,7 @@ fn run_timeline_model_surfaces_malformed_run_metadata() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
 
     let model = run_timeline_model(&app, 20);
 
@@ -201,6 +203,7 @@ fn run_timeline_model_surfaces_non_object_run_metadata() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
 
     let model = run_timeline_model(&app, 20);
 
@@ -224,6 +227,7 @@ fn run_timeline_model_surfaces_non_file_run_metadata() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
 
     let model = run_timeline_model(&app, 20);
 
@@ -246,6 +250,7 @@ fn run_timeline_model_surfaces_missing_run_metadata() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
 
     let model = run_timeline_model(&app, 20);
 
@@ -259,13 +264,15 @@ fn run_timeline_model_surfaces_missing_run_metadata() {
 }
 
 fn write_status_run(root: &Path, run_id: &str, status: &str, findings: u64) {
-    let run_dir = test_run_dir(root, run_id);
-    std::fs::create_dir_all(&run_dir).unwrap();
-    std::fs::write(
-        run_dir.join(run_metadata_artifact_leaf()),
-        format!(r#"{{"status":"{status}","findings":{findings},"target":"~/work/acme"}}"#),
-    )
-    .unwrap();
+    let mut summary = completed_summary(run_id, findings);
+    summary.status = status.to_string();
+    kuzushi_core::write_run_summary(root, &summary).unwrap();
+}
+
+fn completed_summary(run_id: &str, findings: u64) -> RunSummary {
+    RunSummary::running(run_id, "scan", Some("sast:scan".to_string()), "~/work/acme")
+        .with_findings(Some(findings))
+        .complete()
 }
 
 fn assert_status_row(

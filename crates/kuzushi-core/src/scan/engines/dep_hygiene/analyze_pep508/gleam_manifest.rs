@@ -15,11 +15,7 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_gleam_toml(
         .collect()
 }
 
-fn section_findings(
-    file_path: &Path,
-    value: &toml::Value,
-    scope: &str,
-) -> Vec<DepHygieneFinding> {
+fn section_findings(file_path: &Path, value: &toml::Value, scope: &str) -> Vec<DepHygieneFinding> {
     value
         .get(scope)
         .and_then(toml::Value::as_table)
@@ -53,7 +49,9 @@ fn gleam_finding(
             name,
             constraint,
             DepHygieneSeverity::Medium,
-            format!("{scope}: floor-only range; add an upper bound to fix the supply-chain surface"),
+            format!(
+                "{scope}: floor-only range; add an upper bound to fix the supply-chain surface"
+            ),
         ));
     }
     None

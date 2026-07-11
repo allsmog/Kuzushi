@@ -61,7 +61,10 @@ fn requirement_version(text: &str) -> Option<&str> {
 
 fn quoted_value(text: &str) -> Option<(&str, &str)> {
     let text = text.trim_start();
-    let quote = text.chars().next().filter(|quote| matches!(quote, '\'' | '"'))?;
+    let quote = text
+        .chars()
+        .next()
+        .filter(|quote| matches!(quote, '\'' | '"'))?;
     let rest = &text[quote.len_utf8()..];
     let end = rest.find(quote)?;
     Some((&rest[..end], &rest[end + quote.len_utf8()..]))

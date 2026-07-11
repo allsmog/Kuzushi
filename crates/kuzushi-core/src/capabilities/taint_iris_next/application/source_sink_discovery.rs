@@ -433,23 +433,19 @@ fn is_likely_entry_point_name_noise(marker: &str, name: &str) -> bool {
 }
 
 /// Persist the result alongside the rest of the kuzushi state under
-/// `<target>/.kuzushi/discovered-signals.json`. Best-effort: a failure
-/// here is non-fatal because discovery is a ranking aid, not a
-/// correctness gate.
+/// `<target>/.kuzushi/discovered-signals.json`.
 pub(crate) fn persist_taint_iris_next_discovered_signals(
     repo_root: &Path,
     signals: &DiscoveredSignals,
-) {
+) -> Result<()> {
+    let serialized = serde_json::to_vec_pretty(signals)
+        .context("Could not serialize taint-iris-next discovered signals")?;
     let path = taint_iris_next_discovered_signals_path(repo_root);
-    let Some(dir) = path.parent() else {
-        return;
-    };
-    if std::fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    if let Ok(serialised) = serde_json::to_string_pretty(signals) {
-        let _ = std::fs::write(&path, serialised);
-    }
+    let relative = path
+        .strip_prefix(repo_root)
+        .context("taint-iris-next discovered-signals path escaped the workspace")?;
+    crate::workspace::write_workspace_state_file(repo_root, relative, &serialized)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -948,5 +944,31 @@ mod tests {
             result.sources.iter().map(|s| s.marker.as_str()).collect();
         assert!(markers.contains("good"));
         assert!(!markers.contains("broken"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovered_signals_writer_rejects_a_symlinked_artifact() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let mut outside = tempfile::NamedTempFile::new().expect("outside");
+        std::io::Write::write_all(&mut outside, b"outside").expect("seed outside");
+        std::fs::create_dir_all(crate::workspace::workspace_state_root(workspace.path()))
+            .expect("state dir");
+        symlink(
+            outside.path(),
+            taint_iris_next_discovered_signals_path(workspace.path()),
+        )
+        .expect("symlink artifact");
+
+        let error = persist_taint_iris_next_discovered_signals(
+            workspace.path(),
+            &DiscoveredSignals::default(),
+        )
+        .expect_err("symlink must be rejected");
+
+        assert!(error.to_string().contains("symlink"));
+        assert_eq!(std::fs::read_to_string(outside.path()).unwrap(), "outside");
     }
 }

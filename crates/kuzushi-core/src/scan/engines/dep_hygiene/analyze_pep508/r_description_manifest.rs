@@ -48,7 +48,9 @@ fn r_finding(
             dependency.name,
             constraint,
             DepHygieneSeverity::Medium,
-            format!("{field}: floor-only range; add an upper bound to fix the supply-chain surface"),
+            format!(
+                "{field}: floor-only range; add an upper bound to fix the supply-chain surface"
+            ),
         ));
     }
     None

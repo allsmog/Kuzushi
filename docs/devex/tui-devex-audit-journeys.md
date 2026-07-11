@@ -66,7 +66,8 @@ findings are cited inline so a re-run knows what it is re-checking; see
 ### J2 — Offline demo path
 - **Persona:** evaluator who won't paste a key yet.
 - **Launch:** `kuzushi demo`; plus the in-gate `d` offline route.
-- **Goal:** reach a real finding with evidence — zero key, zero network.
+- **Goal:** reach a real scanner signal with a redacted location and an honest
+  `signal_only` proof state — zero key, zero network.
 - **Judge:** does the demo make the value legible, or just print logs?
 
 ### J3 — Explicit-target consent

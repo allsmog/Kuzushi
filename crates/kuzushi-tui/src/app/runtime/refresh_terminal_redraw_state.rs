@@ -8,6 +8,7 @@ pub(crate) fn refresh_terminal_redraw_state(
 ) -> Result<()> {
     state.needs_redraw |= app_background_changed(app, watcher);
     state.needs_redraw |= clear_terminal_after_external_output(terminal, app)?;
+    state.needs_redraw |= app.schedule_active_view_hydration();
     state.needs_redraw = draw_terminal_if_needed(terminal, app, state.needs_redraw)?;
     Ok(())
 }
@@ -122,9 +123,9 @@ fn plain_launch_summary(app: &ShellApp) -> String {
         .map(|target| target.display().to_string())
         .unwrap_or_else(|| "none".to_string());
     let next = if app.target().is_some() {
-        "printf 'findings\n' | kuzushi --plain --target <path>"
+        "printf 'findings\\n' | kuzushi --plain --target <path>"
     } else {
-        "printf 'scan .\n' | kuzushi --plain"
+        "printf 'scan .\\n' | kuzushi --plain"
     };
     format!(
         "KUZUSHI PLAIN SESSION SUMMARY\nstatus: idle\ntarget: {target}\ncommands: 0\nNext: {next}\n"
@@ -144,6 +145,8 @@ mod plain_summary_tests {
         assert!(output.contains("status: idle"));
         assert!(output.contains("target: none"));
         assert!(output.contains("commands: 0"));
+        assert!(output.contains("Next: printf 'scan .\\n' | kuzushi --plain"));
+        assert_eq!(output.lines().count(), 5);
         assert!(!output.contains("press "));
         assert!(!output.contains("kuzushi>"));
     }

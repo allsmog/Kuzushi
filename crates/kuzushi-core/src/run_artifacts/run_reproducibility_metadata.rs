@@ -1,19 +1,24 @@
 use super::llm_audit::load_run_trace_audit;
-use super::{
-    RunEnvFingerprint, RunHouseRuleFingerprint, RunPromptOverrideFingerprint, RunSummary,
-};
+use super::{RunEnvFingerprint, RunHouseRuleFingerprint, RunPromptOverrideFingerprint, RunSummary};
 use crate::workspace::target_git_metadata;
 use std::fs;
 use std::path::Path;
 
+const MAX_PROVENANCE_MARKDOWN_BYTES: usize = 1024 * 1024;
+const MAX_THREAT_MODEL_DIGEST_BYTES: usize = 16 * 1024 * 1024;
+
 pub(crate) fn summary_with_dynamic_metadata(target: &Path, summary: &RunSummary) -> RunSummary {
-    let summary = summary_with_llm_audit(target, summary.clone());
-    let summary = summary_with_house_rules(target, summary);
+    let summary = summary_with_house_rules(target, summary.clone());
     let summary = summary_with_prompt_overrides(target, summary);
     let summary = summary_with_threat_model_digest(target, summary);
     let summary = summary_with_env_fingerprint(summary);
     let summary = summary_with_cli_args(summary);
-    summary_with_target_git(target, summary)
+    let summary = summary_with_target_git(target, summary);
+    summary_with_trace_metadata(target, &summary)
+}
+
+pub(crate) fn summary_with_trace_metadata(target: &Path, summary: &RunSummary) -> RunSummary {
+    summary_with_llm_audit(target, summary.clone())
 }
 
 fn summary_with_llm_audit(target: &Path, summary: RunSummary) -> RunSummary {
@@ -120,10 +125,21 @@ fn sensitive_cli_flag(arg: &str) -> bool {
 }
 
 fn sensitive_arg_key(key: &str) -> bool {
-    let normalized = key.trim_start_matches('-').replace('_', "-").to_ascii_uppercase();
-    ["API-KEY", "AUTH-TOKEN", "OAUTH-TOKEN", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"]
-        .iter()
-        .any(|needle| normalized.contains(needle))
+    let normalized = key
+        .trim_start_matches('-')
+        .replace('_', "-")
+        .to_ascii_uppercase();
+    [
+        "API-KEY",
+        "AUTH-TOKEN",
+        "OAUTH-TOKEN",
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "CREDENTIAL",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
 }
 
 fn redact_assignment(arg: &str) -> String {
@@ -169,58 +185,58 @@ fn sensitive_env_key(key: &str) -> bool {
 
 fn threat_model_sha256(target: &Path) -> Option<String> {
     let path = crate::capabilities::threat_model::persistent_threat_model_path(target);
-    match fs::metadata(&path) {
-        Ok(metadata) if metadata.is_file() => file_sha256(&path),
-        Ok(_) => Some("invalid:not-a-file".to_string()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(_) => Some("invalid:unreadable".to_string()),
-    }
+    bounded_file_sha256(target, &path, MAX_THREAT_MODEL_DIGEST_BYTES)
 }
 
 fn load_prompt_override_fingerprints(target: &Path) -> Vec<RunPromptOverrideFingerprint> {
     let dir = crate::options::prompt_overrides_root(target);
-    let modules = match read_provenance_dir(&dir) {
+    let modules = match read_provenance_dir(target, &dir) {
         Ok(Some(entries)) => entries,
         Ok(None) => return Vec::new(),
         Err(sha256) => return vec![invalid_prompt_root_fingerprint(sha256)],
     };
     let mut fingerprints = modules
         .flatten()
-        .flat_map(prompt_module_fingerprints)
+        .flat_map(|entry| prompt_module_fingerprints(target, entry))
         .collect::<Vec<_>>();
     fingerprints.sort_by(prompt_override_order);
     fingerprints
 }
 
-fn prompt_module_fingerprints(entry: fs::DirEntry) -> Vec<RunPromptOverrideFingerprint> {
+fn prompt_module_fingerprints(
+    target: &Path,
+    entry: fs::DirEntry,
+) -> Vec<RunPromptOverrideFingerprint> {
     let path = entry.path();
     let Some(module) = entry.file_name().to_str().map(str::to_string) else {
         return Vec::new();
     };
-    match read_provenance_dir(&path) {
-        Ok(Some(entries)) => prompt_override_fingerprints(&module, entries),
+    match read_provenance_dir(target, &path) {
+        Ok(Some(entries)) => prompt_override_fingerprints(target, &module, entries),
         Ok(None) => Vec::new(),
         Err(sha256) => vec![invalid_prompt_module_fingerprint(&module, sha256)],
     }
 }
 
 fn prompt_override_fingerprints(
+    target: &Path,
     module: &str,
     entries: fs::ReadDir,
 ) -> Vec<RunPromptOverrideFingerprint> {
     entries
         .flatten()
-        .filter_map(|entry| prompt_override_fingerprint(module, entry))
+        .filter_map(|entry| prompt_override_fingerprint(target, module, entry))
         .collect()
 }
 
 fn prompt_override_fingerprint(
+    target: &Path,
     module: &str,
     entry: fs::DirEntry,
 ) -> Option<RunPromptOverrideFingerprint> {
     let path = entry.path();
     let verb = path.file_stem()?.to_str()?.to_string();
-    let sha256 = markdown_artifact_sha256(&path)?;
+    let sha256 = markdown_artifact_sha256(target, &path)?;
     Some(RunPromptOverrideFingerprint {
         module: module.to_string(),
         verb: verb.clone(),
@@ -240,23 +256,23 @@ fn prompt_override_order(
 
 fn load_house_rule_fingerprints(target: &Path) -> Vec<RunHouseRuleFingerprint> {
     let dir = crate::options::house_rules_root(target);
-    let entries = match read_provenance_dir(&dir) {
+    let entries = match read_provenance_dir(target, &dir) {
         Ok(Some(entries)) => entries,
         Ok(None) => return Vec::new(),
         Err(sha256) => return vec![invalid_house_rule_root_fingerprint(sha256)],
     };
     let mut fingerprints = entries
         .flatten()
-        .filter_map(house_rule_fingerprint)
+        .filter_map(|entry| house_rule_fingerprint(target, entry))
         .collect::<Vec<_>>();
     fingerprints.sort_by(|left, right| left.module.cmp(&right.module));
     fingerprints
 }
 
-fn house_rule_fingerprint(entry: fs::DirEntry) -> Option<RunHouseRuleFingerprint> {
+fn house_rule_fingerprint(target: &Path, entry: fs::DirEntry) -> Option<RunHouseRuleFingerprint> {
     let path = entry.path();
     let file_name = path.file_name()?.to_str()?.to_string();
-    let sha256 = markdown_artifact_sha256(&path)?;
+    let sha256 = markdown_artifact_sha256(target, &path)?;
     Some(RunHouseRuleFingerprint {
         module: path.file_stem()?.to_str()?.to_string(),
         path: house_rule_relative_path(&file_name),
@@ -264,32 +280,25 @@ fn house_rule_fingerprint(entry: fs::DirEntry) -> Option<RunHouseRuleFingerprint
     })
 }
 
-fn markdown_artifact_sha256(path: &Path) -> Option<String> {
+fn markdown_artifact_sha256(target: &Path, path: &Path) -> Option<String> {
     if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
         return None;
     }
-    match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {
-            file_sha256(path).or_else(|| Some("invalid:unreadable".to_string()))
-        }
-        Ok(_) => Some("invalid:not-a-file".to_string()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(_) => Some("invalid:unreadable".to_string()),
-    }
+    bounded_file_sha256(target, path, MAX_PROVENANCE_MARKDOWN_BYTES)
 }
 
-fn read_provenance_dir(dir: &Path) -> Result<Option<fs::ReadDir>, &'static str> {
-    let metadata = match fs::metadata(dir) {
-        Ok(metadata) => metadata,
+fn read_provenance_dir(target: &Path, dir: &Path) -> Result<Option<fs::ReadDir>, &'static str> {
+    match crate::bounded_file::read_dir_within(target, dir) {
+        Ok(entries) => Ok(Some(entries)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err("invalid:unreadable"),
-    };
-    if !metadata.is_dir() {
-        return Err("invalid:not-a-directory");
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+            Err("invalid:not-a-directory")
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err("invalid:unsafe-path")
+        }
+        Err(_) => Err("invalid:unreadable"),
     }
-    fs::read_dir(dir)
-        .map(Some)
-        .map_err(|_| "invalid:unreadable")
 }
 
 fn invalid_house_rule_root_fingerprint(sha256: &str) -> RunHouseRuleFingerprint {
@@ -313,10 +322,7 @@ fn invalid_prompt_root_fingerprint(sha256: &str) -> RunPromptOverrideFingerprint
     }
 }
 
-fn invalid_prompt_module_fingerprint(
-    module: &str,
-    sha256: &str,
-) -> RunPromptOverrideFingerprint {
+fn invalid_prompt_module_fingerprint(module: &str, sha256: &str) -> RunPromptOverrideFingerprint {
     RunPromptOverrideFingerprint {
         module: module.to_string(),
         verb: "<module>".to_string(),
@@ -327,9 +333,21 @@ fn invalid_prompt_module_fingerprint(
     }
 }
 
-fn file_sha256(path: &Path) -> Option<String> {
-    let bytes = fs::read(path).ok()?;
-    Some(bytes_sha256(&bytes))
+fn bounded_file_sha256(target: &Path, path: &Path, max_bytes: usize) -> Option<String> {
+    match crate::bounded_file::read_regular_bytes_within(target, path, max_bytes) {
+        Ok(bytes) => Some(bytes_sha256(&bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
+            Some("invalid:not-a-file".to_string())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            Some("invalid:unsafe-path".to_string())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+            Some("invalid:oversized".to_string())
+        }
+        Err(_) => Some("invalid:unreadable".to_string()),
+    }
 }
 
 fn value_sha256(value: &str) -> String {
@@ -392,5 +410,52 @@ mod tests {
         assert_eq!(args[3], "--token");
         assert_eq!(args[4], "<redacted>");
         assert_eq!(args[5].len(), 512);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prompt_and_house_rule_fingerprints_reject_outside_symlinks() {
+        const OUTSIDE_TOKEN: &str = "OUTSIDE-PROVENANCE-TOKEN-MUST-NOT-HASH";
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_module = outside.path().join("triage");
+        fs::create_dir_all(&outside_module).unwrap();
+        fs::write(outside_module.join("run.md"), OUTSIDE_TOKEN).unwrap();
+        let prompt_root = crate::options::prompt_overrides_root(target.path());
+        fs::create_dir_all(&prompt_root).unwrap();
+        std::os::unix::fs::symlink(&outside_module, prompt_root.join("triage")).unwrap();
+
+        let outside_rule = outside.path().join("rule.md");
+        fs::write(&outside_rule, OUTSIDE_TOKEN).unwrap();
+        let house_root = crate::options::house_rules_root(target.path());
+        fs::create_dir_all(&house_root).unwrap();
+        std::os::unix::fs::symlink(&outside_rule, house_root.join("triage.md")).unwrap();
+
+        let prompts = load_prompt_override_fingerprints(target.path());
+        let rules = load_house_rule_fingerprints(target.path());
+        let serialized = serde_json::to_string(&(&prompts, &rules)).unwrap();
+
+        assert_eq!(prompts[0].sha256, "invalid:unsafe-path");
+        assert_eq!(rules[0].sha256, "invalid:unsafe-path");
+        assert!(!serialized.contains(OUTSIDE_TOKEN));
+        assert!(!serialized.contains(&bytes_sha256(OUTSIDE_TOKEN.as_bytes())));
+    }
+
+    #[test]
+    fn oversized_prompt_fingerprint_is_explicitly_invalid() {
+        let target = tempfile::tempdir().unwrap();
+        let path = crate::options::prompt_override_path(target.path(), "triage", "run");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "prompt").unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(MAX_PROVENANCE_MARKDOWN_BYTES as u64 + 1)
+            .unwrap();
+
+        let prompts = load_prompt_override_fingerprints(target.path());
+
+        assert_eq!(prompts[0].sha256, "invalid:oversized");
     }
 }

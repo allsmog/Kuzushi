@@ -1,7 +1,7 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_pipfile_lock(path: &Path) -> bool {
@@ -25,10 +25,13 @@ pub(super) fn pipfile_lock_components(target: &Path, path: &Path) -> Result<Vec<
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse Pipfile.lock")?;
-    Ok([("default", "Pipfile.lock.default"), ("develop", "Pipfile.lock.develop")]
-        .into_iter()
-        .flat_map(|(section, scope)| locked_components(value.get(section), target, path, scope))
-        .collect())
+    Ok([
+        ("default", "Pipfile.lock.default"),
+        ("develop", "Pipfile.lock.develop"),
+    ]
+    .into_iter()
+    .flat_map(|(section, scope)| locked_components(value.get(section), target, path, scope))
+    .collect())
 }
 
 fn locked_packages(value: Option<&Value>, source: &str) -> Vec<SbomDependencyEdge> {

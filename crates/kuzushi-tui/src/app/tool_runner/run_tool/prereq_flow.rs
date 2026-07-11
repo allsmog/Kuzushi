@@ -8,8 +8,10 @@ impl ShellApp {
         final_input: serde_json::Value,
         _workspace: WorkspaceTarget,
         thinking_level: Option<String>,
+        authorization: ExecutionAuthorization,
     ) -> Vec<ShellEffect> {
-        let chain = PrereqChain::new(steps, final_tool, final_input, thinking_level);
+        let chain = PrereqChain::new(steps, final_tool, final_input, thinking_level)
+            .with_authorization(authorization);
         self.engagement.set_pending_chain(chain);
         self.present_or_auto_accept_prereq_plan()
     }
@@ -200,12 +202,20 @@ impl ShellApp {
     }
 
     fn dispatch_final_chain_tool(&mut self, workspace: WorkspaceTarget) {
-        let Some((tool, input, thinking)) = self.engagement.mark_final_chain_tool_dispatched()
+        let Some((tool, input, thinking, authorization)) =
+            self.engagement.mark_final_chain_tool_dispatched()
         else {
             return;
         };
         let status = tool_run_status(&tool);
-        self.start_background_tool(tool, input, workspace, status, thinking);
+        self.start_authorized_background_tool(
+            tool,
+            input,
+            workspace,
+            status,
+            thinking,
+            authorization,
+        );
     }
 
     fn prepared_prereq_step_input(
@@ -218,6 +228,8 @@ impl ShellApp {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         self.registry().prepare_tool_input_for_dispatch(
             tool_name,

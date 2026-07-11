@@ -56,7 +56,6 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
-url = "2"
 # Tree-sitter is used by taint-iris-next to drop candidates whose byte
 # range falls inside comments or string literals — a candidate is only
 # kept when it lies inside a structurally meaningful node (call, member
@@ -73,11 +72,20 @@ tree-sitter-python = "0.23"
 tree-sitter-ruby = "0.23"
 tree-sitter-typescript = "0.23"
 uuid.workspace = true
+url = "2"
 wasmtime.workspace = true
 notify = "8.2.0"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
+
 [dev-dependencies]
-tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 wat = "1.0"
 

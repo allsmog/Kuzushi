@@ -26,19 +26,39 @@ pub fn persist_chain_finding(
     backend: PersistedSandboxBackend,
     outcome: &ChainOutcome,
 ) -> Result<Option<i64>> {
+    persist_chain_finding_for_run(store, workspace_root, target_host, backend, outcome, None)
+}
+
+/// Persist a chain while linking its empirical proof to the outer replayable
+/// tool run. The finding observation keeps its own discovery run id; the two
+/// identities must not be conflated because only the outer run owns
+/// `.kuzushi/v3/runs/<id>/trace.jsonl`.
+pub fn persist_chain_finding_for_run(
+    store: &FindingStore,
+    workspace_root: &Path,
+    target_host: &str,
+    backend: PersistedSandboxBackend,
+    outcome: &ChainOutcome,
+    verification_run_id: Option<&str>,
+) -> Result<Option<i64>> {
     let landed: Vec<&PlayOutcome> = outcome.steps.iter().filter(|s| s.exploited).collect();
     if landed.is_empty() {
         return Ok(None);
     }
     let run_id = Uuid::new_v4().to_string();
-    store.record_run_started(&run_id, workspace_root, "running")?;
-    let finding = build_chain_finding(target_host, outcome, &landed);
-    let finding_id = store.insert_finding(&run_id, &finding)?;
-    if outcome.completed {
-        store.save_verification(finding_id, &exploited_verification(backend, outcome))?;
-    }
-    store.record_run_finished(&run_id, "completed", 1)?;
-    Ok(Some(finding_id))
+    store
+        .with_run_lifecycle(&run_id, workspace_root, || {
+            let finding = build_chain_finding(target_host, outcome, &landed);
+            let finding_id = store.insert_finding(&run_id, &finding)?;
+            if outcome.completed {
+                store.save_verification(
+                    finding_id,
+                    &exploited_verification(backend, outcome, verification_run_id, &run_id),
+                )?;
+            }
+            Ok((finding_id, 1))
+        })
+        .map(Some)
 }
 
 /// Map the transport's sandbox backend onto the persisted verification backend.
@@ -50,7 +70,11 @@ pub fn persisted_backend(backend: kuzushi_sandbox::SandboxBackend) -> PersistedS
     }
 }
 
-fn build_chain_finding(target_host: &str, outcome: &ChainOutcome, landed: &[&PlayOutcome]) -> Finding {
+fn build_chain_finding(
+    target_host: &str,
+    outcome: &ChainOutcome,
+    landed: &[&PlayOutcome],
+) -> Finding {
     let severity = if outcome.completed {
         Severity::Critical
     } else {
@@ -69,7 +93,10 @@ fn build_chain_finding(target_host: &str, outcome: &ChainOutcome, landed: &[&Pla
         severity,
         message,
     );
-    finding.evidence = landed.iter().map(|step| step_evidence(step, target_host)).collect();
+    finding.evidence = landed
+        .iter()
+        .map(|step| step_evidence(step, target_host))
+        .collect();
     finding
 }
 
@@ -89,6 +116,8 @@ fn step_evidence(step: &PlayOutcome, target_host: &str) -> FindingEvidence {
 fn exploited_verification(
     backend: PersistedSandboxBackend,
     outcome: &ChainOutcome,
+    verification_run_id: Option<&str>,
+    verified_scan_id: &str,
 ) -> PersistedVerification {
     PersistedVerification {
         proof_level: 4,
@@ -100,6 +129,8 @@ fn exploited_verification(
         duration_ms: 0,
         cost_usd: 0.0,
         notes: vec![format!("live attack chain {:?} completed", outcome.chain)],
+        verification_run_id: verification_run_id.map(str::to_string),
+        verified_scan_id: Some(verified_scan_id.to_string()),
         created_at: String::new(),
     }
 }
@@ -108,7 +139,14 @@ fn chain_evidence_blob(outcome: &ChainOutcome) -> String {
     outcome
         .steps
         .iter()
-        .map(|step| format!("{}: {} [{}]", step.play, step.summary, step.evidence.join(", ")))
+        .map(|step| {
+            format!(
+                "{}: {} [{}]",
+                step.play,
+                step.summary,
+                step.evidence.join(", ")
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -159,6 +197,40 @@ mod tests {
             .expect("exploited verification");
         assert_eq!(verification.proof_level, 4);
         assert_eq!(verification.proof_verdict, PersistedProofVerdict::Exploited);
+        assert_eq!(verification.verification_run_id, None);
+        assert_eq!(verification.verified_scan_id, finding.scan_id);
+    }
+
+    #[test]
+    fn completed_chain_links_proof_to_replayable_outer_run() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let id = persist_chain_finding_for_run(
+            &store,
+            Path::new("/tmp/ws"),
+            "box.htb",
+            PersistedSandboxBackend::Bwrap,
+            &outcome(true, 1),
+            Some("tool-replayable"),
+        )
+        .unwrap()
+        .unwrap();
+
+        let finding = store
+            .list_findings(10)
+            .unwrap()
+            .into_iter()
+            .find(|finding| finding.id == Some(id))
+            .unwrap();
+        let verification = store.get_latest_verification(id).unwrap().unwrap();
+        assert_eq!(
+            verification.verification_run_id.as_deref(),
+            Some("tool-replayable")
+        );
+        assert_eq!(verification.verified_scan_id, finding.scan_id);
+        assert_ne!(
+            verification.verification_run_id,
+            verification.verified_scan_id
+        );
     }
 
     #[test]

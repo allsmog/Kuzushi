@@ -43,26 +43,17 @@ impl SemgrepScanner {
             anyhow::bail!("semgrep scan cancelled");
         }
 
-        let mut command = Command::new(&self.binary);
-        command.arg("--json");
-        for config in &self.config {
-            command.arg("--config").arg(config);
-        }
-        command
-            .arg(target)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        configure_scanner_subprocess_env(&mut command);
+        let mut command = self.semgrep_command(target);
         configure_scanner_process_group(&mut command);
 
         let mut child = command.spawn().map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
+                semgrep_missing_binary_error(&self.binary)
+            } else {
                 anyhow::anyhow!(
-                    "semgrep: could not find scanner binary {:?}. Install Semgrep (for example `pipx install semgrep` or `brew install semgrep`) or pass {{\"binary\":\"/path/to/semgrep\"}}. Next: run semgrep:scan {{\"binary\":\"/path/to/semgrep\"}} or task block semgrep.",
+                    "semgrep: could not start scanner {:?}: {error}",
                     self.binary
                 )
-            } else {
-                anyhow::anyhow!("semgrep: could not start scanner {:?}: {error}", self.binary)
             }
         })?;
         let process_group_id = child_process_group_id(&child);
@@ -86,5 +77,23 @@ impl SemgrepScanner {
         Ok(ProcessOutput {
             stdout: output.stdout,
         })
+    }
+
+    pub(in crate::scan) fn semgrep_command(&self, target: &Path) -> Command {
+        let mut command = Command::new(&self.binary);
+        command.args(["--metrics", "off", "--json"]);
+        for config in &self.config {
+            command.arg("--config").arg(config);
+        }
+        command
+            .arg(target)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        configure_scanner_subprocess_env(&mut command);
+        // Defense in depth: Semgrep documents both this environment setting
+        // and `--metrics off`. Keep both fixed so a wrapper cannot re-enable
+        // metrics by inheriting an operator environment value.
+        command.env("SEMGREP_SEND_METRICS", "off");
+        command
     }
 }

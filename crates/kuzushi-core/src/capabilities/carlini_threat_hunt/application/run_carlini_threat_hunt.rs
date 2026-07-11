@@ -232,17 +232,23 @@ fn read_threat_focused_snippet(
     max_bytes_per_file: usize,
 ) -> Result<Option<(String, String)>> {
     let path = target.join(relative);
-    let Ok(file_type) = fs::metadata(&path).map(|metadata| metadata.file_type()) else {
-        return Ok(None);
+    let snippet = match crate::bounded_file::read_source_text_prefix_within(
+        target,
+        &path,
+        max_bytes_per_file,
+    ) {
+        Ok(Some(snippet)) => snippet,
+        Ok(None) => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "could not read Carlini threat-focused source {}",
+                    relative.display()
+                )
+            });
+        }
     };
-    if !file_type.is_file() {
-        return Ok(None);
-    }
-    let raw = fs::read(&path).unwrap_or_default();
-    if raw.iter().take(4096).any(|byte| *byte == 0) {
-        return Ok(None);
-    }
-    let snippet = String::from_utf8_lossy(&raw[..raw.len().min(max_bytes_per_file)]).to_string();
     Ok(Some((relative.display().to_string(), snippet)))
 }
 
@@ -277,13 +283,17 @@ fn execute_carlini_threat_hunt_run(
     // threading the per-actor parent_step into run_carlini_actor_hunts;
     // for now the scope means every LLM call surfaces under the run.
     let _actor_scope = begin_carlini_actor_scope(ctx, run.parent_step);
+    // The repository inventory is identical for every actor, so render its
+    // untrusted-repo block once here and reuse it across the whole loop
+    // instead of rebuilding the same large payload once per actor.
+    let inventory_block = render_carlini_inventory_block(&run.inventory);
     let outcome = run_carlini_actor_hunts(
         run.runtime,
         input,
         &run.target,
         &run.options,
         &run.model,
-        &run.inventory,
+        &inventory_block,
         &run.capped,
         run.debug_artifacts.as_ref(),
     )?;

@@ -1,7 +1,7 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_yaml::{Mapping, Value};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn pubspec_components(
@@ -11,7 +11,12 @@ pub(super) fn pubspec_components(
 ) -> Result<Vec<SbomComponent>> {
     let value: Value = serde_yaml::from_str(text).context("sbom-scan: parse pubspec.yaml")?;
     let mut components = dependency_components(target, path, &value, "dependencies");
-    components.extend(dependency_components(target, path, &value, "dev_dependencies"));
+    components.extend(dependency_components(
+        target,
+        path,
+        &value,
+        "dev_dependencies",
+    ));
     Ok(components)
 }
 
@@ -40,7 +45,9 @@ fn dependency_components(
     mapping_child(value, scope)
         .into_iter()
         .flat_map(|dependencies| dependencies.iter())
-        .filter_map(|(name, dependency)| dependency_component(target, path, scope, name, dependency))
+        .filter_map(|(name, dependency)| {
+            dependency_component(target, path, scope, name, dependency)
+        })
         .collect()
 }
 
@@ -84,9 +91,7 @@ fn is_sdk_dependency(name: &str) -> bool {
 }
 
 fn package_name(name: &Value) -> Option<&str> {
-    name.as_str()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
+    name.as_str().map(str::trim).filter(|name| !name.is_empty())
 }
 
 fn dependency_version(dependency: &Value) -> Option<&str> {

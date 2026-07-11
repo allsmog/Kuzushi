@@ -93,12 +93,26 @@ impl ShellApp {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         self.router
             .target_picker_mut()
-            .open(crate::app::discover_target_candidates(&cwd));
+            .open(vec![crate::app::immediate_target_candidate(&cwd)]);
+        self.runtime_state.start_target_candidate_discovery(cwd);
         self.set_shell_view(ShellView::TargetPicker);
         self.log(
             "onboarding",
             "no target set — pick what to scan with ↑/↓/Enter (Esc to browse without one)",
         );
+    }
+
+    pub(crate) fn apply_target_candidate_discovery_results(&mut self) -> bool {
+        let results = self.runtime_state.drain_target_candidate_discovery();
+        if !matches!(self.shell_view(), ShellView::TargetPicker) || results.is_empty() {
+            return false;
+        }
+        for result in results {
+            self.router
+                .target_picker_mut()
+                .replace_candidates(result.candidates);
+        }
+        true
     }
 
     /// Open the picker for one engagement phase: announce the phase, list only
@@ -109,7 +123,13 @@ impl ShellApp {
         if self.phase_blocked_by_config(phase) {
             return;
         }
-        let target_root = self.phase_target_root();
+        let Some(target_root) = self.target_owned() else {
+            self.log(
+                "error",
+                "planning requires an explicit target. Next: target <path> (or target .)",
+            );
+            return;
+        };
         let kind = self.ensure_target_kind(&target_root);
         let target = crate::app::TargetProfile::detect(&target_root, kind);
         let rows: Vec<PlanningTaskRow> = crate::app::applicable_tasks_for_phase(phase, target)
@@ -217,12 +237,6 @@ impl ShellApp {
         });
     }
 
-    fn phase_target_root(&self) -> std::path::PathBuf {
-        self.target_owned().unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-        })
-    }
-
     /// Classify the target once and cache it; reused across phase pickers.
     fn ensure_target_kind(&mut self, target_root: &std::path::Path) -> kuzushi_core::TargetKind {
         if let Some(kind) = self.engagement.target_kind() {
@@ -290,31 +304,6 @@ impl ShellApp {
         }
     }
 
-    pub(crate) fn apply_ready_default_model_after_target_activation(&mut self) {
-        let Some(index) = ready_default_model_choice_index(self.config().model.as_deref()) else {
-            return;
-        };
-        let Some(choice) = model_choices().get(index) else {
-            return;
-        };
-        self.config_mut().model = Some(choice.id.to_string());
-        self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
-        let selected_model_index = preferred_model_choice_index(self.config());
-        self.router
-            .model_catalog_mut()
-            .set_selected_index(selected_model_index);
-        self.router
-            .model_picker_mut()
-            .open(selected_model_index, model_choices().len());
-        self.log(
-            "model",
-            format!(
-                "{} selected from available credentials",
-                display_model_selector(choice.id)
-            ),
-        );
-    }
-
     fn workspace_is_fresh_for_auto_planner(&self) -> bool {
         let Some(target) = self.target() else {
             return false;
@@ -326,7 +315,10 @@ impl ShellApp {
 }
 
 fn workspace_has_persisted_findings_for_startup(target: &std::path::Path) -> bool {
-    let db_path = kuzushi_core::workspace_findings_db_path(target);
+    let Ok(workspace) = kuzushi_core::WorkspaceTarget::new(target) else {
+        return false;
+    };
+    let db_path = workspace.findings_db_path();
     if !db_path.is_file() {
         return false;
     }
@@ -422,5 +414,20 @@ mod tests {
             "stored; value hidden"
         ));
         assert!(provider_auth_ready("openai", true, "missing"));
+    }
+
+    #[test]
+    fn targetless_phase_picker_refuses_to_classify_cwd() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let initial_view = app.shell_view();
+
+        app.open_phase_picker(crate::app::WorkflowPhase::Map);
+
+        assert_eq!(app.shell_view(), initial_view);
+        assert!(app.engagement.target_kind().is_none());
+        assert!(app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.contains("requires an explicit target")));
     }
 }

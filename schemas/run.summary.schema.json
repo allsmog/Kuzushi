@@ -153,7 +153,10 @@
         "reasoning",
         "tool-progress",
         "done",
-        "refused"
+        "refused",
+        "plan",
+        "llm",
+        "critic"
       ]
     },
     "artifact": {

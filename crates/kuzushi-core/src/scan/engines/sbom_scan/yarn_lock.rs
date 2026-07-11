@@ -1,6 +1,6 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 const DEPENDENCY_BLOCKS: &[&str] = &["dependencies:", "optionalDependencies:"];
@@ -131,7 +131,11 @@ fn dependency_name(line: &str) -> Option<String> {
     if !line.starts_with("    ") || trimmed.is_empty() {
         return None;
     }
-    trimmed.split_whitespace().next().map(unquote).map(str::to_string)
+    trimmed
+        .split_whitespace()
+        .next()
+        .map(unquote)
+        .map(str::to_string)
 }
 
 fn yarn_version(line: &str) -> Option<&str> {

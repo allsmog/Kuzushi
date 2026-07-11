@@ -2,9 +2,15 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn scan_target_label(&self) -> String {
-        self.target()
+        self.scan_target_owned()
             .map(|path| path.display().to_string())
-            .unwrap_or_else(|| ".".to_string())
+            .unwrap_or_else(|| "no target".to_string())
+    }
+
+    pub(crate) fn scan_target_owned(&self) -> Option<PathBuf> {
+        self.scan()
+            .map(|scan| scan.target.clone())
+            .or_else(|| self.target_owned())
     }
 
     pub(crate) fn log_scan_alias_hint(&mut self) {

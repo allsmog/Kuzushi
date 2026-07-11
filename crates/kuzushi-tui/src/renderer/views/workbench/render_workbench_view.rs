@@ -8,8 +8,9 @@ use super::*;
 use crate::app::{WorkbenchPage, WorkbenchPane};
 use crate::renderer::views::scene::{DfdDiagram, TreeDiagram};
 use crate::ui_view_models::{
-    attack_tree, dfd_model, workbench_view_model, JourneyPhaseStatus, ReviewQueueModel,
-    WorkbenchCenter, WorkbenchCenterTab, WorkbenchHint, WorkbenchTopBar, WorkbenchViewModel,
+    attack_tree, dfd_model, phase_cockpit_model_for_phase, workbench_view_model,
+    JourneyPhaseStatus, PhaseCockpitModel, ReviewQueueModel, WorkbenchCenter, WorkbenchCenterTab,
+    WorkbenchHint, WorkbenchTopBar, WorkbenchViewModel,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
@@ -28,13 +29,20 @@ const STACKED_MIN_BODY_HEIGHT: u16 = 21;
 /// drawn by the shell chrome below `area`.
 pub(crate) fn render_workbench_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let model = workbench_view_model(app);
-    let mut top_lines = top_bar_lines(
-        &model.top_bar,
-        &model.command_bar_hints,
-        area.width as usize,
-    );
-    if let Some(pane) = model.zoom {
-        top_lines.push(zoom_status_line(pane));
+    let phase_model =
+        phase_cockpit_model_for_phase(app, super::phase_pages::page_phase(model.page));
+    let phase_state = super::phase_pages::PhaseRenderState::workbench(app, model.page);
+    paint_cinematic_background(frame.buffer_mut(), area);
+    paint_cinematic_scanlines(frame.buffer_mut(), area);
+    let mut top_lines = workbench_header_lines(app, &model, &phase_model, area.width as usize);
+    let displayed_zoom =
+        if app.router.workbench().center_mode() != crate::app::WorkbenchCenterMode::Code {
+            model.zoom
+        } else {
+            phase_state.zoom
+        };
+    if let Some(pane) = displayed_zoom {
+        top_lines.push(zoom_status_line(model.page, pane));
     }
     let outer = Layout::default()
         .direction(Direction::Vertical)
@@ -44,38 +52,139 @@ pub(crate) fn render_workbench_view(frame: &mut Frame<'_>, area: Rect, app: &She
         ])
         .split(area);
     frame.render_widget(Paragraph::new(top_lines), outer[0]);
-    render_body(frame, outer[1], app, &model);
+    render_body(frame, outer[1], app, &model, &phase_model, phase_state);
+    if model.page == WorkbenchPage::Ship && outer[1].width >= 100 && outer[1].height >= 20 {
+        paint_fix_watermark(frame.buffer_mut(), outer[1]);
+    }
 }
 
-fn zoom_status_line(pane: WorkbenchPane) -> Line<'static> {
+fn workbench_header_lines(
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+    phase_model: &PhaseCockpitModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    if app.target().is_none() {
+        return top_bar_lines(&model.top_bar, &model.command_bar_hints, width);
+    }
+    super::phase_pages::phase_header_lines(&phase_model.header, &model.command_bar_hints, width)
+}
+
+fn zoom_status_line(page: WorkbenchPage, pane: WorkbenchPane) -> Line<'static> {
     Line::from(vec![
         Span::styled(" ▸ ZOOM ", theme::warn()),
-        Span::styled(workbench_pane_label(pane), theme::primary()),
+        Span::styled(phase_pane_label(page, pane), theme::primary()),
         Span::styled(" · Tab pane · Z restore cockpit", theme::muted()),
     ])
 }
 
-fn workbench_pane_label(pane: WorkbenchPane) -> &'static str {
+fn phase_pane_label(page: WorkbenchPage, pane: WorkbenchPane) -> &'static str {
+    const MAP: [&str; 4] = ["MAP", "MAP", "MAP", "MAP"];
+    const HUNT: [&str; 4] = ["SOURCE", "HUNT", "REVIEW QUEUE", "FINDINGS HEATMAP"];
+    const CONFIRM: [&str; 4] = ["FINDING", "ATTACK PATH", "DATA-FLOW LADDER", "PROOF"];
+    const FIX: [&str; 4] = ["BREAKDOWN REPORT", "ATTACK TREE", "REMEDIATION", "DFD"];
+    let labels = match page {
+        WorkbenchPage::Terrain => MAP,
+        WorkbenchPage::Coverage => HUNT,
+        WorkbenchPage::Review => CONFIRM,
+        WorkbenchPage::Ship => FIX,
+    };
+    labels[pane_index(pane)]
+}
+
+fn pane_index(pane: WorkbenchPane) -> usize {
     match pane {
-        WorkbenchPane::Source => "SOURCE",
-        WorkbenchPane::Center => "CENTER",
-        WorkbenchPane::Findings => "FINDINGS",
-        WorkbenchPane::Details => "DETAILS",
+        WorkbenchPane::Source => 0,
+        WorkbenchPane::Center => 1,
+        WorkbenchPane::Findings => 2,
+        WorkbenchPane::Details => 3,
     }
 }
 
-fn render_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &WorkbenchViewModel) {
+fn render_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+    phase_model: &PhaseCockpitModel,
+    phase_state: super::phase_pages::PhaseRenderState,
+) {
     if area.width < 8 || area.height < 3 {
         return;
     }
-    if model.page != WorkbenchPage::Review {
-        render_phase_page_body(frame, area, app, model);
+    if render_depth_stack_if_active(frame, area, app, model) {
         return;
     }
-    render_review_body(frame, area, app, model);
+    if render_non_code_center_body(frame, area, app, model) {
+        return;
+    }
+    super::phase_pages::render_phase_cockpit_body(frame, area, app, phase_model, phase_state);
 }
 
-/// The Review page: the opt-in depth stack, else the responsive four-pane ring.
+fn render_depth_stack_if_active(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) -> bool {
+    if model.page != WorkbenchPage::Review || !app.router.workbench().depth_stack() {
+        return false;
+    }
+    let depth_model = crate::ui_view_models::workbench_depth_model(app);
+    super::depth_stack::render_workbench_depth(
+        frame,
+        area,
+        &app.router.workbench().nav(),
+        &depth_model,
+    );
+    true
+}
+
+fn render_non_code_center_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) -> bool {
+    if app.router.workbench().center_mode() == crate::app::WorkbenchCenterMode::Code {
+        return false;
+    }
+    render_legacy_phase_body(frame, area, app, model);
+    true
+}
+
+fn render_legacy_phase_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) {
+    match model.page {
+        WorkbenchPage::Coverage => render_responsive_four_pane_body(frame, area, app, model),
+        WorkbenchPage::Review => render_review_body(frame, area, app, model),
+        WorkbenchPage::Terrain | WorkbenchPage::Ship => {
+            render_phase_page_body(frame, area, app, model)
+        }
+    }
+}
+
+fn render_responsive_four_pane_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) {
+    match workbench_layout(area) {
+        WorkbenchLayout::FourColumn => render_four_column_body(frame, area, app, model),
+        WorkbenchLayout::ReviewGrid => render_review_grid_body(frame, area, app, model),
+        WorkbenchLayout::Stacked => render_stacked_body(frame, area, app, model),
+        WorkbenchLayout::ShortReview => render_short_review_body(frame, area, app, model),
+    }
+}
+
+/// Non-code Review centers keep the same two focusable panes as Confirm.
+/// This is especially important for the threat-model auto-open path: the DFD
+/// must not resurrect Source/Findings panes that Tab can never reach.
 fn render_review_body(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -96,12 +205,17 @@ fn render_review_body(
         );
         return;
     }
-    match workbench_layout(area) {
-        WorkbenchLayout::FourColumn => render_four_column_body(frame, area, app, model),
-        WorkbenchLayout::ReviewGrid => render_review_grid_body(frame, area, app, model),
-        WorkbenchLayout::Stacked => render_stacked_body(frame, area, app, model),
-        WorkbenchLayout::ShortReview => render_short_review_body(frame, area, app, model),
-    }
+    let direction = if area.width >= 80 {
+        Direction::Horizontal
+    } else {
+        Direction::Vertical
+    };
+    let panes = Layout::default()
+        .direction(direction)
+        .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
+        .split(area);
+    render_center(frame, panes[0], app, model);
+    render_detail_pane(frame, panes[1], app, model);
 }
 
 fn render_zoomed_review_pane(
@@ -112,10 +226,9 @@ fn render_zoomed_review_pane(
     pane: WorkbenchPane,
 ) {
     match pane {
-        WorkbenchPane::Source => render_source(frame, area, app, model),
         WorkbenchPane::Center => render_center(frame, area, app, model),
-        WorkbenchPane::Findings => render_review_queue_pane(frame, area, &model.review_queue, true),
         WorkbenchPane::Details => render_detail_pane(frame, area, app, model),
+        WorkbenchPane::Source | WorkbenchPane::Findings => render_center(frame, area, app, model),
     }
 }
 
@@ -1047,23 +1160,28 @@ fn append_phase_rail_spans(spans: &mut Vec<Span<'static>>, statuses: &[JourneyPh
 /// for the layout structure); center content reuses the same lines.
 pub(crate) fn workbench_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let model = workbench_view_model(app);
-    let mut lines = top_bar_lines(
-        &model.top_bar,
-        &model.command_bar_hints,
-        area.width as usize,
-    );
+    let phase_model =
+        phase_cockpit_model_for_phase(app, super::phase_pages::page_phase(model.page));
+    let mut lines = workbench_header_lines(app, &model, &phase_model, area.width as usize);
     lines.push(blank());
-    if model.page != WorkbenchPage::Review {
-        append_phase_page_plain_lines(&mut lines, app, &model, area);
-    } else if app.router.workbench().depth_stack() {
+    if model.page == WorkbenchPage::Review && app.router.workbench().depth_stack() {
         let depth_model = crate::ui_view_models::workbench_depth_model(app);
         lines.extend(super::depth_stack::workbench_depth_lines(
             &app.router.workbench().nav(),
             &depth_model,
             area.width,
         ));
+    } else if app.router.workbench().center_mode() != crate::app::WorkbenchCenterMode::Code {
+        if model.page == WorkbenchPage::Review {
+            append_review_plain_lines(&mut lines, app, &model, area);
+        } else {
+            append_phase_page_plain_lines(&mut lines, app, &model, area);
+        }
     } else {
-        append_review_plain_lines(&mut lines, app, &model, area);
+        lines.extend(super::phase_pages::phase_cockpit_plain_lines(
+            &phase_model,
+            area.width as usize,
+        ));
     }
     lines
 }
@@ -1193,5 +1311,25 @@ mod tests {
         assert_eq!(panes[1].width, panes[2].width);
         assert_eq!(panes[1].height + panes[2].height, 30);
         assert!(panes.iter().all(|pane| pane.width >= 50));
+    }
+
+    #[test]
+    fn phase_zoom_status_uses_the_visible_pane_name() {
+        assert_eq!(
+            phase_pane_label(WorkbenchPage::Review, WorkbenchPane::Source),
+            "FINDING"
+        );
+        assert_eq!(
+            phase_pane_label(WorkbenchPage::Review, WorkbenchPane::Findings),
+            "DATA-FLOW LADDER"
+        );
+        assert_eq!(
+            phase_pane_label(WorkbenchPage::Ship, WorkbenchPane::Source),
+            "BREAKDOWN REPORT"
+        );
+        assert_eq!(
+            phase_pane_label(WorkbenchPage::Ship, WorkbenchPane::Details),
+            "DFD"
+        );
     }
 }

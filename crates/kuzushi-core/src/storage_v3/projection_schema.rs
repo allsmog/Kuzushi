@@ -222,6 +222,8 @@ create table if not exists verification_events (
   stable_fp text not null,
   finding_id integer,
   identity_id text,
+  verification_run_id text,
+  verified_scan_id text,
   proof_level integer not null,
   proof_verdict text not null,
   backend text not null,

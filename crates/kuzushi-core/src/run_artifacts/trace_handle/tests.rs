@@ -1,7 +1,7 @@
 use super::*;
 use crate::run_artifacts::run_dir;
-use std::sync::Mutex;
 use std::sync::mpsc;
+use std::sync::Mutex;
 
 #[derive(Default)]
 struct VecSink {

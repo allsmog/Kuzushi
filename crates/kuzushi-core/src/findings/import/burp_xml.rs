@@ -22,7 +22,7 @@ pub struct BurpImportSummary {
 /// base64 when `base64="true"`. Unknown encodings yield the literal
 /// text. Out-of-scope items are skipped silently.
 pub fn import_burp_xml(workspace: &WorkspaceTarget, path: &Path) -> Result<BurpImportSummary> {
-    let xml = std::fs::read_to_string(path)
+    let xml = crate::bounded_file::read_utf8_text(path, 64 * 1024 * 1024)
         .with_context(|| format!("Could not read Burp XML file {}", path.display()))?;
     let items = parse_burp_items(&xml)
         .with_context(|| format!("Could not parse Burp XML at {}", path.display()))?;
@@ -30,20 +30,21 @@ pub fn import_burp_xml(workspace: &WorkspaceTarget, path: &Path) -> Result<BurpI
     let scope = load_program_scope(workspace).context("Could not load scope.toml")?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let run_id = format!("burp-{}", Uuid::new_v4());
-    store.record_run_started(&run_id, workspace.root(), "completed")?;
-
-    let mut imported = 0usize;
-    let mut skipped = 0usize;
-    for item in items {
-        persist_burp_item(
-            &store,
-            &run_id,
-            scope.as_ref(),
-            &item,
-            &mut imported,
-            &mut skipped,
-        )?;
-    }
+    let (imported, skipped) = store.with_run_lifecycle(&run_id, workspace.root(), || {
+        let mut imported = 0usize;
+        let mut skipped = 0usize;
+        for item in items {
+            persist_burp_item(
+                &store,
+                &run_id,
+                scope.as_ref(),
+                &item,
+                &mut imported,
+                &mut skipped,
+            )?;
+        }
+        Ok(((imported, skipped), imported))
+    })?;
 
     Ok(BurpImportSummary {
         run_id,

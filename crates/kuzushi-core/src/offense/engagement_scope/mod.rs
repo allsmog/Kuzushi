@@ -110,10 +110,10 @@ impl EngagementScope {
 
     fn window_denial(&self, now_unix: u64) -> Option<ScopeDecision> {
         let window = self.window.as_ref()?;
-        window
-            .contains(now_unix)
-            .then_some(())
-            .map_or_else(|| Some(ScopeDecision::Denied(window.denial_reason())), |()| None)
+        window.contains(now_unix).then_some(()).map_or_else(
+            || Some(ScopeDecision::Denied(window.denial_reason())),
+            |()| None,
+        )
     }
 }
 

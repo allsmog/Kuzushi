@@ -178,6 +178,40 @@ mod tests {
             .any(|reason| reason == "threat_model_priority=TM-001"));
     }
 
+    #[test]
+    fn degraded_static_ranking_records_malformed_evidence_without_aborting() {
+        let store = StaticEvidenceStore::open_in_memory().unwrap();
+        let finding = Finding::new_tool(
+            "semgrep",
+            "generic.rule",
+            "src/app.rs",
+            7,
+            Some(7),
+            Severity::Medium,
+            "scanner finding remains available",
+        );
+        store
+            .conn
+            .execute(
+                "insert into static_evidence_nodes(id, kind, finding_fingerprint, content_hash, title, body, metadata_json, indexed_at_unix) values (?1, 'source', ?2, 'hash', 'bad', 'bad', '{', 0)",
+                rusqlite::params!["bad-node", &finding.fingerprint],
+            )
+            .unwrap();
+
+        let (ranked, warnings) = rank_static_findings_with_threats_degraded(
+            &[finding.clone()],
+            None,
+            Some(&store),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(ranked[0].fingerprint, finding.fingerprint);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("static evidence unavailable"));
+    }
+
     fn insert_flow_evidence(store: &StaticEvidenceStore, finding: &Finding) {
         let source = StaticEvidenceNode::new(
             StaticEvidenceNodeKind::Source,

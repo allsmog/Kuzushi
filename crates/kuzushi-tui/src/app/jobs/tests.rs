@@ -40,6 +40,26 @@ fn jobhub_drops_stale_events_per_kind() {
 }
 
 #[test]
+fn jobhub_try_start_preserves_the_single_live_job() {
+    let mut hub = JobHub::default();
+    let current = hub.try_start(JobKind::Run, "scan").unwrap();
+
+    let conflict = match hub.try_start(JobKind::Plan, "planner") {
+        Ok(ticket) => {
+            ticket.complete();
+            panic!("a second live job must be rejected");
+        }
+        Err(conflict) => conflict,
+    };
+
+    assert_eq!(conflict.kind, JobKind::Run);
+    assert_eq!(conflict.label, "scan");
+    assert!(hub.is_current_generation(JobKind::Run, current.generation()));
+    assert!(!hub.is_running(JobKind::Plan));
+    current.complete();
+}
+
+#[test]
 fn jobhub_preserves_send_order_for_current_generation() {
     let mut hub = JobHub::default();
     let ticket = hub.start(JobKind::Run, "scan");
@@ -78,7 +98,7 @@ fn jobhub_drops_non_terminal_events_when_channel_is_full() {
 }
 
 #[test]
-fn jobhub_unresponsive_escalation_fails_slot_once_after_grace() {
+fn jobhub_unresponsive_escalation_quarantines_slot_once_after_grace() {
     let mut hub = JobHub::default();
     let ticket = hub.start(JobKind::Run, "hung:tool");
     let generation = ticket.generation();
@@ -86,23 +106,18 @@ fn jobhub_unresponsive_escalation_fails_slot_once_after_grace() {
 
     // A stale generation must not arm the escalation.
     hub.schedule_unresponsive_escalation(JobKind::Run, WorkerGeneration::new(999), now);
-    assert!(!hub.fail_unresponsive_slots(now + WORKER_UNRESPONSIVE_GRACE));
+    assert!(!hub.quarantine_unresponsive_slots(now + WORKER_UNRESPONSIVE_GRACE));
 
     hub.schedule_unresponsive_escalation(JobKind::Run, generation, now);
-    assert!(!hub.fail_unresponsive_slots(now)); // grace not yet elapsed
+    assert!(!hub.quarantine_unresponsive_slots(now)); // grace not yet elapsed
 
     let after_grace = now + WORKER_UNRESPONSIVE_GRACE;
-    assert!(hub.fail_unresponsive_slots(after_grace));
-    assert!(!hub.fail_unresponsive_slots(after_grace)); // single-shot
-
-    let events = hub.drain(4);
-    assert_eq!(events.len(), 1);
-    assert!(matches!(
-        &events[0],
-        ShellEvent::Tool(ToolEvent::Failed { tool_name, error })
-            if tool_name == "hung:tool" && error.contains("worker unresponsive")
-    ));
-    assert!(events[0].is_terminal());
+    assert!(hub.quarantine_unresponsive_slots(after_grace));
+    assert!(!hub.quarantine_unresponsive_slots(after_grace)); // single-shot
+    assert!(hub.is_quarantined(JobKind::Run));
+    assert!(hub.has_running_job());
+    assert!(hub.try_start(JobKind::Run, "next:tool").is_err());
+    assert!(hub.drain(4).is_empty());
     ticket.complete();
 }
 

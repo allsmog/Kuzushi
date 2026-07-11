@@ -2,20 +2,14 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 69
 ---
- KUZUSHI › sast · mode:module · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › tools · mode:module · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
- * /use sast
- · module now using sast · primary tool sast:scan
-MODULE DETAIL · sast · SAST Pipeline
-  Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
+ -- TOOLS · module:sast ------------------------------------------------------------------------------------------------
+filter: module:sast · showing 2 of 52 tools
 
- -- TOOLS --------------------------------------------------------------------------------------------------------------
- ⏵ sast:scan                      headless Run the full SAST pipeline for the current target.
+HUNT find candidate vulnerabilities and security signals
+tool                          purpose                                                     next
+agentic-sast:scan             Run agentic SAST detectors for the current target           options agentic-sast:scan
+sast:scan                     Run the full SAST pipeline for the current target           options sast:scan
 
- -- NEXT ---------------------------------------------------------------------------------------------------------------
- · run .   dispatches sast:scan (shell); terminal: kuzushi --target . run sast:scan --input '{}'
- · tool    next opens guided hunt; run . dispatches sast:scan
- · needs   target, scanner/task config
- · options options sast:scan before scan; show advanced sast:scan for budgets/model
- · output  .kuzushi/v3/index.sqlite3
- · help tasks · findings · use triage
+> try: tools <query> · j/k/g/G scroll · PgUp/PgDn scroll · use <id> · options <tool>

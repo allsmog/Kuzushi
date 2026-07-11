@@ -1,4 +1,4 @@
-use super::target::ignored_dir;
+use super::bounded_fs as fs;
 use super::bun_lock::{bun_lock_components, is_bun_lock};
 use super::cargo_lock::{cargo_lock_components, is_cargo_lock};
 use super::cartfile_resolved::{cartfile_resolved_components, is_cartfile_resolved};
@@ -12,17 +12,17 @@ use super::mix::{is_mix_lock, mix_lock_components};
 use super::npm_lock::{is_package_lock, package_lock_components};
 use super::nuget_lock::{is_nuget_lock, nuget_lock_components};
 use super::pipfile_lock::{is_pipfile_lock, pipfile_lock_components};
-use super::podfile_lock::{is_podfile_lock, podfile_lock_components};
 use super::pnpm_lock::{is_pnpm_lock, pnpm_lock_components};
+use super::podfile_lock::{is_podfile_lock, podfile_lock_components};
 use super::poetry_lock::{is_poetry_lock, poetry_lock_components};
 use super::pubspec_lock::{is_pubspec_lock, pubspec_lock_components};
 use super::renv_lock::{is_renv_lock, renv_lock_components};
 use super::swift_resolved::{is_swift_resolved, swift_resolved_components};
+use super::target::ignored_dir;
 use super::uv_lock::{is_uv_lock, uv_lock_components};
-use super::{SbomComponent, ScanCancellation};
 use super::yarn_lock::{is_yarn_lock, yarn_lock_components};
+use super::{SbomComponent, ScanCancellation};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 type LockfileDetector = fn(&Path) -> bool;
@@ -71,10 +71,12 @@ fn collect_lockfile_components_in(
         anyhow::bail!("sbom-scan scan cancelled");
     }
     for entry in fs::read_dir(dir).with_context(|| format!("sbom-scan: read {}", dir.display()))? {
-        let path = entry?.path();
-        if path.is_dir() && !ignored_dir(&path) {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let path = entry.path();
+        if file_type.is_dir() && !ignored_dir(&path) {
             collect_lockfile_components_in(target, &path, components, cancellation)?;
-        } else {
+        } else if file_type.is_file() {
             components.extend(lockfile_components_for_path(target, &path)?);
         }
     }

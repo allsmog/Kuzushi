@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
 
 use super::ToolExecutionContext;
@@ -12,17 +12,18 @@ pub(in crate::modules) fn resolve_tool_target(
 ) -> Result<PathBuf> {
     if let Some(target) = input.get("target").and_then(Value::as_str) {
         let trimmed = target.trim();
-        let path = if trimmed.is_empty() {
-            std::env::current_dir().context("Could not resolve current directory")?
+        if trimmed.is_empty() {
+            anyhow::bail!("target must not be empty; pass an explicit path or active workspace")
+        }
+        let candidate = PathBuf::from(trimmed);
+        let path = if candidate.is_absolute() {
+            candidate
+        } else if let Some(workspace) = ctx.workspace {
+            workspace.root().join(candidate)
         } else {
-            let candidate = PathBuf::from(trimmed);
-            if candidate.is_absolute() {
-                candidate
-            } else {
-                std::env::current_dir()
-                    .context("Could not resolve current directory")?
-                    .join(candidate)
-            }
+            anyhow::bail!(
+                "relative target {trimmed:?} requires an explicit active workspace; cwd fallback is forbidden"
+            )
         };
         return Ok(path);
     }
@@ -31,7 +32,7 @@ pub(in crate::modules) fn resolve_tool_target(
         return Ok(workspace.root().to_path_buf());
     }
 
-    std::env::current_dir().context("Could not resolve current directory")
+    anyhow::bail!("tool requires an explicit target or active workspace; cwd fallback is forbidden")
 }
 
 pub(in crate::modules) fn failed_tool_output(
@@ -91,6 +92,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let resolved = resolve_tool_target(
@@ -112,6 +115,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let resolved = resolve_tool_target(&Value::Null, &ctx).unwrap();
@@ -126,5 +131,27 @@ mod tests {
         }
 
         assert!(!should_skip_path("src"));
+    }
+
+    #[test]
+    fn missing_and_empty_targets_never_fall_back_to_cwd() {
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        assert!(resolve_tool_target(&Value::Null, &ctx)
+            .unwrap_err()
+            .to_string()
+            .contains("cwd fallback is forbidden"));
+        assert!(resolve_tool_target(&json!({"target": "  "}), &ctx)
+            .unwrap_err()
+            .to_string()
+            .contains("target must not be empty"));
     }
 }

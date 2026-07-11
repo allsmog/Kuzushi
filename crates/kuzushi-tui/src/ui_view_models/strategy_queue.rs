@@ -1,10 +1,12 @@
-use crate::app::StrategyQueueState;
-use crate::ShellApp;
+use crate::app::{PathState, StrategyQueueState};
+use crate::{ShellApp, ViewDataState};
+#[cfg(test)]
+use kuzushi_core::WorkspaceTarget;
 use kuzushi_core::{
-    strategy_queue_path, StrategyPhase, StrategyPreflightStatus, StrategyProposal,
-    StrategyProposalStatus, StrategyResourceRisk, WorkspaceTarget,
+    StrategyPhase, StrategyPreflightStatus, StrategyProposal, StrategyProposalStatus,
+    StrategyResourceRisk,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const STRATEGY_QUEUE_HEADERS: [&str; 12] = [
     "status",
@@ -74,9 +76,21 @@ pub(crate) fn strategy_queue_model(app: &ShellApp) -> StrategyQueueModel {
         summary: snapshot.summary,
         headers: STRATEGY_QUEUE_HEADERS,
         commands: STRATEGY_QUEUE_COMMANDS,
-        empty_state: strategy_queue_empty_state(source.workspace.is_some()),
+        empty_state: strategy_queue_empty_state(source.target.is_some()),
         rows: snapshot.rows,
     }
+}
+
+pub(crate) fn target_artifact_ready(app: &ShellApp, relative: &str) -> bool {
+    let Some(path) = app.target().map(|target| target.join(relative)) else {
+        return false;
+    };
+    matches!(
+        app.workbench_cache()
+            .borrow()
+            .cached_path_state(app.target().expect("target checked above"), &path),
+        ViewDataState::Ready(PathState::File { .. } | PathState::Directory)
+    )
 }
 
 struct StrategyQueueSnapshot {
@@ -85,7 +99,7 @@ struct StrategyQueueSnapshot {
 }
 
 fn strategy_queue_snapshot(app: &ShellApp, source: &StrategyQueueSource) -> StrategyQueueSnapshot {
-    if source.workspace.is_none() {
+    if source.target.is_none() {
         return StrategyQueueSnapshot {
             rows: Vec::new(),
             summary: "no target selected; strategy queue is target-scoped".to_string(),
@@ -93,23 +107,23 @@ fn strategy_queue_snapshot(app: &ShellApp, source: &StrategyQueueSource) -> Stra
     };
     match app
         .workbench_cache()
-        .borrow_mut()
-        .strategy_queue(source.workspace.as_ref())
+        .borrow()
+        .cached_strategy_queue(source.target.as_deref())
     {
-        Some(StrategyQueueState::Ready(proposals)) => {
+        ViewDataState::Ready(StrategyQueueState::Ready(proposals)) => {
             let summary = strategy_queue_summary(&proposals);
             StrategyQueueSnapshot {
                 rows: strategy_rows_from_proposals(proposals),
                 summary,
             }
         }
-        Some(StrategyQueueState::Unreadable(error)) => StrategyQueueSnapshot {
+        ViewDataState::Ready(StrategyQueueState::Unreadable(error)) => StrategyQueueSnapshot {
             rows: vec![strategy_queue_error_row(error.clone())],
             summary: format!("could not read strategy queue: {error}"),
         },
-        None => StrategyQueueSnapshot {
+        ViewDataState::NotRequested | ViewDataState::Loading => StrategyQueueSnapshot {
             rows: Vec::new(),
-            summary: "no target selected; strategy queue is target-scoped".to_string(),
+            summary: "strategy queue is loading".to_string(),
         },
     }
 }
@@ -378,7 +392,7 @@ fn strategy_queue_empty_state(target_selected: bool) -> StrategyQueueEmptyState 
 }
 
 struct StrategyQueueSource {
-    workspace: Option<WorkspaceTarget>,
+    target: Option<PathBuf>,
     scope_label: String,
     queue_label: String,
 }
@@ -387,25 +401,17 @@ impl StrategyQueueSource {
     fn from_app(app: &ShellApp) -> Self {
         let Some(target) = app.target() else {
             return Self {
-                workspace: None,
+                target: None,
                 scope_label: "no target selected".to_string(),
                 queue_label: "unavailable".to_string(),
             };
         };
-        match WorkspaceTarget::new(target) {
-            Ok(workspace) => {
-                let queue = strategy_queue_path(&workspace);
-                Self {
-                    scope_label: scope_label(target),
-                    queue_label: queue.display().to_string(),
-                    workspace: Some(workspace),
-                }
-            }
-            Err(error) => Self {
-                workspace: None,
-                scope_label: scope_label(target),
-                queue_label: format!("unavailable: {error}"),
-            },
+        let queue =
+            kuzushi_core::workspace_state_dir(target).join(kuzushi_core::STRATEGY_QUEUE_FILE);
+        Self {
+            scope_label: scope_label(target),
+            queue_label: queue.display().to_string(),
+            target: Some(target.to_path_buf()),
         }
     }
 }

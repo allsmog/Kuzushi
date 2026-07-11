@@ -795,17 +795,19 @@ fn license_scan_can_require_source_spdx_headers() {
         .findings
         .iter()
         .any(|finding| finding.rule_id == "license-scan/missing-spdx-header"));
-    assert!(strict_report
-        .findings
-        .iter()
-        .any(|finding| finding.rule_id == "license-scan/missing-spdx-header"
-            && finding.file_path == "src/lib.rs"));
+    assert!(strict_report.findings.iter().any(|finding| finding.rule_id
+        == "license-scan/missing-spdx-header"
+        && finding.file_path == "src/lib.rs"));
 }
 
 #[test]
 fn license_scan_core_findings_are_signal_only() {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("Cargo.toml"), "[package]\nname = \"demo\"\n").unwrap();
+    fs::write(
+        temp.path().join("Cargo.toml"),
+        "[package]\nname = \"demo\"\n",
+    )
+    .unwrap();
 
     let findings = LicenseScanScanner
         .scan(temp.path(), &ScanCancellation::default())

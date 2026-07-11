@@ -30,7 +30,13 @@ fn section_findings(
         .flat_map(|dependencies| dependencies.iter())
         .filter_map(|(name, dependency)| {
             let name = name.as_str()?;
-            shard_finding(file_path, manifest, scope, name, dependency_version(dependency))
+            shard_finding(
+                file_path,
+                manifest,
+                scope,
+                name,
+                dependency_version(dependency),
+            )
         })
         .collect()
 }
@@ -61,16 +67,21 @@ fn shard_finding(
             name,
             constraint,
             DepHygieneSeverity::Medium,
-            format!("{scope}: floor-only range; add an upper bound to fix the supply-chain surface"),
+            format!(
+                "{scope}: floor-only range; add an upper bound to fix the supply-chain surface"
+            ),
         ));
     }
     None
 }
 
 fn dependency_version(value: &YamlValue) -> Option<&str> {
-    value
-        .as_str()
-        .or_else(|| value.as_mapping()?.get(YamlValue::from("version"))?.as_str())
+    value.as_str().or_else(|| {
+        value
+            .as_mapping()?
+            .get(YamlValue::from("version"))?
+            .as_str()
+    })
 }
 
 fn is_floating_shard_constraint(constraint: &str) -> bool {

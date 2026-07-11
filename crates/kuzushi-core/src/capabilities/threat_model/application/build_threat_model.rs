@@ -144,7 +144,8 @@ fn prompt_matches_workspace_default_prompt(
         return false;
     };
     let path = crate::options::prompt_override_path(&target, "threat-model", "build");
-    std::fs::read_to_string(path).is_ok_and(|content| prompt_text_matches(&content, prompt))
+    crate::bounded_file::read_utf8_text(&path, MAX_SOURCE_BYTES)
+        .is_ok_and(|content| prompt_text_matches(&content, prompt))
 }
 
 fn prompt_text_matches(file_content: &str, prompt: &str) -> bool {
@@ -248,7 +249,7 @@ fn generate_threat_model_document(
 }
 
 fn threat_model_prompt(input: &BuildInput, source_bundle: &ThreatModelSourceBundle) -> Result<String> {
-    let previous_model = load_persistent_threat_model(&input.target);
+    let previous_model = try_load_persistent_threat_model(&input.target)?;
     build_agent_prompt(input, previous_model.as_ref(), source_bundle)
 }
 

@@ -35,6 +35,18 @@ and docs should use `offense-review:threat-hunt`.
 The 2026 surface cut keeps exact-name compatibility while reducing discovery
 noise:
 
+- The shell `home`, `/home`, and `/` routes now open the phase Workbench.
+  `modules` opens the phase-native Capabilities overlay; use `tools` for the
+  exhaustive engine inventory.
+- `bounty:import-har` and `bounty:import-burp` are exact-only compatibility
+  entries. Use `recon:import {"tool":"har","path":"..."}` or
+  `recon:import {"tool":"burp-xml","path":"..."}`.
+- `randori:pasta` is exact-only; use
+  `threat-model:build {"methodology":"pasta"}`.
+- `module-recommender:recommend`, `catalog:modules`, and `catalog:tools` remain
+  exact-only while callers move to phase capability projection and direct
+  registry queries.
+
 - `taint-iris:hunt` dispatches to the `taint-iris-next:hunt` executor shape.
   New workflows should use the visible `taint-iris-next:*` evidence helpers or
   the SAST/journey path that invokes the hunt stage.

@@ -14,7 +14,7 @@ mod tests {
         apply_option_override, output_with_cli_run_artifacts, parse_option_override,
         run_tool_command, start_cli_tool_run_with_loaded_modules,
     };
-    use crate::application::runs::{filter_runs_by_status, run_trace_path};
+    use crate::application::runs::filter_runs_by_status;
     use crate::application::runs_diff::{runs_diff, runs_diff_output};
     use crate::application::runs_prune::runs_prune_plan;
     use crate::application::scan::{scan_scope_body, scan_tool_input, scan_worktree_suffix};
@@ -887,7 +887,8 @@ mod tests {
                 "costUsd": 0.0,
                 "data": { "findings": [] }
             }),
-        );
+        )
+        .unwrap();
 
         let summary = load_run_summary(tmp.path(), &run_id).unwrap();
         assert_eq!(summary.status, "completed");
@@ -971,7 +972,8 @@ mod tests {
                 "status": "completed",
                 "artifacts": []
             }),
-        );
+        )
+        .unwrap();
 
         let output = output_with_cli_run_artifacts(
             tmp.path(),
@@ -1033,19 +1035,6 @@ mod tests {
         assert!(plain.contains("143ms"));
         assert!(plain.contains("$0.0021"));
         assert!(plain.contains("sev=info"));
-    }
-
-    #[test]
-    fn run_trace_path_uses_shared_trace_artifact_spec() {
-        let workspace = WorkspaceTarget::new(PathBuf::from(".")).unwrap();
-        let leaf = kuzushi_core::run_artifacts::canonical_run_artifact_spec("trace.jsonl")
-            .expect("trace artifact spec")
-            .leaf;
-
-        assert_eq!(
-            run_trace_path(&workspace, "run-123"),
-            run_dir(workspace.root(), "run-123").join(leaf)
-        );
     }
 
     #[test]
@@ -1138,6 +1127,37 @@ mod tests {
             diff.changed[0].after.verdict.as_deref(),
             Some("true_positive")
         );
+    }
+
+    #[test]
+    fn runs_diff_rejects_run_id_traversal() {
+        let target = tempfile::tempdir().unwrap();
+
+        let error = runs_diff(target.path(), "../outside", "run-safe").unwrap_err();
+
+        assert!(error.to_string().contains("unsafe"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runs_diff_rejects_symlinked_run_directory() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(
+            outside.path().join("result.json"),
+            r#"{"ok":true,"data":{"coreFindings":[]}}"#,
+        )
+        .unwrap();
+        let runs = kuzushi_core::runs_root(target.path());
+        std::fs::create_dir_all(&runs).unwrap();
+        symlink(outside.path(), runs.join("run-link")).unwrap();
+
+        let error = runs_diff(target.path(), "run-link", "run-link").unwrap_err();
+
+        assert!(error.to_string().contains("unsafe"));
+        assert!(outside.path().join("result.json").is_file());
     }
 
     #[test]
@@ -1988,10 +2008,10 @@ mod tests {
         assert!(!tool_needs_finding_store(
             "taint-iris-next:source-sink-trace"
         ));
-        assert!(tool_needs_finding_store("module-recommender:recommend"));
+        assert!(!tool_needs_finding_store("module-recommender:recommend"));
         assert!(tool_needs_finding_store("prompt-armor:scan"));
         assert!(tool_needs_finding_store("cargo-audit:scan"));
-        assert!(tool_needs_finding_store("sbom-scan:scan"));
+        assert!(!tool_needs_finding_store("sbom-scan:scan"));
         assert!(tool_needs_finding_store("secret-scan:scan"));
         assert!(tool_needs_finding_store("android-apk:scan"));
         assert!(!tool_needs_finding_store("context-lite:index"));
@@ -2014,10 +2034,14 @@ mod tests {
             .to_string();
 
         assert!(error.contains("--target <path>"), "{error}");
-        assert!(
-            run_tool_workspace_for_input("iac-scan:scan", None, r#"{"target":"missing"}"#)
-                .unwrap()
-                .is_none()
+        let inline_target = tempfile::tempdir().unwrap();
+        let input = serde_json::json!({"target": inline_target.path()}).to_string();
+        let workspace = run_tool_workspace_for_input("iac-scan:scan", None, &input)
+            .unwrap()
+            .expect("inline target should establish the workspace");
+        assert_eq!(
+            workspace.root(),
+            inline_target.path().canonicalize().unwrap()
         );
         assert!(run_tool_workspace("clang.health", None).unwrap().is_none());
     }
@@ -2062,14 +2086,24 @@ mod tests {
             "whiteboxStatic": true,
             "triage": false,
         });
-        let summary = scan_json_output(&workspace, &data);
+        let result = serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "summary": "scan complete",
+            "warnings": [],
+            "errors": [],
+            "data": data.clone(),
+        });
+        let summary = scan_json_output(&workspace, &result, &data);
         assert_eq!(summary["findingsCount"], serde_json::json!(2));
+        assert_eq!(summary["status"], serde_json::json!("completed"));
         assert!(summary["db"].as_str().unwrap().contains(".kuzushi"));
 
         let footer = scan_plain_artifact_footer(&workspace, &data);
         assert!(footer.contains(".kuzushi/v3/runs/run-1"));
         assert!(footer.contains(".kuzushi/v3/index.sqlite3"));
-        assert!(footer.contains("kuzushi runs show run-1"));
+        assert!(footer.contains("kuzushi --target"));
+        assert!(footer.contains("runs show run-1"));
     }
 
     #[test]

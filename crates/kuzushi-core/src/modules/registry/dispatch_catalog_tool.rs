@@ -284,9 +284,9 @@ fn findings_provenance_target(
         return Ok(if candidate.is_absolute() {
             candidate
         } else {
-            std::env::current_dir()
-                .context("Could not resolve current directory")?
-                .join(candidate)
+            ctx.workspace
+                .map(|workspace| workspace.root().join(candidate))
+                .context("findings:list provenance filters require an active workspace")?
         });
     }
     ctx.workspace
@@ -399,7 +399,7 @@ pub(in crate::modules) fn run_secret_scan_tool(
             .emit();
     }
     let options = SecretScanOptions::from_tool_input(input)?;
-    let report = match scan_for_secrets(&target, &options, &ScanCancellation::default()) {
+    let report = match ctx.with_cancellation(|cancel| scan_for_secrets(&target, &options, cancel)) {
         Ok(report) => report,
         Err(error) => return Ok(failed_tool_output("secret-scan:scan", &target, error)),
     };

@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::{strategy_queue_model, StrategyQueueRow};
+use crate::ui_view_models::{strategy_queue_model, target_artifact_ready, StrategyQueueRow};
 use kuzushi_core::Finding;
 use ratatui::prelude::{Line, Span};
 use std::collections::{BTreeMap, BTreeSet};
@@ -42,9 +42,7 @@ fn engine_chip(app: &ShellApp, label: &str, artifact: &str) -> String {
 }
 
 fn target_artifact_exists(app: &ShellApp, relative: &str) -> bool {
-    app.target()
-        .map(|target| target.join(relative).exists())
-        .unwrap_or(false)
+    target_artifact_ready(app, relative)
 }
 
 fn hunt_budget_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {

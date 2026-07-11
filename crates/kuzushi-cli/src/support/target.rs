@@ -18,7 +18,35 @@ pub(crate) fn require_cli_target(
 ) -> Result<PathBuf> {
     target_or_global(command_target, global_target).ok_or_else(|| {
         anyhow::anyhow!(
-            "{command} needs a target (an explicit target is required): pass `--target <path>` (or `--target .` to use the current directory). Bug-bounty workflows require explicit scope."
+            "{command} needs a target (an explicit target is required). {} Bug-bounty workflows require explicit scope.",
+            target_recovery(command)
         )
     })
+}
+
+fn target_recovery(command: &str) -> String {
+    if command == "scan" {
+        return "Run `kuzushi scan <path>` (or put the global option before the command: `kuzushi --target <path> scan`); use `kuzushi scan .` for the current directory."
+            .to_string();
+    }
+    format!(
+        "Put the global option before the command: `kuzushi --target <path> {command} ...` (or `kuzushi --target . {command} ...` for the current directory)."
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_target_recovery_uses_parser_valid_placements() {
+        let recovery = target_recovery("scan");
+
+        assert!(recovery.contains("kuzushi scan <path>"), "{recovery}");
+        assert!(
+            recovery.contains("kuzushi --target <path> scan"),
+            "{recovery}"
+        );
+        assert!(!recovery.contains("kuzushi scan --target"), "{recovery}");
+    }
 }

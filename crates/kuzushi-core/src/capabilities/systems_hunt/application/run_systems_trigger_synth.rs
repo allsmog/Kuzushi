@@ -56,9 +56,11 @@ pub(crate) fn systems_context_from_input_or_gather(
     target: &Path,
     options: &SystemsHuntInput,
 ) -> Result<SystemsContextOutput> {
-    Ok(context_from_input(input).transpose()?.unwrap_or_else(|| {
-        gather_systems_context(target, options).unwrap_or_else(|_| empty_context())
-    }))
+    match context_from_input(input).transpose()? {
+        Some(context) => Ok(context),
+        None => gather_systems_context(target, options)
+            .context("could not gather systems-hunt context from the target"),
+    }
 }
 
 pub(crate) fn systems_context_is_empty(context: &SystemsContextOutput) -> bool {

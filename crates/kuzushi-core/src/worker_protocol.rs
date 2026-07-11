@@ -2661,16 +2661,11 @@ fn checked_kwp_run_artifact_path(
     run_id: &str,
     artifact: &str,
 ) -> Result<PathBuf, KwpError> {
-    validate_kwp_run_id(run_id)?;
-    validate_relative_path(artifact).map_err(|_| KwpError::denied("audit.path"))?;
-    let root = crate::run_artifacts::runs_root(target);
-    let path = root.join(run_id).join(artifact);
-    ensure_no_symlink_components(&root, &path).map_err(|error| {
+    crate::run_artifacts::checked_run_artifact_path(target, run_id, artifact).map_err(|error| {
         KwpError::Internal(format!(
-            "KWP audit path contains a symlink or invalid component: {error}"
+            "could not resolve KWP run artifact {artifact}: {error}"
         ))
-    })?;
-    Ok(path)
+    })
 }
 
 fn writable_kwp_run_artifact_path(
@@ -2678,24 +2673,14 @@ fn writable_kwp_run_artifact_path(
     run_id: &str,
     artifact: &str,
 ) -> Result<PathBuf, KwpError> {
-    let path = checked_kwp_run_artifact_path(target, run_id, artifact)?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| KwpError::Internal("KWP run artifact has no parent".to_string()))?;
-    fs::create_dir_all(parent).map_err(|error| KwpError::Internal(error.to_string()))?;
+    crate::run_artifacts::ensure_run_artifact_parent(target, run_id, artifact).map_err(
+        |error| {
+            KwpError::Internal(format!(
+                "could not prepare KWP run artifact {artifact}: {error}"
+            ))
+        },
+    )?;
     checked_kwp_run_artifact_path(target, run_id, artifact)
-}
-
-fn validate_kwp_run_id(run_id: &str) -> Result<(), KwpError> {
-    let mut chars = run_id.chars();
-    if run_id.is_empty()
-        || run_id.len() > 200
-        || !chars.next().is_some_and(|ch| ch.is_ascii_alphanumeric())
-        || !chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
-    {
-        return Err(KwpError::denied("audit.runId"));
-    }
-    Ok(())
 }
 
 pub fn kwp_bus_log_path(target: impl AsRef<Path>, run_id: &str) -> PathBuf {
@@ -4038,7 +4023,7 @@ pub fn run_node_worker_tool_blocking(mut run: NodeWorkerRun<'_>) -> Result<Value
     let stdout = take_worker_stdout(&mut child)?;
     tag_worker_stderr(&mut child, run.module, run.tool_name);
     let process_group_id = kwp_child_process_group_id(&child);
-    let cancellation = crate::scan::ScanCancellation::default();
+    let cancellation = context.cancellation.cloned().unwrap_or_default();
     let child = cancellation
         .register_child(child, process_group_id)
         .map_err(|error| cancellation_error(context, error))?;
@@ -4117,13 +4102,17 @@ fn finalize_worker_invocation(
 }
 
 fn ensure_tool_execution_active(
-    _context: &crate::modules::ToolExecutionContext<'_>,
+    context: &crate::modules::ToolExecutionContext<'_>,
 ) -> Result<(), KwpError> {
-    Ok(())
+    context
+        .ensure_active()
+        .map_err(|_| KwpError::NoActiveInvocation)
 }
 
-fn tool_execution_cancelled(_context: &crate::modules::ToolExecutionContext<'_>) -> bool {
-    false
+fn tool_execution_cancelled(context: &crate::modules::ToolExecutionContext<'_>) -> bool {
+    context
+        .cancellation
+        .is_some_and(crate::scan::ScanCancellation::is_cancelled)
 }
 
 fn cancellation_error(
@@ -4378,10 +4367,15 @@ fn next_active_worker_message(
     session: &mut WorkerHostSession<'_>,
     attach_metrics: bool,
 ) -> Result<RpcMessage, KwpError> {
-    let message = read_next_worker_message(receiver, session.deadline, session.tool_name, None)
-        .map_err(|error| {
-            settle_worker_read_error(error, receiver, stdin, request_id, session, attach_metrics)
-        })?;
+    let message = read_next_worker_message(
+        receiver,
+        session.deadline,
+        session.tool_name,
+        session.context.cancellation,
+    )
+    .map_err(|error| {
+        settle_worker_read_error(error, receiver, stdin, request_id, session, attach_metrics)
+    })?;
     ensure_worker_invocation_active(receiver, stdin, request_id, session, attach_metrics)?;
     Ok(message)
 }
@@ -5297,7 +5291,10 @@ impl WorkerHostSession<'_> {
             self.context.config.model.as_deref(),
             &cwd,
         )?;
-        let control = crate::runtime::AgentQueryControl::new(None, Some(self.deadline));
+        let control = crate::runtime::AgentQueryControl::new(
+            self.context.cancellation.cloned(),
+            Some(self.deadline),
+        );
         let response = runtime
             .query_blocking_controlled(prepared.query, control.clone())
             .map_err(|error| controlled_runtime_error(&control, error))?;

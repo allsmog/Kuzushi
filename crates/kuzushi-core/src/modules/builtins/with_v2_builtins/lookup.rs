@@ -1,6 +1,20 @@
 use super::*;
+use crate::modules::runtime_requirements::input_aware_tool_needs_runtime;
+use crate::modules::runtime_requirements::tool_optionally_wants_runtime;
+use crate::V2Config;
 
 impl ModuleRegistry {
+    pub fn tool_requires_finding_store(&self, name: &str) -> bool {
+        self.resolve_tool(name).is_some_and(|tool| {
+            tool.finding_store_requirement == FindingStoreRequirement::Required
+        })
+    }
+
+    pub fn tool_requires_workspace(&self, name: &str) -> bool {
+        self.resolve_tool(name)
+            .is_some_and(|tool| tool.workspace_requirement == WorkspaceRequirement::Required)
+    }
+
     pub fn modules(&self) -> impl Iterator<Item = &BuiltinModule> {
         self.modules.values().filter(|builtin| !builtin.is_hidden())
     }
@@ -43,23 +57,34 @@ impl ModuleRegistry {
         self.tools.get(name)
     }
 
+    /// Whether an input key names a filesystem path in this tool's declared
+    /// contract. `target` is deliberately overloaded across Kuzushi: scanners
+    /// use a path, while recon/offense tools use the same spelling for a host.
+    /// Callers resolving workspace roots must consult the descriptor instead
+    /// of guessing from the key name alone.
+    pub fn tool_option_is_path(&self, tool_name: &str, option_name: &str) -> bool {
+        self.resolve_tool(tool_name).is_some_and(|tool| {
+            tool.options.iter().any(|option| {
+                option.matches_name_or_alias(option_name) && option.option_type == OptionType::Path
+            })
+        })
+    }
+
     pub fn tool_needs_runtime(&self, name: &str, input: &Value) -> bool {
         let requirement = self
             .tools
             .get(name)
             .map(|tool| tool.runtime_requirement)
-            .unwrap_or_else(|| {
-                if self.is_registered_dag_node(name) && tool_uses_agent_runtime(name) {
-                    RuntimeRequirement::Always
-                } else {
-                    RuntimeRequirement::Never
-                }
-            });
+            .unwrap_or(RuntimeRequirement::Never);
         match requirement {
             RuntimeRequirement::Never => false,
             RuntimeRequirement::Always => true,
-            RuntimeRequirement::InputAware => tool_needs_runtime(name, input),
+            RuntimeRequirement::InputAware => input_aware_tool_needs_runtime(name, input),
         }
+    }
+
+    pub fn tool_wants_runtime(&self, name: &str, input: &Value, config: &V2Config) -> bool {
+        self.tool_needs_runtime(name, input) || tool_optionally_wants_runtime(name, input, config)
     }
 
     /// Visible to callers that need the same hidden-tool/hidden-module policy

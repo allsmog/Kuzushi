@@ -2,7 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn apply_agent_event(&mut self, event: AgentEvent) -> Vec<ShellEffect> {
-        let state = AgentEventState::from_chat(self.agent_chat());
+        let state = AgentEventState::from_app(self);
         match event {
             AgentEvent::Answered { text, audit } => self.apply_agent_answer(text, audit, state),
             AgentEvent::Failed { error, audit } => self.apply_agent_failure(error, audit, state),
@@ -33,7 +33,11 @@ impl ShellApp {
                 "LangGraph response arrived after abort request; ignored",
             );
             self.set_refused_activity("agent", "response ignored after abort request");
-            return Vec::new();
+            return self.agent_canceled_record(
+                "response arrived after abort request".to_string(),
+                audit,
+                state,
+            );
         }
         self.log("answer", text.clone());
         self.set_completed_activity("agent", "answer received");
@@ -59,7 +63,11 @@ impl ShellApp {
                 format!("LangGraph ended after abort request: {error}"),
             );
             self.set_refused_activity("agent", "worker ended after abort request");
-            return Vec::new();
+            return self.agent_canceled_record(
+                format!("worker ended after abort request: {error}"),
+                audit,
+                state,
+            );
         }
         self.set_error_notice("ask", error.clone());
         self.set_refused_activity("agent", "model request failed");
@@ -82,7 +90,7 @@ impl ShellApp {
             return Vec::new();
         };
         vec![ShellEffect::RecordAgentRun(AgentRunRecord {
-            target: self.target_owned(),
+            target: state.artifact_target,
             run_id,
             latency_ms: state.latency_ms,
             audit,
@@ -102,7 +110,7 @@ impl ShellApp {
             return Vec::new();
         };
         vec![ShellEffect::RecordAgentRun(AgentRunRecord {
-            target: self.target_owned(),
+            target: state.artifact_target,
             run_id,
             latency_ms: state.latency_ms,
             audit,
@@ -110,20 +118,67 @@ impl ShellApp {
         })]
     }
 
-    pub(crate) fn record_agent_run_effect(&self, record: AgentRunRecord) {
-        match &record.outcome {
+    fn agent_canceled_record(
+        &self,
+        reason: String,
+        audit: AgentCallAudit,
+        state: AgentEventState,
+    ) -> Vec<ShellEffect> {
+        let Some(run_id) = state.run_id else {
+            return Vec::new();
+        };
+        vec![ShellEffect::RecordAgentRun(AgentRunRecord {
+            target: state.artifact_target,
+            run_id,
+            latency_ms: state.latency_ms,
+            audit,
+            outcome: AgentRunOutcome::Canceled { reason },
+        })]
+    }
+
+    pub(crate) fn record_agent_run_effect(&mut self, record: AgentRunRecord) {
+        let usable_result = matches!(record.outcome, AgentRunOutcome::Complete { .. });
+        let persistence = match &record.outcome {
             AgentRunOutcome::Complete { answer_chars } => {
-                record_agent_trace_success(&record, *answer_chars);
+                record_agent_trace_success(&record, *answer_chars)
             }
-            AgentRunOutcome::Failed { error } => {
-                record_agent_trace_failure(&record, error);
-            }
+            AgentRunOutcome::Failed { error } => record_agent_trace_failure(&record, error),
+            AgentRunOutcome::Canceled { reason } => record_agent_trace_canceled(&record, reason),
+        };
+        if let Err(error) = persistence {
+            self.report_agent_terminal_persistence_failure(&record, usable_result, error);
+        }
+        self.invalidate_view_hydration();
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_run_summaries();
+    }
+
+    fn report_agent_terminal_persistence_failure(
+        &mut self,
+        record: &AgentRunRecord,
+        usable_result: bool,
+        error: anyhow::Error,
+    ) {
+        let message = format!(
+            "agent result retained, but run artifacts could not be finalized for {}: {error}",
+            record.run_id
+        );
+        self.log("error", message.clone());
+        self.set_error_notice("artifacts", message);
+        if usable_result {
+            self.set_partial_activity("agent", "answer retained; replay artifacts are incomplete");
+        } else {
+            self.set_failed_activity(
+                "agent",
+                "request failed and terminal artifacts are incomplete",
+            );
         }
     }
 }
 
-fn record_agent_trace_success(record: &AgentRunRecord, answer_chars: usize) {
-    append_llm_trace_step(
+fn record_agent_trace_success(record: &AgentRunRecord, answer_chars: usize) -> anyhow::Result<()> {
+    let trace = append_llm_trace_step(
         record.target.as_deref(),
         &record.run_id,
         "llm",
@@ -131,18 +186,18 @@ fn record_agent_trace_success(record: &AgentRunRecord, answer_chars: usize) {
         record.latency_ms,
         &record.audit,
     );
-    write_agent_run_summary(record.target.as_deref(), &record.run_id, "complete");
-    append_run_status_event(
+    let terminal = record_agent_run_completed(
         record.target.as_deref(),
         &record.run_id,
-        "agent:ask",
-        "completed",
-        "agent:ask completed",
+        answer_chars,
+        record.latency_ms,
+        record.audit.cost_usd,
     );
+    trace.and(terminal)
 }
 
-fn record_agent_trace_failure(record: &AgentRunRecord, error: &str) {
-    append_llm_trace_step(
+fn record_agent_trace_failure(record: &AgentRunRecord, error: &str) -> anyhow::Result<()> {
+    let trace = append_llm_trace_step(
         record.target.as_deref(),
         &record.run_id,
         "refused",
@@ -150,49 +205,61 @@ fn record_agent_trace_failure(record: &AgentRunRecord, error: &str) {
         record.latency_ms,
         &record.audit,
     );
-    write_agent_run_summary(record.target.as_deref(), &record.run_id, "failed");
-    append_run_status_event(
+    let terminal = record_agent_run_failed(
         record.target.as_deref(),
         &record.run_id,
-        "agent:ask",
-        "failed",
-        "agent:ask failed",
-    );
-    write_run_failure_handoff(
-        record.target.as_deref(),
-        &record.run_id,
-        "agent:ask",
-        "failed",
         error,
+        record.audit.cost_usd,
     );
+    trace.and(terminal)
 }
 
-fn write_agent_run_summary(target: Option<&std::path::Path>, run_id: &str, status: &str) {
-    write_run_summary(
-        target,
-        run_id,
-        status,
-        None,
-        target
-            .map(|p| p.display().to_string())
-            .as_deref()
-            .unwrap_or("."),
+fn record_agent_trace_canceled(record: &AgentRunRecord, reason: &str) -> anyhow::Result<()> {
+    let trace = append_llm_trace_step(
+        record.target.as_deref(),
+        &record.run_id,
+        "refused",
+        &short_label(reason, 80),
+        record.latency_ms,
+        &record.audit,
     );
+    let terminal = record_agent_run_canceled(
+        record.target.as_deref(),
+        &record.run_id,
+        reason,
+        record.audit.cost_usd,
+    );
+    trace.and(terminal)
 }
 
 struct AgentEventState {
     abort_requested: bool,
     run_id: Option<String>,
     latency_ms: Option<u64>,
+    artifact_target: Option<std::path::PathBuf>,
 }
 
 impl AgentEventState {
-    fn from_chat(agent: Option<&AgentChatView>) -> Self {
-        let started_secs = agent.map(|agent| agent.started_secs).unwrap_or(0);
+    fn from_app(app: &ShellApp) -> Self {
+        let agent = app.agent_chat();
+        let cleared = app.runtime_state.cleared_agent_run();
+        let started_secs = agent
+            .map(|agent| agent.started_secs)
+            .or_else(|| cleared.map(|run| run.started_secs))
+            .unwrap_or_default();
         Self {
-            abort_requested: agent.is_some_and(|agent| agent.abort_requested),
-            run_id: agent.and_then(|agent| agent.run_id.clone()),
+            abort_requested: agent.is_some_and(|agent| agent.abort_requested)
+                || cleared.is_some()
+                || app
+                    .agent_cancel_token()
+                    .is_some_and(ScanCancellation::is_cancelled),
+            run_id: agent
+                .and_then(|agent| agent.run_id.clone())
+                .or_else(|| cleared.and_then(|run| run.run_id.clone())),
             latency_ms: agent_latency_ms(started_secs),
+            artifact_target: app
+                .agent_artifact_target_owned()
+                .or_else(|| cleared.and_then(|run| run.artifact_target.clone())),
         }
     }
 }

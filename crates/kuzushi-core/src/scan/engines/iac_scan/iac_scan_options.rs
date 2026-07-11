@@ -1,5 +1,7 @@
 use super::*;
 
+pub(super) const MAX_SUPPORTED_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum IacScanKind {
@@ -55,7 +57,7 @@ impl IacScanOptions {
             options.kind = IacScanKind::from_input(kind)?;
         }
         if let Some(max_file_bytes) = input.get("maxFileBytes").and_then(Value::as_u64) {
-            options.max_file_bytes = max_file_bytes.max(1024);
+            options.max_file_bytes = max_file_bytes.clamp(1024, MAX_SUPPORTED_FILE_BYTES);
         }
         Ok(options)
     }

@@ -134,14 +134,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stubs_marker_struct_still_returns_not_yet_implemented() {
-        // Kept for any future tool we register as a stub before wiring.
-        let tool = NotYetImplemented("future.tool");
-        let err = tool.call(json!({})).await.unwrap_err();
-        assert!(err.to_string().starts_with("NotYetImplemented:"));
-    }
-
-    #[tokio::test]
     async fn taint_paths_reports_backend_unavailable_when_joern_missing() {
         let tool = TaintPathsTool;
         assert_backend_unavailable_or_available(

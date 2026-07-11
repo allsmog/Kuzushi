@@ -1,24 +1,28 @@
 use super::*;
 
 impl SastTaskSelection {
-    pub(in crate::modules) fn from_tasks(tasks: Vec<String>) -> Result<Self> {
-        let (
-            native_tasks,
-            run_agentic,
-            run_carlini,
-            run_taint_iris_next,
-            run_systems_hunt,
-        ) = split_agentic_sast_tasks(tasks);
-        let scanners = selected_native_scanners(
+    pub(in crate::modules) fn from_tasks(
+        tasks: Vec<String>,
+        source: SastTaskSelectionSource,
+    ) -> Result<Self> {
+        let (native_tasks, run_agentic, run_carlini, run_taint_iris_next, run_systems_hunt) =
+            split_agentic_sast_tasks(tasks);
+        let explicit_native_selection =
+            source == SastTaskSelectionSource::Explicit && !native_tasks.is_empty();
+        let native = selected_native_scanners(
             &native_tasks,
             run_agentic || run_carlini || run_taint_iris_next || run_systems_hunt,
+            source,
         )?;
-        let engine_ids = scanners
+        let engine_ids = native
+            .engines
             .iter()
             .map(|scanner| scanner.id())
             .collect::<Vec<_>>();
         Ok(Self {
-            scanners,
+            scanners: native.engines,
+            skipped_engines: native.skipped,
+            explicit_native_selection,
             run_agentic,
             run_carlini,
             run_taint_iris_next,
@@ -35,10 +39,7 @@ impl SastTaskSelection {
     }
 
     pub(in crate::modules) fn has_agentic_task(&self) -> bool {
-        self.run_agentic
-            || self.run_carlini
-            || self.run_taint_iris_next
-            || self.run_systems_hunt
+        self.run_agentic || self.run_carlini || self.run_taint_iris_next || self.run_systems_hunt
     }
 
     pub(in crate::modules) fn run_native(
@@ -46,29 +47,84 @@ impl SastTaskSelection {
         workspace: &crate::workspace::WorkspaceTarget,
         store: &crate::findings::FindingStore,
         options: &ScanRunOptions,
+        ctx: &ToolExecutionContext<'_>,
     ) -> Result<Option<ScanRun>> {
+        self.ensure_explicit_native_prerequisites(workspace)?;
         if self.scanners.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(run_scan_engines_with_options(
-                workspace,
-                store,
-                &self.scanners,
-                options,
-            )?))
+            ctx.with_cancellation(|cancellation| {
+                run_scan_engines_with_options_and_cancellation(
+                    workspace,
+                    store,
+                    &self.scanners,
+                    options,
+                    cancellation,
+                )
+                .map(Some)
+            })
         }
+    }
+
+    fn ensure_explicit_native_prerequisites(
+        &self,
+        workspace: &crate::workspace::WorkspaceTarget,
+    ) -> Result<()> {
+        if self.explicit_native_selection
+            && self.engine_ids.contains(&"cargo-audit")
+            && !workspace.root().join("Cargo.lock").is_file()
+        {
+            anyhow::bail!(
+                "cargo-audit was explicitly requested, but the target has no Cargo.lock. Run `cargo generate-lockfile` in the target, then rerun the scan"
+            );
+        }
+        Ok(())
     }
 }
 
 pub(in crate::modules) fn selected_native_scanners(
     native_tasks: &[String],
     only_agentic_tasks: bool,
-) -> Result<Vec<Box<dyn ScanEngine>>> {
+    source: SastTaskSelectionSource,
+) -> Result<DefaultScanEngineSelection> {
     if native_tasks.is_empty() && only_agentic_tasks {
-        Ok(Vec::new())
-    } else {
-        scan_engines_for_tasks(native_tasks)
+        return Ok(empty_scan_engine_selection());
     }
+    match source {
+        SastTaskSelectionSource::Automatic => Ok(select_default_scan_engines()),
+        SastTaskSelectionSource::FilteredAutomatic => {
+            Ok(filtered_default_scan_engines(native_tasks))
+        }
+        SastTaskSelectionSource::Explicit => explicit_native_scanners(native_tasks),
+    }
+}
+
+fn explicit_native_scanners(native_tasks: &[String]) -> Result<DefaultScanEngineSelection> {
+    if native_tasks.is_empty() {
+        return Ok(empty_scan_engine_selection());
+    }
+    Ok(DefaultScanEngineSelection {
+        engines: scan_engines_for_tasks(native_tasks)?,
+        skipped: Vec::new(),
+    })
+}
+
+fn empty_scan_engine_selection() -> DefaultScanEngineSelection {
+    DefaultScanEngineSelection {
+        engines: Vec::new(),
+        skipped: Vec::new(),
+    }
+}
+
+fn filtered_default_scan_engines(native_tasks: &[String]) -> DefaultScanEngineSelection {
+    let mut selection = select_default_scan_engines();
+    selection
+        .engines
+        .retain(|scanner| native_tasks.iter().any(|task| task == scanner.id()));
+    selection
+        .skipped
+        .retain(|skipped| native_tasks.iter().any(|task| task == skipped.id));
+    selection
 }
 
 pub(in crate::modules) fn fill_agentic_reports(

@@ -24,16 +24,15 @@ pub use crate::config::{
 };
 pub use crate::context::context_snapshot_path;
 pub use crate::events::{CoreEvent, EventSink, InMemoryEventSink, ScanProgress};
-pub use crate::module_result::failed_tool_output;
+pub use crate::module_result::{failed_tool_output, tool_result_status, ToolResultStatus};
 pub use crate::modules::{
     agent_runtime_tool_names, approve_dynamic_module, autonomy_gate, default_dynamic_lockfile_path,
     inspect_dynamic_module, revoke_dynamic_module, tool_defaults_to_workspace,
     tool_needs_finding_store, tool_needs_runtime, tool_phase, tool_requires_agent_runtime,
     tool_uses_agent_runtime, tool_uses_finding_store, tool_wants_runtime, wants_sast_runtime,
     AgenticSastPersistedRun, AgenticSastReport, AutonomyDecision, AutonomyPosture, BuiltinModule,
-    DynamicModuleInspection, DynamicModuleLoadOptions, ModuleMetadata, ModuleRegistry,
-    ToolDescriptor, ToolExecutionContext, WorkflowPhase, FINDING_STORE_TOOL_NAMES,
-    FINDING_STORE_TOOL_PREFIXES, RUNTIME_TOOL_NAMES, WORKSPACE_TOOL_NAMES, WORKSPACE_TOOL_PREFIXES,
+    DynamicModuleInspection, DynamicModuleLoadOptions, ExecutionAuthorization, ModuleMetadata,
+    ModuleRegistry, PreparedToolInput, ToolDescriptor, ToolExecutionContext, WorkflowPhase,
 };
 pub use crate::options::{
     house_rule_path, house_rules_root, module_prompt_root, prompt_content_sha256,
@@ -53,16 +52,22 @@ pub use crate::repository_inventory::{
     InventorySourceFile, RepositoryInventory, TargetKind,
 };
 pub use crate::run_artifacts::{
-    append_run_trace_step, latest_run_path, list_run_summaries, load_run_summary, new_run_id,
-    next_run_trace_step_number, run_artifact_path, run_dir, runs_root, tool_result_artifact_spec,
-    write_run_artifact_json, write_run_summary, BroadcastSink, JsonlSink, ParentScope, RunArtifact,
-    RunEnvFingerprint, RunHouseRuleFingerprint, RunLlmCallAudit, RunPromptOverrideFingerprint,
-    RunSummary, RunTargetGitMetadata, RunTraceStep, TraceHandle, TraceSink, TraceStepBuilder,
+    append_run_trace_step, latest_run_path, list_run_summaries, list_run_summary_entries,
+    load_run_events, load_run_summary, load_run_trace, new_run_id, next_run_trace_step_number,
+    read_latest_run_pointer, read_run_artifact_bytes, read_run_artifact_text,
+    repair_latest_run_pointer, resolve_run_artifact_path, run_artifact_path, run_dir, runs_root,
+    tool_result_artifact_spec, write_run_artifact_json, write_run_summary, ArtifactPath,
+    BroadcastSink, JsonlSink, LatestRunPointerIssue, LatestRunPointerState, ParentScope,
+    RunArtifact, RunArtifactBytesRead, RunArtifactRead, RunArtifactTextRead, RunEnvFingerprint,
+    RunEventRead, RunHouseRuleFingerprint, RunId, RunLlmCallAudit, RunPromptOverrideFingerprint,
+    RunSummary, RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue, RunTargetGitMetadata,
+    RunTraceRead, RunTraceStep, TraceHandle, TraceSink, TraceStepBuilder,
+    MAX_RUN_ARTIFACT_READ_BYTES,
 };
 pub use crate::runtime::{
     append_structured_output_contract, mcp_attachment_plan_for_target, model_provider,
     plan_contains, prompt_pair_hash, run_tool_loop, AgentLoopOutcome, AgentLoopStep,
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
+    AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
     AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
     McpArtifactSpec, McpAttachment, ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler,
     ToolResult, TracedRuntime, TriageRequest, MCP_ARTIFACT_TABLE, MCP_CONSTANT_NAMES,
@@ -78,21 +83,22 @@ pub use crate::strategy::{
 };
 pub use crate::workspace::{
     artifact_state, discover_and_save_nested_project_scopes, discover_nested_project_scopes,
-    export_workspace_findings, export_workspace_findings_with_options, legacy_codeql_db_path,
-    load_nested_project_scopes, load_program_scope, preview_workspace_findings_export,
-    resolve_target_git_commit, save_nested_project_scopes, switch_target_revision,
-    workspace_artifact_kb_db_path, workspace_codeql_db_path, workspace_config_path,
-    workspace_findings_db_path, workspace_models_path, workspace_options_path, workspace_state_dir,
-    workspace_state_root, workspace_static_evidence_db_path, workspace_status_for_target,
-    write_program_scope_scaffold, ArtifactState, HostPattern, NestedProjectKind,
-    NestedProjectScope, NestedProjectScopeTree, ProgramScope, ProgramScopeFile, ProgramScopeList,
-    ScopeVerdict, TargetRevisionSwitch, WorkspaceAnalysisExportSummary,
-    WorkspaceEvidenceExportSummary, WorkspaceExportCompleteness, WorkspaceExportFormat,
-    WorkspaceExportOptions, WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
-    WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext, WorkspaceFindingsExport,
-    WorkspaceFindingsExportPreview, WorkspaceRunExportContext, WorkspaceStatus, WorkspaceTarget,
-    WorkspaceVerificationExportSummary, KUZUSHI_STATE_DIR, LEGACY_CODEQL_DB_DIR,
-    LEGACY_CODEQL_STATE_DIR, WORKSPACE_ARTIFACT_KB_DB_FILE, WORKSPACE_CODEQL_DB_DIR,
-    WORKSPACE_CONFIG_FILE, WORKSPACE_FINDINGS_DB_FILE, WORKSPACE_MODELS_FILE,
-    WORKSPACE_OPTIONS_FILE, WORKSPACE_STATE_VERSION_DIR, WORKSPACE_STATIC_EVIDENCE_DB_FILE,
+    export_scan_findings_sarif, export_workspace_findings, export_workspace_findings_with_options,
+    legacy_codeql_db_path, load_nested_project_scopes, load_program_scope,
+    preview_workspace_findings_export, resolve_target_git_commit, save_nested_project_scopes,
+    switch_target_revision, workspace_artifact_kb_db_path, workspace_codeql_db_path,
+    workspace_config_path, workspace_findings_db_path, workspace_models_path,
+    workspace_options_path, workspace_state_dir, workspace_state_root,
+    workspace_static_evidence_db_path, workspace_status_for_target, write_program_scope_scaffold,
+    ArtifactState, HostPattern, NestedProjectKind, NestedProjectScope, NestedProjectScopeTree,
+    ProgramScope, ProgramScopeFile, ProgramScopeList, ScopeVerdict, TargetRevisionSwitch,
+    WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary, WorkspaceExportCompleteness,
+    WorkspaceExportFormat, WorkspaceExportOptions, WorkspaceFindingExportLocation,
+    WorkspaceFindingExportRecord, WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext,
+    WorkspaceFindingsExport, WorkspaceFindingsExportPreview, WorkspaceRunExportContext,
+    WorkspaceStatus, WorkspaceTarget, WorkspaceVerificationExportSummary, KUZUSHI_STATE_DIR,
+    LEGACY_CODEQL_DB_DIR, LEGACY_CODEQL_STATE_DIR, WORKSPACE_ARTIFACT_KB_DB_FILE,
+    WORKSPACE_CODEQL_DB_DIR, WORKSPACE_CONFIG_FILE, WORKSPACE_FINDINGS_DB_FILE,
+    WORKSPACE_MODELS_FILE, WORKSPACE_OPTIONS_FILE, WORKSPACE_STATE_VERSION_DIR,
+    WORKSPACE_STATIC_EVIDENCE_DB_FILE,
 };

@@ -8,10 +8,10 @@
 
 use super::chain::{run_chain, ChainOutcome};
 use super::engagement::{prepare_chain_run, resolve_engagement, PreparedChainRun};
-use super::persistence::{persist_chain_finding, persisted_backend};
-use super::planner::{run_planned_chain, PlannerBudget};
 use super::engagement_scope::ScopeTarget;
 use super::observer::HopObserver;
+use super::persistence::{persist_chain_finding_for_run, persisted_backend};
+use super::planner::{run_planned_chain, PlannerBudget};
 use super::play_context::PlayContext;
 use super::sandbox_curl::SandboxCurlTransport;
 use super::transport::PlayTransport;
@@ -32,6 +32,16 @@ pub fn execute_offense_chain(
     store: Option<&FindingStore>,
     observer: &dyn HopObserver,
 ) -> Value {
+    execute_offense_chain_for_run(input, workspace_root, store, observer, None)
+}
+
+pub fn execute_offense_chain_for_run(
+    input: &Value,
+    workspace_root: &Path,
+    store: Option<&FindingStore>,
+    observer: &dyn HopObserver,
+    verification_run_id: Option<String>,
+) -> Value {
     let timeout_ms = input
         .get("timeoutMs")
         .or_else(|| input.get("timeout_ms"))
@@ -39,7 +49,16 @@ pub fn execute_offense_chain(
         .unwrap_or(DEFAULT_PLAY_TIMEOUT_MS);
     let transport = SandboxCurlTransport::detect(timeout_ms);
     let backend = persisted_backend(transport.backend());
-    run_offense_chain(input, workspace_root, &transport, backend, store, now_unix(), observer)
+    run_offense_chain(
+        input,
+        workspace_root,
+        &transport,
+        backend,
+        store,
+        now_unix(),
+        observer,
+        verification_run_id.as_deref(),
+    )
 }
 
 /// Run `offense:chain` in autonomous (LLM-planned) mode: the model proposes
@@ -53,6 +72,29 @@ pub fn execute_offense_planned(
     model: &str,
     goal: &str,
     observer: &dyn HopObserver,
+) -> Value {
+    execute_offense_planned_for_run(
+        input,
+        workspace_root,
+        store,
+        runtime,
+        model,
+        goal,
+        observer,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn execute_offense_planned_for_run(
+    input: &Value,
+    workspace_root: &Path,
+    store: Option<&FindingStore>,
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    goal: &str,
+    observer: &dyn HopObserver,
+    verification_run_id: Option<String>,
 ) -> Value {
     let timeout_ms = input
         .get("timeoutMs")
@@ -72,6 +114,7 @@ pub fn execute_offense_planned(
         backend,
         now_unix: now_unix(),
         observer,
+        verification_run_id,
     })
 }
 
@@ -86,24 +129,38 @@ struct PlannedRun<'a> {
     backend: PersistedSandboxBackend,
     now_unix: u64,
     observer: &'a dyn HopObserver,
+    verification_run_id: Option<String>,
 }
 
 fn run_planned(run: PlannedRun<'_>) -> Value {
-    let (scope, target_host) = match resolve_engagement(run.input, run.workspace_root) {
-        Ok(resolved) => resolved,
-        Err(reason) => return failure("offense:chain could not start", reason),
+    let (target_host, ctx) = match prepare_planned_context(&run) {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
     };
-    let authorized = match scope.authorize(ScopeTarget::parse(&target_host), run.now_unix) {
-        Ok(authorized) => authorized,
-        Err(reason) => {
-            return failure("offense:chain refused", format!("refused {target_host}: {reason}"))
-        }
-    };
+    let result = execute_planned_run(&run, &ctx);
+    finish_planned_run(&run, &target_host, result)
+}
+
+fn prepare_planned_context(run: &PlannedRun<'_>) -> Result<(String, PlayContext), Value> {
+    let (scope, target_host) = resolve_engagement(run.input, run.workspace_root)
+        .map_err(|reason| failure("offense:chain could not start", reason))?;
+    let authorized = scope
+        .authorize(ScopeTarget::parse(&target_host), run.now_unix)
+        .map_err(|reason| {
+            failure(
+                "offense:chain refused",
+                format!("refused {target_host}: {reason}"),
+            )
+        })?;
     let ctx = PlayContext::new(authorized, input_run_id(run.input, run.now_unix));
-    let result = run_planned_chain(
+    Ok((target_host, ctx))
+}
+
+fn execute_planned_run(run: &PlannedRun<'_>, ctx: &PlayContext) -> anyhow::Result<ChainOutcome> {
+    run_planned_chain(
         chain_name(run.input),
         run.goal,
-        &ctx,
+        ctx,
         run.runtime,
         run.model,
         run.workspace_root,
@@ -112,12 +169,25 @@ fn run_planned(run: PlannedRun<'_>) -> Value {
             max_steps: planned_max_steps(run.input),
         },
         run.observer,
-    );
+    )
+}
+
+fn finish_planned_run(
+    run: &PlannedRun<'_>,
+    target_host: &str,
+    result: anyhow::Result<ChainOutcome>,
+) -> Value {
     match result {
         Ok(outcome) => {
-            let finding_id =
-                persist_outcome(run.store, run.workspace_root, &target_host, run.backend, &outcome);
-            let warnings = isolation_warnings(run.backend, &target_host);
+            let finding_id = persist_outcome(
+                run.store,
+                run.workspace_root,
+                target_host,
+                run.backend,
+                &outcome,
+                run.verification_run_id.as_deref(),
+            );
+            let warnings = isolation_warnings(run.backend, target_host);
             success(outcome, finding_id, warnings)
         }
         Err(err) => failure("offense:chain planning failed", err.to_string()),
@@ -157,6 +227,7 @@ fn run_offense_chain(
     store: Option<&FindingStore>,
     now_unix: u64,
     observer: &dyn HopObserver,
+    verification_run_id: Option<&str>,
 ) -> Value {
     let prepared = match prepare_chain_run(input, workspace_root) {
         Ok(prepared) => prepared,
@@ -172,7 +243,14 @@ fn run_offense_chain(
         Ok(outcome) => outcome,
         Err(reason) => return failure("offense:chain refused or failed", reason),
     };
-    let finding_id = persist_outcome(store, workspace_root, &prepared.target_host, backend, &outcome);
+    let finding_id = persist_outcome(
+        store,
+        workspace_root,
+        &prepared.target_host,
+        backend,
+        &outcome,
+        verification_run_id,
+    );
     let warnings = isolation_warnings(backend, &prepared.target_host);
     success(outcome, finding_id, warnings)
 }
@@ -185,9 +263,18 @@ fn persist_outcome(
     target_host: &str,
     backend: PersistedSandboxBackend,
     outcome: &ChainOutcome,
+    verification_run_id: Option<&str>,
 ) -> Option<i64> {
     let store = store?;
-    persist_chain_finding(store, workspace_root, target_host, backend, outcome).unwrap_or_default()
+    persist_chain_finding_for_run(
+        store,
+        workspace_root,
+        target_host,
+        backend,
+        outcome,
+        verification_run_id,
+    )
+    .unwrap_or_default()
 }
 
 fn run_prepared(
@@ -337,10 +424,18 @@ mod tests {
             backend: PersistedSandboxBackend::Plain,
             now_unix: 1,
             observer: &NoopObserver,
+            verification_run_id: None,
         });
         assert_eq!(result["status"], json!("failed"));
-        assert!(result["data"]["reason"].as_str().unwrap().contains("refused"));
-        assert_eq!(runtime.queries.load(Ordering::SeqCst), 0, "scope gate must precede planning");
+        assert!(result["data"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("refused"));
+        assert_eq!(
+            runtime.queries.load(Ordering::SeqCst),
+            0,
+            "scope gate must precede planning"
+        );
     }
 
     fn input() -> Value {
@@ -362,6 +457,7 @@ mod tests {
             store,
             1,
             &NoopObserver,
+            None,
         )
     }
 
@@ -390,6 +486,36 @@ mod tests {
         assert!(result["data"]["findingId"].is_number());
         // The chain landed as a durable finding.
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn completed_chain_threads_outer_run_into_verification_provenance() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let transport = StubTransport {
+            status: 200,
+            body: "root shell".to_string(),
+        };
+        let result = run_offense_chain(
+            &input(),
+            Path::new("/tmp/ws"),
+            &transport,
+            PersistedSandboxBackend::Plain,
+            Some(&store),
+            1,
+            &NoopObserver,
+            Some("tool-outer"),
+        );
+
+        let finding_id = result["data"]["findingId"].as_i64().unwrap();
+        let finding = store
+            .list_findings(10)
+            .unwrap()
+            .into_iter()
+            .find(|finding| finding.id == Some(finding_id))
+            .unwrap();
+        let proof = store.get_latest_verification(finding_id).unwrap().unwrap();
+        assert_eq!(proof.verification_run_id.as_deref(), Some("tool-outer"));
+        assert_eq!(proof.verified_scan_id, finding.scan_id);
     }
 
     #[test]

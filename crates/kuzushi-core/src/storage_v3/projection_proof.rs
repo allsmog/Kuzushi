@@ -26,11 +26,12 @@ pub(super) fn project_verification_event(tx: &Transaction<'_>, event: &EventEnve
     tx.execute(
         r#"
         insert into verification_events(
-          event_hash, seq, stable_fp, finding_id, identity_id, proof_level,
+          event_hash, seq, stable_fp, finding_id, identity_id,
+          verification_run_id, verified_scan_id, proof_level,
           proof_verdict, backend, language, harness_path, crash_evidence,
           duration_ms, cost_usd, notes_json, actor, created_at, payload_json
         )
-        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
         on conflict(event_hash) do nothing
         "#,
         params![
@@ -39,6 +40,8 @@ pub(super) fn project_verification_event(tx: &Transaction<'_>, event: &EventEnve
             require_payload_str(&event.payload, "stableFp")?,
             payload_i64(&event.payload, "findingId"),
             payload_str(&event.payload, "identityId"),
+            payload_str(&event.payload, "verificationRunId"),
+            payload_str(&event.payload, "verifiedScanId"),
             require_payload_i64(&event.payload, "proofLevel")?,
             require_payload_str(&event.payload, "proofVerdict")?,
             require_payload_str(&event.payload, "backend")?,

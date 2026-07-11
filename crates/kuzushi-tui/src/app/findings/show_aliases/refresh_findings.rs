@@ -44,6 +44,7 @@ impl ShellApp {
                 return;
             }
         };
+        self.refresh_journey_ledger_counts(&store);
         let read_watermark = self.current_findings_projection_watermark();
         match store.list_findings_filtered(&filter) {
             Ok(report) => {
@@ -98,7 +99,24 @@ impl ShellApp {
         read_watermark: Option<u64>,
     ) {
         let decisions = self.load_review_decisions_for_findings(store, &findings);
+        let counts =
+            crate::ui_view_models::finding_ledger_counts(&findings, &decisions, total_count);
+        self.domain_mut().set_finding_ledger_counts(counts);
         self.replace_findings(findings, decisions, announce, total_count, read_watermark);
+    }
+
+    fn refresh_journey_ledger_counts(&mut self, store: &FindingStore) {
+        let filter = FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT);
+        let Ok(report) = store.list_findings_filtered(&filter) else {
+            return;
+        };
+        let decisions = self.load_review_decisions_for_findings(store, &report.findings);
+        let counts = crate::ui_view_models::finding_ledger_counts(
+            &report.findings,
+            &decisions,
+            report.count,
+        );
+        self.domain_mut().set_finding_ledger_counts(counts);
     }
 
     fn replace_findings(

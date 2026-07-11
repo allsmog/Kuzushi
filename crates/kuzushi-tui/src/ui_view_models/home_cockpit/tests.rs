@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::ui_latest_run_path;
 
 fn create_invalid_latest_pointer(root: &std::path::Path) {
     std::fs::create_dir_all(ui_latest_run_path(Some(root))).unwrap();
@@ -35,6 +36,32 @@ fn identity_finding(
     finding
 }
 
+fn test_run(root: &std::path::Path, run_id: &str) -> HomeRunModel {
+    let run_dir = ui_run_dir(Some(root), run_id);
+    std::fs::create_dir_all(&run_dir).unwrap();
+    HomeRunModel {
+        target: Some(root.to_path_buf()),
+        run_id: Some(run_id.to_string()),
+        latest_pointer_invalid: false,
+        hydration_pending: false,
+        run_dir,
+    }
+}
+
+fn prime_artifact(app: &ShellApp, run: &HomeRunModel, leaf: &str) {
+    let target = run.target.as_deref().unwrap();
+    let run_id = run.run_id.as_deref().unwrap();
+    let _ = app
+        .workbench_cache()
+        .borrow_mut()
+        .run_artifact_text(target, run_id, leaf);
+}
+
+fn hydrate_home(app: &mut ShellApp) {
+    app.set_shell_view(crate::app::ShellView::Home);
+    app.hydrate_active_view_blocking();
+}
+
 #[test]
 fn artifact_state_maps_home_rail_glyphs() {
     assert_eq!(
@@ -66,11 +93,15 @@ fn artifact_state_maps_home_rail_glyphs() {
 #[test]
 fn home_artifact_row_shapes_display_cells() {
     let temp = tempfile::tempdir().unwrap();
-    let run_dir = temp.path();
+    let run = test_run(temp.path(), "run-context");
+    let run_dir = &run.run_dir;
+    let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     std::fs::write(run_dir.join("context.json"), r#"{"status":"partial"}"#).unwrap();
+    prime_artifact(&app, &run, "context.json");
 
     let row = home_artifact_row(
-        run_dir,
+        &app,
+        &run,
         RunArtifactSpec {
             label: "context snapshot",
             leaf: "context.json",
@@ -92,11 +123,15 @@ fn home_artifact_row_shapes_display_cells() {
 #[test]
 fn home_artifact_row_surfaces_malformed_json_artifacts() {
     let temp = tempfile::tempdir().unwrap();
-    let run_dir = temp.path();
+    let run = test_run(temp.path(), "run-malformed");
+    let run_dir = &run.run_dir;
+    let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     std::fs::write(run_dir.join("context.json"), "{not-json").unwrap();
+    prime_artifact(&app, &run, "context.json");
 
     let row = home_artifact_row(
-        run_dir,
+        &app,
+        &run,
         RunArtifactSpec {
             label: "context snapshot",
             leaf: "context.json",
@@ -118,11 +153,15 @@ fn home_artifact_row_surfaces_malformed_json_artifacts() {
 #[test]
 fn home_artifact_row_surfaces_non_file_artifact_paths() {
     let temp = tempfile::tempdir().unwrap();
-    let run_dir = temp.path();
+    let run = test_run(temp.path(), "run-non-file");
+    let run_dir = &run.run_dir;
+    let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     std::fs::create_dir(run_dir.join("context.json")).unwrap();
+    prime_artifact(&app, &run, "context.json");
 
     let row = home_artifact_row(
-        run_dir,
+        &app,
+        &run,
         RunArtifactSpec {
             label: "context snapshot",
             leaf: "context.json",
@@ -137,11 +176,15 @@ fn home_artifact_row_surfaces_non_file_artifact_paths() {
 #[test]
 fn home_artifact_row_keeps_markdown_reports_unstructured() {
     let temp = tempfile::tempdir().unwrap();
-    let run_dir = temp.path();
+    let run = test_run(temp.path(), "run-markdown");
+    let run_dir = &run.run_dir;
+    let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     std::fs::write(run_dir.join("report.md"), "{not-json").unwrap();
+    prime_artifact(&app, &run, "report.md");
 
     let row = home_artifact_row(
-        run_dir,
+        &app,
+        &run,
         RunArtifactSpec {
             label: "report",
             leaf: "report.md",
@@ -186,6 +229,7 @@ fn active_home_commands_offer_one_guided_workflow_entrypoint() {
     let temp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    hydrate_home(&mut app);
 
     let model = home_cockpit_model(&app);
 
@@ -210,6 +254,7 @@ fn home_cockpit_model_surfaces_invalid_latest_pointer() {
     create_invalid_latest_pointer(temp.path());
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    hydrate_home(&mut app);
 
     let model = home_cockpit_model(&app);
 
@@ -223,6 +268,7 @@ fn home_cockpit_model_surfaces_blank_latest_pointer() {
     write_blank_latest_pointer(temp.path());
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    hydrate_home(&mut app);
 
     let model = home_cockpit_model(&app);
 
@@ -232,10 +278,13 @@ fn home_cockpit_model_surfaces_blank_latest_pointer() {
 #[test]
 fn run_status_label_surfaces_malformed_run_json() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::write(temp.path().join(run_metadata_artifact_leaf()), "{not-json").unwrap();
+    let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    let run = test_run(temp.path(), "run-malformed-status");
+    std::fs::write(run.run_dir.join(run_metadata_artifact_leaf()), "{not-json").unwrap();
+    prime_artifact(&app, &run, run_metadata_artifact_leaf());
 
     assert_eq!(
-        run_status_label(temp.path()),
+        run_status_label(&app, &run),
         format!("malformed {}", run_metadata_artifact_leaf())
     );
 }
@@ -243,10 +292,13 @@ fn run_status_label_surfaces_malformed_run_json() {
 #[test]
 fn run_status_label_surfaces_non_object_run_json() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::write(temp.path().join(run_metadata_artifact_leaf()), "[]").unwrap();
+    let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    let run = test_run(temp.path(), "run-array-status");
+    std::fs::write(run.run_dir.join(run_metadata_artifact_leaf()), "[]").unwrap();
+    prime_artifact(&app, &run, run_metadata_artifact_leaf());
 
     assert_eq!(
-        run_status_label(temp.path()),
+        run_status_label(&app, &run),
         format!("malformed {}", run_metadata_artifact_leaf())
     );
 }
@@ -254,10 +306,13 @@ fn run_status_label_surfaces_non_object_run_json() {
 #[test]
 fn run_status_label_surfaces_non_file_run_json() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::create_dir(temp.path().join(run_metadata_artifact_leaf())).unwrap();
+    let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    let run = test_run(temp.path(), "run-directory-status");
+    std::fs::create_dir(run.run_dir.join(run_metadata_artifact_leaf())).unwrap();
+    prime_artifact(&app, &run, run_metadata_artifact_leaf());
 
     assert_eq!(
-        run_status_label(temp.path()),
+        run_status_label(&app, &run),
         format!("{} is not a file", run_metadata_artifact_leaf())
     );
 }
@@ -265,14 +320,17 @@ fn run_status_label_surfaces_non_file_run_json() {
 #[test]
 fn home_cockpit_artifact_rail_includes_manifest() {
     let temp = tempfile::tempdir().unwrap();
-    let run_dir = temp.path();
+    let run = test_run(temp.path(), "run-manifest");
+    let run_dir = &run.run_dir;
+    let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     std::fs::write(
         run_dir.join("artifacts.json"),
         r#"{"runId":"run-home","artifacts":[]}"#,
     )
     .unwrap();
+    prime_artifact(&app, &run, "artifacts.json");
 
-    let rows = home_artifact_rows(run_dir);
+    let rows = home_artifact_rows(&app, &run);
 
     assert!(rows.iter().any(|row| {
         row.cells[1] == "manifest"
@@ -284,8 +342,11 @@ fn home_cockpit_artifact_rail_includes_manifest() {
 #[test]
 fn placeholder_attack_surface_does_not_render_zero_risk() {
     let temp = tempfile::tempdir().unwrap();
-    let run_dir = ui_run_dir(Some(temp.path()), "latest");
-    std::fs::create_dir_all(&run_dir).unwrap();
+    let run_id = "run-placeholder-surface";
+    let summary =
+        kuzushi_core::RunSummary::running(run_id, "tool", None, temp.path().display().to_string());
+    kuzushi_core::write_run_summary(temp.path(), &summary).unwrap();
+    let run_dir = ui_run_dir(Some(temp.path()), run_id);
     std::fs::write(
         run_dir.join("attack-surface.json"),
         r#"{"status":"skipped"}"#,
@@ -294,6 +355,7 @@ fn placeholder_attack_surface_does_not_render_zero_risk() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     *app.findings_mut() = vec![finding("sql-injection", kuzushi_core::Severity::High, 88)];
+    hydrate_home(&mut app);
 
     let model = home_cockpit_model(&app);
 

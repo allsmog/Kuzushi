@@ -2,8 +2,8 @@
 mod tests {
     use super::super::*;
     use kuzushi_core::{
-        AgentQueryRequest, AgentRuntime, AgentRuntimeOptions, Finding, RuntimeConfig, RuntimeKind,
-        ScanCancellation, Severity, TriageRequest,
+        AgentQueryControl, AgentQueryRequest, AgentRuntime, AgentRuntimeOptions, Finding,
+        RuntimeConfig, RuntimeKind, ScanCancellation, Severity, TriageRequest,
     };
     use std::collections::BTreeMap;
     use std::time::{Duration, Instant};
@@ -160,6 +160,49 @@ while :; do :; done
             "cancel should not wait for the bridge timeout"
         );
         assert!(error.contains("cancelled"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn controlled_query_deadline_kills_running_bridge() {
+        let tmp = tempfile::tempdir().unwrap();
+        let started = tmp.path().join("started");
+        let bridge = tmp.path().join("bridge.sh");
+        std::fs::write(
+            &bridge,
+            format!(
+                "#!/bin/sh\nprintf started > {}\nwhile :; do :; done\n",
+                started.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bridge, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let config = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(100),
+            anthropic_oauth: None,
+        };
+        let runtime = LangGraphRuntime::from_runtime_config(&config, ".").unwrap();
+        let started_at = Instant::now();
+        let error = runtime
+            .query_blocking_controlled(
+                AgentQueryRequest::new("openai:gpt-5.5", ".", "sys", "prompt"),
+                AgentQueryControl::new(None, Some(Instant::now() + Duration::from_millis(500))),
+            )
+            .unwrap_err()
+            .to_string();
+
+        assert!(started_at.elapsed() < Duration::from_secs(2));
+        assert!(error.contains("deadline"), "{error}");
+        assert!(started.exists());
     }
 
     #[cfg(unix)]

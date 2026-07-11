@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 pub(in crate::code_nav) use scan_c_like::*;
 pub(in crate::code_nav) use scan_go::*;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::Path;
 mod list_definitions;
 mod read_definition;

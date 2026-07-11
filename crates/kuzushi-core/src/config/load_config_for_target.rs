@@ -1,4 +1,5 @@
 use super::*;
+use super::config_file_io::{read_optional_config, write_config_body};
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -100,11 +101,9 @@ pub fn persist_global_model_selection(
 }
 
 fn global_config_for_write(path: &Path) -> Result<V2Config> {
-    if !path.exists() {
+    let Some(raw) = read_optional_config(path)? else {
         return Ok(V2Config::default());
-    }
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
+    };
     toml::from_str(&raw).with_context(|| format!("Could not parse {}", path.display()))
 }
 
@@ -124,10 +123,6 @@ pub(crate) fn default_config_body() -> Result<String> {
     ))
 }
 
-pub(crate) fn write_config_body(path: &Path, body: String) -> Result<()> {
-    fs::write(path, body).with_context(|| format!("Could not write {}", path.display()))
-}
-
 fn merge_project_file(config: &mut V2Config, path: Option<PathBuf>) -> Result<()> {
     match path {
         Some(path) => merge_existing_file(config, path, ConfigSource::Project),
@@ -136,17 +131,20 @@ fn merge_project_file(config: &mut V2Config, path: Option<PathBuf>) -> Result<()
 }
 
 fn merge_existing_file(config: &mut V2Config, path: PathBuf, source: ConfigSource) -> Result<()> {
-    if !path.exists() {
+    let Some(raw) = read_optional_config(&path)? else {
         return Ok(());
-    }
-    merge_file(config, &path, source)
+    };
+    merge_config_body(config, &path, source, &raw)
 }
 
-pub(crate) fn merge_file(config: &mut V2Config, path: &Path, source: ConfigSource) -> Result<()> {
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
+fn merge_config_body(
+    config: &mut V2Config,
+    path: &Path,
+    source: ConfigSource,
+    raw: &str,
+) -> Result<()> {
     let patch: PartialConfig =
-        toml::from_str(&raw).with_context(|| format!("Could not parse {}", path.display()))?;
+        toml::from_str(raw).with_context(|| format!("Could not parse {}", path.display()))?;
     reject_untrusted_runtime_overrides(path, &patch, source)?;
     merge_config(config, patch);
     Ok(())
@@ -237,15 +235,9 @@ fn forbidden_operator_fields(operator: Option<&PartialOperatorConfig>) -> Vec<&'
             "operator.trusted_modules",
             operator.trusted_modules.is_some(),
         ),
-        (
-            "operator.signature_keys",
-            operator.signature_keys.is_some(),
-        ),
+        ("operator.signature_keys", operator.signature_keys.is_some()),
         ("operator.mcp_mounts", operator.mcp_mounts.is_some()),
-        (
-            "operator.fuzz_executors",
-            operator.fuzz_executors.is_some(),
-        ),
+        ("operator.fuzz_executors", operator.fuzz_executors.is_some()),
     ]
     .into_iter()
     .filter_map(|(field, present)| present.then_some(field))

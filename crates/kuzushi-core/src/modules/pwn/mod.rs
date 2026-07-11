@@ -15,6 +15,7 @@ const PWN_STATE_VERSION: u32 = 1;
 const DEFAULT_REVNG_IMAGE: &str = "revng/revng:latest";
 const PWN_AUTO_MAX_ACTIONS: usize = 6;
 const PWN_AUTO_MAX_ROUNDS: usize = 3;
+const MAX_PWN_STATE_BYTES: usize = 8 * 1024 * 1024;
 
 pub(in crate::modules) fn pwn_module() -> BuiltinModule {
     builtin_module(
@@ -29,15 +30,15 @@ pub(in crate::modules) fn pwn_module() -> BuiltinModule {
 
 fn pwn_tools() -> Vec<ToolDescriptor> {
     vec![
-        pwn_profile_binary_tool(),
-        pwn_reverse_tool(),
-        pwn_state_tool(),
-        pwn_calibrate_local_tool(),
-        pwn_run_candidates_tool(),
-        pwn_auto_solve_tool(),
-        pwn_menu_probe_tool(),
-        pwn_exploit_run_tool(),
-        pwn_heap_uaf_scan_tool(),
+        pwn_profile_binary_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        pwn_reverse_tool().with_policy(external_action_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        pwn_state_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        pwn_calibrate_local_tool().with_policy(external_action_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        pwn_run_candidates_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        pwn_auto_solve_tool().with_policy(external_action_policy(ToolPhase::Hunt, RuntimeRequirement::Always, FindingStoreRequirement::Optional)),
+        pwn_menu_probe_tool().with_policy(external_action_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        pwn_exploit_run_tool().with_policy(external_action_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        pwn_heap_uaf_scan_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
     ]
 }
 
@@ -46,18 +47,22 @@ fn pwn_profile_binary_tool() -> ToolDescriptor {
         "pwn:profile-binary",
         "Profile ELF/checksec/libc/loader/RPATH/architecture facts for a challenge binary.",
         vec![
-            opt("binary", OptionType::Path, "Binary to profile.").required(),
+            opt("binary", OptionType::Path, "Binary to profile.")
+                .external_read()
+                .required(),
             opt(
                 "libc",
                 OptionType::Path,
                 "Optional libc paired with the challenge binary.",
             )
+            .external_read()
             .advanced(),
             opt(
                 "ld",
                 OptionType::Path,
                 "Optional dynamic loader paired with the challenge binary.",
             )
+            .external_read()
             .advanced(),
         ],
     )
@@ -68,7 +73,9 @@ fn pwn_reverse_tool() -> ToolDescriptor {
         "pwn:reverse",
         "Use rev.ng-backed reverse engineering plus host strings/symbol summaries to identify functions, loops, alloc/free sites, and dangerous IO.",
         vec![
-            opt("binary", OptionType::Path, "Binary to reverse.").required(),
+            opt("binary", OptionType::Path, "Binary to reverse.")
+                .external_read()
+                .required(),
             opt("backend", OptionType::Enum, "Reverse-engineering backend.")
                 .choices(&["revng"])
                 .default(json!("revng")),
@@ -87,6 +94,7 @@ fn pwn_reverse_tool() -> ToolDescriptor {
                 "Explicit native rev.ng binary path.",
             )
             .aliases(&["revng_native"])
+            .executable()
             .advanced(),
             opt(
                 "revngContainerRuntime",
@@ -108,7 +116,8 @@ fn pwn_state_tool() -> ToolDescriptor {
                 "binary",
                 OptionType::Path,
                 "Binary whose pwn state should be read or updated.",
-            ),
+            )
+            .external_read(),
             opt(
                 "stateId",
                 OptionType::String,
@@ -142,7 +151,9 @@ fn pwn_calibrate_local_tool() -> ToolDescriptor {
         "pwn:calibrate-local",
         "Run a local binary briefly and capture /proc/<pid>/maps plus script output for leak/base calibration.",
         vec![
-            opt("binary", OptionType::Path, "Local binary to run.").required(),
+            opt("binary", OptionType::Path, "Local binary to run.")
+                .external_read()
+                .required(),
             opt("argv", OptionType::StringList, "Additional argv values."),
             opt("env", OptionType::Json, "Environment object for the process."),
             opt("script", OptionType::String, "Bytes sent to stdin after spawn."),
@@ -196,6 +207,7 @@ fn pwn_auto_solve_tool() -> ToolDescriptor {
                 OptionType::Path,
                 "Target binary, shared object, or challenge directory.",
             )
+            .external_read()
             .required(),
             model_option(),
         ],
@@ -207,7 +219,9 @@ fn pwn_menu_probe_tool() -> ToolDescriptor {
         "pwn:menu-probe",
         "Spawn a menu-driven challenge binary and probe each numbered choice to capture prompts, response shape, and refcount/UAF hints.",
         vec![
-            opt("binary", OptionType::Path, "Binary or loader+binary path to probe.").required(),
+            opt("binary", OptionType::Path, "Binary or loader+binary path to probe.")
+                .external_read()
+                .required(),
             opt("argv", OptionType::StringList, "Additional argv values for the loader/binary."),
             opt("env", OptionType::Json, "Environment object for the process."),
             opt("maxChoices", OptionType::Int, "Upper bound on menu choices to probe.")
@@ -225,12 +239,14 @@ fn pwn_exploit_run_tool() -> ToolDescriptor {
         "pwn:exploit-run",
         "Execute a pwntools-style exploit script under a wall-clock timeout and capture stdout/stderr plus any LEAK/FLAG markers.",
         vec![
-            opt("script", OptionType::Path, "Python exploit script to invoke.").required(),
+            opt("script", OptionType::Path, "Python exploit script to invoke.")
+                .external_read()
+                .required(),
             opt("python", OptionType::String, "Interpreter to invoke.")
                 .default(json!("python3")),
             opt("argv", OptionType::StringList, "Additional argv passed to the script."),
             opt("env", OptionType::Json, "Environment object for the script invocation."),
-            opt("workdir", OptionType::Path, "Working directory."),
+            opt("workdir", OptionType::Path, "Working directory.").external_read(),
             opt("timeoutMs", OptionType::Int, "Wall-clock timeout in milliseconds.")
                 .aliases(&["timeout_ms"])
                 .default(json!(15000)),
@@ -242,7 +258,9 @@ fn pwn_heap_uaf_scan_tool() -> ToolDescriptor {
     tool_with_options(
         "pwn:heap-uaf-scan",
         "Scan a binary for refcount-based free patterns and other heap UAF indicators.",
-        vec![opt("binary", OptionType::Path, "Binary to scan.").required()],
+        vec![opt("binary", OptionType::Path, "Binary to scan.")
+            .external_read()
+            .required()],
     )
 }
 
@@ -1343,7 +1361,14 @@ fn query_pwn_strategy_planner(
     round: usize,
 ) -> Result<Value> {
     let facts = target_facts(target);
-    let schema = json!({
+    let prompt = pwn_strategy_prompt(&facts, profile, reverse_summary, observations, round)?;
+    let request = pwn_strategy_request(model, target, prompt);
+    let response = runtime.query_blocking(request)?;
+    pwn_strategy_response_json(response)
+}
+
+fn pwn_strategy_schema() -> Value {
+    json!({
         "type": "object",
         "additionalProperties": false,
         "required": ["strategy", "reason", "confidence", "actions"],
@@ -1365,46 +1390,58 @@ fn query_pwn_strategy_planner(
             "actions": {
                 "type": "array",
                 "maxItems": PWN_AUTO_MAX_ACTIONS,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": ["operation", "reason"],
-                    "properties": {
-                        "operation": {
-                            "type": "string",
-                            "enum": ["reverse-function", "calibrate-local", "record-primitive", "stop"]
-                        },
-                        "reason": { "type": "string" },
-                        "function": { "type": "string" },
-                        "primitive": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": ["kind", "confidence", "evidence", "remoteSafe"],
-                            "properties": {
-                                "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                        "leak",
-                                        "arbitrary-read",
-                                        "arbitrary-write",
-                                        "heap-overlap",
-                                        "tcache-poison",
-                                        "stack-leak",
-                                        "control-flow-target"
-                                    ]
-                                },
-                                "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
-                                "evidence": { "type": "string" },
-                                "remoteSafe": { "type": "boolean" }
-                            }
-                        }
-                    }
-                }
+                "items": pwn_action_schema()
             },
             "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
         }
-    });
-    let prompt = format!(
+    })
+}
+
+fn pwn_action_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operation", "reason"],
+        "properties": {
+            "operation": {
+                "type": "string",
+                "enum": ["reverse-function", "calibrate-local", "record-primitive", "stop"]
+            },
+            "reason": { "type": "string" },
+            "function": { "type": "string" },
+            "primitive": pwn_primitive_schema()
+        }
+    })
+}
+
+fn pwn_primitive_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "confidence", "evidence", "remoteSafe"],
+        "properties": {
+            "kind": {
+                "type": "string",
+                "enum": [
+                    "leak", "arbitrary-read", "arbitrary-write", "heap-overlap",
+                    "tcache-poison", "stack-leak", "control-flow-target"
+                ]
+            },
+            "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+            "evidence": { "type": "string" },
+            "remoteSafe": { "type": "boolean" }
+        }
+    })
+}
+
+fn pwn_strategy_prompt(
+    facts: &Value,
+    profile: &Value,
+    reverse_summary: &Value,
+    observations: &[Value],
+    round: usize,
+) -> Result<String> {
+    Ok(format!(
         "Build a generic pwn workflow plan for these target facts.\n\
          Use generic-analysis when the target should be profiled/reversed/calibrated. \
          Use unsupported only when it is not a pwnable binary or challenge artifact.\n\
@@ -1419,17 +1456,25 @@ fn query_pwn_strategy_planner(
         serde_json::to_string_pretty(profile)?,
         serde_json::to_string_pretty(reverse_summary)?,
         serde_json::to_string_pretty(observations)?
-    );
-    let request = AgentQueryRequest::new(
+    ))
+}
+
+fn pwn_strategy_request(model: &str, target: &Path, prompt: String) -> AgentQueryRequest {
+    AgentQueryRequest::new(
         model,
-        std::env::current_dir().context("resolve current directory for pwn planner")?,
+        target.to_path_buf(),
         "You are Kuzushi's binary exploitation strategy planner. Return strict JSON. Do not generate exploit code or shell commands.",
         prompt,
     )
-    .with_structured_output(AgentStructuredOutput::json_schema("pwn_auto_solve_plan", schema))
+    .with_structured_output(AgentStructuredOutput::json_schema(
+        "pwn_auto_solve_plan",
+        pwn_strategy_schema(),
+    ))
     .with_max_output_tokens(600)
-    .with_temperature(0.0);
-    let response = runtime.query_blocking(request)?;
+    .with_temperature(0.0)
+}
+
+fn pwn_strategy_response_json(response: crate::runtime::AgentQueryResponse) -> Result<Value> {
     if let Some(structured) = response.structured {
         return Ok(structured);
     }
@@ -1903,8 +1948,12 @@ fn state_identity(input: &Value) -> Result<(String, BinaryMetadata)> {
 }
 
 fn load_or_new_state(path: &Path, binary: BinaryMetadata) -> Result<PwnState> {
-    if path.exists() {
-        return read_state(path);
+    match fs::symlink_metadata(path) {
+        Ok(_) => return read_state(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("could not inspect {}", path.display()));
+        }
     }
     Ok(PwnState {
         version: PWN_STATE_VERSION,
@@ -1920,18 +1969,20 @@ fn load_or_new_state(path: &Path, binary: BinaryMetadata) -> Result<PwnState> {
 }
 
 fn read_state(path: &Path) -> Result<PwnState> {
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("could not read {}", path.display()))?;
+    let (workspace_root, _) = pwn_state_workspace_location(path)?;
+    let raw = crate::bounded_file::read_utf8_text_within(workspace_root, path, MAX_PWN_STATE_BYTES)
+        .with_context(|| format!("could not read {}", path.display()))?;
     let mut value: Value = serde_json::from_str(&raw).context("invalid pwn state JSON")?;
     migrate_state_value(&mut value);
     serde_json::from_value(value).context("invalid pwn state schema")
 }
 
 fn save_state(path: &Path, state: &PwnState) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, serde_json::to_string_pretty(state)?)
+    let (workspace_root, relative) = pwn_state_workspace_location(path)?;
+    let mut body = serde_json::to_vec_pretty(state)?;
+    body.push(b'\n');
+    crate::workspace::write_workspace_state_file(workspace_root, relative, &body)
+        .map(|_| ())
         .with_context(|| format!("could not write {}", path.display()))
 }
 
@@ -1954,15 +2005,55 @@ fn migrate_state_value(value: &mut Value) {
 }
 
 fn state_path_for(ctx: &ToolExecutionContext<'_>, state_id: &str) -> Result<PathBuf> {
+    validate_state_id(state_id)?;
     let root = ctx
         .workspace
         .map(|workspace| workspace.root().to_path_buf())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        .context("pwn state requires an explicit active workspace")?;
     Ok(root
         .join(".kuzushi")
         .join("pwn")
         .join(state_id)
         .join("state.json"))
+}
+
+fn validate_state_id(state_id: &str) -> Result<()> {
+    anyhow::ensure!(
+        !state_id.is_empty() && state_id.len() <= 128,
+        "pwn stateId must contain between 1 and 128 characters"
+    );
+    let mut characters = state_id.chars();
+    anyhow::ensure!(
+        characters
+            .next()
+            .is_some_and(|character| character.is_ascii_alphanumeric()),
+        "pwn stateId must start with an ASCII letter or digit"
+    );
+    anyhow::ensure!(
+        characters.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        }),
+        "pwn stateId may contain only ASCII letters, digits, '.', '-', and '_'"
+    );
+    Ok(())
+}
+
+fn pwn_state_workspace_location(path: &Path) -> Result<(&Path, &Path)> {
+    let state_root = path
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == ".kuzushi"))
+        .with_context(|| format!("pwn state path {} is outside .kuzushi", path.display()))?;
+    let workspace_root = state_root
+        .parent()
+        .with_context(|| format!("pwn state path {} has no workspace parent", path.display()))?;
+    let relative = path.strip_prefix(workspace_root).with_context(|| {
+        format!(
+            "pwn state path {} is outside workspace {}",
+            path.display(),
+            workspace_root.display()
+        )
+    })?;
+    Ok((workspace_root, relative))
 }
 
 fn required_file(input: &Value, name: &str) -> Result<PathBuf> {
@@ -1987,28 +2078,25 @@ fn required_existing_path(input: &Value, name: &str) -> Result<PathBuf> {
         .get(name)
         .and_then(Value::as_str)
         .with_context(|| format!("{name} is required"))?;
-    let path = PathBuf::from(raw);
-    let path = if path.is_absolute() {
-        path
-    } else {
-        std::env::current_dir()?.join(path)
-    };
+    let path = require_absolute_prepared_path(PathBuf::from(raw), name)?;
     fs::canonicalize(&path).with_context(|| format!("{name} does not exist: {}", path.display()))
 }
 
 fn canonical_file(raw: &str) -> Result<PathBuf> {
-    let path = PathBuf::from(raw);
-    let path = if path.is_absolute() {
-        path
-    } else {
-        std::env::current_dir()?.join(path)
-    };
+    let path = require_absolute_prepared_path(PathBuf::from(raw), "file")?;
     let canonical = fs::canonicalize(&path)
         .with_context(|| format!("file does not exist: {}", path.display()))?;
     if !canonical.is_file() {
         anyhow::bail!("path is not a file: {}", canonical.display());
     }
     Ok(canonical)
+}
+
+fn require_absolute_prepared_path(path: PathBuf, name: &str) -> Result<PathBuf> {
+    if !path.is_absolute() {
+        anyhow::bail!("{name} must be resolved against the active workspace before dispatch");
+    }
+    Ok(path)
 }
 
 fn file_hash(path: &Path) -> Result<String> {
@@ -2278,10 +2366,10 @@ fn installed_revng() -> Option<PathBuf> {
 }
 
 fn local_revng() -> Option<PathBuf> {
-    std::env::current_dir()
-        .ok()
-        .map(|cwd| cwd.join("revng").join("revng"))
-        .filter(|path| path.is_file())
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .map(|root| root.join("revng").join("revng"))
+        .find(|path| path.is_file())
 }
 
 fn container_runtime(options: &RevngOptions) -> Option<String> {
@@ -2445,6 +2533,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let path = state_path_for(&ctx, "abc").unwrap();
         let mut state = load_or_new_state(
@@ -2470,51 +2560,213 @@ mod tests {
     }
 
     #[test]
-    fn auto_solve_planner_uses_configured_model() {
-        struct RecordingRuntime {
-            requests: Mutex<Vec<AgentQueryRequest>>,
-        }
-
-        impl AgentRuntime for RecordingRuntime {
-            fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-                self.requests.lock().unwrap().push(request);
-                Ok(AgentQueryResponse {
-                    structured: Some(json!({
-                        "strategy": "generic-analysis",
-                        "reason": "target should be profiled and reversed before exploit attempts",
-                        "exploitPath": "unknown",
-                        "nextActions": ["profile binary", "summarize dangerous IO"],
-                        "actions": [
-                            {
-                                "operation": "stop",
-                                "reason": "unit test planner response should not run further actions"
-                            }
-                        ],
-                        "confidence": 0.91
-                    })),
-                    ..AgentQueryResponse::default()
-                })
-            }
-
-            fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
-                anyhow::bail!("triage is not used by pwn auto-solve planner")
-            }
-        }
-
+    fn state_id_cannot_escape_the_workspace_state_directory() {
         let temp = tempdir().unwrap();
-        fs::write(temp.path().join("challenge"), b"\x7fELF").unwrap();
-
-        let mut config = V2Config::default();
-        config.model = Some("openai:gpt-test".to_string());
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
-            workspace: None,
+            workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
-        let runtime = RecordingRuntime {
-            requests: Mutex::new(Vec::new()),
+
+        for state_id in ["", "../escape", "a/b", r"a\b", ".hidden", "a:drive"] {
+            assert!(
+                state_path_for(&ctx, state_id).is_err(),
+                "accepted {state_id:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_reader_and_writer_do_not_follow_final_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
+        let path = state_path_for(&ctx, "safe-id").unwrap();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "sentinel").unwrap();
+        symlink(outside.path(), &path).unwrap();
+        let state = PwnState {
+            version: PWN_STATE_VERSION,
+            state_id: "safe-id".to_string(),
+            binary: BinaryMetadata {
+                path: "bin".to_string(),
+                hash: "safe-id".to_string(),
+                arch: None,
+                libc: None,
+                ld: None,
+            },
+            primitives: Vec::new(),
+            leaks: Vec::new(),
+            candidate_bases: Vec::new(),
+            calibration: Vec::new(),
+            failed_strategies: Vec::new(),
+            artifacts: Vec::new(),
+        };
+
+        assert!(save_state(&path, &state).is_err());
+        assert!(read_state(&path).is_err());
+        assert_eq!(fs::read_to_string(outside.path()).unwrap(), "sentinel");
+    }
+
+    struct RecordingRuntime {
+        requests: Mutex<Vec<AgentQueryRequest>>,
+    }
+
+    impl RecordingRuntime {
+        fn new() -> Self {
+            Self {
+                requests: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl AgentRuntime for RecordingRuntime {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.requests.lock().unwrap().push(request);
+            Ok(AgentQueryResponse {
+                structured: Some(planner_stop_response()),
+                ..AgentQueryResponse::default()
+            })
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!("triage is not used by pwn auto-solve planner")
+        }
+    }
+
+    struct SequencedRuntime {
+        requests: Mutex<Vec<AgentQueryRequest>>,
+        responses: Mutex<Vec<Value>>,
+    }
+
+    impl SequencedRuntime {
+        fn replan_fixture() -> Self {
+            Self {
+                requests: Mutex::new(Vec::new()),
+                responses: Mutex::new(vec![record_primitive_response(), operator_stop_response()]),
+            }
+        }
+    }
+
+    impl AgentRuntime for SequencedRuntime {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.requests.lock().unwrap().push(request);
+            let response = self.responses.lock().unwrap().remove(0);
+            Ok(AgentQueryResponse {
+                structured: Some(response),
+                ..AgentQueryResponse::default()
+            })
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!("triage is not used by pwn auto-solve planner")
+        }
+    }
+
+    fn pwn_test_context<'a>(
+        config: &'a V2Config,
+        workspace: Option<&'a WorkspaceTarget>,
+    ) -> ToolExecutionContext<'a> {
+        ToolExecutionContext {
+            config,
+            workspace,
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        }
+    }
+
+    fn planner_stop_response() -> Value {
+        json!({
+            "strategy": "generic-analysis",
+            "reason": "target should be profiled and reversed before exploit attempts",
+            "exploitPath": "unknown",
+            "nextActions": ["profile binary", "summarize dangerous IO"],
+            "actions": [{
+                "operation": "stop",
+                "reason": "unit test planner response should not run further actions"
+            }],
+            "confidence": 0.91
+        })
+    }
+
+    fn record_primitive_response() -> Value {
+        json!({
+            "strategy": "generic-analysis",
+            "reason": "record a fact first",
+            "exploitPath": "unknown",
+            "actions": [{
+                "operation": "record-primitive",
+                "reason": "record observed IO",
+                "primitive": {
+                    "kind": "leak",
+                    "confidence": 0.4,
+                    "evidence": "controlled output path",
+                    "remoteSafe": false
+                }
+            }],
+            "confidence": 0.6
+        })
+    }
+
+    fn operator_stop_response() -> Value {
+        json!({
+            "strategy": "generic-analysis",
+            "reason": "observations are sufficient for now",
+            "exploitPath": "unknown",
+            "actions": [{
+                "operation": "stop",
+                "reason": "wait for operator review"
+            }],
+            "confidence": 0.7
+        })
+    }
+
+    fn seed_replan_state(ctx: &ToolExecutionContext<'_>, root: &Path) -> (PathBuf, PathBuf) {
+        let binary = root.join("challenge");
+        fs::write(&binary, b"\x7fELF").unwrap();
+        let state_path = state_path_for(ctx, "state-1").unwrap();
+        let state = load_or_new_state(
+            &state_path,
+            BinaryMetadata {
+                path: binary.display().to_string(),
+                hash: "state-1".to_string(),
+                arch: None,
+                libc: None,
+                ld: None,
+            },
+        )
+        .unwrap();
+        save_state(&state_path, &state).unwrap();
+        (binary, state_path)
+    }
+
+    #[test]
+    fn auto_solve_planner_uses_configured_model() {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join("challenge"), b"\x7fELF").unwrap();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-test".to_string());
+        let ctx = pwn_test_context(&config, None);
+        let runtime = RecordingRuntime::new();
         let report = plan_auto_solve_strategy(
             &json!({}),
             &ctx,
@@ -2535,81 +2787,12 @@ mod tests {
 
     #[test]
     fn auto_solve_loop_replans_after_observations() {
-        struct SequencedRuntime {
-            requests: Mutex<Vec<AgentQueryRequest>>,
-            responses: Mutex<Vec<Value>>,
-        }
-
-        impl AgentRuntime for SequencedRuntime {
-            fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-                self.requests.lock().unwrap().push(request);
-                let response = self.responses.lock().unwrap().remove(0);
-                Ok(AgentQueryResponse {
-                    structured: Some(response),
-                    ..AgentQueryResponse::default()
-                })
-            }
-
-            fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
-                anyhow::bail!("triage is not used by pwn auto-solve planner")
-            }
-        }
-
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let config = V2Config::default();
-        let ctx = ToolExecutionContext {
-            config: &config,
-            workspace: Some(&workspace),
-            findings_store: None,
-            trace: None,
-        };
-        let binary = temp.path().join("challenge");
-        fs::write(&binary, b"\x7fELF").unwrap();
-        let state_path = state_path_for(&ctx, "state-1").unwrap();
-        let state = load_or_new_state(
-            &state_path,
-            BinaryMetadata {
-                path: binary.display().to_string(),
-                hash: "state-1".to_string(),
-                arch: None,
-                libc: None,
-                ld: None,
-            },
-        )
-        .unwrap();
-        save_state(&state_path, &state).unwrap();
-        let runtime = SequencedRuntime {
-            requests: Mutex::new(Vec::new()),
-            responses: Mutex::new(vec![
-                json!({
-                    "strategy": "generic-analysis",
-                    "reason": "record a fact first",
-                    "exploitPath": "unknown",
-                    "actions": [{
-                        "operation": "record-primitive",
-                        "reason": "record observed IO",
-                        "primitive": {
-                            "kind": "leak",
-                            "confidence": 0.4,
-                            "evidence": "controlled output path",
-                            "remoteSafe": false
-                        }
-                    }],
-                    "confidence": 0.6
-                }),
-                json!({
-                    "strategy": "generic-analysis",
-                    "reason": "observations are sufficient for now",
-                    "exploitPath": "unknown",
-                    "actions": [{
-                        "operation": "stop",
-                        "reason": "wait for operator review"
-                    }],
-                    "confidence": 0.7
-                }),
-            ]),
-        };
+        let ctx = pwn_test_context(&config, Some(&workspace));
+        let (binary, state_path) = seed_replan_state(&ctx, temp.path());
+        let runtime = SequencedRuntime::replan_fixture();
 
         let report = run_pwn_observe_replan_loop(
             &runtime,

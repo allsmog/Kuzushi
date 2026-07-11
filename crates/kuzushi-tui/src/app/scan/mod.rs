@@ -3,7 +3,6 @@ pub(crate) use super::*;
 
 use self::artifacts::{
     append_run_status_event, append_trace_step, short_label, write_run_failure_handoff,
-    write_run_summary,
 };
 use self::findings::short_fingerprint;
 use self::workers::{scan_worker, LiveTraceBudget};

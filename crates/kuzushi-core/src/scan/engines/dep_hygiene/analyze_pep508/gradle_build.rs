@@ -37,10 +37,7 @@ fn gradle_dependency(line: &str) -> Option<GradleDependency> {
     })
 }
 
-fn gradle_finding(
-    file_path: &Path,
-    dependency: GradleDependency,
-) -> Option<DepHygieneFinding> {
+fn gradle_finding(file_path: &Path, dependency: GradleDependency) -> Option<DepHygieneFinding> {
     if is_floating_gradle_version(&dependency.version) {
         return Some(DepHygieneFinding::new(
             ManifestKind::GradleBuild,
@@ -48,7 +45,10 @@ fn gradle_finding(
             dependency.name,
             dependency.version,
             DepHygieneSeverity::High,
-            format!("{}: floating version - accepts any future package release without review", dependency.scope),
+            format!(
+                "{}: floating version - accepts any future package release without review",
+                dependency.scope
+            ),
         ));
     }
     if is_open_ended_gradle_range(&dependency.version) {
@@ -58,7 +58,10 @@ fn gradle_finding(
             dependency.name,
             dependency.version,
             DepHygieneSeverity::Medium,
-            format!("{}: open-ended range; add an upper bound to fix the supply-chain surface", dependency.scope),
+            format!(
+                "{}: open-ended range; add an upper bound to fix the supply-chain surface",
+                dependency.scope
+            ),
         ));
     }
     None
@@ -109,7 +112,8 @@ fn gradle_coordinate(value: &str) -> Option<(String, Option<String>)> {
 
 fn gradle_map_coordinate(line: &str) -> Option<(String, Option<String>)> {
     let group = gradle_named_value(line, "group")?;
-    let artifact = gradle_named_value(line, "name").or_else(|| gradle_named_value(line, "artifact"))?;
+    let artifact =
+        gradle_named_value(line, "name").or_else(|| gradle_named_value(line, "artifact"))?;
     let version = gradle_named_value(line, "version");
     coordinate_parts(&group, &artifact, version.as_deref())
 }

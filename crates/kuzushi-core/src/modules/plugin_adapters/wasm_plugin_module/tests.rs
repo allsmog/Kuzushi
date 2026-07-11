@@ -8,7 +8,8 @@ use crate::modules::ModuleRegistry;
 fn registry_runs_wasm_plugin_and_commits_v3_observation() {
     let fixture = wasm_plugin_fixture();
     let config = V2Config::default();
-    let ctx = wasm_plugin_context(&config);
+    let workspace = WorkspaceTarget::new(fixture.target.path()).unwrap();
+    let ctx = wasm_plugin_context(&config, &workspace);
 
     let result = execute_wasm_plugin_fixture(&fixture, &ctx);
 
@@ -68,12 +69,17 @@ fn wasm_plugin_fixture() -> WasmPluginFixture {
     }
 }
 
-fn wasm_plugin_context(config: &V2Config) -> ToolExecutionContext<'_> {
+fn wasm_plugin_context<'a>(
+    config: &'a V2Config,
+    workspace: &'a WorkspaceTarget,
+) -> ToolExecutionContext<'a> {
     ToolExecutionContext {
         config,
-        workspace: None,
+        workspace: Some(workspace),
         findings_store: None,
         trace: None,
+cancellation: None,
+authorization: Default::default(),
     }
 }
 

@@ -6,7 +6,7 @@ pub(crate) fn build_taint_iris_next_plan(
 ) -> Result<TaintIrisNextPlan> {
     let roots = resolve_taint_iris_next_roots(target, &options)?;
     let planning = load_taint_iris_next_planning_context(target, &roots.repo_root, &options)?;
-    let catalog_selection = select_taint_iris_next_catalog(&roots.repo_root, &options, &planning);
+    let catalog_selection = select_taint_iris_next_catalog(&roots.repo_root, &options, &planning)?;
     let catalog = catalog_selection.catalog;
     let structural_queries = build_taint_iris_next_structural_queries(&catalog);
     let prompt_catalog = render_taint_iris_next_catalog(&catalog);
@@ -134,14 +134,14 @@ fn select_taint_iris_next_catalog(
     repo_root: &Path,
     options: &TaintIrisNextInput,
     planning: &TaintIrisNextPlanningContext,
-) -> TaintIrisNextCatalogSelection {
+) -> Result<TaintIrisNextCatalogSelection> {
     let catalog = initial_taint_iris_next_catalog(repo_root, options, planning);
-    let discovered_signals = discover_taint_iris_next_plan_signals(repo_root, options, &catalog);
+    let discovered_signals = discover_taint_iris_next_plan_signals(repo_root, options, &catalog)?;
     let catalog = finalize_taint_iris_next_catalog(catalog, options, planning, &discovered_signals);
-    TaintIrisNextCatalogSelection {
+    Ok(TaintIrisNextCatalogSelection {
         catalog,
         discovered_signals,
-    }
+    })
 }
 
 fn initial_taint_iris_next_catalog(
@@ -221,12 +221,12 @@ fn discover_taint_iris_next_plan_signals(
     repo_root: &Path,
     options: &TaintIrisNextInput,
     catalog: &[TaintIrisNextRankedCatalogEntry],
-) -> DiscoveredSignals {
+) -> Result<DiscoveredSignals> {
     let catalog_markers = catalog_regex_markers_for_discovery(catalog);
     let discovered_signals =
         run_taint_iris_next_discovery_for_plan(repo_root, options, &catalog_markers);
-    persist_taint_iris_next_discovered_signals(repo_root, &discovered_signals);
-    discovered_signals
+    persist_taint_iris_next_discovered_signals(repo_root, &discovered_signals)?;
+    Ok(discovered_signals)
 }
 
 fn finalize_taint_iris_next_catalog(
@@ -691,9 +691,7 @@ struct PhantomFocusSignalSources {
     discovery_sinks_by_cwe: BTreeMap<String, Vec<String>>,
 }
 
-fn represented_catalog_cwes(
-    catalog: &[TaintIrisNextRankedCatalogEntry],
-) -> BTreeSet<String> {
+fn represented_catalog_cwes(catalog: &[TaintIrisNextRankedCatalogEntry]) -> BTreeSet<String> {
     catalog
         .iter()
         .map(|entry| entry.cwe.to_ascii_uppercase())
@@ -753,7 +751,9 @@ fn discovery_sinks_by_cwe(discovered: &DiscoveredSignals) -> BTreeMap<String, Ve
             .or_insert_with(Vec::new)
             .push(signal.name.clone());
     }
-    by_cwe.values_mut().for_each(|signals| *signals = sorted_unique(std::mem::take(signals)));
+    by_cwe
+        .values_mut()
+        .for_each(|signals| *signals = sorted_unique(std::mem::take(signals)));
     by_cwe
 }
 
@@ -767,9 +767,8 @@ fn phantom_focus_entry(
         return None;
     }
     let scoped = phantom_signals_for_cwe(&normalised, signals);
-    (!scoped.source_signals.is_empty() || !scoped.sink_signals.is_empty()).then(|| {
-        phantom_catalog_entry(normalised, scoped)
-    })
+    (!scoped.source_signals.is_empty() || !scoped.sink_signals.is_empty())
+        .then(|| phantom_catalog_entry(normalised, scoped))
 }
 
 struct ScopedPhantomSignals {
@@ -778,10 +777,7 @@ struct ScopedPhantomSignals {
     provenance: &'static str,
 }
 
-fn phantom_signals_for_cwe(
-    cwe: &str,
-    signals: &PhantomFocusSignalSources,
-) -> ScopedPhantomSignals {
+fn phantom_signals_for_cwe(cwe: &str, signals: &PhantomFocusSignalSources) -> ScopedPhantomSignals {
     if has_threat_model_signals(signals) {
         return ScopedPhantomSignals {
             source_signals: signals.threat_sources.clone(),
@@ -791,7 +787,11 @@ fn phantom_signals_for_cwe(
     }
     ScopedPhantomSignals {
         source_signals: signals.discovery_sources.clone(),
-        sink_signals: signals.discovery_sinks_by_cwe.get(cwe).cloned().unwrap_or_default(),
+        sink_signals: signals
+            .discovery_sinks_by_cwe
+            .get(cwe)
+            .cloned()
+            .unwrap_or_default(),
         provenance: "Discovery Sweep",
     }
 }
@@ -1084,7 +1084,7 @@ pub(crate) fn load_taint_iris_next_context(repo_root: &Path) -> TaintIrisNextArt
 }
 
 fn load_taint_iris_next_json_artifact(path: PathBuf) -> TaintIrisNextArtifactLoad {
-    match fs::read_to_string(&path) {
+    match crate::bounded_file::read_utf8_text(&path, 16 * 1024 * 1024) {
         Ok(raw) => match serde_json::from_str::<Value>(&raw) {
             Ok(value) => TaintIrisNextArtifactLoad {
                 status: TaintIrisNextArtifactStatus {

@@ -67,6 +67,7 @@ pub(crate) fn trim_line(line: &str) -> String {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn empty_context() -> SystemsContextOutput {
     SystemsContextOutput {
         surfaces: Vec::new(),

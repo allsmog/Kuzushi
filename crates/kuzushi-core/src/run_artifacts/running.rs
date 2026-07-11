@@ -216,7 +216,11 @@ impl RunSummary {
         self.prompt_spine_version = source.prompt_spine_version.clone();
         self.git_sha = source.git_sha.clone();
         self.git_branch = source.git_branch.clone();
-        self.model = source.model.clone();
+        // A resolved runtime may be the first producer able to report the
+        // effective model. Preserve a model captured at start, but allow the
+        // terminal result to fill an absent value without refreshing the rest
+        // of the start-time reproducibility snapshot.
+        self.model = source.model.clone().or(self.model);
         self.config_hash = source.config_hash.clone();
         self.platform = source.platform.clone();
         self.house_rules = source.house_rules.clone();
@@ -232,7 +236,15 @@ impl RunSummary {
 
     pub fn with_artifact(mut self, artifact: RunArtifact) -> Self {
         if let Some(artifact) = artifact.normalized() {
-            self.artifacts.push(artifact);
+            if let Some(existing) = self
+                .artifacts
+                .iter_mut()
+                .find(|existing| existing.path == artifact.path)
+            {
+                *existing = artifact;
+            } else {
+                self.artifacts.push(artifact);
+            }
         }
         self
     }

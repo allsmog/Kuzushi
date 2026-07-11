@@ -59,11 +59,18 @@ impl ShellApp {
         if !self.ui().auto_open_viz() {
             return;
         }
+        self.hydrate_latest_threat_model_for_dfd();
         if crate::ui_view_models::dfd_model(self).empty_hint.is_some() {
             return;
         }
         if self.can_auto_open_viz_now() {
             self.open_workbench(crate::app::WorkbenchPane::Center);
+            self.router
+                .workbench_mut()
+                .set_page(Some(crate::app::WorkbenchPage::Review));
+            self.router
+                .workbench_mut()
+                .set_center_mode(crate::app::WorkbenchCenterMode::Dfd);
             self.log(
                 "workbench",
                 "data-flow model ready — showing Workbench DFD center pane",
@@ -71,6 +78,21 @@ impl ShellApp {
         } else {
             self.log_workbench_ready("use `workbench` to view");
         }
+    }
+
+    fn hydrate_latest_threat_model_for_dfd(&mut self) {
+        let Some(target) = self.target_owned() else {
+            return;
+        };
+        let path = kuzushi_core::capabilities::persistent_threat_model_path(&target);
+        self.invalidate_view_hydration();
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_json_file(&path);
+        self.hydrate_view_keys_blocking(
+            &target,
+            vec![crate::app::ViewHydrationKey::JsonFile { path }],
+        );
     }
 
     fn activity_deck_is_pinned(&self) -> bool {

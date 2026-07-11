@@ -45,6 +45,13 @@ fn non_empty_semgrep_configs(configs: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+pub(in crate::scan) fn semgrep_missing_binary_error(binary: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "semgrep: could not find scanner binary {:?}. Install Semgrep (for example `pipx install semgrep` or `brew install semgrep`). To use a custom binary: `kuzushi --target <repo> run semgrep:scan --input '{{\"binary\":\"/path/to/semgrep\"}}'`. To continue without Semgrep: `kuzushi scan <repo> --tasks dep-hygiene,secret-scan,license-scan,iac-scan --ci`.",
+        binary
+    )
+}
+
 impl ScanEngine for SemgrepScanner {
     fn id(&self) -> &'static str {
         "semgrep"
@@ -54,10 +61,7 @@ impl ScanEngine for SemgrepScanner {
         if scanner_binary_available(&self.binary) {
             return Ok(());
         }
-        anyhow::bail!(
-            "semgrep: could not find scanner binary {:?}. Install Semgrep (for example `pipx install semgrep` or `brew install semgrep`) or pass {{\"binary\":\"/path/to/semgrep\"}}. Next: run semgrep:scan {{\"binary\":\"/path/to/semgrep\"}} or task block semgrep.",
-            self.binary
-        )
+        Err(semgrep_missing_binary_error(&self.binary))
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {

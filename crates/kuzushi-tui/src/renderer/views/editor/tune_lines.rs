@@ -80,6 +80,9 @@ fn house_rule_line_limit(area: Rect) -> usize {
 }
 
 pub(crate) fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    if let Some(document) = app.router.prompts().document() {
+        return prompt_document_lines(document, area);
+    }
     let mut lines = context_strip(app, area);
     let model = prompts_model(app);
     lines.push(blank());
@@ -99,6 +102,99 @@ pub(crate) fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ("back", "home"),
     ]));
     lines
+}
+
+fn prompt_document_lines(document: &PromptDocumentState, area: Rect) -> Vec<Line<'static>> {
+    let width = area.width as usize;
+    let mut lines = vec![divider("PROMPT REVIEW", area.width)];
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!(" {} ", prompt_document_mode_label(document.mode)),
+            theme::accent().add_modifier(Modifier::REVERSED),
+        ),
+        Span::styled(
+            format!(" {} · {} ", document.role, document.source),
+            theme::primary(),
+        ),
+        Span::styled(if document.dirty { "[+]" } else { "" }, theme::warn()),
+    ]));
+    lines.push(muted(&fit(&document.path.display().to_string(), width)));
+    lines.push(muted(&fit(
+        &format!("{} · {}", document.hash, document.context_note),
+        width,
+    )));
+    lines.push(blank());
+    let body_rows = (area.height as usize).saturating_sub(7).max(1);
+    for (index, text) in document
+        .lines
+        .iter()
+        .enumerate()
+        .skip(document.top_row)
+        .take(body_rows)
+    {
+        lines.push(prompt_document_line(document, index, text, width));
+    }
+    while lines.len() < (area.height as usize).saturating_sub(1) {
+        lines.push(Line::raw("~"));
+    }
+    lines.push(prompt_document_status_line(document, width));
+    lines
+}
+
+fn prompt_document_line(
+    document: &PromptDocumentState,
+    index: usize,
+    text: &str,
+    width: usize,
+) -> Line<'static> {
+    let prefix = format!("{:>4} ", index + 1);
+    let available = width.saturating_sub(prefix.len());
+    if index != document.cursor_row {
+        return Line::from(vec![
+            Span::styled(prefix, theme::subtle()),
+            Span::raw(fit(text, available)),
+        ]);
+    }
+    let before = text.chars().take(document.cursor_col).collect::<String>();
+    let cursor = text.chars().nth(document.cursor_col).unwrap_or(' ');
+    let after = text
+        .chars()
+        .skip(document.cursor_col + 1)
+        .collect::<String>();
+    let remaining = available.saturating_sub(before.chars().count() + 1);
+    Line::from(vec![
+        Span::styled(prefix, theme::accent()),
+        Span::raw(fit(&before, available)),
+        Span::styled(
+            cursor.to_string(),
+            theme::accent().add_modifier(Modifier::REVERSED),
+        ),
+        Span::raw(fit(&after, remaining)),
+    ])
+}
+
+fn prompt_document_status_line(document: &PromptDocumentState, width: usize) -> Line<'static> {
+    let text = match document.mode {
+        PromptDocumentMode::Normal => {
+            " j/k scroll · Ctrl+f/b page · gg/G ends · i edit · :w save · :q return ".to_string()
+        }
+        PromptDocumentMode::Insert => " -- INSERT -- · Esc normal ".to_string(),
+        PromptDocumentMode::Command => format!(":{}", document.command),
+        PromptDocumentMode::ConfirmDiscard => " Discard unsaved changes? y/n ".to_string(),
+    };
+    Line::styled(
+        fit(&text, width),
+        theme::accent().add_modifier(Modifier::REVERSED),
+    )
+}
+
+fn prompt_document_mode_label(mode: PromptDocumentMode) -> &'static str {
+    match mode {
+        PromptDocumentMode::Normal => "NORMAL",
+        PromptDocumentMode::Insert => "INSERT",
+        PromptDocumentMode::Command => "COMMAND",
+        PromptDocumentMode::ConfirmDiscard => "CONFIRM",
+    }
 }
 
 fn append_prompts_header(lines: &mut Vec<Line<'static>>, module: &str, width: u16) {

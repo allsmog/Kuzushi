@@ -29,10 +29,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: moonrepo/setup-rust@v1
         with:
-          toolchain: "1.88"
-      - uses: Swatinem/rust-cache@v2
+          inherit-toolchain: true
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-python@v5
         with:

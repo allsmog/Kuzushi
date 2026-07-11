@@ -1,7 +1,7 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_yaml::{Mapping, Value};
-use std::fs;
 use std::path::Path;
 
 pub(super) use super::dependency_graph::is_pnpm_lock;
@@ -153,7 +153,9 @@ fn mapping_child_value<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
 }
 
 fn mapping_child<'a>(value: &'a Value, key: &str) -> Option<&'a Mapping> {
-    mapping(value)?.get(Value::String(key.to_string())).and_then(mapping)
+    mapping(value)?
+        .get(Value::String(key.to_string()))
+        .and_then(mapping)
 }
 
 fn mapping(value: &Value) -> Option<&Mapping> {
@@ -164,7 +166,8 @@ fn mapping(value: &Value) -> Option<&Mapping> {
 }
 
 fn package_key(value: &Value) -> Option<&str> {
-    value.as_str()
+    value
+        .as_str()
         .map(str::trim)
         .filter(|name| !name.is_empty())
 }

@@ -9,7 +9,7 @@ impl CodeqlScanner {
         cancel: &ScanCancellation,
     ) -> Result<String> {
         let tmp_dir = env::temp_dir().join(format!("kuzushi-codeql-{}", Uuid::new_v4()));
-        fs::create_dir_all(&tmp_dir)
+        fs::create_dir(&tmp_dir)
             .with_context(|| format!("codeql: could not create {}", tmp_dir.display()))?;
         let output_path = tmp_dir.join("results.sarif");
 
@@ -30,12 +30,14 @@ impl CodeqlScanner {
             }
 
             self.run_codeql_command(binary, &args, None, cancel)?;
-            fs::read_to_string(&output_path).with_context(|| {
-                format!(
-                    "codeql: could not read SARIF output {}",
-                    output_path.display()
-                )
-            })
+            crate::bounded_file::read_utf8_text(&output_path, 256 * 1024 * 1024).with_context(
+                || {
+                    format!(
+                        "codeql: could not read SARIF output {}",
+                        output_path.display()
+                    )
+                },
+            )
         })();
 
         let _ = fs::remove_dir_all(&tmp_dir);

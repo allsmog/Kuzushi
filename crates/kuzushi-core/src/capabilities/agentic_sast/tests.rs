@@ -129,6 +129,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let raw = json!({
             "findings": [{
@@ -241,6 +243,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let runtime = FakeRuntime {
             response: AgentQueryResponse {
@@ -408,6 +412,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let runtime = FakeRuntime {
             response: AgentQueryResponse {

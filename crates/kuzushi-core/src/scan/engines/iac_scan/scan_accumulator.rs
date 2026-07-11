@@ -1,10 +1,10 @@
+use super::iac_scan_options::MAX_SUPPORTED_FILE_BYTES;
 use super::{
     analyze_dockerfile, analyze_github_actions, analyze_terraform, classify_iac_file,
     IacScanFinding, IacScanKind, IacScanOptions,
 };
 use crate::scan::ScanCancellation;
 use anyhow::Result;
-use std::fs;
 use std::path::Path;
 
 #[derive(Default)]
@@ -56,10 +56,10 @@ fn ensure_iac_scan_active(cancellation: &ScanCancellation) -> Result<()> {
 }
 
 fn read_iac_file(file: &Path, options: &IacScanOptions) -> IacFileRead {
-    fs::metadata(file)
+    let max_bytes =
+        usize::try_from(options.max_file_bytes).unwrap_or(MAX_SUPPORTED_FILE_BYTES as usize);
+    crate::bounded_file::read_utf8_text(file, max_bytes)
         .ok()
-        .filter(|metadata| metadata.len() <= options.max_file_bytes)
-        .and_then(|_| fs::read_to_string(file).ok())
         .map(IacFileRead::Analyze)
         .unwrap_or(IacFileRead::Skip)
 }

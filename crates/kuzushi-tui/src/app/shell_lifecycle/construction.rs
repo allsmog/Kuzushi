@@ -103,17 +103,10 @@ impl ShellApp {
     }
 
     pub fn with_registry(
-        mut config: V2Config,
+        config: V2Config,
         target: Option<&WorkspaceTarget>,
         registry: ModuleRegistry,
     ) -> Self {
-        let ready_default = target
-            .is_some()
-            .then(|| ready_default_model_choice_index(config.model.as_deref()))
-            .flatten();
-        if let Some(choice) = ready_default.and_then(|index| model_choices().get(index)) {
-            config.model = Some(choice.id.to_string());
-        }
         let selected_model_index = preferred_model_choice_index(&config);
         let (option_store, option_store_error) = persistent_option_store(target);
         let session_budget_usd = config.operator.session_budget_usd;
@@ -127,16 +120,21 @@ impl ShellApp {
             session_budget_usd,
             trusted_workflow_auto_accept
         );
-        refresh_auto_open_prefs_from_store(&mut app);
+        Self::hydrate_initial_workspace(&mut app, target);
+        app.announce_startup(selected_model_index, option_store_error, target.is_some());
+        app
+    }
+
+    fn hydrate_initial_workspace(app: &mut Self, target: Option<&WorkspaceTarget>) {
+        refresh_auto_open_prefs_from_store(app);
+        app.workbench_cache()
+            .borrow_mut()
+            .run_summary_entries(target.map(WorkspaceTarget::root));
+        app.workbench_cache()
+            .borrow_mut()
+            .git_metadata(target.map(WorkspaceTarget::root));
         app.hydrate_persisted_scene_snapshots(target.map(|target| target.root()));
         app.refresh_program_scope();
-        app.announce_startup(
-            selected_model_index,
-            ready_default,
-            option_store_error,
-            target.is_some(),
-        );
-        app
     }
 
     /// Post-construction setup: session model/thinking-level, the startup
@@ -144,11 +142,10 @@ impl ShellApp {
     fn announce_startup(
         &mut self,
         selected_model_index: usize,
-        ready_default: Option<usize>,
         option_store_error: Option<String>,
         has_target: bool,
     ) {
-        self.apply_session_model(selected_model_index, ready_default);
+        self.apply_session_model(selected_model_index);
         self.log("system", "kuzushi shell");
         self.log("startup", self.startup_summary_line());
         if let Some(error) = option_store_error {
@@ -168,24 +165,19 @@ impl ShellApp {
         self.apply_initial_onboarding_phase();
     }
 
-    fn apply_session_model(&mut self, selected_model_index: usize, ready_default: Option<usize>) {
+    fn apply_session_model(&mut self, selected_model_index: usize) {
+        if self.config().model.is_none() {
+            return;
+        }
         if let Some(choice) = model_choices().get(selected_model_index) {
             self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
-        }
-        if let Some(choice) = ready_default.and_then(|index| model_choices().get(index)) {
-            self.log(
-                "model",
-                format!(
-                    "{} / {} ready; using as session default",
-                    model_choice_display_selector(choice),
-                    choice.thinking_level
-                ),
-            );
         }
     }
 }
 
-fn persistent_option_store(target: Option<&WorkspaceTarget>) -> (ToolOptionStore, Option<String>) {
+pub(crate) fn persistent_option_store(
+    target: Option<&WorkspaceTarget>,
+) -> (ToolOptionStore, Option<String>) {
     let paths = match kuzushi_core::ConfigPaths::from_target(target.map(WorkspaceTarget::root)) {
         Ok(paths) => paths,
         Err(error) => return (ToolOptionStore::new(), Some(error.to_string())),

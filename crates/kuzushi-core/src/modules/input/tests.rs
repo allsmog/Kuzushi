@@ -43,9 +43,40 @@ mod tests {
 
     #[test]
     fn parse_sast_tasks_keeps_cargo_audit_when_auto_tasks_are_filtered() {
-        let tasks = parse_sast_tasks(&json!({"disabledTasks": ["semgrep"]})).unwrap();
+        let request = parse_sast_tasks(&json!({"disabledTasks": ["semgrep"]})).unwrap();
 
-        assert!(tasks.iter().any(|task| task == "cargo-audit"));
-        assert!(!tasks.iter().any(|task| task == "semgrep"));
+        assert_eq!(
+            request.source,
+            SastTaskSelectionSource::FilteredAutomatic
+        );
+        assert!(request.tasks.iter().any(|task| task == "cargo-audit"));
+        assert!(!request.tasks.iter().any(|task| task == "semgrep"));
+    }
+
+    #[test]
+    fn parse_sast_tasks_preserves_empty_after_disabling_every_default() {
+        let request = parse_sast_tasks(&json!({
+            "disabledTasks": default_native_sast_tasks()
+        }))
+        .unwrap();
+
+        assert_eq!(
+            request.source,
+            SastTaskSelectionSource::FilteredAutomatic
+        );
+        assert!(request.tasks.is_empty());
+    }
+
+    #[test]
+    fn explicit_sast_tasks_override_the_automatic_denylist() {
+        let request = parse_sast_tasks(&json!({
+            "taskMode": "manual",
+            "tasks": ["dep-hygiene"],
+            "disabledTasks": ["dep-hygiene"]
+        }))
+        .unwrap();
+
+        assert_eq!(request.source, SastTaskSelectionSource::Explicit);
+        assert_eq!(request.tasks, vec!["dep-hygiene"]);
     }
 }

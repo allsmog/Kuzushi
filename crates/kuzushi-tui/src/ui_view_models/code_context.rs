@@ -1,7 +1,7 @@
 //! Source-code context for the Workbench center pane when a finding is selected.
 
 use super::findings::{current_finding_for_detail, relativize_location, target_base};
-use crate::ShellApp;
+use crate::{ShellApp, ViewDataState};
 use kuzushi_core::Finding;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -38,16 +38,28 @@ pub(crate) fn selected_finding_code_model(app: &ShellApp) -> Option<CodePaneMode
 
 impl CodePaneModel {
     fn from_finding(app: &ShellApp, finding: &Finding, alias: &str, base: Option<&str>) -> Self {
-        let source_path = resolve_source_path(app.target(), &finding.file_path);
         let path_label = relativize_location(finding.file_path.clone(), base);
         let title = code_title(alias, &path_label, finding.start_line, finding.end_line);
+        let Some(target) = app.target() else {
+            return missing_code_model(
+                title,
+                path_label,
+                "no active target; select one with target <path> (or target .)".to_string(),
+            );
+        };
+        let source_path = resolve_source_path(target, &finding.file_path);
         match app
             .workbench_cache()
-            .borrow_mut()
-            .read_source_file(&source_path)
+            .borrow()
+            .cached_source_file(target, &source_path)
         {
-            Ok(raw) => code_model_from_source(finding, title, path_label, &raw),
-            Err(error) => missing_code_model(title, path_label, error),
+            ViewDataState::Ready(Ok(raw)) => {
+                code_model_from_source(finding, title, path_label, &raw)
+            }
+            ViewDataState::Ready(Err(error)) => missing_code_model(title, path_label, error),
+            ViewDataState::NotRequested | ViewDataState::Loading => {
+                missing_code_model(title, path_label, "source context is loading".to_string())
+            }
         }
     }
 }
@@ -79,18 +91,12 @@ fn missing_code_model(title: String, path_label: String, error: String) -> CodeP
     }
 }
 
-fn resolve_source_path(target: Option<&Path>, reported: &str) -> PathBuf {
+fn resolve_source_path(target: &Path, reported: &str) -> PathBuf {
     let path = PathBuf::from(reported);
     if path.is_absolute() {
         return path;
     }
-    target
-        .map(|root| root.join(&path))
-        .unwrap_or_else(|| current_dir().join(path))
-}
-
-fn current_dir() -> PathBuf {
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    target.join(path)
 }
 
 fn code_title(alias: &str, path: &str, start: u32, end: Option<u32>) -> String {
@@ -193,5 +199,20 @@ mod tests {
             .any(|row| row.number == 11 && row.highlighted));
         assert!(model.rows.iter().any(|row| row.number == 9 && row.evidence));
         assert_eq!(model.empty_hint, None);
+    }
+
+    #[test]
+    fn targetless_code_model_refuses_to_read_relative_source_from_cwd() {
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let finding =
+            Finding::new_semgrep("demo.rule", "Cargo.toml", 1, None, Severity::Low, "demo");
+
+        let model = CodePaneModel::from_finding(&app, &finding, "F-0001", None);
+
+        assert!(model.rows.is_empty());
+        assert!(model
+            .empty_hint
+            .as_deref()
+            .is_some_and(|hint| hint.contains("no active target")));
     }
 }

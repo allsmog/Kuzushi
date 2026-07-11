@@ -3,7 +3,6 @@ use super::*;
 use crate::findings::Severity;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(in crate::modules) fn run_fileprovider_scan(
@@ -80,31 +79,27 @@ fn emit_fileprovider_step(
 }
 
 fn resolve_fileprovider_inputs(input: &Value, workspace_root: &Path) -> Result<FileProviderInputs> {
-    if let Some(raw) = input
+    let candidate = if let Some(raw) = input
         .get("filePathsPath")
         .or_else(|| input.get("file_paths_path"))
         .and_then(Value::as_str)
     {
-        let path = PathBuf::from(raw);
-        if path.is_file() {
-            return Ok(FileProviderInputs { file_paths: path });
-        }
-    }
-    let candidate = workspace_root
-        .join("android-decompiled")
-        .join("apktool")
-        .join("res")
-        .join("xml")
-        .join("file_paths.xml");
-    if !candidate.is_file() {
-        anyhow::bail!(
+        PathBuf::from(raw)
+    } else {
+        workspace_root
+            .join("android-decompiled")
+            .join("apktool")
+            .join("res")
+            .join("xml")
+            .join("file_paths.xml")
+    };
+    let file_paths = validated_android_workspace_file(workspace_root, &candidate).with_context(|| {
+        format!(
             "android-apk:fileprovider-scan: missing {}. The APK may not declare a FileProvider, or apktool decode hasn't run yet.",
             candidate.display()
-        );
-    }
-    Ok(FileProviderInputs {
-        file_paths: candidate,
-    })
+        )
+    })?;
+    Ok(FileProviderInputs { file_paths })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,7 +146,7 @@ fn is_root_like(path: &str) -> bool {
 }
 
 fn collect_path_descriptors(path: &Path) -> Result<Vec<PathDescriptor>> {
-    let bytes = fs::read(path)
+    let bytes = crate::bounded_file::read_regular_bytes(path, 16 * 1024 * 1024)
         .map_err(|error| anyhow::anyhow!("could not read {}: {error}", path.display()))?;
     parse_path_descriptors(&bytes)
         .map_err(|error| anyhow::anyhow!("invalid XML in {}: {error}", path.display()))

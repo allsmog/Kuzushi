@@ -49,6 +49,10 @@ pub trait AgentRuntime: Send + Sync {
         anyhow::bail!("agent runtime does not support generic LangGraph queries")
     }
 
+    /// Execute a query under the caller's invocation cancellation/deadline.
+    /// Process-backed runtimes override this to terminate their supervised
+    /// transport promptly; the default preserves compatibility while refusing
+    /// to report a late result as successful.
     fn query_blocking_controlled(
         &self,
         request: AgentQueryRequest,

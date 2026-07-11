@@ -4,7 +4,7 @@ use super::ActivityRouteState;
 pub use pickers::{
     AuthPickerRouteState, ModelPickerRouteState, PlanningPickerRouteState, TargetPickerRouteState,
 };
-use std::time::Instant;
+use std::{path::PathBuf, time::Instant};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RouterState {
@@ -532,6 +532,14 @@ impl Default for WorkbenchRouteState {
 }
 
 impl WorkbenchRouteState {
+    pub(crate) fn reset_for_target(&mut self) {
+        let depth_stack = self.depth_stack;
+        *self = Self {
+            depth_stack,
+            ..Self::default()
+        };
+    }
+
     pub(crate) fn focus(&self) -> crate::app::WorkbenchPane {
         self.focus
     }
@@ -910,8 +918,14 @@ impl CatalogRouteState {
         self.expanded = false;
     }
 
+    #[cfg(test)]
     pub(crate) fn expand(&mut self) {
         self.expanded = true;
+    }
+
+    pub(crate) fn toggle_expanded(&mut self) {
+        self.expanded = !self.expanded;
+        self.cursor = 0;
     }
 
     pub(crate) fn is_expanded(&self) -> bool {
@@ -1054,6 +1068,12 @@ pub struct FindingsRouteState {
 impl FindingsRouteState {
     pub(crate) fn reset(&mut self) {
         self.cursor = 0;
+    }
+
+    pub(crate) fn reset_for_target(&mut self) {
+        self.cursor = 0;
+        self.active_filter = None;
+        self.selected_finding = None;
     }
 
     pub(crate) fn cursor(&self) -> usize {
@@ -1267,6 +1287,7 @@ impl TuneRouteState {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromptsRouteState {
     cursor: usize,
+    document: Option<PromptDocumentState>,
 }
 
 impl PromptsRouteState {
@@ -1281,6 +1302,68 @@ impl PromptsRouteState {
 
     pub(crate) fn move_cursor(&mut self, delta: i32, len: usize) {
         self.cursor = shifted_cursor(self.cursor, delta, len);
+    }
+
+    pub(crate) fn document(&self) -> Option<&PromptDocumentState> {
+        self.document.as_ref()
+    }
+
+    pub(crate) fn document_mut(&mut self) -> Option<&mut PromptDocumentState> {
+        self.document.as_mut()
+    }
+
+    pub(crate) fn open_document(&mut self, document: PromptDocumentState) {
+        self.document = Some(document);
+    }
+
+    pub(crate) fn close_document(&mut self) -> Option<PromptDocumentState> {
+        self.document.take()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PromptDocumentMode {
+    #[default]
+    Normal,
+    Insert,
+    Command,
+    ConfirmDiscard,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptDocumentState {
+    pub role: String,
+    pub path: PathBuf,
+    pub source: String,
+    pub hash: String,
+    pub context_note: String,
+    pub lines: Vec<String>,
+    pub trailing_newline: bool,
+    pub cursor_row: usize,
+    pub cursor_col: usize,
+    pub top_row: usize,
+    pub mode: PromptDocumentMode,
+    pub command: String,
+    pub dirty: bool,
+    pub exit_after_save: bool,
+    pub pending_g: bool,
+    pub origin: crate::app::ShellView,
+}
+
+impl PromptDocumentState {
+    pub fn text(&self) -> String {
+        let mut text = self.lines.join("\n");
+        if self.trailing_newline {
+            text.push('\n');
+        }
+        text
+    }
+
+    pub fn current_line_len(&self) -> usize {
+        self.lines
+            .get(self.cursor_row)
+            .map(|line| line.chars().count())
+            .unwrap_or(0)
     }
 }
 

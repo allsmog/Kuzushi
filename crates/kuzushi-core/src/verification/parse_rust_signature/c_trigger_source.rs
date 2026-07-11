@@ -35,9 +35,23 @@ pub(in crate::verification) struct CTriggerSource {
 /// self-contained, and contains a parseable function near the finding's
 /// line, generate a real trampoline. Otherwise produce the
 /// payload-only stub.
-pub(in crate::verification) fn build_c_trigger(finding: &Finding) -> CTriggerSource {
+pub(in crate::verification) fn build_c_trigger(
+    finding: &Finding,
+    workspace_root: &Path,
+) -> Result<CTriggerSource> {
     let payload = synth_payload_from_finding(finding);
-    let payload_decl = format!(
+    let trigger_c = C_HARNESS_TEMPLATE.replace("{payload_decl}", &c_payload_declaration(&payload));
+    let suspect = plan_c_suspect(finding, workspace_root)?;
+    let (target_c, suspect_source) = c_target_sources(&suspect);
+    Ok(CTriggerSource {
+        trigger_c,
+        target_c,
+        suspect_source,
+    })
+}
+
+fn c_payload_declaration(payload: &[u8]) -> String {
+    format!(
         "    static const uint8_t payload[{}] = {{ {} }};",
         payload.len(),
         payload
@@ -45,20 +59,27 @@ pub(in crate::verification) fn build_c_trigger(finding: &Finding) -> CTriggerSou
             .map(|b| format!("0x{b:02x}"))
             .collect::<Vec<_>>()
             .join(", ")
-    );
-    let trigger_c = C_HARNESS_TEMPLATE.replace("{payload_decl}", &payload_decl);
+    )
+}
 
-    let suspect_path = std::path::Path::new(&finding.file_path);
-    let suspect_source = std::fs::read_to_string(suspect_path).ok();
-    let enclosing = suspect_source
+struct CSuspectPlan {
+    source: Option<String>,
+    call: Option<CCallPlan>,
+}
+
+fn plan_c_suspect(finding: &Finding, workspace_root: &Path) -> Result<CSuspectPlan> {
+    let suspect_path = Path::new(&finding.file_path);
+    let source = read_finding_source(workspace_root, suspect_path, "C")?;
+    let call = source
         .as_deref()
-        .and_then(|_| extract_enclosing_function(suspect_path, finding.start_line));
-    let parsed_sig = enclosing
-        .as_ref()
-        .and_then(|f| parse_c_signature(&f.signature));
-    let call_plan = parsed_sig.as_ref().and_then(plan_c_call_expression);
+        .and_then(|body| extract_enclosing_function_from_source(body, finding.start_line))
+        .and_then(|function| parse_c_signature(&function.signature))
+        .and_then(|signature| plan_c_call_expression(&signature));
+    Ok(CSuspectPlan { source, call })
+}
 
-    match (&suspect_source, &call_plan) {
+fn c_target_sources(suspect: &CSuspectPlan) -> (String, Option<String>) {
+    match (&suspect.source, &suspect.call) {
         (Some(src), Some(plan)) if c_source_appears_self_contained(src) => {
             // Real trampoline: include the suspect file and forward.
             let target_c = format!(
@@ -75,17 +96,9 @@ pub(in crate::verification) fn build_c_trigger(finding: &Finding) -> CTriggerSou
                 kind = plan.call_kind,
                 call = plan.call_expression,
             );
-            CTriggerSource {
-                trigger_c,
-                target_c,
-                suspect_source: Some(src.clone()),
-            }
+            (target_c, Some(src.clone()))
         }
-        _ => CTriggerSource {
-            trigger_c,
-            target_c: C_TARGET_STUB.to_string(),
-            suspect_source: None,
-        },
+        _ => (C_TARGET_STUB.to_string(), None),
     }
 }
 

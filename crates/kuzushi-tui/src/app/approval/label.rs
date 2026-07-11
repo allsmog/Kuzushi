@@ -6,6 +6,7 @@ pub enum ConfirmKind {
     FsWriteOutsideKuzushi,
     DestructiveVerb,
     PwnCandidateAttempt,
+    DescriptorEffect,
 }
 
 impl ConfirmKind {
@@ -15,6 +16,7 @@ impl ConfirmKind {
             ConfirmKind::FsWriteOutsideKuzushi => "CONFIRM · fs:write outside .kuzushi/",
             ConfirmKind::DestructiveVerb => "REFUSED · destructive verb",
             ConfirmKind::PwnCandidateAttempt => "CONFIRM · pwn candidate attempts",
+            ConfirmKind::DescriptorEffect => "CONFIRM · descriptor-declared effect",
         }
     }
 

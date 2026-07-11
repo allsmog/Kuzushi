@@ -53,6 +53,12 @@ pub(crate) fn tool_input_options_coerce_limits_sets_and_severities() {
 
     let err = SecretScanOptions::from_tool_input(&json!({"severity": ["BAD"]})).unwrap_err();
     assert!(err.to_string().contains("unknown secret-scan severity"));
+
+    let bounded = SecretScanOptions::from_tool_input(&json!({"maxFileBytes": u64::MAX})).unwrap();
+    assert_eq!(
+        bounded.max_file_bytes,
+        super::scanner_options::MAX_SUPPORTED_FILE_BYTES
+    );
 }
 
 #[test]

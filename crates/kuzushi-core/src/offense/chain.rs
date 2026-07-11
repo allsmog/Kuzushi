@@ -108,7 +108,10 @@ fn finish_chain(chain: &AttackChain, target: &str, steps: Vec<PlayOutcome>) -> C
     let completed = steps.len() == chain.plays.len() && steps.iter().all(|step| step.exploited);
     let landed = steps.iter().filter(|step| step.exploited).count();
     let summary = if completed {
-        format!("chain complete: {landed}/{} links landed", chain.plays.len())
+        format!(
+            "chain complete: {landed}/{} links landed",
+            chain.plays.len()
+        )
     } else {
         format!(
             "chain broke at link {}: {}/{} landed",
@@ -128,11 +131,12 @@ fn finish_chain(chain: &AttackChain, target: &str, steps: Vec<PlayOutcome>) -> C
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::engagement_scope::ScopeEntry;
     use super::super::observer::NoopObserver;
     use super::super::play_context::PlayContext;
     use super::super::transport::{PlayRequest, PlayResponse};
+    use super::*;
+    use std::cell::RefCell;
 
     struct NullTransport;
     impl PlayTransport for NullTransport {
@@ -143,6 +147,25 @@ mod tests {
                 body: String::new(),
                 elapsed_ms: 1,
             })
+        }
+    }
+
+    #[derive(Default)]
+    struct SpyObserver {
+        events: RefCell<Vec<String>>,
+    }
+
+    impl HopObserver for SpyObserver {
+        fn on_chain_start(&self, chain: &str, target: &str) {
+            self.events
+                .borrow_mut()
+                .push(format!("start:{chain}:{target}"));
+        }
+
+        fn on_hop(&self, index: usize, outcome: &PlayOutcome) {
+            self.events
+                .borrow_mut()
+                .push(format!("hop:{index}:{}", outcome.play));
         }
     }
 
@@ -209,8 +232,16 @@ mod tests {
                 play("rce", true, "id=root", Some("uid=1")),
             ],
         );
-        let outcome =
-            run_chain(&scope("10.0.0.5"), "10.0.0.5", 1, "run-1", &chain, &NullTransport, &NoopObserver).unwrap();
+        let outcome = run_chain(
+            &scope("10.0.0.5"),
+            "10.0.0.5",
+            1,
+            "run-1",
+            &chain,
+            &NullTransport,
+            &NoopObserver,
+        )
+        .unwrap();
         assert!(outcome.completed);
         assert_eq!(outcome.steps.len(), 3);
         assert!(outcome.summary.contains("3/3"));
@@ -226,8 +257,16 @@ mod tests {
                 play("rce", true, "id=root", None),
             ],
         );
-        let outcome =
-            run_chain(&scope("10.0.0.5"), "10.0.0.5", 1, "run-1", &chain, &NullTransport, &NoopObserver).unwrap();
+        let outcome = run_chain(
+            &scope("10.0.0.5"),
+            "10.0.0.5",
+            1,
+            "run-1",
+            &chain,
+            &NullTransport,
+            &NoopObserver,
+        )
+        .unwrap();
         assert!(!outcome.completed);
         // Third play never ran — the chain broke at link 2.
         assert_eq!(outcome.steps.len(), 2);
@@ -236,23 +275,7 @@ mod tests {
 
     #[test]
     fn observer_sees_start_and_every_hop() {
-        use std::cell::RefCell;
-        struct Spy {
-            events: RefCell<Vec<String>>,
-        }
-        impl HopObserver for Spy {
-            fn on_chain_start(&self, chain: &str, target: &str) {
-                self.events.borrow_mut().push(format!("start:{chain}:{target}"));
-            }
-            fn on_hop(&self, index: usize, outcome: &PlayOutcome) {
-                self.events
-                    .borrow_mut()
-                    .push(format!("hop:{index}:{}", outcome.play));
-            }
-        }
-        let spy = Spy {
-            events: RefCell::new(Vec::new()),
-        };
+        let spy = SpyObserver::default();
         let chain = AttackChain::new(
             "c",
             vec![
@@ -261,7 +284,16 @@ mod tests {
                 play("c", true, "x", None),
             ],
         );
-        run_chain(&scope("10.0.0.5"), "10.0.0.5", 1, "run-1", &chain, &NullTransport, &spy).unwrap();
+        run_chain(
+            &scope("10.0.0.5"),
+            "10.0.0.5",
+            1,
+            "run-1",
+            &chain,
+            &NullTransport,
+            &spy,
+        )
+        .unwrap();
         let events = spy.events.borrow();
         // Start, then two hops (the chain broke at the second, so the third
         // never ran — and the observer never saw it).
@@ -274,7 +306,15 @@ mod tests {
     #[test]
     fn denied_target_runs_no_links() {
         let chain = AttackChain::new("probe", vec![play("auth-bypass", true, "t", None)]);
-        let result = run_chain(&scope("10.0.0.5"), "10.9.9.9", 1, "run-1", &chain, &NullTransport, &NoopObserver);
+        let result = run_chain(
+            &scope("10.0.0.5"),
+            "10.9.9.9",
+            1,
+            "run-1",
+            &chain,
+            &NullTransport,
+            &NoopObserver,
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("refused"));
     }

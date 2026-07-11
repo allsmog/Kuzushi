@@ -115,33 +115,50 @@ fn sanitizer_body_candidates(
     plan: &TaintIrisNextPlan,
     evidence: &TaintIrisNextEvidenceResult,
 ) -> Vec<SanitizerFunctionBody> {
-    let mut files_to_scan = BTreeSet::new();
-    for story in &evidence.linked_stories {
-        files_to_scan.insert(story.file_path.clone());
-    }
-    for row in &evidence.evidence {
-        files_to_scan.insert(row.file_path.clone());
-    }
-
+    let files_to_scan = sanitizer_candidate_files(evidence);
     let mut bodies = Vec::new();
     for relative_path in files_to_scan.iter().take(20) {
-        let source_path = plan.scan_root.join(relative_path);
-        let Ok(content) = fs::read_to_string(&source_path) else {
-            continue;
-        };
-        for (name, start_line, source) in extract_sanitizer_function_bodies(&content) {
-            bodies.push(SanitizerFunctionBody {
-                file_path: relative_path.clone(),
-                name,
-                start_line,
-                source,
-            });
-            if bodies.len() >= 8 {
-                return bodies;
-            }
+        append_sanitizer_bodies_from_file(plan, relative_path, &mut bodies);
+        if bodies.len() >= 8 {
+            bodies.truncate(8);
+            break;
         }
     }
     bodies
+}
+
+fn sanitizer_candidate_files(evidence: &TaintIrisNextEvidenceResult) -> BTreeSet<String> {
+    let mut files = BTreeSet::new();
+    for story in &evidence.linked_stories {
+        files.insert(story.file_path.clone());
+    }
+    for row in &evidence.evidence {
+        files.insert(row.file_path.clone());
+    }
+    files
+}
+
+fn append_sanitizer_bodies_from_file(
+    plan: &TaintIrisNextPlan,
+    relative_path: &str,
+    bodies: &mut Vec<SanitizerFunctionBody>,
+) {
+    let source_path = plan.scan_root.join(relative_path);
+    let Ok(Some(content)) =
+        crate::bounded_file::read_source_text_prefix(&source_path, 2 * 1024 * 1024)
+    else {
+        return;
+    };
+    bodies.extend(
+        extract_sanitizer_function_bodies(&content)
+            .into_iter()
+            .map(|(name, start_line, source)| SanitizerFunctionBody {
+                file_path: relative_path.to_string(),
+                name,
+                start_line,
+                source,
+            }),
+    );
 }
 
 struct SanitizerFunctionBody {

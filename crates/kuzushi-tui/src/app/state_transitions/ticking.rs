@@ -101,7 +101,8 @@ impl ShellApp {
         let scan_running = self.scan().is_some_and(|scan| scan.running);
         let tool_running = self.tool_is_running();
         let agent_running = self.agent_chat().is_some_and(|agent| agent.running);
-        scan_running
+        self.jobs().has_running_job()
+            || scan_running
             || tool_running
             || agent_running
             || self.planner_running()
@@ -144,6 +145,10 @@ impl ShellApp {
         self.set_notice(NoticeSeverity::Warn, source, message);
     }
 
+    pub fn set_info_notice(&mut self, source: impl Into<String>, message: impl Into<String>) {
+        self.set_notice(NoticeSeverity::Info, source, message);
+    }
+
     /// Surface a transient completion banner (green) and keep the transcript
     /// record — how background work announces itself when the operator is
     /// on another view.
@@ -161,7 +166,9 @@ impl ShellApp {
         let message = message.into();
         let prefix = match severity {
             NoticeSeverity::Error => "error",
-            NoticeSeverity::Warn | NoticeSeverity::Success => source.as_str(),
+            NoticeSeverity::Warn | NoticeSeverity::Info | NoticeSeverity::Success => {
+                source.as_str()
+            }
         };
         self.log(prefix, message.clone());
         self.advisory_mut().notice = Some(Notice {

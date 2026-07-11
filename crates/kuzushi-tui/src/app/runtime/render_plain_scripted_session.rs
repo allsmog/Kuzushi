@@ -27,23 +27,38 @@ pub(crate) fn execute_plain_scripted_session(
         }
         let log_start = app.log_len();
         submit_plain_scripted_command(app, command);
-        wait_for_plain_work(app);
+        let work = wait_for_plain_work(app);
+        app.hydrate_active_view_blocking();
         failed |= plain_command_failed(app, log_start);
         output.push_str(&render_plain_command_result(app, width, command, log_start));
-        if app.should_quit() {
+        if app.should_quit() || work == PlainWorkOutcome::Quarantined {
             break;
         }
     }
     PlainSessionReport { output, failed }
 }
 
-fn wait_for_plain_work(app: &mut ShellApp) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlainWorkOutcome {
+    Completed,
+    Quarantined,
+}
+
+fn wait_for_plain_work(app: &mut ShellApp) -> PlainWorkOutcome {
     app_background_changed(app, None);
     while app.has_running_work() {
+        if app.jobs().has_quarantined_slot() {
+            app.log(
+                "error",
+                "plain session stopped: worker remained unresponsive after watchdog grace and was quarantined",
+            );
+            return PlainWorkOutcome::Quarantined;
+        }
         std::thread::sleep(Duration::from_millis(10));
         app_background_changed(app, None);
     }
     app_background_changed(app, None);
+    PlainWorkOutcome::Completed
 }
 
 fn plain_command_failed(app: &ShellApp, log_start: usize) -> bool {
@@ -52,7 +67,7 @@ fn plain_command_failed(app: &ShellApp, log_start: usize) -> bool {
             || (line.prefix == "result"
                 && matches!(
                     line.body.split_whitespace().next(),
-                    Some("failed" | "canceled" | "interrupted")
+                    Some("fail" | "failed" | "partial" | "canceled" | "interrupted")
                 ))
     })
 }
@@ -73,14 +88,8 @@ fn submit_plain_scripted_command(app: &mut ShellApp, command: &str) {
 }
 
 fn submit_plain_line(app: &mut ShellApp, command: &str) {
-    app.set_input(command);
-    update_and_execute_effects(
-        app,
-        Msg::Term(TermEvent::Key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::empty(),
-        ))),
-    );
+    let update = app.reduce_submitted_line(command);
+    EffectRuntime::execute(app, update.effects);
 }
 
 #[cfg(test)]
@@ -113,16 +122,114 @@ mod tests {
         );
         assert!(!app.has_running_work());
     }
+
+    #[test]
+    fn plain_commands_bypass_modal_onboarding_without_selecting_a_model() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        assert_eq!(app.shell_view(), ShellView::ModelPicker);
+
+        let report = execute_plain_scripted_session(&mut app, &["findings"], 80);
+
+        assert_eq!(app.config().model, None);
+        assert_eq!(app.shell_view(), ShellView::Workbench);
+        assert!(report.output.contains("findings"), "{}", report.output);
+    }
+
+    #[test]
+    fn partial_result_marks_plain_session_failed_but_skipped_does_not() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let partial_start = app.log_len();
+        app.log("result", "partial (scan incomplete) exit_hint=1");
+        assert!(plain_command_failed(&app, partial_start));
+
+        let skipped_start = app.log_len();
+        app.log("result", "skipped (scan did not run) exit_hint=0");
+        assert!(!plain_command_failed(&app, skipped_start));
+    }
+
+    #[test]
+    fn quarantined_worker_fails_plain_session_without_waiting_for_thread_exit() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let ticket = app.jobs_mut().start(JobKind::Run, "hung:tool");
+        let generation = ticket.generation();
+        let now = std::time::Instant::now();
+        app.jobs_mut()
+            .schedule_unresponsive_escalation(JobKind::Run, generation, now);
+        assert!(app
+            .jobs_mut()
+            .quarantine_unresponsive_slots(now + WORKER_UNRESPONSIVE_GRACE));
+
+        let report = execute_plain_scripted_session(&mut app, &["help"], 80);
+
+        assert!(report.failed);
+        assert!(report.output.contains("worker remained unresponsive"));
+        assert!(app.jobs().is_quarantined(JobKind::Run));
+        app.jobs_mut().finish(JobKind::Run);
+        ticket.complete();
+    }
+
+    #[test]
+    fn scripted_replay_hydrates_artifacts_before_plain_rendering() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_id = "run-plain-replay";
+        let summary = kuzushi_core::RunSummary::running(
+            run_id,
+            "tool",
+            None,
+            temp.path().display().to_string(),
+        )
+        .complete();
+        kuzushi_core::write_run_summary(temp.path(), &summary).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+
+        let report = execute_plain_scripted_session(&mut app, &[&format!("replay {run_id}")], 180);
+
+        assert!(report.output.contains("run.json"), "{}", report.output);
+        assert!(
+            !report.output.contains("loading artifact"),
+            "{}",
+            report.output
+        );
+    }
 }
 
 pub(crate) fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
     let stdout = setup_terminal_stdout()?;
-    Terminal::new(CrosstermBackend::new(stdout)).context("Could not initialize terminal")
+    Terminal::new(CrosstermBackend::new(stdout)).map_err(|error| {
+        rollback_terminal_mode();
+        anyhow::Error::new(error).context("Could not initialize terminal")
+    })
+}
+
+pub(crate) struct TerminalSession {
+    terminal: Terminal<CrosstermBackend<Stdout>>,
+}
+
+impl TerminalSession {
+    pub(crate) fn setup() -> Result<Self> {
+        setup_terminal().map(|terminal| Self { terminal })
+    }
+
+    pub(crate) fn terminal_mut(&mut self) -> &mut Terminal<CrosstermBackend<Stdout>> {
+        &mut self.terminal
+    }
+}
+
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        let _ = restore_terminal(&mut self.terminal);
+    }
 }
 
 pub(crate) fn setup_terminal_stdout() -> Result<Stdout> {
     let mut stdout = raw_terminal_stdout()?;
-    enable_mouse_capture_if_configured(&mut stdout)?;
+    if let Err(error) = enable_mouse_capture_if_configured(&mut stdout) {
+        rollback_terminal_mode();
+        return Err(error);
+    }
     Ok(stdout)
 }
 
@@ -131,8 +238,21 @@ fn raw_terminal_stdout() -> Result<Stdout> {
     // Enter the alternate screen so the shell owns a dedicated full-screen
     // buffer: the terminal has no scrollback to drift through, the view stays
     // locked in place, and rendered frames don't pile into the user's history.
-    execute!(io::stdout(), EnterAlternateScreen).context("Could not enter alternate screen")?;
-    reset_terminal_viewport()
+    if let Err(error) = execute!(io::stdout(), EnterAlternateScreen) {
+        rollback_terminal_mode();
+        return Err(error).context("Could not enter alternate screen");
+    }
+    reset_terminal_viewport().inspect_err(|_| rollback_terminal_mode())
+}
+
+fn rollback_terminal_mode() {
+    let _ = execute!(
+        io::stdout(),
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        LeaveAlternateScreen
+    );
+    let _ = disable_raw_mode();
 }
 
 pub(crate) fn reset_terminal_viewport() -> Result<Stdout> {
@@ -171,14 +291,39 @@ pub(crate) fn mouse_capture_setting_enabled(value: Option<&str>) -> bool {
 }
 
 pub(crate) fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
-    let _ = execute!(
+    let escape_result = execute!(
         terminal.backend_mut(),
         DisableMouseCapture,
         DisableBracketedPaste,
         LeaveAlternateScreen
     );
-    disable_raw_mode().context("Could not disable raw mode")?;
-    terminal
-        .show_cursor()
-        .context("Could not show terminal cursor")
+    let raw_result = disable_raw_mode();
+    let cursor_result = terminal.show_cursor();
+    let mut failures = Vec::new();
+    record_terminal_failure(
+        &mut failures,
+        escape_result,
+        "could not leave terminal screen",
+    );
+    record_terminal_failure(&mut failures, raw_result, "could not disable raw mode");
+    record_terminal_failure(
+        &mut failures,
+        cursor_result,
+        "could not show terminal cursor",
+    );
+    terminal_restore_result(failures)
+}
+
+fn record_terminal_failure(failures: &mut Vec<String>, result: std::io::Result<()>, context: &str) {
+    if let Err(error) = result {
+        failures.push(format!("{context}: {error}"));
+    }
+}
+
+fn terminal_restore_result(failures: Vec<String>) -> Result<()> {
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(failures.join("; "))
+    }
 }

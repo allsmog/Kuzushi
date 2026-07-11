@@ -41,17 +41,76 @@ impl BuiltinModule {
         self
     }
 
-    /// Stamp each tool with its canonical journey phase from the single core
-    /// mapping table. Applied once at registration so the descriptor carries
-    /// the phase truth instead of a side table.
-    pub(in crate::modules) fn with_stamped_phases(mut self) -> Self {
-        let id = self.metadata.id.clone();
-        let kind = self.metadata.kind;
-        for tool in &mut self.tools {
-            tool.phase = canonical_tool_phase(&id, kind, &tool.name);
+    pub(in crate::modules) fn validate_declared_policy(&self) -> Result<()> {
+        for tool in &self.tools {
+            tool.validate_declared_policy(&self.metadata.id)?;
         }
+        Ok(())
+    }
+}
+
+impl ToolDescriptor {
+    pub(in crate::modules) fn with_prompt(mut self, prompt: PromptSpec) -> Self {
+        self.prompts.push(prompt);
         self
     }
+
+    pub(in crate::modules) fn with_policy(mut self, policy: ToolPolicy) -> Self {
+        self.phase = policy.phase;
+        self.runtime_requirement = policy.runtime_requirement;
+        self.effect = policy.effect;
+        self.approval = policy.approval;
+        self.workspace_requirement = policy.workspace_requirement;
+        self.finding_store_requirement = policy.finding_store_requirement;
+        self.policy_declared = true;
+        self
+    }
+
+    fn validate_declared_policy(&self, module_id: &str) -> Result<()> {
+        if !self.policy_declared {
+            anyhow::bail!(
+                "built-in tool {:?} in module {:?} has no descriptor-owned policy",
+                self.name,
+                module_id
+            )
+        }
+        if self.effect.needs_operator_approval() && self.approval != ApprovalPolicy::Explicit {
+            anyhow::bail!(
+                "built-in tool {:?} has {:?} effect without explicit approval",
+                self.name,
+                self.effect
+            )
+        }
+        if self.finding_store_requirement == FindingStoreRequirement::Required
+            && self.workspace_requirement != WorkspaceRequirement::Required
+        {
+            anyhow::bail!(
+                "built-in tool {:?} requires a finding store but not a workspace",
+                self.name
+            )
+        }
+        for prompt in &self.prompts {
+            if !self.options.iter().any(|option| option.name == prompt.option_key) {
+                anyhow::bail!(
+                    "built-in tool {:?} prompt {:?} refers to undeclared option {:?}",
+                    self.name,
+                    prompt.role,
+                    prompt.option_key
+                )
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(in crate::modules) fn tools_with_policy(
+    policy: ToolPolicy,
+    tools: Vec<ToolDescriptor>,
+) -> Vec<ToolDescriptor> {
+    tools
+        .into_iter()
+        .map(|tool| tool.with_policy(policy))
+        .collect()
 }
 
 pub(in crate::modules) fn module(
@@ -114,8 +173,31 @@ pub(in crate::modules) fn tool_with_options(
         hidden: false,
         runtime_requirement: RuntimeRequirement::Never,
         phase: ToolPhase::default(),
+        effect: ToolEffect::default(),
+        approval: ApprovalPolicy::default(),
+        workspace_requirement: WorkspaceRequirement::default(),
+        finding_store_requirement: FindingStoreRequirement::default(),
         options,
+        prompts: Vec::new(),
         executor: None,
+        policy_declared: false,
+    }
+}
+
+pub(in crate::modules) fn editable_prompt(
+    role: &str,
+    module_id: &str,
+    verb: &str,
+    option_key: &str,
+    default_content: String,
+) -> PromptSpec {
+    PromptSpec {
+        role: role.to_string(),
+        module_id: module_id.to_string(),
+        verb: verb.to_string(),
+        option_key: option_key.to_string(),
+        default_content,
+        context_note: "Repository context is generated at runtime and is not part of this editable instruction template.".to_string(),
     }
 }
 
@@ -144,6 +226,7 @@ pub(in crate::modules) fn target_option() -> OptionSpec {
         "Repository or workspace path; defaults to the active workspace when supported.",
     )
     .aliases(&["cwd"])
+    .workspace_read()
 }
 
 pub(in crate::modules) fn model_option() -> OptionSpec {

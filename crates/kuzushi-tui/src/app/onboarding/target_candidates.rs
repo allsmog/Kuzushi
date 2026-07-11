@@ -41,6 +41,15 @@ pub fn discover_target_candidates(cwd: &Path) -> Vec<TargetCandidate> {
     discover_target_candidates_with_recent(cwd, &load_recent_target_paths())
 }
 
+pub(crate) fn immediate_target_candidate(cwd: &Path) -> TargetCandidate {
+    TargetCandidate {
+        path: cwd.to_path_buf(),
+        label: ".".to_string(),
+        hint: "current directory",
+        scope: None,
+    }
+}
+
 fn discover_target_candidates_with_recent(
     cwd: &Path,
     recent_paths: &[PathBuf],

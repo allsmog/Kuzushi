@@ -1,27 +1,31 @@
 use super::prompt_bundle::{
     build_fallback_report, build_prompt_bundle, merge_report_object, scope_has_text,
 };
-use super::storage::{load_updated_scope, runs_dir};
+use super::storage::{
+    load_updated_scope, prepare_state_path, runs_dir, validate_run_id, write_state_path,
+};
 use crate::capabilities::vendor_assessment::adapters::render_report_markdown;
 use crate::capabilities::vendor_assessment::domain::{unix_millis, ScopeUpdate};
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn assess(
     root: &Path,
     update: ScopeUpdate,
+    run_id: Option<String>,
     runtime: Option<&dyn AgentRuntime>,
     resolve_model: impl FnOnce() -> Result<String>,
 ) -> Result<Value> {
+    let run_id = run_id.unwrap_or_else(|| format!("va-{}", unix_millis()));
+    validate_run_id(&run_id)?;
+    let run_root = runs_dir(root).join(&run_id);
+    preflight_assessment_artifacts(root, &run_root)?;
     load_updated_scope(root, &update).and_then(|scope| {
-        let run_id = format!("va-{}", unix_millis());
-        let run_root = runs_dir(root).join(&run_id);
         let prompts_dir = run_root.join("prompts");
-        write_assessment_prompts(&prompts_dir, &scope).and_then(|prompts| {
+        write_assessment_prompts(root, &prompts_dir, &scope).and_then(|prompts| {
             build_assessment_report(
                 root,
                 &run_id,
@@ -32,7 +36,7 @@ pub(crate) fn assess(
                 resolve_model,
             )
             .and_then(|report| {
-                write_assessment_artifacts(&run_root, &scope, &report).map(|artifacts| {
+                write_assessment_artifacts(root, &run_root, &scope, &report).map(|artifacts| {
                     assessment_response(run_id, report, scope, artifacts, prompts_dir)
                 })
             })
@@ -40,21 +44,40 @@ pub(crate) fn assess(
     })
 }
 
-fn write_assessment_prompts(prompts_dir: &Path, scope: &Value) -> Result<Vec<(String, String)>> {
-    ensure_assessment_prompt_dir(prompts_dir).and_then(|_| {
-        let prompts = build_prompt_bundle(&scope);
-        write_assessment_prompt_files(prompts_dir, &prompts).map(|_| prompts)
-    })
+fn preflight_assessment_artifacts(root: &Path, run_root: &Path) -> Result<()> {
+    for path in [
+        run_root.join("scope.json"),
+        run_root.join("report.md"),
+        run_root.join("report.json"),
+        run_root.join("prompts/overview.md"),
+        run_root.join("prompts/evidence-review.md"),
+        run_root.join("prompts/follow-up-questions.md"),
+    ] {
+        prepare_state_path(root, &path)?;
+    }
+    Ok(())
 }
 
-fn ensure_assessment_prompt_dir(prompts_dir: &Path) -> Result<()> {
-    fs::create_dir_all(prompts_dir)
-        .with_context(|| format!("Could not create {}", prompts_dir.display()))
+fn write_assessment_prompts(
+    root: &Path,
+    prompts_dir: &Path,
+    scope: &Value,
+) -> Result<Vec<(String, String)>> {
+    let prompts = build_prompt_bundle(&scope);
+    write_assessment_prompt_files(root, prompts_dir, &prompts).map(|_| prompts)
 }
 
-fn write_assessment_prompt_files(prompts_dir: &Path, prompts: &[(String, String)]) -> Result<()> {
+fn write_assessment_prompt_files(
+    root: &Path,
+    prompts_dir: &Path,
+    prompts: &[(String, String)],
+) -> Result<()> {
+    for (filename, _) in prompts {
+        prepare_state_path(root, &prompts_dir.join(filename))?;
+    }
     prompts.iter().try_for_each(|(filename, content)| {
-        fs::write(prompts_dir.join(filename), format!("{content}\n")).map_err(Into::into)
+        let path = prompts_dir.join(filename);
+        write_state_path(root, &path, format!("{content}\n").as_bytes()).map(|_| ())
     })
 }
 
@@ -134,6 +157,7 @@ struct AssessmentArtifacts {
 }
 
 fn write_assessment_artifacts(
+    root: &Path,
     run_root: &Path,
     scope: &Value,
     report: &Value,
@@ -141,34 +165,41 @@ fn write_assessment_artifacts(
     let scope_path = run_root.join("scope.json");
     let report_path = run_root.join("report.md");
     let report_json_path = run_root.join("report.json");
-    write_scope_artifact(&scope_path, scope).and_then(|_| {
-        write_report_markdown_artifact(&report_path, report).and_then(|_| {
-            write_report_json_artifact(&report_json_path, report).map(|_| AssessmentArtifacts {
-                scope_path,
-                report_path,
-                report_json_path,
+    write_scope_artifact(root, &scope_path, scope).and_then(|_| {
+        write_report_markdown_artifact(root, &report_path, report).and_then(|_| {
+            write_report_json_artifact(root, &report_json_path, report).map(|_| {
+                AssessmentArtifacts {
+                    scope_path,
+                    report_path,
+                    report_json_path,
+                }
             })
         })
     })
 }
 
-fn write_scope_artifact(path: &Path, scope: &Value) -> Result<()> {
-    write_pretty_json_artifact(path, scope)
+fn write_scope_artifact(root: &Path, path: &Path, scope: &Value) -> Result<()> {
+    write_pretty_json_artifact(root, path, scope)
 }
 
-fn write_report_json_artifact(path: &Path, report: &Value) -> Result<()> {
-    write_pretty_json_artifact(path, report)
+fn write_report_json_artifact(root: &Path, path: &Path, report: &Value) -> Result<()> {
+    write_pretty_json_artifact(root, path, report)
 }
 
-fn write_pretty_json_artifact(path: &Path, value: &Value) -> Result<()> {
+fn write_pretty_json_artifact(root: &Path, path: &Path, value: &Value) -> Result<()> {
     serde_json::to_string_pretty(value)
         .map(|body| format!("{body}\n"))
         .map_err(Into::into)
-        .and_then(|body| fs::write(path, body).map_err(Into::into))
+        .and_then(|body| write_state_path(root, path, body.as_bytes()).map(|_| ()))
 }
 
-fn write_report_markdown_artifact(path: &Path, report: &Value) -> Result<()> {
-    fs::write(path, format!("{}\n", render_report_markdown(report))).map_err(Into::into)
+fn write_report_markdown_artifact(root: &Path, path: &Path, report: &Value) -> Result<()> {
+    write_state_path(
+        root,
+        path,
+        format!("{}\n", render_report_markdown(report)).as_bytes(),
+    )
+    .map(|_| ())
 }
 
 fn assessment_response(
@@ -178,38 +209,62 @@ fn assessment_response(
     artifacts: AssessmentArtifacts,
     prompts_dir: PathBuf,
 ) -> Value {
+    let summary = assessment_response_summary(&report, &artifacts, &prompts_dir);
+    let artifact_data = assessment_artifact_data(&artifacts, &prompts_dir);
+    let mut result = crate::module_result::completed_output_result(
+        summary.clone(),
+        summary,
+        json!({
+            "runId": run_id,
+            "report": report,
+            "scope": scope,
+            "artifacts": artifact_data,
+        }),
+    );
+    result["artifacts"] = assessment_artifact_rows(&artifacts, &prompts_dir);
+    result["costUsd"] = json!(0.0);
+    result
+}
+
+fn assessment_response_summary(
+    report: &Value,
+    artifacts: &AssessmentArtifacts,
+    prompts_dir: &Path,
+) -> String {
     let output = format!(
         "Vendor assessment complete ({}, {}).\nReport: {}\nJSON:   {}\nScope:  {}\nPrompts: {}",
-        report.get("overallRisk").and_then(Value::as_str).unwrap_or("needs-review"),
-        report.get("confidence").and_then(Value::as_str).unwrap_or("low"),
+        report
+            .get("overallRisk")
+            .and_then(Value::as_str)
+            .unwrap_or("needs-review"),
+        report
+            .get("confidence")
+            .and_then(Value::as_str)
+            .unwrap_or("low"),
         artifacts.report_path.display(),
         artifacts.report_json_path.display(),
         artifacts.scope_path.display(),
         prompts_dir.display(),
     );
-    let mut result = crate::module_result::completed_output_result(
-        output.clone(),
-        output,
-        json!({
-            "runId": run_id,
-            "report": report,
-            "scope": scope,
-            "artifacts": {
-                "scopePath": artifacts.scope_path.display().to_string(),
-                "reportPath": artifacts.report_path.display().to_string(),
-                "reportJsonPath": artifacts.report_json_path.display().to_string(),
-                "promptsDir": prompts_dir.display().to_string(),
-            },
-        }),
-    );
-    result["artifacts"] = json!([
+    output
+}
+
+fn assessment_artifact_data(artifacts: &AssessmentArtifacts, prompts_dir: &Path) -> Value {
+    json!({
+        "scopePath": artifacts.scope_path.display().to_string(),
+        "reportPath": artifacts.report_path.display().to_string(),
+        "reportJsonPath": artifacts.report_json_path.display().to_string(),
+        "promptsDir": prompts_dir.display().to_string(),
+    })
+}
+
+fn assessment_artifact_rows(artifacts: &AssessmentArtifacts, prompts_dir: &Path) -> Value {
+    json!([
         { "label": "report", "path": artifacts.report_path.display().to_string() },
         { "label": "report json", "path": artifacts.report_json_path.display().to_string() },
         { "label": "scope", "path": artifacts.scope_path.display().to_string() },
         { "label": "prompts", "path": prompts_dir.display().to_string() },
-    ]);
-    result["costUsd"] = json!(0.0);
-    result
+    ])
 }
 
 pub(crate) fn require_json_object(value: Value) -> Result<Value> {

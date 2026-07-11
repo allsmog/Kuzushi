@@ -14,7 +14,9 @@
 mod tool_phase;
 mod workflow_phase;
 
-pub use tool_phase::{classify, tool_mutates, tool_phase, ToolClassification};
+pub use tool_phase::{
+    classify, classify_descriptor, tool_mutates, tool_phase, ToolClassification,
+};
 pub use workflow_phase::WorkflowPhase;
 
 use crate::config::GuidedPhase;
@@ -147,6 +149,9 @@ pub enum AutonomyDecision {
         needed: WorkflowPhase,
         ceiling: WorkflowPhase,
     },
+    /// Effectful tool without a declared journey phase, or an unknown name in
+    /// the compatibility API. Unknown policy fails closed at every posture.
+    RefuseUnclassified,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -173,14 +178,30 @@ impl std::error::Error for AutonomyRefusal {}
 /// Pure autonomy gate. No IO, no model, no runtime. Refuses tools above the
 /// posture ceiling; otherwise allows (flagging mutating tools for approval).
 pub fn gate(tool_name: &str, posture: AutonomyPosture) -> AutonomyDecision {
-    let Some(needed) = tool_phase(tool_name) else {
+    let registry = crate::modules::registry::ModuleRegistry::with_v2_builtins();
+    let Some(tool) = registry.resolve_tool(tool_name) else {
+        return AutonomyDecision::RefuseUnclassified;
+    };
+    gate_descriptor(tool, posture)
+}
+
+/// Gate the descriptor actually selected for dispatch. Dynamic tools never
+/// fall back to a built-in name table.
+pub fn gate_descriptor(
+    tool: &crate::modules::descriptor::ToolDescriptor,
+    posture: AutonomyPosture,
+) -> AutonomyDecision {
+    let Some(classification) = classify_descriptor(tool) else {
+        return AutonomyDecision::RefuseUnclassified;
+    };
+    let ToolClassification::Phase(needed) = classification else {
         return AutonomyDecision::Allow;
     };
     let ceiling = posture.ceiling();
     if needed > ceiling {
         return AutonomyDecision::Refuse { needed, ceiling };
     }
-    if tool_mutates(tool_name) {
+    if tool.approval == crate::modules::descriptor::ApprovalPolicy::Explicit {
         return AutonomyDecision::RequireApproval;
     }
     AutonomyDecision::Allow
@@ -287,25 +308,23 @@ mod tests {
         let registry = ModuleRegistry::with_v2_builtins();
         for name in registry.tools.keys() {
             assert!(
-                !matches!(gate(name, AutonomyPosture::Fix), AutonomyDecision::Refuse { .. }),
+                !matches!(
+                    gate(name, AutonomyPosture::Fix),
+                    AutonomyDecision::Refuse { .. } | AutonomyDecision::RefuseUnclassified
+                ),
                 "{name} was refused under the most-permissive Fix posture"
             );
         }
     }
 
-    /// The anti-escape guard: every *dispatchable* tool — including hidden
-    /// DAG-node ids that never appear in `registry.tools` but are still
-    /// resolvable via `registry.executors` at the dispatch boundary — must be
-    /// explicitly classified as read/infra or phase-bearing. Iterating
-    /// `executors` rather than `tools` matters: a DAG-internal id with an
-    /// unknown module prefix would otherwise classify to `None` (permissive
-    /// `Allow`) and dispatch anyway, escaping gating without this test ever
-    /// noticing.
+    /// The anti-escape guard: every descriptor accepted by the shared
+    /// dispatch boundary must classify. Executor-only legacy DAG ids are not
+    /// included because dispatch now refuses anything without a descriptor.
     #[test]
     fn every_registered_tool_is_classified() {
         let registry = ModuleRegistry::with_v2_builtins();
         let unclassified: Vec<&String> = registry
-            .executors
+            .tools
             .keys()
             .filter(|name| classify(name).is_none())
             .collect();
@@ -313,6 +332,14 @@ mod tests {
             unclassified.is_empty(),
             "these dispatchable tools escape autonomy classification (add their module \
              prefix to tool_phase.rs): {unclassified:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_tool_fails_closed() {
+        assert_eq!(
+            gate("unknown:act", AutonomyPosture::Fix),
+            AutonomyDecision::RefuseUnclassified
         );
     }
 }

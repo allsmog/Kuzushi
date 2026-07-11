@@ -13,10 +13,10 @@ pub(crate) fn recon_module() -> BuiltinModule {
 
 fn recon_tools() -> Vec<ToolDescriptor> {
     vec![
-        nmap_tool(),
-        subdomain_tool(),
-        http_fingerprint_tool(),
-        recon_import_tool(),
+        nmap_tool().with_policy(external_action_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        subdomain_tool().with_policy(external_action_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        http_fingerprint_tool().with_policy(external_action_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        recon_import_tool().with_policy(workspace_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
     ]
 }
 
@@ -67,13 +67,15 @@ fn http_fingerprint_tool() -> ToolDescriptor {
 fn recon_import_tool() -> ToolDescriptor {
     tool_with_options(
         "recon:import",
-        "Import an external recon export (amass, httpx, nuclei, nmap-xml) into the recon store.",
+        "Import recon and HTTP evidence (amass, httpx, nuclei, nmap-xml, Burp XML, HAR).",
         vec![
             opt("tool", OptionType::Enum, "Recon export format to import.")
-                .choices(&["amass", "httpx", "nuclei", "nmap-xml"])
+                .choices(&["amass", "httpx", "nuclei", "nmap-xml", "burp-xml", "har"])
                 .aliases(&["source", "format"])
                 .required(),
-            opt("path", OptionType::String, "Path to the recon export file.").required(),
+            opt("path", OptionType::Path, "Path to the recon export file.")
+                .external_read()
+                .required(),
         ],
     )
 }

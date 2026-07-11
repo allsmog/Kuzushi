@@ -28,6 +28,7 @@ Feature: Planning-stage multi-select
     And I move the cursor to "Gather repo context"
     And I press "Space"
     Then "Gather repo context" is checked
+    And the log contains "cannot uncheck Gather repo context"
 
   Scenario: Enter runs the selected set and produces context-snapshot.json
     When I launch the shell

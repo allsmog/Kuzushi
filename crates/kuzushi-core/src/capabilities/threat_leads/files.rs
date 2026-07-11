@@ -16,22 +16,35 @@ pub(super) struct IndexedFile {
 }
 
 pub(super) fn collect_scan_files(target: &Path) -> Result<Vec<PathBuf>> {
-    let mut out = Vec::new();
-    collect_scan_files_inner(target, target, &mut out)?;
+    let canonical_root = fs::canonicalize(target)
+        .with_context(|| format!("Could not resolve {}", target.display()))?;
+    let mut canonical_files = Vec::new();
+    collect_scan_files_inner(&canonical_root, &canonical_root, &mut canonical_files)?;
+    let mut out = logical_scan_paths(target, &canonical_root, canonical_files);
     out.sort();
     out.truncate(MAX_SCAN_FILES);
     Ok(out)
 }
 
+fn logical_scan_paths(target: &Path, canonical_root: &Path, paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            path.strip_prefix(canonical_root)
+                .ok()
+                .map(|relative| target.join(relative))
+        })
+        .collect()
+}
+
 fn collect_scan_files_inner(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in fs::read_dir(dir).with_context(|| format!("Could not read {}", dir.display()))? {
-        let entry = entry?;
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if should_skip_path(&name) {
+    let entries = crate::bounded_file::read_dir_within(root, dir)
+        .with_context(|| format!("Could not read {}", dir.display()))?;
+    for entry in entries {
+        let Some((path, file_type)) = visible_scan_entry(entry?)? else {
             continue;
-        }
-        collect_entry(root, path, entry.metadata()?, out)?;
+        };
+        collect_entry(root, path, file_type, out)?;
         if out.len() >= MAX_SCAN_FILES {
             break;
         }
@@ -39,28 +52,45 @@ fn collect_scan_files_inner(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> 
     Ok(())
 }
 
+fn visible_scan_entry(entry: fs::DirEntry) -> Result<Option<(PathBuf, fs::FileType)>> {
+    let file_type = entry.file_type()?;
+    let name = entry.file_name();
+    if should_skip_path(&name.to_string_lossy()) || file_type.is_symlink() {
+        return Ok(None);
+    }
+    Ok(Some((entry.path(), file_type)))
+}
+
 fn collect_entry(
     root: &Path,
     path: PathBuf,
-    metadata: fs::Metadata,
+    file_type: fs::FileType,
     out: &mut Vec<PathBuf>,
 ) -> Result<()> {
-    if metadata.is_dir() {
-        collect_scan_files_inner(root, &path, out)?;
-    } else if metadata.is_file()
-        && metadata.len() <= MAX_FILE_BYTES
-        && is_interesting_source_path(root, &path)
-    {
+    if file_type.is_dir() {
+        return collect_scan_files_inner(root, &path, out);
+    }
+    if scan_file_is_eligible(root, &path, file_type)? {
         out.push(path);
     }
     Ok(())
+}
+
+fn scan_file_is_eligible(root: &Path, path: &Path, file_type: fs::FileType) -> Result<bool> {
+    if !file_type.is_file() || !is_interesting_source_path(root, path) {
+        return Ok(false);
+    }
+    let metadata = fs::symlink_metadata(path)?;
+    Ok(metadata.file_type().is_file() && metadata.len() <= MAX_FILE_BYTES)
 }
 
 pub(super) fn index_files(root: &Path, files: &[PathBuf]) -> Vec<IndexedFile> {
     files
         .iter()
         .filter_map(|path| {
-            let text = fs::read_to_string(path).ok()?;
+            let text =
+                crate::bounded_file::read_utf8_text_within(root, path, MAX_FILE_BYTES as usize)
+                    .ok()?;
             let relative = path.strip_prefix(root).ok()?.display().to_string();
             Some(IndexedFile {
                 relative: relative.replace('\\', "/"),
@@ -178,7 +208,12 @@ fn is_interesting_source_path(root: &Path, path: &Path) -> bool {
     let Ok(relative) = path.strip_prefix(root) else {
         return false;
     };
-    if relative.display().to_string().replace('\\', "/").starts_with(".kuzushi/") {
+    if relative
+        .display()
+        .to_string()
+        .replace('\\', "/")
+        .starts_with(".kuzushi/")
+    {
         return false;
     }
     is_interesting_extension(path) || is_interesting_filename(path)
@@ -187,22 +222,52 @@ fn is_interesting_source_path(root: &Path, path: &Path) -> bool {
 fn is_interesting_extension(path: &Path) -> bool {
     matches!(
         path.extension().and_then(|ext| ext.to_str()).unwrap_or(""),
-        "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "rs" | "go" | "js" | "ts" | "py" | "rb"
-            | "php" | "java" | "sh" | "yml" | "yaml" | "cmake" | "txt" | "md"
+        "c" | "cc"
+            | "cpp"
+            | "cxx"
+            | "h"
+            | "hpp"
+            | "rs"
+            | "go"
+            | "js"
+            | "ts"
+            | "py"
+            | "rb"
+            | "php"
+            | "java"
+            | "sh"
+            | "yml"
+            | "yaml"
+            | "cmake"
+            | "txt"
+            | "md"
     )
 }
 
 fn is_interesting_filename(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| matches!(name, "CMakeLists.txt" | "configure" | "configure.ac" | "Makefile"))
+        .is_some_and(|name| {
+            matches!(
+                name,
+                "CMakeLists.txt" | "configure" | "configure.ac" | "Makefile"
+            )
+        })
 }
 
 fn should_skip_path(name: &str) -> bool {
     matches!(
         name,
-        ".git" | ".kuzushi" | ".next" | ".turbo" | "coverage" | "dist" | "native"
-            | "node_modules" | "target" | "build"
+        ".git"
+            | ".kuzushi"
+            | ".next"
+            | ".turbo"
+            | "coverage"
+            | "dist"
+            | "native"
+            | "node_modules"
+            | "target"
+            | "build"
     )
 }
 
@@ -212,11 +277,37 @@ mod tests {
 
     #[test]
     fn path_patterns_match_simple_globs() {
-        assert!(path_matches_pattern("docs/examples/ftp-wildcard.c", "docs/*"));
+        assert!(path_matches_pattern(
+            "docs/examples/ftp-wildcard.c",
+            "docs/*"
+        ));
         assert!(path_matches_pattern(
             ".github/workflows/ci.yml",
             ".github/workflows/*.yml"
         ));
         assert!(!path_matches_pattern("src/tool.c", "docs/*"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scan_and_index_skip_symlinks_outside_target() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(target.join("src")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(target.join("src/safe.rs"), "fn safe() {}\n").unwrap();
+        fs::write(outside.join("secret.rs"), "OUTSIDE_THREAT_LEAD_TOKEN\n").unwrap();
+        symlink(&outside, target.join("linked-dir")).unwrap();
+        symlink(outside.join("secret.rs"), target.join("linked.rs")).unwrap();
+
+        let mut files = collect_scan_files(&target).unwrap();
+        assert_eq!(files, vec![target.join("src/safe.rs")]);
+        files.push(target.join("linked.rs"));
+        let indexed = index_files(&target, &files);
+
+        assert_eq!(indexed.len(), 1);
+        assert!(!indexed[0].text.contains("OUTSIDE_THREAT_LEAD_TOKEN"));
     }
 }

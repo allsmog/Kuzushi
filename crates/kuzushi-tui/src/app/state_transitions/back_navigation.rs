@@ -10,7 +10,7 @@ impl ShellApp {
             Some(ShellView::Home) => {
                 self.clear_focused_module();
                 self.router.catalog_mut().collapse();
-                self.set_shell_view(ShellView::Home);
+                self.open_workbench(WorkbenchPane::Findings);
             }
             Some(target) => {
                 self.set_shell_view(target);

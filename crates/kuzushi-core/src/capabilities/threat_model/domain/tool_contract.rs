@@ -1,5 +1,7 @@
 use super::*;
 
+pub(crate) const MAX_SOURCE_BYTES: usize = 2 * 1024 * 1024;
+
 pub(crate) const VALID_STAGES: &[&str] = &["s1", "s2", "s3", "s4"];
 
 pub(crate) const VALID_METHODOLOGIES: &[&str] = &["pasta", "stride", "dread"];

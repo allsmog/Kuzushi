@@ -6,8 +6,8 @@
 //! This enum is the shared, pure phase concept for the whole workspace. It
 //! lives in `kuzushi-core` so the tool-dispatch boundary (and the autonomy
 //! gate) can reason about "how far along the spine a tool sits" without
-//! depending on the TUI crate. The TUI re-exports it through
-//! `app::onboarding::phase` as a compatibility shim.
+//! depending on the TUI crate. The TUI imports and re-exports this type
+//! directly from `kuzushi-core`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WorkflowPhase {

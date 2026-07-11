@@ -1,7 +1,7 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_elm_json(path: &Path) -> bool {
@@ -10,11 +10,7 @@ pub(super) fn is_elm_json(path: &Path) -> bool {
         .is_some_and(|name| name == "elm.json")
 }
 
-pub(super) fn elm_components(
-    target: &Path,
-    path: &Path,
-    text: &str,
-) -> Result<Vec<SbomComponent>> {
+pub(super) fn elm_components(target: &Path, path: &Path, text: &str) -> Result<Vec<SbomComponent>> {
     let value: Value = serde_json::from_str(text).context("sbom-scan: parse elm.json")?;
     Ok(elm_dependency_scopes(&value)
         .into_iter()
@@ -99,5 +95,8 @@ fn elm_direct_dependency_names(value: &Value) -> Vec<String> {
 }
 
 fn dependency_version(value: &Value) -> Option<&str> {
-    value.as_str().map(str::trim).filter(|version| !version.is_empty())
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
 }

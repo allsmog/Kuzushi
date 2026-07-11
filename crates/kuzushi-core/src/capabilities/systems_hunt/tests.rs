@@ -318,6 +318,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let runtime = FakeRuntime::new();
 
@@ -349,6 +351,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let output = execute_systems_hunt_tool(
@@ -377,6 +381,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let output =
@@ -410,6 +416,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let runtime = FakeRuntime::new();
         let context = gather_systems_context(
@@ -461,6 +469,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let runtime = FakeRuntime::new();
 
@@ -490,6 +500,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let runtime = FakeRuntime::new();
 
@@ -529,6 +541,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let runtime = FakeRuntime::new();
 
@@ -650,6 +664,51 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("under-evidenced"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn systems_hunt_artifacts_do_not_follow_workspace_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
+        symlink(
+            outside.path(),
+            workspace.path().join(".kuzushi/systems-hunt"),
+        )
+        .unwrap();
+        let raw = json!({
+            "findings": [{
+                "title": "Rejected candidate",
+                "filePath": "src/main.c",
+                "message": "unverified candidate"
+            }]
+        });
+
+        assert!(normalize_systems_hunt_findings(
+            raw,
+            workspace.path(),
+            &ctx_with(Vec::new()),
+            &workspace.path().join(".kuzushi/systems-hunt"),
+            5,
+        )
+        .is_err());
+        assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn systems_context_does_not_accept_symlinked_codeql_database() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
+        symlink(outside.path(), workspace.path().join(".kuzushi/codeql-db")).unwrap();
+
+        assert!(resolve_codeql_db_path(workspace.path()).is_none());
     }
 
     // ----- pick_role_for_invariants --------------------------------

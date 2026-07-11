@@ -1,7 +1,7 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_yaml::{Mapping, Value};
-use std::fs;
 use std::path::Path;
 
 const DEPENDENCY_SCOPES: &[&str] = &["dependencies", "development_dependencies"];
@@ -19,7 +19,16 @@ pub(super) fn shard_components(
 ) -> Result<Vec<SbomComponent>> {
     let value: Value = serde_yaml::from_str(text).context("sbom-scan: parse shard.yml")?;
     Ok(dependencies(&value)
-        .map(|dependency| component(target, path, "crystal", dependency.scope, dependency.name, None))
+        .map(|dependency| {
+            component(
+                target,
+                path,
+                "crystal",
+                dependency.scope,
+                dependency.name,
+                None,
+            )
+        })
         .collect())
 }
 
@@ -38,15 +47,19 @@ pub(super) fn shard_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependen
 }
 
 fn dependencies(value: &Value) -> impl Iterator<Item = ShardDependency<'_>> {
-    DEPENDENCY_SCOPES
-        .iter()
-        .flat_map(|scope| dependency_table(value, scope).into_iter().flat_map(move |table| table.keys().filter_map(move |key| dependency_name(scope, key))))
+    DEPENDENCY_SCOPES.iter().flat_map(|scope| {
+        dependency_table(value, scope)
+            .into_iter()
+            .flat_map(move |table| {
+                table
+                    .keys()
+                    .filter_map(move |key| dependency_name(scope, key))
+            })
+    })
 }
 
 fn dependency_table<'a>(value: &'a Value, scope: &str) -> Option<&'a Mapping> {
-    value
-        .get(scope)
-        .and_then(Value::as_mapping)
+    value.get(scope).and_then(Value::as_mapping)
 }
 
 fn dependency_name<'a>(scope: &'a str, key: &'a Value) -> Option<ShardDependency<'a>> {

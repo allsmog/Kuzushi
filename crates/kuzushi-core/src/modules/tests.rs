@@ -19,6 +19,31 @@ mod tests {
     use std::sync::Mutex;
     use tempfile::tempdir;
 
+    fn execute_authorized_tool(
+        registry: &ModuleRegistry,
+        name: &str,
+        input: Value,
+        ctx: &ToolExecutionContext<'_>,
+    ) -> Result<Value> {
+        let prepared = registry
+            .prepare_dispatch_input(name, input, ctx, None)?
+            .authorize_explicit_headless();
+        registry.dispatch_prepared_input_with_runtime(prepared, ctx, None)
+    }
+
+    fn execute_authorized_tool_with_runtime(
+        registry: &ModuleRegistry,
+        name: &str,
+        input: Value,
+        ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
+    ) -> Result<Value> {
+        let prepared = registry
+            .prepare_dispatch_input(name, input, ctx, None)?
+            .authorize_explicit_headless();
+        registry.dispatch_prepared_input_with_runtime(prepared, ctx, runtime)
+    }
+
     struct MockRuntime {
         requests: Mutex<Vec<TriageRequest>>,
         queries: Mutex<Vec<AgentQueryRequest>>,
@@ -716,6 +741,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let report = crate::capabilities::full_mode_multi::FullModeReport {
             findings: vec![Finding::new_tool(
@@ -770,6 +797,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let runtime = MockRuntime::new();
 
@@ -840,6 +869,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -877,6 +908,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let err = registry
@@ -902,6 +935,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -934,6 +969,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let err = chrome_rce::execute_tool("chrome-rce:unknown", json!({}), &ctx).unwrap_err();
@@ -975,6 +1012,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -1019,6 +1058,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let runtime = MockRuntime::new();
 
@@ -1028,14 +1069,14 @@ OUT
             "shinsa:quick-check",
             "prompt-armor:analyze",
         ] {
-            let result = registry
-                .execute_tool_with_runtime(
-                    tool,
-                    json!({"pluginRoot": plugin_root.display().to_string()}),
-                    &ctx,
-                    Some(&runtime),
-                )
-                .unwrap();
+            let result = execute_authorized_tool_with_runtime(
+                &registry,
+                tool,
+                json!({"pluginRoot": plugin_root.display().to_string()}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
             assert_eq!(
                 result.get("ok").and_then(Value::as_bool),
                 Some(true),
@@ -1070,14 +1111,17 @@ OUT
     fn plugin_adapters_missing_dependency_fail_actionably() {
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-test".to_string());
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
-            findings_store: None,
+            findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let runtime = MockRuntime::new();
 
@@ -1094,17 +1138,19 @@ OUT
     fn prompt_armor_network_tools_require_authorization() {
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
-            findings_store: None,
+            findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
-            .execute_tool("prompt-armor:scan", json!({}), &ctx)
+        let result = execute_authorized_tool(&registry, "prompt-armor:scan", json!({}), &ctx)
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
@@ -1134,11 +1180,17 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let config_result = registry
-            .execute_tool("prompt-armor:config", json!({"action": "init"}), &ctx)
-            .unwrap();
+        let config_result = execute_authorized_tool(
+            &registry,
+            "prompt-armor:config",
+            json!({"action": "init"}),
+            &ctx,
+        )
+        .unwrap();
         assert_completed_result_envelope(&config_result, "prompt-armor:config");
         assert_eq!(
             config_result
@@ -1147,13 +1199,13 @@ OUT
             Some(true)
         );
 
-        let diff_result = registry
-            .execute_tool(
-                "prompt-armor:diff",
-                json!({"runA": "run-a.txt", "runB": "run-b.txt"}),
-                &ctx,
-            )
-            .unwrap();
+        let diff_result = execute_authorized_tool(
+            &registry,
+            "prompt-armor:diff",
+            json!({"runA": "run-a.txt", "runB": "run-b.txt"}),
+            &ctx,
+        )
+        .unwrap();
         assert_completed_result_envelope(&diff_result, "prompt-armor:diff complete");
         assert_eq!(
             diff_result
@@ -1162,9 +1214,8 @@ OUT
             Some(1)
         );
 
-        let report_result = registry
-            .execute_tool("prompt-armor:report", json!({}), &ctx)
-            .unwrap();
+        let report_result =
+            execute_authorized_tool(&registry, "prompt-armor:report", json!({}), &ctx).unwrap();
         assert_eq!(
             report_result.get("status").and_then(Value::as_str),
             Some("completed")
@@ -1207,15 +1258,17 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
-            .execute_tool(
-                "recon:nmap",
-                json!({"target":"192.0.2.10","ports":"80,443","binary":binary.display().to_string()}),
-                &ctx,
-            )
-            .unwrap();
+        let result = execute_authorized_tool(
+            &registry,
+            "recon:nmap",
+            json!({"target":"192.0.2.10","ports":"80,443","binary":binary.display().to_string()}),
+            &ctx,
+        )
+        .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
@@ -1250,15 +1303,17 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
-            .execute_tool(
-                "recon:http-fingerprint",
-                json!({"target":"https://www.example.com","binary":binary.display().to_string()}),
-                &ctx,
-            )
-            .unwrap();
+        let result = execute_authorized_tool(
+            &registry,
+            "recon:http-fingerprint",
+            json!({"target":"https://www.example.com","binary":binary.display().to_string()}),
+            &ctx,
+        )
+        .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
@@ -1293,15 +1348,17 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
-            .execute_tool(
-                "recon:subdomain",
-                json!({"domain":"example.com","source":"crtsh","binary":binary.display().to_string()}),
-                &ctx,
-            )
-            .unwrap();
+        let result = execute_authorized_tool(
+            &registry,
+            "recon:subdomain",
+            json!({"domain":"example.com","source":"crtsh","binary":binary.display().to_string()}),
+            &ctx,
+        )
+        .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
@@ -1322,6 +1379,8 @@ OUT
             workspace: None,
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let error = registry
@@ -1345,6 +1404,8 @@ OUT
             workspace: None,
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -1379,6 +1440,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -1447,6 +1510,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -1497,6 +1562,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -1557,6 +1624,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -1608,6 +1677,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -1643,9 +1714,16 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        assert!(registry.resolve_tool("context-lite:index").is_none());
+        assert!(registry
+            .resolve_tool("context-lite:index")
+            .is_some_and(|tool| tool.hidden));
+        assert!(registry
+            .tools()
+            .all(|tool| tool.name != "context-lite:index"));
         let result = registry
             .execute_tool("context-lite:index", json!({"sampleLimit": 5}), &ctx)
             .unwrap();
@@ -1670,6 +1748,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let err = registry
@@ -1739,6 +1819,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -1791,32 +1873,31 @@ OUT
     #[test]
     fn dep_hygiene_missing_target_failure_is_explicit() {
         let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
-            workspace: None,
+            workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
+        let error = registry
             .execute_tool(
                 "dep-hygiene:check",
                 json!({"target": temp.path().join("missing").display().to_string()}),
                 &ctx,
             )
-            .unwrap();
-
-        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
-        assert_eq!(
-            result.pointer("/data/tool").and_then(Value::as_str),
-            Some("dep-hygiene:check")
+            .unwrap_err();
+        let detail = format!("{error:#}");
+        assert!(detail.contains("dep-hygiene:check target path"), "{detail}");
+        assert!(
+            detail.contains("could not be resolved inside workspace"),
+            "{detail}"
         );
-        assert!(result["errors"][0]
-            .as_str()
-            .is_some_and(|error| error.contains("dep-hygiene: target does not exist")));
     }
 
     #[test]
@@ -1831,6 +1912,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -1878,6 +1961,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -1926,32 +2011,31 @@ OUT
     #[test]
     fn secret_scan_missing_target_failure_is_explicit() {
         let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
-            workspace: None,
+            workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
+        let error = registry
             .execute_tool(
                 "secret-scan:scan",
                 json!({"target": temp.path().join("missing").display().to_string()}),
                 &ctx,
             )
-            .unwrap();
-
-        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
-        assert_eq!(
-            result.pointer("/data/tool").and_then(Value::as_str),
-            Some("secret-scan:scan")
+            .unwrap_err();
+        let detail = format!("{error:#}");
+        assert!(detail.contains("secret-scan:scan target path"), "{detail}");
+        assert!(
+            detail.contains("could not be resolved inside workspace"),
+            "{detail}"
         );
-        assert!(result["errors"][0]
-            .as_str()
-            .is_some_and(|error| error.contains("secret-scan: target is not a directory")));
     }
 
     #[test]
@@ -1977,6 +2061,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2029,6 +2115,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2058,32 +2146,31 @@ OUT
     #[test]
     fn license_scan_missing_target_failure_is_explicit() {
         let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
-            workspace: None,
+            workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
+        let error = registry
             .execute_tool(
                 "license-scan:scan",
                 json!({"target": temp.path().join("missing").display().to_string()}),
                 &ctx,
             )
-            .unwrap();
-
-        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
-        assert_eq!(
-            result.pointer("/data/tool").and_then(Value::as_str),
-            Some("license-scan:scan")
+            .unwrap_err();
+        let detail = format!("{error:#}");
+        assert!(detail.contains("license-scan:scan target path"), "{detail}");
+        assert!(
+            detail.contains("could not be resolved inside workspace"),
+            "{detail}"
         );
-        assert!(result["errors"][0]
-            .as_str()
-            .is_some_and(|error| error.contains("license-scan: target does not exist")));
     }
 
     #[test]
@@ -2103,6 +2190,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2143,6 +2232,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2177,32 +2268,31 @@ OUT
     #[test]
     fn iac_scan_missing_target_failure_is_explicit() {
         let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
-            workspace: None,
+            workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
+        let error = registry
             .execute_tool(
                 "iac-scan:scan",
                 json!({"target": temp.path().join("missing").display().to_string()}),
                 &ctx,
             )
-            .unwrap();
-
-        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
-        assert_eq!(
-            result.pointer("/data/tool").and_then(Value::as_str),
-            Some("iac-scan:scan")
+            .unwrap_err();
+        let detail = format!("{error:#}");
+        assert!(detail.contains("iac-scan:scan target path"), "{detail}");
+        assert!(
+            detail.contains("could not be resolved inside workspace"),
+            "{detail}"
         );
-        assert!(result["errors"][0]
-            .as_str()
-            .is_some_and(|error| error.contains("iac-scan: target does not exist")));
     }
 
     #[test]
@@ -2234,6 +2324,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2279,7 +2371,7 @@ OUT
     }
 
     #[test]
-    fn sast_scan_dispatches_cargo_audit_task_without_lockfile() {
+    fn sast_scan_explicit_cargo_audit_requires_lockfile() {
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -2290,9 +2382,11 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
+        let error = registry
             .execute_tool(
                 "sast:scan",
                 json!({
@@ -2301,35 +2395,11 @@ OUT
                 }),
                 &ctx,
             )
-            .unwrap();
+            .unwrap_err();
 
-        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(
-            result.get("status").and_then(Value::as_str),
-            Some("completed")
-        );
-        assert!(result
-            .get("summary")
-            .and_then(Value::as_str)
-            .is_some_and(|summary| summary.starts_with("sast:scan")));
-        assert!(result
-            .get("errors")
-            .and_then(Value::as_array)
-            .is_some_and(Vec::is_empty));
-        assert_eq!(
-            result
-                .pointer("/data/findingsCount")
-                .and_then(Value::as_u64),
-            Some(0)
-        );
-        assert!(result
-            .pointer("/data/coreFindings")
-            .and_then(Value::as_array)
-            .is_some_and(Vec::is_empty));
-        assert!(result
-            .get("output")
-            .and_then(Value::as_str)
-            .is_some_and(|output| output.contains("cargo-audit")));
+        let detail = format!("{error:#}");
+        assert!(detail.contains("explicitly requested"), "{detail}");
+        assert!(detail.contains("cargo generate-lockfile"), "{detail}");
         assert!(store.list_findings(10).unwrap().is_empty());
     }
 
@@ -2356,6 +2426,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2401,6 +2473,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2451,6 +2525,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2501,6 +2577,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2564,6 +2642,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         registry
@@ -2640,6 +2720,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let err = registry
@@ -2654,6 +2736,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let runtime = MockRuntime::new();
         let err = registry
@@ -2680,6 +2764,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2745,6 +2831,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let err = registry
@@ -2759,6 +2847,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let runtime = MockRuntime::new();
         let err = registry
@@ -2795,6 +2885,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2834,6 +2926,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2896,6 +2990,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -2925,6 +3021,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let err = registry
@@ -2965,6 +3063,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3019,6 +3119,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3071,6 +3173,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3127,7 +3231,11 @@ OUT
         fs::write(kuzushi.join("cpg.bin"), b"CPG\0stub").unwrap();
         let codeql_db = kuzushi.join("codeql-db");
         fs::create_dir_all(&codeql_db).unwrap();
-        fs::write(codeql_db.join("placeholder"), "stub").unwrap();
+        fs::write(
+            codeql_db.join("codeql-database.yml"),
+            "primaryLanguage: javascript\n",
+        )
+        .unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
@@ -3139,6 +3247,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3193,6 +3303,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3231,13 +3343,16 @@ OUT
         let temp = tempdir().unwrap();
         write_systems_hunt_fixture(temp.path());
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
-            findings_store: None,
+            findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let err = registry
@@ -3275,6 +3390,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3334,10 +3451,12 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
-            .execute_tool_with_runtime(
+        let prepared = registry
+            .prepare_dispatch_input(
                 "sast:scan",
                 json!({
                     "taskMode": "manual",
@@ -3349,8 +3468,12 @@ OUT
                     "testCmd": "true"
                 }),
                 &ctx,
-                Some(&runtime),
+                None,
             )
+            .unwrap()
+            .authorize_explicit_headless_with_delegated_tools(&["patch:finding"]);
+        let result = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
@@ -3385,6 +3508,10 @@ OUT
             .pointer("/data/artifacts/verifyJsonl")
             .and_then(Value::as_str)
             .unwrap();
+        let patch_log = result
+            .pointer("/data/artifacts/patchJsonl")
+            .and_then(Value::as_str)
+            .unwrap();
         assert!(Path::new(summary).exists());
         assert!(summary.ends_with("sast-summary.json"));
         assert!(fs::read_to_string(summary)
@@ -3413,7 +3540,10 @@ OUT
             .contains("triage:complete"));
         let verify_log = fs::read_to_string(verify_log).unwrap();
         assert!(verify_log.contains("verification:complete"));
-        assert!(verify_log.contains("patch:complete"));
+        assert!(!verify_log.contains("patch:complete"));
+        assert!(fs::read_to_string(patch_log)
+            .unwrap()
+            .contains("patch:complete"));
 
         let finding = store.list_findings(10).unwrap().pop().unwrap();
         assert_eq!(
@@ -3449,6 +3579,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3595,6 +3727,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3667,6 +3801,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3729,6 +3865,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3791,6 +3929,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3822,19 +3962,22 @@ OUT
     fn semgrep_missing_binary_failure_is_actionable() {
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
-            findings_store: None,
+            findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
             .execute_tool(
                 "semgrep:scan",
-                json!({"binary": temp.path().join("missing-semgrep").display().to_string()}),
+                json!({"binary": "kuzushi-missing-semgrep"}),
                 &ctx,
             )
             .unwrap();
@@ -3845,7 +3988,8 @@ OUT
         assert!(err.contains("semgrep: could not find scanner binary"));
         assert!(err.contains("Install Semgrep"));
         assert!(err.contains(r#""binary":"/path/to/semgrep""#));
-        assert!(err.contains("Next: run semgrep:scan"));
+        assert!(err.contains("kuzushi --target <repo> run semgrep:scan"));
+        assert!(err.contains("kuzushi scan <repo> --tasks dep-hygiene,secret-scan"));
     }
 
     #[cfg(unix)]
@@ -3865,6 +4009,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3932,6 +4078,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -3998,6 +4146,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -4030,20 +4180,23 @@ OUT
     fn codeql_missing_binary_failure_is_actionable() {
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
-            findings_store: None,
+            findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
             .execute_tool(
                 "codeql:scan",
                 json!({
-                    "binary": temp.path().join("missing-codeql").display().to_string(),
+                    "binary": "kuzushi-missing-codeql",
                     "language": "javascript"
                 }),
                 &ctx,
@@ -4104,6 +4257,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let result = registry
             .execute_tool(
@@ -4139,11 +4294,11 @@ OUT
             "run-report-source",
             "tool",
             Some("secret-scan:scan".to_string()),
-            temp.path().display().to_string(),
+            workspace.root().display().to_string(),
         )
         .complete()
         .with_findings(Some(0));
-        write_run_summary(temp.path(), &source).unwrap();
+        write_run_summary(workspace.root(), &source).unwrap();
 
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
@@ -4152,6 +4307,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let result = registry
             .execute_tool("report:build", json!({"runId": "run-report-source"}), &ctx)
@@ -4224,6 +4381,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -4293,6 +4452,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let err = registry
@@ -4324,6 +4485,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -4380,6 +4543,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -4445,6 +4610,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -4500,6 +4667,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -4573,6 +4742,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -4645,6 +4816,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -4742,22 +4915,24 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
-            .execute_tool_with_runtime(
-                "patch:finding",
-                json!({
+        let result = execute_authorized_tool_with_runtime(
+            &registry,
+            "patch:finding",
+            json!({
                     "fingerprint": finding.fingerprint.clone(),
                     "model": "openai:gpt-patch",
                     "maxIterations": 1,
                     "buildCmd": "true",
                     "testCmd": "true"
-                }),
-                &ctx,
-                Some(&runtime),
-            )
-            .unwrap();
+            }),
+            &ctx,
+            Some(&runtime),
+        )
+        .unwrap();
 
         assert_eq!(
             result.get("ok").and_then(Value::as_bool),
@@ -4814,15 +4989,17 @@ OUT
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
-        let result = registry
-            .execute_tool(
-                "patch:finding",
-                json!({"fingerprint": finding.fingerprint.clone()}),
-                &ctx,
-            )
-            .unwrap();
+        let result = execute_authorized_tool(
+            &registry,
+            "patch:finding",
+            json!({"fingerprint": finding.fingerprint.clone()}),
+            &ctx,
+        )
+        .unwrap();
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
         assert!(result
             .get("output")
@@ -4840,26 +5017,26 @@ OUT
                 },
             )
             .unwrap();
-        let err = registry
-            .execute_tool(
-                "patch:finding",
-                json!({"fingerprint": finding.fingerprint.clone()}),
-                &ctx,
-            )
-            .unwrap_err()
-            .to_string();
+        let err = execute_authorized_tool(
+            &registry,
+            "patch:finding",
+            json!({"fingerprint": finding.fingerprint.clone()}),
+            &ctx,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("requires the LangGraph runtime"));
 
         let runtime = MockRuntime::new();
-        let err = registry
-            .execute_tool_with_runtime(
-                "patch:finding",
-                json!({"fingerprint": finding.fingerprint}),
-                &ctx,
-                Some(&runtime),
-            )
-            .unwrap_err()
-            .to_string();
+        let err = execute_authorized_tool_with_runtime(
+            &registry,
+            "patch:finding",
+            json!({"fingerprint": finding.fingerprint}),
+            &ctx,
+            Some(&runtime),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("requires an explicit model"));
         assert!(err.contains("will not choose a fallback model"));
     }
@@ -4898,6 +5075,8 @@ OUT
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry

@@ -53,15 +53,13 @@ pub(crate) fn run_terminal_shell(
     target: Option<&WorkspaceTarget>,
     registry: ModuleRegistry,
 ) -> Result<()> {
-    let mut terminal = setup_terminal()?;
     let mut app = ShellApp::with_registry(config, target, registry);
     if let Ok((columns, rows)) = crossterm::terminal::size() {
         apply_initial_terminal_size(&mut app, columns, rows);
     }
     apply_launch_onboarding(&mut app);
-    let result = terminal_shell_loop(&mut terminal, &mut app);
-    let _ = restore_terminal(&mut terminal);
-    result
+    let mut terminal = TerminalSession::setup()?;
+    terminal_shell_loop(terminal.terminal_mut(), &mut app)
 }
 
 pub(crate) fn apply_initial_terminal_size(app: &mut ShellApp, columns: u16, rows: u16) -> bool {
@@ -129,8 +127,9 @@ pub(crate) fn terminal_shell_loop(
     let (input, wake) = TerminalLoopInbox::spawn_crossterm_reader();
     app.set_loop_wake(Some(wake.clone()));
     app.jobs_mut().set_wake(Some(wake.clone()));
-    let mut watcher = WorkspaceWatcherRuntime::start(app.target(), wake)?;
+    let mut watcher = WorkspaceWatcherRuntime::start(app.target(), wake.clone())?;
     while !app.should_quit() {
+        reconcile_workspace_watcher(&mut watcher, app.target(), wake.clone())?;
         terminal_shell_step(terminal, app, &mut state, &input, watcher.as_mut())?;
     }
     app.jobs_mut().set_wake(None);

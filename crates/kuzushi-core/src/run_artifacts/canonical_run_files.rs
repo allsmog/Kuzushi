@@ -1,8 +1,6 @@
 use super::artifact_manifest::record_canonical_run_artifacts;
-use super::canonical_run_markers::{
-    write_empty_failures_marker, write_missing_report_marker,
-};
-use super::run_dir;
+use super::canonical_run_markers::{write_empty_failures_marker, write_missing_report_marker};
+use super::ensure_run_dir;
 use super::write_run_artifact_text;
 use super::RunArtifact;
 use crate::artifact_contract::{
@@ -13,14 +11,14 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn ensure_canonical_run_files(
-    target: &Path,
-    run_id: &str,
-    status: &str,
-) -> Result<()> {
-    let dir = run_dir(target, run_id);
-    fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
-    write_empty_failures_marker(dir.join(required_artifact_spec("failures.json").leaf), run_id, status)?;
+pub(crate) fn ensure_canonical_run_files(target: &Path, run_id: &str, status: &str) -> Result<()> {
+    let dir = ensure_run_dir(target, run_id)?;
+    write_empty_failures_marker(
+        target,
+        run_id,
+        required_artifact_spec("failures.json").leaf,
+        status,
+    )?;
     write_json_if_missing(
         dir.join(required_artifact_spec("artifacts.json").leaf),
         empty_manifest(run_id),
@@ -28,8 +26,9 @@ pub(crate) fn ensure_canonical_run_files(
     write_text_if_missing(dir.join(required_artifact_spec("events.jsonl").leaf), "")?;
     write_text_if_missing(dir.join(required_artifact_spec("trace.jsonl").leaf), "")?;
     write_missing_report_marker(
-        dir.join(required_artifact_spec("report.md").leaf),
+        target,
         run_id,
+        required_artifact_spec("report.md").leaf,
         status,
     )?;
     record_canonical_run_artifacts(target, run_id)?;
@@ -40,11 +39,11 @@ pub(crate) fn record_report_artifacts(
     target: &Path,
     run_id: &str,
     output: &Value,
-) -> Vec<RunArtifact> {
+) -> Result<Vec<RunArtifact>> {
     let mut artifacts = Vec::new();
-    record_markdown_report_artifact(&mut artifacts, target, run_id, output);
-    record_sarif_report_artifact(&mut artifacts, target, run_id, output);
-    artifacts
+    record_markdown_report_artifact(&mut artifacts, target, run_id, output)?;
+    record_sarif_report_artifact(&mut artifacts, target, run_id, output)?;
+    Ok(artifacts)
 }
 
 fn record_markdown_report_artifact(
@@ -52,10 +51,11 @@ fn record_markdown_report_artifact(
     target: &Path,
     run_id: &str,
     output: &Value,
-) {
+) -> Result<()> {
     if let Some(markdown) = string_at(output, &["/data/reportMarkdown", "/reportMarkdown"]) {
-        push_text_artifact(artifacts, target, run_id, report_artifact_spec(), markdown);
+        push_text_artifact(artifacts, target, run_id, report_artifact_spec(), markdown)?;
     }
+    Ok(())
 }
 
 fn record_sarif_report_artifact(
@@ -63,10 +63,11 @@ fn record_sarif_report_artifact(
     target: &Path,
     run_id: &str,
     output: &Value,
-) {
+) -> Result<()> {
     if let Some(sarif) = sarif_at(output, &["/data/reportSarif", "/reportSarif"]) {
-        push_text_artifact(artifacts, target, run_id, sarif_artifact_spec(), &sarif);
+        push_text_artifact(artifacts, target, run_id, sarif_artifact_spec(), &sarif)?;
     }
+    Ok(())
 }
 
 fn push_text_artifact(
@@ -75,12 +76,10 @@ fn push_text_artifact(
     run_id: &str,
     spec: &CanonicalRunArtifactSpec,
     body: &str,
-) {
-    if let Ok(artifact) = write_text_artifact(target, run_id, spec, body) {
-        artifacts.push(artifact);
-    }
+) -> Result<()> {
+    artifacts.push(write_text_artifact(target, run_id, spec, body)?);
+    Ok(())
 }
-
 
 fn required_artifact_spec(leaf: &str) -> &'static CanonicalRunArtifactSpec {
     canonical_run_artifact_spec(leaf).expect("canonical snapshot artifact must be in shared spec")

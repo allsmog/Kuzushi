@@ -13,17 +13,12 @@ would mark this true_positive. A score of 0.2 means you would expect false_posit
 Reserve scores above 0.9 for cases with obvious user-controlled input flowing into a
 clear sink with no visible guard."#;
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub(crate) struct ClassifierResponse {
     #[serde(default)]
     pub(crate) likely: bool,
     #[serde(default)]
     pub(crate) score: f32,
-    /// The model's stated reason. Surfaced via the rationale on
-    /// `skip_outcome` only — kept for forward-compat / log enrichment.
-    #[serde(default)]
-    pub(crate) reason: String,
 }
 
 pub struct LikelyVulnClassifier<'a> {

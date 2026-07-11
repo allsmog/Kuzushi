@@ -7,7 +7,13 @@ pub(in crate::modules) fn module() -> BuiltinModule {
         "Chrome RCE",
         ModuleKind::Defense,
         "Detection rules anchored to verified Chrome and Chromium RCE CVEs.",
-        vec![
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Hunt,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Required,
+            ),
+            vec![
             tool_with_options(
                 "chrome-rce:scan",
                 "Scan for Chrome RCE bug patterns.",
@@ -26,7 +32,8 @@ pub(in crate::modules) fn module() -> BuiltinModule {
                     .aliases(&["diff_base"]),
                 ],
             ),
-        ],
+            ],
+        ),
         vec![
             dag("chrome-rce:scan", "findings", &["context:build"]),
             dag("chrome-rce:review-trigger", "review", &["chrome-rce:scan"]),

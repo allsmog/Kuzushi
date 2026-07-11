@@ -7,59 +7,74 @@
 //! workspace findings store, and the threat model (the DFD page) persists via
 //! [`crate::capabilities::persistent_threat_model_path`]. These two were the
 //! only generated visualizations that vanished on restart; saving them under the
-//! same `.kuzushi/v3` state root keeps every page available for a repo across
+//! same `.kuzushi` state root keeps every page available for a repo across
 //! sessions. The payload is the raw structured JSON the tools emit, reloaded by
 //! the same parsers that handle the live tool result, so there is no second
 //! schema to keep in sync.
 
-use crate::workspace::workspace_state_root;
+use crate::workspace::{
+    read_optional_workspace_text, workspace_state_root, write_workspace_state_file,
+    KUZUSHI_STATE_DIR,
+};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 const TAINT_FLOW_FILE: &str = "scene-taint-flow.json";
 const EXPLOIT_CHAINS_FILE: &str = "scene-exploit-chains.json";
+const MAX_SCENE_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
-/// `<root>/.kuzushi/v3/scene-taint-flow.json` — the persisted `{ "flows": [...] }`.
+/// `<root>/.kuzushi/scene-taint-flow.json` — the persisted `{ "flows": [...] }`.
 pub fn persistent_taint_flow_path(root: &Path) -> PathBuf {
     workspace_state_root(root).join(TAINT_FLOW_FILE)
 }
 
-/// `<root>/.kuzushi/v3/scene-exploit-chains.json` — the persisted `{ "chains": [...] }`.
+/// `<root>/.kuzushi/scene-exploit-chains.json` — the persisted `{ "chains": [...] }`.
 pub fn persistent_exploit_chains_path(root: &Path) -> PathBuf {
     workspace_state_root(root).join(EXPLOIT_CHAINS_FILE)
 }
 
 pub fn save_persistent_taint_flow(root: &Path, payload: &Value) -> Result<()> {
-    write_scene_snapshot(&persistent_taint_flow_path(root), payload)
+    write_scene_snapshot(root, TAINT_FLOW_FILE, payload)
 }
 
 pub fn load_persistent_taint_flow(root: &Path) -> Option<Value> {
-    read_scene_snapshot(&persistent_taint_flow_path(root))
+    try_load_persistent_taint_flow(root).ok().flatten()
+}
+
+pub fn try_load_persistent_taint_flow(root: &Path) -> Result<Option<Value>> {
+    read_scene_snapshot(root, &persistent_taint_flow_path(root))
 }
 
 pub fn save_persistent_exploit_chains(root: &Path, payload: &Value) -> Result<()> {
-    write_scene_snapshot(&persistent_exploit_chains_path(root), payload)
+    write_scene_snapshot(root, EXPLOIT_CHAINS_FILE, payload)
 }
 
 pub fn load_persistent_exploit_chains(root: &Path) -> Option<Value> {
-    read_scene_snapshot(&persistent_exploit_chains_path(root))
+    try_load_persistent_exploit_chains(root).ok().flatten()
 }
 
-fn write_scene_snapshot(path: &Path, payload: &Value) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Could not create {}", parent.display()))?;
-    }
-    fs::write(path, format!("{}\n", serde_json::to_string_pretty(payload)?))
-        .with_context(|| format!("Could not write {}", path.display()))?;
+pub fn try_load_persistent_exploit_chains(root: &Path) -> Result<Option<Value>> {
+    read_scene_snapshot(root, &persistent_exploit_chains_path(root))
+}
+
+fn write_scene_snapshot(root: &Path, file_name: &str, payload: &Value) -> Result<()> {
+    let body = format!("{}\n", serde_json::to_string_pretty(payload)?);
+    write_workspace_state_file(
+        root,
+        Path::new(KUZUSHI_STATE_DIR).join(file_name),
+        body.as_bytes(),
+    )?;
     Ok(())
 }
 
-fn read_scene_snapshot(path: &Path) -> Option<Value> {
-    let raw = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
+fn read_scene_snapshot(root: &Path, path: &Path) -> Result<Option<Value>> {
+    let Some(raw) = read_optional_workspace_text(root, path, MAX_SCENE_SNAPSHOT_BYTES)? else {
+        return Ok(None);
+    };
+    serde_json::from_str(&raw)
+        .map(Some)
+        .with_context(|| format!("Could not parse scene snapshot {}", path.display()))
 }
 
 #[cfg(test)]
@@ -97,5 +112,43 @@ mod tests {
         assert!(load_persistent_exploit_chains(dir.path()).is_none());
         save_persistent_exploit_chains(dir.path(), &payload).expect("save");
         assert_eq!(load_persistent_exploit_chains(dir.path()), Some(payload));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn scene_snapshot_writer_rejects_a_symlinked_artifact() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let mut outside = tempfile::NamedTempFile::new().expect("outside");
+        std::io::Write::write_all(&mut outside, b"outside").expect("seed outside");
+        std::fs::create_dir_all(workspace_state_root(workspace.path())).expect("state dir");
+        symlink(outside.path(), persistent_taint_flow_path(workspace.path()))
+            .expect("symlink artifact");
+
+        let error = save_persistent_taint_flow(workspace.path(), &json!({ "flows": [] }))
+            .expect_err("symlink must be rejected");
+
+        assert!(error.to_string().contains("symlink"));
+        assert_eq!(std::fs::read_to_string(outside.path()).unwrap(), "outside");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fallible_scene_reader_rejects_an_outside_symlink_without_disclosing_content() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let outside = tempfile::NamedTempFile::new().expect("outside");
+        std::fs::write(outside.path(), "OUTSIDE_SCENE_TOKEN").unwrap();
+        std::fs::create_dir_all(workspace_state_root(workspace.path())).unwrap();
+        symlink(outside.path(), persistent_taint_flow_path(workspace.path())).unwrap();
+
+        let error = try_load_persistent_taint_flow(workspace.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("symlink"), "{error}");
+        assert!(!error.contains("OUTSIDE_SCENE_TOKEN"));
     }
 }

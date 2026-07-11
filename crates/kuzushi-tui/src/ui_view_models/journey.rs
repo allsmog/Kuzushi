@@ -4,7 +4,7 @@
 //! than from the launch walker's transient state. The walker finishing
 //! doesn't end the journey — the workspace always *is* somewhere.
 
-use crate::app::{PlanningTaskId, WorkflowPhase};
+use crate::app::{PlanningTaskId, ViewDataState, WorkflowPhase};
 use crate::ui_view_models::review_state::{
     indexed_review_decision_complete, EffectiveReviewStateIndex,
 };
@@ -124,16 +124,8 @@ impl JourneyProgress {
 /// previous phases only become `Done` when workspace evidence proves progress.
 pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
     let target = app.target()?;
-    let findings = app.findings();
-    let review_index =
-        EffectiveReviewStateIndex::from_findings_and_decisions(findings, app.review_decisions());
-    let progress = journey_progress_from_parts(
-        app.workbench_cache()
-            .borrow_mut()
-            .map_artifacts_built(Some(target)),
-        findings,
-        &review_index,
-    );
+    let map_artifacts_built = cached_map_artifacts_built(app, target);
+    let progress = journey_progress(app, map_artifacts_built);
     let derived_current = progress.current_phase();
     let current = app.engagement.current_phase().unwrap_or(derived_current);
     let failed_phases = failed_phase_set(app);
@@ -150,6 +142,54 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
         next_tools: phase_tool_hint(current),
         next_summary: phase_next_summary(current, progress),
     })
+}
+
+fn cached_map_artifacts_built(app: &ShellApp, target: &std::path::Path) -> bool {
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_map_artifacts_built(Some(target))
+    {
+        ViewDataState::Ready(built) => built,
+        ViewDataState::NotRequested | ViewDataState::Loading => false,
+    }
+}
+
+fn journey_progress(app: &ShellApp, map_artifacts_built: bool) -> JourneyProgress {
+    app.domain()
+        .finding_ledger_counts()
+        .map(|counts| JourneyProgress {
+            map_artifacts_built,
+            finding_total: counts.total,
+            reviewed_findings: counts.reviewed,
+            confirmed_findings: counts.confirmed,
+        })
+        .unwrap_or_else(|| {
+            let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
+                app.findings(),
+                app.review_decisions(),
+            );
+            journey_progress_from_parts(map_artifacts_built, app.findings(), &review_index)
+        })
+}
+
+pub(crate) fn finding_ledger_counts(
+    findings: &[Finding],
+    decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
+    total: usize,
+) -> crate::app::FindingLedgerCounts {
+    let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(findings, decisions);
+    crate::app::FindingLedgerCounts {
+        total: total.max(findings.len()),
+        reviewed: findings
+            .iter()
+            .filter(|finding| indexed_review_decision_complete(&review_index, finding))
+            .count(),
+        confirmed: findings
+            .iter()
+            .filter(|finding| indexed_confirmed_finding(&review_index, finding))
+            .count(),
+    }
 }
 
 fn journey_progress_from_parts(
@@ -500,6 +540,8 @@ mod tests {
             duration_ms: 42,
             cost_usd: 0.0,
             notes: Vec::new(),
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: "2026-07-02T00:00:00Z".to_string(),
         });
 

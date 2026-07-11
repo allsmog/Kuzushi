@@ -1,11 +1,9 @@
 use super::review_state::EffectiveReviewStateIndex;
-use super::ui_run_dir;
-use crate::app::JsonFileState;
+use crate::app::{JsonFileState, ViewDataState};
 use crate::ShellApp;
 use kuzushi_core::findings::{ReviewDecisionVerdict, TriageVerdict};
-use kuzushi_core::RunTargetGitMetadata;
+use kuzushi_core::{RunId, RunTargetGitMetadata};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
 
 const FINDINGS_FILE: &str = "findings.json";
 const RUN_FILE: &str = "run.json";
@@ -76,15 +74,15 @@ pub(crate) struct RunDiffDecisionSummary {
 }
 
 pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiffModel {
-    let left_dir = ui_run_dir(app.target(), left);
-    let right_dir = ui_run_dir(app.target(), right);
     let mut warnings = Vec::new();
-    let left_metadata = run_metadata(app, &left_dir);
-    let right_metadata = run_metadata(app, &right_dir);
+    append_run_id_warning(&mut warnings, left);
+    append_run_id_warning(&mut warnings, right);
+    let left_metadata = run_metadata(app, left);
+    let right_metadata = run_metadata(app, right);
     append_status_warning(&mut warnings, left, &left_metadata.status);
     append_status_warning(&mut warnings, right, &right_metadata.status);
-    let left_findings = load_run_findings(app, &left_dir, left, &mut warnings);
-    let right_findings = load_run_findings(app, &right_dir, right, &mut warnings);
+    let left_findings = load_run_findings(app, left, &mut warnings);
+    let right_findings = load_run_findings(app, right, &mut warnings);
     let rows = classified_run_diff_rows(&left_findings, &right_findings);
     let decision_summary = run_diff_decision_summary(app, &right_findings);
 
@@ -306,19 +304,28 @@ struct RunDiffMetadata {
     status: String,
 }
 
-fn run_metadata(app: &ShellApp, run_dir: &Path) -> RunDiffMetadata {
-    let run_state = app
-        .workbench_cache()
-        .borrow_mut()
-        .json_file(&run_dir.join(RUN_FILE));
-    RunDiffMetadata {
-        revision: run_revision_label(run_state.clone()),
-        status: run_status_label(run_state),
+fn run_metadata(app: &ShellApp, run_id: &str) -> RunDiffMetadata {
+    let run_state = run_json_state(app, run_id, RUN_FILE);
+    match run_state {
+        ViewDataState::Ready(run_state) => RunDiffMetadata {
+            revision: run_revision_label(run_state.clone()),
+            status: run_status_label(run_state),
+        },
+        ViewDataState::NotRequested | ViewDataState::Loading => RunDiffMetadata {
+            revision: "rev:loading".to_string(),
+            status: "loading".to_string(),
+        },
+    }
+}
+
+fn append_run_id_warning(warnings: &mut Vec<String>, run_id: &str) {
+    if let Err(error) = RunId::parse(run_id) {
+        warnings.push(format!("invalid run id: {error}"));
     }
 }
 
 fn append_status_warning(warnings: &mut Vec<String>, run_id: &str, status: &str) {
-    if status == "completed" || status == "unknown" {
+    if matches!(status, "completed" | "unknown" | "loading") {
         return;
     }
     warnings.push(format!(
@@ -328,19 +335,26 @@ fn append_status_warning(warnings: &mut Vec<String>, run_id: &str, status: &str)
 
 fn load_run_findings(
     app: &ShellApp,
-    run_dir: &Path,
     run_id: &str,
     warnings: &mut Vec<String>,
 ) -> BTreeMap<String, RunDiffFindingRow> {
-    let path = run_dir.join(FINDINGS_FILE);
-    let value = match app.workbench_cache().borrow_mut().json_file(&path) {
-        JsonFileState::Present(value) => value,
-        JsonFileState::Missing => {
+    if RunId::parse(run_id).is_err() {
+        return BTreeMap::new();
+    }
+    let value = match run_json_state(app, run_id, FINDINGS_FILE) {
+        ViewDataState::Ready(JsonFileState::Present(value)) => value,
+        ViewDataState::Ready(JsonFileState::Missing) => {
             warnings.push(format!("{run_id}: missing {FINDINGS_FILE}"));
             return BTreeMap::new();
         }
-        JsonFileState::NonFile | JsonFileState::Malformed | JsonFileState::Unreadable => {
+        ViewDataState::Ready(
+            JsonFileState::NonFile | JsonFileState::Malformed | JsonFileState::Unreadable,
+        ) => {
             warnings.push(format!("{run_id}: malformed {FINDINGS_FILE}"));
+            return BTreeMap::new();
+        }
+        ViewDataState::NotRequested | ViewDataState::Loading => {
+            warnings.push(format!("{run_id}: loading {FINDINGS_FILE}"));
             return BTreeMap::new();
         }
     };
@@ -353,6 +367,15 @@ fn load_run_findings(
         .filter_map(run_diff_finding_row)
         .map(|row| (row.key.clone(), row))
         .collect()
+}
+
+fn run_json_state(app: &ShellApp, run_id: &str, leaf: &str) -> ViewDataState<JsonFileState> {
+    let Some(target) = app.target() else {
+        return ViewDataState::Ready(JsonFileState::Missing);
+    };
+    app.workbench_cache()
+        .borrow()
+        .cached_run_artifact_json(target, run_id, leaf)
 }
 
 fn findings_array(value: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {

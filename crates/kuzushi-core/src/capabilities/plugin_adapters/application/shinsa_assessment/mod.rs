@@ -46,6 +46,7 @@ fn prepare_shinsa_assessment<'tool, 'runtime>(
     let verb = shinsa_assessment_verb(tool_name);
     emit_shinsa_start(ctx, tool_name, verb, &target);
     let execution = resolve_shinsa_execution(tool_name, &input, ctx, runtime)?;
+    artifacts::prepare_shinsa_output_root(&target, &execution.output_dir)?;
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
     Ok(ShinsaAssessmentRun {
         tool_name,

@@ -8,7 +8,8 @@ use crate::findings::Finding;
 use crate::findings::StaticProofState;
 use crate::proof::whitebox_policy::{apply_whitebox_static_sast_policy, WhiteboxStaticPolicy};
 use crate::scan::{
-    run_scan_engines_with_options, scan_engines_for_tasks, ScanEngine, ScanRun, ScanRunOptions,
+    run_scan_engines_with_options_and_cancellation, scan_engines_for_tasks,
+    select_default_scan_engines, DefaultScanEngineSelection, ScanEngine, ScanRun, ScanRunOptions,
 };
 use anyhow::{Context, Result};
 pub(in crate::modules) use findings_count::*;

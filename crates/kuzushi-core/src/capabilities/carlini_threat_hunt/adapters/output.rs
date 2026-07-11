@@ -47,7 +47,11 @@ impl CarliniThreatHuntReport {
 }
 
 fn plural_suffix(count: usize) -> &'static str {
-    if count == 1 { "" } else { "s" }
+    if count == 1 {
+        ""
+    } else {
+        "s"
+    }
 }
 
 fn append_carlini_persisted_run(
@@ -228,14 +232,18 @@ fn explicit_carlini_context_snippets(target: &Path) -> Vec<ArtifactKnowledgeSnip
             "threat-model",
             "threat-model.json",
         ),
-        (context_snapshot_source_path(target), "context", "context-snapshot.json"),
+        (
+            context_snapshot_source_path(target),
+            "context",
+            "context-snapshot.json",
+        ),
     ]);
     sources
         .into_iter()
-    .filter_map(|(source_path, module_id, title)| {
-        explicit_context_snippet(target, &source_path, module_id, title)
-    })
-    .collect()
+        .filter_map(|(source_path, module_id, title)| {
+            explicit_context_snippet(target, &source_path, module_id, title)
+        })
+        .collect()
 }
 
 fn persistent_threat_model_source_path(target: &Path) -> String {
@@ -263,7 +271,8 @@ fn explicit_context_snippet(
     module_id: &str,
     title: &str,
 ) -> Option<ArtifactKnowledgeSnippet> {
-    let body = fs::read_to_string(target.join(source_path)).ok()?;
+    let path = target.join(source_path);
+    let body = crate::bounded_file::read_utf8_text_within(target, &path, 2 * 1024 * 1024).ok()?;
     let snippet_limit = if source_path.ends_with("threat-leads.md") {
         5000
     } else {
@@ -337,7 +346,30 @@ mod tests {
         assert!(source_paths.contains(&context_snapshot_source_path(temp.path()).as_str()));
         assert!(snippets
             .iter()
-            .any(|snippet| snippet.module_id == "context"
-                && is_carlini_context_artifact(snippet)));
+            .any(|snippet| snippet.module_id == "context" && is_carlini_context_artifact(snippet)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_context_skips_symlinks_outside_target() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        let outside = temp.path().join("outside-threat-leads.md");
+        fs::create_dir_all(target.join(".kuzushi")).unwrap();
+        fs::write(&outside, "OUTSIDE_CARLINI_CONTEXT_TOKEN\n").unwrap();
+        symlink(&outside, target.join(".kuzushi/threat-leads.md")).unwrap();
+
+        let snippets = explicit_carlini_context_snippets(&target);
+        let text = snippets
+            .iter()
+            .map(|snippet| format!("{}\n{}", snippet.summary, snippet.snippet))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(!text.contains("OUTSIDE_CARLINI_CONTEXT_TOKEN"));
+        assert!(snippets
+            .iter()
+            .all(|snippet| snippet.source_path != ".kuzushi/threat-leads.md"));
     }
 }

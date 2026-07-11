@@ -58,8 +58,7 @@ pub fn harvest_threat_intel_catalog(
         parent_step,
         format!("catalog · write {} new entries", harvest.new_entries.len()),
     );
-    let toml_text = render_catalog_toml(&harvest.new_entries, &output_path)?;
-    write_catalog_with_append(&output_path, &toml_text)?;
+    persist_harvested_catalog(ctx, &output_path, &harvest.new_entries)?;
     emit_threat_intel_harvest_done(ctx, &harvest.stats);
 
     Ok(harvest_result(
@@ -69,6 +68,20 @@ pub fn harvest_threat_intel_catalog(
         &harvest.stats,
         &gate,
     ))
+}
+
+fn persist_harvested_catalog(
+    ctx: &ToolExecutionContext<'_>,
+    output_path: &Path,
+    entries: &[HarvestedCatalogEntry],
+) -> Result<()> {
+    let workspace = ctx.workspace.ok_or_else(|| {
+        anyhow::anyhow!(crate::workspace::active_workspace_required_message(
+            "threat-intel:harvest"
+        ))
+    })?;
+    let toml_text = render_catalog_toml(entries, output_path)?;
+    write_catalog_with_append(workspace.root(), output_path, &toml_text)
 }
 
 struct HarvestedCatalog {

@@ -1,8 +1,9 @@
-use super::{scan_status, ui_runs_root};
-use crate::{ScanPanelState, ShellApp};
+use super::scan_status;
+use crate::{ScanPanelState, ShellApp, ViewDataState};
 use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
-use kuzushi_core::RunTargetGitMetadata;
-use std::path::{Path, PathBuf};
+use kuzushi_core::{
+    RunSummary, RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue, RunTargetGitMetadata,
+};
 
 const RUN_TIMELINE_COLUMN_COUNT: usize = 5;
 const RUN_ID_CELL: usize = 0;
@@ -59,7 +60,7 @@ impl PastRun {
 }
 
 pub(crate) fn run_timeline_model(app: &ShellApp, past_limit: usize) -> RunTimelineModel {
-    let active = app.scan().map(active_scan_row);
+    let active = app.scan().map(|scan| active_scan_row(app, scan));
     let active_run_id = active.as_ref().map(|row| row.cells[RUN_ID_CELL].clone());
     let mut rows = active.into_iter().collect::<Vec<_>>();
     rows.extend(past_run_rows(app, past_limit, active_run_id.as_deref()));
@@ -67,10 +68,21 @@ pub(crate) fn run_timeline_model(app: &ShellApp, past_limit: usize) -> RunTimeli
 }
 
 fn past_runs_model(app: &ShellApp) -> Vec<PastRun> {
-    collect_past_runs(&runs_root(app))
+    let Some(target) = app.target() else {
+        return Vec::new();
+    };
+    let entries = match app
+        .workbench_cache()
+        .borrow()
+        .cached_run_summary_entries(Some(target))
+    {
+        ViewDataState::Ready(entries) => entries,
+        ViewDataState::NotRequested | ViewDataState::Loading => Vec::new(),
+    };
+    entries.into_iter().map(past_run_from_entry).collect()
 }
 
-fn active_scan_row(scan: &ScanPanelState) -> RunTimelineRow {
+fn active_scan_row(app: &ShellApp, scan: &ScanPanelState) -> RunTimelineRow {
     RunTimelineRow {
         cells: [
             scan.run_id
@@ -79,7 +91,7 @@ fn active_scan_row(scan: &ScanPanelState) -> RunTimelineRow {
                 .unwrap_or_else(pending_id),
             scan_status(scan),
             active_scan_findings_label(scan),
-            active_scan_revision_label(scan),
+            active_scan_revision_label(app, scan),
             scan.target.display().to_string(),
         ],
         tone: active_scan_status(scan),
@@ -94,10 +106,17 @@ fn active_scan_findings_label(scan: &ScanPanelState) -> String {
     }
 }
 
-fn active_scan_revision_label(scan: &ScanPanelState) -> String {
-    kuzushi_core::workspace::target_git_metadata(&scan.target)
-        .map(|git| target_git_revision_label(&git))
-        .unwrap_or_else(|| "rev:unknown".to_string())
+fn active_scan_revision_label(app: &ShellApp, scan: &ScanPanelState) -> String {
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_git_metadata(Some(&scan.target))
+    {
+        ViewDataState::Ready(Some(git)) => target_git_revision_label(&git),
+        ViewDataState::Ready(None) | ViewDataState::NotRequested | ViewDataState::Loading => {
+            "rev:unknown".to_string()
+        }
+    }
 }
 
 fn active_scan_status(scan: &ScanPanelState) -> PastRunStatus {
@@ -158,68 +177,69 @@ fn finding_count_label(findings: Option<u64>) -> String {
         .unwrap_or_else(|| "\u{2014}".to_string())
 }
 
-fn runs_root(app: &ShellApp) -> PathBuf {
-    ui_runs_root(app.target())
-}
-
-fn collect_past_runs(runs_root: &Path) -> Vec<PastRun> {
-    let Ok(entries) = std::fs::read_dir(runs_root) else {
-        return Vec::new();
-    };
-    entries.flatten().filter_map(past_run_from_entry).collect()
-}
-
-fn past_run_from_entry(entry: std::fs::DirEntry) -> Option<PastRun> {
-    if !entry.metadata().ok()?.is_dir() {
-        return None;
+fn past_run_from_entry(entry: RunSummaryEntry) -> PastRun {
+    match entry.state {
+        RunSummaryEntryState::Ready(summary) => past_run_from_summary(summary),
+        RunSummaryEntryState::Issue(issue) => past_run_from_issue(entry.run_id, issue),
     }
-    let run_id = entry.file_name().to_string_lossy().to_string();
-    let (status_kind, findings, revision, target) = read_past_run_metadata(&entry.path());
-    Some(PastRun {
+}
+
+fn past_run_from_summary(summary: RunSummary) -> PastRun {
+    PastRun {
+        run_id: summary.run_id,
+        status_kind: parse_past_run_status(&summary.status),
+        findings: summary.findings,
+        revision: summary
+            .target_git
+            .as_ref()
+            .map(target_git_revision_label)
+            .unwrap_or_else(|| "rev:unknown".to_string()),
+        target: summary.target,
+    }
+}
+
+fn past_run_from_issue(run_id: String, issue: RunSummaryIssue) -> PastRun {
+    let (status_kind, target) = issue_display(issue);
+    PastRun {
         run_id,
         status_kind,
-        findings,
-        revision,
+        findings: None,
+        revision: "rev:unknown".to_string(),
         target,
-    })
-}
-
-fn read_past_run_metadata(run_dir: &Path) -> (PastRunStatus, Option<u64>, String, String) {
-    let metadata_leaf = run_metadata_artifact_leaf();
-    match read_run_artifact_json(&run_dir.join(metadata_leaf)) {
-        JsonArtifactRead::Present(value) => past_run_metadata_from_value(&value),
-        JsonArtifactRead::Malformed => return malformed_past_run_metadata(metadata_leaf),
-        JsonArtifactRead::NonFile => return non_file_past_run_metadata(metadata_leaf),
-        JsonArtifactRead::Missing => empty_past_run_metadata(),
     }
 }
 
-fn past_run_metadata_from_value(
-    value: &serde_json::Value,
-) -> (PastRunStatus, Option<u64>, String, String) {
-    (
-        value
-            .get("status")
-            .and_then(serde_json::Value::as_str)
-            .map(parse_past_run_status)
-            .unwrap_or(PastRunStatus::Unknown),
-        value.get("findings").and_then(serde_json::Value::as_u64),
-        run_revision_label(&value),
-        value
-            .get("target")
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string)
-            .unwrap_or_default(),
-    )
-}
-
-fn run_revision_label(value: &serde_json::Value) -> String {
-    value
-        .get("targetGit")
-        .or_else(|| value.get("target_git"))
-        .and_then(|git| serde_json::from_value::<RunTargetGitMetadata>(git.clone()).ok())
-        .map(|git| target_git_revision_label(&git))
-        .unwrap_or_else(|| "rev:unknown".to_string())
+fn issue_display(issue: RunSummaryIssue) -> (PastRunStatus, String) {
+    match issue {
+        RunSummaryIssue::MissingMetadata => (PastRunStatus::Unknown, String::new()),
+        RunSummaryIssue::NonFileMetadata => (
+            PastRunStatus::Malformed,
+            format!("{} is not a file", run_metadata_artifact_leaf()),
+        ),
+        RunSummaryIssue::InvalidMetadata(_) => (
+            PastRunStatus::Malformed,
+            format!("malformed {}", run_metadata_artifact_leaf()),
+        ),
+        RunSummaryIssue::InvalidRunId(error) => {
+            (PastRunStatus::Malformed, format!("invalid run id: {error}"))
+        }
+        RunSummaryIssue::UnsafeSymlink => (
+            PastRunStatus::Malformed,
+            "unsafe symlink in run artifacts".to_string(),
+        ),
+        RunSummaryIssue::NotDirectory => (
+            PastRunStatus::Malformed,
+            "run path is not a directory".to_string(),
+        ),
+        RunSummaryIssue::UnreadableMetadata(error) => (
+            PastRunStatus::Malformed,
+            format!("unreadable metadata: {error}"),
+        ),
+        RunSummaryIssue::RunIdMismatch { metadata_run_id } => (
+            PastRunStatus::Malformed,
+            format!("metadata run id mismatch: {metadata_run_id}"),
+        ),
+    }
 }
 
 fn target_git_revision_label(git: &RunTargetGitMetadata) -> String {
@@ -236,60 +256,6 @@ fn run_metadata_artifact_leaf() -> &'static str {
     canonical_run_artifact_spec("run.json")
         .expect("run metadata artifact must be in shared canonical spec")
         .leaf
-}
-
-enum JsonArtifactRead {
-    Present(serde_json::Value),
-    Malformed,
-    NonFile,
-    Missing,
-}
-
-fn read_run_artifact_json(path: &Path) -> JsonArtifactRead {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return JsonArtifactRead::NonFile,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return JsonArtifactRead::Missing;
-        }
-        Err(_) => return JsonArtifactRead::Malformed,
-    }
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(_) => return JsonArtifactRead::Malformed,
-    };
-    match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(value) if value.is_object() => JsonArtifactRead::Present(value),
-        Ok(_) => JsonArtifactRead::Malformed,
-        Err(_) => JsonArtifactRead::Malformed,
-    }
-}
-
-fn empty_past_run_metadata() -> (PastRunStatus, Option<u64>, String, String) {
-    (
-        PastRunStatus::Unknown,
-        None,
-        "rev:unknown".to_string(),
-        String::new(),
-    )
-}
-
-fn malformed_past_run_metadata(file: &str) -> (PastRunStatus, Option<u64>, String, String) {
-    (
-        PastRunStatus::Malformed,
-        None,
-        "rev:unknown".to_string(),
-        format!("malformed {file}"),
-    )
-}
-
-fn non_file_past_run_metadata(file: &str) -> (PastRunStatus, Option<u64>, String, String) {
-    (
-        PastRunStatus::Malformed,
-        None,
-        "rev:unknown".to_string(),
-        format!("{file} is not a file"),
-    )
 }
 
 fn parse_past_run_status(status: &str) -> PastRunStatus {

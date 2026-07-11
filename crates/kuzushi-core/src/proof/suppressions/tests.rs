@@ -103,6 +103,46 @@ mod tests {
         assert_eq!(loaded, vec![record]);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn whitebox_suppression_writer_rejects_a_symlinked_artifact() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("workspace");
+        let workspace = WorkspaceTarget::new(temp.path()).expect("workspace target");
+        let mut outside = tempfile::NamedTempFile::new().expect("outside");
+        std::io::Write::write_all(&mut outside, b"outside").expect("seed outside");
+        workspace.ensure_state_dir().expect("state dir");
+        symlink(outside.path(), whitebox_suppression_store_path(&workspace))
+            .expect("symlink artifact");
+
+        let error =
+            save_whitebox_suppressions(&workspace, &[]).expect_err("symlink must be rejected");
+
+        assert!(error.to_string().contains("symlink"));
+        assert_eq!(fs::read_to_string(outside.path()).unwrap(), "outside");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn whitebox_suppression_reader_rejects_an_outside_symlink_without_disclosing_content() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("workspace");
+        let workspace = WorkspaceTarget::new(temp.path()).expect("workspace target");
+        let outside = tempfile::NamedTempFile::new().expect("outside");
+        fs::write(outside.path(), "OUTSIDE_SUPPRESSION_TOKEN").unwrap();
+        workspace.ensure_state_dir().unwrap();
+        symlink(outside.path(), whitebox_suppression_store_path(&workspace)).unwrap();
+
+        let error = load_whitebox_suppressions(&workspace)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("symlink"), "{error}");
+        assert!(!error.contains("OUTSIDE_SUPPRESSION_TOKEN"));
+    }
+
     #[test]
     fn whitebox_suppression_matches_until_snippet_hash_changes() {
         let temp = tempfile::tempdir().unwrap();

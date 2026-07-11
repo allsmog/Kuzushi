@@ -45,7 +45,7 @@ fn read_threat_model_document(
     let normalized_path =
         resolve_output_dir(target, output_dir).join("normalized-threat-model.json");
     if normalized_path.exists() {
-        return read_normalized_threat_model(&normalized_path, methodology).map(Some);
+        return read_normalized_threat_model(target, &normalized_path, methodology).map(Some);
     }
     if artifacts.has_any_artifact() {
         return convert_randori_artifacts_to_document(artifacts, methodology);
@@ -53,8 +53,9 @@ fn read_threat_model_document(
     Ok(None)
 }
 
-fn read_normalized_threat_model(path: &Path, methodology: &str) -> Result<Value> {
-    let raw = fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
+fn read_normalized_threat_model(target: &Path, path: &Path, methodology: &str) -> Result<Value> {
+    let raw = crate::bounded_file::read_utf8_text_within(target, path, 8 * 1024 * 1024)
+        .with_context(|| format!("Could not read {}", path.display()))?;
     let parsed = serde_json::from_str::<Value>(&raw)
         .with_context(|| format!("Could not parse {}", path.display()))?;
     normalize_document(parsed, methodology)

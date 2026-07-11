@@ -58,11 +58,7 @@ pub struct PlayResponse {
 impl PlayResponse {
     /// True if `needle` appears in the body or any header value.
     pub fn contains(&self, needle: &str) -> bool {
-        self.body.contains(needle)
-            || self
-                .headers
-                .iter()
-                .any(|(_, value)| value.contains(needle))
+        self.body.contains(needle) || self.headers.iter().any(|(_, value)| value.contains(needle))
     }
 
     /// A compact `status + body excerpt` summary for the audit trail and for

@@ -18,6 +18,38 @@ pub struct ShellApp {
     pub(crate) option_persistence_enabled_for_test: bool,
 }
 
+#[derive(Debug, Default)]
+struct ExternalTargetStateChanges {
+    config: bool,
+    options: bool,
+    project_scopes: bool,
+}
+
+impl ExternalTargetStateChanges {
+    fn classify(target: &std::path::Path, relative_paths: &[std::path::PathBuf]) -> Self {
+        let broad = std::path::Path::new(".kuzushi/v3");
+        let config = kuzushi_core::workspace_config_path(target);
+        let options = kuzushi_core::workspace_options_path(target);
+        let scopes = target.join(".kuzushi/v3/project-model/scopes.json");
+        Self {
+            config: changed_path(target, relative_paths, broad, &config),
+            options: changed_path(target, relative_paths, broad, &options),
+            project_scopes: changed_path(target, relative_paths, broad, &scopes),
+        }
+    }
+}
+
+fn changed_path(
+    target: &std::path::Path,
+    relative_paths: &[std::path::PathBuf],
+    broad: &std::path::Path,
+    expected: &std::path::Path,
+) -> bool {
+    relative_paths
+        .iter()
+        .any(|relative| relative == broad || target.join(relative) == expected)
+}
+
 impl ShellApp {
     #[doc(hidden)]
     pub fn shell_view(&self) -> ShellView {
@@ -355,6 +387,9 @@ impl ShellApp {
     }
 
     pub fn set_target(&mut self, target: Option<PathBuf>) {
+        if self.target() != target.as_deref() {
+            self.invalidate_view_hydration();
+        }
         self.session.set_target(target);
     }
 
@@ -430,7 +465,12 @@ impl ShellApp {
     }
 
     pub(crate) fn record_task_duration_secs(&mut self, task_id: &str, secs: u64) {
-        self.domain.record_task_duration_secs(task_id, secs);
+        if let Err(error) = self.domain.record_task_duration_secs(task_id, secs) {
+            self.log(
+                "task-duration",
+                format!("could not persist duration for {task_id}: {error}"),
+            );
+        }
     }
 
     pub(crate) fn agent_cancel_token(&self) -> Option<&ScanCancellation> {
@@ -494,6 +534,10 @@ impl ShellApp {
         self.runtime_state.tool_run_mut().take_run_id()
     }
 
+    pub(crate) fn take_active_tool_target(&mut self) -> Option<PathBuf> {
+        self.runtime_state.tool_run_mut().take_target()
+    }
+
     pub(crate) fn active_model_override(&self) -> Option<&str> {
         self.runtime_state.tool_run().active_model_override()
     }
@@ -509,11 +553,12 @@ impl ShellApp {
         tool_name: String,
         cancel: ScanCancellation,
         run_id: String,
+        target: PathBuf,
         model_override: Option<String>,
     ) {
         self.runtime_state
             .tool_run_mut()
-            .start(tool_name, cancel, run_id, model_override);
+            .start(tool_name, cancel, run_id, target, model_override);
     }
 
     pub(crate) fn finish_tool_run(&mut self) {
@@ -665,7 +710,44 @@ impl ShellApp {
     }
 
     pub(crate) fn apply_workspace_changes(&mut self, changes: &[WorkspaceChange]) {
+        self.invalidate_view_hydration();
         self.domain.apply_workspace_changes(changes);
+        let target = self.target_owned();
+        let mut cache = self.workbench_cache().borrow_mut();
+        cache.invalidate_workspace_files();
+        cache.git_metadata(target.as_deref());
+    }
+
+    pub(crate) fn apply_external_workspace_state_change(
+        &mut self,
+        relative_paths: &[std::path::PathBuf],
+    ) -> Vec<ShellEffect> {
+        let Some(target) = self.target_owned() else {
+            return Vec::new();
+        };
+        self.invalidate_view_hydration();
+        let changes = ExternalTargetStateChanges::classify(&target, relative_paths);
+        let (findings_changed, run_summaries_changed) = {
+            self.workbench_cache()
+                .borrow_mut()
+                .invalidate_state_artifact_paths(&target, relative_paths)
+        };
+        self.reload_external_target_settings(&target, changes.config, changes.options);
+        if changes.project_scopes {
+            self.reload_external_project_scope_tree(&target);
+        }
+        if run_summaries_changed {
+            self.workbench_cache()
+                .borrow_mut()
+                .run_summary_entries(Some(&target));
+        }
+        if !findings_changed {
+            return Vec::new();
+        }
+        vec![ShellEffect::RefreshFindings(FindingsRefresh {
+            announce: false,
+            filter: None,
+        })]
     }
 
     pub(crate) fn clear_workspace_stale(&mut self) {
@@ -757,6 +839,16 @@ impl ShellApp {
 
     pub(crate) fn set_agent_chat(&mut self, agent: Option<AgentChatView>) {
         self.domain.set_agent_chat(agent);
+    }
+
+    pub(crate) fn agent_artifact_target_owned(&self) -> Option<std::path::PathBuf> {
+        self.domain
+            .agent_artifact_target()
+            .map(std::path::Path::to_path_buf)
+    }
+
+    pub(crate) fn set_agent_artifact_target(&mut self, target: Option<std::path::PathBuf>) {
+        self.domain.set_agent_artifact_target(target);
     }
 
     pub(crate) fn clear_agent_chat(&mut self) {
@@ -854,7 +946,8 @@ impl ShellApp {
 fn contextual_overlay_view(view: ShellView) -> bool {
     matches!(
         view,
-        ShellView::CommandPalette
+        ShellView::Catalog
+            | ShellView::CommandPalette
             | ShellView::ConfirmDialog
             | ShellView::QuitConfirm
             | ShellView::ThemePicker

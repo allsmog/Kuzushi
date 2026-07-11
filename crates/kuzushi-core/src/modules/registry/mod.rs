@@ -30,7 +30,6 @@ use crate::modules::application::sast_scan::run_sast_scan_with_registry;
 use crate::options::ToolOptionStore;
 use crate::recon::execute_recon_tool;
 use crate::remediation::patch::run_patch_finding;
-use crate::scan::ScanCancellation;
 use crate::secret_scan::{scan_for_secrets, SecretScanOptions};
 use crate::threat_leads::execute_threat_leads_tool;
 use crate::threat_model::execute_threat_model_tool;

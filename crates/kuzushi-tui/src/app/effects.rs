@@ -32,6 +32,7 @@ pub(crate) enum ShellEffect {
     ListPromptOverrides(PromptOverrideList),
     LoadDynamicModule(DynamicModuleLoad),
     OpenFilePicker,
+    OpenPromptDocument(PromptDocumentOpen),
     OpenGuidedScan(GuidedScanOpen),
     ShowKnowledgeBase(KnowledgeBaseShow),
     AttachKnowledgeBaseSource(KnowledgeBaseAttach),
@@ -160,7 +161,7 @@ pub(crate) struct ReviewedPatchApply {
 
 pub(crate) struct ThreatPatchApply {
     pub(crate) patch: ThreatPatch,
-    pub(crate) target: Option<PathBuf>,
+    pub(crate) target: PathBuf,
 }
 
 pub(crate) struct ReviewDecisionApply {
@@ -289,6 +290,7 @@ pub(crate) struct AgentRunRecord {
 pub(crate) enum AgentRunOutcome {
     Complete { answer_chars: usize },
     Failed { error: String },
+    Canceled { reason: String },
 }
 
 pub(crate) struct ScanRunRecord {
@@ -300,7 +302,16 @@ pub(crate) struct ScanRunRecord {
 
 pub(crate) enum ScanRunOutcome {
     Complete {
-        findings_count: usize,
+        result: serde_json::Value,
+    },
+    Partial {
+        result: serde_json::Value,
+    },
+    Skipped {
+        result: serde_json::Value,
+    },
+    FailedResult {
+        result: serde_json::Value,
     },
     Failed {
         error: String,
@@ -398,6 +409,7 @@ pub(crate) struct TargetRevisionSwitch {
 pub(crate) enum TargetActivationSource {
     Command,
     Picker,
+    ScriptedScan,
 }
 
 pub(crate) struct HouseRulesWrite {
@@ -412,6 +424,11 @@ pub(crate) struct HouseRulesReset {
 pub(crate) struct PromptOverrideWrite {
     pub(crate) path: PathBuf,
     pub(crate) value: String,
+}
+
+pub(crate) struct PromptDocumentOpen {
+    pub(crate) prompt: kuzushi_core::modules::PromptSpec,
+    pub(crate) origin: ShellView,
 }
 
 pub(crate) struct PromptOverrideReset {
@@ -467,6 +484,7 @@ pub(crate) struct RunToolLaunch {
     pub(crate) input: serde_json::Value,
     pub(crate) workspace: WorkspaceTarget,
     pub(crate) thinking_level: Option<String>,
+    pub(crate) authorization: ExecutionAuthorization,
 }
 
 impl ShellApp {
@@ -616,7 +634,7 @@ impl ShellApp {
     }
 
     pub(super) fn apply_threat_patch_effect(&mut self, apply: ThreatPatchApply) {
-        let target = threat_patch_target_root(apply.target);
+        let target = apply.target;
         self.engagement.clear_pending_threat_patch();
         self.set_completed_activity("threat model", "pending patch applied");
         let mut document = kuzushi_core::load_persistent_threat_model(&target)
@@ -675,6 +693,7 @@ impl ShellApp {
             launch.input,
             launch.workspace,
             launch.thinking_level,
+            launch.authorization,
         )
     }
 
@@ -785,8 +804,17 @@ fn resolve_run_artifact_selector(app: &mut ShellApp, open: &OpenRunArtifact) -> 
     if open.selector != "latest" {
         return resolve_known_run_reference(app, open);
     }
-    let latest_path = latest_run_pointer_path(app, open)?;
-    read_latest_run_id(app, &latest_path)
+    let Some(target) = open.target.as_deref() else {
+        app.log(
+            "error",
+            format!(
+                "{} latest needs a target. Next: target <path> or show runs",
+                open.view.verb()
+            ),
+        );
+        return None;
+    };
+    read_latest_run_id(app, target)
 }
 
 fn resolve_known_run_reference(app: &mut ShellApp, open: &OpenRunArtifact) -> Option<String> {
@@ -825,46 +853,28 @@ fn resolve_known_run_reference(app: &mut ShellApp, open: &OpenRunArtifact) -> Op
     }
 }
 
-fn latest_run_pointer_path(app: &mut ShellApp, open: &OpenRunArtifact) -> Option<PathBuf> {
-    let Some(target) = open.target.as_deref() else {
-        app.log(
-            "error",
-            format!(
-                "{} latest needs a target. Next: target <path> or show runs",
-                open.view.verb()
-            ),
-        );
-        return None;
-    };
-    Some(crate::ui_view_models::ui_latest_run_path(Some(target)))
-}
-
-fn read_latest_run_id(app: &mut ShellApp, latest_path: &Path) -> Option<String> {
-    let text = match std::fs::read_to_string(&latest_path) {
-        Ok(text) => text,
+fn read_latest_run_id(app: &mut ShellApp, target: &Path) -> Option<String> {
+    match kuzushi_core::read_latest_run_pointer(target) {
+        Ok(kuzushi_core::LatestRunPointerState::Ready(run_id)) => Some(run_id.as_str().to_string()),
+        Ok(kuzushi_core::LatestRunPointerState::Missing) => {
+            app.log("error", "latest run pointer is missing. Next: show runs");
+            None
+        }
+        Ok(kuzushi_core::LatestRunPointerState::Invalid(issue)) => {
+            app.log(
+                "error",
+                format!("latest run pointer is invalid: {issue:?}. Next: show runs"),
+            );
+            None
+        }
         Err(error) => {
             app.log(
                 "error",
-                format!(
-                    "could not read latest run pointer {}: {error}. Next: show runs",
-                    latest_path.display()
-                ),
+                format!("could not resolve latest run pointer: {error}. Next: show runs"),
             );
-            return None;
+            None
         }
-    };
-    let run_id = text.trim();
-    if run_id.is_empty() {
-        app.log(
-            "error",
-            format!(
-                "latest run pointer {} is empty. Next: show runs",
-                latest_path.display()
-            ),
-        );
-        return None;
     }
-    Some(run_id.to_string())
 }
 
 impl RunArtifactView {
@@ -885,12 +895,6 @@ fn current_unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
-}
-
-fn threat_patch_target_root(target: Option<PathBuf>) -> PathBuf {
-    target
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn record_review_decision_in_workspace(
@@ -1004,6 +1008,7 @@ mod tests {
 
     #[test]
     fn offline_demo_fixture_effect_returns_scan_followup_without_starting_worker() {
+        let _fixture_lock = demo_fixture_test_lock();
         let mut app = ShellApp::new(V2Config::default(), None);
 
         let effects = app.start_offline_demo_fixture_scan_effect();

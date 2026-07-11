@@ -2,22 +2,27 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
+import {
+  nativeExecutableName,
+  nativePlatformSlug,
+  nativeRuntimeBinaries,
+} from "./native-runtime-contract.mjs";
 
 const root = process.cwd();
-// One binary per platform: the wrapper resolves `kz` to the `kuzushi` binary
-// and sets argv0, so shipping a duplicate ~25MB kz would be pure tarball waste.
-const exes = process.platform === "win32" ? ["kuzushi.exe"] : ["kuzushi"];
+// `kz` remains an argv0 alias of `kuzushi`; every executable dependency used
+// by the CLI and agent bridge is otherwise shipped as a sibling.
+const exes = nativeRuntimeBinaries.map((binary) => nativeExecutableName(binary));
 const retiredExes =
   process.platform === "win32"
     ? ["codex.exe", "kuzushi-ts.exe", "kz.exe"]
     : ["codex", "kuzushi-ts", "kz"];
-const outDir = join(root, "native", `${process.platform}-${process.arch}`);
+const outDir = join(root, "native", nativePlatformSlug());
 
 for (const exe of exes) {
   const source = join(root, "target", "release", exe);
   if (!existsSync(source)) {
     process.stderr.write(
-      `Missing ${source}. Run \`cargo build -p kuzushi-cli --release\` before staging the native package.\n`,
+      `Missing ${source}. Run \`node scripts/build-native-runtime.mjs\` before staging the native package.\n`,
     );
     process.exit(1);
   }

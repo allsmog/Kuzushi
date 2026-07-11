@@ -53,7 +53,10 @@ impl WriterLifecycle {
     pub fn append_committed_event(&mut self, seq: u64) -> Result<()> {
         require_state(self.state, WriterActorState::Live)?;
         if seq <= self.log_head {
-            bail!("event seq {seq} does not advance log head {}", self.log_head);
+            bail!(
+                "event seq {seq} does not advance log head {}",
+                self.log_head
+            );
         }
         self.log_head = seq;
         Ok(())
@@ -83,7 +86,10 @@ impl WriterLifecycle {
     pub fn finish_rebuild(&mut self, applied_seq: u64) -> Result<()> {
         require_state(self.state, WriterActorState::Rebuilding)?;
         if applied_seq > self.log_head {
-            bail!("rebuilt projection watermark {applied_seq} is ahead of event log head {}", self.log_head);
+            bail!(
+                "rebuilt projection watermark {applied_seq} is ahead of event log head {}",
+                self.log_head
+            );
         }
         self.applied_seq = applied_seq;
         self.state = recovered_state(self.log_head, applied_seq);

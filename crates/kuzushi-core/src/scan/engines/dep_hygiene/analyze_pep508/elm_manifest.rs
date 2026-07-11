@@ -48,7 +48,9 @@ fn elm_finding(
             name,
             constraint,
             DepHygieneSeverity::Medium,
-            format!("{scope}: floor-only range; add an upper bound to fix the supply-chain surface"),
+            format!(
+                "{scope}: floor-only range; add an upper bound to fix the supply-chain surface"
+            ),
         ));
     }
     None

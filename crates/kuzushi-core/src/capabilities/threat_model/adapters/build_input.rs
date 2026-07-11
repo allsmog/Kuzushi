@@ -49,6 +49,7 @@ fn context_limit(input: &Value) -> usize {
 
 fn max_source_bytes(input: &Value) -> usize {
     read_usize(input, &["maxSourceBytes", "max_source_bytes"], 200_000, 1)
+        .min(MAX_SOURCE_BYTES)
 }
 
 fn prompt_override(input: &Value, target: &Path) -> Result<Option<String>> {

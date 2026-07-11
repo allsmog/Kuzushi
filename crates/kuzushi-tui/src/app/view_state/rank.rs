@@ -41,6 +41,8 @@ pub struct Notice {
 pub enum NoticeSeverity {
     Error,
     Warn,
+    /// Informational terminal state such as a deliberately skipped tool.
+    Info,
     /// Background work finished while the operator was elsewhere — green
     /// banner with the result and the verb that opens it.
     Success,
@@ -92,6 +94,8 @@ pub struct ExploitChainStep {
 /// for the attack-path visualization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaintFlowSnapshot {
+    pub finding_fingerprint: Option<String>,
+    pub finding_identity_id: Option<String>,
     pub cwe: String,
     pub severity: String,
     pub stages: Vec<TaintStage>,

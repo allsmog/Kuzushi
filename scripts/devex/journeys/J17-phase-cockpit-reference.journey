@@ -1,0 +1,68 @@
+# J17 — Updated PDF phase-cockpit reference
+# Governing reference: /Users/operator/Desktop/Kuzushi TUI.pdf
+# SHA-256: fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545
+#
+# The explicit DevEx hook enriches only the canonical offline-demo target with
+# the same deterministic state used by the buffer contract. It cannot write
+# into an operator target. `kuzushi demo` is the separate headless command, so
+# this journey enters through the target gate and presses `d` inside the TUI.
+# Numeric page keys are printable view hotkeys, so this journey enters strict
+# Navigate mode before selecting Map, Hunt, Confirm, and Fix.
+name: Updated PDF phase-cockpit reference (1a–1d)
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_DEVEX_PHASE_FIXTURE=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+keys: d
+wait-for: 120 PDF phase reference fixture loaded
+keys: Escape
+submit: workbench
+wait: 2
+keys: F2
+keys: 1
+wait: 2
+snap: 1a-map-recon
+expect-ansi-profile: truecolor
+expect: MAP
+expect: TELEMETRY
+expect: artifacts
+expect: files 3
+expect: dfd 3n/2f
+expect: findings 6
+expect: NEXT
+ask: 1a Map — does the full-width trace/telemetry composition match the PDF hierarchy while every event, meter, cost, and NEXT action remains real or explicitly unavailable?
+keys: 2
+wait: 2
+snap: 1b-hunt-split-cockpit
+expect: HUNT
+expect: SOURCE
+expect: REVIEW QUEUE
+expect: FINDINGS HEATMAP
+expect: F-0001
+expect: SQL injection
+ask: 1b Hunt — does Source + Hunt + Review Queue sit above the spanning heatmap, with one clear selection and no fabricated queue or risk data?
+keys: 3
+wait: 2
+snap: 1c-confirm-proof
+expect: CONFIRM
+expect: SQL injection reaches query
+expect: ATTACK PATH
+expect: DATA-FLOW LADDER
+expect: PROOF · REPLAY
+expect: replay verify-phase
+expect: verify F-0001
+ask: 1c Confirm — does the attack path lead into the source-to-sink ladder and proof sidecar, using PROOF · REPLAY only when a persisted replay artifact really exists?
+keys: 4
+wait: 2
+snap: 1d-fix-breakdown
+expect: FIX
+expect: BREAKDOWN REPORT
+expect: ATTACK TREE
+expect: DFD
+expect: REMEDIATION
+expect: patch staged
+expect: findings export report.sarif sarif
+ask: 1d Fix — does the breakdown/report composition expose truthful totals, attack-tree/DFD evidence, remediation state, and a complete export action without imitating outer window chrome?
+keys: Escape

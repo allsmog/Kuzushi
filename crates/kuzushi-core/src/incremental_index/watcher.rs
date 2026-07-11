@@ -30,12 +30,24 @@ impl LiveWorkspaceWatcher {
         root: impl AsRef<Path>,
         mut sink: impl FnMut(Vec<WorkspaceChange>) + Send + 'static,
     ) -> Result<Self> {
+        Self::start_with_state_events(root, move |changes, _state_artifact_paths| {
+            if !changes.is_empty() {
+                sink(changes);
+            }
+        })
+    }
+
+    pub fn start_with_state_events(
+        root: impl AsRef<Path>,
+        mut sink: impl FnMut(Vec<WorkspaceChange>, Vec<PathBuf>) + Send + 'static,
+    ) -> Result<Self> {
         let scope = workspace_watch_scope(root);
         let classifier_root = scope.root.clone();
         let mut watcher = notify::recommended_watcher(move |event| {
-            let changes = classify_notify_result(&classifier_root, event);
-            if !changes.is_empty() {
-                sink(changes);
+            let (changes, state_artifact_paths) =
+                classify_notify_result_with_state(&classifier_root, event);
+            if !changes.is_empty() || !state_artifact_paths.is_empty() {
+                sink(changes, state_artifact_paths);
             }
         })
         .context("could not start workspace watcher")?;
@@ -68,6 +80,20 @@ pub fn classify_notify_event(root: &Path, event: Event) -> Vec<WorkspaceChange> 
     classify_watcher_events(root, notify_event_to_watch_events(event))
 }
 
+pub fn classify_notify_event_with_state(
+    root: &Path,
+    event: Event,
+) -> (Vec<WorkspaceChange>, Vec<PathBuf>) {
+    let mut state_artifact_paths = event
+        .paths
+        .iter()
+        .filter_map(|path| runtime_state_path(root, path))
+        .collect::<Vec<_>>();
+    state_artifact_paths.sort();
+    state_artifact_paths.dedup();
+    (classify_notify_event(root, event), state_artifact_paths)
+}
+
 pub fn classify_watcher_events(
     root: impl AsRef<Path>,
     events: impl IntoIterator<Item = WatchEvent>,
@@ -92,26 +118,40 @@ pub fn classify_watcher_event(root: &Path, event: WatchEvent) -> Vec<WorkspaceCh
 
 fn classify_existing_path(root: &Path, path: &Path) -> Option<WorkspaceChange> {
     let relative = watch_relative_path(root, path)?;
+    if let Some(change) = special_workspace_change(&relative) {
+        return Some(change);
+    }
     if should_ignore_path(&relative) {
         return None;
     }
-    special_workspace_change(&relative)
-        .or_else(|| manifest_or_lockfile_change(&relative))
+    manifest_or_lockfile_change(&relative)
         .or(Some(WorkspaceChange::FileChanged(relative)))
 }
 
 fn classify_deleted_path(root: &Path, path: &Path) -> Option<WorkspaceChange> {
     let relative = watch_relative_path(root, path)?;
+    if let Some(change) = special_workspace_change(&relative) {
+        return Some(change);
+    }
     if should_ignore_path(&relative) {
         return None;
     }
-    special_workspace_change(&relative)
-        .or_else(|| manifest_or_lockfile_change(&relative))
+    manifest_or_lockfile_change(&relative)
         .or(Some(WorkspaceChange::FileDeleted(relative)))
 }
 
 fn classify_moved_path(root: &Path, from: &Path, to: &Path) -> Vec<WorkspaceChange> {
-    match (watch_relative_path(root, from), watch_relative_path(root, to)) {
+    let relative = (watch_relative_path(root, from), watch_relative_path(root, to));
+    let mut changes = moved_special_changes(&relative);
+    changes.extend(classify_moved_source_changes(root, relative));
+    coalesce_changes(changes)
+}
+
+fn classify_moved_source_changes(
+    root: &Path,
+    relative: (Option<PathBuf>, Option<PathBuf>),
+) -> Vec<WorkspaceChange> {
+    match relative {
         (Some(from), Some(to)) if should_ignore_path(&from) && should_ignore_path(&to) => Vec::new(),
         (Some(from), Some(to)) if should_ignore_path(&from) => {
             classify_existing_path(root, &root.join(to)).into_iter().collect()
@@ -124,6 +164,17 @@ fn classify_moved_path(root: &Path, from: &Path, to: &Path) -> Vec<WorkspaceChan
         (Some(from), None) => classify_deleted_path(root, &root.join(from)).into_iter().collect(),
         (None, None) => Vec::new(),
     }
+}
+
+fn moved_special_changes(paths: &(Option<PathBuf>, Option<PathBuf>)) -> Vec<WorkspaceChange> {
+    let mut changes = [&paths.0, &paths.1]
+        .into_iter()
+        .filter_map(|path| path.as_deref())
+        .filter_map(special_workspace_change)
+        .collect::<Vec<_>>();
+    changes.sort();
+    changes.dedup();
+    changes
 }
 
 fn classify_visible_move(from: PathBuf, to: PathBuf) -> Vec<WorkspaceChange> {
@@ -213,14 +264,42 @@ fn clean_relative_path(path: &Path) -> Option<PathBuf> {
     (!clean.as_os_str().is_empty()).then_some(clean)
 }
 
-fn classify_notify_result(
+fn classify_notify_result_with_state(
     root: &Path,
     event: notify::Result<Event>,
-) -> Vec<WorkspaceChange> {
+) -> (Vec<WorkspaceChange>, Vec<PathBuf>) {
     match event {
-        Ok(event) => classify_notify_event(root, event),
-        Err(_) => vec![WorkspaceChange::GitHeadChanged],
+        Ok(event) => classify_notify_event_with_state(root, event),
+        Err(_) => (
+            vec![WorkspaceChange::GitHeadChanged],
+            vec![PathBuf::from(".kuzushi/v3")],
+        ),
     }
+}
+
+fn runtime_state_path(root: &Path, path: &Path) -> Option<PathBuf> {
+    let relative = watch_relative_path(root, path)?;
+    if relative.starts_with(".kuzushi/v3") {
+        return Some(relative);
+    }
+    if relative == Path::new(".kuzushi/codeql-db") {
+        return Some(PathBuf::from(".kuzushi/codeql-db"));
+    }
+    is_legacy_workspace_artifact(&relative).then_some(relative)
+}
+
+fn is_legacy_workspace_artifact(path: &Path) -> bool {
+    matches!(
+        path.to_str(),
+        Some(
+            ".kuzushi/context-snapshot.json"
+                | ".kuzushi/entry-points.json"
+                | ".kuzushi/threat-model.json"
+                | ".kuzushi/threat-model-pasta.json"
+                | ".kuzushi/cpg.bin"
+                | ".kuzushi/threat-intel/candidates.json"
+        )
+    )
 }
 
 fn watch_scope_roots(watcher: &mut RecommendedWatcher, scope: &WatchScope) -> Result<()> {

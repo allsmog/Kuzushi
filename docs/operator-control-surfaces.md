@@ -48,6 +48,16 @@ kuzushi --target . run semgrep:scan \
 tool's descriptor. Use `--input` for structured values that are easier to read
 as JSON. If both are present for the same canonical option, `--input` wins.
 
+`target` is descriptor-typed, not globally synonymous with a repository path.
+For a `path` option (for example a scanner target), inline JSON or a session
+`--option` may establish the workspace when `--target` is absent; when a
+workspace is already explicit, the resolved path must remain inside it.
+Persisted `target`/`cwd` values are checked at the shared dispatch boundary and
+cannot steer execution outside the workspace that owns the finding store and
+run artifacts. For a `string` option (for example `recon:nmap` or
+`offense:chain`), `target` remains a host/URL and a separate `--target <repo>`
+is still required for workspace-backed state.
+
 `kuzushi scan` is a shorthand for `sast:scan`. Flags such as `--mode`,
 `--tasks`, `--triage`, `--budget`, `--since`, `--include-worktree`,
 `--fail-on`, and `--sarif` compile into sparse `sast:scan` JSON input or
@@ -55,11 +65,20 @@ scan-gate policy, then go through the same preparation path as
 `kuzushi run sast:scan` where they are tool input.
 
 Global `--load <specifier>` is supported for shell and headless `run`.
-For `file://` modules, trust is digest-pinned in `kuzushi.lock`: approve the
-exact resolved bundle with `kuzushi kwp approve <specifier>` before loading it.
-The loader hashes the canonical bundle and checks the lockfile before any
-module bytes are imported. `[operator].trusted_modules` is retained only as
-deprecated compatibility state and is not the `file://` worker trust boundary.
+For local file/path modules, trust is digest-pinned in `kuzushi.lock`: approve
+the exact resolved bundle with `kuzushi kwp approve <specifier>` before
+loading it. The host hashes the canonical bundle and checks its approval
+before importing module bytes. `[operator].trusted_modules` remains only for
+explicitly trusted `package:<npm-name>` compatibility specifiers and is not the
+local-worker trust boundary; file-URL aliases and local-resolving package
+payloads are rejected.
+A headless dynamic invocation must still pass an explicit global
+`--target <workspace>` so an inline `target`/`cwd` value cannot bootstrap
+workspace policy or artifact placement from process cwd.
+
+`kuzushi scan` rejects `--load` with guidance to use `kuzushi run`; it does not
+silently discard the specifier or reinterpret a dynamic tool as a scan task.
+All other non-shell/non-run commands reject it for the same reason.
 
 `kuzushi run --autonomy <recon|hunt|confirm|fix>` sets the autonomy ceiling
 for that run. The shared dispatch gate refuses any tool whose engagement phase
@@ -117,8 +136,8 @@ worker_watchdog_timeout_ms = 21600000
 session_budget_usd = 2.50
 spend_hard_ceiling_usd = 10.00
 trusted_workflow_auto_accept = false
-# Deprecated compatibility list; file:// workers use kuzushi.lock approvals.
-trusted_modules = ["file:///absolute/path/to/my-module"]
+# Deprecated compatibility list; local workers use kuzushi.lock approvals.
+trusted_modules = ["package:trusted-module"]
 
 [[operator.signature_keys]]
 key_id = "trusted-author"
@@ -143,10 +162,12 @@ config, not environment variables. Project configs may set `[phases]` fields;
 repository must not redirect model choice, credentials, process execution, or
 operator trust policy.
 
-`operator.signature_keys` are trust roots for non-empty KWP lockfile
-`signatureChain` entries. Each entry verifies
+`operator.signature_keys` are global trust roots for non-empty KWP lockfile
+`signatureChain` entries. They verify
 `ed25519:v1:<keyId>:<base64Signature>` over the module id, digest, descriptor
-hash, and version recorded in `kuzushi.lock`.
+hash, and version. Host-mounted MCP aliases and fuzz executors likewise belong
+under global `operator.mcp_mounts` and `operator.fuzz_executors`, never in
+target-owned configuration.
 
 ## Model Selection
 

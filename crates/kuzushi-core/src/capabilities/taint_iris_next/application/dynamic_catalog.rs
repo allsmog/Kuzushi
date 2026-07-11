@@ -14,7 +14,7 @@ pub(crate) fn load_taint_iris_next_target_catalog(
     repo_root: &Path,
 ) -> Option<Vec<TaintIrisNextRankedCatalogEntry>> {
     let path = taint_iris_next_target_catalog_path(repo_root);
-    let raw = fs::read_to_string(&path).ok()?;
+    let raw = crate::bounded_file::read_utf8_text_within(repo_root, &path, 8 * 1024 * 1024).ok()?;
     parse_target_catalog_payload(&raw).ok()
 }
 
@@ -124,19 +124,13 @@ pub(crate) fn run_taint_iris_next_catalog_report(
         threat_model.value.as_ref(),
     );
 
-    let request = AgentQueryRequest::new(
-        model.clone(),
-        target.clone(),
-        TAINT_IRIS_NEXT_CATALOG_SYSTEM_PROMPT.to_string(),
-        prompt,
-    );
-    let response = runtime.query_blocking(request)?;
+    let response = query_catalog_agent(runtime, model, &target, prompt)?;
     let cost_usd = response.cost_usd;
     let raw_value = catalog_raw_value(&response);
     let (entries, parse_error) = parse_catalog_entries(raw_value.as_ref(), &languages);
 
     let catalog_path = taint_iris_next_target_catalog_path(&target);
-    let status = persist_catalog_status(&catalog_path, &entries);
+    let status = persist_catalog_status(&target, &entries);
     let ok = status == "generated";
 
     Ok(TaintIrisNextCatalogReport {
@@ -149,6 +143,20 @@ pub(crate) fn run_taint_iris_next_catalog_report(
         cost_usd,
         ok,
     })
+}
+
+fn query_catalog_agent(
+    runtime: &dyn AgentRuntime,
+    model: String,
+    target: &Path,
+    prompt: String,
+) -> Result<AgentQueryResponse> {
+    runtime.query_blocking(AgentQueryRequest::new(
+        model,
+        target.to_path_buf(),
+        TAINT_IRIS_NEXT_CATALOG_SYSTEM_PROMPT.to_string(),
+        prompt,
+    ))
 }
 
 fn ensure_catalog_target_dir(target: &Path) -> Result<()> {
@@ -204,11 +212,11 @@ fn parse_catalog_entries(
     }
 }
 
-fn persist_catalog_status(path: &Path, entries: &[TaintIrisNextRankedCatalogEntry]) -> String {
+fn persist_catalog_status(target: &Path, entries: &[TaintIrisNextRankedCatalogEntry]) -> String {
     if entries.is_empty() {
         return "agent-output-invalid".to_string();
     }
-    persist_target_catalog(path, entries)
+    persist_target_catalog(target, entries)
         .map(|_| "generated".to_string())
         .unwrap_or_else(|error| format!("persist-failed: {error}"))
 }
@@ -523,16 +531,19 @@ fn parse_target_catalog_payload(raw: &str) -> Result<Vec<TaintIrisNextRankedCata
     Ok(entries)
 }
 
-fn persist_target_catalog(path: &Path, entries: &[TaintIrisNextRankedCatalogEntry]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("could not mkdir -p {}", parent.display()))?;
-    }
+fn persist_target_catalog(
+    target: &Path,
+    entries: &[TaintIrisNextRankedCatalogEntry],
+) -> Result<PathBuf> {
     let payload = serde_json::json!({ "catalog": entries });
     let pretty = serde_json::to_string_pretty(&payload)
         .context("could not serialize target catalog to JSON")?;
-    std::fs::write(path, pretty).with_context(|| format!("could not write {}", path.display()))?;
-    Ok(())
+    let intended_path = taint_iris_next_target_catalog_path(target);
+    let relative = intended_path
+        .strip_prefix(target)
+        .context("could not resolve target catalog below target")?;
+    crate::workspace::write_workspace_state_file(target, relative, pretty.as_bytes())
+        .with_context(|| format!("could not write {}", intended_path.display()))
 }
 
 #[cfg(test)]
@@ -620,11 +631,48 @@ mod tests {
             score: 50,
             reasons: vec![],
         }];
-        let path = taint_iris_next_target_catalog_path(target);
-        persist_target_catalog(&path, &entries).unwrap();
+        persist_target_catalog(target, &entries).unwrap();
         let loaded = load_taint_iris_next_target_catalog(target).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].cwe, "CWE-22");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persist_target_catalog_rejects_symlinked_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        std::fs::create_dir_all(workspace.path().join(".kuzushi")).unwrap();
+        let outside_catalog = outside.path().join("catalog.json");
+        std::fs::write(&outside_catalog, "outside-sentinel").unwrap();
+        symlink(
+            &outside_catalog,
+            taint_iris_next_target_catalog_path(workspace.path()),
+        )
+        .unwrap();
+
+        let entries = vec![TaintIrisNextRankedCatalogEntry {
+            cwe: "CWE-22".to_string(),
+            name: "Path Traversal".to_string(),
+            taint_class: "path-traversal".to_string(),
+            languages: vec!["any".to_string()],
+            source_signals: vec![],
+            sink_signals: vec![],
+            sanitizer_signals: vec![],
+            structural_queries: vec![],
+            regex_markers: vec![],
+            score: 50,
+            reasons: vec![],
+        }];
+
+        let error = persist_target_catalog(workspace.path(), &entries).unwrap_err();
+        assert!(format!("{error:#}").contains("symlink"));
+        assert_eq!(
+            std::fs::read_to_string(outside_catalog).unwrap(),
+            "outside-sentinel"
+        );
     }
 
     #[test]

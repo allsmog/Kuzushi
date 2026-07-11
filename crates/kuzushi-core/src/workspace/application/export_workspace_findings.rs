@@ -7,7 +7,7 @@ use super::export_sarif::findings_to_sarif;
 use super::*;
 use crate::findings::ReviewDecisionRecord;
 use crate::run_artifacts::load_run_summary;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 /// Refresh suppression state against the current clock before exporting, so a
 /// finding whose rule lapsed since the last scan exports as NOT suppressed
@@ -33,6 +33,34 @@ pub fn export_workspace_findings(
         output_path,
         WorkspaceExportOptions::new(format),
     )
+}
+
+pub fn export_scan_findings_sarif(
+    workspace: &WorkspaceTarget,
+    output_path: impl AsRef<Path>,
+    run_ids: &[String],
+) -> Result<WorkspaceFindingsExport> {
+    let output_path = output_path.as_ref();
+    validate_workspace_findings_output_path(output_path, WorkspaceExportFormat::Sarif)?;
+    reconcile_suppressions_for_export(workspace)?;
+    let options = WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Sarif));
+    let prepared = prepare_scan_findings_export(workspace, run_ids, options)?;
+    ensure_empty_export_is_allowed(&prepared.records, options)?;
+    ensure_workspace_export_parent(output_path)?;
+    write_workspace_findings_export(
+        workspace,
+        &prepared.findings,
+        &prepared.records,
+        WorkspaceExportFormat::Sarif,
+        output_path,
+        options,
+        prepared.total_count,
+    )?;
+    Ok(WorkspaceFindingsExport {
+        output_path: output_path.to_path_buf(),
+        format: WorkspaceExportFormat::Sarif,
+        count: prepared.records.len(),
+    })
 }
 
 pub fn export_workspace_findings_with_options(
@@ -135,6 +163,68 @@ fn prepare_workspace_findings_export(
         records,
         total_count,
     })
+}
+
+fn prepare_scan_findings_export(
+    workspace: &WorkspaceTarget,
+    run_ids: &[String],
+    options: WorkspaceExportOptions,
+) -> Result<PreparedWorkspaceFindingsExport> {
+    let store = FindingStore::open(workspace.findings_db_path())?;
+    let all_findings = findings_for_run_ids(&store, run_ids)?;
+    let all_reviews = effective_review_contexts(&store, &all_findings)?;
+    let total_count = all_findings.len();
+    let (findings, reviews) =
+        filter_export_findings(all_findings, all_reviews, options.completeness);
+    let run_contexts = scan_run_export_contexts(workspace, &findings, run_ids);
+    let records = workspace_finding_export_records_with_context(&findings, &reviews, &run_contexts);
+    Ok(PreparedWorkspaceFindingsExport {
+        findings,
+        records,
+        total_count,
+    })
+}
+
+fn findings_for_run_ids(store: &FindingStore, run_ids: &[String]) -> Result<Vec<Finding>> {
+    let mut findings = Vec::new();
+    let mut fingerprints = BTreeSet::new();
+    for run_id in run_ids {
+        for finding in store.list_findings_for_scan_id(run_id)? {
+            if fingerprints.insert(finding_dedupe_key(&finding)) {
+                findings.push(finding);
+            }
+        }
+    }
+    Ok(findings)
+}
+
+fn finding_dedupe_key(finding: &Finding) -> String {
+    finding
+        .identity_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&finding.fingerprint)
+        .to_string()
+}
+
+fn scan_run_export_contexts(
+    workspace: &WorkspaceTarget,
+    findings: &[Finding],
+    run_ids: &[String],
+) -> HashMap<String, WorkspaceRunExportContext> {
+    let mut contexts = workspace_run_export_contexts(workspace, findings);
+    let fallback = run_ids.iter().find_map(|run_id| {
+        load_run_summary(workspace.root(), run_id)
+            .ok()
+            .map(|summary| WorkspaceRunExportContext::from_summary(&summary))
+    });
+    if let Some(fallback) = fallback {
+        for run_id in finding_run_ids(findings) {
+            contexts.entry(run_id).or_insert_with(|| fallback.clone());
+        }
+    }
+    contexts
 }
 
 fn workspace_run_export_contexts(

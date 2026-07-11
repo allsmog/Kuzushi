@@ -8,7 +8,11 @@ pub struct CodeqlScanner {
     pub threads: Option<u32>,
     pub ram: Option<u32>,
     pub multi_language: bool,
+    pub command_timeout: std::time::Duration,
 }
+
+pub(crate) const DEFAULT_CODEQL_SCAN_TIMEOUT_MS: u64 = 30 * 60 * 1000;
+pub(crate) const MAX_CODEQL_SCAN_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 
 impl Default for CodeqlScanner {
     fn default() -> Self {
@@ -21,6 +25,7 @@ impl Default for CodeqlScanner {
             threads: None,
             ram: None,
             multi_language: false,
+            command_timeout: std::time::Duration::from_millis(DEFAULT_CODEQL_SCAN_TIMEOUT_MS),
         }
     }
 }

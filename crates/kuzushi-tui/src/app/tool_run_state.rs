@@ -1,5 +1,6 @@
 use super::AbortReason;
 use kuzushi_core::ScanCancellation;
+use std::path::PathBuf;
 
 #[derive(Debug, Default)]
 pub(crate) struct ToolRunState {
@@ -7,6 +8,7 @@ pub(crate) struct ToolRunState {
     cancel: Option<ScanCancellation>,
     ambient: Option<String>,
     run_id: Option<String>,
+    target: Option<PathBuf>,
     active_model_override: Option<String>,
     abort_reason: Option<AbortReason>,
 }
@@ -34,6 +36,10 @@ impl ToolRunState {
 
     pub(crate) fn take_run_id(&mut self) -> Option<String> {
         self.run_id.take()
+    }
+
+    pub(crate) fn take_target(&mut self) -> Option<PathBuf> {
+        self.target.take()
     }
 
     pub(crate) fn active_model_override(&self) -> Option<&str> {
@@ -65,12 +71,14 @@ impl ToolRunState {
         tool_name: String,
         cancel: ScanCancellation,
         run_id: String,
+        target: PathBuf,
         model_override: Option<String>,
     ) {
         self.running = Some(tool_name);
         self.cancel = Some(cancel);
         self.ambient = None;
         self.run_id = Some(run_id);
+        self.target = Some(target);
         self.active_model_override = model_override;
         self.abort_reason = None;
     }
@@ -79,6 +87,7 @@ impl ToolRunState {
         self.running = None;
         self.cancel = None;
         self.ambient = None;
+        self.target = None;
         self.active_model_override = None;
         self.abort_reason = None;
     }
@@ -101,6 +110,11 @@ impl ToolRunState {
     #[cfg(test)]
     pub(crate) fn set_run_id_for_test(&mut self, run_id: Option<String>) {
         self.run_id = run_id;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_target_for_test(&mut self, target: Option<PathBuf>) {
+        self.target = target;
     }
 
     #[cfg(test)]

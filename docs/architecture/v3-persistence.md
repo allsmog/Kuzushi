@@ -28,8 +28,12 @@ Target-owned state lives under:
     run.json
     events.jsonl
     trace.jsonl
+    input.json
+    result.json
+    failures.json
+    report.md
     artifacts.json
-    diagnostics/failures and report exports
+    scan-input.json, triage.jsonl, verify.jsonl, patch.jsonl  # sast:scan only
   latest
 ```
 
@@ -39,6 +43,13 @@ second mutable state store. Snapshot-style files such as `context.json`,
 synthesized as fixed run leaves. A producer may declare those files explicitly
 in `artifacts.json`, but otherwise those payloads live in `result.json`, CAS
 objects, events, or rebuilt SQLite projections.
+
+The run id created by the caller is the canonical identity for an umbrella
+scan. Per-engine ids are retained as child provenance, and scan policy/export
+queries read the parent/child union. Run lifecycle rows are written as
+`running` before fallible finding persistence and are terminalized as
+`completed` or `failed`; import and scanner writers use the same guarded
+start/operation/finish shape.
 
 ## Source Of Truth
 

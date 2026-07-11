@@ -424,9 +424,14 @@ impl ShellApp {
             ShellCommand::Scan(target) => Some(vec![ShellEffect::OpenGuidedScan(GuidedScanOpen {
                 target: target.clone(),
             })]),
-            ShellCommand::ScriptedScan(target) => {
-                Some(self.reduce_scan_start(target.clone(), None))
+            ShellCommand::ScriptedScan(Some(target)) => {
+                Some(self.request_target_activation(TargetActivation {
+                    path: target.clone(),
+                    selected_scope: None,
+                    source: TargetActivationSource::ScriptedScan,
+                }))
             }
+            ShellCommand::ScriptedScan(None) => Some(self.reduce_scan_start(None, None)),
             ShellCommand::Target(path) => Some(self.reduce_target_command(path.as_deref())),
             ShellCommand::TargetRevision(reference) => {
                 Some(self.reduce_target_revision_command(reference))
@@ -536,8 +541,8 @@ impl ShellApp {
     fn open_home_view(&mut self) {
         self.clear_focused_module();
         self.router.catalog_mut().collapse();
-        self.set_shell_view(ShellView::Home);
-        self.log("home", "showing Kuzushi cockpit");
+        self.open_workbench(WorkbenchPane::Findings);
+        self.log("home", "showing the phase cockpit");
     }
 
     fn open_help_view(&mut self, query: Option<String>) {
@@ -549,14 +554,15 @@ impl ShellApp {
     fn open_modules_view(&mut self) {
         self.clear_focused_module();
         self.set_shell_view(ShellView::Catalog);
-        self.router.catalog_mut().expand();
+        self.router.catalog_mut().collapse();
+        self.router.catalog_mut().jump_start();
         self.router.modules_mut().open();
-        let count = self.registry().modules().count();
+        let count = self.catalog_module_count();
         self.log(
-            "module",
+            "capability",
             format!(
-                "showing {count} {}",
-                if count == 1 { "module" } else { "modules" }
+                "showing {count} phase-native {} · press F2, then e for expert engines",
+                if count == 1 { "action" } else { "actions" }
             ),
         );
     }
@@ -625,6 +631,13 @@ impl ShellApp {
         self.workbench_cache()
             .borrow_mut()
             .invalidate_map_artifacts();
+        self.invalidate_view_hydration();
+        if let Some(target) = self.target_owned() {
+            self.hydrate_view_keys_blocking(
+                &target,
+                vec![crate::app::ViewHydrationKey::MapArtifacts],
+            );
+        }
         let Some(journey) = crate::ui_view_models::journey_model(self) else {
             self.log(
                 "journey",
@@ -722,12 +735,12 @@ impl ShellApp {
     fn focus_module_or_log_error(&mut self, module: &str) {
         if self
             .registry()
-            .modules()
+            .all_modules()
             .any(|entry| entry.metadata().id == module)
         {
             self.set_focused_module(Some(module.to_string()));
-            self.set_shell_view(ShellView::Module);
-            self.log("use", module);
+            self.open_tools_view(Some(format!("module:{module}")));
+            self.log("use", format!("showing {module} tools"));
         } else {
             self.log("error", self.unknown_module_message(module));
         }
@@ -881,15 +894,41 @@ impl ShellApp {
     /// looks running yet; without the `planning_queues_empty` guard the steer
     /// item would be popped and then dropped by the overlap reject.
     pub(crate) fn advance_steer_queue(&mut self) -> Vec<ShellEffect> {
+        self.take_next_steer_effects().unwrap_or_default()
+    }
+
+    fn take_next_steer_effects(&mut self) -> Option<Vec<ShellEffect>> {
         if self.steer_dispatch_blocked() {
-            return Vec::new();
+            return None;
         }
         let Some(queued) = self.steer_queue_mut().pop_front() else {
-            return Vec::new();
+            return None;
         };
         self.log("queue", format!("dispatching queued {}", queued.summary));
-        self.reduce_command_message(crate::commands::parse_command(&queued.raw))
-            .effects
+        Some(
+            self.reduce_command_message(crate::commands::parse_command(&queued.raw))
+                .effects,
+        )
+    }
+
+    /// Keep draining queued synchronous or rejected commands while the shell
+    /// remains idle. A bounded pass prevents an arbitrary queue from
+    /// monopolizing a terminal tick; commands that start work stop the pass
+    /// through `steer_dispatch_blocked` and resume after their terminal event.
+    pub(crate) fn drain_idle_steer_queue(&mut self) -> bool {
+        const DRAIN_LIMIT: usize = 32;
+        let mut changed = false;
+        for _ in 0..DRAIN_LIMIT {
+            let Some(effects) = self.take_next_steer_effects() else {
+                break;
+            };
+            changed = true;
+            EffectRuntime::execute(self, effects);
+            if self.steer_dispatch_blocked() {
+                break;
+            }
+        }
+        changed
     }
 
     fn steer_dispatch_blocked(&self) -> bool {
@@ -897,6 +936,11 @@ impl ShellApp {
             || self.engagement.has_pending_chain()
             || self.engagement.has_pending_prereq_prompt()
             || !self.engagement.planning_queues_empty()
+            || self.should_quit()
+            || matches!(
+                self.shell_view(),
+                ShellView::QuitConfirm | ShellView::ConfirmDialog
+            )
     }
 
     fn open_run_diff_view(&mut self, left: String, right: String) {
@@ -924,24 +968,12 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_recommend(&mut self) -> Vec<ShellEffect> {
-        self.set_shell_view(ShellView::Recommend);
-        self.router.catalog_mut().reset_recommend_cursor();
-        if self.target().is_none() {
-            self.log(
-                "recommend",
-                "choose a target with `target <path>` or run `demo` for the offline fixture",
-            );
-            return Vec::new();
-        }
-        if !crate::ui_view_models::recommendation_artifact_needs_refresh(self) {
-            self.log("recommend", "latest module recommendations");
-            return Vec::new();
-        }
+        self.open_modules_view();
         self.log(
             "recommend",
-            "running module-recommender:recommend for the active target",
+            "phase-native capabilities are derived from workspace reality · press F2, then e for engines",
         );
-        self.reduce_run_tool(Some("module-recommender:recommend".to_string()), None)
+        Vec::new()
     }
 
     pub(crate) fn reduce_aim(&mut self, focus: &Option<String>) -> Vec<ShellEffect> {

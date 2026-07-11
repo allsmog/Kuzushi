@@ -36,9 +36,17 @@ fn human_confirmed(mut finding: Finding, confidence: f32) -> Finding {
 fn report_preview_model_uses_export_projection_metadata() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
-    let latest_path = kuzushi_core::latest_run_path(workspace.root());
-    std::fs::create_dir_all(latest_path.parent().unwrap()).unwrap();
-    std::fs::write(&latest_path, "run-123\n").unwrap();
+    kuzushi_core::write_run_summary(
+        workspace.root(),
+        &kuzushi_core::RunSummary::running(
+            "run-123",
+            "tool",
+            None,
+            workspace.root().display().to_string(),
+        )
+        .complete(),
+    )
+    .unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     let mut open = finding("path-traversal", Severity::High, 20);
     open.identity_id = Some("fi_0123456789abcdef0123456789abcdef".to_string());
@@ -46,6 +54,7 @@ fn report_preview_model_uses_export_projection_metadata() {
         open,
         confirmed(finding("sql-injection", Severity::Medium, 40)),
     ];
+    app.hydrate_all_view_data_for_test();
 
     let model = report_preview_model(&app, WorkspaceExportFormat::Csv, ReviewQueueMode::All);
 

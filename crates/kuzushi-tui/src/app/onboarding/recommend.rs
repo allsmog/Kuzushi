@@ -5,10 +5,9 @@
 //! a session-model refinement layers on top of the same task set (it can only
 //! add/remove from this recommendation, never invent tasks).
 
-use super::phase::WorkflowPhase;
 use super::task_id::PlanningTaskId;
 use super::task_row::{ArtifactState, PlanningTaskRow};
-use kuzushi_core::TargetKind;
+use kuzushi_core::{TargetKind, WorkflowPhase};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -350,19 +349,19 @@ mod tests {
     }
 
     #[test]
-    fn map_preselects_reverse_engineering_for_an_apk() {
+    fn map_keeps_legacy_reverse_engineering_out_of_the_apk_picker() {
         let rows = rows_for(WorkflowPhase::Map);
         let picked =
             recommended_tasks_for_phase(WorkflowPhase::Map, profile(TargetKind::AndroidApk), &rows);
-        assert!(picked.contains(&PlanningTaskId::ReverseEngineerBinary));
+        assert!(!picked.contains(&PlanningTaskId::ReverseEngineerBinary));
         assert!(picked.contains(&PlanningTaskId::BuildXRay));
     }
 
     #[test]
-    fn hunt_scopes_uaf_to_c_family_source() {
+    fn hunt_keeps_legacy_uaf_out_of_source_pickers() {
         let rows = rows_for(WorkflowPhase::Hunt);
         let c_source = recommended_tasks_for_phase(WorkflowPhase::Hunt, c_profile(), &rows);
-        assert!(c_source.contains(&PlanningTaskId::HuntUseAfterFree));
+        assert!(!c_source.contains(&PlanningTaskId::HuntUseAfterFree));
         assert!(c_source.contains(&PlanningTaskId::ScanSecrets));
 
         let source =
@@ -378,7 +377,7 @@ mod tests {
         c_source.has_compile_commands = false;
         let picked = recommended_tasks_for_phase(WorkflowPhase::Hunt, c_source, &rows);
         assert!(!picked.contains(&PlanningTaskId::HuntUseAfterFree));
-        assert!(applicable_tasks_for_phase(WorkflowPhase::Hunt, c_source)
+        assert!(!applicable_tasks_for_phase(WorkflowPhase::Hunt, c_source)
             .contains(&PlanningTaskId::HuntUseAfterFree));
     }
 
@@ -393,7 +392,7 @@ mod tests {
         assert!(rust.contains(&PlanningTaskId::HuntSystems));
 
         let c_source = applicable_tasks_for_phase(WorkflowPhase::Hunt, c_profile());
-        assert!(c_source.contains(&PlanningTaskId::HuntUseAfterFree));
+        assert!(!c_source.contains(&PlanningTaskId::HuntUseAfterFree));
         assert!(c_source.contains(&PlanningTaskId::HuntSystems));
     }
 

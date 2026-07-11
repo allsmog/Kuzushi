@@ -1,8 +1,9 @@
 use super::*;
 use crate::renderer::views::scene::diagrams::{attack_path_lines, heatmap_lines};
 use crate::ui_view_models::{
-    attack_tree, cached_findings_heatmap_with_selection, selected_taint_flow_path, threat_dfd_view,
-    AttackTree, CodePaneModel, CodePaneRow, DfdLineKind, WorkbenchCenter, WorkbenchCenterBody,
+    attack_tree, cached_findings_heatmap_with_selection, current_finding_for_detail,
+    selected_taint_flow_path, threat_dfd_view, AttackTree, CodePaneModel, CodePaneRow, DfdLineKind,
+    WorkbenchCenter, WorkbenchCenterBody,
 };
 use ratatui::prelude::{Line, Span};
 
@@ -23,10 +24,13 @@ pub(in crate::renderer::views::workbench) fn center_pane_lines(
         WorkbenchCenterBody::Flow { .. } => {
             attack_path_lines(width, &selected_taint_flow_path(app))
         }
-        WorkbenchCenterBody::Risk { .. } => heatmap_lines(
-            width,
-            &cached_findings_heatmap_with_selection(app, app.selected_finding().as_ref()),
-        ),
+        WorkbenchCenterBody::Risk { .. } => {
+            let selected = current_finding_for_detail(app).map(|(_, finding)| finding);
+            heatmap_lines(
+                width,
+                &cached_findings_heatmap_with_selection(app, selected.as_ref()),
+            )
+        }
     }
 }
 

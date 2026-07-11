@@ -21,11 +21,18 @@ pub(in crate::modules) fn wasm_plugin_module() -> BuiltinModule {
         "Wasm Plugin",
         ModuleKind::Offense,
         "Run a capability-scoped Wasm analyzer against the indexed source snapshot.",
-        vec![tool_with_options(
-            TOOL_NAME,
-            "Run a Wasm analyzer and commit host-checked findings through the v3 writer.",
-            wasm_plugin_options(),
-        )],
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Hunt,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Optional,
+            ),
+            vec![tool_with_options(
+                TOOL_NAME,
+                "Run a Wasm analyzer and commit host-checked findings through the v3 writer.",
+                wasm_plugin_options(),
+            )],
+        ),
         vec![dag(TOOL_NAME, "findings", &["context:build"])],
     )
 }
@@ -118,6 +125,7 @@ fn wasm_module_path_option() -> OptionSpec {
         "Path to the Wasm analyzer module.",
     )
     .aliases(&["module_path", "wasmPath", "wasm_path"])
+    .external_read()
     .required()
 }
 

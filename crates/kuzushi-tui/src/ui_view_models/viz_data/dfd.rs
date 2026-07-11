@@ -106,10 +106,16 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_threat_model(temp.path(), "api");
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
-        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
 
         assert_eq!(dfd_model(&app).nodes[0].name, "api");
         write_threat_model(temp.path(), "worker");
+        app.workbench_cache()
+            .borrow_mut()
+            .invalidate_workspace_files();
+        app.invalidate_view_hydration();
+        app.hydrate_all_view_data_for_test();
         assert_eq!(dfd_model(&app).nodes[0].name, "worker");
     }
 

@@ -67,7 +67,9 @@ fn citation_matches_disk(target_root: &Path, evidence: &FindingEvidence) -> bool
     let Some(path) = safe_target_path(target_root, &evidence.file_path) else {
         return false;
     };
-    let Ok(source) = std::fs::read_to_string(path) else {
+    let Ok(source) =
+        crate::bounded_file::read_utf8_text_within(target_root, &path, 8 * 1024 * 1024)
+    else {
         return false;
     };
     let snippet = normalize_evidence_text(&evidence.snippet);

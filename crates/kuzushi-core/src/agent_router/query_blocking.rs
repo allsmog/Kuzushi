@@ -1,10 +1,20 @@
 use super::*;
+use crate::runtime::AgentQueryControl;
 
 #[async_trait]
 impl AgentRuntime for RoutedRuntime<'_> {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         validate_routed_request_model("query", &request.model)?;
         self.inner.query_blocking(request)
+    }
+
+    fn query_blocking_controlled(
+        &self,
+        request: AgentQueryRequest,
+        control: AgentQueryControl,
+    ) -> Result<AgentQueryResponse> {
+        validate_routed_request_model("query", &request.model)?;
+        self.inner.query_blocking_controlled(request, control)
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {

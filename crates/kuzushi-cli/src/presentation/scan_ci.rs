@@ -56,7 +56,20 @@ pub(crate) fn emit_scan_ci_success(
             )
         )
     );
+    emit_scan_ci_warnings(result, started);
     println!("{}", ci_line(started, "exit", "0"));
+}
+
+fn emit_scan_ci_warnings(result: &serde_json::Value, started: Instant) {
+    let Some(warnings) = result.get("warnings").and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    for warning in warnings.iter().filter_map(serde_json::Value::as_str) {
+        println!(
+            "{}",
+            ci_line(started, "warning", &sanitize_for_log_line(warning))
+        );
+    }
 }
 
 pub(crate) fn emit_scan_ci_start(

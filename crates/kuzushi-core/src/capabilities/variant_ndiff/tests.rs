@@ -391,6 +391,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let registry = ModuleRegistry::with_v2_builtins();
         let runtime = MockRuntime::new();
@@ -450,6 +452,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let lift = run_variant_lift_pattern(json!({}), &ctx, Some(&MockRuntime::new())).unwrap();
@@ -461,12 +465,8 @@ mod tests {
         let fetch = run_ndiff_fetch_cve(json!({})).unwrap();
         assert_failed_rejection(&fetch, "missing-id");
 
-        let extract = run_ndiff_extract_fix_pattern(
-            json!({}),
-            &ctx,
-            Some(&MockRuntime::new()),
-        )
-        .unwrap();
+        let extract =
+            run_ndiff_extract_fix_pattern(json!({}), &ctx, Some(&MockRuntime::new())).unwrap();
         assert_failed_rejection(&extract, "missing-source");
 
         let ndiff_hunt =
@@ -528,6 +528,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let result = run_variant_hunt(
             json!({"fingerprint": fingerprint}),
@@ -591,18 +593,24 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let registry = ModuleRegistry::with_v2_builtins();
         let runtime = MockRuntime::new();
 
-        let extract = registry
-            .execute_tool_with_runtime(
+        let prepared = registry
+            .prepare_dispatch_input(
                 "ndiff:extract-fix-pattern",
                 json!({"patchText": "--- a/parser.c\n+++ b/parser.c\n+if (len > cap) return -1;\n"}),
                 &ctx,
-                Some(&runtime),
-        )
-        .unwrap();
+                None,
+            )
+            .unwrap()
+            .authorize_explicit_headless();
+        let extract = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
+            .unwrap();
         assert_eq!(extract.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             extract.pointer("/status").and_then(Value::as_str),
@@ -652,6 +660,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let err = run_ndiff_hunt_variants(
             json!({"pattern": {"fixShape":"guard","vulnerableShape":"unguarded"}}),

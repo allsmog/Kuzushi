@@ -11,7 +11,6 @@ mod controls;
 mod dependencies;
 mod failure;
 mod initial_view;
-mod phase;
 mod planning_options;
 mod recommend;
 mod runner;
@@ -31,7 +30,7 @@ pub use initial_view::{
     initial_onboarding_phase, initial_onboarding_phase_for, skip_onboarding_env,
     InitialOnboardingPhase, OnboardingInputs,
 };
-pub use phase::WorkflowPhase;
+pub use kuzushi_core::WorkflowPhase;
 pub(crate) use planning_options::{planning_task_explicit_input, planning_task_preset_input};
 pub use planning_options::{PickerFocus, PlanningOptionEdit, PlanningOptionOverrides};
 pub use recommend::{
@@ -39,6 +38,7 @@ pub use recommend::{
     TargetProfile,
 };
 pub(crate) use runner::PlanningRunStep;
+pub(crate) use target_candidates::immediate_target_candidate;
 pub use target_candidates::{
     discover_target_candidates, record_recent_target, TargetCandidate, TargetCandidateScope,
 };

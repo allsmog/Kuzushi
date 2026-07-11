@@ -62,9 +62,11 @@ fn job_drain_does_not_finish_tool_slot_on_scan_terminal_event() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     let ticket = app.jobs_mut().start(JobKind::Run, "sast:scan");
     ticket.send(ShellEvent::Scan(ScanEvent::Finished {
-        run_id: "run-1".to_string(),
-        findings_count: 0,
-        cost_usd: None,
+        result: serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "data": {"runId": "run-1", "findingsCount": 0},
+        }),
     }));
     app.set_running_tool_for_test("sast:scan");
 
@@ -89,9 +91,11 @@ fn job_drain_finishes_scan_slot_on_scan_terminal_event() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     let ticket = app.jobs_mut().start(JobKind::Run, "scan");
     ticket.send(ShellEvent::Scan(ScanEvent::Finished {
-        run_id: "run-1".to_string(),
-        findings_count: 0,
-        cost_usd: None,
+        result: serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "data": {"runId": "run-1", "findingsCount": 0},
+        }),
     }));
     app.set_scan_panel(Some(ScanPanelState {
         run_id: None,

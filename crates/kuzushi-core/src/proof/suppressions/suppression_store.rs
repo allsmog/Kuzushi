@@ -9,6 +9,8 @@ impl Default for WhiteboxSuppressionStoreFile {
     }
 }
 
+const MAX_WHITEBOX_SUPPRESSION_BYTES: usize = 8 * 1024 * 1024;
+
 pub fn whitebox_suppression_store_path(workspace: &WorkspaceTarget) -> PathBuf {
     workspace.state_dir().join(WHITEBOX_SUPPRESSION_STORE_NAME)
 }
@@ -17,11 +19,14 @@ pub fn load_whitebox_suppressions(
     workspace: &WorkspaceTarget,
 ) -> Result<Vec<WhiteboxSuppressionRecord>> {
     let path = whitebox_suppression_store_path(workspace);
-    if !path.exists() {
+    let Some(body) = crate::workspace::read_optional_workspace_text(
+        workspace.root(),
+        &path,
+        MAX_WHITEBOX_SUPPRESSION_BYTES,
+    )?
+    else {
         return Ok(Vec::new());
-    }
-    let body =
-        fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
+    };
     let value: Value = serde_json::from_str(&body)
         .with_context(|| format!("Could not parse {}", path.display()))?;
     let suppressions = if value.is_array() {
@@ -42,7 +47,6 @@ pub fn save_whitebox_suppressions(
     workspace: &WorkspaceTarget,
     suppressions: &[WhiteboxSuppressionRecord],
 ) -> Result<()> {
-    workspace.ensure_state_dir()?;
     for record in suppressions {
         validate_whitebox_suppression(record)?;
     }
@@ -52,7 +56,11 @@ pub fn save_whitebox_suppressions(
         suppressions: sorted_suppressions(suppressions.to_vec()),
     };
     let body = format!("{}\n", serde_json::to_string_pretty(&store)?);
-    fs::write(&path, body).with_context(|| format!("Could not write {}", path.display()))
+    let relative = path
+        .strip_prefix(workspace.root())
+        .with_context(|| format!("{} escaped the workspace", path.display()))?;
+    crate::workspace::write_workspace_state_file(workspace.root(), relative, body.as_bytes())?;
+    Ok(())
 }
 
 pub fn upsert_whitebox_suppression(

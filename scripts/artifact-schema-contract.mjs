@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { Validator } from "@cfworker/json-schema";
 import { checkFieldShapeSpecs } from "./artifact-schema-shapes.mjs";
 import {
   optionalRunArtifactSpecs,
@@ -11,6 +12,8 @@ import { canonicalRunSchemaFiles } from "./canonical-run-schema-files.mjs";
 
 export { canonicalRunSchemaFiles };
 
+const FIXTURE_MODEL_FIELD = "model";
+
 const artifactFieldGroups = [
   { path: ["definitions", "artifact"], kind: "required", fields: ["label", "path", "kind"] },
 ];
@@ -20,6 +23,71 @@ const reservedArtifactMetadataSpecs = [
   ...toolInputArtifactSpecs,
   ...toolResultArtifactSpecs,
 ];
+
+const producerFixturesBySchema = {
+  "schemas/run.events.schema.json": [
+    {
+      name: "sast scan completion",
+      value: {
+        n: 2,
+        kind: "scan",
+        status: "completed",
+        message: "sast:scan completed: 2 finding(s)",
+        atUnix: 1,
+        tool: "sast:scan",
+      },
+    },
+    {
+      name: "stale-run recovery",
+      value: {
+        n: 3,
+        kind: "run",
+        status: "interrupted",
+        message: "run process is no longer running",
+        atUnix: 2,
+      },
+    },
+  ],
+  "schemas/run.trace.schema.json": [
+    { name: "agent plan", value: { n: 1, kind: "plan", label: "ask operator question" } },
+    {
+      name: "agent llm answer",
+      value: {
+        n: 2,
+        kind: "llm",
+        label: "answer (42 chars)",
+        latency_ms: 120,
+        [FIXTURE_MODEL_FIELD]: "openai:gpt-test",
+        provider: "openai",
+        prompt_hash: "fnv1a64:test",
+      },
+    },
+    { name: "agent critic", value: { n: 3, kind: "critic", label: "critic review" } },
+  ],
+  "schemas/run.summary.schema.json": [
+    {
+      name: "agent llm audit summary",
+      value: {
+        runId: "shell-agent",
+        kind: "shell",
+        status: "completed",
+        target: "/tmp/repo",
+        startedAtUnix: 1,
+        completedAtUnix: 2,
+        llmCalls: [
+          {
+            n: 2,
+            kind: "llm",
+            [FIXTURE_MODEL_FIELD]: "openai:gpt-test",
+            provider: "openai",
+            promptHash: "fnv1a64:test",
+            latencyMs: 120,
+          },
+        ],
+      },
+    },
+  ],
+};
 
 const requiredAliasGroupsBySchema = {
   "schemas/run.artifacts.schema.json": [
@@ -155,7 +223,16 @@ const runSummaryStatusSpec = {
   values: ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"],
   refs: [],
 };
-const traceKindValues = ["tool", "reasoning", "tool-progress", "done", "refused"];
+const traceKindValues = [
+  "tool",
+  "reasoning",
+  "tool-progress",
+  "done",
+  "refused",
+  "plan",
+  "llm",
+  "critic",
+];
 
 const schemaEnumSpecs = {
   "schemas/run.artifacts.schema.json": [
@@ -172,7 +249,7 @@ const schemaEnumSpecs = {
     {
       name: "eventKind",
       path: ["definitions", "eventKind"],
-      values: ["tool"],
+      values: ["tool", "scan", "run", "shell"],
       refs: [["properties", "kind"]],
     },
     {
@@ -278,7 +355,20 @@ function checkSchemaDocument(relativeFile, schema) {
     ...checkFieldShapeSpecs(relativeFile, schema, schemaNode),
     ...checkRunArtifactManifestReservedMetadata(relativeFile, schema),
     ...checkNamedEnums(relativeFile, schema),
+    ...checkProducerFixtures(relativeFile, schema),
   ].filter(Boolean);
+}
+
+function checkProducerFixtures(relativeFile, schema) {
+  const fixtures = producerFixturesBySchema[relativeFile] ?? [];
+  if (fixtures.length === 0) return [];
+  const validator = new Validator(schema, "7", false);
+  return fixtures.flatMap(({ name, value }) => {
+    const result = validator.validate(value);
+    return result.valid
+      ? []
+      : [`${relativeFile}: producer fixture ${name} is invalid: ${JSON.stringify(result.errors)}`];
+  });
 }
 
 function checkProofLevelNumericBranch(relativeFile, schema) {

@@ -1,6 +1,6 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_julia_project(path: &Path) -> bool {
@@ -24,7 +24,8 @@ pub(super) fn julia_project_components(
 pub(super) fn julia_project_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse Julia Project.toml")?;
+    let value: toml::Value =
+        toml::from_str(&text).context("sbom-scan: parse Julia Project.toml")?;
     let source = relative_display(target, path);
     Ok(dependency_names(&value)
         .into_iter()

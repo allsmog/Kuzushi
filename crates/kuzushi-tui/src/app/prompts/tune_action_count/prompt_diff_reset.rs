@@ -13,7 +13,11 @@ impl ShellApp {
     }
 
     pub(crate) fn diff_prompt_override_effect(&mut self, diff: PromptOverrideDiff) {
-        match prompt_override_path_state(&diff.path) {
+        let Some(target) = self.target_owned() else {
+            self.log("error", "could not diff prompt override without a target");
+            return;
+        };
+        match prompt_override_path_state(&target, &diff.path) {
             PromptOverridePathState::File => self.log(
                 "prompt",
                 format!("diff candidate: git diff -- {}", diff.path.display()),
@@ -46,8 +50,12 @@ impl ShellApp {
     }
 
     pub(crate) fn reset_prompt_override_effect(&mut self, reset: PromptOverrideReset) {
-        match prompt_override_path_state(&reset.path) {
-            PromptOverridePathState::File => self.remove_prompt_override(&reset.path),
+        let Some(target) = self.target_owned() else {
+            self.log("error", "could not reset prompt override without a target");
+            return;
+        };
+        match prompt_override_path_state(&target, &reset.path) {
+            PromptOverridePathState::File => self.remove_prompt_override(&target, &reset.path),
             PromptOverridePathState::Missing => self.log(
                 "prompt",
                 format!("no override at {} to reset", reset.path.display()),
@@ -62,9 +70,30 @@ impl ShellApp {
         }
     }
 
-    fn remove_prompt_override(&mut self, path: &std::path::Path) {
-        match std::fs::remove_file(path) {
-            Ok(_) => self.log("prompt", format!("removed override {}", path.display())),
+    fn remove_prompt_override(&mut self, target: &std::path::Path, path: &std::path::Path) {
+        if !matches!(
+            prompt_override_path_state(target, path),
+            PromptOverridePathState::File
+        ) {
+            self.log(
+                "error",
+                format!("prompt override changed before reset: {}", path.display()),
+            );
+            return;
+        }
+        let relative = match path.strip_prefix(target) {
+            Ok(relative) => relative,
+            Err(_) => {
+                self.log("error", "prompt override path escaped the active target");
+                return;
+            }
+        };
+        match kuzushi_core::workspace::remove_workspace_state_file(target, relative) {
+            Ok(true) => self.log("prompt", format!("removed override {}", path.display())),
+            Ok(false) => self.log(
+                "prompt",
+                format!("no override at {} to reset", path.display()),
+            ),
             Err(error) => self.log(
                 "error",
                 format!("could not remove {}: {error}", path.display()),
@@ -79,13 +108,13 @@ enum PromptOverridePathState {
     Unreadable,
 }
 
-fn prompt_override_path_state(path: &std::path::Path) -> PromptOverridePathState {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => PromptOverridePathState::File,
-        Ok(_) => PromptOverridePathState::Unreadable,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            PromptOverridePathState::Missing
-        }
+fn prompt_override_path_state(
+    target: &std::path::Path,
+    path: &std::path::Path,
+) -> PromptOverridePathState {
+    match kuzushi_core::workspace::read_optional_workspace_text(target, path, 1024 * 1024) {
+        Ok(Some(_)) => PromptOverridePathState::File,
+        Ok(None) => PromptOverridePathState::Missing,
         Err(_) => PromptOverridePathState::Unreadable,
     }
 }

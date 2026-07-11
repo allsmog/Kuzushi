@@ -20,10 +20,9 @@ fn resolve_relative_target(path: PathBuf, ctx: &ToolExecutionContext<'_>) -> Res
 }
 
 fn target_base_dir(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    match ctx.workspace {
-        Some(workspace) => Ok(workspace.root().to_path_buf()),
-        None => Ok(std::env::current_dir()?),
-    }
+    ctx.workspace
+        .map(|workspace| workspace.root().to_path_buf())
+        .context("carlini threat hunt requires an explicit active workspace")
 }
 
 fn resolve_default_target(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {

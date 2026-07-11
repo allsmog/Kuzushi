@@ -1,6 +1,6 @@
 use super::adapters::clang_subprocess::rewrite_unsupported_method_error;
 use super::adapters::{parse_uaf_hunt_input, resolve_compile_commands_path};
-use super::application::run_uaf_hunt_report;
+use super::application::{normalize_uaf_hunt_findings, run_uaf_hunt_report};
 use crate::config::V2Config;
 use crate::findings::TriageOutcome;
 use crate::modules::ToolExecutionContext;
@@ -61,6 +61,18 @@ impl AgentRuntime for ScriptedUafRuntime {
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+#[test]
+fn malformed_finding_envelopes_fail_instead_of_looking_empty() {
+    for malformed in [
+        json!({}),
+        json!({"findings": {}}),
+        json!({"findings": [{"ruleId": "uaf", "message": "missing path"}]}),
+    ] {
+        let error = normalize_uaf_hunt_findings(&malformed, 10).unwrap_err();
+        assert!(error.to_string().contains("uaf-hunt"));
+    }
 }
 
 #[test]
@@ -241,6 +253,8 @@ fn run_uaf_hunt_rejects_bare_model_before_clang_spawn() {
         workspace: None,
         findings_store: None,
         trace: None,
+        cancellation: None,
+        authorization: Default::default(),
     };
 
     let err = run_uaf_hunt_report(
@@ -411,6 +425,8 @@ done
         workspace: None,
         findings_store: None,
         trace: Some(&trace),
+        cancellation: None,
+        authorization: Default::default(),
     };
 
     let report = run_uaf_hunt_report(&json!({"target": dir.path()}), &ctx, Some(&runtime)).unwrap();
@@ -431,10 +447,14 @@ done
         .iter()
         .map(|step| step.label.as_str())
         .collect::<Vec<_>>();
-    assert!(labels.iter().any(|label| label.contains("agent · preflight")));
+    assert!(labels
+        .iter()
+        .any(|label| label.contains("agent · preflight")));
     assert!(labels.iter().any(|label| label.contains("clang · spawn")));
     assert!(labels.iter().any(|label| label.contains("agent-loop")));
-    assert!(labels.iter().any(|label| label.contains("complete · 1 findings")));
+    assert!(labels
+        .iter()
+        .any(|label| label.contains("complete · 1 findings")));
     let start_step = steps[0].n;
     assert!(steps
         .iter()

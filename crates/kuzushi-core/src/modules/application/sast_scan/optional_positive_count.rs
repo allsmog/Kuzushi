@@ -175,5 +175,63 @@ pub(in crate::modules) fn run_sast_subtool(
     runtime: Option<&dyn AgentRuntime>,
     option_store: &crate::options::ToolOptionStore,
 ) -> Result<Value> {
-    registry.execute_tool_with_runtime_and_options(name, input, ctx, runtime, Some(option_store))
+    let prepared = registry
+        .prepare_dispatch_input(name, input, ctx, Some(option_store))?
+        .authorize_delegated(&ctx.authorization);
+    let output = registry.dispatch_prepared_input_with_runtime(prepared, ctx, runtime)?;
+    validate_sast_subtool_result(name, &output)?;
+    Ok(output)
+}
+
+fn validate_sast_subtool_result(name: &str, output: &Value) -> Result<()> {
+    if crate::module_result::tool_result_status(&output).is_failure_like() {
+        let details = output
+            .get("errors")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join("; ");
+        anyhow::bail!(
+            "sast:scan subtool {name} did not complete successfully: {}",
+            if details.is_empty() {
+                output
+                    .get("summary")
+                    .and_then(Value::as_str)
+                    .unwrap_or("subtool returned a failure-like result")
+            } else {
+                details.as_str()
+            }
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod result_truth_tests {
+    use super::*;
+
+    #[test]
+    fn failed_subtool_envelope_is_not_treated_as_success() {
+        let output = json!({
+            "ok": false,
+            "status": "failed",
+            "summary": "verify failed",
+            "errors": ["runtime unavailable"]
+        });
+
+        let error = validate_sast_subtool_result("verify:finding", &output)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("runtime unavailable"));
+    }
+
+    #[test]
+    fn skipped_subtool_envelope_remains_an_explicit_non_failure() {
+        let output = json!({"ok": true, "status": "skipped"});
+
+        validate_sast_subtool_result("triage:run", &output).unwrap();
+    }
 }

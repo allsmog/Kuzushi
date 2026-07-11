@@ -77,7 +77,7 @@ function checkNativeBinary() {
   logErr(`No Kuzushi native binary found for ${slug}.`);
   logErr(`Expected native/${slug}/kuzushi, a Cargo build output, or KUZUSHI_NATIVE_BIN.`);
   logErr(
-    "The package can still install, but `kuzushi` will fail until a matching binary is available. Next: install a release that includes this platform, set KUZUSHI_NATIVE_BIN, or build from source with `cargo build -p kuzushi-cli --release`.",
+    "The package can still install, but `kuzushi` will fail until a matching binary is available. Next: install a release that includes this platform, set KUZUSHI_NATIVE_BIN, or build from source with `pnpm build:native`.",
   );
   return false;
 }

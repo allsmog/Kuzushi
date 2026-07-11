@@ -1,7 +1,7 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_yaml::{Mapping, Value};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_pubspec_lock(path: &Path) -> bool {

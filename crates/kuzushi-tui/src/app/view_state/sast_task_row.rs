@@ -313,16 +313,6 @@ impl WorkbenchCenterMode {
         Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
     }
 
-    pub fn scene_page(self) -> Option<crate::scene3d::VizPage> {
-        match self {
-            WorkbenchCenterMode::Code => None,
-            WorkbenchCenterMode::Dfd => Some(crate::scene3d::VizPage::Dfd),
-            WorkbenchCenterMode::Chain => Some(crate::scene3d::VizPage::ExploitChain),
-            WorkbenchCenterMode::Flow => Some(crate::scene3d::VizPage::AttackPath),
-            WorkbenchCenterMode::Risk => Some(crate::scene3d::VizPage::Heatmap),
-        }
-    }
-
     fn index(self) -> usize {
         Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0)
     }
@@ -339,6 +329,12 @@ pub enum WorkbenchPage {
 }
 
 impl WorkbenchPage {
+    pub const FIX_GRID_MIN_COLUMNS: u16 = 80;
+    pub const FIX_DIAGRAM_MIN_BODY_ROWS: u16 = 20;
+    /// The phase body sits below the shared status/keybind/prompt chrome and
+    /// the engagement header. Canonical 80x24 therefore has fewer than 20 body
+    /// rows and renders the single combined Fix pane.
+    pub const FIX_GRID_MIN_ROWS: u16 = Self::FIX_DIAGRAM_MIN_BODY_ROWS + 10;
     pub const ALL: [Self; 4] = [Self::Terrain, Self::Coverage, Self::Review, Self::Ship];
 
     pub fn from_phase(phase: WorkflowPhase) -> Self {
@@ -371,6 +367,131 @@ impl WorkbenchPage {
 
     pub fn position(self) -> usize {
         self.index() + 1
+    }
+
+    /// Logical pane order for the phase-native cockpit.
+    ///
+    /// The renderer may stack these panes at compact widths, but their focus
+    /// order stays stable so Tab never lands on content that is not visible on
+    /// the active page.
+    pub fn pane_order(self) -> &'static [WorkbenchPane] {
+        match self {
+            Self::Terrain => &[WorkbenchPane::Center],
+            Self::Coverage => &[
+                WorkbenchPane::Source,
+                WorkbenchPane::Center,
+                WorkbenchPane::Findings,
+                WorkbenchPane::Details,
+            ],
+            Self::Review => &[
+                WorkbenchPane::Source,
+                WorkbenchPane::Center,
+                WorkbenchPane::Findings,
+                WorkbenchPane::Details,
+            ],
+            Self::Ship => &[
+                WorkbenchPane::Source,
+                WorkbenchPane::Center,
+                WorkbenchPane::Details,
+                WorkbenchPane::Findings,
+            ],
+        }
+    }
+
+    pub fn pane_order_for_viewport(self, columns: u16, rows: u16) -> &'static [WorkbenchPane] {
+        if self == Self::Ship
+            && (columns < Self::FIX_GRID_MIN_COLUMNS || rows < Self::FIX_GRID_MIN_ROWS)
+        {
+            return &[WorkbenchPane::Center];
+        }
+        self.pane_order()
+    }
+
+    /// Panes the active Workbench composition actually paints and can focus.
+    ///
+    /// Review's non-code center modes intentionally replace the four-pane
+    /// finding cockpit with a diagram plus its detail rail. Keeping this
+    /// projection beside the page's normal viewport projection prevents input
+    /// routing from tabbing through hidden Source/Findings panes.
+    pub fn interactive_panes_for_viewport(
+        self,
+        center_mode: WorkbenchCenterMode,
+        columns: u16,
+        rows: u16,
+    ) -> &'static [WorkbenchPane] {
+        if self == Self::Review && center_mode != WorkbenchCenterMode::Code {
+            return &[WorkbenchPane::Center, WorkbenchPane::Details];
+        }
+        self.pane_order_for_viewport(columns, rows)
+    }
+
+    pub fn primary_pane(self) -> WorkbenchPane {
+        match self {
+            Self::Coverage => WorkbenchPane::Findings,
+            Self::Terrain | Self::Review | Self::Ship => WorkbenchPane::Center,
+        }
+    }
+
+    pub fn primary_pane_for_viewport(self, columns: u16, rows: u16) -> WorkbenchPane {
+        let panes = self.pane_order_for_viewport(columns, rows);
+        let primary = self.primary_pane();
+        if panes.contains(&primary) {
+            primary
+        } else {
+            panes.first().copied().unwrap_or(primary)
+        }
+    }
+
+    pub fn next_pane_for_viewport(
+        self,
+        current: WorkbenchPane,
+        reverse: bool,
+        columns: u16,
+        rows: u16,
+    ) -> WorkbenchPane {
+        self.next_pane_in(
+            self.pane_order_for_viewport(columns, rows),
+            current,
+            reverse,
+        )
+    }
+
+    pub fn next_interactive_pane_for_viewport(
+        self,
+        center_mode: WorkbenchCenterMode,
+        current: WorkbenchPane,
+        reverse: bool,
+        columns: u16,
+        rows: u16,
+    ) -> WorkbenchPane {
+        if self != Self::Review || center_mode == WorkbenchCenterMode::Code {
+            return self.next_pane_for_viewport(current, reverse, columns, rows);
+        }
+        self.next_pane_in(
+            self.interactive_panes_for_viewport(center_mode, columns, rows),
+            current,
+            reverse,
+        )
+    }
+
+    fn next_pane_in(
+        self,
+        panes: &[WorkbenchPane],
+        current: WorkbenchPane,
+        reverse: bool,
+    ) -> WorkbenchPane {
+        let Some(current_index) = panes.iter().position(|pane| *pane == current) else {
+            return panes
+                .first()
+                .copied()
+                .unwrap_or_else(|| self.primary_pane());
+        };
+        let next_index = if reverse {
+            (current_index + panes.len() - 1) % panes.len()
+        } else {
+            (current_index + 1) % panes.len()
+        };
+        panes[next_index]
     }
 
     fn index(self) -> usize {
@@ -435,4 +556,108 @@ pub struct CompletionCycle {
 pub struct HistorySearch {
     pub query: String,
     pub cursor: usize,
+}
+
+#[cfg(test)]
+mod workbench_page_tests {
+    use super::*;
+
+    #[test]
+    fn phase_pages_cycle_only_their_visible_panes() {
+        assert_eq!(
+            WorkbenchPage::Terrain.next_pane_for_viewport(WorkbenchPane::Center, false, 160, 40,),
+            WorkbenchPane::Center
+        );
+        assert_eq!(
+            WorkbenchPage::Coverage
+                .next_pane_for_viewport(WorkbenchPane::Findings, false, 160, 40,),
+            WorkbenchPane::Details
+        );
+        assert_eq!(
+            WorkbenchPage::Review.next_pane_for_viewport(WorkbenchPane::Center, true, 160, 40,),
+            WorkbenchPane::Source
+        );
+        assert_eq!(
+            WorkbenchPage::Ship.next_pane_for_viewport(WorkbenchPane::Details, false, 160, 40,),
+            WorkbenchPane::Findings
+        );
+        assert_eq!(
+            WorkbenchPage::Ship.next_pane_for_viewport(WorkbenchPane::Details, false, 60, 20,),
+            WorkbenchPane::Center,
+            "compact Fix normalizes a stale hidden-pane focus"
+        );
+    }
+
+    #[test]
+    fn each_phase_names_its_primary_pane() {
+        assert_eq!(WorkbenchPage::Terrain.primary_pane(), WorkbenchPane::Center);
+        assert_eq!(
+            WorkbenchPage::Coverage.primary_pane(),
+            WorkbenchPane::Findings
+        );
+        assert_eq!(WorkbenchPage::Review.primary_pane(), WorkbenchPane::Center);
+        assert_eq!(WorkbenchPage::Ship.primary_pane(), WorkbenchPane::Center);
+    }
+
+    #[test]
+    fn compact_fix_cycles_only_the_combined_center_pane() {
+        for (columns, rows) in [(60, 20), (80, 24)] {
+            assert_eq!(
+                WorkbenchPage::Ship.next_pane_for_viewport(
+                    WorkbenchPane::Center,
+                    false,
+                    columns,
+                    rows,
+                ),
+                WorkbenchPane::Center
+            );
+            assert_eq!(
+                WorkbenchPage::Ship.pane_order_for_viewport(columns, rows),
+                &[WorkbenchPane::Center]
+            );
+        }
+        assert_eq!(
+            WorkbenchPage::Ship.next_pane_for_viewport(WorkbenchPane::Center, false, 120, 36,),
+            WorkbenchPane::Details
+        );
+    }
+
+    #[test]
+    fn confirm_and_fix_expose_every_rendered_reference_pane() {
+        assert_eq!(
+            WorkbenchPage::Review.pane_order_for_viewport(120, 36),
+            &[
+                WorkbenchPane::Source,
+                WorkbenchPane::Center,
+                WorkbenchPane::Findings,
+                WorkbenchPane::Details,
+            ]
+        );
+        assert_eq!(
+            WorkbenchPage::Ship.pane_order_for_viewport(120, 36),
+            &[
+                WorkbenchPane::Source,
+                WorkbenchPane::Center,
+                WorkbenchPane::Details,
+                WorkbenchPane::Findings,
+            ]
+        );
+    }
+
+    #[test]
+    fn review_diagram_focus_skips_hidden_reference_panes() {
+        assert_eq!(
+            WorkbenchPage::Review
+                .interactive_panes_for_viewport(WorkbenchCenterMode::Dfd, 150, 34,),
+            &[WorkbenchPane::Center, WorkbenchPane::Details]
+        );
+        assert_eq!(
+            WorkbenchPage::Review.interactive_panes_for_viewport(
+                WorkbenchCenterMode::Code,
+                150,
+                34,
+            ),
+            WorkbenchPage::Review.pane_order()
+        );
+    }
 }

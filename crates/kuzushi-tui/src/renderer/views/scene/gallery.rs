@@ -353,7 +353,8 @@ mod tests {
         let temp = tempfile::tempdir().expect("temp target");
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         save_persistent_threat_model(temp.path(), &sample_dfd_doc(), true).unwrap();
-        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
 
         let lines = scene_page_lines(&app, Rect::new(0, 0, 80, 24), VizPage::Dfd);
         let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");

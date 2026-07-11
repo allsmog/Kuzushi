@@ -195,6 +195,9 @@ pub(in crate::modules) fn sast_output_lines(
         whitebox_artifacts.append_output_lines(&mut lines);
     }
     lines.push(format!("  Engines: {}", reports.engine_ids.join(", ")));
+    for skipped in &reports.skipped_engines {
+        lines.push(format!("  Warning: {}", skipped.warning));
+    }
     append_triage_output_line(&mut lines, post_processing.triage.as_ref());
     if requests.needs_verification() {
         lines.push(format!(

@@ -2,18 +2,7 @@ use super::*;
 use crate::app::{auth_ready_for_provider, visible_model_choices, ModelChoice};
 
 pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(divider("CHOOSE A MODEL", area.width));
-    lines.push(blank());
-    lines.extend(
-        wrap_text(
-            "Kuzushi does not silently pick a model for you. Select one to continue.",
-            area.width as usize,
-        )
-        .into_iter()
-        .map(|line| muted(&line)),
-    );
-    lines.push(blank());
+    let mut lines = model_picker_intro(app, area.width);
     let choices = visible_model_choices(app.config().model.as_deref());
     let widths = picker_column_widths(&choices);
     for (idx, choice) in choices.iter().enumerate() {
@@ -21,8 +10,29 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
     }
     lines.push(offline_demo_action_line(area.width));
     lines.push(blank());
-    lines.push(responsive_keybind_hint_line(
-        area.width as usize,
+    lines.push(model_picker_controls(area.width as usize));
+    lines
+}
+
+fn model_picker_intro(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    let mut lines = vec![divider("CHOOSE A MODEL", width)];
+    lines.extend(confirmed_target_line(app, width as usize));
+    lines.push(blank());
+    lines.extend(
+        wrap_text(
+            "Kuzushi does not silently pick a model for you. Select one to continue.",
+            width as usize,
+        )
+        .into_iter()
+        .map(|line| muted(&line)),
+    );
+    lines.push(blank());
+    lines
+}
+
+fn model_picker_controls(width: usize) -> Line<'static> {
+    responsive_keybind_hint_line(
+        width,
         &[
             ("↑/↓/j/k", "move"),
             ("d/demo", "offline fixture"),
@@ -36,8 +46,7 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
             ("d", "demo"),
             ("Esc", "defer"),
         ],
-    ));
-    lines
+    )
 }
 
 /// Widest visible label and provider/effort cells, so the columns line up

@@ -1,5 +1,6 @@
 use super::*;
 use crate::attachments::{AttachmentKind, AttachmentRecord};
+use crate::bounded_file::{read_source_text_prefix_within, read_utf8_text_prefix};
 use crate::workspace::WorkspaceTarget;
 
 pub(crate) fn render_attachments(root: &Path) -> Result<Option<String>> {
@@ -55,22 +56,29 @@ fn attachment_body(workspace: &WorkspaceTarget, attachment: &AttachmentRecord) -
 }
 
 fn path_attachment_body(workspace: &WorkspaceTarget, attachment: &AttachmentRecord) -> String {
-    let path = workspace.root().join(&attachment.source);
-    fs::read_to_string(&path)
-        .map(|body| bounded_attachment_body(&body))
+    let path = match crate::attachments::resolve_safe_attachment_path(workspace, &attachment.source)
+    {
+        Ok(path) => path,
+        Err(error) => return format!("[Unsafe attachment {}: {error}.]", attachment.source),
+    };
+    read_utf8_text_prefix(&path, 16_384)
+        .map(|body| bounded_attachment_body(&body.text, body.truncated))
         .unwrap_or_else(|error| format!("[Could not read {}: {error}.]", attachment.source))
 }
 
-fn bounded_attachment_body(body: &str) -> String {
+fn bounded_attachment_body(body: &str, already_truncated: bool) -> String {
     const MAX_ATTACHMENT_BYTES: usize = 16_384;
-    if body.len() <= MAX_ATTACHMENT_BYTES {
+    if body.len() <= MAX_ATTACHMENT_BYTES && !already_truncated {
         return body.trim().to_string();
     }
-    let mut end = MAX_ATTACHMENT_BYTES;
+    let mut end = body.len().min(MAX_ATTACHMENT_BYTES);
     while !body.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}\n[Attachment truncated at {MAX_ATTACHMENT_BYTES} bytes.]", body[..end].trim())
+    format!(
+        "{}\n[Attachment truncated at {MAX_ATTACHMENT_BYTES} bytes.]",
+        body[..end].trim()
+    )
 }
 
 fn attachment_kind_label(kind: &AttachmentKind) -> &'static str {
@@ -92,8 +100,16 @@ pub(crate) fn collect_repo_inventory(
     max_files: usize,
     max_bytes_per_file: usize,
 ) -> Result<Vec<(String, String)>> {
+    let canonical_root =
+        fs::canonicalize(root).with_context(|| format!("Could not resolve {}", root.display()))?;
     let mut files = Vec::new();
-    collect_repo_inventory_inner(root, root, max_files, max_bytes_per_file, &mut files)?;
+    collect_repo_inventory_inner(
+        &canonical_root,
+        &canonical_root,
+        max_files,
+        max_bytes_per_file,
+        &mut files,
+    )?;
     Ok(files)
 }
 
@@ -107,39 +123,96 @@ pub(crate) fn collect_repo_inventory_inner(
     if files.len() >= max_files {
         return Ok(());
     }
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return Ok(());
-    };
-    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.path());
-    for entry in entries {
+    for entry in sorted_readable_entries(root, dir) {
         if files.len() >= max_files {
             break;
         }
-        let path = entry.path();
-        let file_name = entry.file_name();
-        if should_skip_path(&file_name.to_string_lossy()) {
-            continue;
-        }
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_dir() {
-            collect_repo_inventory_inner(root, &path, max_files, max_bytes_per_file, files)?;
-        } else if file_type.is_file() && is_context_file(&path) {
-            let raw = fs::read(&path).unwrap_or_default();
-            if raw.iter().take(4096).any(|byte| *byte == 0) {
-                continue;
-            }
-            let snippet =
-                String::from_utf8_lossy(&raw[..raw.len().min(max_bytes_per_file)]).to_string();
-            let relative = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .display()
-                .to_string();
-            files.push((relative, snippet));
-        }
+        collect_inventory_entry(root, entry, max_files, max_bytes_per_file, files)?;
     }
     Ok(())
+}
+
+fn sorted_readable_entries(root: &Path, dir: &Path) -> Vec<fs::DirEntry> {
+    let Ok(read_dir) = crate::bounded_file::read_dir_within(root, dir) else {
+        return Vec::new();
+    };
+    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.path());
+    entries
+}
+
+fn collect_inventory_entry(
+    root: &Path,
+    entry: fs::DirEntry,
+    max_files: usize,
+    max_bytes_per_file: usize,
+    files: &mut Vec<(String, String)>,
+) -> Result<()> {
+    let Some((path, file_type)) = visible_inventory_entry(&entry) else {
+        return Ok(());
+    };
+    if file_type.is_dir() {
+        return collect_repo_inventory_inner(root, &path, max_files, max_bytes_per_file, files);
+    }
+    if let Some(item) = inventory_file(root, &path, file_type.is_file(), max_bytes_per_file) {
+        files.push(item);
+    }
+    Ok(())
+}
+
+fn visible_inventory_entry(entry: &fs::DirEntry) -> Option<(PathBuf, fs::FileType)> {
+    if should_skip_path(&entry.file_name().to_string_lossy()) {
+        return None;
+    }
+    Some((entry.path(), entry.file_type().ok()?))
+}
+
+fn inventory_file(
+    root: &Path,
+    path: &Path,
+    is_file: bool,
+    max_bytes_per_file: usize,
+) -> Option<(String, String)> {
+    if !is_file || !is_context_file(path) {
+        return None;
+    }
+    let snippet = read_source_text_prefix_within(root, path, max_bytes_per_file)
+        .ok()
+        .flatten()?;
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string();
+    Some((relative, snippet))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn repo_inventory_does_not_follow_symlinks_outside_target() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(target.join("src")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(target.join("src/lib.rs"), "fn safe() {}\n").unwrap();
+        fs::write(outside.join("secret.rs"), "OUTSIDE_INVENTORY_TOKEN\n").unwrap();
+        symlink(&outside, target.join("linked-source")).unwrap();
+
+        let inventory = collect_repo_inventory(&target, 100, 4096).unwrap();
+        let text = inventory
+            .iter()
+            .map(|(path, snippet)| format!("{path}\n{snippet}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("src/lib.rs"));
+        assert!(!text.contains("OUTSIDE_INVENTORY_TOKEN"));
+        assert!(!text.contains("linked-source"));
+    }
 }

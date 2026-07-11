@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 pub(crate) use parse_name_status::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 mod build_whitebox_diff_scope_report;

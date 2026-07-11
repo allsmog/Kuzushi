@@ -1,4 +1,9 @@
 use super::*;
+use anyhow::Context;
+use std::path::Path;
+
+const MAX_PWN_STATE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_PWN_STATE_ENTRIES: usize = 4_096;
 
 impl ShellApp {
     pub(crate) fn reduce_pwn_command(&mut self, command: &PwnCommand) -> Vec<ShellEffect> {
@@ -218,17 +223,26 @@ impl ShellApp {
 
     pub(crate) fn refresh_pwn_state_from_disk(&mut self) {
         if self.pwn_view().state_path.is_none() {
-            let state_path = latest_pwn_state_path(self.target_path_buf());
-            self.pwn_view_mut().state_path = state_path;
+            match latest_pwn_state_path(self.target_path_buf()) {
+                Ok(state_path) => self.pwn_view_mut().state_path = state_path,
+                Err(error) => {
+                    self.log("error", format!("could not discover pwn state: {error}"));
+                    return;
+                }
+            }
         }
         let Some(path) = self.pwn_view().state_path.clone() else {
             return;
         };
-        let Ok(body) = std::fs::read_to_string(&path) else {
+        let Some(root) = self.target_path_buf().cloned() else {
             return;
         };
-        let Ok(state) = serde_json::from_str::<serde_json::Value>(&body) else {
-            return;
+        let state = match read_pwn_state(&root, &path) {
+            Ok(state) => state,
+            Err(error) => {
+                self.log("error", format!("could not read pwn state: {error}"));
+                return;
+            }
         };
         let existing_binary = self.pwn_view().binary.clone();
         let pwn = self.pwn_view_mut();
@@ -248,21 +262,121 @@ fn path_value(result: &serde_json::Value, key: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-pub(crate) fn latest_pwn_state_path(target: Option<&PathBuf>) -> Option<PathBuf> {
-    let root = target.cloned().or_else(|| std::env::current_dir().ok())?;
+pub(crate) fn latest_pwn_state_path(target: Option<&PathBuf>) -> anyhow::Result<Option<PathBuf>> {
+    let Some(root) = target else {
+        return Ok(None);
+    };
     let pwn_dir = root.join(".kuzushi/pwn");
-    let entries = std::fs::read_dir(pwn_dir).ok()?;
-    let mut candidates = entries
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path().join("state.json"))
-        .filter(|path| path.is_file())
-        .filter_map(|path| {
-            let modified = std::fs::metadata(&path)
-                .and_then(|meta| meta.modified())
-                .ok()?;
-            Some((modified, path))
-        })
-        .collect::<Vec<_>>();
+    let metadata = match std::fs::symlink_metadata(&pwn_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    anyhow::ensure!(
+        metadata.is_dir() && !metadata.file_type().is_symlink(),
+        "pwn state directory must be a real directory: {}",
+        pwn_dir.display()
+    );
+    let canonical_root = std::fs::canonicalize(root)?;
+    let canonical_pwn = std::fs::canonicalize(&pwn_dir)?;
+    anyhow::ensure!(
+        canonical_pwn.starts_with(&canonical_root),
+        "pwn state directory escapes the active target"
+    );
+    let mut candidates = collect_pwn_state_candidates(&canonical_pwn)?;
     candidates.sort_by_key(|(modified, _)| *modified);
-    candidates.pop().map(|(_, path)| path)
+    Ok(candidates.pop().map(|(_, path)| path))
+}
+
+fn collect_pwn_state_candidates(
+    pwn_dir: &Path,
+) -> anyhow::Result<Vec<(std::time::SystemTime, PathBuf)>> {
+    let mut candidates = Vec::new();
+    for (index, entry) in std::fs::read_dir(pwn_dir)?.enumerate() {
+        anyhow::ensure!(
+            index < MAX_PWN_STATE_ENTRIES,
+            "pwn state directory exceeds the {MAX_PWN_STATE_ENTRIES}-entry limit"
+        );
+        let entry = entry?;
+        let entry_type = entry.file_type()?;
+        anyhow::ensure!(
+            !entry_type.is_symlink(),
+            "pwn state entry must not be a symlink: {}",
+            entry.path().display()
+        );
+        if !entry_type.is_dir() {
+            continue;
+        }
+        let path = entry.path().join("state.json");
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        anyhow::ensure!(
+            metadata.is_file() && !metadata.file_type().is_symlink(),
+            "pwn state must be a regular non-symlink file: {}",
+            path.display()
+        );
+        candidates.push((metadata.modified()?, path));
+    }
+    Ok(candidates)
+}
+
+fn read_pwn_state(root: &Path, path: &Path) -> anyhow::Result<serde_json::Value> {
+    let body = kuzushi_core::workspace::read_workspace_text(root, path, MAX_PWN_STATE_BYTES)?;
+    serde_json::from_str(&body)
+        .with_context(|| format!("Could not parse pwn state {}", path.display()))
+}
+
+#[cfg(test)]
+mod target_scope_tests {
+    use super::*;
+
+    #[test]
+    fn targetless_pwn_state_discovery_does_not_probe_cwd() {
+        assert_eq!(latest_pwn_state_path(None).unwrap(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pwn_state_discovery_rejects_an_outside_directory_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".kuzushi")).unwrap();
+        symlink(outside.path(), root.path().join(".kuzushi/pwn")).unwrap();
+        let root_path = root.path().to_path_buf();
+
+        assert!(latest_pwn_state_path(Some(&root_path)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pwn_state_discovery_rejects_a_state_file_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let state_dir = root.path().join(".kuzushi/pwn/run");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        symlink(outside.path(), state_dir.join("state.json")).unwrap();
+        let root_path = root.path().to_path_buf();
+
+        assert!(latest_pwn_state_path(Some(&root_path)).is_err());
+    }
+
+    #[test]
+    fn pwn_state_reader_rejects_oversized_state() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join(".kuzushi/pwn/run/state.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len((MAX_PWN_STATE_BYTES + 1) as u64)
+            .unwrap();
+
+        assert!(read_pwn_state(root.path(), &path).is_err());
+    }
 }

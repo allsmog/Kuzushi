@@ -39,6 +39,7 @@ fn strategy_queue_model_reads_persisted_proposals() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
     let model = strategy_queue_model(&app);
 
     assert_eq!(
@@ -76,6 +77,7 @@ fn strategy_queue_model_sorts_proposed_before_approved_and_rejected() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
     let model = strategy_queue_model(&app);
 
     assert_eq!(model.rows[0].id, "review-codeql-scan");

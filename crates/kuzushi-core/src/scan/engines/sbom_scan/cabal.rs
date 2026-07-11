@@ -1,6 +1,6 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_cabal_file(path: &Path) -> bool {
@@ -60,9 +60,7 @@ fn dependency_continuation(line: &str, trimmed: &str, in_build_depends: bool) ->
 }
 
 fn parse_dependencies(text: &str) -> Vec<String> {
-    text.split(',')
-        .filter_map(dependency_name)
-        .collect()
+    text.split(',').filter_map(dependency_name).collect()
 }
 
 fn dependency_name(text: &str) -> Option<String> {

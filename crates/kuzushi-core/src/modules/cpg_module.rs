@@ -2,7 +2,10 @@ use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const DEFAULT_CPG_BUILD_TIMEOUT_MS: u64 = 30 * 60 * 1000;
+const MAX_CPG_BUILD_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 
 pub(in crate::modules) fn cpg_module() -> BuiltinModule {
     builtin_module(
@@ -11,29 +14,51 @@ pub(in crate::modules) fn cpg_module() -> BuiltinModule {
         ModuleKind::Intel,
         "Build a Joern Code Property Graph (.kuzushi/cpg.bin) for downstream \
          taint analyses. Deterministic; wraps `joern-parse`. Honors KUZUSHI_JOERN_BIN.",
-        vec![tool_with_options(
-            "cpg:build",
-            "Build the Joern CPG for the active target. Skips silently when joern-parse is not \
-             installed; otherwise writes .kuzushi/cpg.bin.",
-            vec![
-                target_option(),
-                opt(
-                    "outputPath",
-                    OptionType::Path,
-                    "Destination CPG binary. Defaults to <target>/.kuzushi/cpg.bin.",
-                )
-                .advanced(),
-                opt(
-                    "heapMb",
-                    OptionType::Int,
-                    "Max JVM heap for joern-parse, in MB (passed as -J-Xmx). Defaults to ~75% of \
-                     physical RAM. Raise this when large targets fail with a Java heap OOM.",
-                )
-                .advanced(),
-            ],
-        )],
+        vec![cpg_build_tool()],
         vec![dag("cpg:build", "cpg", &["context:build"])],
     )
+}
+
+fn cpg_build_tool() -> ToolDescriptor {
+    tool_with_options(
+        "cpg:build",
+        "Build the Joern CPG for the active target. Returns an explicit skipped result when \
+         joern-parse is not installed; otherwise writes .kuzushi/cpg.bin.",
+        cpg_build_options(),
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn cpg_build_options() -> Vec<OptionSpec> {
+    vec![
+        target_option(),
+        opt(
+            "outputPath",
+            OptionType::Path,
+            "Destination CPG binary below <target>/.kuzushi. Defaults to <target>/.kuzushi/cpg.bin; paths outside Kuzushi state are rejected.",
+        )
+        .state_write()
+        .advanced(),
+        opt(
+            "heapMb",
+            OptionType::Int,
+            "Max JVM heap for joern-parse, in MB (passed as -J-Xmx). Defaults to ~75% of \
+             physical RAM. Raise this when large targets fail with a Java heap OOM.",
+        )
+        .advanced(),
+        opt(
+            "timeoutMs",
+            OptionType::Int,
+            "Joern parse deadline in milliseconds. A deadline kills and reaps the complete Joern/JVM process tree.",
+        )
+        .aliases(&["timeout_ms"])
+        .default(json!(DEFAULT_CPG_BUILD_TIMEOUT_MS))
+        .advanced(),
+    ]
 }
 
 fn announce_cpg_phase(ctx: &ToolExecutionContext<'_>, kind: &str, label: &str) {
@@ -68,13 +93,17 @@ pub(in crate::modules) fn run_cpg_build(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
+    ctx.ensure_active()?;
     let target = resolve_tool_target(input, ctx)?;
     let bin = match locate_joern_parse_bin() {
         Some(path) => path,
         None => return Ok(skipped_response(&target, "joern-parse")),
     };
     let output_path = resolve_cpg_output_path(input, &target);
-    ensure_parent(&output_path)?;
+    let timeout = cpg_build_timeout(input)?;
+    prepare_cpg_output_path(&target, &output_path)?;
+    ctx.ensure_active()?;
+    clear_cpg_output(&output_path)?;
     let heap_mb = resolve_heap_mb(input);
     announce_cpg_phase(ctx, "tool", "cpg:build start");
     let started = Instant::now();
@@ -85,14 +114,12 @@ pub(in crate::modules) fn run_cpg_build(
         "tool-progress",
         &format!("parsing source with joern → CPG (heap {} MB)", heap_mb),
     );
-    let output = invoke_joern_parse(&bin, &target, &output_path, heap_mb)?;
-    if let Some(skip) = joern_outcome(ctx, &target, &output, heap_mb)? {
+    if let Some(skip) = run_joern_parse_checked(ctx, &bin, &target, &output_path, heap_mb, timeout)?
+    {
         return Ok(skip);
     }
     let elapsed_ms = started.elapsed().as_millis() as u64;
-    let bytes = fs::metadata(&output_path)
-        .map(|meta| meta.len())
-        .unwrap_or(0);
+    let bytes = cpg_output_size_checked(&output_path)?;
     announce_cpg_phase(ctx, "done", &cpg_complete_label(bytes, elapsed_ms));
     let timestamp = now_ms()?;
     Ok(cpg_build_response(
@@ -103,6 +130,45 @@ pub(in crate::modules) fn run_cpg_build(
         elapsed_ms,
         timestamp,
     ))
+}
+
+fn run_joern_parse_checked(
+    ctx: &ToolExecutionContext<'_>,
+    bin: &Path,
+    target: &Path,
+    output_path: &Path,
+    heap_mb: u64,
+    timeout: Duration,
+) -> Result<Option<Value>> {
+    let output = invoke_joern_parse(bin, target, output_path, heap_mb, ctx.cancellation, timeout)
+        .map_err(|error| cleanup_cpg_after_error(output_path, error))?;
+    let outcome = joern_outcome(ctx, target, &output, heap_mb)
+        .map_err(|error| cleanup_cpg_after_error(output_path, error))?;
+    if outcome.is_some() {
+        clear_cpg_output(output_path)?;
+    }
+    Ok(outcome)
+}
+
+fn cpg_build_timeout(input: &Value) -> Result<Duration> {
+    crate::bounded_subprocess::timeout_from_input(
+        input,
+        &["timeoutMs", "timeout_ms"],
+        DEFAULT_CPG_BUILD_TIMEOUT_MS,
+        MAX_CPG_BUILD_TIMEOUT_MS,
+        "cpg:build timeoutMs",
+    )
+}
+
+fn cpg_output_size_checked(output_path: &Path) -> Result<u64> {
+    cpg_output_size(output_path).map_err(|error| cleanup_cpg_after_error(output_path, error))
+}
+
+fn cleanup_cpg_after_error(output_path: &Path, error: anyhow::Error) -> anyhow::Error {
+    match clear_cpg_output(output_path) {
+        Ok(()) => error,
+        Err(cleanup) => cleanup.context(error),
+    }
 }
 
 fn locate_joern_parse_bin() -> Option<PathBuf> {
@@ -135,12 +201,52 @@ fn resolve_cpg_output_path(input: &Value, target: &Path) -> PathBuf {
         .unwrap_or_else(|| target.join(".kuzushi/cpg.bin"))
 }
 
-fn ensure_parent(path: &Path) -> Result<()> {
-    let Some(parent) = path.parent() else {
-        return Ok(());
-    };
-    fs::create_dir_all(parent)
-        .with_context(|| format!("creating {} for CPG artifact", parent.display()))
+fn prepare_cpg_output_path(target: &Path, path: &Path) -> Result<PathBuf> {
+    let relative = path.strip_prefix(target).with_context(|| {
+        format!(
+            "CPG output {} must stay inside target {}",
+            path.display(),
+            target.display()
+        )
+    })?;
+    anyhow::ensure!(
+        relative.starts_with(crate::workspace::KUZUSHI_STATE_DIR),
+        "CPG output {} must stay below .kuzushi",
+        path.display()
+    );
+    crate::workspace::prepare_workspace_output_path(target, relative)
+}
+
+fn cpg_output_size(path: &Path) -> Result<u64> {
+    let metadata = fs::symlink_metadata(path).with_context(|| {
+        format!(
+            "joern reported success without output at {}",
+            path.display()
+        )
+    })?;
+    anyhow::ensure!(
+        metadata.file_type().is_file() && !metadata.file_type().is_symlink(),
+        "joern output is not a regular file: {}",
+        path.display()
+    );
+    anyhow::ensure!(
+        metadata.len() > 0,
+        "joern produced an empty CPG at {}",
+        path.display()
+    );
+    Ok(metadata.len())
+}
+
+fn clear_cpg_output(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() || metadata.file_type().is_symlink() => {
+            fs::remove_file(path)
+                .with_context(|| format!("Could not clear CPG output {}", path.display()))
+        }
+        Ok(_) => anyhow::bail!("CPG output is not a regular file: {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("Could not inspect {}", path.display())),
+    }
 }
 
 fn invoke_joern_parse(
@@ -148,22 +254,27 @@ fn invoke_joern_parse(
     target: &Path,
     output_path: &Path,
     heap_mb: u64,
+    cancellation: Option<&crate::scan::ScanCancellation>,
+    timeout: Duration,
 ) -> Result<std::process::Output> {
     // Capture stdout/stderr instead of inheriting them: joern is noisy and,
     // when kuzushi runs inside the Ratatui alternate screen, inherited child
     // output corrupts the TUI. The captured stderr is surfaced on failure.
     // `-J-Xmx` is forwarded to the JVM by the joern-parse launcher; without it
     // the JVM defaults to ~25% of RAM and large targets die with a heap OOM.
-    Command::new(bin)
+    let mut command = Command::new(bin);
+    command
         .arg(format!("-J-Xmx{heap_mb}m"))
         .arg(target)
         .arg("--output")
         .arg(output_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .with_context(|| format!("spawning {}", bin.display()))
+        .stdin(Stdio::null());
+    crate::bounded_subprocess::output_with_control(
+        &mut command,
+        "joern-parse",
+        cancellation,
+        timeout,
+    )
 }
 
 /// Resolve the JVM max-heap (MB) for joern-parse: an explicit `heapMb` option
@@ -289,9 +400,10 @@ fn joern_environment_skip(target: &Path, stderr: &[u8]) -> Option<Value> {
          missing, so it cannot parse this target. Reinstall Joern (e.g. `brew reinstall joern`) \
          or set ASTGEN_BIN to a working astgen binary, then re-run cpg:build."
         .to_string();
-    Some(crate::module_result::completed_output_result(
+    Some(crate::module_result::skipped_output_result(
         output.clone(),
-        output,
+        output.clone(),
+        vec![json!(output)],
         json!({
             "target": target.display().to_string(),
             "skipped": true,
@@ -306,9 +418,10 @@ fn skipped_response(target: &Path, missing_bin: &str) -> Value {
          Install Joern or set KUZUSHI_JOERN_BIN to enable code-property-graph construction.",
         missing_bin
     );
-    crate::module_result::completed_output_result(
+    crate::module_result::skipped_output_result(
         output.clone(),
-        output,
+        output.clone(),
+        vec![json!(output)],
         json!({
             "target": target.display().to_string(),
             "skipped": true,
@@ -369,8 +482,29 @@ mod joern_skip_tests {
         let stderr = b"ERROR AstGenRunner Local astgen binary not found at '/x/astgen' or is not executable!";
         let skip = joern_environment_skip(Path::new("/tmp/t"), stderr)
             .expect("astgen-missing should map to a skip");
+        assert_eq!(skip["status"], "skipped");
         assert_eq!(skip["data"]["skipped"], true);
         assert!(skip["output"].as_str().unwrap().contains("astgen"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_child_symlink_output_is_unlinked_without_touching_destination() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let outside = temp.path().join("outside-cpg");
+        let output = temp.path().join("cpg.bin");
+        std::fs::write(&outside, "outside sentinel").unwrap();
+        symlink(&outside, &output).unwrap();
+
+        clear_cpg_output(&output).unwrap();
+
+        assert!(!output.exists());
+        assert_eq!(
+            std::fs::read_to_string(outside).unwrap(),
+            "outside sentinel"
+        );
     }
 
     #[test]
@@ -414,9 +548,39 @@ mod joern_skip_tests {
     }
 
     #[test]
+    fn build_timeout_is_defaulted_and_bounded() {
+        assert_eq!(
+            cpg_build_timeout(&json!({})).unwrap(),
+            Duration::from_millis(DEFAULT_CPG_BUILD_TIMEOUT_MS)
+        );
+        assert!(cpg_build_timeout(&json!({"timeoutMs": 0})).is_err());
+        assert!(cpg_build_timeout(&json!({
+            "timeoutMs": MAX_CPG_BUILD_TIMEOUT_MS + 1
+        }))
+        .is_err());
+    }
+
+    #[test]
     fn suggested_retry_heap_grows_but_stays_bounded() {
         let next = suggested_retry_heap_mb(4096);
         assert!(next >= 4096, "retry heap must not shrink");
         assert!(next <= MAX_HEAP_MB);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cpg_output_rejects_preexisting_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
+        symlink(outside.path(), workspace.path().join(".kuzushi/cpg.bin")).unwrap();
+
+        assert!(prepare_cpg_output_path(
+            workspace.path(),
+            &workspace.path().join(".kuzushi/cpg.bin")
+        )
+        .is_err());
     }
 }

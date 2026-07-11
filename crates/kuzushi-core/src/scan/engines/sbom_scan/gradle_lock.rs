@@ -1,6 +1,6 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_gradle_lock(path: &Path) -> bool {
@@ -61,6 +61,13 @@ struct GradleDependency {
 
 impl GradleDependency {
     fn to_component(&self, target: &Path, path: &Path, source: &str) -> SbomComponent {
-        component(target, path, "maven", source, &self.name, Some(&self.version))
+        component(
+            target,
+            path,
+            "maven",
+            source,
+            &self.name,
+            Some(&self.version),
+        )
     }
 }

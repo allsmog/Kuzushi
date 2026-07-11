@@ -26,7 +26,6 @@ env:
   # 2026 permission-model fixes on Linux runners.
   NODE_VERSION: "26.3.1"
   PYTHON_VERSION: "3.12"
-  RUST_VERSION: "1.96.1"
   # Run JS-based actions on Node 24 ahead of the June 2026 default flip
   # (Node 20 action runtimes are deprecated on GitHub-hosted runners).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -124,14 +123,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v4
+      - uses: moonrepo/setup-rust@v1
         with:
-          node-version: ${{ env.NODE_VERSION }}
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+          inherit-toolchain: true
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - name: rustfmt drift (informational)
         continue-on-error: true
@@ -152,23 +146,18 @@ jobs:
   rust-cli:
     name: rust-cli
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: moonrepo/setup-rust@v1
         with:
-          toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@v2
+          inherit-toolchain: true
       - run: cargo test --workspace
       - run: cargo build --workspace
-      - run: cargo build -p kuzushi-cli --release
-      - run: node scripts/stage-native-binary.mjs
+      - run: node scripts/build-native-runtime.mjs
       - name: Upload native artifact
         uses: actions/upload-artifact@v7
         with:

@@ -25,6 +25,9 @@ pub(crate) fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<
     lines.push(divider(&format!("TRACE · {}", model.run_id), area.width));
     lines.push(detail("run", &model.run_id));
     append_run_artifacts(&mut lines, &model.artifacts);
+    // Keep copyable finding aliases above the potentially long step list so
+    // compact Trace views preserve the operator's navigation references.
+    lines.extend(alias_reference_lines(app, area));
 
     // STEPS section per `design/mockups/trace.jsx::step` — one row per
     // agent step with kind-tinted column + label + latency + cost.
@@ -44,7 +47,6 @@ pub(crate) fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<
             lines.push(trace_step_line(step, area.width));
         }
     }
-    lines.extend(alias_reference_lines(app, area));
     lines
 }
 

@@ -49,7 +49,7 @@ fn diff_tool(
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
     let (path_a, path_b) = diff_input_paths(&input, &target)?;
-    prompt_armor_capability::diff(path_a, path_b)
+    prompt_armor_capability::diff(&target, path_a, path_b)
 }
 
 fn diff_input_paths(

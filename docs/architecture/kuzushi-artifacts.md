@@ -44,10 +44,24 @@ Every run should converge on these files:
 | `report.md` | Human-readable report for the run. |
 | `artifacts.json` | Manifest of written artifacts with label/path/kind and CAS object references when available. |
 
-Direct tool runs also write `input.json` and `result.json`. `report.sarif` is
-optional and appears only when a scanner/report producer returns `reportSarif`
-or `data.reportSarif`. Any other JSON file under the run directory is a
-producer-declared artifact, not part of the canonical bundle.
+Every dispatched tool run writes the canonical prepared input to `input.json`
+and its normalized result envelope to `result.json`. This includes the
+`sast:scan` umbrella and the APK scan path, not only `kuzushi run`.
+
+The SAST umbrella additionally owns four declared pipeline artifacts:
+
+| File | Purpose |
+| --- | --- |
+| `scan-input.json` | Canonical SAST umbrella input, including the parent run id. |
+| `triage.jsonl` | Triage-stage records only. |
+| `verify.jsonl` | Verification-stage records only. |
+| `patch.jsonl` | Patch-stage records only; patch records are never multiplexed into `verify.jsonl`. |
+
+`report.sarif` is optional. A producer may return it in `reportSarif` or
+`data.reportSarif`; `kuzushi scan --sarif <path>` instead exports the findings
+observed by that scan's parent/child run-id union and excludes older workspace
+findings. Any other JSON file under the run directory is a producer-declared
+artifact, not part of the canonical bundle.
 
 The target should also maintain:
 
@@ -55,8 +69,23 @@ The target should also maintain:
 <target>/.kuzushi/v3/latest
 ```
 
-`latest` points to the most recent run id for quick shell, replay, and failure
-handoff lookup.
+`latest` points to the chronologically newest run by `startedAtUnix` (with run
+id as the deterministic tie-break), not whichever run happened to finish last.
+Summary writers and prune repair serialize compare-and-write updates so an
+older completion cannot move the pointer backward.
+
+### Parent and child scan identity
+
+One caller-created run id is canonical for an umbrella scan. The registry
+context wins over input aliases; Kuzushi injects that id into canonical input
+before engine dispatch and reports it as `data.runId`. Engine-native run ids
+remain available under `data.runIds` for provenance and findings lookup.
+
+Finding counts, `--fail-on`, and scan-scoped SARIF operate on the union of the
+parent and every nested child id. They de-duplicate by durable `identityId`
+when present and fall back to the observation fingerprint only when identity
+is unavailable. Consequently `data.findingsCount` is the length of the same
+de-duplicated `data.coreFindings` set, rather than a sum of per-engine counts.
 
 ### Run lifecycle vocabulary
 
@@ -74,6 +103,23 @@ scan, shell, run, Jobs, Timeline, replay, and reports:
 An active cancellation request is presented as `canceling` in the TUI but is
 not persisted as a terminal run status. Existing `interrupted` artifacts remain
 valid and keep their original abnormal-termination meaning.
+
+Writers persist the `running` summary, prepared input, and start event/trace
+before dispatch. On completion they persist `result.json` and the terminal
+`run.json` before appending terminal event/trace rows, so replay never observes
+a completion event whose summary is still running. CLI scan/run paths propagate
+artifact-write failures; compatibility call sites that cannot return an error
+retain the best-effort wrappers.
+
+Terminalization is retryable. A same-status retry rewrites missing result
+state and repairs a missing terminal event or trace row without duplicating an
+existing row. A conflicting terminal status is rejected instead of rewriting
+history.
+
+If a persisted `running` summary names a process that no longer exists, read
+repair converts it to `interrupted`, clears the process id, refreshes the
+canonical failure/report markers, and appends a canonical `run` interruption
+event plus a refused trace step.
 
 Operators can prune accumulated run directories with
 `kuzushi runs prune --older-than-days <n>` and/or `--keep-last <n>`.
@@ -102,12 +148,17 @@ claims.
 `schemas/run.events.schema.json` is the machine-readable contract for each
 JSON line in `events.jsonl`, including sequence number, kind, status, message,
 timestamp, optional tool, and optional artifact pointer.
+The currently published event kinds are `tool`, `scan`, `run`, and `shell`.
+Concurrent in-process writers are serialized per event file and the writer
+assigns the authoritative monotonic sequence number while holding that lock.
 Run events use canonical `atUnix`, `tool`, and `artifact` fields only; obsolete
 event aliases are rejected instead of normalized. Event artifacts use the
 canonical `artifact` object with `"label"`, `"path"`, and `"kind"` fields.
 `schemas/run.trace.schema.json` is the machine-readable contract for each JSON
 line in `trace.jsonl`, including trace step identity, optional module/verb
 metadata, parent-step linkage, severity, timing, and LLM audit metadata.
+Trace and summary LLM-audit vocabularies include `plan`, `llm`, and `critic`
+records emitted by the agent planning path.
 Trace streams use canonical snake_case fields only, including `module_id`,
 `parent_step`, `started_at_ms`, `cost_usd`, and `prompt_hash`; obsolete
 camelCase trace aliases are rejected instead of normalized.
@@ -145,6 +196,8 @@ The current Rust substrate already writes:
 - `.kuzushi/v3/runs/<runId>/trace.jsonl`
 - `.kuzushi/v3/runs/<runId>/input.json`
 - `.kuzushi/v3/runs/<runId>/result.json`
+- `.kuzushi/v3/runs/<runId>/scan-input.json`, `triage.jsonl`,
+  `verify.jsonl`, and `patch.jsonl` for `sast:scan`
 - `.kuzushi/v3/runs/<runId>/failures.json`
 - `.kuzushi/v3/runs/<runId>/report.md`; the recorder writes a deterministic
   placeholder when no producer report is available and replaces it when a
@@ -187,6 +240,12 @@ When the target is a git worktree, `targetGit` records the scanned commit SHA,
 current branch when available, and whether the worktree had uncommitted
 changes. This is separate from Kuzushi build provenance (`gitSha` /
 `gitBranch`).
+
+Reproducibility metadata is a start-time snapshot. Later terminal writes keep
+the original start timestamp, resolved model/config hash, loaded modules, CLI
+arguments, environment fingerprints, target git state, prompt overrides,
+house rules, and threat-model digest. Only trace-derived audit rollups are
+refreshed as the run progresses.
 
 ## Module Result Envelope
 

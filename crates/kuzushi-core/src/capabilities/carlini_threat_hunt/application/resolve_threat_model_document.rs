@@ -9,15 +9,16 @@ pub(crate) fn resolve_threat_model_document(input: &Value, target: &Path) -> Res
         return unwrap_document(value.clone());
     }
     let path = crate::capabilities::threat_model::persistent_threat_model_path(target);
-    let raw = fs::read_to_string(&path).with_context(|| {
-        let artifact = path.strip_prefix(target).unwrap_or(path.as_path());
-        format!(
-            "carlini-threat-hunt requires an existing {} under {}. Run `kuzushi --target {} run threat-model:build` first or provide a document in the tool input.",
-            artifact.display(),
-            target.display(),
-            target.display()
-        )
-    })?;
+    let raw = crate::bounded_file::read_utf8_text_within(target, &path, 8 * 1024 * 1024)
+        .with_context(|| {
+            let artifact = path.strip_prefix(target).unwrap_or(path.as_path());
+            format!(
+                "carlini-threat-hunt requires an existing {} under {}. Run `kuzushi --target {} run threat-model:build` first or provide a document in the tool input.",
+                artifact.display(),
+                target.display(),
+                target.display()
+            )
+        })?;
     let parsed = serde_json::from_str::<Value>(&raw)
         .with_context(|| format!("Could not parse {}", path.display()))?;
     unwrap_document(parsed)
@@ -69,4 +70,30 @@ pub(crate) fn parse_flow(value: &Value) -> Option<DfdFlow> {
             ],
         ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn persisted_threat_model_rejects_symlink_outside_target() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        let outside = temp.path().join("outside-threat-model.json");
+        let artifact = crate::capabilities::threat_model::persistent_threat_model_path(&target);
+        fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        fs::write(
+            &outside,
+            r#"{"dfd":{"nodes":[]},"marker":"OUTSIDE_CARLINI_MODEL_TOKEN"}"#,
+        )
+        .unwrap();
+        symlink(&outside, &artifact).unwrap();
+
+        let error = resolve_threat_model_document(&json!({}), &target).unwrap_err();
+
+        assert!(!error.to_string().contains("OUTSIDE_CARLINI_MODEL_TOKEN"));
+    }
 }

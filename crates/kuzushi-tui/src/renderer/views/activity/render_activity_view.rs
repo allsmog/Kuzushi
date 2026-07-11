@@ -2,8 +2,8 @@ use super::dag_pane::dag_row_style;
 use super::feed_pane::feed_row_style;
 use super::*;
 use crate::ui_view_models::{
-    activity_view_model, ActiveActivityViewModel, ActivityFooterHint, ActivityPaneTitle,
-    ActivityViewModel,
+    activity_view_model, phase_cockpit_model, ActiveActivityViewModel, ActivityFooterHint,
+    ActivityPaneTitle, ActivityViewModel, PhaseCockpitModel,
 };
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
@@ -31,8 +31,16 @@ use std::time::Instant;
 /// └──────────────────────────────────────────────────────────┘
 /// ```
 pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    paint_cinematic_background(frame.buffer_mut(), area);
+    paint_cinematic_scanlines(frame.buffer_mut(), area);
     match activity_view_model(app) {
-        ActivityViewModel::Active(activity) => render_active_activity_view(frame, area, &activity),
+        ActivityViewModel::Active(activity) => {
+            if let Some(phase) = phase_cockpit_model(app) {
+                render_phase_activity_view(frame, area, app, &activity, &phase);
+            } else {
+                render_active_activity_view(frame, area, &activity);
+            }
+        }
         ActivityViewModel::Inactive(empty) => {
             let mut lines = vec![divider(empty.title, area.width)];
             lines.extend(empty_state_panel(
@@ -46,12 +54,61 @@ pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &Shel
     }
 }
 
+fn render_phase_activity_view(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    activity: &ActiveActivityViewModel<'_>,
+    phase: &PhaseCockpitModel,
+) {
+    let phase_header = activity_phase_header_lines(&phase.header, area);
+    let activity_header = activity_header_lines(activity);
+    let footer = activity.footer(area.width);
+    let footer_rows = (1 + footer.hint_rows.len().max(1)) as u16;
+    let fixed_rows = phase_header
+        .len()
+        .saturating_add(activity_header.len())
+        .saturating_add(footer_rows as usize) as u16;
+    let (phase_body_rows, activity_pane_rows) =
+        phase_activity_body_rows(area.height.saturating_sub(fixed_rows));
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(phase_header.len() as u16),
+            Constraint::Length(phase_body_rows),
+            Constraint::Length(activity_header.len() as u16),
+            Constraint::Length(activity_pane_rows),
+            Constraint::Length(footer_rows),
+        ])
+        .split(area);
+    render_header(frame, outer[0], phase_header);
+    super::super::workbench::render_phase_cockpit_body(
+        frame,
+        outer[1],
+        app,
+        phase,
+        super::super::workbench::PhaseRenderState::activity(),
+    );
+    render_header(frame, outer[2], activity_header);
+    render_activity_panes(frame, outer[3], activity);
+    render_focus_footer(frame, outer[4], activity);
+}
+
+fn phase_activity_body_rows(available: u16) -> (u16, u16) {
+    let activity = match available {
+        18.. => (available / 3).clamp(6, 10),
+        10..=17 => 4,
+        6..=9 => 3,
+        _ => available / 2,
+    };
+    (available.saturating_sub(activity), activity)
+}
+
 fn render_active_activity_view(
     frame: &mut Frame<'_>,
     area: Rect,
     activity: &ActiveActivityViewModel<'_>,
 ) {
-    let layout = activity.frame_layout();
     let header_lines = activity_header_lines(activity);
     // Footer height tracks the wrapped hint rows so narrow terminals get a
     // second hint line instead of keys clipped off the right edge.
@@ -68,21 +125,30 @@ fn render_active_activity_view(
 
     render_header(frame, outer[0], header_lines);
 
+    render_activity_panes(frame, outer[1], activity);
+
+    render_focus_footer(frame, outer[2], activity);
+}
+
+fn render_activity_panes(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    activity: &ActiveActivityViewModel<'_>,
+) {
+    let layout = activity.frame_layout();
     let pane_chrome = activity.pane_chrome();
     if activity.collapse_dag_pane() {
         // No DAG tasks (single-tool run): the TASKS pane would only say
         // "(no DAG tasks yet)" forever — give the OUTPUT pane full width.
-        render_feed_pane_widget(frame, outer[1], activity, &pane_chrome.feed);
+        render_feed_pane_widget(frame, area, activity, &pane_chrome.feed);
     } else {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(activity_pane_constraints(area.width, layout))
-            .split(outer[1]);
+            .split(area);
         render_dag_pane_widget(frame, panes[0], activity, &pane_chrome.dag);
         render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed);
     }
-
-    render_focus_footer(frame, outer[2], activity);
 }
 
 fn render_header(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {

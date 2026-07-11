@@ -42,7 +42,10 @@ fn missing_ndiff_advisory_response(id: &str, input: &Value) -> Value {
     let output = format!(
         "No advisory found for \"{}\" (offline={}).",
         id,
-        input.get("offline").and_then(Value::as_bool).unwrap_or(false)
+        input
+            .get("offline")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     );
     crate::module_result::failed_output_result(
         "ndiff:fetch-cve advisory not found",
@@ -84,8 +87,7 @@ fn query_ndiff_fix_pattern(
 ) -> Result<Value> {
     let runtime = require_runtime("ndiff:extract-fix-pattern", runtime)?;
     let model = require_model("ndiff:extract-fix-pattern", input, ctx)?;
-    let target = resolve_tool_target(input, ctx)
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let target = resolve_tool_target(input, ctx)?;
     let thinking_level = agentic_hunter_thinking_level(input);
     let prompt = build_ndiff_fix_pattern_prompt(source.record.as_ref(), &source.patch_text);
     let _llm_scope = begin_ndiff_extract_scope(ctx);

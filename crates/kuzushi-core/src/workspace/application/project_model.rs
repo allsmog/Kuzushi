@@ -1,5 +1,4 @@
 use super::*;
-use crate::fs_atomic::write_atomic;
 use crate::workspace::inventory::repo_relative;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,6 +9,9 @@ use formatting::{
 };
 
 pub const PROJECT_MODEL_SCHEMA_VERSION: u32 = 1;
+const MAX_PROJECT_MODEL_BYTES: usize = 32 * 1024 * 1024;
+const MAX_PROJECT_MODEL_SOURCE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_SCOPE_ID_BYTES: usize = 160;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -68,12 +70,11 @@ pub fn load_project_model_document(
     current_revision: Option<&str>,
 ) -> Result<Option<ProjectModelDocument>> {
     let root = root.as_ref();
+    validate_scope_id(scope_id)?;
     let path = project_model_scope_path(root, scope_id);
-    if !path.exists() {
+    let Some(body) = read_optional_workspace_text(root, &path, MAX_PROJECT_MODEL_BYTES)? else {
         return Ok(None);
-    }
-    let body =
-        fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
+    };
     let document = serde_json::from_str(&body)
         .with_context(|| format!("Could not parse {}", path.display()))?;
     Ok(Some(refresh_project_model_staleness(
@@ -87,10 +88,15 @@ pub fn save_project_model_document(
     root: impl AsRef<Path>,
     document: &ProjectModelDocument,
 ) -> Result<PathBuf> {
+    let root = root.as_ref();
+    validate_scope_id(&document.scope_id)?;
     let path = project_model_scope_path(root, &document.scope_id);
     let body =
         serde_json::to_string_pretty(document).context("Could not serialize project model")?;
-    write_atomic(&path, &body)?;
+    let relative = path
+        .strip_prefix(root)
+        .context("Project model path escaped the workspace")?;
+    write_workspace_state_file(root, relative, body.as_bytes())?;
     Ok(path)
 }
 
@@ -160,8 +166,8 @@ impl<'a> ProjectModelBuilder<'a> {
             .find(|scope| scope.id == scope_id)
             .cloned()
             .with_context(|| format!("unknown project scope {scope_id:?}"))?;
-        let scope_root = scope.absolute_path(self.root);
         let mut sections = self.inherited_sections(&scope)?;
+        let scope_root = checked_scope_root(self.root, &scope)?;
         merge_local_sections(
             &mut sections,
             local_sections(self.root, &scope_root, self.current_revision.as_deref()),
@@ -246,8 +252,8 @@ fn source_file_section(
     label: &str,
     current_revision: Option<&str>,
 ) -> ProjectModelSection {
-    match fs::read_to_string(source_path) {
-        Ok(body) => ProjectModelSection {
+    match read_optional_workspace_text(root, source_path, MAX_PROJECT_MODEL_SOURCE_BYTES) {
+        Ok(Some(body)) => ProjectModelSection {
             key: key.to_string(),
             origin: ProjectModelSectionOrigin::Local,
             summary: format!("{label} present"),
@@ -256,7 +262,12 @@ fn source_file_section(
             built_at_revision: current_revision.map(str::to_string),
             stale: false,
         },
-        Err(_) => missing_section(key, format!("{label} missing"), current_revision),
+        Ok(None) => missing_section(key, format!("{label} missing"), current_revision),
+        Err(error) => missing_section(
+            key,
+            format!("{label} unavailable: {error}"),
+            current_revision,
+        ),
     }
 }
 
@@ -348,9 +359,46 @@ fn source_hash_changed(root: &Path, section: &ProjectModelSection) -> bool {
     ) else {
         return false;
     };
-    fs::read_to_string(root.join(source_path))
-        .map(|body| crate::static_evidence::static_content_hash(&body) != content_hash)
-        .unwrap_or(true)
+    read_optional_workspace_text(
+        root,
+        &root.join(source_path),
+        MAX_PROJECT_MODEL_SOURCE_BYTES,
+    )
+    .ok()
+    .flatten()
+    .is_none_or(|body| crate::static_evidence::static_content_hash(&body) != content_hash)
+}
+
+fn validate_scope_id(scope_id: &str) -> Result<()> {
+    let valid = !scope_id.is_empty()
+        && scope_id.len() <= MAX_SCOPE_ID_BYTES
+        && scope_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'));
+    anyhow::ensure!(valid, "Invalid project scope id {scope_id:?}");
+    Ok(())
+}
+
+fn checked_scope_root(root: &Path, scope: &NestedProjectScope) -> Result<PathBuf> {
+    if scope.rel_path == "." {
+        return Ok(root.to_path_buf());
+    }
+    let normalized = normalize_relative_path(&scope.rel_path)
+        .with_context(|| format!("Invalid project scope path {:?}", scope.rel_path))?;
+    anyhow::ensure!(
+        normalized == scope.rel_path,
+        "Project scope path is not normalized: {:?}",
+        scope.rel_path
+    );
+    let path = validated_workspace_descendant(root, &normalized)?;
+    let metadata = fs::symlink_metadata(&path)
+        .with_context(|| format!("Could not inspect project scope {}", path.display()))?;
+    anyhow::ensure!(
+        metadata.is_dir(),
+        "Project scope is not a directory: {}",
+        path.display()
+    );
+    Ok(path)
 }
 
 #[cfg(test)]

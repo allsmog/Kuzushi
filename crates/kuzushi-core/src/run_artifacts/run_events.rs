@@ -15,6 +15,36 @@ pub struct RunEvent {
     pub artifact: Option<RunArtifact>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunEventRead {
+    pub events: Vec<RunEvent>,
+    pub malformed_lines: usize,
+}
+
+pub fn load_run_events(target: impl AsRef<Path>, run_id: &str) -> Result<RunEventRead> {
+    let body = super::run_artifact_reader::read_run_artifact_text_or_empty(
+        target,
+        run_id,
+        run_events_spec().leaf,
+        "Run event log",
+    )?;
+    Ok(parse_run_event_lines(&body))
+}
+
+fn parse_run_event_lines(body: &str) -> RunEventRead {
+    let mut read = RunEventRead {
+        events: Vec::new(),
+        malformed_lines: 0,
+    };
+    for line in body.lines().filter(|line| !line.trim().is_empty()) {
+        match serde_json::from_str::<RunEvent>(line) {
+            Ok(event) => read.events.push(event),
+            Err(_) => read.malformed_lines += 1,
+        }
+    }
+    read
+}
+
 impl RunEvent {
     pub fn new(
         n: usize,
@@ -49,26 +79,39 @@ pub fn append_run_event(
     run_id: &str,
     event: &RunEvent,
 ) -> Result<PathBuf> {
-    let dir = run_dir(&target, run_id);
-    fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
-    let path = run_artifact_path(&target, run_id, run_events_spec().leaf);
+    let target = target.as_ref();
+    let _guard = super::run_ledger::acquire_run_ledger_lock(target, run_id)?;
+    let path = checked_run_artifact_path(target, run_id, run_events_spec().leaf)?;
     reject_non_file_event_target(&path)?;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("Could not open {}", path.display()))?;
-    writeln!(file, "{}", serde_json::to_string(event)?)
-        .with_context(|| format!("Could not write {}", path.display()))?;
+    let mut numbered = event.clone();
+    numbered.n = next_event_number_from_path(&path)?;
+    let mut line = serde_json::to_string(&numbered)?;
+    line.push('\n');
+    super::jsonl_append::append_jsonl_line(&path, &line)?;
     Ok(path)
 }
 
 pub fn next_run_event_number(target: impl AsRef<Path>, run_id: &str) -> usize {
-    let path = run_artifact_path(target, run_id, run_events_spec().leaf);
-    let Ok(text) = fs::read_to_string(path) else {
-        return 1;
+    checked_run_artifact_path(target, run_id, run_events_spec().leaf)
+        .and_then(|path| next_event_number_from_path(&path))
+        .unwrap_or(1)
+}
+
+fn next_event_number_from_path(path: &Path) -> Result<usize> {
+    let text = match crate::bounded_file::read_utf8_text(
+        path,
+        super::run_artifact_reader::MAX_RUN_ARTIFACT_READ_BYTES as usize,
+    ) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(1),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("Could not read run event log {}", path.display()))
+        }
     };
-    crate::run_artifacts::jsonl_numbering::next_jsonl_number::<RunEvent>(&text, |event| event.n)
+    Ok(crate::run_artifacts::jsonl_numbering::next_jsonl_number::<
+        RunEvent,
+    >(&text, |event| event.n))
 }
 
 fn run_events_spec() -> &'static CanonicalRunArtifactSpec {
@@ -76,7 +119,13 @@ fn run_events_spec() -> &'static CanonicalRunArtifactSpec {
 }
 
 fn reject_non_file_event_target(path: &Path) -> Result<()> {
-    match fs::metadata(path) {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            anyhow::bail!(
+                "Run event log target must not be a symlink: {}",
+                path.display()
+            )
+        }
         Ok(metadata) if metadata.is_file() => Ok(()),
         Ok(_) => anyhow::bail!("Run event log target is not a file: {}", path.display()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),

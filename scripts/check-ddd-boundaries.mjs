@@ -80,6 +80,66 @@ const rules = [
       /\b(TriageOutcome|TriageVerdict|triage:run|crate::(?:modules::triage|verification|verify))\b/,
   },
   {
+    name: "target-controlled source readers use bounded nofollow adapters",
+    roots: [
+      "crates/kuzushi-core/src/options/prompt_override.rs",
+      "crates/kuzushi-core/src/modules/application/sast_scan/prompt_overrides.rs",
+      "crates/kuzushi-core/src/capabilities/prompt_armor/application/local_tools.rs",
+      "crates/kuzushi-core/src/capabilities/recon/application/import_nmap_xml.rs",
+      "crates/kuzushi-core/src/capabilities/recon/application/import_shared.rs",
+      "crates/kuzushi-core/src/capabilities/threat_intel/adapters/load_toml.rs",
+      "crates/kuzushi-core/src/capabilities/taint_iris_next/application/agent/agent_prompt.rs",
+      "crates/kuzushi-core/src/capabilities/taint_iris_next/application/identifier_injection_detector.rs",
+      "crates/kuzushi-core/src/capabilities/taint_iris_next/application/syntactic_narrowing.rs",
+      "crates/kuzushi-core/src/capabilities/taint_iris_next/application/context_languages.rs",
+      "crates/kuzushi-core/src/capabilities/taint_iris_next/application/dynamic_catalog.rs",
+      "crates/kuzushi-core/src/capabilities/taint_iris_next/application/plan.rs",
+      "crates/kuzushi-core/src/capabilities/taint_iris_next/application/codeql_build.rs",
+      "crates/kuzushi-core/src/capabilities/taint_iris_next/application/codeql_dataflow.rs",
+      "crates/kuzushi-core/src/capabilities/full_mode_multi/application/chunk_prompt.rs",
+      "crates/kuzushi-core/src/capabilities/threat_model/application/source_bundle.rs",
+      "crates/kuzushi-core/src/capabilities/threat_model/application/read_manifest_summary.rs",
+      "crates/kuzushi-core/src/capabilities/threat_model/application/read_threat_model.rs",
+      "crates/kuzushi-core/src/capabilities/carlini_threat_hunt/application/resolve_threat_model_document.rs",
+      "crates/kuzushi-core/src/capabilities/carlini_threat_hunt/adapters/output.rs",
+      "crates/kuzushi-core/src/capabilities/carlini_threat_hunt/adapters/render_attachments.rs",
+      "crates/kuzushi-core/src/capabilities/threat_leads/files.rs",
+      "crates/kuzushi-core/src/capabilities/systems_hunt/domain/build_surface_pack.rs",
+      "crates/kuzushi-core/src/capabilities/uaf_hunt/application/repo_tools.rs",
+      "crates/kuzushi-core/src/capabilities/variant_ndiff/application/hunt_whitebox_static_variants.rs",
+      "crates/kuzushi-core/src/capabilities/variant_ndiff/application/fetch_patch_text.rs",
+      "crates/kuzushi-core/src/capabilities/vendor_assessment/application/attachments.rs",
+      "crates/kuzushi-core/src/capabilities/x_ray/application/artifacts.rs",
+      "crates/kuzushi-core/src/code_nav",
+      "crates/kuzushi-core/src/remediation/patch",
+      "crates/kuzushi-core/src/verification",
+      "crates/kuzushi-core/src/findings/persistence/open/finding_evidence.rs",
+      "crates/kuzushi-core/src/findings/persistence/open/finding_writes.rs",
+      "crates/kuzushi-core/src/findings/import/har.rs",
+      "crates/kuzushi-core/src/findings/import/burp_xml.rs",
+      "crates/kuzushi-core/src/run_artifacts/run_reproducibility_metadata.rs",
+      "crates/kuzushi-core/src/modules/context/ingest_file.rs",
+      "crates/kuzushi-core/src/modules/context/package_json_dependency_names.rs",
+      "crates/kuzushi-core/src/modules/full_mode_dry_run.rs",
+      "crates/kuzushi-core/src/modules/native_scanners/android_apk_fileprovider.rs",
+      "crates/kuzushi-core/src/modules/native_scanners/android_apk_manifest_parser.rs",
+      "crates/kuzushi-core/src/modules/native_scanners/android_apk_native_elf.rs",
+      "crates/kuzushi-core/src/modules/native_scanners/android_apk_nsc_parser.rs",
+      "crates/kuzushi-core/src/scan/engines/exploit_chain",
+      "crates/kuzushi-core/src/scan/engines/dep_hygiene/textual_cvss_severity.rs",
+      "crates/kuzushi-core/src/scan/engines/secret_scan/scan_for_secrets/file_scanning.rs",
+      "crates/kuzushi-core/src/scan/engines/iac_scan/scan_accumulator.rs",
+      "crates/kuzushi-core/src/scan/engines/license_scan",
+    ],
+    forbidden: /\b(?:std::fs|fs)::(?:read|read_to_string)\s*\(/,
+  },
+  {
+    name: "SBOM readers stay behind the bounded file facade",
+    roots: ["crates/kuzushi-core/src/scan/engines/sbom_scan"],
+    forbidden:
+      /\buse\s+std::fs\s*;|\bstd::fs::(?:read|read_to_string)\s*\(/,
+  },
+  {
     name: "triage attaches verdicts without scanner verification patch or report dispatch",
     roots: ["crates/kuzushi-core/src/triage.rs", "crates/kuzushi-core/src/modules/triage"],
     forbidden:
@@ -139,6 +199,10 @@ const rules = [
       // explicit so new renderer files do not inherit that latitude.
       "crates/kuzushi-tui/src/renderer/views/onboarding/planning_picker.rs",
       "crates/kuzushi-tui/src/renderer/views/workbench/panes/phase.rs",
+      // Test-only fixture and snapshot IO, reached exclusively through the
+      // `#[cfg(test)]` phase composition contract module.
+      "crates/kuzushi-tui/src/renderer/phase_composition_contract/fixture/artifacts.rs",
+      "crates/kuzushi-tui/src/renderer/phase_composition_contract/snapshots.rs",
     ],
     forbidden:
       /\b(FindingStore|AgentRuntime|execute_tool|execute_tool_with_runtime|std::process|std::fs|serde_json|read_to_string|Command::new|ProcessCommand|kuzushi_core::Severity)\b/,
@@ -153,6 +217,28 @@ const rules = [
     ],
     forbidden:
       /\b(AgentRuntime|TracedRuntime|execute_tool|execute_tool_with_runtime|start_background_tool|run_background_tool|Command::new|ProcessCommand)\b/,
+  },
+  {
+    name: "TUI presentation reads hydrated view data without synchronous artifact IO",
+    roots: [
+      "crates/kuzushi-tui/src/renderer",
+      "crates/kuzushi-tui/src/ui_view_models.rs",
+      "crates/kuzushi-tui/src/ui_view_models",
+    ],
+    allowed: [
+      "crates/kuzushi-tui/src/renderer/phase_composition_contract/snapshots.rs",
+    ],
+    forbidden:
+      /\.(?:latest_run_pointer|run_summary_entries|run_summary_index|read_source_file|git_metadata|project_scope_tree|strategy_queue|prompt_mutations|harness_file|json_file|path_state|directory_listing|run_artifact_text|run_artifact_json|map_artifacts_built|prompt_override_hash)\s*\(|\b(?:load_run_summary|load_project_model_document|target_git_metadata|load_nested_project_scopes|load_strategy_queue|load_prompt_mutations|read_latest_run_pointer|read_run_artifact_text|list_run_summary_entries)\s*\(|\b(?:std::fs|fs)::(?:read|read_to_string|read_dir|metadata|symlink_metadata)\s*\(|\b(?:File|OpenOptions)::open\s*\(|\.exists\s*\(/,
+  },
+  {
+    name: "TUI planning artifact probes use the confined core workspace facade",
+    roots: [
+      "crates/kuzushi-tui/src/app/onboarding/task_row.rs",
+      "crates/kuzushi-tui/src/app/prereq_chain/mod.rs",
+    ],
+    forbidden:
+      /\b(?:std::fs|fs)::(?:read|read_to_string|read_dir|metadata|symlink_metadata)\s*\(|\b(?:File|OpenOptions)::open\s*\(/,
   },
   {
     name: "TUI runtime wording avoids validated without proof",

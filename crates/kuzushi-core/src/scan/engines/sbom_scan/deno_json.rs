@@ -1,7 +1,7 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 pub(super) fn is_deno_json(path: &Path) -> bool {
@@ -18,7 +18,11 @@ pub(super) fn deno_components(
     let value = parse_import_map(text)?;
     let mut components = dependency_components(target, path, &value);
     for import_map in referenced_import_maps(target, path, &value)? {
-        components.extend(dependency_components(target, &import_map.path, &import_map.value));
+        components.extend(dependency_components(
+            target,
+            &import_map.path,
+            &import_map.value,
+        ));
     }
     Ok(components)
 }
@@ -29,7 +33,11 @@ pub(super) fn deno_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependenc
     let value = parse_import_map(&text)?;
     let mut edges = dependency_edges(target, path, &value);
     for import_map in referenced_import_maps(target, path, &value)? {
-        edges.extend(dependency_edges(target, &import_map.path, &import_map.value));
+        edges.extend(dependency_edges(
+            target,
+            &import_map.path,
+            &import_map.value,
+        ));
     }
     Ok(edges)
 }
@@ -66,7 +74,12 @@ fn local_import_map_path(config_path: &Path, value: &Value) -> Option<PathBuf> {
     if raw_path.is_empty() || raw_path.contains("://") {
         return None;
     }
-    Some(config_path.parent().unwrap_or_else(|| Path::new("")).join(raw_path))
+    Some(
+        config_path
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .join(raw_path),
+    )
 }
 
 fn is_inside_target(target: &Path, path: &Path) -> Result<bool> {
@@ -158,7 +171,11 @@ fn import_dependency(scope: &str, value: &str) -> Option<DenoDependency> {
     let (ecosystem, specifier) = value
         .strip_prefix("npm:")
         .map(|specifier| ("npm", specifier))
-        .or_else(|| value.strip_prefix("jsr:").map(|specifier| ("jsr", specifier)))?;
+        .or_else(|| {
+            value
+                .strip_prefix("jsr:")
+                .map(|specifier| ("jsr", specifier))
+        })?;
     package_specifier(specifier).map(|(name, version)| DenoDependency {
         ecosystem,
         scope: scope.to_string(),

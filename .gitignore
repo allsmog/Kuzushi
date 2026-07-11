@@ -29,6 +29,7 @@ iris.pdf
 .claude/hooks/*
 !.claude/hooks/session-start.sh
 !.claude/settings.json
+!.claude/skills/
 cc-repo/
 vendor/
 .codex
@@ -39,9 +40,6 @@ perf/results.json
 !LICENSES/Apache-2.0.txt
 !experiments/recall-eval/scope/*.txt
 .kuzushi/credentials.json
-.ralph/
-ralph-*.md
-
 # Local Hack The Box challenge downloads
 /822
 /pwn_under_the_web/
@@ -65,8 +63,6 @@ pre-*.png
 workspace/
 !crates/*/src/workspace/
 !crates/*/src/workspace/**
-!crates/*/src/renderer/views/workspace/
-!crates/*/src/renderer/views/workspace/**
 
 # TUI DevEx audit harness — per-run tmux pane captures (see scripts/devex/README.md)
 scripts/devex/artifacts/

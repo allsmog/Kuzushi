@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+use std::fs;
 
 #[test]
 fn sbom_scan_extracts_package_cargo_and_python_dependencies() {
@@ -43,8 +44,10 @@ fn sbom_scan_extracts_package_cargo_and_python_dependencies() {
     assert_eq!(report.by_ecosystem.get("cargo"), Some(&1));
     assert_eq!(report.by_ecosystem.get("python"), Some(&1));
     assert_eq!(report.lockfiles.len(), 2);
-    assert!(report.lockfiles.iter().any(|lockfile| lockfile.path == "Cargo.lock"
-        && lockfile.sha256.starts_with("sha256:")));
+    assert!(report
+        .lockfiles
+        .iter()
+        .any(|lockfile| lockfile.path == "Cargo.lock" && lockfile.sha256.starts_with("sha256:")));
     assert!(report
         .dependencies
         .iter()
@@ -108,9 +111,10 @@ fn sbom_scan_extracts_package_json_root_edges_without_lockfile() {
 
     assert_eq!(report.manifests_scanned, 1);
     assert!(report.lockfiles.is_empty());
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "express"
-        && edge.source == "package.json"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "express" && edge.source == "package.json"));
     assert!(report
         .dependencies
         .iter()
@@ -119,9 +123,10 @@ fn sbom_scan_extracts_package_json_root_edges_without_lockfile() {
         .dependencies
         .iter()
         .any(|edge| edge.from == "root" && edge.to == "react" && edge.source == "package.json"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "fsevents"
-        && edge.source == "package.json"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "fsevents" && edge.source == "package.json"));
 }
 
 #[test]
@@ -160,11 +165,13 @@ fn sbom_scan_extracts_bower_dependencies() {
     assert_eq!(report.manifests_scanned, 1);
     assert_eq!(report.by_ecosystem.get("bower"), Some(&3));
     assert!(scoped_names.contains(&("dependencies", "jquery", Some("pkg:generic/jquery@3.7.1"))));
-    assert!(scoped_names.contains(&((
-        "dependencies",
-        "normalize-css",
-        Some("pkg:generic/normalize-css@8.0.1")
-    ))));
+    assert!(scoped_names.contains(
+        &((
+            "dependencies",
+            "normalize-css",
+            Some("pkg:generic/normalize-css@8.0.1")
+        ))
+    ));
     assert!(scoped_names.contains(&("devDependencies", "qunit", Some("pkg:generic/qunit"))));
     assert!(report
         .dependencies
@@ -502,12 +509,7 @@ fn sbom_scan_extracts_deno_import_dependencies() {
         "@std/path",
         Some("pkg:generic/@std/path@1.0.0")
     )));
-    assert!(scoped_names.contains(&(
-        "imports",
-        "npm",
-        "chalk",
-        Some("pkg:npm/chalk@5.3.0")
-    )));
+    assert!(scoped_names.contains(&("imports", "npm", "chalk", Some("pkg:npm/chalk@5.3.0"))));
     assert!(scoped_names.contains(&("imports", "npm", "lodash", Some("pkg:npm/lodash"))));
     assert!(report
         .dependencies
@@ -559,12 +561,7 @@ fn sbom_scan_extracts_deno_import_map_scopes() {
     assert_eq!(report.manifests_scanned, 1);
     assert_eq!(report.by_ecosystem.get("npm"), Some(&2));
     assert_eq!(report.by_ecosystem.get("jsr"), Some(&1));
-    assert!(scoped_names.contains(&(
-        "imports",
-        "npm",
-        "preact",
-        Some("pkg:npm/preact@10.24.0")
-    )));
+    assert!(scoped_names.contains(&("imports", "npm", "preact", Some("pkg:npm/preact@10.24.0"))));
     assert!(scoped_names.contains(&(
         "scopes.https://deno.land/x/example/",
         "jsr",
@@ -580,9 +577,10 @@ fn sbom_scan_extracts_deno_import_map_scopes() {
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "@std/path"
         && edge.source == "import_map.json"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "kleur"
-        && edge.source == "import_map.json"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "kleur" && edge.source == "import_map.json"));
 }
 
 #[test]
@@ -698,14 +696,56 @@ fn sbom_scan_ignores_symlinked_deno_import_map_outside_target() {
 }"#,
     )
     .unwrap();
-    std::os::unix::fs::symlink(temp.path().join("outside.json"), target.join("deps-link.json"))
-        .unwrap();
+    std::os::unix::fs::symlink(
+        temp.path().join("outside.json"),
+        target.join("deps-link.json"),
+    )
+    .unwrap();
 
     let report = scan_sbom(&target, &ScanCancellation::default()).unwrap();
 
     assert_eq!(report.manifests_scanned, 1);
     assert!(report.components.is_empty());
     assert!(report.dependencies.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn sbom_scan_does_not_descend_through_symlinked_directories() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("target");
+    let outside = temp.path().join("outside");
+    fs::create_dir_all(&target).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(
+        outside.join("package.json"),
+        r#"{"dependencies":{"outside":"1.0.0"}}"#,
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&outside, target.join("linked-dependencies")).unwrap();
+
+    let report = scan_sbom(&target, &ScanCancellation::default()).unwrap();
+
+    assert_eq!(report.manifests_scanned, 0);
+    assert!(report.components.is_empty());
+    assert!(report.dependencies.is_empty());
+}
+
+#[test]
+fn sbom_scan_rejects_oversized_manifest_before_parsing() {
+    let temp = tempfile::tempdir().unwrap();
+    let manifest = temp.path().join("package.json");
+    fs::write(&manifest, r#"{"dependencies":{}}"#).unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&manifest)
+        .unwrap()
+        .set_len(64 * 1024 * 1024 + 1)
+        .unwrap();
+
+    let error = scan_sbom(temp.path(), &ScanCancellation::default()).unwrap_err();
+
+    assert!(format!("{error:#}").contains("maximum supported size"));
 }
 
 #[test]
@@ -759,8 +799,10 @@ fn sbom_scan_extracts_deno_lock_edges() {
     assert_eq!(report.by_ecosystem.get("jsr"), Some(&2));
     assert_eq!(report.by_ecosystem.get("npm"), Some(&2));
     assert_eq!(report.lockfiles.len(), 1);
-    assert!(report.lockfiles.iter().any(|lockfile| lockfile.path == "deno.lock"
-        && lockfile.sha256.starts_with("sha256:")));
+    assert!(report
+        .lockfiles
+        .iter()
+        .any(|lockfile| lockfile.path == "deno.lock" && lockfile.sha256.starts_with("sha256:")));
     assert!(components.contains(&(
         "jsr",
         "deno.lock",
@@ -773,12 +815,7 @@ fn sbom_scan_extracts_deno_lock_edges() {
         "@std/fs",
         Some("pkg:generic/@std/fs@1.0.0"),
     )));
-    assert!(components.contains(&(
-        "npm",
-        "deno.lock",
-        "chalk",
-        Some("pkg:npm/chalk@5.3.0"),
-    )));
+    assert!(components.contains(&("npm", "deno.lock", "chalk", Some("pkg:npm/chalk@5.3.0"),)));
     assert!(components.contains(&(
         "npm",
         "deno.lock",
@@ -860,13 +897,11 @@ fn sbom_scan_records_bun_lockfile_digests() {
     assert!(report
         .lockfiles
         .iter()
-        .any(|lockfile| lockfile.path == "bun.lock"
-            && lockfile.sha256.starts_with("sha256:")));
+        .any(|lockfile| lockfile.path == "bun.lock" && lockfile.sha256.starts_with("sha256:")));
     assert!(report
         .lockfiles
         .iter()
-        .any(|lockfile| lockfile.path == "bun.lockb"
-            && lockfile.sha256.starts_with("sha256:")));
+        .any(|lockfile| lockfile.path == "bun.lockb" && lockfile.sha256.starts_with("sha256:")));
     assert!(report
         .dependencies
         .iter()
@@ -878,9 +913,10 @@ fn sbom_scan_records_bun_lockfile_digests() {
     assert!(report.dependencies.iter().any(|edge| edge.from == "react"
         && edge.to == "loose-envify"
         && edge.source == "bun.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "react"
-        && edge.to == "scheduler"
-        && edge.source == "bun.lock"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "react" && edge.to == "scheduler" && edge.source == "bun.lock"));
 }
 
 #[test]
@@ -1070,9 +1106,7 @@ fn sbom_scan_extracts_composer_dependencies() {
         "phpunit/phpunit",
         Some("pkg:composer/phpunit/phpunit")
     )));
-    assert!(!scoped_names
-        .iter()
-        .any(|(_, name, _)| *name == "php"));
+    assert!(!scoped_names.iter().any(|(_, name, _)| *name == "php"));
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "symfony/http-foundation"
         && edge.source == "composer.json"));
@@ -1143,29 +1177,31 @@ fn sbom_scan_extracts_composer_lock_package_edges() {
         "phpunit/phpunit",
         Some("pkg:composer/phpunit/phpunit@11.0.0")
     )));
-    assert!(report
-        .lockfiles
-        .iter()
-        .any(|lockfile| lockfile.path == "composer.lock"
-            && lockfile.sha256.starts_with("sha256:")));
+    assert!(
+        report
+            .lockfiles
+            .iter()
+            .any(|lockfile| lockfile.path == "composer.lock"
+                && lockfile.sha256.starts_with("sha256:"))
+    );
+    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "symfony/http-foundation"
+        && edge.source == "composer.lock"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "phpunit/phpunit"
+        && edge.source == "composer.lock"));
     assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "symfony/http-foundation"
+        .any(|edge| edge.from == "symfony/http-foundation"
+            && edge.to == "symfony/polyfill-mbstring"
             && edge.source == "composer.lock"));
     assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "phpunit/phpunit"
+        .any(|edge| edge.from == "phpunit/phpunit"
+            && edge.to == "sebastian/version"
             && edge.source == "composer.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "symfony/http-foundation"
-        && edge.to == "symfony/polyfill-mbstring"
-        && edge.source == "composer.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "phpunit/phpunit"
-        && edge.to == "sebastian/version"
-        && edge.source == "composer.lock"));
     assert!(!report
         .dependencies
         .iter()
@@ -1228,31 +1264,33 @@ BUNDLED WITH
     assert_eq!(report.lockfiles.len(), 1);
     assert_eq!(report.by_ecosystem.get("gem"), Some(&5));
     assert!(components.contains(&("Gemfile.lock", "rails", Some("pkg:gem/rails@7.1.0"))));
-    assert!(components.contains(&("Gemfile.lock", "actionpack", Some("pkg:gem/actionpack@7.1.0"))));
+    assert!(components.contains(&(
+        "Gemfile.lock",
+        "actionpack",
+        Some("pkg:gem/actionpack@7.1.0")
+    )));
     assert!(components.contains(&("Gemfile.lock", "rack", Some("pkg:gem/rack@3.0.8"))));
     assert!(report
         .lockfiles
         .iter()
-        .any(|lockfile| lockfile.path == "Gemfile.lock"
-            && lockfile.sha256.starts_with("sha256:")));
+        .any(|lockfile| lockfile.path == "Gemfile.lock" && lockfile.sha256.starts_with("sha256:")));
     assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "rails"
-            && edge.source == "Gemfile.lock"));
+        .any(|edge| edge.from == "root" && edge.to == "rails" && edge.source == "Gemfile.lock"));
     assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "rspec"
-            && edge.source == "Gemfile.lock"));
+        .any(|edge| edge.from == "root" && edge.to == "rspec" && edge.source == "Gemfile.lock"));
     assert!(report.dependencies.iter().any(|edge| edge.from == "rails"
         && edge.to == "actionpack"
         && edge.source == "Gemfile.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "actionpack"
-        && edge.to == "rack"
-        && edge.source == "Gemfile.lock"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "actionpack"
+            && edge.to == "rack"
+            && edge.source == "Gemfile.lock"));
     assert!(report.dependencies.iter().any(|edge| edge.from == "rspec"
         && edge.to == "rspec-core"
         && edge.source == "Gemfile.lock"));
@@ -1338,12 +1376,9 @@ fn sbom_scan_extracts_maven_pom_dependencies() {
 
     assert_eq!(report.manifests_scanned, 1);
     assert_eq!(report.by_ecosystem.get("maven"), Some(&2));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "org.slf4j/slf4j-api"
-            && edge.source == "pom.xml"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "org.slf4j/slf4j-api"
+        && edge.source == "pom.xml"));
     assert!(report
         .dependencies
         .iter()
@@ -1396,9 +1431,10 @@ fn sbom_scan_extracts_dotnet_project_dependencies() {
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "Newtonsoft.Json"
         && edge.source == "App.csproj"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "Serilog"
-        && edge.source == "App.csproj"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "Serilog" && edge.source == "App.csproj"));
     assert!(scoped_names.contains(&(
         "PackageReference",
         "Newtonsoft.Json",
@@ -1430,9 +1466,12 @@ fn sbom_scan_extracts_fsharp_project_dependencies() {
 
     assert_eq!(report.manifests_scanned, 1);
     assert_eq!(report.by_ecosystem.get("nuget"), Some(&1));
-    assert!(report.components.iter().any(|component| component.name == "FSharp.Data"
-        && component.manifest_path == "Library.fsproj"
-        && component.package_url.as_deref() == Some("pkg:nuget/FSharp.Data@6.4.0")));
+    assert!(report
+        .components
+        .iter()
+        .any(|component| component.name == "FSharp.Data"
+            && component.manifest_path == "Library.fsproj"
+            && component.package_url.as_deref() == Some("pkg:nuget/FSharp.Data@6.4.0")));
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "FSharp.Data"
         && edge.source == "Library.fsproj"));
@@ -1492,14 +1531,20 @@ fn sbom_scan_extracts_nuget_lock_dependency_edges() {
         "System.Runtime.CompilerServices.Unsafe",
         Some("pkg:nuget/System.Runtime.CompilerServices.Unsafe@6.0.0")
     )));
-    assert!(report.lockfiles.iter().any(|lockfile| lockfile.path == "packages.lock.json"
-        && lockfile.sha256.starts_with("sha256:")));
+    assert!(report
+        .lockfiles
+        .iter()
+        .any(|lockfile| lockfile.path == "packages.lock.json"
+            && lockfile.sha256.starts_with("sha256:")));
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "Newtonsoft.Json"
         && edge.source == "packages.lock.json"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "Newtonsoft.Json"
-        && edge.to == "System.Runtime.CompilerServices.Unsafe"
-        && edge.source == "packages.lock.json"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "Newtonsoft.Json"
+            && edge.to == "System.Runtime.CompilerServices.Unsafe"
+            && edge.source == "packages.lock.json"));
 }
 
 #[test]
@@ -1548,8 +1593,11 @@ fn sbom_scan_extracts_swift_package_resolved_edges() {
 
     assert_eq!(report.by_ecosystem.get("swift"), Some(&2));
     assert_eq!(report.lockfiles.len(), 1);
-    assert!(report.lockfiles.iter().any(|lockfile| lockfile.path == "Package.resolved"
-        && lockfile.sha256.starts_with("sha256:")));
+    assert!(report
+        .lockfiles
+        .iter()
+        .any(|lockfile| lockfile.path == "Package.resolved"
+            && lockfile.sha256.starts_with("sha256:")));
     assert!(components.contains(&(
         "Package.resolved",
         "alamofire",
@@ -1596,8 +1644,9 @@ empty=ignored
 
     assert_eq!(report.by_ecosystem.get("maven"), Some(&2));
     assert_eq!(report.lockfiles.len(), 1);
-    assert!(report.lockfiles.iter().any(|lockfile| lockfile.path == "gradle.lockfile"
-        && lockfile.sha256.starts_with("sha256:")));
+    assert!(report.lockfiles.iter().any(
+        |lockfile| lockfile.path == "gradle.lockfile" && lockfile.sha256.starts_with("sha256:")
+    ));
     assert!(components.contains(&(
         "gradle.lockfile",
         "org.slf4j/slf4j-api",
@@ -1614,10 +1663,7 @@ empty=ignored
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "junit/junit"
         && edge.source == "gradle.lockfile"));
-    assert!(!report
-        .dependencies
-        .iter()
-        .any(|edge| edge.to == "empty"));
+    assert!(!report.dependencies.iter().any(|edge| edge.to == "empty"));
 }
 
 #[test]
@@ -1700,12 +1746,20 @@ dependencies {
 
     assert_eq!(report.manifests_scanned, 1);
     assert_eq!(report.by_ecosystem.get("maven"), Some(&3));
-    assert!(report.components.iter().any(|component| component.scope == "api"
-        && component.name == "com.google.guava/guava"
-        && component.package_url.as_deref() == Some("pkg:maven/com.google.guava/guava@33.0.0-jre")));
-    assert!(report.components.iter().any(|component| component.scope == "compileOnly"
-        && component.name == "jakarta.servlet/jakarta.servlet-api"
-        && component.package_url.as_deref() == Some("pkg:maven/jakarta.servlet/jakarta.servlet-api")));
+    assert!(report
+        .components
+        .iter()
+        .any(|component| component.scope == "api"
+            && component.name == "com.google.guava/guava"
+            && component.package_url.as_deref()
+                == Some("pkg:maven/com.google.guava/guava@33.0.0-jre")));
+    assert!(report
+        .components
+        .iter()
+        .any(|component| component.scope == "compileOnly"
+            && component.name == "jakarta.servlet/jakarta.servlet-api"
+            && component.package_url.as_deref()
+                == Some("pkg:maven/jakarta.servlet/jakarta.servlet-api")));
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "org.slf4j/slf4j-api"
         && edge.source == "build.gradle"));
@@ -1770,31 +1824,34 @@ fn sbom_scan_extracts_renv_lock_package_edges() {
 
     assert_eq!(report.by_ecosystem.get("r"), Some(&4));
     assert_eq!(report.lockfiles.len(), 1);
-    assert!(report.lockfiles.iter().any(|lockfile| lockfile.path == "renv.lock"
-        && lockfile.sha256.starts_with("sha256:")));
+    assert!(report
+        .lockfiles
+        .iter()
+        .any(|lockfile| lockfile.path == "renv.lock" && lockfile.sha256.starts_with("sha256:")));
     assert!(components.contains(&("renv.lock", "dplyr", Some("pkg:cran/dplyr@1.1.4"))));
     assert!(components.contains(&("renv.lock", "rlang", Some("pkg:cran/rlang@1.1.3"))));
     assert!(components.contains(&("renv.lock", "tibble", Some("pkg:cran/tibble@3.2.1"))));
-    assert!(components.contains(&(
-        "renv.lock",
-        "testthat",
-        Some("pkg:cran/testthat@3.2.1"),
-    )));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "dplyr"
-        && edge.source == "renv.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "rlang"
-        && edge.source == "renv.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "dplyr"
-        && edge.to == "rlang"
-        && edge.source == "renv.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "dplyr"
-        && edge.to == "tibble"
-        && edge.source == "renv.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "dplyr"
-        && edge.to == "testthat"
-        && edge.source == "renv.lock"));
+    assert!(components.contains(&("renv.lock", "testthat", Some("pkg:cran/testthat@3.2.1"),)));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "dplyr" && edge.source == "renv.lock"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "rlang" && edge.source == "renv.lock"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "dplyr" && edge.to == "rlang" && edge.source == "renv.lock"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "dplyr" && edge.to == "tibble" && edge.source == "renv.lock"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "dplyr" && edge.to == "testthat" && edge.source == "renv.lock"));
     assert!(!report
         .dependencies
         .iter()
@@ -1806,7 +1863,7 @@ fn sbom_scan_extracts_podfile_lock_dependency_edges() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(
         temp.path().join("Podfile.lock"),
-r#"PODS:
+        r#"PODS:
   - Alamofire (5.8.1)
   - Firebase/Auth (10.22.0):
     - Firebase/CoreOnly
@@ -1839,8 +1896,10 @@ SPEC CHECKSUMS:
 
     assert_eq!(report.by_ecosystem.get("cocoapods"), Some(&4));
     assert_eq!(report.lockfiles.len(), 1);
-    assert!(report.lockfiles.iter().any(|lockfile| lockfile.path == "Podfile.lock"
-        && lockfile.sha256.starts_with("sha256:")));
+    assert!(report
+        .lockfiles
+        .iter()
+        .any(|lockfile| lockfile.path == "Podfile.lock" && lockfile.sha256.starts_with("sha256:")));
     assert!(components.contains(&(
         "Podfile.lock",
         "Alamofire",
@@ -1867,18 +1926,21 @@ SPEC CHECKSUMS:
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "Firebase/Auth"
         && edge.source == "Podfile.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "Firebase/Auth"
-        && edge.to == "Firebase/CoreOnly"
-        && edge.source == "Podfile.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "Firebase/Auth"
-        && edge.to == "GoogleUtilities/AppDelegateSwizzler"
-        && edge.source == "Podfile.lock"));
-    assert!(!report
+    assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "root"
+        .any(|edge| edge.from == "Firebase/Auth"
             && edge.to == "Firebase/CoreOnly"
             && edge.source == "Podfile.lock"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "Firebase/Auth"
+            && edge.to == "GoogleUtilities/AppDelegateSwizzler"
+            && edge.source == "Podfile.lock"));
+    assert!(!report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "Firebase/CoreOnly"
+        && edge.source == "Podfile.lock"));
 }
 
 #[test]
@@ -1908,8 +1970,11 @@ binary "https://example.com/Foo.json" "1.0.0"
 
     assert_eq!(report.by_ecosystem.get("carthage"), Some(&3));
     assert_eq!(report.lockfiles.len(), 1);
-    assert!(report.lockfiles.iter().any(|lockfile| lockfile.path == "Cartfile.resolved"
-        && lockfile.sha256.starts_with("sha256:")));
+    assert!(report
+        .lockfiles
+        .iter()
+        .any(|lockfile| lockfile.path == "Cartfile.resolved"
+            && lockfile.sha256.starts_with("sha256:")));
     assert!(components.contains(&(
         "Cartfile.resolved",
         "Alamofire/Alamofire",
@@ -1969,24 +2034,24 @@ generated: "2024-01-01T00:00:00.000000-00:00"
 
     assert_eq!(report.by_ecosystem.get("helm"), Some(&2));
     assert_eq!(report.lockfiles.len(), 1);
-    assert!(report.lockfiles.iter().any(|lockfile| lockfile.path == "Chart.lock"
-        && lockfile.sha256.starts_with("sha256:")));
+    assert!(report
+        .lockfiles
+        .iter()
+        .any(|lockfile| lockfile.path == "Chart.lock" && lockfile.sha256.starts_with("sha256:")));
     assert!(components.contains(&(
         "Chart.lock",
         "postgresql",
         Some("pkg:helm/postgresql@13.2.24"),
     )));
-    assert!(components.contains(&(
-        "Chart.lock",
-        "redis",
-        Some("pkg:helm/redis@18.6.1"),
-    )));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "postgresql"
-        && edge.source == "Chart.lock"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "redis"
-        && edge.source == "Chart.lock"));
+    assert!(components.contains(&("Chart.lock", "redis", Some("pkg:helm/redis@18.6.1"),)));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "postgresql" && edge.source == "Chart.lock"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "redis" && edge.source == "Chart.lock"));
 }
 
 #[test]
@@ -2029,9 +2094,10 @@ dependencies:
         Some("pkg:helm/postgresql@13.2.24")
     )));
     assert!(scoped_names.contains(&("dependencies", "redis", Some("pkg:helm/redis"))));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "postgresql"
-        && edge.source == "Chart.yaml"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "postgresql" && edge.source == "Chart.yaml"));
     assert!(report
         .dependencies
         .iter()
@@ -2131,9 +2197,12 @@ fn sbom_scan_extracts_elm_package_json_dependencies() {
 
     assert_eq!(report.manifests_scanned, 1);
     assert_eq!(report.by_ecosystem.get("elm"), Some(&1));
-    assert!(report.components.iter().any(|component| component.name == "elm/core"
-        && component.scope == "dependencies"
-        && component.package_url.as_deref() == Some("pkg:elm/elm/core")));
+    assert!(report
+        .components
+        .iter()
+        .any(|component| component.name == "elm/core"
+            && component.scope == "dependencies"
+            && component.package_url.as_deref() == Some("pkg:elm/elm/core")));
     assert!(report
         .dependencies
         .iter()
@@ -2177,9 +2246,10 @@ JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "DataFrames"
         && edge.source == "Project.toml"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "JSON"
-        && edge.source == "Project.toml"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "JSON" && edge.source == "Project.toml"));
 }
 
 #[test]
@@ -2237,9 +2307,10 @@ CMakeDeps
         .dependencies
         .iter()
         .any(|edge| edge.from == "root" && edge.to == "fmt" && edge.source == "conanfile.txt"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "openssl"
-        && edge.source == "conanfile.txt"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "openssl" && edge.source == "conanfile.txt"));
 }
 
 #[test]
@@ -2332,9 +2403,10 @@ recommends 'Optional::Module', '0.1';
         Some("1.302199"),
         Some("pkg:cpan/Test::More@1.302199")
     )));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "Mojolicious"
-        && edge.source == "cpanfile"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "Mojolicious" && edge.source == "cpanfile"));
     assert!(report
         .dependencies
         .iter()
@@ -2521,9 +2593,10 @@ Suggests: testthat
     assert!(scoped_names.contains(&("Imports", "rlang", Some("pkg:cran/rlang"))));
     assert!(scoped_names.contains(&("Imports", "cli", Some("pkg:cran/cli"))));
     assert!(scoped_names.contains(&("Suggests", "testthat", Some("pkg:cran/testthat"))));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "dplyr"
-        && edge.source == "DESCRIPTION"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "dplyr" && edge.source == "DESCRIPTION"));
     assert!(!report
         .components
         .iter()
@@ -2576,8 +2649,10 @@ fn sbom_scan_extracts_pubspec_lock_direct_edges() {
 
     assert_eq!(report.by_ecosystem.get("dart"), Some(&3));
     assert_eq!(report.lockfiles.len(), 1);
-    assert!(report.lockfiles.iter().any(|lockfile| lockfile.path == "pubspec.lock"
-        && lockfile.sha256.starts_with("sha256:")));
+    assert!(report
+        .lockfiles
+        .iter()
+        .any(|lockfile| lockfile.path == "pubspec.lock" && lockfile.sha256.starts_with("sha256:")));
     assert!(components.contains(&("pubspec.lock", "http", Some("pkg:pub/http@1.2.2"))));
     assert!(components.contains(&("pubspec.lock", "test", Some("pkg:pub/test@1.25.8"))));
     assert!(components.contains(&("pubspec.lock", "async", Some("pkg:pub/async@2.11.0"))));
@@ -2688,9 +2763,10 @@ dependencies:
     assert_eq!(report.manifests_scanned, 1);
     assert_eq!(report.by_ecosystem.get("conda"), Some(&3));
     assert_eq!(report.by_ecosystem.get("python"), Some(&2));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "numpy"
-        && edge.source == "environment.yml"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "numpy" && edge.source == "environment.yml"));
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "requests"
         && edge.source == "environment.yml"));
@@ -2759,18 +2835,12 @@ fn sbom_scan_extracts_go_sum_module_edges() {
         "golang.org/x/crypto",
         Some("pkg:golang/golang.org/x/crypto@v0.17.0"),
     )));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "github.com/gin-gonic/gin"
-            && edge.source == "go.sum"));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "golang.org/x/crypto"
-            && edge.source == "go.sum"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "github.com/gin-gonic/gin"
+        && edge.source == "go.sum"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "golang.org/x/crypto"
+        && edge.source == "go.sum"));
 }
 
 #[test]
@@ -2808,19 +2878,17 @@ version = "0.37.2"
 
     assert_eq!(report.by_ecosystem.get("python"), Some(&2));
     assert!(components.contains(&("poetry.lock", "fastapi", Some("pkg:pypi/fastapi@0.111.0"))));
-    assert!(components.contains(&("poetry.lock", "starlette", Some("pkg:pypi/starlette@0.37.2"))));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "fastapi"
-            && edge.to == "pydantic"
-            && edge.source == "poetry.lock"));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "fastapi"
-            && edge.to == "starlette"
-            && edge.source == "poetry.lock"));
+    assert!(components.contains(&(
+        "poetry.lock",
+        "starlette",
+        Some("pkg:pypi/starlette@0.37.2")
+    )));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "fastapi"
+        && edge.to == "pydantic"
+        && edge.source == "poetry.lock"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "fastapi"
+        && edge.to == "starlette"
+        && edge.source == "poetry.lock"));
 }
 
 #[test]
@@ -2856,12 +2924,14 @@ pytest = "*"
     assert!(scoped_names.contains(&("packages", "requests", Some("pkg:pypi/requests"))));
     assert!(scoped_names.contains(&("packages", "flask", Some("pkg:pypi/flask"))));
     assert!(scoped_names.contains(&("dev-packages", "pytest", Some("pkg:pypi/pytest"))));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "requests"
-        && edge.source == "Pipfile"));
-    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
-        && edge.to == "pytest"
-        && edge.source == "Pipfile"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "requests" && edge.source == "Pipfile"));
+    assert!(report
+        .dependencies
+        .iter()
+        .any(|edge| edge.from == "root" && edge.to == "pytest" && edge.source == "Pipfile"));
 }
 
 #[test]
@@ -2911,15 +2981,11 @@ fn sbom_scan_extracts_pipfile_lock_dependency_edges() {
     assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "requests"
-            && edge.source == "Pipfile.lock"));
+        .any(|edge| edge.from == "root" && edge.to == "requests" && edge.source == "Pipfile.lock"));
     assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "pytest"
-            && edge.source == "Pipfile.lock"));
+        .any(|edge| edge.from == "root" && edge.to == "pytest" && edge.source == "Pipfile.lock"));
 }
 
 #[test]
@@ -2968,27 +3034,19 @@ version = "2.7.4"
     assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "fastapi"
-            && edge.source == "uv.lock"));
+        .any(|edge| edge.from == "root" && edge.to == "fastapi" && edge.source == "uv.lock"));
     assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "starlette"
-            && edge.source == "uv.lock"));
+        .any(|edge| edge.from == "root" && edge.to == "starlette" && edge.source == "uv.lock"));
     assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "fastapi"
-            && edge.to == "pydantic"
-            && edge.source == "uv.lock"));
+        .any(|edge| edge.from == "fastapi" && edge.to == "pydantic" && edge.source == "uv.lock"));
     assert!(report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "fastapi"
-            && edge.to == "starlette"
-            && edge.source == "uv.lock"));
+        .any(|edge| edge.from == "fastapi" && edge.to == "starlette" && edge.source == "uv.lock"));
 }
 
 #[test]
@@ -3032,12 +3090,9 @@ fn sbom_scan_extracts_yarn_lock_dependency_edges() {
         "@scope/pkg",
         Some("pkg:npm/%40scope/pkg@1.0.0"),
     )));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "express"
-            && edge.to == "body-parser"
-            && edge.source == "yarn.lock"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "express"
+        && edge.to == "body-parser"
+        && edge.source == "yarn.lock"));
     assert!(report
         .dependencies
         .iter()
@@ -3098,62 +3153,37 @@ packages:
         .collect::<Vec<_>>();
 
     assert_eq!(report.by_ecosystem.get("npm"), Some(&4));
-    assert!(components.contains(&(
-        "pnpm-lock.yaml",
-        "express",
-        Some("pkg:npm/express@4.18.2"),
-    )));
+    assert!(components.contains(&("pnpm-lock.yaml", "express", Some("pkg:npm/express@4.18.2"),)));
     assert!(components.contains(&(
         "pnpm-lock.yaml",
         "@scope/pkg",
         Some("pkg:npm/%40scope/pkg@1.0.0"),
     )));
-    assert!(components.contains(&(
-        "pnpm-lock.yaml",
-        "debug",
-        Some("pkg:npm/debug@2.6.9"),
-    )));
+    assert!(components.contains(&("pnpm-lock.yaml", "debug", Some("pkg:npm/debug@2.6.9"),)));
     assert!(components.contains(&(
         "pnpm-lock.yaml",
         "supports-color",
         Some("pkg:npm/supports-color@8.1.1"),
     )));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "express"
-            && edge.source == "pnpm-lock.yaml"));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "@scope/pkg"
-            && edge.source == "pnpm-lock.yaml"));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "express"
-            && edge.to == "debug"
-            && edge.source == "pnpm-lock.yaml"));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "express"
-            && edge.to == "supports-color"
-            && edge.source == "pnpm-lock.yaml"));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "express"
-            && edge.to == "accepts"
-            && edge.source == "pnpm-lock.yaml"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "express"
+        && edge.source == "pnpm-lock.yaml"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "@scope/pkg"
+        && edge.source == "pnpm-lock.yaml"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "express"
+        && edge.to == "debug"
+        && edge.source == "pnpm-lock.yaml"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "express"
+        && edge.to == "supports-color"
+        && edge.source == "pnpm-lock.yaml"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "express"
+        && edge.to == "accepts"
+        && edge.source == "pnpm-lock.yaml"));
     assert!(!report
         .dependencies
         .iter()
-        .any(|edge| edge.from == "root"
-            && edge.to == "debug"
-            && edge.source == "pnpm-lock.yaml"));
+        .any(|edge| edge.from == "root" && edge.to == "debug" && edge.source == "pnpm-lock.yaml"));
 }
 
 #[test]
@@ -3190,7 +3220,11 @@ fn sbom_scan_extracts_package_lock_v1_dependency_edges() {
         .collect::<Vec<_>>();
 
     assert_eq!(report.by_ecosystem.get("npm"), Some(&3));
-    assert!(components.contains(&("package-lock.json", "express", Some("pkg:npm/express@4.18.2"))));
+    assert!(components.contains(&(
+        "package-lock.json",
+        "express",
+        Some("pkg:npm/express@4.18.2")
+    )));
     assert!(components.contains(&(
         "package-lock.json",
         "body-parser",
@@ -3346,14 +3380,12 @@ mkdocs = "^1.6"
     assert!(scoped_names.contains(&("tool.poetry.dev-dependencies", "pytest")));
     assert!(scoped_names.contains(&("tool.poetry.group.docs.dependencies", "mkdocs")));
     assert!(!scoped_names.contains(&("tool.poetry.dependencies", "python")));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "root" && edge.to == "fastapi" && edge.source == "pyproject.toml"));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "root" && edge.to == "pydantic" && edge.source == "pyproject.toml"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "fastapi"
+        && edge.source == "pyproject.toml"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "pydantic"
+        && edge.source == "pyproject.toml"));
     assert!(report
         .dependencies
         .iter()
@@ -3399,10 +3431,9 @@ fn sbom_scan_extracts_python_requirements_components() {
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "requests"
         && edge.source == "requirements.txt"));
-    assert!(report
-        .dependencies
-        .iter()
-        .any(|edge| edge.from == "root" && edge.to == "flask" && edge.source == "requirements.txt"));
+    assert!(report.dependencies.iter().any(|edge| edge.from == "root"
+        && edge.to == "flask"
+        && edge.source == "requirements.txt"));
     assert!(report.dependencies.iter().any(|edge| edge.from == "root"
         && edge.to == "pytest"
         && edge.source == "dev-requirements.txt"));
@@ -3482,13 +3513,11 @@ fn sbom_scan_outputs_completed_tool_envelope() {
         .any(|component| component["name"] == json!("lodash")
             && component["packageUrl"] == json!("pkg:npm/lodash@4.17.21")));
     assert_eq!(output["data"]["cycloneDx"]["bomFormat"], json!("CycloneDX"));
-    assert!(
-        output["data"]["cycloneDx"]["components"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|component| component["purl"] == json!("pkg:npm/lodash@4.17.21"))
-    );
+    assert!(output["data"]["cycloneDx"]["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|component| component["purl"] == json!("pkg:npm/lodash@4.17.21")));
     assert_eq!(
         output["data"]["cycloneDx"]["metadata"]["component"]["bom-ref"],
         json!("kuzushi:root")
@@ -3502,20 +3531,20 @@ fn sbom_scan_outputs_completed_tool_envelope() {
         json!(["pkg:npm/express@4.18.2", "pkg:npm/lodash@4.17.21"])
     );
     assert_eq!(output["data"]["spdx"]["spdxVersion"], json!("SPDX-2.3"));
-    assert!(
-        output["data"]["spdx"]["packages"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|package| package["externalRefs"][0]["referenceLocator"]
-                == json!("pkg:npm/lodash@4.17.21"))
-    );
+    assert!(output["data"]["spdx"]["packages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|package| package["externalRefs"][0]["referenceLocator"]
+            == json!("pkg:npm/lodash@4.17.21")));
     assert!(output["data"]["spdx"]["relationships"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|relationship| relationship["spdxElementId"] == json!("SPDXRef-DOCUMENT")
-            && relationship["relatedSpdxElement"] == json!("SPDXRef-Package-npm-lodash")));
+        .any(
+            |relationship| relationship["spdxElementId"] == json!("SPDXRef-DOCUMENT")
+                && relationship["relatedSpdxElement"] == json!("SPDXRef-Package-npm-lodash")
+        ));
 }
 
 #[test]
@@ -3547,19 +3576,23 @@ version = "1.0.197"
         .as_array()
         .unwrap()
         .iter()
-        .any(|component| component["purl"] == json!("pkg:cargo/serde@1.0.197")
-            && component["properties"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|property| property["name"] == json!("kuzushi:manifestPath")
-                    && property["value"] == json!("Cargo.lock"))));
+        .any(
+            |component| component["purl"] == json!("pkg:cargo/serde@1.0.197")
+                && component["properties"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|property| property["name"] == json!("kuzushi:manifestPath")
+                        && property["value"] == json!("Cargo.lock"))
+        ));
     assert!(output["data"]["cycloneDx"]["dependencies"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|dependency| dependency["ref"] == json!("pkg:cargo/demo@0.1.0")
-            && dependency["dependsOn"] == json!(["pkg:cargo/serde@1.0.197"])));
+        .any(
+            |dependency| dependency["ref"] == json!("pkg:cargo/demo@0.1.0")
+                && dependency["dependsOn"] == json!(["pkg:cargo/serde@1.0.197"])
+        ));
     assert!(output["data"]["spdx"]["packages"]
         .as_array()
         .unwrap()
@@ -3575,7 +3608,8 @@ version = "1.0.197"
         .as_array()
         .unwrap()
         .iter()
-        .any(|relationship| relationship["spdxElementId"]
-            == json!("SPDXRef-Package-cargo-demo")
-            && relationship["relatedSpdxElement"] == json!("SPDXRef-Package-cargo-serde")));
+        .any(
+            |relationship| relationship["spdxElementId"] == json!("SPDXRef-Package-cargo-demo")
+                && relationship["relatedSpdxElement"] == json!("SPDXRef-Package-cargo-serde")
+        ));
 }

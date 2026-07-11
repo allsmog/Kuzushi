@@ -1,6 +1,5 @@
 use super::*;
 
-use std::fs;
 use std::path::Path;
 
 pub(in crate::modules) struct TaintSourcesSummary {
@@ -10,6 +9,7 @@ pub(in crate::modules) struct TaintSourcesSummary {
 
 pub(in crate::modules) fn write_taint_sources(
     manifest: &ParsedManifest,
+    workspace_root: &Path,
     path: &Path,
 ) -> Result<TaintSourcesSummary> {
     let sources = build_taint_sources(manifest);
@@ -17,8 +17,18 @@ pub(in crate::modules) fn write_taint_sources(
         "package": manifest.package,
         "sources": sources,
     });
-    fs::write(path, serde_json::to_string_pretty(&payload)?)
-        .map_err(|error| anyhow::anyhow!("could not write {}: {error}", path.display()))?;
+    let relative = path.strip_prefix(workspace_root).map_err(|_| {
+        anyhow::anyhow!(
+            "android-apk taint source output {} is outside workspace {}",
+            path.display(),
+            workspace_root.display()
+        )
+    })?;
+    let path = crate::workspace::write_workspace_file(
+        workspace_root,
+        relative,
+        serde_json::to_string_pretty(&payload)?.as_bytes(),
+    )?;
     Ok(TaintSourcesSummary {
         path: path.display().to_string(),
         count: sources.len(),
@@ -110,7 +120,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ts.json");
         let manifest = parsed();
-        let summary = write_taint_sources(&manifest, &path).unwrap();
+        let summary = write_taint_sources(&manifest, dir.path(), &path).unwrap();
         assert_eq!(summary.count, 1);
         let payload = fs::read_to_string(&path).unwrap();
         assert!(payload.contains("\"package\": \"com.example.app\""));

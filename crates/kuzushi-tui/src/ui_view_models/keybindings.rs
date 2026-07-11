@@ -36,7 +36,7 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
     let binding = match app.input_mode() {
         crate::InputMode::Prompt => bind("F2", "nav mode"),
-        crate::InputMode::Navigate => bind("Esc", "prompt mode"),
+        crate::InputMode::Navigate => bind("Esc", "prompt"),
     };
     if !bindings.contains(&binding) {
         bindings.insert(0, binding);

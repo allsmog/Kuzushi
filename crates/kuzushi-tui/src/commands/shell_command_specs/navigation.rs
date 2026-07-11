@@ -5,7 +5,7 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         command: "home",
         aliases: &["/home", "/", "home"],
         category: ShellCommandCategory::Navigation,
-        description: "open Kuzushi cockpit home",
+        description: "open the current phase cockpit",
     },
     ShellCommandSpec {
         command: "help",
@@ -29,13 +29,13 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         command: "modules",
         aliases: &["/modules", "/m", "m", "show modules"],
         category: ShellCommandCategory::Navigation,
-        description: "browse native Rust modules",
+        description: "open phase-native capabilities (Expert engines with e)",
     },
     ShellCommandSpec {
         command: "recommend",
         aliases: &["recommend", "/recommend", "rec", "/rec"],
         category: ShellCommandCategory::Navigation,
-        description: "open latest module recommendations",
+        description: "open phase-native recommended capabilities",
     },
     ShellCommandSpec {
         command: "tools [query]",
@@ -65,7 +65,7 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         command: "use <module>",
         aliases: &["use semgrep", "/use <module>"],
         category: ShellCommandCategory::Navigation,
-        description: "focus a module",
+        description: "filter the expert tool inventory by module",
     },
     ShellCommandSpec {
         command: "back",

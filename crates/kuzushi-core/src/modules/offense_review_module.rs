@@ -6,7 +6,14 @@ pub(crate) fn offense_review_module() -> BuiltinModule {
         "Offense Review",
         ModuleKind::Offense,
         "Model-backed offensive review tools over existing threat-model artifacts.",
-        vec![threat_hunt_tool()],
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Hunt,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Required,
+            ),
+            vec![threat_hunt_tool()],
+        ),
         vec![dag(
             "offense-review:threat-hunt",
             "findings",

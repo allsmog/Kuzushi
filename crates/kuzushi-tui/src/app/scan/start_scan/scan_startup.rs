@@ -2,8 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn open_guided_scan(&mut self, target: Option<PathBuf>) -> Vec<ShellEffect> {
-        if self.scan().is_some_and(|scan| scan.running) {
-            self.log("scan", "scan already running");
+        if self.scan_start_blocked() {
             return Vec::new();
         }
         let Some(mut effects) = self.guided_scan_target_effects(target) else {
@@ -43,11 +42,11 @@ impl ShellApp {
             return None;
         };
         match WorkspaceTarget::new(&target) {
-            Ok(_) => Some(vec![ShellEffect::ActivateTarget(TargetActivation {
+            Ok(_) => Some(self.request_target_activation(TargetActivation {
                 path: target,
                 selected_scope: None,
                 source: TargetActivationSource::Command,
-            })]),
+            })),
             Err(error) => {
                 self.log(
                     "error",
@@ -70,7 +69,12 @@ impl ShellApp {
     }
 
     pub(crate) fn start_prepared_scan(&mut self, request: ScanStartRequest) {
-        let ticket = self.jobs_mut().start(JobKind::Run, "scan");
+        if self.scan_start_blocked() {
+            return;
+        }
+        let Some(ticket) = self.try_start_exclusive_job(JobKind::Run, "scan") else {
+            return;
+        };
         let trace_budget = self.jobs().trace_budget();
         let trace_handle = scan_trace_handle(
             &request.target_root,
@@ -139,7 +143,7 @@ impl ShellApp {
     }
 
     fn pending_scan_activity(&self, run_id: &str) -> ActivitySession {
-        let mut session = ActivitySession::new(run_id);
+        let mut session = ActivitySession::for_phase(run_id, crate::app::WorkflowPhase::Hunt);
         session.seed_from_registry(self.registry());
         session
     }
@@ -148,7 +152,7 @@ impl ShellApp {
         if self.ui().auto_open_activity() {
             ShellView::Activity
         } else {
-            ShellView::ModuleRun
+            ShellView::Workbench
         }
     }
 
@@ -181,11 +185,21 @@ impl ShellApp {
         target: Option<PathBuf>,
         explicit_input: Option<serde_json::Value>,
     ) -> Option<ScanStartRequest> {
-        if self.scan().is_some_and(|scan| scan.running) {
-            self.log("scan", "scan already running");
+        if self.scan_start_blocked() {
             return None;
         }
         self.resolve_scan_start_request(target, explicit_input)
+    }
+
+    fn scan_start_blocked(&mut self) -> bool {
+        if !self.has_running_work() {
+            return false;
+        }
+        self.log(
+            "scan",
+            "scan start blocked — finish or cancel the active work, then retry",
+        );
+        true
     }
 
     fn resolve_scan_start_request(
@@ -266,6 +280,8 @@ impl ShellApp {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         self.registry().prepare_tool_input_for_dispatch(
             "sast:scan",
@@ -273,5 +289,19 @@ impl ShellApp {
             &ctx,
             use_stored_options.then_some(self.option_store()),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_scan_activity_captures_hunt_as_its_launch_phase() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let session = app.pending_scan_activity("scan-origin");
+
+        assert_eq!(session.origin_phase, Some(crate::app::WorkflowPhase::Hunt));
     }
 }

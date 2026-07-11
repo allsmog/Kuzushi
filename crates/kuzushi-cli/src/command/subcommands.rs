@@ -59,7 +59,7 @@ pub(crate) enum KwpCommand {
     Approve {
         /// Dynamic module specifier, usually file:///absolute/path/module.mjs.
         specifier: String,
-        /// Grant file as JSON or TOML. Omitted means no privileged grants.
+        /// Grant as JSON or TOML. Omitted means no privileged grants.
         #[arg(long)]
         grant: Option<PathBuf>,
         /// Lockfile path. Defaults to ./kuzushi.lock.

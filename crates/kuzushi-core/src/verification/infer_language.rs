@@ -50,8 +50,12 @@ pub(crate) async fn verify_rust(
     finding: &Finding,
     backend: SandboxBackend,
     opts: &VerifyOptions,
+    workspace_root: &Path,
 ) -> Result<VerificationOutcome> {
-    let trigger = build_rust_trigger(finding);
+    let trigger = match build_rust_trigger(finding, workspace_root) {
+        Ok(trigger) => trigger,
+        Err(error) => return Ok(scaffold_error(backend, "Rust source input", error)),
+    };
     let project = match scaffold_rust_project(&trigger).await {
         Ok(p) => p,
         Err(err) => return Ok(scaffold_error(backend, "scaffold", err)),

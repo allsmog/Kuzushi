@@ -46,7 +46,7 @@ class AnthropicOAuthChatModel {
       system: claudeCodeIdentitySystemBlocks(system),
       messages: anthropicMessages(messages),
     };
-    if (this.tools.length) body.tools = this.tools.map(anthropicToolDefinition);
+    if (this.tools.length) body.tools = anthropicToolDefinitions(this.tools);
     const temperature = numericTemperature(this.request);
     if (temperature !== undefined) body.temperature = temperature;
     return body;
@@ -97,8 +97,6 @@ class OpenAiCodexOAuthChatModel {
       stream: true,
     };
     if (this.tools.length) body.tools = this.openAiToolDefinitions();
-    const temperature = numericTemperature(this.request);
-    if (temperature !== undefined) body.temperature = temperature;
     return body;
   }
 
@@ -192,7 +190,28 @@ function parseArguments(value) {
 
 function anthropicMessages(messages) {
   const converted = messages.filter((message) => message?._getType?.() !== "system").map(anthropicMessage);
-  return converted.length ? converted : [{ role: "user", content: "ok" }];
+  if (!converted.length) return [{ role: "user", content: "ok" }];
+  return markHistoryCacheBreakpoint(converted);
+}
+
+// Agent loops resend the full conversation on every call; a cache breakpoint on
+// the last turn lets the next call read that shared prefix at cache-read rates.
+// Single-shot calls (one message) stay unmarked so a volatile one-off prompt
+// never pays the cache-write premium for a prefix that is never reused.
+function markHistoryCacheBreakpoint(converted) {
+  if (converted.length < 2) return converted;
+  const last = converted.at(-1);
+  const content = contentWithCacheBreakpoint(last.content);
+  return content ? [...converted.slice(0, -1), { ...last, content }] : converted;
+}
+
+function contentWithCacheBreakpoint(content) {
+  if (typeof content === "string") {
+    return content.trim() ? [cacheableTextBlock(content)] : undefined;
+  }
+  if (!Array.isArray(content) || !content.length) return undefined;
+  const last = content.at(-1);
+  return [...content.slice(0, -1), { ...last, cache_control: { type: "ephemeral" } }];
 }
 
 function anthropicMessage(message) {
@@ -269,6 +288,16 @@ function stripIdentity(system) {
   return system.startsWith(CLAUDE_CODE_IDENTITY_LINE)
     ? system.slice(CLAUDE_CODE_IDENTITY_LINE.length).replace(/^\n+/, "")
     : system;
+}
+
+// Tool definitions render first in the prompt and are stable across every call
+// in a run; a breakpoint on the last definition caches the whole tools segment
+// even when the role-specific system prompt differs between calls.
+function anthropicToolDefinitions(tools) {
+  const definitions = tools.map(anthropicToolDefinition);
+  const lastIndex = definitions.length - 1;
+  definitions[lastIndex] = { ...definitions[lastIndex], cache_control: { type: "ephemeral" } };
+  return definitions;
 }
 
 function anthropicToolDefinition(tool) {

@@ -1,7 +1,9 @@
-use super::ui_runs_root;
-use crate::ShellApp;
+use crate::{
+    app::{RunTraceCacheState, ViewDataState},
+    ShellApp,
+};
 use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
-use std::path::{Path, PathBuf};
+use kuzushi_core::{RunArtifactRead, RunArtifactTextRead, RunTraceStep};
 
 const RUN_TRIAGE_FILE: &str = "triage.jsonl";
 const RUN_VERIFY_FILE: &str = "verify.jsonl";
@@ -72,7 +74,7 @@ pub(crate) fn trace_model(app: &ShellApp, run_id: &str) -> TraceModel {
     TraceModel {
         run_id: run_id.to_string(),
         trace_exists,
-        steps: parse_trace_jsonl(&trace.path),
+        steps: trace_steps(app, run_id, trace.artifact_state()),
         artifacts: vec![
             trace.into_display(),
             triage.into_display(),
@@ -110,19 +112,30 @@ fn run_artifact_detail(
 ) -> RunArtifactPath {
     RunArtifactPath {
         label,
-        path: run_artifact_path(app, run_id, leaf),
+        state: cached_artifact_text(app, run_id, leaf),
     }
 }
 
 fn run_metadata_artifact_detail(app: &ShellApp, run_id: &str) -> RunArtifactPath {
     RunArtifactPath {
         label: "metadata",
-        path: run_artifact_path(app, run_id, run_metadata_artifact_leaf()),
+        state: cached_artifact_text(app, run_id, run_metadata_artifact_leaf()),
     }
 }
 
-fn run_artifact_path(app: &ShellApp, run_id: &str, leaf: &str) -> PathBuf {
-    runs_root(app).join(run_id).join(leaf)
+fn cached_artifact_text(
+    app: &ShellApp,
+    run_id: &str,
+    leaf: &str,
+) -> ViewDataState<RunArtifactTextRead> {
+    let Some(target) = app.target() else {
+        return ViewDataState::Ready(RunArtifactRead::Unsafe {
+            error: "no active target".to_string(),
+        });
+    };
+    app.workbench_cache()
+        .borrow()
+        .cached_run_artifact_text(target, run_id, leaf)
 }
 
 fn run_metadata_artifact_leaf() -> &'static str {
@@ -137,70 +150,64 @@ fn run_trace_artifact_leaf() -> &'static str {
         .leaf
 }
 
-fn runs_root(app: &ShellApp) -> PathBuf {
-    ui_runs_root(app.target())
-}
-
-fn parse_trace_jsonl(path: &Path) -> Vec<TraceStep> {
-    match artifact_state(path) {
+fn trace_steps(app: &ShellApp, run_id: &str, state: RunArtifactState) -> Vec<TraceStep> {
+    match state {
         RunArtifactState::Missing => return Vec::new(),
         RunArtifactState::NonFile => return vec![non_file_trace_artifact_step()],
         RunArtifactState::Invalid => return vec![malformed_trace_artifact_step()],
+        RunArtifactState::Loading => return Vec::new(),
         RunArtifactState::File => {}
     }
-
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(_) => return vec![malformed_trace_artifact_step()],
+    let Some(target) = app.target() else {
+        return Vec::new();
     };
-    let text = match std::str::from_utf8(&bytes) {
-        Ok(text) => text,
-        Err(_) => return vec![malformed_trace_artifact_step()],
-    };
-    trace_steps_from_text(text)
-}
-
-fn trace_steps_from_text(text: &str) -> Vec<TraceStep> {
-    text.lines()
-        .enumerate()
-        .filter_map(|(idx, raw)| trace_step_from_line(idx, raw.trim()))
-        .collect()
-}
-
-fn trace_step_from_line(idx: usize, raw: &str) -> Option<TraceStep> {
-    if raw.is_empty() {
-        return None;
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_run_trace(target, run_id)
+    {
+        ViewDataState::Ready(RunTraceCacheState::Ready(read)) => {
+            trace_steps_from_core_read(read.steps, read.malformed_lines)
+        }
+        ViewDataState::Ready(RunTraceCacheState::Invalid) => vec![malformed_trace_artifact_step()],
+        ViewDataState::NotRequested | ViewDataState::Loading => Vec::new(),
     }
-    let value = match serde_json::from_str::<serde_json::Value>(raw) {
-        Ok(value) if value.is_object() => value,
-        Ok(_) | Err(_) => return Some(malformed_trace_step(idx)),
-    };
-    Some(TraceStep {
-        n: step_number(&value, idx),
-        kind: string_field(&value, "kind").unwrap_or_else(|| "step".to_string()),
-        label: string_field(&value, "label").unwrap_or_else(|| "(no label)".to_string()),
-        latency_ms: u64_alias_field(&value, "latency_ms", "latencyMs"),
-        cost_usd: f64_alias_field(&value, "cost_usd", "costUsd"),
-        module_id: string_alias_field(&value, "module_id", "moduleId"),
-        verb: string_field(&value, "verb"),
-        parent_step: u64_alias_field(&value, "parent_step", "parentStep").map(|n| n as usize),
-        severity: string_field(&value, "severity"),
-        started_at_ms: u64_alias_field(&value, "started_at_ms", "startedAtMs"),
-    })
 }
 
-fn malformed_trace_step(idx: usize) -> TraceStep {
-    TraceStep {
-        n: idx + 1,
-        kind: "malformed".to_string(),
-        label: "malformed trace JSONL line".to_string(),
-        latency_ms: None,
-        cost_usd: None,
-        module_id: None,
-        verb: None,
-        parent_step: None,
-        severity: Some("warn".to_string()),
-        started_at_ms: None,
+fn trace_steps_from_core_read(steps: Vec<RunTraceStep>, malformed_lines: usize) -> Vec<TraceStep> {
+    let next_number = steps.iter().map(|step| step.n).max().unwrap_or(0) + 1;
+    let mut projected = steps.into_iter().map(TraceStep::from).collect::<Vec<_>>();
+    if malformed_lines > 0 {
+        projected.push(TraceStep {
+            n: next_number,
+            kind: "malformed".to_string(),
+            label: format!("{malformed_lines} malformed trace JSONL line(s) ignored"),
+            latency_ms: None,
+            cost_usd: None,
+            module_id: None,
+            verb: None,
+            parent_step: None,
+            severity: Some("warn".to_string()),
+            started_at_ms: None,
+        });
+    }
+    projected
+}
+
+impl From<RunTraceStep> for TraceStep {
+    fn from(step: RunTraceStep) -> Self {
+        Self {
+            n: step.n,
+            kind: step.kind,
+            label: step.label,
+            latency_ms: step.latency_ms,
+            cost_usd: step.cost_usd,
+            module_id: step.module_id,
+            verb: step.verb,
+            parent_step: step.parent_step,
+            severity: step.severity,
+            started_at_ms: step.started_at_ms,
+        }
     }
 }
 
@@ -234,43 +241,13 @@ fn non_file_trace_artifact_step() -> TraceStep {
     }
 }
 
-fn step_number(value: &serde_json::Value, idx: usize) -> usize {
-    u64_field(value, "n").map(|n| n as usize).unwrap_or(idx + 1)
-}
-
-fn u64_field(value: &serde_json::Value, key: &str) -> Option<u64> {
-    value.get(key).and_then(serde_json::Value::as_u64)
-}
-
-fn u64_alias_field(value: &serde_json::Value, canonical: &str, alias: &str) -> Option<u64> {
-    u64_field(value, canonical).or_else(|| u64_field(value, alias))
-}
-
-fn f64_alias_field(value: &serde_json::Value, canonical: &str, alias: &str) -> Option<f64> {
-    value
-        .get(canonical)
-        .or_else(|| value.get(alias))
-        .and_then(serde_json::Value::as_f64)
-}
-
-fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string)
-}
-
-fn string_alias_field(value: &serde_json::Value, canonical: &str, alias: &str) -> Option<String> {
-    string_field(value, canonical).or_else(|| string_field(value, alias))
-}
-
 fn short_fingerprint(value: &str) -> String {
     value.chars().take(8).collect()
 }
 
 struct RunArtifactPath {
     label: &'static str,
-    path: PathBuf,
+    state: ViewDataState<RunArtifactTextRead>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -279,18 +256,22 @@ enum RunArtifactState {
     Invalid,
     Missing,
     NonFile,
+    Loading,
 }
 
 impl RunArtifactPath {
     fn artifact_state(&self) -> RunArtifactState {
-        artifact_state(&self.path)
+        artifact_state(&self.state)
     }
 
     fn into_display(self) -> RunArtifactDetail {
-        let display = self.path.display().to_string();
-        let detail = match artifact_state(&self.path) {
+        let display = match &self.state {
+            ViewDataState::Ready(state) => state.display_path(),
+            ViewDataState::NotRequested | ViewDataState::Loading => "loading".to_string(),
+        };
+        let detail = match artifact_state(&self.state) {
             RunArtifactState::File
-                if self.label == "metadata" && metadata_json_malformed(&self.path) =>
+                if self.label == "metadata" && metadata_json_malformed(&self.state) =>
             {
                 format!("{display} (malformed)")
             }
@@ -298,6 +279,7 @@ impl RunArtifactPath {
             RunArtifactState::Invalid => format!("{display} (invalid)"),
             RunArtifactState::Missing => format!("{display} (missing)"),
             RunArtifactState::NonFile => format!("{display} (not a file)"),
+            RunArtifactState::Loading => "loading artifact metadata".to_string(),
         };
         RunArtifactDetail {
             label: self.label,
@@ -306,21 +288,24 @@ impl RunArtifactPath {
     }
 }
 
-fn metadata_json_malformed(path: &Path) -> bool {
-    let Ok(bytes) = std::fs::read(path) else {
+fn metadata_json_malformed(state: &ViewDataState<RunArtifactTextRead>) -> bool {
+    let ViewDataState::Ready(RunArtifactRead::Ready { value: text, .. }) = state else {
         return true;
     };
-    serde_json::from_slice::<serde_json::Value>(&bytes)
+    serde_json::from_str::<serde_json::Value>(text)
         .map(|value| !value.is_object())
         .unwrap_or(true)
 }
 
-fn artifact_state(path: &Path) -> RunArtifactState {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => RunArtifactState::File,
-        Ok(_) => RunArtifactState::NonFile,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => RunArtifactState::Missing,
-        Err(_) => RunArtifactState::Invalid,
+fn artifact_state(state: &ViewDataState<RunArtifactTextRead>) -> RunArtifactState {
+    match state {
+        ViewDataState::NotRequested | ViewDataState::Loading => RunArtifactState::Loading,
+        ViewDataState::Ready(RunArtifactRead::Ready { .. }) => RunArtifactState::File,
+        ViewDataState::Ready(RunArtifactRead::Missing { .. }) => RunArtifactState::Missing,
+        ViewDataState::Ready(RunArtifactRead::NonFile { .. }) => RunArtifactState::NonFile,
+        ViewDataState::Ready(
+            RunArtifactRead::Unsafe { .. } | RunArtifactRead::Unreadable { .. },
+        ) => RunArtifactState::Invalid,
     }
 }
 
@@ -328,6 +313,16 @@ fn artifact_state(path: &Path) -> RunArtifactState {
 mod tests {
     use super::*;
     use kuzushi_core::{Finding, Severity, V2Config};
+
+    fn hydrate_replay(app: &mut ShellApp, run_id: &str) {
+        app.open_replay_for_test(run_id);
+        app.hydrate_active_view_blocking();
+    }
+
+    fn hydrate_trace(app: &mut ShellApp, run_id: &str) {
+        app.open_trace_for_test(run_id);
+        app.hydrate_active_view_blocking();
+    }
 
     #[test]
     fn alias_reference_model_projects_top_aliases() {
@@ -361,9 +356,41 @@ mod tests {
     }
 
     #[test]
-    fn trace_steps_accept_camel_case_artifact_schema_aliases() {
-        let steps = trace_steps_from_text(
-            r#"{"n":1,"kind":"reasoning","label":"query","latencyMs":25,"costUsd":0.02,"moduleId":"triage","verb":"run","parentStep":7,"severity":"info","startedAtMs":1700000000000}"#,
+    fn trace_model_rejects_traversal_run_id_without_displaying_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+        hydrate_trace(&mut app, "../../outside\nrun");
+
+        let model = trace_model(&app, "../../outside\nrun");
+
+        assert!(!model.trace_exists);
+        assert_eq!(model.steps[0].label, "malformed trace artifact");
+        assert!(model
+            .artifacts
+            .iter()
+            .all(|artifact| artifact.detail == "<unsafe run artifact path> (invalid)"));
+    }
+
+    #[test]
+    fn trace_steps_project_the_canonical_core_schema() {
+        let steps = trace_steps_from_core_read(
+            vec![RunTraceStep {
+                n: 1,
+                kind: "reasoning".to_string(),
+                label: "query".to_string(),
+                latency_ms: Some(25),
+                cost_usd: Some(0.02),
+                module_id: Some("triage".to_string()),
+                verb: Some("run".to_string()),
+                parent_step: Some(7),
+                severity: Some("info".to_string()),
+                started_at_ms: Some(1_700_000_000_000),
+                model: None,
+                provider: None,
+                prompt_hash: None,
+            }],
+            0,
         );
 
         assert_eq!(steps.len(), 1);
@@ -375,58 +402,14 @@ mod tests {
     }
 
     #[test]
-    fn trace_steps_surface_malformed_jsonl_rows() {
-        let steps = trace_steps_from_text(
-            [
-                r#"{"n":1,"kind":"reasoning","label":"query"}"#,
-                "{not-json",
-                "",
-                r#"{"n":4,"kind":"done","label":"complete"}"#,
-            ]
-            .join("\n")
-            .as_str(),
-        );
-
-        assert_eq!(steps.len(), 3);
-        assert_eq!(steps[1].n, 2);
-        assert_eq!(steps[1].kind, "malformed");
-        assert_eq!(steps[1].severity.as_deref(), Some("warn"));
-        assert_eq!(steps[1].label, "malformed trace JSONL line");
-        assert_eq!(steps[2].n, 4);
-    }
-
-    #[test]
-    fn trace_steps_surface_non_object_jsonl_rows() {
-        let steps = trace_steps_from_text(
-            [
-                r#"{"n":1,"kind":"reasoning","label":"query"}"#,
-                "[]",
-                r#"{"n":3,"kind":"done","label":"complete"}"#,
-            ]
-            .join("\n")
-            .as_str(),
-        );
-
-        assert_eq!(steps.len(), 3);
-        assert_eq!(steps[1].n, 2);
-        assert_eq!(steps[1].kind, "malformed");
-        assert_eq!(steps[1].severity.as_deref(), Some("warn"));
-        assert_eq!(steps[1].label, "malformed trace JSONL line");
-        assert_eq!(steps[2].n, 3);
-    }
-
-    #[test]
-    fn trace_steps_surface_non_file_trace_artifact() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join(run_trace_artifact_leaf());
-        std::fs::create_dir(&path).unwrap();
-
-        let steps = parse_trace_jsonl(&path);
+    fn trace_steps_summarize_malformed_canonical_rows() {
+        let steps = trace_steps_from_core_read(Vec::new(), 2);
 
         assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].n, 1);
         assert_eq!(steps[0].kind, "malformed");
         assert_eq!(steps[0].severity.as_deref(), Some("warn"));
-        assert_eq!(steps[0].label, "trace artifact path is not a file");
+        assert_eq!(steps[0].label, "2 malformed trace JSONL line(s) ignored");
     }
 
     #[test]
@@ -436,6 +419,7 @@ mod tests {
         std::fs::create_dir_all(run_dir.join(run_metadata_artifact_leaf())).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        hydrate_replay(&mut app, "r-invalid");
 
         let model = replay_model(&app, "r-invalid");
 
@@ -452,6 +436,7 @@ mod tests {
         std::fs::write(run_dir.join(run_metadata_artifact_leaf()), "{not-json").unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        hydrate_replay(&mut app, "r-malformed");
 
         let model = replay_model(&app, "r-malformed");
 
@@ -468,6 +453,7 @@ mod tests {
         std::fs::write(run_dir.join(run_metadata_artifact_leaf()), "[]").unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        hydrate_replay(&mut app, "r-non-object");
 
         let model = replay_model(&app, "r-non-object");
 
@@ -483,6 +469,7 @@ mod tests {
         std::fs::create_dir_all(run_dir.join(run_trace_artifact_leaf())).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        hydrate_trace(&mut app, "r-invalid-trace");
 
         let model = trace_model(&app, "r-invalid-trace");
 
@@ -498,10 +485,15 @@ mod tests {
     #[test]
     fn trace_steps_surface_non_utf8_trace_artifact() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join(run_trace_artifact_leaf());
+        let run_id = "r-non-utf8";
+        let path = kuzushi_core::run_dir(temp.path(), run_id).join(run_trace_artifact_leaf());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+        hydrate_trace(&mut app, run_id);
 
-        let steps = parse_trace_jsonl(&path);
+        let steps = trace_model(&app, run_id).steps;
 
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].kind, "malformed");

@@ -100,8 +100,9 @@ mod tests {
 
     #[test]
     fn governance_accepts_provider_models_with_default_credential_envs() {
-        assert!(validate_model_api_key_env("anthropic:claude-sonnet-4-6", "ANTHROPIC_API_KEY")
-            .is_ok());
+        assert!(
+            validate_model_api_key_env("anthropic:claude-sonnet-4-6", "ANTHROPIC_API_KEY").is_ok()
+        );
         assert!(validate_model_api_key_env("openai:gpt-5.5", "OPENAI_API_KEY").is_ok());
 
         assert_eq!(
@@ -113,16 +114,14 @@ mod tests {
             bridge_api_key_env_for_model("openai:gpt-5.5", "OPENAI_API_KEY").unwrap(),
             "OPENAI_API_KEY"
         );
-        let custom =
-            validate_model_api_key_env("anthropic:claude-sonnet-4-6", "CUSTOM_KEY")
-                .unwrap_err()
-                .to_string();
+        let custom = validate_model_api_key_env("anthropic:claude-sonnet-4-6", "CUSTOM_KEY")
+            .unwrap_err()
+            .to_string();
         assert!(custom.contains("requires ANTHROPIC_API_KEY"));
 
-        let mismatch =
-            validate_model_api_key_env("anthropic:claude-sonnet-4-6", "OPENAI_API_KEY")
-                .unwrap_err()
-                .to_string();
+        let mismatch = validate_model_api_key_env("anthropic:claude-sonnet-4-6", "OPENAI_API_KEY")
+            .unwrap_err()
+            .to_string();
         assert!(mismatch.contains("requires ANTHROPIC_API_KEY"));
         assert!(mismatch.contains("will not silently switch"));
 
@@ -233,7 +232,11 @@ mod tests {
             })
         });
         let outcome = run_tool_loop(&runtime, &req(), &mut tb).unwrap();
-        assert!((outcome.cost_usd - 0.06).abs() < 1e-9, "got {}", outcome.cost_usd);
+        assert!(
+            (outcome.cost_usd - 0.06).abs() < 1e-9,
+            "got {}",
+            outcome.cost_usd
+        );
     }
 
     #[test]
@@ -270,7 +273,11 @@ mod tests {
         request.max_steps = 2;
         let outcome = run_tool_loop(&runtime, &request, &mut tb).unwrap();
         assert!(outcome.truncated);
-        assert!((outcome.cost_usd - 0.10).abs() < 1e-9, "got {}", outcome.cost_usd);
+        assert!(
+            (outcome.cost_usd - 0.10).abs() < 1e-9,
+            "got {}",
+            outcome.cost_usd
+        );
     }
 
     #[test]

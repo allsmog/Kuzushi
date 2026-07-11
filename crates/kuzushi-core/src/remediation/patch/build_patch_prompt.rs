@@ -47,26 +47,23 @@ pub(crate) fn build_patch_prompt(
 }
 
 pub(crate) fn read_source_context(repo_root: &Path, file_path: &str) -> Result<String> {
-    let path = repo_root.join(file_path);
-    let Ok(raw) = fs::read_to_string(&path) else {
+    let Ok(path) = crate::code_nav::canonicalise_within(repo_root, file_path) else {
         return Ok(format!(
             "Could not read {}; produce a patch from the finding metadata.",
             file_path
         ));
     };
-    let max_bytes = 40_000usize;
-    let content = if raw.len() > max_bytes {
-        let cutoff = raw
-            .char_indices()
-            .map(|(index, _)| index)
-            .take_while(|index| *index <= max_bytes)
-            .last()
-            .unwrap_or(0);
-        format!("{}\n... [truncated]", &raw[..cutoff])
-    } else {
-        raw
+    let Ok(source) = crate::bounded_file::read_utf8_text_prefix(&path, 40_000) else {
+        return Ok(format!(
+            "Could not read {}; produce a patch from the finding metadata.",
+            file_path
+        ));
     };
-    Ok(content)
+    Ok(if source.truncated {
+        format!("{}\n... [truncated]", source.text)
+    } else {
+        source.text
+    })
 }
 
 pub(crate) fn parse_patch_synthesis(raw: Value) -> Result<PatchSynthesis> {
@@ -83,4 +80,42 @@ pub(crate) fn parse_patch_synthesis(raw: Value) -> Result<PatchSynthesis> {
 pub(crate) struct ValidationResult {
     pub(crate) status: PatchStatus,
     pub(crate) output: String,
+}
+
+#[cfg(test)]
+mod bounded_source_context_tests {
+    use super::read_source_context;
+    use std::fs;
+
+    #[test]
+    fn source_context_rejects_repository_escape() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        fs::write(temp.path().join("secret.rs"), "outside secret").unwrap();
+
+        let context = read_source_context(&repo, "../secret.rs").unwrap();
+
+        assert!(context.contains("Could not read"));
+        assert!(!context.contains("outside secret"));
+    }
+
+    #[test]
+    fn source_context_reads_only_the_bounded_prefix() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("huge.rs");
+        fs::write(&path, "fn vulnerable() {}\n").unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(32 * 1024 * 1024)
+            .unwrap();
+
+        let context = read_source_context(temp.path(), "huge.rs").unwrap();
+
+        assert!(context.starts_with("fn vulnerable"));
+        assert!(context.ends_with("... [truncated]"));
+        assert!(context.len() < 41_000);
+    }
 }

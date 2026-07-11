@@ -91,6 +91,11 @@ impl ShellApp {
     }
 
     pub(super) fn handle_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if matches!(self.shell_view(), ShellView::PromptsEditor)
+            && self.router.prompts().document().is_some()
+        {
+            return self.reduce_prompt_document_key(key);
+        }
         let prereq_update = self.handle_prereq_prompt_key(key);
         if prereq_update.handled {
             return prereq_update;
@@ -310,7 +315,9 @@ impl ShellApp {
         if !request.kind.allows_yes() {
             return None;
         }
-        self.advisory_mut().pending_confirm_launch.take()
+        let mut launch = self.advisory_mut().pending_confirm_launch.take()?;
+        launch.authorization = ExecutionAuthorization::interactive_request();
+        Some(launch)
     }
 
     pub(super) fn handle_budget_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -396,18 +403,11 @@ impl ShellApp {
             return false;
         }
         match key.code {
-            KeyCode::F(2) => self.toggle_input_mode(),
+            KeyCode::F(2) => self.enter_navigate_mode(),
             KeyCode::Esc if self.input_mode() == InputMode::Navigate => self.enter_prompt_mode(),
             _ => return false,
         }
         true
-    }
-
-    fn toggle_input_mode(&mut self) {
-        match self.input_mode() {
-            InputMode::Prompt => self.enter_navigate_mode(),
-            InputMode::Navigate => self.enter_prompt_mode(),
-        }
     }
 
     fn enter_navigate_mode(&mut self) {

@@ -1,7 +1,7 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use roxmltree::Node;
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_dotnet_project(path: &Path) -> bool {
@@ -30,10 +30,7 @@ pub(super) fn dotnet_project_components(
     Ok(components)
 }
 
-pub(super) fn dotnet_project_edges(
-    target: &Path,
-    path: &Path,
-) -> Result<Vec<SbomDependencyEdge>> {
+pub(super) fn dotnet_project_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let document =

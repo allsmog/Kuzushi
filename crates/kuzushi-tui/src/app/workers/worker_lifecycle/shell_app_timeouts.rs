@@ -56,20 +56,22 @@ impl ShellApp {
             self.log_worker_timeout(worker);
             self.mark_worker_timeout_requested(worker);
         }
-        let escalated = self.fail_unresponsive_workers();
+        let escalated = self.quarantine_unresponsive_workers();
         !timed_out.is_empty() || escalated
     }
 
     /// Escalation for non-cooperative workers: once the watchdog cancel's
-    /// grace window elapses with no terminal event, emit a synthetic failure
-    /// so the job slot is released and new work is accepted. The hung OS
-    /// thread is not killed; only the logical slot is freed honestly.
-    fn fail_unresponsive_workers(&mut self) -> bool {
-        let escalated = self.jobs_mut().fail_unresponsive_slots(Instant::now());
+    /// grace window elapses, quarantine the logical slot until the OS thread
+    /// really exits. Rust cannot safely kill that thread, so accepting new
+    /// work would permit overlapping side effects.
+    fn quarantine_unresponsive_workers(&mut self) -> bool {
+        let escalated = self
+            .jobs_mut()
+            .quarantine_unresponsive_slots(Instant::now());
         if escalated {
             self.log(
                 "error",
-                "worker unresponsive after watchdog cancel grace; releasing job slot with synthetic failure".to_string(),
+                "worker unresponsive after watchdog cancel grace; job quarantined until the worker exits — restart Kuzushi if it remains stuck".to_string(),
             );
         }
         escalated

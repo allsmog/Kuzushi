@@ -1,4 +1,3 @@
-use super::target_or_default;
 use crate::application::export::export_command;
 use crate::application::findings::{finding_command, findings_command};
 use crate::application::permissions::permissions_command;
@@ -40,7 +39,9 @@ pub(super) fn dispatch_reporting_command(
         suppress @ Command::Suppress { .. } => dispatch_suppress_command(suppress, default_target),
         Command::Suppressions { json } => suppressions_command(default_target, json),
         Command::Permissions { json } => permissions_command(default_target, json),
-        Command::Doctor { json } => doctor_command(default_target, json),
+        Command::Doctor { json } => {
+            doctor_command(require_cli_target("doctor", None, default_target)?, json)
+        }
         pr_comment @ Command::PrComment(_) => {
             dispatch_pr_comment_command(pr_comment, default_target)
         }
@@ -100,8 +101,9 @@ fn dispatch_pr_comment_command(command: Command, default_target: Option<PathBuf>
     let Command::PrComment(args) = command else {
         unreachable!("non-pr-comment command routed to PR comment dispatcher")
     };
+    let target = require_cli_target("pr-comment", args.target, default_target)?;
     pr_comment_command(
-        target_or_default(args.target, &default_target),
+        target,
         args.repo,
         args.run_url,
         args.top_n,

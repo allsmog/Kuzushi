@@ -122,20 +122,6 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         description: "show exit confirmation checklist without quitting",
     },
     ShellCommandSpec {
-        command: "pwn",
-        aliases: &[
-            "/pwn",
-            "pwn target <path>",
-            "pwn profile",
-            "pwn reverse [function]",
-            "pwn auto",
-            "pwn state",
-            "pwn candidates <target>",
-        ],
-        category: ShellCommandCategory::Session,
-        description: "binary exploitation dashboard and pwn:* workflow actions",
-    },
-    ShellCommandSpec {
         command: "quit",
         aliases: &["q", "/q", "exit", "/quit", "/exit"],
         category: ShellCommandCategory::Session,

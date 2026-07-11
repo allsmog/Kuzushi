@@ -79,5 +79,3 @@ export const zModuleManifest = z
     kuzushiSdkVersion: zVersionConstraint.optional(),
   })
   .passthrough();
-
-export type ZodModuleManifest = z.infer<typeof zModuleManifest>;

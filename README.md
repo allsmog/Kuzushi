@@ -63,15 +63,22 @@ This snapshot tightens the path from scanner output to human review:
 
 ## Privacy & Data Flow
 
-Kuzushi is local-first and ships **no telemetry**. Findings, evidence, run
-artifacts, and suppressions live under `.kuzushi/` in your workspace and never
-leave your machine. The only bytes that go anywhere are the prompts sent to
-the model provider **you** configure (and nothing is sent at all until you
-configure one — the deterministic scanners run fully offline). Model and
-runtime selection is explicit: Kuzushi never silently falls back to a
-different provider or model.
+Kuzushi is local-first and ships **no first-party telemetry**. Findings,
+evidence, run artifacts, and suppressions live under `.kuzushi/` in your
+workspace. Network access is tool-dependent: configured model providers receive
+prompts only when you invoke model-backed tools, while external scanners chosen
+automatically or explicitly may fetch rules or contact services according to
+their own documented behavior. Kuzushi disables Semgrep metrics, but registry-backed
+configs such as `auto` still fetch rules. `kuzushi demo` and the fully bundled
+task list in Quick Start are the zero-network paths. Model and runtime selection
+is explicit: Kuzushi never silently falls back to a different provider or
+model.
 
 ## Install
+
+Kuzushi requires Node.js 22 or newer. The npm package declares this in
+`engines.node`; upgrade Node before installing if `node --version` reports an
+older major version.
 
 ```bash
 npm install -g kuzushi
@@ -88,19 +95,45 @@ pnpm build:native
 node bin/kuzushi-rs.mjs --help
 ```
 
-The published `kuzushi` command resolves `native/<platform>-<arch>/kuzushi`,
-and the published `kz` alias resolves `native/<platform>-<arch>/kz`; both then
-fall back to local Cargo build outputs for the invoked name. Set
-`KUZUSHI_NATIVE_BIN` to point the wrapper at a specific binary.
+The published `kuzushi` command resolves `native/<platform>-<arch>/kuzushi`.
+The `kz` command is an argv0 alias over that same binary, so the package does
+not duplicate it. Each platform directory also contains the sibling
+`kuzushi-mcp-*` servers advertised by the CLI, and the wrapper places that
+private runtime directory first on the child `PATH`. Set `KUZUSHI_NATIVE_BIN`
+to point the wrapper at a specific CLI binary.
+
+The npm installation is the complete product distribution: it installs the
+Node bridge dependencies and ships the LangGraph and trusted dynamic-module
+host scripts alongside the native runtime. GitHub's platform-specific native
+archives contain the CLI plus its MCP server siblings, but intentionally omit
+the Node dependency tree; use the npm tarball or a source checkout for
+model-backed and trusted dynamic-Node tools.
+
+Release platform policy is explicit:
+
+| Platform payload | Release status |
+| --- | --- |
+| `linux-x64` | Required; a failed build blocks publication. |
+| `darwin-arm64` | Required; a failed build blocks publication. |
+| `linux-arm64`, `darwin-x64`, `win32-x64` | Best effort; included in npm and GitHub artifacts only after that matrix leg succeeds. |
 
 ## Quick Start
 
 This is the golden path. It is the workflow new operators should try before
 touching advanced modules or deferred plugin-backed tools.
 
+Kuzushi writes target-local state below `.kuzushi/`. On first initialization
+it creates `.kuzushi/.gitignore` when that file is absent. The generated policy
+keeps databases, traces, locks, findings, and other runtime state local, while
+leaving `.kuzushi/scope.toml`, `.kuzushi/prompts/**`, and
+`.kuzushi/v3/config.toml` available for deliberate team versioning. Review
+those project files before committing them; never commit credentials or an
+unreviewed live state tree.
+
 ```bash
-# 90-second offline proof: scan a vendored vulnerable fixture with the
-# deterministic engines. No API key, no model, no external scanners.
+# 90-second offline tour: scan a vendored vulnerable fixture with the
+# deterministic engines. It records scanner signals and honest signal_only
+# proof states; it does not claim source-grounded confirmation.
 kuzushi demo
 
 # Check config, local state, scanners, and the LangGraph bridge.
@@ -109,25 +142,30 @@ kuzushi doctor --target .
 # Build the repository context snapshot used by shell and model-backed tools.
 kuzushi --target . run context:build --input '{}'
 
-# Run the standard native scan path with deterministic CI-style progress.
-kuzushi scan . --mode standard --ci
+# Fully bundled offline scan: no API key, model, or external scanner required.
+kuzushi scan . \
+  --tasks dep-hygiene,secret-scan,license-scan,iac-scan \
+  --ci
 
-# Inspect persisted findings.
+# Optional Semgrep pass after installing Semgrep. Auto-selected default scans
+# visibly skip an unavailable Semgrep; explicitly requesting it stays fail-closed.
+kuzushi scan . --mode standard --tasks semgrep --ci
+
+# Inspect persisted findings. A clean repository may legitimately list none.
 kuzushi findings --target . --limit 10
 
-# Inspect one finding's evidence, proof state, verification, and next action.
-kuzushi finding F-0001 --target .
-
-# Record a human review decision without mutating scanner triage output.
-kuzushi decision F-0001 --target . \
-  --verdict confirmed \
-  --reason "reviewed source-linked evidence and accepted the finding"
+# If the list contains an alias, use that displayed alias to inspect and review
+# the finding. Skip these optional steps when the list is empty:
+#   kuzushi finding <displayed-alias> --target .
+#   kuzushi decision <displayed-alias> --target . --verdict confirmed \
+#     --reason "reviewed the scanner signal and source before accepting it"
 
 # Render a markdown PR/security review summary from persisted findings.
 kuzushi pr-comment --target . > kuzushi-report.md
 
-# Or export the canonical persisted projection.
-kuzushi export --target . --format json --completeness complete --out findings.json
+# Or export the canonical persisted projection, including an honest empty list.
+kuzushi export --target . --format json --completeness complete \
+  --allow-empty --out findings.json
 ```
 
 Fresh native state is stored under `.kuzushi/v3/`; scan, shell, and headless
@@ -166,7 +204,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | Command | Purpose |
 | --- | --- |
 | `kuzushi shell [--target <repo>]` | Start the Ratatui shell. |
-| `kuzushi demo` | Scan a vendored vulnerable fixture offline — no API key, no model, no external scanners. The fastest way to see a real finding with evidence. |
+| `kuzushi demo` | Scan a vendored vulnerable fixture offline — no API key, no model, no external scanners. It records real scanner signals and redacted locations at the honest `signal_only` proof state; it does not claim source-grounded proof. |
 | `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci] [--fail-on low\|medium\|high\|critical] [--sarif out.sarif]` | Run the Rust SAST umbrella executor and persist findings. `--fail-on` exits 3 when findings at/above the severity exist (CI gating); `--sarif` writes a SARIF 2.1.0 export for Code Scanning upload. Descriptor-backed inputs also support `verifyWhen`, `verifyMax`, and `verifyVotes` for post-triage verification selection. |
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--vuln-source sarif,...] [--limit 50] [--json]` | List persisted findings. |
 | `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, verification summary, patch result, and next action. |
@@ -181,7 +219,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
 | `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
 | `kuzushi run <module:tool> --input '<json>' [--option key=value]` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand. |
-| `kuzushi mcp serve\|health <backend>` | Run or health-check a local MCP server over stdio. Backends: `gtags`, `clang`, `joern`, `tree-sitter`, `codeql`, `revng`. |
+| `kuzushi mcp serve\|health <backend>` | Run or health-check a shipped local MCP server over stdio. Backends: `gtags`, `clang`, `joern`, `tree-sitter`, `codeql`, `revng`, `context`, `entry-points`, `threat-model`, `threat-intel`, `x-ray`. |
 | `kuzushi auth ping [provider] [--model <spec>]` | Round-trip a 1-token request to verify credentials, network, and bridge. Interactive provider login is handled inside `kuzushi shell`. |
 | `kuzushi config show` | Print effective config. |
 | `kuzushi config init [--force]` | Write the default global config. |
@@ -195,7 +233,7 @@ kuzushi scan . --mode standard --tasks semgrep,secret-scan --json
 kuzushi scan . --tasks agentic-sast --triage --json
 kuzushi findings --target . --severity high,critical --limit 10
 kuzushi finding F-0001 --target .
-kuzushi decision F-0001 --target . --verdict confirmed --reason "reviewed source-linked evidence"
+kuzushi decision F-0001 --target . --verdict confirmed --reason "reviewed scanner signal and source"
 kuzushi runs list --target .
 kuzushi runs list --target . --status failed,partial
 kuzushi runs diff run-a run-b --target . --json
@@ -334,77 +372,42 @@ opaque crash. The Activity view's OUTPUT pane starts on findings and switches
 directly between generated security artifacts, including the threat model's
 data-flow diagram (boxes, trust zones, flows) once a threat model exists.
 
-## Built-In Modules
+## Capabilities and engines
 
-`kuzushi modules` is the source of truth for the visible native registry. The
-current built-ins are:
+The interactive product is organized around six operator capabilities rather
+than a scanner catalog:
 
-| Module | Primary tools |
-| --- | --- |
-| `catalog` | `catalog:modules`, `catalog:tools` |
-| `config` | `config:show` |
-| `router` | `router:show` |
-| `module-recommender` | `module-recommender:recommend` |
-| `workspace` | `workspace:status`, `workspace:export-findings` |
-| `context` | `context:build` |
-| `sast` | `sast:scan` |
-| `full-mode` | `full-mode:hunt` |
-| `classifier-gate` | `classifier-gate:score` |
-| `deep-audit` | `deep-audit:run` |
-| `smoke` | `smoke:next-step` |
-| `semgrep` | `semgrep:scan` |
-| `codeql` | `codeql:scan` |
-| `cargo-audit` | `cargo-audit:scan` |
-| `govulncheck` | `govulncheck:scan` |
-| `iac-scan` | `iac-scan:scan` |
-| `exploit-chain` | `exploit-chain:scan` |
-| `agentic-sast` | `agentic-sast:scan` |
-| `offense-review` | `offense-review:threat-hunt` |
-| `taint-iris-next` | `taint-iris-next:dataflow-plan`, `taint-iris-next:source-sink-trace`, `taint-iris-next:finding-review` |
-| `threat-intel` | `threat-intel:list`, `threat-intel:apply`, `threat-intel:harvest` |
-| `triage` | `triage:run` |
-| `verify` | `verify:finding`, `verify:exploit` |
-| `patch` | `patch:finding` |
-| `findings` | `findings:list` |
-| `report` | `report:build` |
-| `threat-model` | `threat-model:build`, `threat-model:read`, `threat-model:methodologies` |
-| `threat-intel` | `threat-intel:discover`, `threat-intel:list`, `threat-intel:apply`, `threat-intel:harvest` |
-| `threat-leads` | `threat-leads:build`, `threat-leads:read` |
-| `randori` | `randori:pasta`, `randori:threat-model` |
-| `x-ray` | `x-ray:run`, `x-ray:read` |
-| `dep-hygiene` | `dep-hygiene:check` |
-| `secret-scan` | `secret-scan:scan` |
-| `license-scan` | `license-scan:scan` |
-| `sbom-scan` | `sbom-scan:scan` |
-| `variant` | `variant:lift-pattern`, `variant:hunt` |
-| `ndiff` | `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`, `ndiff:hunt-variants` |
-| `android-apk` | `android-apk:scan` |
-| `entry-points` | `entry-points:extract` |
-| `cpg` | `cpg:build` |
-| `codeql-db` | `codeql:create-db` |
-| `bounty` | `bounty:import-har`, `bounty:import-burp` |
+| Capability | Canonical boundary | What the operator does |
+| --- | --- | --- |
+| Recon | `recon:*` | import or collect target evidence |
+| Threat map | `threat-model:*` | map boundaries, flows, and attack surface |
+| Hunt | `sast:scan` | run a target-aware composition of engines |
+| Review | `findings:*` | triage, suppress, defer, or confirm findings |
+| Verify | `verify:finding` | corroborate a selected claim with proof |
+| Fix | `patch:finding` | review remediation and export the result |
 
-Internal DAG modules such as `context-lite`, `pipeline`, and `systems-hunt`
-stay hidden from `kuzushi modules`; `systems-hunt:*` entries are internal DAG
-nodes selected through `sast:scan`, not public catalog tools. Deferred
-compatibility and product-quarantine modules are also hidden from the public
-catalog and shell completions, but remain executable by exact tool name for
-operators who opt into them: `carlini-threat-hunt`, `classifier-gate`,
-`chrome-rce`, `deep-audit`, `exploit-chain`, `full-mode`, `pwn`,
-`threat-leads`, `uaf-hunt`, and `vendor-assessment`. Legacy folded tools such
-as `taint-iris:hunt`, `taint-iris-next:hunt`, `randori:threat-model`,
-`verify:exploit`, and the granular `android-apk:*` sub-scans are exact-name
-compatibility entries; prefer the visible umbrella tools and descriptor options
-shown above.
+The shell opens on the phase Workbench. `modules` opens a small contextual
+**Capabilities** overlay; press `e` in Navigate mode to reveal direct engines
+and installed integrations. `tools [query]` remains the exhaustive expert
+inventory, while `kuzushi modules --json` and `kuzushi tools --json` are the
+machine-readable registry views.
 
-Optional plugin-backed adapters (`prompt-armor`, `shinsa`, `tob`, and
-`vuln-scout`) self-hide when their plugin package is absent. When installed,
-their canonical descriptor rows surface; legacy quick/deep aliases remain
-exact-name compatibility entries where applicable.
+Individual engines such as Semgrep, CodeQL, cargo-audit, secret scanning,
+Taint IRIS Next, and offense review remain real descriptor-backed tools. They
+are composed by `sast:scan` or selected deliberately from Expert mode rather
+than presented as competing products. Context, entry-point, CPG, CodeQL DB,
+triage, suppression, report, configuration, and workspace modules are support
+steps folded into their owning capability.
 
-Per-module operator guides live under `docs/`: [`docs/x-ray.md`](./docs/x-ray.md)
-for repository analysis reports and [`docs/pwn.md`](./docs/pwn.md) for the
-binary-exploitation workflow.
+Compatibility facades remain exact-runnable for the migration window but do
+not appear in discovery. See [`docs/api-compatibility.md`](./docs/api-compatibility.md)
+for successor commands. Optional adapters (`prompt-armor`, `shinsa`, `tob`,
+and `vuln-scout`) are no longer activated merely because a development package
+exists in `node_modules`; an operator must configure the corresponding adapter
+explicitly.
+
+Run `kuzushi tools --json` for the current canonical tool inventory. Per-engine
+guidance remains under `docs/`, including [`docs/x-ray.md`](./docs/x-ray.md).
 
 ## External Dependencies
 
@@ -431,6 +434,13 @@ Subprocess-backed tools require the operator to install or configure binaries:
 | `recon:nmap` | `nmap`, or pass a binary override. |
 | `recon:subdomain`, `recon:http-fingerprint`, online `ndiff:fetch-cve` | `curl`, unless using offline/local input. |
 
+The npm and native release payloads include every `kuzushi-mcp-*` server.
+Some servers wrap an operator-installed analysis engine: `gtags` needs GNU
+GLOBAL, `clang` needs clangd, `joern` needs Joern (or `JOERN_SERVER_URL`),
+`codeql` needs CodeQL plus a database, and `revng` needs its documented
+container runtime. `tree-sitter` and the artifact readers are self-contained;
+their `health` commands work without those external engines.
+
 LangGraph-backed tools require Node, `@langchain/langgraph`,
 `@langchain/openai` or `@langchain/anthropic`, a configured model, and provider
 credentials. A custom bridge should be supplied through
@@ -455,6 +465,7 @@ not silently succeed and they do not substitute a different model.
 | Path | Produced by |
 | --- | --- |
 | `~/.kuzushi/v3/config.toml` | `kuzushi config init` |
+| `.kuzushi/.gitignore` | first target-state initialization; ignores generated state while keeping `scope.toml`, `prompts/**`, and `v3/config.toml` shareable |
 | `.kuzushi/v3/config.toml` | Optional project override |
 | `~/.kuzushi/v3/options.json` | persisted global tool options from shell `setg` |
 | `.kuzushi/v3/options.json` | optional project/workspace tool option overrides |
@@ -491,9 +502,10 @@ camelCase run metadata/event/failure fields such as `runId` and
 `startedAtUnix`, plus canonical snake_case trace fields. Obsolete compatibility
 aliases are rejected instead of normalized.
 
-See [docs/rust-migration-status.md](docs/rust-migration-status.md) for the
-module-by-module cutover ledger, intentional removals, artifact compatibility
-notes, and TypeScript retention audit.
+Current implementation boundaries are documented in
+[docs/modules.md](docs/modules.md),
+[docs/assessments/mode-parity.md](docs/assessments/mode-parity.md), and
+[docs/architecture/domain-boundaries.md](docs/architecture/domain-boundaries.md).
 
 ## Development
 
@@ -511,7 +523,7 @@ Useful package scripts:
 | Script | Purpose |
 | --- | --- |
 | `pnpm dev -- <args>` | Run the native Rust CLI from source. |
-| `pnpm build:native` | Build and stage the native binary for npm packaging. |
+| `pnpm build:native` | Build and stage the CLI plus all shipped MCP server binaries for npm packaging. |
 | `pnpm build` | Compile retained TypeScript library exports. |
 | `pnpm test` | Run retained TypeScript unit/reference tests. |
 | `pnpm test:rust` | Run `cargo test --workspace`. |

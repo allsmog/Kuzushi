@@ -89,7 +89,7 @@ fn collect_source_file_variants(
     let Some(relative_path) = repo_relative_path(repo_root, source_file) else {
         return;
     };
-    let Ok(text) = fs::read_to_string(source_file) else {
+    let Ok(text) = crate::bounded_file::read_utf8_text(source_file, 8 * 1024 * 1024) else {
         return;
     };
     for (line_index, line) in text.lines().enumerate() {

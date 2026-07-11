@@ -6,9 +6,9 @@ use super::threat_model_signals::{
 use super::*;
 use crate::fs_atomic::{now_ms, slug};
 use crate::strategy::{
-    apply_strategy_corrections, load_strategy_queue, save_strategy_queue, StrategyPhase,
-    StrategyPreflight, StrategyPreflightStatus, StrategyProposal, StrategyProposalStatus,
-    StrategyResourceRisk,
+    acquire_recovered_strategy_lock, apply_strategy_corrections_unlocked,
+    load_strategy_queue_unlocked, save_strategy_queue_unlocked, StrategyPhase, StrategyPreflight,
+    StrategyPreflightStatus, StrategyProposal, StrategyProposalStatus, StrategyResourceRisk,
 };
 
 pub(crate) fn execute_module_recommender_tool(
@@ -29,7 +29,7 @@ pub(crate) fn execute_module_recommender_tool(
         &attack_surface,
         findings_available,
         &findings,
-    );
+    )?;
     // Rank with the session model when one is configured and a runtime is
     // available; otherwise fall back to the deterministic rule catalog.
     let ranking = ModelRanking::resolve(ctx, runtime, &input, workspace.root());
@@ -53,9 +53,9 @@ fn recommender_request(
     attack_surface: &AttackSurfaceMap,
     findings_available: bool,
     findings: &[Finding],
-) -> RecommenderRequest {
-    let threat_model = load_persistent_threat_model(workspace.root());
-    RecommenderRequest {
+) -> Result<RecommenderRequest> {
+    let threat_model = try_load_persistent_threat_model(workspace.root())?;
+    Ok(RecommenderRequest {
         target: workspace.root().display().to_string(),
         max_recommendations: max_recommendations(input),
         available_tools: available_tools.into_iter().collect(),
@@ -70,17 +70,18 @@ fn recommender_request(
         ),
         components: component_recommendations(
             workspace.root(),
-            &recommender_scope_tree(workspace.root()),
+            &recommender_scope_tree(workspace.root())?,
             inventory,
             attack_surface,
         ),
-    }
+    })
 }
 
-fn recommender_scope_tree(root: &Path) -> crate::workspace::NestedProjectScopeTree {
+fn recommender_scope_tree(root: &Path) -> Result<crate::workspace::NestedProjectScopeTree> {
     match crate::workspace::load_nested_project_scopes(root) {
-        Ok(Some(tree)) => tree,
-        _ => crate::workspace::discover_nested_project_scopes(root),
+        Ok(Some(tree)) => Ok(tree),
+        Ok(None) => Ok(crate::workspace::discover_nested_project_scopes(root)),
+        Err(error) => Err(error).context("Could not load persisted project scopes"),
     }
 }
 
@@ -89,7 +90,8 @@ fn persist_strategy_proposals(
     report: &RecommendationReport,
     run_id: Option<String>,
 ) -> Result<Vec<StrategyProposal>> {
-    let mut existing = load_strategy_queue(workspace)?;
+    let _guard = acquire_recovered_strategy_lock(workspace)?;
+    let mut existing = load_strategy_queue_unlocked(workspace)?;
     let now = now_ms();
     let mut generated_ids = Vec::new();
     let mut generated = Vec::new();
@@ -98,11 +100,11 @@ fn persist_strategy_proposals(
         generated_ids.push(proposal.id.clone());
         generated.push(proposal);
     }
-    apply_strategy_corrections(workspace, run_id.as_deref(), &mut generated)?;
+    apply_strategy_corrections_unlocked(workspace, run_id.as_deref(), &mut generated)?;
     for proposal in generated {
         merge_strategy_proposal(&mut existing, proposal);
     }
-    save_strategy_queue(workspace, &existing)?;
+    save_strategy_queue_unlocked(workspace, &existing)?;
     Ok(existing
         .into_iter()
         .filter(|proposal| generated_ids.contains(&proposal.id))

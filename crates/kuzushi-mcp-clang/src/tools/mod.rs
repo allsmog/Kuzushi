@@ -6,7 +6,6 @@ mod file_macro_handlers;
 mod health_compile_handlers;
 mod health_handle;
 mod navigation_handlers;
-mod stub;
 mod tool_types;
 mod type_ast_handlers;
 

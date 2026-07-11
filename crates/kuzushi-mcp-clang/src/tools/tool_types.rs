@@ -40,6 +40,3 @@ pub(crate) struct SemanticTokensTool {
 pub(crate) struct DiagnosticsTool {
     pub(crate) handle: Arc<ClangdHandle>,
 }
-
-#[allow(dead_code)]
-pub(crate) struct NotYetImplemented(pub(crate) &'static str);

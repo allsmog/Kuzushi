@@ -10,6 +10,7 @@ Feature: Launch-time target picker
     When I launch the shell without a target
     Then I see "CHOOSE A TARGET"
     And I see "offline fixture"
+    And the selected target consent is visible
     And the status segment shows "target-picker"
 
   Scenario: Esc browses without a target
@@ -25,4 +26,27 @@ Feature: Launch-time target picker
     And no model is configured
     When I launch the shell without a target
     Then I do not see "CHOOSE A TARGET"
-    And the status segment shows "modules"
+    And the status segment shows "workbench"
+
+  Scenario: Narrow full chain preserves target consent and plan confirmation
+    Given a fresh kuzushi workspace
+    And a 60 by 20 terminal
+    And no model is configured
+    When I launch the shell without a target
+    Then the selected target consent is visible
+    When I press "Enter"
+    Then I see "CHOOSE A MODEL"
+    And the confirmed target is visible
+    When I press "Down"
+    And I press "Down"
+    And I press "Down"
+    And I press "Enter"
+    Then I see "CHOOSE AUTH METHOD"
+    And the confirmed target is visible
+    When I type text "bdd-anthropic-key"
+    And I press "Enter"
+    Then I see "KUMI-KATA"
+    And the confirmed target is visible
+    And I see "Inline action"
+    And the Enter plan summary and controls are visible
+    And I do not see "tool descriptor missing"

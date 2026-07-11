@@ -8,7 +8,7 @@ env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch: demo
 wait-for: 120 finding
 snap: demo-subcommand
-ask: `kuzushi demo` — does the output make the value legible (a real finding with evidence), or does it just print logs?
+ask: `kuzushi demo` — does the output make a real scanner signal, redacted location, and signal_only proof state legible, or does it just print logs?
 wait-for: 120 demo: point
 wait: 3
 snap: demo-subcommand-settled
@@ -21,4 +21,4 @@ keys: d
 wait-for: 90 run completed
 snap: in-gate-demo
 expect: findings
-ask: In-gate `d` — same value as the subcommand route? Zero key, zero network, real evidence?
+ask: In-gate `d` — same value as the subcommand route? Zero key, zero network, and the same honest scanner-signal proof state?

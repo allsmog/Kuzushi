@@ -187,11 +187,11 @@ fn load_context_source(
         }
         "require" => {
             emit_source_step(ctx, "source:context require");
-            read_json_source(&path, "context snapshot")?
+            read_json_source(&input.target, &path, "context snapshot")?
         }
         _ if path.exists() => {
             emit_source_step(ctx, "source:context load");
-            read_json_source(&path, "context snapshot")?
+            read_json_source(&input.target, &path, "context snapshot")?
         }
         _ => {
             emit_source_step(ctx, "source:context build");
@@ -224,7 +224,7 @@ fn load_prior_threat_model_source(input: &BuildInput) -> Result<ThreatModelSourc
             "no prior persistent threat model",
         ));
     }
-    let content = read_json_source(&path, "prior threat model")?;
+    let content = read_json_source(&input.target, &path, "prior threat model")?;
     Ok(ThreatModelSourceRecord::loaded(
         "artifact",
         "threat-model",
@@ -236,9 +236,17 @@ fn load_prior_threat_model_source(input: &BuildInput) -> Result<ThreatModelSourc
 
 fn load_x_ray_source(input: &BuildInput) -> Result<ThreatModelSourceRecord> {
     let dir = input.target.join(X_RAY_DIR);
-    let x_ray = read_required_text(&dir.join(X_RAY_MD), "x-ray source")?;
-    let entry_points = read_required_text(&dir.join(X_RAY_ENTRY_POINTS_MD), "x-ray entry points")?;
-    let invariants = read_required_text(&dir.join(X_RAY_INVARIANTS_MD), "x-ray invariants")?;
+    let x_ray = read_required_text(&input.target, &dir.join(X_RAY_MD), "x-ray source")?;
+    let entry_points = read_required_text(
+        &input.target,
+        &dir.join(X_RAY_ENTRY_POINTS_MD),
+        "x-ray entry points",
+    )?;
+    let invariants = read_required_text(
+        &input.target,
+        &dir.join(X_RAY_INVARIANTS_MD),
+        "x-ray invariants",
+    )?;
     let content = format!(
         "# x-ray.md\n{x_ray}\n\n# entry-points.md\n{entry_points}\n\n# invariants.md\n{invariants}"
     );
@@ -253,7 +261,7 @@ fn load_x_ray_source(input: &BuildInput) -> Result<ThreatModelSourceRecord> {
 
 fn load_entry_points_source(input: &BuildInput) -> Result<ThreatModelSourceRecord> {
     let path = crate::workspace::workspace_state_root(&input.target).join(ENTRY_POINTS_FILE);
-    let content = read_json_source(&path, "entry-points artifact")?;
+    let content = read_json_source(&input.target, &path, "entry-points artifact")?;
     Ok(ThreatModelSourceRecord::loaded(
         "artifact",
         "entry-points",
@@ -265,7 +273,7 @@ fn load_entry_points_source(input: &BuildInput) -> Result<ThreatModelSourceRecor
 
 fn load_design_doc_source(input: &BuildInput, design_doc: &str) -> Result<ThreatModelSourceRecord> {
     let path = resolve_source_path(&input.target, design_doc);
-    let content = read_required_text(&path, "designDoc")?;
+    let content = read_required_text(&input.target, &path, "designDoc")?;
     Ok(ThreatModelSourceRecord::loaded(
         "operator",
         "designDoc",
@@ -279,7 +287,7 @@ fn load_seed_source(input: &BuildInput, index: usize, seed: &str) -> Result<Thre
     let label = format!("seed-{index}");
     let path = resolve_source_path(&input.target, seed);
     if looks_like_source_path(seed) || path.exists() {
-        let content = read_required_text(&path, "seed")?;
+        let content = read_required_text(&input.target, &path, "seed")?;
         return Ok(ThreatModelSourceRecord::loaded(
             "operator",
             &label,
@@ -297,16 +305,17 @@ fn load_seed_source(input: &BuildInput, index: usize, seed: &str) -> Result<Thre
     ))
 }
 
-fn read_json_source(path: &Path, label: &str) -> Result<String> {
-    let raw = read_required_text(path, label)?;
+fn read_json_source(root: &Path, path: &Path, label: &str) -> Result<String> {
+    let raw = read_required_text(root, path, label)?;
     let value: Value = serde_json::from_str(&raw)
         .with_context(|| format!("{label} at {} is not valid JSON", path.display()))?;
     serde_json::to_string_pretty(&value)
         .with_context(|| format!("Could not render {label} from {}", path.display()))
 }
 
-fn read_required_text(path: &Path, label: &str) -> Result<String> {
-    fs::read_to_string(path).with_context(|| format!("Could not read {label} from {}", path.display()))
+fn read_required_text(root: &Path, path: &Path, label: &str) -> Result<String> {
+    crate::bounded_file::read_utf8_text_within(root, path, MAX_SOURCE_BYTES)
+        .with_context(|| format!("Could not read {label} from {}", path.display()))
 }
 
 fn resolve_source_path(root: &Path, value: &str) -> PathBuf {

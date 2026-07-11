@@ -75,29 +75,26 @@ fn emit_network_security_done(ctx: &ToolExecutionContext<'_>, findings_count: us
 }
 
 fn resolve_config_path(input: &Value, workspace_root: &Path) -> Result<PathBuf> {
-    if let Some(raw) = input
+    let candidate = if let Some(raw) = input
         .get("configPath")
         .or_else(|| input.get("config_path"))
         .and_then(Value::as_str)
     {
-        let path = PathBuf::from(raw);
-        if path.is_file() {
-            return Ok(path);
-        }
-    }
-    let candidate = workspace_root
-        .join("android-decompiled")
-        .join("apktool")
-        .join("res")
-        .join("xml")
-        .join("network_security_config.xml");
-    if !candidate.is_file() {
-        anyhow::bail!(
+        PathBuf::from(raw)
+    } else {
+        workspace_root
+            .join("android-decompiled")
+            .join("apktool")
+            .join("res")
+            .join("xml")
+            .join("network_security_config.xml")
+    };
+    validated_android_workspace_file(workspace_root, &candidate).with_context(|| {
+        format!(
             "android-apk:network-security-config: missing {}. Either the APK has no network security config or apktool decode hasn't run yet.",
             candidate.display()
-        );
-    }
-    Ok(candidate)
+        )
+    })
 }
 
 pub(in crate::modules) fn network_security_findings(

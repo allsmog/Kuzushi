@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     use std::{env, fs};
 
     struct EnvVarGuard {
@@ -190,6 +189,31 @@ prompt_variant = "   "
         .unwrap();
         assert_eq!(loaded.model.as_deref(), Some("openai:gpt-5.5"));
         assert_eq!(loaded.runtime.thinking_level.as_deref(), Some("xhigh"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_config_reader_rejects_an_outside_symlink_without_disclosing_content() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let target = tmp.path().join("repo");
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "OUTSIDE_CONFIG_TOKEN").unwrap();
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+        symlink(outside.path(), target.join(".kuzushi/v3/config.toml")).unwrap();
+
+        let error = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: Some(target),
+        })
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("symlink"), "{error}");
+        assert!(!error.contains("OUTSIDE_CONFIG_TOKEN"));
     }
 
     #[test]
@@ -570,30 +594,55 @@ trusted_workflow_auto_accept = true
     }
 
     #[test]
-    fn project_config_rejects_mcp_mounts() {
+    fn project_config_rejects_kwp_operator_execution_policy() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let target = tmp.path().join("evil-target");
+        fs::create_dir_all(&home).unwrap();
         fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
         fs::write(
             target.join(".kuzushi/v3/config.toml"),
-            r#"
-[operator]
-mcp_mounts = []
+            format!(
+                r#"
+[[operator.signature_keys]]
+key_id = "author"
+algorithm = "ed25519"
+public_key = "{}"
+
+[[operator.mcp_mounts]]
+alias = "target-controlled"
+command = ["node", "evil-mcp.mjs"]
+descriptor_hash = "sha256:{}"
+
+[[operator.mcp_mounts.tools]]
+name = "query"
+description = ""
+input_schema = {{ type = "object" }}
+
+[[operator.fuzz_executors]]
+engine = "property-tests"
+command = ["node", "evil-fuzzer.mjs"]
 "#,
+                test_signature_public_key(),
+                "0".repeat(64),
+            ),
         )
         .unwrap();
 
-        let err = load_config(ConfigPaths {
+        let error = load_config(ConfigPaths {
             home_dir: home,
             target_dir: Some(target),
         })
-        .unwrap_err();
-        assert!(err.to_string().contains("operator.mcp_mounts"));
+        .unwrap_err()
+        .to_string();
+
+        for field in ["signature_keys", "mcp_mounts", "fuzz_executors"] {
+            assert!(error.contains(field), "missing {field} in error: {error}");
+        }
     }
 
     #[test]
-    fn loads_global_signature_keys() {
+    fn global_config_loads_kwp_operator_execution_policy() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
@@ -605,8 +654,25 @@ mcp_mounts = []
 key_id = "author"
 algorithm = "ed25519"
 public_key = "{}"
+
+[[operator.mcp_mounts]]
+alias = "trusted"
+command = ["node", "trusted-mcp.mjs"]
+descriptor_hash = "sha256:{}"
+timeout_ms = 1000
+
+[[operator.mcp_mounts.tools]]
+name = "query"
+description = "Trusted query"
+input_schema = {{ type = "object" }}
+
+[[operator.fuzz_executors]]
+engine = "property-tests"
+command = ["node", "trusted-fuzzer.mjs"]
+timeout_ms = 2000
 "#,
-                test_signature_public_key()
+                test_signature_public_key(),
+                "a".repeat(64),
             ),
         )
         .unwrap();
@@ -617,12 +683,44 @@ public_key = "{}"
         })
         .unwrap();
 
-        assert_eq!(config.operator.signature_keys.len(), 1);
         assert_eq!(config.operator.signature_keys[0].key_id, "author");
+        assert_eq!(config.operator.mcp_mounts[0].alias, "trusted");
+        assert_eq!(config.operator.fuzz_executors[0].timeout_ms, Some(2000));
     }
 
     #[test]
-    fn rejects_invalid_global_signature_key() {
+    fn global_config_rejects_invalid_kwp_operator_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[[operator.mcp_mounts]]
+alias = "trusted"
+command = ["node", "trusted-mcp.mjs"]
+descriptor_hash = "sha256:not-a-digest"
+
+[[operator.mcp_mounts.tools]]
+name = "query"
+description = ""
+input_schema = { type = "object" }
+"#,
+        )
+        .unwrap();
+
+        let error = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("descriptor_hash"), "{error}");
+    }
+
+    #[test]
+    fn global_config_rejects_invalid_kwp_signature_key() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
@@ -637,74 +735,18 @@ public_key = "not-base64"
         )
         .unwrap();
 
-        let err = load_config(ConfigPaths {
+        let error = load_config(ConfigPaths {
             home_dir: home,
             target_dir: None,
         })
-        .unwrap_err();
+        .unwrap_err()
+        .to_string();
 
-        assert!(err.to_string().contains("operator.signature_keys"));
+        assert!(error.contains("operator.signature_keys"), "{error}");
     }
 
-    #[test]
-    fn project_config_rejects_signature_keys() {
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path().join("home");
-        let target = tmp.path().join("evil-target");
-        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
-        fs::write(
-            target.join(".kuzushi/v3/config.toml"),
-            format!(
-                r#"
-[[operator.signature_keys]]
-key_id = "author"
-algorithm = "ed25519"
-public_key = "{}"
-"#,
-                test_signature_public_key()
-            ),
-        )
-        .unwrap();
-
-        let err = load_config(ConfigPaths {
-            home_dir: home,
-            target_dir: Some(target),
-        })
-        .unwrap_err();
-
-        assert!(err.to_string().contains("operator.signature_keys"));
-    }
-
-    fn test_signature_public_key() -> String {
-        BASE64.encode(
-            ed25519_dalek::SigningKey::from_bytes(&[7; 32])
-                .verifying_key()
-                .as_bytes(),
-        )
-    }
-
-    #[test]
-    fn project_config_rejects_fuzz_executors() {
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path().join("home");
-        let target = tmp.path().join("evil-target");
-        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
-        fs::write(
-            target.join(".kuzushi/v3/config.toml"),
-            r#"
-[[operator.fuzz_executors]]
-engine = "property-tests"
-command = ["node", "evil.js"]
-"#,
-        )
-        .unwrap();
-
-        let err = load_config(ConfigPaths {
-            home_dir: home,
-            target_dir: Some(target),
-        })
-        .unwrap_err();
-        assert!(err.to_string().contains("operator.fuzz_executors"));
+    fn test_signature_public_key() -> &'static str {
+        "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
     }
 
     #[test]

@@ -187,6 +187,33 @@ impl AgentRuntime for TracedRuntime<'_> {
         result
     }
 
+    fn query_blocking_controlled(
+        &self,
+        request: AgentQueryRequest,
+        control: AgentQueryControl,
+    ) -> Result<AgentQueryResponse> {
+        let start = Instant::now();
+        let prompt_len = request.prompt.len();
+        let model = request.model.clone();
+        let prompt_hash = prompt_pair_hash(&request.system_prompt, &request.prompt);
+        self.record_model_call_start(
+            "query",
+            format!("query · sending {prompt_len} chars"),
+            &model,
+            &prompt_hash,
+        );
+        let result = self.inner.query_blocking_controlled(request, control);
+        self.record_query(
+            "query",
+            prompt_len,
+            &model,
+            &prompt_hash,
+            &result,
+            start.elapsed().as_millis() as u64,
+        );
+        result
+    }
+
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
         let start = Instant::now();
         let model = request.model.clone();

@@ -21,7 +21,7 @@ impl FindingStore {
         let conn = crate::sqlite_connection::open_file(db_path)?;
         let mut stmt = conn.prepare(
             r#"
-            select patch_run_id, fingerprint, repo, diff_object, status, iterations,
+            select patch_run_id, fingerprint, repo, diff_object, diff_size_bytes, status, iterations,
                    build_command, test_command, worktree_path, cost_usd,
                    validator_log, history_json, created_at, created_at
             from patch_attempt_events
@@ -30,11 +30,14 @@ impl FindingStore {
             "#,
         )?;
         let rows = stmt.query_map(params![fingerprint], row_to_v3_patch_result)?;
-        let mut results = rows
+        let mut stored_results = rows
             .collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not list v3 patch results")?;
-        self.attach_patch_diffs(&mut results)?;
-        Ok(results)
+        self.attach_patch_diffs(&mut stored_results)?;
+        Ok(stored_results
+            .into_iter()
+            .map(|stored| stored.result)
+            .collect())
     }
 
     fn record_v3_patch_attempt(&self, result: &PatchResult, history_json: &str) -> Result<()> {
@@ -84,7 +87,7 @@ impl FindingStore {
             .map(Some)
     }
 
-    fn attach_patch_diffs(&self, results: &mut [PatchResult]) -> Result<()> {
+    fn attach_patch_diffs(&self, results: &mut [StoredPatchResult]) -> Result<()> {
         let Some(db_path) = &self.db_path else {
             return Ok(());
         };
@@ -93,36 +96,72 @@ impl FindingStore {
             .context("v3 index path has no parent for patch diff object store")?
             .join("objects");
         let store = ContentStore::open(objects_dir)?;
-        for result in results {
-            let Some(object_hash) = result.diff.as_deref() else {
+        for stored in results {
+            let Some(object_hash) = stored.result.diff.as_deref() else {
                 continue;
             };
             let hash = Blake3Hash::new(object_hash.to_string())?;
-            let bytes = store.get(&hash)?;
-            result.diff = Some(String::from_utf8_lossy(&bytes).to_string());
+            let size_bytes = stored.diff_size_bytes.with_context(|| {
+                format!("patch diff object {hash} is missing its recorded size")
+            })?;
+            let object_ref = ObjectRef {
+                kind: ObjectKind::PatchDiff,
+                hash,
+                size_bytes,
+            };
+            let bytes = store.get_object(&object_ref)?;
+            stored.result.diff = Some(String::from_utf8(bytes).context("Patch diff is not UTF-8")?);
         }
         Ok(())
     }
 }
 
-fn row_to_v3_patch_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<PatchResult> {
-    let status: String = row.get(4)?;
-    let history_json: String = row.get(11)?;
-    Ok(PatchResult {
+struct StoredPatchResult {
+    result: PatchResult,
+    diff_size_bytes: Option<u64>,
+}
+
+fn row_to_v3_patch_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredPatchResult> {
+    let status: String = row.get(5)?;
+    let history_json: String = row.get(12)?;
+    Ok(StoredPatchResult {
+        result: PatchResult {
         patch_run_id: row.get(0)?,
         fingerprint: row.get(1)?,
         repo: row.get(2)?,
         diff: row.get(3)?,
         status: PatchStatus::try_from(status.as_str()).map_err(to_sql_error)?,
-        iterations: row.get::<_, i64>(5)? as usize,
-        build_command: row.get(6)?,
-        test_command: row.get(7)?,
-        worktree_path: row.get(8)?,
-        cost_usd: row.get(9)?,
-        validator_log: row.get(10)?,
+        iterations: row.get::<_, i64>(6)? as usize,
+        build_command: row.get(7)?,
+        test_command: row.get(8)?,
+        worktree_path: row.get(9)?,
+        cost_usd: row.get(10)?,
+        validator_log: row.get(11)?,
         history: serde_json::from_str::<Vec<PatchAttempt>>(&history_json)
             .map_err(|error| to_sql_error(anyhow::Error::new(error)))?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
+        },
+        diff_size_bytes: optional_nonnegative_u64(row, 4)?,
     })
+}
+
+fn optional_nonnegative_u64(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Option<u64>> {
+    row.get::<_, Option<i64>>(index)?
+        .map(|value| {
+            u64::try_from(value).map_err(|_| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    index,
+                    rusqlite::types::Type::Integer,
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("negative object size {value}"),
+                    )),
+                )
+            })
+        })
+        .transpose()
 }

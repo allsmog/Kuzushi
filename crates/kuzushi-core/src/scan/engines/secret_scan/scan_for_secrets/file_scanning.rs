@@ -1,3 +1,4 @@
+use super::super::scanner_options::MAX_SUPPORTED_FILE_BYTES;
 use super::*;
 
 pub(super) enum SecretFileScan {
@@ -35,15 +36,14 @@ fn read_secret_file_bytes(file_path: &Path, options: &SecretScanOptions) -> Secr
         return SecretFileRead::Skipped;
     }
 
-    let Ok(metadata) = fs::metadata(file_path) else {
-        return SecretFileRead::Ignored;
-    };
-    if metadata.len() > options.max_file_bytes {
-        return SecretFileRead::Skipped;
-    }
-
-    let Ok(bytes) = fs::read(file_path) else {
-        return SecretFileRead::Ignored;
+    let max_bytes =
+        usize::try_from(options.max_file_bytes).unwrap_or(MAX_SUPPORTED_FILE_BYTES as usize);
+    let bytes = match crate::bounded_file::read_regular_bytes(file_path, max_bytes) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+            return SecretFileRead::Skipped;
+        }
+        Err(_) => return SecretFileRead::Ignored,
     };
     if is_likely_binary(&bytes) {
         return SecretFileRead::Skipped;

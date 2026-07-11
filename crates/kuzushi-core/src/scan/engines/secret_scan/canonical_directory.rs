@@ -1,13 +1,10 @@
 use super::*;
 
 pub(crate) fn canonical_directory(target: &Path) -> Result<PathBuf> {
-    let path = if target.is_absolute() {
-        target.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .context("Could not resolve current directory")?
-            .join(target)
-    };
+    if !target.is_absolute() {
+        anyhow::bail!("secret-scan target must be resolved against the active workspace");
+    }
+    let path = target.to_path_buf();
     if !path.exists() {
         anyhow::bail!("secret-scan: target is not a directory: {}", path.display());
     }

@@ -18,7 +18,6 @@ pub(crate) use node_route_from_line::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::Path;
 pub(crate) use summarize_surfaces::*;
 mod add;

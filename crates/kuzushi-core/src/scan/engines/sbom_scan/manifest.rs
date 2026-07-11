@@ -1,9 +1,10 @@
+use super::bounded_fs as fs;
 use super::bower_json::bower_components;
 use super::cabal::{cabal_components, is_cabal_file};
 use super::cargo_manifest::cargo_target_components;
-use super::conda_environment::{conda_environment_components, is_conda_environment_manifest};
-use super::conanfile_txt::conanfile_components;
 use super::composer_json::composer_components;
+use super::conanfile_txt::conanfile_components;
+use super::conda_environment::{conda_environment_components, is_conda_environment_manifest};
 use super::cpanfile::{cpanfile_components, is_cpanfile};
 use super::deno_json::deno_components;
 use super::dotnet_project::{dotnet_project_components, is_dotnet_project};
@@ -30,9 +31,8 @@ use super::sbt_build::sbt_components;
 use super::shard_yml::{is_shard_yml, shard_components};
 use super::toml_manifest::{toml_dependency_scopes, toml_value_at, toml_version};
 use super::vcpkg_json::vcpkg_components;
-use super::{SbomComponent, component};
+use super::{component, SbomComponent};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_dependency_manifest(path: &Path) -> bool {
@@ -58,8 +58,7 @@ pub(super) fn is_dependency_manifest(path: &Path) -> bool {
                     | "vcpkg.json"
                     | "deno.json"
                     | "import_map.json"
-            )
-                || is_gradle_build(path)
+            ) || is_gradle_build(path)
                 || is_requirements_manifest(name)
                 || is_cabal_file(path)
                 || is_conda_environment_manifest(name)

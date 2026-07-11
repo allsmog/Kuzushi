@@ -20,7 +20,7 @@ pub(in crate::modules) struct NativeLibSummary {
 }
 
 pub(in crate::modules) fn summarize_lib(path: &Path) -> Result<NativeLibSummary> {
-    let bytes = fs::read(path)?;
+    let bytes = crate::bounded_file::read_regular_bytes(path, 128 * 1024 * 1024)?;
     let elf = Elf::parse(&bytes)?;
     let abi = path
         .parent()
@@ -78,30 +78,43 @@ pub(in crate::modules) fn enumerate_so_files(lib_root: &Path) -> Result<Vec<Path
     for abi_entry in fs::read_dir(lib_root)
         .map_err(|error| anyhow::anyhow!("could not read {}: {error}", lib_root.display()))?
     {
-        let abi_entry = match abi_entry {
-            Ok(entry) => entry,
-            Err(_) => continue,
+        let abi_entry = abi_entry.with_context(|| {
+            format!(
+                "could not inspect native libraries in {}",
+                lib_root.display()
+            )
+        })?;
+        let Ok(file_type) = abi_entry.file_type() else {
+            continue;
         };
         let abi_path = abi_entry.path();
-        if !abi_path.is_dir() {
+        if !file_type.is_dir() || file_type.is_symlink() {
             continue;
         }
-        collect_so_in_abi(&abi_path, &mut paths);
+        collect_so_in_abi(&abi_path, &mut paths)?;
     }
     Ok(paths)
 }
 
-fn collect_so_in_abi(abi_path: &Path, paths: &mut Vec<PathBuf>) {
-    let entries = match fs::read_dir(abi_path) {
-        Ok(entries) => entries,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
+fn collect_so_in_abi(abi_path: &Path, paths: &mut Vec<PathBuf>) -> Result<()> {
+    let entries = fs::read_dir(abi_path)
+        .with_context(|| format!("could not read native ABI directory {}", abi_path.display()))?;
+    for entry in entries {
+        let entry = entry.with_context(|| {
+            format!(
+                "could not inspect native ABI directory {}",
+                abi_path.display()
+            )
+        })?;
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         let path = entry.path();
-        if is_shared_object(&path) {
+        if file_type.is_file() && !file_type.is_symlink() && is_shared_object(&path) {
             paths.push(path);
         }
     }
+    Ok(())
 }
 
 fn is_shared_object(path: &Path) -> bool {

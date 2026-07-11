@@ -32,7 +32,7 @@ fn read_sast_prompt_override(
         return Ok(None);
     };
     let path = crate::options::prompt_override_path(workspace.root(), "sast", verb);
-    match std::fs::read_to_string(&path) {
+    match crate::options::read_workspace_prompt_file(workspace.root(), &path) {
         Ok(text) if !text.trim().is_empty() => Ok(Some(text)),
         Ok(_) => Ok(None),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -55,6 +55,8 @@ mod tests {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         }
     }
 
@@ -100,5 +102,32 @@ mod tests {
         .unwrap();
 
         assert_eq!(input["TRIAGE_PROMPT"], json!("explicit prompt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn with_sast_prompt_override_rejects_outside_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace_root = temp.path().join("workspace");
+        let outside = temp.path().join("outside.txt");
+        std::fs::create_dir_all(&workspace_root).unwrap();
+        std::fs::write(&outside, "outside secret").unwrap();
+        let path = crate::options::prompt_override_path(&workspace_root, "sast", "triage");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&outside, &path).unwrap();
+        let workspace = WorkspaceTarget::new(&workspace_root).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let error = with_sast_prompt_override(
+            json!({"scanId": "scan-1"}),
+            &json!({}),
+            &ctx,
+            "triage",
+            "TRIAGE_PROMPT",
+        )
+        .unwrap_err();
+
+        assert!(!format!("{error:#}").contains("outside secret"));
     }
 }

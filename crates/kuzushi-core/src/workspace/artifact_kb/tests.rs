@@ -64,10 +64,7 @@ mod tests {
         assert!(!search.missing_db);
         assert!(search.results.iter().any(|result| {
             result.record.module_id == "carlini-threat-hunt"
-                && result
-                    .record
-                    .source_path
-                    .contains("index.sqlite3#finding")
+                && result.record.source_path.contains("index.sqlite3#finding")
                 && result.record.refs == ["src/app.ts:42"]
         }));
         assert!(search
@@ -119,6 +116,40 @@ mod tests {
             stale[0].current_hash.as_deref(),
             Some(stale[0].record.content_hash.as_str())
         );
+    }
+
+    #[test]
+    fn stale_records_never_read_absolute_or_oversized_sources() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let oversized = workspace.root().join("oversized.txt");
+        fs::File::create(&oversized)
+            .unwrap()
+            .set_len(65 * 1024 * 1024)
+            .unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let store = ArtifactKnowledgeStore::open(&workspace).unwrap();
+        for source in [
+            outside.path().display().to_string(),
+            "oversized.txt".to_string(),
+        ] {
+            store
+                .upsert_record(&ArtifactKnowledgeRecord::from_body(
+                    source.as_str(),
+                    "context",
+                    None,
+                    "adversarial source",
+                    "body",
+                    Vec::new(),
+                    json!({}),
+                ))
+                .unwrap();
+        }
+
+        let stale = store.stale_records(&workspace).unwrap();
+
+        assert_eq!(stale.len(), 2);
+        assert!(stale.iter().all(|record| record.current_hash.is_none()));
     }
 
     #[test]

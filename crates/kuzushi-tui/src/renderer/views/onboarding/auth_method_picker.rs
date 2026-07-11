@@ -11,7 +11,7 @@ pub(crate) fn auth_method_picker_lines(
     }
 
     let rows = auth_method_rows(provider);
-    let mut lines = auth_picker_intro(provider, area.width);
+    let mut lines = auth_picker_intro(app, provider, area.width);
     lines.extend(auth_picker_rows(app, &rows, area.width));
     if app.router.auth_picker().is_api_key_row() {
         lines.extend(api_key_draft_lines(app, provider, area.width));
@@ -20,8 +20,12 @@ pub(crate) fn auth_method_picker_lines(
     lines
 }
 
-fn auth_picker_intro(provider: &str, width: u16) -> Vec<Line<'static>> {
-    let mut lines = vec![divider("CHOOSE AUTH METHOD", width), blank()];
+fn auth_picker_intro(app: &ShellApp, provider: &str, width: u16) -> Vec<Line<'static>> {
+    let mut lines = vec![divider("CHOOSE AUTH METHOD", width)];
+    if let Some(target) = confirmed_target_line(app, width as usize) {
+        lines.push(target);
+    }
+    lines.push(blank());
     lines.extend(
         wrap_text(
             &format!(

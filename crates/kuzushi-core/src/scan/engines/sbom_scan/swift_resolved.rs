@@ -1,7 +1,7 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_swift_resolved(path: &Path) -> bool {
@@ -29,10 +29,7 @@ pub(super) fn swift_resolved_edges(target: &Path, path: &Path) -> Result<Vec<Sbo
         .collect())
 }
 
-pub(super) fn swift_resolved_components(
-    target: &Path,
-    path: &Path,
-) -> Result<Vec<SbomComponent>> {
+pub(super) fn swift_resolved_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse Package.resolved")?;

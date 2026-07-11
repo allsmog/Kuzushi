@@ -2,6 +2,7 @@ use super::TerminalLoopWake;
 use kuzushi_core::NestedProjectScopeTree;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::thread::JoinHandle;
 
 #[derive(Debug)]
 pub(crate) struct ProjectScopeDiscoveryResult {
@@ -21,6 +22,7 @@ pub(crate) struct ProjectScopeDiscoveryRuntime {
     active_root: Option<PathBuf>,
     tx: Sender<StampedProjectScopeDiscoveryResult>,
     rx: Receiver<StampedProjectScopeDiscoveryResult>,
+    handles: Vec<JoinHandle<()>>,
 }
 
 impl Default for ProjectScopeDiscoveryRuntime {
@@ -31,6 +33,7 @@ impl Default for ProjectScopeDiscoveryRuntime {
             active_root: None,
             tx,
             rx,
+            handles: Vec::new(),
         }
     }
 }
@@ -41,7 +44,8 @@ impl ProjectScopeDiscoveryRuntime {
         self.active_root = Some(root.clone());
         let generation = self.generation;
         let tx = self.tx.clone();
-        std::thread::spawn(move || {
+        self.reap_finished();
+        self.handles.push(std::thread::spawn(move || {
             let tree = kuzushi_core::discover_and_save_nested_project_scopes(&root)
                 .map_err(|error| error.to_string());
             let result = ProjectScopeDiscoveryResult { root, tree };
@@ -49,7 +53,7 @@ impl ProjectScopeDiscoveryRuntime {
             if let Some(wake) = wake {
                 wake.notify();
             }
-        });
+        }));
     }
 
     pub(crate) fn drain_current(&mut self) -> Vec<ProjectScopeDiscoveryResult> {
@@ -61,7 +65,31 @@ impl ProjectScopeDiscoveryRuntime {
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }
         }
+        self.reap_finished();
         current
+    }
+
+    pub(crate) fn is_running(&self) -> bool {
+        self.handles.iter().any(|handle| !handle.is_finished())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn register_blocked_handle(&mut self, release: Receiver<()>) {
+        self.handles.push(std::thread::spawn(move || {
+            let _ = release.recv();
+        }));
+    }
+
+    fn reap_finished(&mut self) {
+        let mut active = Vec::with_capacity(self.handles.len());
+        for handle in self.handles.drain(..) {
+            if handle.is_finished() {
+                let _ = handle.join();
+            } else {
+                active.push(handle);
+            }
+        }
+        self.handles = active;
     }
 
     fn is_current(&self, result: &StampedProjectScopeDiscoveryResult) -> bool {

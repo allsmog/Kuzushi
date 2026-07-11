@@ -20,7 +20,6 @@
     "src/utils.ts",
     "src/agent-runtime/types.ts",
     "src/bus/types.ts",
-    "src/copilot/print.ts",
     "src/modules/dag-execute.ts",
     "src/modules/dag-ids.ts",
     "src/modules/dag-registry.ts",
@@ -47,5 +46,5 @@
     "src/testing/mocks/ui-store.ts",
     "src/testing/mocks/workspace.ts"
   ],
-  "exclude": ["node_modules", "dist", "tests", "src/migrations/_legacy"]
+  "exclude": ["node_modules", "dist", "tests"]
 }

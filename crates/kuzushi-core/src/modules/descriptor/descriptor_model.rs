@@ -40,10 +40,25 @@ pub struct ToolDescriptor {
     /// (which land in OPERATE) deserializable.
     #[serde(default)]
     pub phase: ToolPhase,
+    #[serde(default)]
+    pub effect: ToolEffect,
+    #[serde(default)]
+    pub approval: ApprovalPolicy,
+    #[serde(default)]
+    pub workspace_requirement: WorkspaceRequirement,
+    #[serde(default)]
+    pub finding_store_requirement: FindingStoreRequirement,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<OptionSpec>,
+    /// Operator-reviewable instruction templates used by model-backed tools.
+    /// Runtime-generated repository context is intentionally not represented
+    /// here: this is the stable, editable instruction surface.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompts: Vec<PromptSpec>,
     #[serde(skip)]
     pub(in crate::modules) executor: Option<ToolExecutor>,
+    #[serde(skip)]
+    pub(in crate::modules) policy_declared: bool,
 }
 
 impl PartialEq for ToolDescriptor {
@@ -54,7 +69,29 @@ impl PartialEq for ToolDescriptor {
             && self.hidden == other.hidden
             && self.runtime_requirement == other.runtime_requirement
             && self.phase == other.phase
+            && self.effect == other.effect
+            && self.approval == other.approval
+            && self.workspace_requirement == other.workspace_requirement
+            && self.finding_store_requirement == other.finding_store_requirement
             && self.options == other.options
+            && self.prompts == other.prompts
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptSpec {
+    pub role: String,
+    pub module_id: String,
+    pub verb: String,
+    pub option_key: String,
+    pub default_content: String,
+    pub context_note: String,
+}
+
+impl PromptSpec {
+    pub fn override_relative_path(&self) -> std::path::PathBuf {
+        crate::options::relative_prompt_override_path(&self.module_id, &self.verb)
     }
 }
 
@@ -100,6 +137,11 @@ pub struct OptionSpec {
     pub required: bool,
     pub advanced: bool,
     pub evasion: bool,
+    /// Required for `type = path`; describes containment and provenance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_semantics: Option<PathSemantics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_reference_semantics: Option<FileReferenceSemantics>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -108,6 +150,30 @@ pub struct OptionSpec {
     pub aliases: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deprecated_aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PathSemantics {
+    WorkspaceRead,
+    StateWrite,
+    TargetWrite,
+    ExternalRead,
+    ExternalWrite,
+    Executable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum FileReferenceSemantics {
+    InlineOrWorkspaceFile,
+    InlineOrWorkspaceFiles,
+}
+
+impl PathSemantics {
+    pub fn forbids_workspace_storage(self) -> bool {
+        !matches!(self, Self::WorkspaceRead)
+    }
 }
 
 impl OptionSpec {
@@ -119,6 +185,8 @@ impl OptionSpec {
             required: false,
             advanced: false,
             evasion: false,
+            path_semantics: None,
+            file_reference_semantics: None,
             default: None,
             choices: Vec::new(),
             aliases: Vec::new(),
@@ -138,6 +206,46 @@ impl OptionSpec {
 
     pub(in crate::modules) fn evasion(mut self) -> Self {
         self.evasion = true;
+        self
+    }
+
+    pub(in crate::modules) fn workspace_read(mut self) -> Self {
+        self.path_semantics = Some(PathSemantics::WorkspaceRead);
+        self
+    }
+
+    pub(in crate::modules) fn state_write(mut self) -> Self {
+        self.path_semantics = Some(PathSemantics::StateWrite);
+        self
+    }
+
+    pub(in crate::modules) fn target_write(mut self) -> Self {
+        self.path_semantics = Some(PathSemantics::TargetWrite);
+        self
+    }
+
+    pub(in crate::modules) fn external_write(mut self) -> Self {
+        self.path_semantics = Some(PathSemantics::ExternalWrite);
+        self
+    }
+
+    pub(in crate::modules) fn external_read(mut self) -> Self {
+        self.path_semantics = Some(PathSemantics::ExternalRead);
+        self
+    }
+
+    pub(in crate::modules) fn executable(mut self) -> Self {
+        self.path_semantics = Some(PathSemantics::Executable);
+        self
+    }
+
+    pub(in crate::modules) fn inline_or_workspace_file(mut self) -> Self {
+        self.file_reference_semantics = Some(FileReferenceSemantics::InlineOrWorkspaceFile);
+        self
+    }
+
+    pub(in crate::modules) fn inline_or_workspace_files(mut self) -> Self {
+        self.file_reference_semantics = Some(FileReferenceSemantics::InlineOrWorkspaceFiles);
         self
     }
 

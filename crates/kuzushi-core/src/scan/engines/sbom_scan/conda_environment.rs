@@ -1,8 +1,8 @@
+use super::bounded_fs as fs;
 use super::python_dependency::python_dependency_name;
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_yaml::{Mapping, Value};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_conda_environment_manifest(name: &str) -> bool {

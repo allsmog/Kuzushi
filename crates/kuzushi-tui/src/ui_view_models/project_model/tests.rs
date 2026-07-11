@@ -60,6 +60,7 @@ fn project_model_aggregates_context_threat_dfd_and_findings() {
         kuzushi_core::Severity::High,
         "Unvalidated input path",
     )];
+    app.hydrate_all_view_data_for_test();
 
     let model = project_model(&app);
 
@@ -113,6 +114,7 @@ fn project_model_renders_persisted_nested_scope_tree() {
         kind: kuzushi_core::NestedProjectKind::Submodule,
         rel_path: "libs/parser".to_string(),
     }));
+    app.hydrate_all_view_data_for_test();
 
     let model = project_model(&app);
 
@@ -134,6 +136,7 @@ fn project_model_does_not_discover_unpersisted_scope_tree_during_render() {
     std::fs::create_dir_all(temp.path().join("vendor")).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
 
     let model = project_model(&app);
 
@@ -184,6 +187,7 @@ fn project_model_prefers_persisted_scope_document_rows() {
     std::fs::write(&context_path, "{\"new\":true}\n").unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
 
     let model = project_model(&app);
 

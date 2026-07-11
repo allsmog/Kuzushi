@@ -903,7 +903,7 @@ mod tests {
         let model = workbench_view_model(&app);
 
         assert_eq!(model.review_queue.completeness_mode, "open");
-        assert_eq!(model.review_queue.filter_label, "decision:open");
+        assert_eq!(model.review_queue.filter_label, "completeness:open");
         assert_eq!(model.review_queue.visible_count, 1);
     }
 
@@ -916,7 +916,7 @@ mod tests {
         let model = workbench_view_model(&app);
 
         assert_eq!(model.review_queue.completeness_mode, "all");
-        assert_eq!(model.review_queue.filter_label, "decision:all");
+        assert_eq!(model.review_queue.filter_label, "completeness:all");
     }
 
     #[test]

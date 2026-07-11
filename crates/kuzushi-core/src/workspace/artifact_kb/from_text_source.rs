@@ -31,8 +31,12 @@ impl ArtifactKnowledgeRecord {
     ) -> Result<Self> {
         let source_path = source_path.into();
         let absolute = workspace.root().join(&source_path);
-        let bytes = fs::read(&absolute)
-            .with_context(|| format!("Could not read artifact {}", absolute.display()))?;
+        let bytes = crate::bounded_file::read_regular_bytes_within(
+            workspace.root(),
+            &absolute,
+            16 * 1024 * 1024,
+        )
+        .with_context(|| format!("Could not read artifact {}", absolute.display()))?;
         let body = String::from_utf8(bytes.clone())
             .with_context(|| format!("Artifact {} is not UTF-8 text", absolute.display()))?;
         let module_id = module_id.into();

@@ -16,7 +16,7 @@ pub(crate) fn run_recon_import_nmap_xml(
         .workspace
         .context(crate::workspace::active_workspace_required_message("recon:import"))?;
     let path = required_path(input, "path", "recon:import nmap-xml needs a `path` field")?;
-    let xml = std::fs::read_to_string(&path)
+    let xml = crate::bounded_file::read_utf8_text(&path, 64 * 1024 * 1024)
         .with_context(|| format!("Could not read {}", path.display()))?;
     let parsed = parse_nmap_xml(&xml)
         .with_context(|| format!("Could not parse nmap XML at {}", path.display()))?;

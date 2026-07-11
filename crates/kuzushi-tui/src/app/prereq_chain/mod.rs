@@ -1,3 +1,4 @@
+use kuzushi_core::ExecutionAuthorization;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -60,6 +61,7 @@ pub struct PrereqChain {
     pub final_dispatched: bool,
     pub approved: bool,
     pub regenerate_existing: bool,
+    pub authorization: ExecutionAuthorization,
 }
 
 impl PrereqChain {
@@ -78,7 +80,13 @@ impl PrereqChain {
             final_dispatched: false,
             approved: false,
             regenerate_existing: false,
+            authorization: ExecutionAuthorization::default(),
         }
+    }
+
+    pub(crate) fn with_authorization(mut self, authorization: ExecutionAuthorization) -> Self {
+        self.authorization = authorization;
+        self
     }
 
     pub fn next_step(&self) -> Option<&PrereqStep> {
@@ -172,11 +180,22 @@ impl PrereqPlanAction {
 }
 
 fn artifact_state(path: &Path) -> PrereqArtifactState {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => readable_json_artifact_state(path),
-        Ok(_) => PrereqArtifactState::Invalid,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => PrereqArtifactState::Missing,
-        Err(_) => PrereqArtifactState::Invalid,
+    let Some(root) = artifact_workspace_root(path) else {
+        return PrereqArtifactState::Invalid;
+    };
+    match kuzushi_core::workspace::artifact_state_within(root, path) {
+        kuzushi_core::workspace::ArtifactState::Cached => readable_json_artifact_state(root, path),
+        kuzushi_core::workspace::ArtifactState::Invalid => PrereqArtifactState::Invalid,
+        kuzushi_core::workspace::ArtifactState::Missing => {
+            missing_prereq_artifact_state(root, path)
+        }
+    }
+}
+
+fn missing_prereq_artifact_state(root: &Path, path: &Path) -> PrereqArtifactState {
+    match kuzushi_core::workspace::read_optional_workspace_text(root, path, 16 * 1024 * 1024) {
+        Ok(None) => PrereqArtifactState::Missing,
+        Ok(Some(_)) | Err(_) => PrereqArtifactState::Invalid,
     }
 }
 
@@ -191,11 +210,21 @@ fn recommended_action(steps: &[PrereqStep]) -> PrereqPlanAction {
     }
 }
 
-fn readable_json_artifact_state(path: &Path) -> PrereqArtifactState {
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return PrereqArtifactState::Invalid;
-    };
+fn artifact_workspace_root(path: &Path) -> Option<&Path> {
+    path.ancestors().find_map(|candidate| {
+        (candidate.file_name().and_then(|name| name.to_str()) == Some(".kuzushi"))
+            .then(|| candidate.parent())
+            .flatten()
+    })
+}
 
+fn readable_json_artifact_state(root: &Path, path: &Path) -> PrereqArtifactState {
+    let body =
+        match kuzushi_core::workspace::read_optional_workspace_text(root, path, 16 * 1024 * 1024) {
+            Ok(Some(body)) => body,
+            Ok(None) => return PrereqArtifactState::Missing,
+            Err(_) => return PrereqArtifactState::Invalid,
+        };
     if serde_json::from_str::<Value>(&body).is_ok() {
         PrereqArtifactState::Cached
     } else {
@@ -420,5 +449,29 @@ mod tests {
         assert_eq!(plan.steps[0].artifact_state, PrereqArtifactState::Invalid);
         assert_eq!(plan.recommended_action, PrereqPlanAction::Approve);
         assert!(chain.should_run_step(&step));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prereq_probe_rejects_symlinked_workspace_state() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("context-snapshot.json"), "{}").unwrap();
+        symlink(outside.path(), target.path().join(".kuzushi")).unwrap();
+        let step = context_step(target.path());
+
+        assert_eq!(
+            artifact_state(&step.artifact_path),
+            PrereqArtifactState::Invalid
+        );
+        assert!(PrereqChain::new(
+            vec![step.clone()],
+            "sast:scan".to_string(),
+            Value::Null,
+            None,
+        )
+        .should_run_step(&step));
     }
 }

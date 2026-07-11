@@ -43,43 +43,72 @@ pub(crate) fn optional_nonempty_string(input: &Value, key: &str) -> Result<Optio
 }
 
 pub(crate) fn artifact_root(target: &Path, raw: &str) -> Result<PathBuf> {
-    let normalized = raw
-        .trim()
-        .replace('\\', "/")
-        .trim_start_matches('/')
-        .to_string();
-    let relative = if normalized.is_empty() {
-        ".kuzushi/systems-hunt"
+    let configured = raw.trim();
+    let configured = if configured.is_empty() {
+        Path::new(".kuzushi/systems-hunt")
     } else {
-        normalized.as_str()
+        Path::new(configured)
     };
-    let path = Path::new(relative);
-    if path.components().any(|component| {
-        matches!(
-            component,
-            Component::ParentDir | Component::RootDir | Component::Prefix(_)
-        )
-    }) {
-        anyhow::bail!("systems-hunt artifactDir must stay inside the repository root: {relative}");
+    if configured
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        anyhow::bail!(
+            "systems-hunt artifactDir must stay inside the repository root: {}",
+            configured.display()
+        );
     }
-    Ok(target.join(path))
+    let candidate = if configured.is_absolute() {
+        configured.to_path_buf()
+    } else {
+        target.join(configured)
+    };
+    let relative = candidate.strip_prefix(target).with_context(|| {
+        format!(
+            "systems-hunt artifactDir {} must stay inside {}",
+            candidate.display(),
+            target.display()
+        )
+    })?;
+    crate::workspace::validated_workspace_descendant(target, relative)
 }
 
-pub(crate) fn write_artifact(root: &Path, fingerprint: &str, artifact: &Value) -> Result<PathBuf> {
-    fs::create_dir_all(root).with_context(|| format!("Could not create {}", root.display()))?;
-    let path = root.join(format!("{fingerprint}.json"));
-    fs::write(
-        &path,
-        format!("{}\n", serde_json::to_string_pretty(artifact)?),
-    )
-    .with_context(|| format!("Could not write {}", path.display()))?;
-    Ok(path)
+pub(crate) fn write_artifact(
+    target: &Path,
+    root: &Path,
+    fingerprint: &str,
+    artifact: &Value,
+) -> Result<PathBuf> {
+    anyhow::ensure!(
+        Path::new(fingerprint).components().count() == 1
+            && !matches!(fingerprint, "" | "." | "..")
+            && !fingerprint.contains('/')
+            && !fingerprint.contains('\\'),
+        "systems-hunt artifact fingerprint is not a safe file name"
+    );
+    let relative_root = root.strip_prefix(target).with_context(|| {
+        format!(
+            "systems-hunt artifact root {} is outside {}",
+            root.display(),
+            target.display()
+        )
+    })?;
+    let relative = relative_root.join(format!("{fingerprint}.json"));
+    let body = format!("{}\n", serde_json::to_string_pretty(artifact)?);
+    crate::workspace::write_workspace_file(target, relative, body.as_bytes())
 }
 
 pub(crate) fn resolve_codeql_db_path(target: &Path) -> Option<PathBuf> {
-    [target.join(".kuzushi/codeql-db"), target.join(".codeql/db")]
+    [Path::new(".kuzushi/codeql-db"), Path::new(".codeql/db")]
         .into_iter()
-        .find(|path| path.exists())
+        .filter_map(|relative| {
+            crate::workspace::validated_workspace_descendant(target, relative).ok()
+        })
+        .find(|path| {
+            std::fs::symlink_metadata(path).is_ok_and(|metadata| {
+                metadata.file_type().is_dir() && !metadata.file_type().is_symlink()
+            })
+        })
 }
 
 pub(crate) fn path_relative_to(root: &Path, path: &Path) -> String {

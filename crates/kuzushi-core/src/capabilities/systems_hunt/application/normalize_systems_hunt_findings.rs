@@ -39,7 +39,7 @@ fn write_finding_artifact(
     finding: &Finding,
     artifact: &Value,
 ) -> Result<String> {
-    let artifact_path = write_artifact(artifact_root, &finding.fingerprint, artifact)?;
+    let artifact_path = write_artifact(target, artifact_root, &finding.fingerprint, artifact)?;
     Ok(path_relative_to(target, &artifact_path))
 }
 
@@ -48,11 +48,12 @@ fn write_rejected_candidate(
     artifact_root: &Path,
     object: &serde_json::Map<String, Value>,
 ) -> Result<String> {
-    let artifact_path = write_rejected_systems_candidate_artifact(artifact_root, object)?;
+    let artifact_path = write_rejected_systems_candidate_artifact(target, artifact_root, object)?;
     Ok(path_relative_to(target, &artifact_path))
 }
 
 fn write_rejected_systems_candidate_artifact(
+    target: &Path,
     artifact_root: &Path,
     object: &serde_json::Map<String, Value>,
 ) -> Result<PathBuf> {
@@ -63,7 +64,7 @@ fn write_rejected_systems_candidate_artifact(
         "rejectionReason": "under-evidenced systems-hunt candidate: no evidence, invariant link, trigger link, cheap verification flag, or corroboration status",
         "candidate": object,
     });
-    write_artifact(artifact_root, &fingerprint, &artifact)
+    write_artifact(target, artifact_root, &fingerprint, &artifact)
 }
 
 fn rejected_candidate_fingerprint(object: &serde_json::Map<String, Value>) -> String {

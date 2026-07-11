@@ -76,7 +76,10 @@ fn cabal_dependency(text: &str) -> Option<CabalDependency<'_>> {
     if name.is_empty() {
         return None;
     }
-    let constraint = text.strip_prefix(name).map(str::trim).filter(|rest| !rest.is_empty());
+    let constraint = text
+        .strip_prefix(name)
+        .map(str::trim)
+        .filter(|rest| !rest.is_empty());
     Some(CabalDependency { name, constraint })
 }
 

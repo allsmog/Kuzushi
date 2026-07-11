@@ -2,7 +2,7 @@ use super::*;
 use kuzushi_core::write_run_summary;
 
 #[test]
-fn source_file_cache_refreshes_when_size_changes() {
+fn source_file_cache_refreshes_after_workspace_invalidation() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("src.rs");
     std::fs::write(&path, "one").unwrap();
@@ -10,15 +10,15 @@ fn source_file_cache_refreshes_when_size_changes() {
 
     assert_eq!(cache.read_source_file(&path).unwrap(), "one");
     std::fs::write(&path, "two lines").unwrap();
+    cache.invalidate_workspace_files();
 
     assert_eq!(cache.read_source_file(&path).unwrap(), "two lines");
 }
 
 #[test]
-fn harness_file_serves_cached_contents_while_stamp_is_unchanged() {
+fn harness_file_serves_cached_contents_until_invalidated() {
     let temp = tempfile::tempdir().unwrap();
     let path = seed_harness_file(temp.path(), "raw = \"auth\"");
-    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
     let mut cache = WorkbenchCache::default();
 
     assert_eq!(
@@ -27,19 +27,13 @@ fn harness_file_serves_cached_contents_while_stamp_is_unchanged() {
     );
 
     std::fs::write(&path, "raw = \"api!\"").unwrap();
-    std::fs::File::options()
-        .write(true)
-        .open(&path)
-        .unwrap()
-        .set_modified(modified)
-        .unwrap();
 
     let served = cache.harness_file(Some(temp.path()));
     assert_eq!(served.as_deref(), Some("raw = \"auth\""));
 }
 
 #[test]
-fn harness_file_refreshes_when_stamp_changes() {
+fn harness_file_refreshes_after_workspace_invalidation() {
     let temp = tempfile::tempdir().unwrap();
     let path = seed_harness_file(temp.path(), "raw = \"auth\"");
     let mut cache = WorkbenchCache::default();
@@ -49,6 +43,7 @@ fn harness_file_refreshes_when_stamp_changes() {
     );
 
     std::fs::write(&path, "raw = \"payments\"").unwrap();
+    cache.invalidate_workspace_files();
 
     assert_eq!(
         cache.harness_file(Some(temp.path())).as_deref(),
@@ -73,7 +68,7 @@ fn seed_harness_file(target: &Path, contents: &str) -> PathBuf {
 }
 
 #[test]
-fn run_summary_cache_refreshes_when_scan_ids_change() {
+fn run_summary_cache_refreshes_after_run_persistence() {
     let temp = tempfile::tempdir().unwrap();
     let mut cache = WorkbenchCache::default();
     assert!(cache
@@ -82,9 +77,33 @@ fn run_summary_cache_refreshes_when_scan_ids_change() {
 
     let summary = RunSummary::running("scan-a", "scan", None, "target");
     write_run_summary(temp.path(), &summary).unwrap();
+    cache.invalidate_run_summaries();
 
     let indexed = cache.run_summary_index(Some(temp.path()), vec!["scan-a".to_string()]);
     assert!(indexed.contains_key("scan-a"));
+}
+
+#[test]
+fn latest_run_pointer_refreshes_after_run_persistence_invalidation() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut cache = WorkbenchCache::default();
+    assert_eq!(
+        cache.latest_run_pointer(Some(temp.path())),
+        LatestRunPointerState::Missing
+    );
+
+    let summary = RunSummary::running("scan-latest", "scan", None, "target");
+    write_run_summary(temp.path(), &summary).unwrap();
+    assert_eq!(
+        cache.latest_run_pointer(Some(temp.path())),
+        LatestRunPointerState::Missing
+    );
+
+    cache.invalidate_run_summaries();
+    assert!(matches!(
+        cache.latest_run_pointer(Some(temp.path())),
+        LatestRunPointerState::Ready(ref run_id) if run_id.as_str() == "scan-latest"
+    ));
 }
 
 #[test]

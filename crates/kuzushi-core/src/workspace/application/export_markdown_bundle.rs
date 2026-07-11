@@ -84,10 +84,7 @@ fn push_readme_header(
     total_count: usize,
 ) {
     out.push_str("# Kuzushi findings bundle\n\n");
-    out.push_str(&format!(
-        "- **Target:** `{}`\n",
-        workspace.root().display()
-    ));
+    out.push_str(&format!("- **Target:** `{}`\n", workspace.root().display()));
     out.push_str("- **Projection:** `WorkspaceFindingExportRecord`\n");
     out.push_str(&format!(
         "- **Completeness:** `{}`\n",
@@ -151,7 +148,9 @@ fn projection_count_summary(
 
 fn push_readme_findings_table(out: &mut String, records: &[WorkspaceFindingExportRecord]) {
     out.push_str("## Findings\n\n");
-    out.push_str("| Alias | Severity | Confidence | Decision | Lifecycle | Evidence | Location |\n");
+    out.push_str(
+        "| Alias | Severity | Confidence | Decision | Lifecycle | Evidence | Location |\n",
+    );
     out.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
     for record in records {
         out.push_str(&format!(
@@ -274,10 +273,7 @@ fn push_bundle_analysis_summary(out: &mut String, record: &WorkspaceFindingExpor
         "- **Automated reasoning:** {}\n",
         record.analysis.automated_reasoning_present
     ));
-    out.push_str(&format!(
-        "- **Confidence:** {}\n",
-        record.proof_confidence
-    ));
+    out.push_str(&format!("- **Confidence:** {}\n", record.proof_confidence));
     out.push_str(&format!(
         "- **Static proof:** {} ({})\n",
         record.static_proof_label, record.static_proof_state
@@ -365,9 +361,7 @@ fn write_bundle_manifest(
         .with_context(|| format!("Could not write {}", path.display()))
 }
 
-fn finding_files_by_alias(
-    finding_files: &[BundleFindingFile],
-) -> HashMap<&str, &BundleFileEntry> {
+fn finding_files_by_alias(finding_files: &[BundleFindingFile]) -> HashMap<&str, &BundleFileEntry> {
     finding_files
         .iter()
         .map(|file| (file.alias.as_str(), &file.file))

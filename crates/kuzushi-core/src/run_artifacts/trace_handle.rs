@@ -8,7 +8,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{RunTraceStep, append_run_trace_step, next_run_trace_step_number, run_artifact_path};
+use super::{append_run_trace_step, next_run_trace_step_number, run_artifact_path, RunTraceStep};
 
 thread_local! {
     static PARENT_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };

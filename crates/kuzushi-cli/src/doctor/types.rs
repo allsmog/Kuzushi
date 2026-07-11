@@ -94,8 +94,8 @@ impl DoctorReport {
     }
 }
 
-pub(crate) fn doctor_command(target: Option<PathBuf>, json: bool) -> Result<()> {
-    let report = super::build_doctor_report(target.unwrap_or_else(|| PathBuf::from(".")));
+pub(crate) fn doctor_command(target: PathBuf, json: bool) -> Result<()> {
+    let report = super::build_doctor_report(target);
     if json {
         super::print_doctor_json(&report)?;
     } else {

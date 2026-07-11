@@ -84,9 +84,11 @@ impl ModuleRegistry {
         &self,
         loaded: &DynamicModuleDescription,
     ) -> Result<()> {
-        if self.modules.contains_key(&loaded.module.id) {
+        if self.modules.contains_key(&loaded.module.id)
+            || retired_builtin_module_id(&loaded.module.id)
+        {
             anyhow::bail!(
-                "dynamic module id {:?} collides with an already loaded module",
+                "dynamic module id {:?} collides with an active or retired built-in module",
                 loaded.module.id
             );
         }
@@ -100,6 +102,35 @@ impl ModuleRegistry {
         }
         Ok(())
     }
+}
+
+fn retired_builtin_module_id(id: &str) -> bool {
+    matches!(
+        id,
+        "bounty"
+            | "catalog"
+            | "carlini-threat-hunt"
+            | "chrome-rce"
+            | "classifier-gate"
+            | "context-lite"
+            | "deep-audit"
+            | "exploit-chain"
+            | "full-mode"
+            | "module-recommender"
+            | "offense"
+            | "pipeline"
+            | "prompt-armor"
+            | "pwn"
+            | "randori"
+            | "shinsa"
+            | "smoke"
+            | "taint-iris"
+            | "threat-leads"
+            | "tob"
+            | "uaf-hunt"
+            | "vendor-assessment"
+            | "vuln-scout"
+    )
 }
 
 fn dynamic_tool_binding(
@@ -586,7 +617,7 @@ fn execute_dynamic_module_tool(
     let output = run_dynamic_host(
         ["execute", specifier, name],
         Some(serde_json::to_vec(&payload)?),
-        None,
+        ctx.cancellation,
     )?;
     serde_json::from_slice(&output)
         .with_context(|| format!("dynamic tool {name:?} returned invalid JSON"))
@@ -600,6 +631,7 @@ fn execute_dynamic_module_tool_with_worker(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    ctx.ensure_active()?;
     ensure_verified_approval_is_current(binding, verified, ctx)?;
     ensure_verified_bundle_is_current(&binding.specifier, verified)?;
     ensure_verified_snapshot_is_current(verified)?;
@@ -753,7 +785,7 @@ fn execute_dynamic_module_tool_with_runtime(
         "input": input,
         "context": dynamic_tool_context_json(ctx)?,
     });
-    run_dynamic_host_with_runtime(specifier, name, payload, runtime)
+    run_dynamic_host_with_runtime(specifier, name, payload, runtime, ctx.cancellation)
 }
 
 fn kwp_worker_command(specifier: &str, verified: &VerifiedModule) -> Result<Command> {
@@ -1004,6 +1036,29 @@ fn validate_dynamic_tool_policy(tool: &ToolDescriptor) -> Result<()> {
             tool.name
         );
     }
+    if tool.effect.needs_operator_approval() && tool.approval != ApprovalPolicy::Explicit {
+        anyhow::bail!(
+            "dynamic tool {:?} declares {:?} but does not require explicit approval",
+            tool.name,
+            tool.effect
+        );
+    }
+    if tool.effect != ToolEffect::Read && tool.phase == ToolPhase::Operate {
+        anyhow::bail!(
+            "dynamic tool {:?} must declare map|hunt|confirm|fix for an effectful operation",
+            tool.name
+        );
+    }
+    for prompt in &tool.prompts {
+        if !tool.options.iter().any(|option| option.name == prompt.option_key) {
+            anyhow::bail!(
+                "dynamic tool {:?} prompt {:?} refers to undeclared option {:?}",
+                tool.name,
+                prompt.role,
+                prompt.option_key
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1040,6 +1095,13 @@ fn validate_dynamic_tool_options(tool: &mut ToolDescriptor) -> Result<()> {
         validate_dynamic_option_names(&tool.name, option, &mut names)?;
         validate_dynamic_enum_choices(&tool.name, option)?;
         normalize_dynamic_option_default(&tool.name, option)?;
+        if option.option_type == OptionType::Path && option.path_semantics.is_none() {
+            anyhow::bail!(
+                "dynamic tool {:?} path option {:?} must declare pathSemantics",
+                tool.name,
+                option.name
+            )
+        }
     }
     Ok(())
 }
@@ -1457,6 +1519,13 @@ mod dynamic_loader_tests {
     use std::fs;
 
     #[test]
+    fn retired_builtin_ids_remain_reserved_for_run_provenance() {
+        assert!(retired_builtin_module_id("smoke"));
+        assert!(retired_builtin_module_id("pwn"));
+        assert!(!retired_builtin_module_id("third-party-module"));
+    }
+
+    #[test]
     fn dynamic_host_candidates_cover_native_package_layout() {
         let package = tempfile::tempdir().unwrap();
         let native_dir = package.path().join("native").join("darwin-arm64");
@@ -1701,6 +1770,7 @@ mod dynamic_loader_tests {
     fn dynamic_input_aware_runtime_policy_is_rejected_without_a_native_predicate() {
         let mut descriptor = tool("example:run", "example");
         descriptor.runtime_requirement = RuntimeRequirement::InputAware;
+        descriptor.effect = ToolEffect::Read;
 
         let error = validate_dynamic_tool_policy(&descriptor)
             .unwrap_err()

@@ -28,7 +28,7 @@ Feature: Conditional MCP attachment plan
 
   Scenario: Pre-seeded CPG and CodeQL DB attach the joern + codeql MCPs
     Given the artifact ".kuzushi/cpg.bin" is seeded with "CPGSTUB"
-    And the directory ".kuzushi/codeql-db" is seeded with a placeholder file
+    And the artifact ".kuzushi/codeql-db/codeql-database.yml" is seeded with "primaryLanguage: rust"
     When I launch the shell
     And I type command "logs"
     Then the log contains "joern"

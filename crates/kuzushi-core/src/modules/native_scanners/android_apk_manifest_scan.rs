@@ -12,14 +12,15 @@ pub(in crate::modules) fn resolve_manifest_inputs(
     input: &Value,
     workspace_root: &Path,
 ) -> Result<ManifestScanInputs> {
-    let decompiled_root = decompiled_root_from(input, workspace_root);
-    let manifest_path = decompiled_root.join("apktool").join("AndroidManifest.xml");
-    if !manifest_path.is_file() {
-        anyhow::bail!(
-            "android-apk:manifest-scan: missing {}. Run `android-apk:prepare` first.",
-            manifest_path.display()
-        );
-    }
+    let decompiled_root = decompiled_root_from(input, workspace_root)?;
+    let requested_manifest = decompiled_root.join("apktool").join("AndroidManifest.xml");
+    let manifest_path = validated_android_workspace_file(workspace_root, &requested_manifest)
+        .with_context(|| {
+            format!(
+                "android-apk:manifest-scan: missing {}. Run `android-apk:prepare` first.",
+                requested_manifest.display()
+            )
+        })?;
     let taint_sources_path = decompiled_root.join("taint-sources.json");
     Ok(ManifestScanInputs {
         manifest_path,
@@ -27,18 +28,22 @@ pub(in crate::modules) fn resolve_manifest_inputs(
     })
 }
 
-fn decompiled_root_from(input: &Value, workspace_root: &Path) -> PathBuf {
-    if let Some(raw) = input
+fn decompiled_root_from(input: &Value, workspace_root: &Path) -> Result<PathBuf> {
+    let candidate = if let Some(raw) = input
         .get("decompiledRoot")
         .or_else(|| input.get("decompiled_root"))
         .and_then(Value::as_str)
     {
         let trimmed = raw.trim();
         if !trimmed.is_empty() {
-            return PathBuf::from(trimmed);
+            PathBuf::from(trimmed)
+        } else {
+            workspace_root.join("android-decompiled")
         }
-    }
-    workspace_root.join("android-decompiled")
+    } else {
+        workspace_root.join("android-decompiled")
+    };
+    validated_android_workspace_dir(workspace_root, &candidate)
 }
 
 pub(in crate::modules) fn run_manifest_scan(
@@ -85,7 +90,7 @@ fn collect_manifest_scan(input: &Value, target: &Path) -> Result<ManifestScan> {
     let inputs = resolve_manifest_inputs(input, target)?;
     let manifest = parse_manifest_file(&inputs.manifest_path)?;
     let findings = collect_manifest_findings(&manifest, &inputs.manifest_path);
-    let taint_summary = write_taint_sources(&manifest, &inputs.taint_sources_path)?;
+    let taint_summary = write_taint_sources(&manifest, target, &inputs.taint_sources_path)?;
     Ok(ManifestScan {
         inputs,
         manifest,

@@ -20,42 +20,14 @@ pub(crate) enum ReviewQueueMode {
     All,
 }
 
-/// Operator-workflow grouping for the review queue. This is deliberately
-/// independent of severity: proof and decision state determine what the
-/// operator can do next, while severity remains visible inside each row.
+/// Operator-workflow metadata carried by each review row. It describes the
+/// review state without changing the canonical confidence-first order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReviewWorkflowGroup {
     NeedsReview,
     Confirmed,
     Deferred,
     Closed,
-}
-
-impl ReviewWorkflowGroup {
-    pub(crate) const ALL: [Self; 4] = [
-        Self::NeedsReview,
-        Self::Confirmed,
-        Self::Deferred,
-        Self::Closed,
-    ];
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::NeedsReview => "NEEDS REVIEW",
-            Self::Confirmed => "CONFIRMED",
-            Self::Deferred => "DEFERRED / RISK",
-            Self::Closed => "CLOSED",
-        }
-    }
-
-    fn rank(self) -> u8 {
-        match self {
-            Self::NeedsReview => 0,
-            Self::Confirmed => 1,
-            Self::Deferred => 2,
-            Self::Closed => 3,
-        }
-    }
 }
 
 impl ReviewQueueMode {
@@ -109,14 +81,11 @@ pub(crate) struct ReviewQueueRow {
 
 pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> ReviewQueueModel {
     let base = target_base(app);
-    let selected_key = app.selected_finding().as_ref().map(review_queue_key);
     let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
         app.findings(),
         app.review_decisions(),
     );
-    let mut all_rows =
-        projected_review_queue_rows(app, &review_index, base.as_deref(), selected_key.as_deref());
-    all_rows.sort_by_key(|row| row.workflow_group.rank());
+    let all_rows = projected_review_queue_rows(app, &review_index, base.as_deref());
     let open_count = all_rows.iter().filter(|row| !row.review_complete()).count();
     let complete_count = all_rows.len().saturating_sub(open_count);
     let rows = filter_review_rows(all_rows, mode);
@@ -127,7 +96,7 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
         visible_count,
         open_count,
         complete_count,
-        filter_label: format!("decision:{}", mode.label()),
+        filter_label: format!("completeness:{}", mode.label()),
         completeness_mode: mode.label(),
         header: review_queue_header(visible_count, total_count, open_count, complete_count),
         empty_reason: review_queue_empty_reason(total_count, visible_count, mode),
@@ -139,7 +108,6 @@ fn projected_review_queue_rows(
     app: &ShellApp,
     review_index: &EffectiveReviewStateIndex,
     base: Option<&str>,
-    selected_key: Option<&str>,
 ) -> Vec<ReviewQueueRow> {
     projected_visible_finding_pairs(app)
         .into_iter()
@@ -153,7 +121,6 @@ fn projected_review_queue_rows(
                 &finding,
                 decision.as_ref(),
                 base,
-                selected_key,
             )
         })
         .collect()
@@ -208,7 +175,6 @@ impl ReviewQueueRow {
         finding: &Finding,
         decision: Option<&EffectiveReviewDecision>,
         base: Option<&str>,
-        selected_key: Option<&str>,
     ) -> Self {
         let projection = project_finding(finding, Some(alias.clone()));
         let decision_label = effective_review_decision_label(finding, decision);
@@ -235,7 +201,11 @@ impl ReviewQueueRow {
             proof_label: projection.proof_state,
             evidence_state: evidence_state_label(finding),
             next_action: review_next_action_label(finding, decision),
-            selected: review_row_selected(index, cursor, finding, selected_key),
+            // The cursor indexes `projected_visible_finding_pairs`, the same
+            // projection used by Enter, detail, verify, suppress, and patch.
+            // A previously opened finding must not steal the highlight after
+            // the operator moves the cursor to another projected identity.
+            selected: index == cursor,
             workflow_group,
         }
     }
@@ -245,7 +215,7 @@ impl ReviewQueueRow {
     }
 }
 
-fn workflow_group(decision: &str, conflict: Option<&str>) -> ReviewWorkflowGroup {
+pub(crate) fn workflow_group(decision: &str, conflict: Option<&str>) -> ReviewWorkflowGroup {
     if conflict.is_some() {
         return ReviewWorkflowGroup::NeedsReview;
     }
@@ -255,17 +225,6 @@ fn workflow_group(decision: &str, conflict: Option<&str>) -> ReviewWorkflowGroup
         "rejected_false_positive" | "false_positive" | "suppressed" => ReviewWorkflowGroup::Closed,
         _ => ReviewWorkflowGroup::NeedsReview,
     }
-}
-
-fn review_row_selected(
-    index: usize,
-    cursor: usize,
-    finding: &Finding,
-    selected_key: Option<&str>,
-) -> bool {
-    selected_key
-        .map(|key| key == review_queue_key(finding))
-        .unwrap_or(index == cursor)
 }
 
 fn review_next_action_label(
@@ -291,13 +250,6 @@ fn review_verdict(
     decision
         .map(EffectiveReviewDecision::verdict)
         .unwrap_or_else(|| super::review_state::current_review_decision(finding))
-}
-
-fn review_queue_key(finding: &Finding) -> String {
-    finding
-        .dedup_key
-        .clone()
-        .unwrap_or_else(|| finding.fingerprint.clone())
 }
 
 #[cfg(test)]

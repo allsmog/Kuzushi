@@ -14,7 +14,10 @@ impl DepHygieneReport {
             return no_risky_specifiers_line(&self.target);
         }
 
-        dep_hygiene_output_lines(self).join("\n").trim_end().to_string()
+        dep_hygiene_output_lines(self)
+            .join("\n")
+            .trim_end()
+            .to_string()
     }
 
     pub fn to_tool_json(&self) -> Value {
@@ -76,7 +79,11 @@ fn append_severity_group(
         return;
     }
     lines.push(format!("  [{}]", severity.as_str().to_ascii_uppercase()));
-    lines.extend(grouped.into_iter().map(|finding| finding_line(report, finding)));
+    lines.extend(
+        grouped
+            .into_iter()
+            .map(|finding| finding_line(report, finding)),
+    );
     lines.push(String::new());
 }
 

@@ -159,6 +159,7 @@ fn prepare_deep_semantic_hunt<'a>(
         format!("target={}", target.display()),
     );
     let execution = resolve_deep_semantic_execution(input, ctx, runtime)?;
+    artifact_root(&target, &execution.options.artifact_dir)?;
     Ok(DeepSemanticHuntRun {
         target,
         parent_step,

@@ -20,8 +20,7 @@ impl ShellApp {
     }
 
     fn handle_catalog_row_hotkey(&mut self, key: KeyEvent) -> bool {
-        if !matches!(self.shell_view(), ShellView::Catalog) || !self.router.catalog().is_expanded()
-        {
+        if !matches!(self.shell_view(), ShellView::Catalog) {
             return false;
         }
         match key.code {
@@ -120,7 +119,7 @@ impl ShellApp {
 
     pub(super) fn is_scrollable_view(&self) -> bool {
         match &self.shell_view() {
-            ShellView::Catalog => self.router.catalog().is_expanded(),
+            ShellView::Catalog => true,
             ShellView::Help
             | ShellView::Quickstart
             | ShellView::Logs

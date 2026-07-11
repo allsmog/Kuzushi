@@ -65,6 +65,7 @@ impl ShellApp {
             input,
             workspace,
             thinking_level: None,
+            authorization: ExecutionAuthorization::default(),
         })]
     }
 
@@ -89,6 +90,8 @@ impl ShellApp {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         self.registry().prepare_tool_input_for_dispatch(
             "context:build",

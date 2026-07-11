@@ -57,6 +57,29 @@ pub(crate) const TOOL_INPUT_ARTIFACTS: [CanonicalRunArtifactSpec; 1] = [Canonica
     kind: "json",
 }];
 
+pub(crate) const SCAN_PIPELINE_ARTIFACTS: [CanonicalRunArtifactSpec; 4] = [
+    CanonicalRunArtifactSpec {
+        leaf: "scan-input.json",
+        label: "scan input",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "triage.jsonl",
+        label: "scan triage events",
+        kind: "jsonl",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "verify.jsonl",
+        label: "scan verification events",
+        kind: "jsonl",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "patch.jsonl",
+        label: "scan patch events",
+        kind: "jsonl",
+    },
+];
+
 pub(crate) fn canonical_run_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
     CANONICAL_RUN_ARTIFACTS
         .iter()
@@ -73,4 +96,10 @@ pub(crate) fn tool_result_artifact_spec(leaf: &str) -> Option<&'static Canonical
 
 pub(crate) fn tool_input_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
     TOOL_INPUT_ARTIFACTS.iter().find(|spec| spec.leaf == leaf)
+}
+
+pub(crate) fn scan_pipeline_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
+    SCAN_PIPELINE_ARTIFACTS
+        .iter()
+        .find(|spec| spec.leaf == leaf)
 }

@@ -8,8 +8,10 @@ const pairedFiles = [
   {
     file: "crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs",
     needles: [
-      "prepare_tool_input_for_dispatch(name, input, ctx, option_store)?",
-      "dispatch_prepared_tool_with_runtime(name, input, ctx, runtime)",
+      "let input = self.prepare_dispatch_input(name, input, ctx, option_store)?;",
+      "self.dispatch_prepared_input_with_runtime(input, ctx, runtime)",
+      "let prepared = self.prepare_dispatch_input(name, input, ctx, None)?;",
+      "self.dispatch_prepared_input_with_runtime(prepared, ctx, runtime)",
     ],
   },
   {
@@ -18,7 +20,10 @@ const pairedFiles = [
   },
   {
     file: "crates/kuzushi-cli/src/application/scan.rs",
-    needles: ["dispatch_prepared_tool_with_runtime("],
+    needles: [
+      "prepare_dispatch_input(SCAN_TOOL, execution.input, execution.ctx, None)",
+      "execution.registry.dispatch_prepared_input_with_runtime(",
+    ],
   },
   {
     file: "crates/kuzushi-cli/src/application/run_tool_prepare.rs",
@@ -26,19 +31,33 @@ const pairedFiles = [
   },
   {
     file: "crates/kuzushi-cli/src/application/run_tool.rs",
-    needles: ["dispatch_prepared_tool_with_runtime("],
+    needles: [
+      "prepare_dispatch_input(&run.tool, run.input.clone(), &ctx, None)",
+      "dispatch_prepared_input_with_runtime(prepared, &ctx, runtime_ref)",
+    ],
   },
   {
     file: "crates/kuzushi-tui/src/app/tool_runner/run_tool/dispatch.rs",
-    needles: ["prepare_tool_input_for_dispatch(", "start_background_tool("],
+    needles: [
+      "prepare_tool_input_for_dispatch(",
+      "start_authorized_background_tool(",
+      "authorization: ExecutionAuthorization",
+    ],
   },
   {
     file: "crates/kuzushi-tui/src/app/workers/run_background_tool.rs",
-    needles: ["dispatch_prepared_tool_with_runtime(tool_name, input, &ctx, runtime_ref)"],
+    needles: [
+      "prepare_dispatch_input(tool_name, input, &ctx, None)",
+      "dispatch_prepared_input_with_runtime(prepared, &ctx, runtime_ref)",
+    ],
   },
   {
     file: "crates/kuzushi-tui/src/app/tool_runner/run_tool/prereq_flow.rs",
-    needles: ["prepare_tool_input_for_dispatch(", "start_background_tool("],
+    needles: [
+      "prepare_tool_input_for_dispatch(",
+      "start_authorized_background_tool(",
+      "mark_final_chain_tool_dispatched()",
+    ],
   },
   {
     file: "crates/kuzushi-tui/src/app/onboarding/runner.rs",

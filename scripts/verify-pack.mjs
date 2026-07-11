@@ -1,8 +1,10 @@
 #!/usr/bin/env node
+import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { checkArtifactSchemaInventory } from "./artifact-schema-inventory-contract.mjs";
 import { canonicalRunSchemaFiles } from "./canonical-run-schema-files.mjs";
+import { nativeExecutableName, nativeRuntimeBinaries } from "./native-runtime-contract.mjs";
 
 const repo = process.cwd();
 const manifest = readPackageManifest();
@@ -16,7 +18,6 @@ const manifestRecordFields = [
   "scripts",
   "dependencies",
   "devDependencies",
-  "optionalDependencies",
   "exports",
 ];
 const manifestRecordShapeFailures = manifestRecordFields.flatMap((field) =>
@@ -55,7 +56,6 @@ const allowedPackageEntries = [
   "scripts/check-native-bindings.mjs",
   "schemas",
   "examples/kwp/agentic-fuzz",
-  "assets/ascii",
   "assets/pashov-xray",
   "README.md",
   "UPSTREAM_CODEX.md",
@@ -72,7 +72,7 @@ const allowedLifecycleScripts = {
 };
 const requiredReleaseScripts = {
   prepack: "pnpm build:clean && pnpm build:native",
-  "verify:pack": "node scripts/verify-pack.mjs",
+  "verify:pack": "node scripts/verify-pack.mjs && node scripts/smoke-packed-runtime.mjs",
   "publish:npm": "bash scripts/publish-npm.sh",
   "publish:npm:dry": "bash scripts/publish-npm.sh",
   "publish:npm:go": "bash scripts/publish-npm.sh --publish",
@@ -81,7 +81,8 @@ const expectedPackageScripts = {
   setup: "bash scripts/bootstrap.sh",
   doctor: "bash scripts/doctor.sh",
   "check:docs":
-    "node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
+    "node scripts/check-release-contract.mjs && node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
+  "check:release": "node scripts/check-release-contract.mjs",
   "check:retired-ts-runtime": "node scripts/check-retired-ts-runtime.mjs",
   "export:source": "bash scripts/export-clean-source.sh",
   "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
@@ -94,7 +95,7 @@ const expectedPackageScripts = {
   "clean:dist": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
   build: "tsc",
   "build:rust": "cargo build --workspace",
-  "build:native": "cargo build -p kuzushi-cli --release && node scripts/stage-native-binary.mjs",
+  "build:native": "node scripts/build-native-runtime.mjs",
   "build:clean": "pnpm clean:dist && tsc",
   prepack: "pnpm build:clean && pnpm build:native",
   "check:types": "node scripts/typecheck-all.mjs",
@@ -106,12 +107,14 @@ const expectedPackageScripts = {
   "test:rust": "cargo test --workspace",
   "test:e2e": "bash tests/e2e/run-smoke.sh",
   "test:coverage": "vitest run --coverage",
-  "quality:crap-risk": "node scripts/crap-risk-gate.mjs",
+  "quality:crap-risk":
+    "node --test scripts/crap-risk-test-mapping.test.mjs && node scripts/crap-risk-gate.mjs",
   "quality:identity": "node scripts/check-public-identity.mjs",
   "quality:architecture":
-    "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-env-discipline.mjs && node scripts/check-dispatch-boundary-contract.mjs && node scripts/check-validated-wording.mjs",
+    "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-env-discipline.mjs && node scripts/check-dispatch-boundary-contract.mjs && node scripts/check-workspace-state-writes.mjs && node scripts/check-validated-wording.mjs",
+  "check:workspace-state-writes": "node scripts/check-workspace-state-writes.mjs",
   "quality:model-safety": "node scripts/check-model-safety.mjs",
-  "verify:pack": "node scripts/verify-pack.mjs",
+  "verify:pack": "node scripts/verify-pack.mjs && node scripts/smoke-packed-runtime.mjs",
   "publish:npm": "bash scripts/publish-npm.sh",
   "publish:npm:dry": "bash scripts/publish-npm.sh",
   "publish:npm:go": "bash scripts/publish-npm.sh --publish",
@@ -152,45 +155,23 @@ const expectedPackageMetadata = {
 const expectedPackageKeywords = ["sast", "security", "semgrep", "ai", "triage"];
 const expectedOnlyBuiltDependencies = ["better-sqlite3", "esbuild"];
 const expectedPackageDependencies = {
-  "@anthropic-ai/sdk": "^0.109.1",
-  "@kuzushi/augur": "^0.3.0",
   "@langchain/anthropic": "^1.0.0",
   "@langchain/core": "^1.0.0",
   "@langchain/langgraph": "^1.0.0",
   "@langchain/mcp-adapters": "^1.0.0",
   "@langchain/openai": "^1.0.0",
   "better-sqlite3": "^12.8.0",
-  chalk: "^5.4.1",
-  commander: "^15.0.0",
-  langchain: "^1.0.0",
-  tinyglobby: "^0.2.15",
-  typescript: "^5.7.3",
-  undici: "^7.22.0",
-  yaml: "^2.7.0",
   zod: "^4.3.6",
 };
 const expectedPnpmLockfileRootDependencyVersions = {
   dependencies: {
-    "@anthropic-ai/sdk": "0.109.1(zod@4.4.3)",
-    "@kuzushi/augur": "0.3.0",
-    "@langchain/anthropic":
-      "1.5.1(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))",
-    "@langchain/core": "1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1)",
-    "@langchain/langgraph":
-      "1.4.7(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))(zod@4.4.3)",
+    "@langchain/anthropic": "1.5.1(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))",
+    "@langchain/core": "1.2.1(openai@6.45.0(zod@4.4.3))",
+    "@langchain/langgraph": "1.4.7(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))(zod@4.4.3)",
     "@langchain/mcp-adapters":
-      "1.1.3(@cfworker/json-schema@4.1.1)(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))(@langchain/langgraph@1.4.7(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))(zod@4.4.3))",
-    "@langchain/openai":
-      "1.5.3(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))(ws@8.20.1)",
+      "1.1.3(@cfworker/json-schema@4.1.1)(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))(@langchain/langgraph@1.4.7(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))(zod@4.4.3))",
+    "@langchain/openai": "1.5.3(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))",
     "better-sqlite3": "12.11.1",
-    chalk: "5.6.2",
-    commander: "15.0.0",
-    langchain:
-      "1.5.2(@langchain/core@1.2.1(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1))(openai@6.45.0(ws@8.20.1)(zod@4.4.3))(ws@8.20.1)",
-    tinyglobby: "0.2.17",
-    typescript: "5.9.3",
-    undici: "7.22.0",
-    yaml: "2.9.0",
     zod: "4.4.3",
   },
   devDependencies: {
@@ -201,23 +182,16 @@ const expectedPnpmLockfileRootDependencyVersions = {
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "22.19.11",
     "@vitest/coverage-v8":
-      "3.2.4(vitest@3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0))",
+      "3.2.7(vitest@3.2.7(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0))",
+    chalk: "5.6.2",
     husky: "9.1.7",
     "lint-staged": "17.0.8",
     madge: "8.0.0(typescript@5.9.3)",
     tsx: "4.22.4",
-    vitest: "3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0)",
+    typescript: "5.9.3",
+    vitest: "3.2.7(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0)",
   },
-  optionalDependencies: {
-    "@kuzushi/tob-skills":
-      "https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2",
-    "@kuzushi/vuln-scout":
-      "https://codeload.github.com/allsmog/vuln-scout/tar.gz/79df9e804c6a87f0af3c779c55d2fcdb4675f49d",
-    "promptarmor-plugin":
-      "https://codeload.github.com/allsmog/promptarmor-plugin/tar.gz/690d60a5b4d2136206ef7dedd516d3fcfddd4db9",
-    "shinsa-plugin":
-      "https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/74b3737d225970d849f5f6f57095cfe65ee7ccdf",
-  },
+  optionalDependencies: {},
 };
 const expectedPackageDevDependencies = {
   "@biomejs/biome": "^2.4.12",
@@ -226,12 +200,14 @@ const expectedPackageDevDependencies = {
   "@commitlint/config-conventional": "^21.2.0",
   "@types/better-sqlite3": "^7.6.13",
   "@types/node": "^22.13.4",
-  "@vitest/coverage-v8": "^3.0.5",
+  "@vitest/coverage-v8": "^3.2.7",
+  chalk: "^5.4.1",
   husky: "^9.1.7",
   "lint-staged": "^17.0.8",
   madge: "^8.0.0",
   tsx: "^4.19.2",
-  vitest: "^3.0.5",
+  typescript: "^5.7.3",
+  vitest: "^3.2.7",
 };
 const expectedPackageExports = {
   ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
@@ -257,20 +233,17 @@ const forbiddenPackageMetadataFields = [
   "os",
   "cpu",
 ];
-const expectedOptionalAdapterDependencies = {
-  "@kuzushi/tob-skills":
-    "github:allsmog/tob-security-skills#98dda39a53eb74b90d60f305c8523e47552a9fb2",
-  "@kuzushi/vuln-scout": "github:allsmog/vuln-scout#79df9e804c6a87f0af3c779c55d2fcdb4675f49d",
-  "promptarmor-plugin":
-    "github:allsmog/promptarmor-plugin#690d60a5b4d2136206ef7dedd516d3fcfddd4db9",
-  "shinsa-plugin": "github:allsmog/shinsa-plugin#74b3737d225970d849f5f6f57095cfe65ee7ccdf",
-};
+const explicitAdapterPackages = [
+  "@kuzushi/tob-skills",
+  "@kuzushi/vuln-scout",
+  "promptarmor-plugin",
+  "shinsa-plugin",
+];
 
 const denied = [
   /^(?:.*\/)?\.kuzushi(?:\/|$)/,
   /^(?:.*\/)?\.codex(?:\/|$)/,
   /^(?:.*\/)?\.codex-active(?:\/|$)/,
-  /^(?:.*\/)?\.ralph(?:\/|$)/,
   /^(?:.*\/)?\.pnpm-store(?:\/|$)/,
   /^(?:.*\/)?\.claude(?:\/|$)/,
   /^(?:.*\/)?\.serena(?:\/|$)/,
@@ -302,7 +275,6 @@ const denied = [
   /^(?:.*\/)?iris\.pdf$/,
   /^(?:.*\/)?kuzushi-.*-prompt\.md$/,
   /^(?:.*\/)?\.tmp-.*\.md$/,
-  /^(?:.*\/)?ralph-.*\.md$/,
   /^(?:.*\/)?cc-repo(?:\/|$)/,
   /^(?:.*\/)?vendor(?:\/|$)/,
   /^(?:.*\/)?dist\/cli(?:\/|\.|$)/,
@@ -412,6 +384,7 @@ const deferredDependencyFailures = deferredAdapterDependencyFailures(
   packageDependencies,
   packageOptionalDependencies,
 );
+const bridgeDependencyFailures = packagedBridgeDependencyFailures(packageDependencies);
 
 if (
   offenders.length > 0 ||
@@ -446,7 +419,8 @@ if (
   dependencyFailures.length > 0 ||
   devDependencyFailures.length > 0 ||
   optionalDependencyFailures.length > 0 ||
-  deferredDependencyFailures.length > 0
+  deferredDependencyFailures.length > 0 ||
+  bridgeDependencyFailures.length > 0
 ) {
   process.stderr.write("package artifact contract failed:\n");
   for (const offender of offenders) {
@@ -485,11 +459,14 @@ if (
     ...devDependencyFailures,
     ...optionalDependencyFailures,
     ...deferredDependencyFailures,
+    ...bridgeDependencyFailures,
   ]) {
     process.stderr.write(`- ${failure}\n`);
   }
   process.exit(1);
 }
+
+runArchitectureContractChecks();
 
 process.stdout.write(
   JSON.stringify(
@@ -504,8 +481,16 @@ process.stdout.write(
   ),
 );
 process.stdout.write(
-  "\npackage artifact check passed (no local state, bin aliases, and native binary pairs are consistent)\n",
+  "\npackage artifact check passed (no local state, bin aliases, and native runtime payloads are consistent)\n",
 );
+
+function runArchitectureContractChecks() {
+  const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+  execFileSync(pnpm, ["run", "quality:architecture"], {
+    cwd: repo,
+    stdio: "inherit",
+  });
+}
 
 function readPackageManifest() {
   try {
@@ -523,6 +508,32 @@ function readPackageContractText(file) {
   } catch (error) {
     return { source: "", failures: [`${file} must be readable: ${error.message}`] };
   }
+}
+
+function packagedBridgeDependencyFailures(dependencies) {
+  const files = [
+    "scripts/langgraph-bridge.mjs",
+    ...walk("scripts/langgraph-bridge").filter((file) => file.endsWith(".mjs")),
+    "scripts/kuzushi-dynamic-module-host.mjs",
+  ];
+  const imports = new Set(files.flatMap(externalImportsFrom));
+  return [...imports]
+    .filter((packageName) => !Object.hasOwn(dependencies, packageName))
+    .map((packageName) => `packaged bridge imports undeclared dependency ${packageName}`);
+}
+
+function externalImportsFrom(relativePath) {
+  const source = readPackageContractText(relativePath).source;
+  return [...source.matchAll(/\bfrom\s+["']([^"']+)["']/g)]
+    .map((match) => match[1])
+    .filter((specifier) => !specifier.startsWith(".") && !specifier.startsWith("node:"))
+    .map(packageNameForSpecifier);
+}
+
+function packageNameForSpecifier(specifier) {
+  return specifier.startsWith("@")
+    ? specifier.split("/").slice(0, 2).join("/")
+    : specifier.split("/")[0];
 }
 
 function walk(rel) {
@@ -652,7 +663,16 @@ function deniedPathFixtureFailures() {
 function binWrapperContentFailures() {
   const content = readPackageContractText("bin/kuzushi-rs.mjs");
   const source = content.source;
-  const required = [
+  return [
+    ...content.failures,
+    ...missingBinWrapperTokens(source, requiredBinWrapperTokens()),
+    ...presentForbiddenBinWrapperTokens(source, forbiddenBinWrapperTokenList()),
+    ...executableFileFailures(["bin/kuzushi-rs.mjs"]),
+  ];
+}
+
+function requiredBinWrapperTokens() {
+  return [
     "#!/usr/bin/env node",
     "spawnSync(binary, process.argv.slice(2)",
     'stdio: "inherit"',
@@ -661,6 +681,7 @@ function binWrapperContentFailures() {
     'join(root, "target", "debug", exe)',
     'invokedName === "kz" ? "kz" : "kuzushi"',
     "KUZUSHI_CLI_NAME: cliName",
+    "nativeRuntimePath(binary, process.env.PATH)",
     "native/<platform>-<arch>/kuzushi",
     "kuzushi doctor --target .",
     "KUZUSHI_NATIVE_BIN points to missing file",
@@ -674,19 +695,26 @@ function binWrapperContentFailures() {
     "process.exit(127)",
     "result.error",
     "process.exit(1)",
-    "process.exit(result.status ?? 0)",
+    "if (result.status === null)",
+    "process.exit(signalExitCode(result.signal))",
+    "process.exit(result.status)",
   ];
-  const forbidden = ["codex", "kuzushi-ts", "process.env.KUZUSHI_CLI_NAME ??"];
-  return [
-    ...content.failures,
-    ...required
-      .filter((token) => !source.includes(token))
-      .map((token) => `bin/kuzushi-rs.mjs must mention ${token}`),
-    ...forbidden
-      .filter((token) => source.includes(token))
-      .map((token) => `bin/kuzushi-rs.mjs must not mention ${token}`),
-    ...executableFileFailures(["bin/kuzushi-rs.mjs"]),
-  ];
+}
+
+function forbiddenBinWrapperTokenList() {
+  return ["codex", "kuzushi-ts", "process.env.KUZUSHI_CLI_NAME ??", "result.status ?? 0"];
+}
+
+function missingBinWrapperTokens(source, required) {
+  return required
+    .filter((token) => !source.includes(token))
+    .map((token) => `bin/kuzushi-rs.mjs must mention ${token}`);
+}
+
+function presentForbiddenBinWrapperTokens(source, forbidden) {
+  return forbidden
+    .filter((token) => source.includes(token))
+    .map((token) => `bin/kuzushi-rs.mjs must not mention ${token}`);
 }
 
 function nativeBinaryFailures(files) {
@@ -713,12 +741,7 @@ function nativePlatformDirs(files) {
 }
 
 function missingNativeBinaries(files, dir) {
-  // One shipped binary per platform: the bin wrapper resolves `kz` to the
-  // `kuzushi` binary via argv0 dispatch.
-  const windows = dir.startsWith("native/win32-");
-  const names = windows ? ["kuzushi.exe"] : ["kuzushi"];
-  return names
-    .map((name) => `${dir}/${name}`)
+  return expectedNativeBinaries(dir)
     .filter((file) => !files.includes(file))
     .map((file) => `missing shipped native binary ${file}`);
 }
@@ -732,9 +755,8 @@ function extraNativePayloadFailures(files, dir) {
 }
 
 function expectedNativeBinaries(dir) {
-  const windows = dir.startsWith("native/win32-");
-  const names = windows ? ["kuzushi.exe"] : ["kuzushi"];
-  return names.map((name) => `${dir}/${name}`);
+  const platform = dir.startsWith("native/win32-") ? "win32" : "unix";
+  return nativeRuntimeBinaries.map((binary) => `${dir}/${nativeExecutableName(binary, platform)}`);
 }
 
 function nativeExecutableFailures(dir) {
@@ -752,12 +774,15 @@ function stageNativeScriptContentFailures() {
   const content = readPackageContractText("scripts/stage-native-binary.mjs");
   const source = content.source;
   const required = [
-    '["kuzushi.exe"] : ["kuzushi"]',
+    'from "./native-runtime-contract.mjs"',
+    "nativeRuntimeBinaries.map",
+    "nativeExecutableName(binary)",
+    "nativePlatformSlug()",
     '["codex.exe", "kuzushi-ts.exe", "kz.exe"]',
     '["codex", "kuzushi-ts", "kz"]',
     'join(root, "target", "release", exe)',
-    'join(root, "native", `${process.platform}-${process.arch}`)',
-    "cargo build -p kuzushi-cli --release",
+    'join(root, "native", nativePlatformSlug())',
+    "node scripts/build-native-runtime.mjs",
     "process.exit(1)",
     "mkdirSync(outDir, { recursive: true })",
     "readdirSync(outDir)",
@@ -1389,31 +1414,19 @@ function packageDevDependencyFailures(devDependencies) {
 }
 
 function packageOptionalDependencyFailures(optionalDependencies) {
-  return [
-    ...missingSchemaFiles(
-      Object.keys(expectedOptionalAdapterDependencies),
-      Object.keys(optionalDependencies),
-      "package optionalDependencies missing required package",
-    ),
-    ...missingSchemaFiles(
-      Object.keys(optionalDependencies),
-      Object.keys(expectedOptionalAdapterDependencies),
-      "package optionalDependencies has uncontracted package",
-    ),
-    ...Object.entries(expectedOptionalAdapterDependencies)
-      .filter(([name, spec]) => optionalDependencies[name] !== spec)
-      .map(([name, spec]) => `package optionalDependencies.${name} must be ${spec}`),
-  ];
+  return Object.keys(optionalDependencies).map(
+    (name) => `package optionalDependencies has uncontracted package ${name}`,
+  );
 }
 
 function deferredAdapterDependencyFailures(dependencies, optionalDependencies) {
-  return Object.entries(expectedOptionalAdapterDependencies).flatMap(([name, spec]) => [
+  return explicitAdapterPackages.flatMap((name) => [
     ...(Object.hasOwn(dependencies, name)
-      ? [`package dependencies must not install deferred adapter package ${name}`]
+      ? [`package dependencies must not install explicit adapter package ${name}`]
       : []),
-    ...(optionalDependencies[name] === spec
-      ? []
-      : [`package optionalDependencies.${name} must be ${spec}`]),
+    ...(Object.hasOwn(optionalDependencies, name)
+      ? [`package optionalDependencies must not auto-install explicit adapter package ${name}`]
+      : []),
   ]);
 }
 

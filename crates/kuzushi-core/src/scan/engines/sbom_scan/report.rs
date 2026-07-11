@@ -1,8 +1,8 @@
-use super::*;
 use super::cyclonedx::cyclonedx_document;
 use super::spdx::spdx_document;
-use std::collections::BTreeMap;
+use super::*;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 pub(super) fn ecosystem_counts(components: &[SbomComponent]) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();

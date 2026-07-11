@@ -8,7 +8,6 @@ const roots = [
   "README.md",
   "docs",
   "examples",
-  "recipes",
   ".github",
   "AGENTS.md",
   "CLAUDE.md",

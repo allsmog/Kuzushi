@@ -4,14 +4,22 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
+const MAX_RG_STDOUT_BYTES: usize = 32 * 1024 * 1024;
+const MAX_RG_STDERR_BYTES: usize = 1024 * 1024;
+
 /// True iff a usable `rg` is on PATH. Probed once per process.
 pub(crate) fn rg_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
     *AVAILABLE.get_or_init(|| {
-        Command::new("rg")
-            .arg("--version")
-            .output()
-            .is_ok_and(|out| out.status.success())
+        let mut command = Command::new("rg");
+        command.arg("--version");
+        crate::bounded_subprocess::output_with_limits(
+            &mut command,
+            "rg --version",
+            64 * 1024,
+            64 * 1024,
+        )
+        .is_ok_and(|out| out.status.success())
     })
 }
 
@@ -157,9 +165,13 @@ fn run_rg(
     for path in paths {
         cmd.arg(path);
     }
-    let output = cmd
-        .output()
-        .context("could not invoke rg for taint-iris-next structural backend")?;
+    let output = crate::bounded_subprocess::output_with_limits(
+        &mut cmd,
+        "taint-iris-next rg",
+        MAX_RG_STDOUT_BYTES,
+        MAX_RG_STDERR_BYTES,
+    )
+    .context("could not invoke rg for taint-iris-next structural backend")?;
     // rg exits 1 when there are no matches; that's a normal outcome here.
     if !output.status.success() && output.status.code() != Some(1) {
         anyhow::bail!(
@@ -168,41 +180,47 @@ fn run_rg(
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    Ok(parse_rg_json(scan_root, &output.stdout))
+    parse_rg_json(scan_root, &output.stdout)
 }
 
-fn parse_rg_json(scan_root: &Path, stdout: &[u8]) -> Vec<RgHit> {
+fn parse_rg_json(scan_root: &Path, stdout: &[u8]) -> Result<Vec<RgHit>> {
     let mut hits = Vec::new();
-    let stdout = String::from_utf8_lossy(stdout);
-    for raw_line in stdout.lines() {
-        let value: Value = match serde_json::from_str(raw_line) {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
-        if value.get("type").and_then(Value::as_str) != Some("match") {
-            continue;
+    let stdout = std::str::from_utf8(stdout).context("rg returned non-UTF-8 JSON output")?;
+    for (index, raw_line) in stdout.lines().enumerate() {
+        let value: Value = serde_json::from_str(raw_line)
+            .with_context(|| format!("rg returned malformed JSON at line {}", index + 1))?;
+        if let Some(hit) = parse_rg_hit(scan_root, &value)
+            .with_context(|| format!("rg match event {} is invalid", index + 1))?
+        {
+            hits.push(hit);
         }
-        let Some(data) = value.get("data") else {
-            continue;
-        };
-        let Some(path) = data.pointer("/path/text").and_then(Value::as_str) else {
-            continue;
-        };
-        let line_no = data.get("line_number").and_then(Value::as_u64).unwrap_or(0);
-        if line_no == 0 {
-            continue;
-        }
-        let line_text = data
-            .pointer("/lines/text")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        hits.push(RgHit {
-            relative_path: relative_path_for(scan_root, Path::new(path)),
-            line_no,
-            line: line_text.trim_end_matches(['\r', '\n']).to_string(),
-        });
     }
-    hits
+    Ok(hits)
+}
+
+fn parse_rg_hit(scan_root: &Path, value: &Value) -> Result<Option<RgHit>> {
+    if value.get("type").and_then(Value::as_str) != Some("match") {
+        return Ok(None);
+    }
+    let data = value.get("data").context("missing data object")?;
+    let path = data
+        .pointer("/path/text")
+        .and_then(Value::as_str)
+        .context("missing UTF-8 path.text")?;
+    let line_no = data
+        .get("line_number")
+        .and_then(Value::as_u64)
+        .filter(|line| *line > 0)
+        .context("missing positive line_number")?;
+    let line = data
+        .pointer("/lines/text")
+        .and_then(Value::as_str)
+        .context("missing UTF-8 lines.text")?;
+    Ok(Some(RgHit {
+        relative_path: relative_path_for(scan_root, Path::new(path)),
+        line_no,
+        line: line.trim_end_matches(['\r', '\n']).to_string(),
+    }))
 }
 
 fn relative_path_for(scan_root: &Path, path: &Path) -> String {
@@ -283,5 +301,15 @@ mod tests {
         assert!(substrings.contains("params")); // alias expansion
         assert!(!substrings.iter().any(|s| s.trim().is_empty()));
         assert!(!substrings.iter().any(|s| s.contains('\n')));
+    }
+
+    #[test]
+    fn rg_json_parser_rejects_malformed_and_shape_invalid_matches() {
+        assert!(parse_rg_json(Path::new("/repo"), b"not-json\n").is_err());
+        assert!(parse_rg_json(
+            Path::new("/repo"),
+            br#"{"type":"match","data":{"line_number":1}}"#,
+        )
+        .is_err());
     }
 }

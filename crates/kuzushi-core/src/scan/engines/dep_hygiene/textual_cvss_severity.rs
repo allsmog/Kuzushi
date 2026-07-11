@@ -133,14 +133,22 @@ pub fn check_dependency_hygiene(target: &Path) -> Result<DepHygieneReport> {
         if !manifest_path.exists() {
             continue;
         }
-        let raw = fs::read_to_string(&manifest_path)
-            .with_context(|| format!("dep-hygiene: failed to read {}", manifest_path.display()))?;
+        let raw = crate::bounded_file::read_utf8_text_within(
+            &target,
+            &manifest_path,
+            16 * 1024 * 1024,
+        )
+        .with_context(|| format!("dep-hygiene: failed to read {}", manifest_path.display()))?;
         findings.extend(analyze_manifest(manifest, &manifest_path, &raw));
     }
     findings.extend(check_dotnet_projects(&target)?);
     findings.extend(check_gradle_builds(&target)?);
     findings.extend(check_extension_files(&target, "opam", analyze_opam_file)?);
-    findings.extend(check_extension_files(&target, "nimble", analyze_nimble_file)?);
+    findings.extend(check_extension_files(
+        &target,
+        "nimble",
+        analyze_nimble_file,
+    )?);
     findings.extend(check_extension_files(&target, "cabal", analyze_cabal_file)?);
 
     Ok(DepHygieneReport {
@@ -171,11 +179,23 @@ pub fn analyze_manifest(
         ManifestKind::HaxelibJson => analyze_haxelib_json(file_path, raw),
         ManifestKind::Cpanfile => analyze_cpanfile(file_path, raw),
         ManifestKind::RDescription => analyze_r_description(file_path, raw),
+        extended => analyze_extended_manifest(extended, file_path, raw),
+    }
+}
+
+fn analyze_extended_manifest(
+    manifest: ManifestKind,
+    file_path: &Path,
+    raw: &str,
+) -> Vec<DepHygieneFinding> {
+    match manifest {
         ManifestKind::CondaEnvironmentYml | ManifestKind::CondaEnvironmentYaml => {
             analyze_conda_environment(file_path, raw, manifest)
         }
         ManifestKind::GleamToml => analyze_gleam_toml(file_path, raw),
-        ManifestKind::ShardYml | ManifestKind::ShardYaml => analyze_shard_manifest(file_path, raw, manifest),
+        ManifestKind::ShardYml | ManifestKind::ShardYaml => {
+            analyze_shard_manifest(file_path, raw, manifest)
+        }
         ManifestKind::OpamFile => analyze_opam_file(file_path, raw),
         ManifestKind::NimbleFile => analyze_nimble_file(file_path, raw),
         ManifestKind::CabalFile => analyze_cabal_file(file_path, raw),
@@ -188,19 +208,20 @@ pub fn analyze_manifest(
         }
         ManifestKind::CargoToml => analyze_cargo_toml(file_path, raw),
         ManifestKind::GoMod => analyze_go_mod(file_path, raw),
+        _ => unreachable!("core manifest routed to extended analyzer"),
     }
 }
 
 fn check_dotnet_projects(target: &Path) -> Result<Vec<DepHygieneFinding>> {
     let mut findings = Vec::new();
-    for entry in
-        fs::read_dir(target).with_context(|| format!("dep-hygiene: failed to read {}", target.display()))?
+    for entry in fs::read_dir(target)
+        .with_context(|| format!("dep-hygiene: failed to read {}", target.display()))?
     {
         let path = entry?.path();
         if !is_dotnet_project(&path) {
             continue;
         }
-        let raw = fs::read_to_string(&path)
+        let raw = crate::bounded_file::read_utf8_text_within(target, &path, 16 * 1024 * 1024)
             .with_context(|| format!("dep-hygiene: failed to read {}", path.display()))?;
         findings.extend(analyze_dotnet_project(&path, &raw));
     }
@@ -225,7 +246,7 @@ fn check_gradle_builds(target: &Path) -> Result<Vec<DepHygieneFinding>> {
         if !path.exists() {
             continue;
         }
-        let raw = fs::read_to_string(&path)
+        let raw = crate::bounded_file::read_utf8_text_within(target, &path, 16 * 1024 * 1024)
             .with_context(|| format!("dep-hygiene: failed to read {}", path.display()))?;
         findings.extend(analyze_gradle_build(&path, &raw));
     }
@@ -238,14 +259,14 @@ fn check_extension_files(
     analyze: fn(&Path, &str) -> Vec<DepHygieneFinding>,
 ) -> Result<Vec<DepHygieneFinding>> {
     let mut findings = Vec::new();
-    for entry in
-        fs::read_dir(target).with_context(|| format!("dep-hygiene: failed to read {}", target.display()))?
+    for entry in fs::read_dir(target)
+        .with_context(|| format!("dep-hygiene: failed to read {}", target.display()))?
     {
         let path = entry?.path();
         if !has_extension(&path, extension) {
             continue;
         }
-        let raw = fs::read_to_string(&path)
+        let raw = crate::bounded_file::read_utf8_text_within(target, &path, 16 * 1024 * 1024)
             .with_context(|| format!("dep-hygiene: failed to read {}", path.display()))?;
         findings.extend(analyze(&path, &raw));
     }

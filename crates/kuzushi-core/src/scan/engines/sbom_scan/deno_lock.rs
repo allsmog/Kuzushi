@@ -1,8 +1,8 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_deno_lock(path: &Path) -> bool {
@@ -115,7 +115,10 @@ fn extend_transitive_edges(
 }
 
 fn dependency_name(ecosystem: &str, value: &str) -> Option<String> {
-    if let Some(specifier) = value.strip_prefix("npm:").or_else(|| value.strip_prefix("jsr:")) {
+    if let Some(specifier) = value
+        .strip_prefix("npm:")
+        .or_else(|| value.strip_prefix("jsr:"))
+    {
         return specifier_package_name(specifier);
     }
     if ecosystem == "npm" {

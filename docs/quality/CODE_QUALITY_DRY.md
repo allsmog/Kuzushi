@@ -60,17 +60,11 @@ medium for shell.ts (slightly different semantics — must invert
 compare). Will tackle the easy ones; leave shell.ts inversion as-is to
 avoid regressions.
 
-### D3. Duplicate `stripAnsi` helpers (LOW)
+### D3. Duplicate `stripAnsi` helpers (RESOLVED)
 
-- `src/copilot/print.ts:49` (exported)
-- `src/ui/components/ContextBuildView.tsx:584` (private)
-- `src/ui/components/FindingsView.tsx:157,161` (inline regex + `pad`)
-
-Severity: low (only 3 copies, regex is small).
-Proposed: keep `print.ts`'s `stripAnsi` exported and consume it from
-the two UI sites; consolidate `pad`/`padEndColored` likewise.
-Risk: low — visible change is import only.
-Confidence: high.
+The TypeScript shell and its `src/copilot/print.ts` compatibility shim were
+retired during the Rust TUI migration. The supported SDK formatter now lives
+at `src/modules/print.ts`; the duplicate UI helpers no longer exist.
 
 ### D4. Local `isRecord` duplicate (LOW)
 

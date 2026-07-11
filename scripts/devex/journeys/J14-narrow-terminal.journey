@@ -10,11 +10,50 @@ env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch:
 wait-for: 2 CHOOSE A TARGET
 snap: narrow-target-gate
+expect: Enter selects
 ask: 60 cols — is the target gate readable, does the footer wrap to two lines instead of truncating behind a +more chip?
 keys: Enter
-wait: 3
+wait-for: 3 CHOOSE A MODEL
 snap: narrow-model-gate
-keys: d
+expect: Target confirmed
+keys: Down Down Down Enter
+wait-for: 5 CHOOSE AUTH METHOD
+snap: narrow-credentials-gate
+expect: Target confirmed
+expect: API key (ANTHROPIC_API_KEY)
+type: bdd-session-only-key
+keys: Enter
+wait-for: 10 KUMI-KATA
+snap: narrow-planning-gate
+expect: Target confirmed
+expect: Inline action
+expect: Enter:
+expect: Space check
+expect: Enter run
+expect-not: tool descriptor missing
+ask: Planning at 60x20 — are the selected tasks, exact Enter outcome, and controls all visible without internal or mid-word cropping?
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.5
+snap: narrow-planning-scrolled
+expect: TASKS
+expect: > SKIP    Threat intel (CVEs)
+expect: Enter:
+expect: Enter run
+ask: Scrolled Planning — did the task window follow the cursor while keeping the confirmation and controls fixed?
+keys: Escape
+submit: demo
 wait-for: 90 run completed
 snap: narrow-demo-result
 ask: Compact Workbench/Activity — do findings and detail text stay readable, with nothing truncated behind chrome?

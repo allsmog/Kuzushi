@@ -19,6 +19,8 @@ mod tests {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         }
     }
 
@@ -297,6 +299,8 @@ HTTP
             workspace: None,
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let error = execute_recon_tool(
             "recon:http-fingerprint",
@@ -478,10 +482,43 @@ HTTP
         let ctx = context(&config, &workspace);
         let dump = workspace_dir.path().join("anything.jsonl");
         fs::write(&dump, "{}\n").unwrap();
-        let err = execute_recon_tool("recon:import", import_input("burp", &dump), &ctx)
+        let err = execute_recon_tool("recon:import", import_input("unsupported", &dump), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("amass, httpx, nuclei, nmap-xml"));
+        assert!(err.contains("amass, httpx, nuclei, nmap-xml, burp-xml, har"));
+    }
+
+    #[test]
+    fn recon_import_har_folds_bounty_evidence_into_the_canonical_route() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("traffic.har");
+        fs::write(
+            &dump,
+            json!({
+                "log": {
+                    "version": "1.2",
+                    "entries": [{
+                        "request": {
+                            "method": "GET",
+                            "url": "https://api.lab.test/health",
+                            "headers": []
+                        },
+                        "response": {"status": 200, "headers": []}
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("har", &dump), &ctx)
+            .expect("HAR import succeeds through recon");
+
+        assert_eq!(result["data"]["imported"], 1);
+        assert!(result["output"].as_str().unwrap().contains("recon:import har"));
     }
 
     #[test]

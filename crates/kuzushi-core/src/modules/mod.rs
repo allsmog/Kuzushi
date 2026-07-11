@@ -113,20 +113,22 @@ pub use autonomy::{
     gate as autonomy_gate, tool_phase, AutonomyDecision, AutonomyPosture, AutonomyRefusal,
     WorkflowPhase,
 };
-pub use contracts::ToolExecutionContext;
+pub use contracts::{ExecutionAuthorization, ToolExecutionContext};
 pub use contracts::{
-    canonical_tool_phase, BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec,
-    OptionType, RuntimeRequirement, ToolDescriptor, ToolPhase,
+    canonical_tool_phase, ApprovalPolicy, BuiltinModule, DagNodeDescriptor, ModuleKind,
+    FileReferenceSemantics, FindingStoreRequirement, ModuleMetadata, OptionSpec, OptionType,
+    PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor, ToolEffect, ToolPhase, ToolPolicy,
+    WorkspaceRequirement,
 };
 pub use dynamic_loader::{
     approve_dynamic_module, default_dynamic_lockfile_path, inspect_dynamic_module,
     revoke_dynamic_module, DynamicModuleInspection, DynamicModuleLoadOptions,
 };
+pub use builtins::PreparedToolInput;
 pub use options::coerce_option_value;
 pub use registry::ModuleRegistry;
 pub use runtime_requirements::{
     agent_runtime_tool_names, tool_defaults_to_workspace, tool_needs_finding_store,
     tool_needs_runtime, tool_requires_agent_runtime, tool_uses_agent_runtime,
-    tool_uses_finding_store, tool_wants_runtime, wants_sast_runtime, FINDING_STORE_TOOL_NAMES,
-    FINDING_STORE_TOOL_PREFIXES, RUNTIME_TOOL_NAMES, WORKSPACE_TOOL_NAMES, WORKSPACE_TOOL_PREFIXES,
+    tool_uses_finding_store, tool_wants_runtime, wants_sast_runtime,
 };

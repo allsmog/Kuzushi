@@ -173,6 +173,9 @@ fn hash_risk_findings(findings: &[Finding], hasher: &mut DefaultHasher) {
 }
 
 fn hash_finding_projection_fields(finding: &Finding, hasher: &mut DefaultHasher) {
+    finding.id.hash(hasher);
+    finding.identity_id.hash(hasher);
+    finding.created_at.hash(hasher);
     finding.fingerprint.hash(hasher);
     finding.dedup_key.hash(hasher);
     finding.file_path.hash(hasher);
@@ -238,6 +241,26 @@ mod tests {
         let changed = VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
 
         assert_ne!(original, changed);
+    }
+
+    #[test]
+    fn visible_findings_cache_key_tracks_review_binding_fields() {
+        let mut findings = vec![finding("src/a.rs", Severity::High)];
+        let original = VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
+
+        findings[0].id = Some(41);
+        let with_id = VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
+        assert_ne!(original, with_id);
+
+        findings[0].identity_id = Some("fi_review_identity".to_string());
+        let with_identity =
+            VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
+        assert_ne!(with_id, with_identity);
+
+        findings[0].created_at = "2026-07-10T00:00:00Z".to_string();
+        let with_timestamp =
+            VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
+        assert_ne!(with_identity, with_timestamp);
     }
 
     #[test]

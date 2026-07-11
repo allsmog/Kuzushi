@@ -1,7 +1,9 @@
 use super::*;
-use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const MAX_THREAT_INTEL_INPUT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_THREAT_INTEL_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 
 pub(crate) fn threat_intel_module() -> BuiltinModule {
     builtin_module(
@@ -11,72 +13,96 @@ pub(crate) fn threat_intel_module() -> BuiltinModule {
         "Per-target detector catalog seeded from a project's CVE history. Each entry \
          describes the source/sink/sanitizer pattern of one historical CVE and dispatches \
          to the right native hunt (uaf-hunt, taint-iris-next, systems-hunt, variant).",
-        vec![
-            tool_with_options(
-                "threat-intel:discover",
-                "Inspect dependency manifests and the context snapshot to enumerate the \
-                 technologies + packages used by the target. Writes \
-                 .kuzushi/threat-intel/candidates.json — a candidate list that can then be \
-                 fed into `threat-intel:harvest` once CVE IDs are sourced. Deterministic; \
-                 no model cost.",
-                vec![target_option()],
-            ),
-            tool_with_options(
-                "threat-intel:list",
-                "List the entries declared in a threat-intel catalog TOML.",
-                vec![
-                    opt(
-                        "catalogPath",
-                        OptionType::Path,
-                        "Path to the catalog TOML. Defaults to the first .toml under <target>/.kuzushi/catalogs/.",
-                    ),
-                ],
-            ),
-            tool_with_options(
-                "threat-intel:apply",
-                "Plan or dispatch the catalog: route each entry to its hunt module. \
-                 Defaults to dryRun=true.",
-                vec![
-                    opt(
-                        "catalogPath",
-                        OptionType::Path,
-                        "Path to the catalog TOML. Defaults to the first .toml under <target>/.kuzushi/catalogs/.",
-                    ),
-                    opt(
-                        "dryRun",
-                        OptionType::Bool,
-                        "When true (default), produce the dispatch plan without invoking the underlying hunts. Set false to actually spend agent budget.",
-                    )
-                    .default(json!(true)),
-                ],
-            ),
-            tool_with_options(
-                "threat-intel:harvest",
-                "Build a catalog TOML from a list of CVE IDs. For each CVE, calls \
-                 ndiff:fetch-cve + ndiff:extract-fix-pattern, then writes one entry per \
-                 CVE to the output catalog. The `cves` field is the only JSON-only input \
-                 (array of strings).",
-                vec![
-                    opt(
-                        "cves",
-                        OptionType::Json,
-                        "Array of CVE IDs to harvest into catalog entries.",
-                    )
-                    .required(),
-                    opt(
-                        "outputPath",
-                        OptionType::Path,
-                        "Destination catalog TOML. Defaults to <target>/.kuzushi/catalogs/harvested.toml. Existing files are appended to.",
-                    ),
-                    model_option(),
-                ],
-            ),
-        ],
+        threat_intel_tools(),
         vec![dag(
             "threat-intel:discover",
             "cve-candidates",
             &["context:build"],
         )],
+    )
+}
+
+fn threat_intel_tools() -> Vec<ToolDescriptor> {
+    vec![
+        threat_intel_discover_tool(),
+        threat_intel_list_tool(),
+        threat_intel_apply_tool(),
+        threat_intel_harvest_tool().with_policy(external_action_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Always,
+            FindingStoreRequirement::Optional,
+        )),
+    ]
+}
+
+fn threat_intel_discover_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-intel:discover",
+        "Inspect dependencies and context, then write .kuzushi threat-intel candidates.",
+        vec![target_option()],
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn threat_intel_list_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-intel:list",
+        "List the entries declared in a threat-intel catalog TOML.",
+        vec![threat_intel_catalog_path_option()],
+    )
+    .with_policy(tool_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::Never,
+        ToolEffect::Read,
+        WorkspaceRequirement::Required,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn threat_intel_apply_tool() -> ToolDescriptor {
+    let options = vec![
+        threat_intel_catalog_path_option(),
+        opt(
+            "dryRun",
+            OptionType::Bool,
+            "Only produce the dispatch plan.",
+        )
+        .default(json!(true)),
+    ];
+    tool_with_options(
+        "threat-intel:apply",
+        "Plan or dispatch catalog entries to their native hunt modules.",
+        options,
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::Always,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn threat_intel_catalog_path_option() -> OptionSpec {
+    opt(
+        "catalogPath",
+        OptionType::Path,
+        "Catalog TOML under the active target's .kuzushi/catalogs directory.",
+    )
+    .workspace_read()
+}
+
+fn threat_intel_harvest_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-intel:harvest",
+        "Build a catalog TOML from CVE IDs and extracted fix patterns.",
+        vec![
+            opt("cves", OptionType::Json, "CVE IDs to harvest.").required(),
+            opt("outputPath", OptionType::Path, "Destination catalog TOML.").state_write(),
+            model_option(),
+        ],
     )
 }
 
@@ -86,9 +112,9 @@ pub(in crate::modules) fn run_threat_intel_discover(
 ) -> Result<Value> {
     let target = resolve_tool_target(input, ctx)?;
     emit_discover_start(ctx, &target);
-    let snapshot = load_context_snapshot_for_discover(&target);
+    let snapshot = load_context_snapshot_for_discover(&target)?;
     let technologies = collect_technologies(&snapshot);
-    let packages = collect_packages(&target);
+    let packages = collect_packages(&target)?;
     let output_path = write_candidates_json(&target, &technologies, &packages)?;
     emit_discover_done(ctx, technologies.len(), packages.len());
     Ok(discover_response(
@@ -99,10 +125,14 @@ pub(in crate::modules) fn run_threat_intel_discover(
     ))
 }
 
-fn load_context_snapshot_for_discover(target: &Path) -> Option<Value> {
+fn load_context_snapshot_for_discover(target: &Path) -> Result<Option<Value>> {
     let path = target.join(".kuzushi/context-snapshot.json");
-    let body = fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&body).ok()
+    let Some(body) = read_optional_threat_intel_input(target, &path)? else {
+        return Ok(None);
+    };
+    serde_json::from_str(&body)
+        .with_context(|| format!("Could not parse {}", path.display()))
+        .map(Some)
 }
 
 fn collect_technologies(snapshot: &Option<Value>) -> Vec<String> {
@@ -137,24 +167,22 @@ fn collect_string_array(snapshot: &Value, keys: &[&str]) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn collect_packages(target: &Path) -> Vec<Value> {
+fn collect_packages(target: &Path) -> Result<Vec<Value>> {
     let mut entries = Vec::new();
-    collect_npm_packages(target, &mut entries);
-    collect_cargo_packages(target, &mut entries);
-    collect_python_requirements(target, &mut entries);
-    collect_go_modules(target, &mut entries);
-    entries
+    collect_npm_packages(target, &mut entries)?;
+    collect_cargo_packages(target, &mut entries)?;
+    collect_python_requirements(target, &mut entries)?;
+    collect_go_modules(target, &mut entries)?;
+    Ok(entries)
 }
 
-fn collect_npm_packages(target: &Path, entries: &mut Vec<Value>) {
-    let body = match fs::read_to_string(target.join("package.json")) {
-        Ok(body) => body,
-        Err(_) => return,
+fn collect_npm_packages(target: &Path, entries: &mut Vec<Value>) -> Result<()> {
+    let path = target.join("package.json");
+    let Some(body) = read_optional_threat_intel_input(target, &path)? else {
+        return Ok(());
     };
-    let json: Value = match serde_json::from_str(&body) {
-        Ok(value) => value,
-        Err(_) => return,
-    };
+    let json: Value = serde_json::from_str(&body)
+        .with_context(|| format!("Could not parse {}", path.display()))?;
     for key in ["dependencies", "devDependencies", "peerDependencies"] {
         let Some(deps) = json.get(key).and_then(Value::as_object) else {
             continue;
@@ -168,12 +196,13 @@ fn collect_npm_packages(target: &Path, entries: &mut Vec<Value>) {
             }));
         }
     }
+    Ok(())
 }
 
-fn collect_cargo_packages(target: &Path, entries: &mut Vec<Value>) {
-    let body = match fs::read_to_string(target.join("Cargo.toml")) {
-        Ok(body) => body,
-        Err(_) => return,
+fn collect_cargo_packages(target: &Path, entries: &mut Vec<Value>) -> Result<()> {
+    let path = target.join("Cargo.toml");
+    let Some(body) = read_optional_threat_intel_input(target, &path)? else {
+        return Ok(());
     };
     for line in body.lines() {
         let trimmed = line.trim();
@@ -192,12 +221,13 @@ fn collect_cargo_packages(target: &Path, entries: &mut Vec<Value>) {
             "scope": "dependencies",
         }));
     }
+    Ok(())
 }
 
-fn collect_python_requirements(target: &Path, entries: &mut Vec<Value>) {
-    let body = match fs::read_to_string(target.join("requirements.txt")) {
-        Ok(body) => body,
-        Err(_) => return,
+fn collect_python_requirements(target: &Path, entries: &mut Vec<Value>) -> Result<()> {
+    let path = target.join("requirements.txt");
+    let Some(body) = read_optional_threat_intel_input(target, &path)? else {
+        return Ok(());
     };
     for raw in body.lines() {
         let line = raw.split('#').next().unwrap_or("").trim();
@@ -215,29 +245,18 @@ fn collect_python_requirements(target: &Path, entries: &mut Vec<Value>) {
             "scope": "requirements",
         }));
     }
+    Ok(())
 }
 
-fn collect_go_modules(target: &Path, entries: &mut Vec<Value>) {
-    let body = match fs::read_to_string(target.join("go.mod")) {
-        Ok(body) => body,
-        Err(_) => return,
+fn collect_go_modules(target: &Path, entries: &mut Vec<Value>) -> Result<()> {
+    let path = target.join("go.mod");
+    let Some(body) = read_optional_threat_intel_input(target, &path)? else {
+        return Ok(());
     };
     let mut in_require = false;
     for raw in body.lines() {
         let line = raw.trim();
-        if line.starts_with("require (") {
-            in_require = true;
-            continue;
-        }
-        if in_require && line == ")" {
-            in_require = false;
-            continue;
-        }
-        let candidate = if in_require {
-            line
-        } else if let Some(rest) = line.strip_prefix("require ") {
-            rest
-        } else {
+        let Some(candidate) = go_requirement_candidate(line, &mut in_require) else {
             continue;
         };
         if candidate.is_empty() {
@@ -254,6 +273,27 @@ fn collect_go_modules(target: &Path, entries: &mut Vec<Value>) {
             "scope": "require",
         }));
     }
+    Ok(())
+}
+
+fn go_requirement_candidate<'a>(line: &'a str, in_require: &mut bool) -> Option<&'a str> {
+    if line.starts_with("require (") {
+        *in_require = true;
+        return None;
+    }
+    if *in_require && line == ")" {
+        *in_require = false;
+        return None;
+    }
+    if *in_require {
+        return Some(line);
+    }
+    line.strip_prefix("require ")
+}
+
+fn read_optional_threat_intel_input(target: &Path, path: &Path) -> Result<Option<String>> {
+    crate::workspace::read_optional_workspace_text(target, path, MAX_THREAT_INTEL_INPUT_BYTES)
+        .with_context(|| format!("Could not read threat-intel input {}", path.display()))
 }
 
 fn write_candidates_json(
@@ -261,10 +301,6 @@ fn write_candidates_json(
     technologies: &[String],
     packages: &[Value],
 ) -> Result<std::path::PathBuf> {
-    let dir = target.join(".kuzushi/threat-intel");
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("creating {} for threat-intel candidates", dir.display()))?;
-    let path = dir.join("candidates.json");
     let body = json!({
         "target": target.display().to_string(),
         "timestamp": now_ms()?,
@@ -274,12 +310,17 @@ fn write_candidates_json(
         "note": "Offline candidate set. Populate `cves` from OSV / NVD / vendor advisories \
                  and feed into `threat-intel:harvest`.",
     });
-    fs::write(
-        &path,
-        serde_json::to_string_pretty(&body).unwrap_or_default(),
+    let encoded =
+        serde_json::to_vec_pretty(&body).context("serializing threat-intel candidates")?;
+    anyhow::ensure!(
+        encoded.len() <= MAX_THREAT_INTEL_OUTPUT_BYTES,
+        "threat-intel candidates exceed the {MAX_THREAT_INTEL_OUTPUT_BYTES}-byte output limit"
+    );
+    crate::workspace::write_workspace_state_file(
+        target,
+        Path::new(".kuzushi/threat-intel/candidates.json"),
+        &encoded,
     )
-    .with_context(|| format!("writing threat-intel candidates at {}", path.display()))?;
-    Ok(path)
 }
 
 fn discover_response(
@@ -340,4 +381,34 @@ fn now_ms() -> Result<u64> {
         .duration_since(UNIX_EPOCH)
         .context("system clock is before Unix epoch")?
         .as_millis() as u64)
+}
+
+#[cfg(test)]
+mod discover_input_tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn package_discovery_rejects_manifest_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(outside.path(), "API_KEY=outside-secret\n").unwrap();
+        symlink(outside.path(), target.path().join("requirements.txt")).unwrap();
+
+        let error = collect_packages(target.path()).unwrap_err();
+
+        assert!(format!("{error:#}").contains("symlink"));
+    }
+
+    #[test]
+    fn package_discovery_rejects_malformed_manifests() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("package.json"), "{not-json").unwrap();
+
+        let error = collect_packages(target.path()).unwrap_err();
+
+        assert!(error.to_string().contains("Could not parse"));
+    }
 }

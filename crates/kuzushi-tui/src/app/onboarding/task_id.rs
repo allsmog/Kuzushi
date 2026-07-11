@@ -1,4 +1,4 @@
-use super::phase::WorkflowPhase;
+use kuzushi_core::WorkflowPhase;
 
 /// Every task an operator can select across the four engagement phases. Each
 /// variant maps to a concrete tool (or a tool + option) and, for the Map-phase
@@ -18,6 +18,9 @@ pub enum PlanningTaskId {
     BuildCodePropertyGraph,
     BuildCodeQlDatabase,
     ThreatIntelCves,
+    /// Retained only to decode older saved plans; no longer offered by the
+    /// source-security phase picker.
+    #[allow(dead_code)]
     ReverseEngineerBinary,
     // 崩 KUZUSHI · hunt — find vulnerabilities.
     ScanSecrets,
@@ -27,6 +30,8 @@ pub enum PlanningTaskId {
     HuntTaint,
     HuntThreatModel,
     HuntSystems,
+    /// Retained only to decode older saved plans; superseded by the supported
+    /// systems/dataflow engines and no longer offered by Planning.
     HuntUseAfterFree,
     // 作 TSUKURI · confirm — triage & verify.
     TriageFindings,
@@ -47,7 +52,6 @@ impl PlanningTaskId {
         PlanningTaskId::BuildCodePropertyGraph,
         PlanningTaskId::BuildCodeQlDatabase,
         PlanningTaskId::ThreatIntelCves,
-        PlanningTaskId::ReverseEngineerBinary,
         PlanningTaskId::ScanSecrets,
         PlanningTaskId::ScanSemgrep,
         PlanningTaskId::ScanCodeql,
@@ -55,7 +59,6 @@ impl PlanningTaskId {
         PlanningTaskId::HuntTaint,
         PlanningTaskId::HuntThreatModel,
         PlanningTaskId::HuntSystems,
-        PlanningTaskId::HuntUseAfterFree,
         PlanningTaskId::TriageFindings,
         PlanningTaskId::VerifyFindings,
         PlanningTaskId::PatchFindings,
@@ -138,7 +141,7 @@ impl PlanningTaskId {
             ScanCodeql => "codeql:scan",
             ScanAgenticSast => "agentic-sast:scan",
             HuntTaint => "taint-iris-next:hunt",
-            HuntThreatModel => "carlini-threat-hunt:run",
+            HuntThreatModel => "offense-review:threat-hunt",
             HuntSystems => "systems-hunt:systems-hunt",
             HuntUseAfterFree => "uaf-hunt:hunt",
             TriageFindings => "triage:run",

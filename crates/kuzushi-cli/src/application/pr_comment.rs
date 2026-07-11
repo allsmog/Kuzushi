@@ -1,14 +1,14 @@
 use anyhow::Result;
 use kuzushi_core::{
-    build_pr_comment, load_run_summary, run_artifact_path, tool_result_artifact_spec,
+    build_pr_comment, load_run_summary, read_run_artifact_text, tool_result_artifact_spec,
     FindingListFilter, FindingStore, PrCommentChain, PrCommentChainStep, PrCommentInput,
-    PrCommentPhaseCost, RunLlmCallAudit, RunSummary, WorkspaceTarget,
+    PrCommentPhaseCost, RunArtifactRead, RunLlmCallAudit, RunSummary, WorkspaceTarget,
 };
 use serde_json::Value;
-use std::{collections::BTreeMap, fs, path::PathBuf, time::Duration};
+use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
 pub(crate) fn pr_comment_command(
-    target: Option<PathBuf>,
+    target: PathBuf,
     repo: Option<String>,
     run_url: Option<String>,
     top_n: usize,
@@ -17,7 +17,6 @@ pub(crate) fn pr_comment_command(
     model: Option<String>,
     git_sha: Option<String>,
 ) -> Result<()> {
-    let target = target.unwrap_or_else(|| PathBuf::from("."));
     let workspace = WorkspaceTarget::new(target)?;
     let input = load_pr_comment_input(
         &workspace,
@@ -143,8 +142,9 @@ fn load_pr_comment_chains(
     let Some(run_id) = run_id.filter(|id| !id.trim().is_empty()) else {
         return Vec::new();
     };
-    let path = run_artifact_path(workspace.root(), run_id, result_artifact_leaf());
-    let Ok(body) = fs::read_to_string(path) else {
+    let RunArtifactRead::Ready { value: body, .. } =
+        read_run_artifact_text(workspace.root(), run_id, result_artifact_leaf())
+    else {
         return Vec::new();
     };
     let Ok(value) = serde_json::from_str::<Value>(&body) else {

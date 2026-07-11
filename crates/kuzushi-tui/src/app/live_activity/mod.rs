@@ -9,6 +9,9 @@ pub enum LiveActivityPhase {
     WritingArtifact,
     Waiting,
     Paused,
+    Partial,
+    Skipped,
+    Failed,
     Refused,
     Completed,
 }
@@ -52,13 +55,19 @@ impl LiveActivityPhase {
             Self::WritingArtifact => "writing artifact",
             Self::Waiting => "waiting",
             Self::Paused => "paused",
+            Self::Partial => "partial",
+            Self::Skipped => "skipped",
+            Self::Failed => "failed",
             Self::Refused => "refused",
             Self::Completed => "completed",
         }
     }
 
     pub fn active(self) -> bool {
-        !matches!(self, Self::Completed | Self::Refused)
+        !matches!(
+            self,
+            Self::Completed | Self::Partial | Self::Skipped | Self::Failed | Self::Refused
+        )
     }
 }
 
@@ -98,6 +107,7 @@ impl ShellApp {
         subject: impl Into<String>,
         detail: impl Into<String>,
     ) {
+        self.mark_activity_session_terminal();
         // Clear the live strip indicator, but don't echo a low-value
         // "activity completed" line into the transcript — the DAG ✓ and the
         // tool's own `result` line already convey completion.
@@ -113,11 +123,57 @@ impl ShellApp {
         subject: impl Into<String>,
         detail: impl Into<String>,
     ) {
+        self.mark_activity_session_terminal();
         self.set_live_activity(LiveActivity::new(
             LiveActivityPhase::Refused,
             subject,
             detail,
         ));
+    }
+
+    pub(crate) fn set_partial_activity(
+        &mut self,
+        subject: impl Into<String>,
+        detail: impl Into<String>,
+    ) {
+        self.mark_activity_session_terminal();
+        self.set_live_activity(LiveActivity::new(
+            LiveActivityPhase::Partial,
+            subject,
+            detail,
+        ));
+    }
+
+    pub(crate) fn set_skipped_activity(
+        &mut self,
+        subject: impl Into<String>,
+        detail: impl Into<String>,
+    ) {
+        self.mark_activity_session_terminal();
+        self.set_live_activity(LiveActivity::new(
+            LiveActivityPhase::Skipped,
+            subject,
+            detail,
+        ));
+    }
+
+    pub(crate) fn set_failed_activity(
+        &mut self,
+        subject: impl Into<String>,
+        detail: impl Into<String>,
+    ) {
+        self.mark_activity_session_terminal();
+        self.set_live_activity(LiveActivity::new(
+            LiveActivityPhase::Failed,
+            subject,
+            detail,
+        ));
+    }
+
+    fn mark_activity_session_terminal(&mut self) {
+        if let Some(session) = self.activity_mut() {
+            session.mark_terminal();
+        }
     }
 }
 

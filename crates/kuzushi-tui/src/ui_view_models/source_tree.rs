@@ -6,7 +6,7 @@
 use super::findings::{projected_visible_findings, relativize_location, target_base};
 use super::recommendation_components;
 use crate::app::ProjectScopeTreeState;
-use crate::ShellApp;
+use crate::{ShellApp, ViewDataState};
 use kuzushi_core::{NestedProjectKind, NestedProjectScope, NestedProjectScopeTree};
 use std::collections::BTreeMap;
 
@@ -205,9 +205,9 @@ fn component_roots(app: &ShellApp) -> Vec<SourceTreeComponentRoot> {
     let mut roots = recommendation_component_roots(app);
     let scope_state = app
         .workbench_cache()
-        .borrow_mut()
-        .project_scope_tree(app.target());
-    if let Some(scope_state) = scope_state {
+        .borrow()
+        .cached_project_scope_tree(app.target());
+    if let ViewDataState::Ready(scope_state) = scope_state {
         roots.extend(scope_component_roots(&scope_state, &roots));
     }
     roots

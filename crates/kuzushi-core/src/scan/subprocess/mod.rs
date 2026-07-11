@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::env;
-use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus};
@@ -18,8 +17,8 @@ pub(in crate::scan) use capture_scanner_process_pipes::{
     capture_scanner_process_pipes, join_scanner_process_readers, wait_for_scanner_process,
 };
 pub(in crate::scan) use is_safe_scanner_env_key::is_safe_scanner_env_key;
-pub(in crate::scan) use is_safe_scanner_env_key::{read_pipe, ProcessOutput};
+pub(in crate::scan) use is_safe_scanner_env_key::ProcessOutput;
 pub use scan_cancellation::{RegisteredChild, ScanCancellation};
-pub(in crate::scan) use try_wait::{
+pub(crate) use try_wait::{
     child_process_group_id, configure_scanner_process_group, configure_scanner_subprocess_env,
 };

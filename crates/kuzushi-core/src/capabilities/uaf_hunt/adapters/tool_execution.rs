@@ -33,6 +33,8 @@ mod tests {
             workspace: None,
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let err =
             execute_uaf_hunt_tool("uaf-hunt:nope", serde_json::json!({}), &ctx, None).unwrap_err();

@@ -129,11 +129,14 @@ fn artifact_source_status_row(
 
 fn active_run_summary(app: &ShellApp, session: &ActivitySession) -> Option<RunSummary> {
     let target = app.target()?;
-    app.workbench_cache()
-        .borrow_mut()
-        .run_summary_index(Some(target), vec![session.run_id.clone()])
-        .get(&session.run_id)
-        .cloned()
+    let crate::app::ViewDataState::Ready(index) = app
+        .workbench_cache()
+        .borrow()
+        .cached_run_summary_index(Some(target))
+    else {
+        return None;
+    };
+    index.get(&session.run_id).cloned()
 }
 
 fn artifact_source_status_text(status: &str, reason: Option<&str>) -> Option<String> {

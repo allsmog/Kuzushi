@@ -2,9 +2,20 @@ use super::*;
 use crate::app::TargetCandidate;
 
 pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let mut lines = target_picker_intro(area.width);
-    lines.extend(target_candidate_lines(app, area.width));
-    lines.extend(target_picker_footer(area.width));
+    let intro = target_picker_intro(area.width);
+    let consent = target_consent_lines(app, area.width);
+    let footer = target_picker_footer(area.width);
+    let candidate_budget = (area.height as usize)
+        .saturating_sub(intro.len() + consent.len() + footer.len())
+        .max(1);
+    let mut lines = intro;
+    lines.extend(target_candidate_window_lines(
+        app,
+        area.width,
+        candidate_budget,
+    ));
+    lines.extend(consent);
+    lines.extend(footer);
     lines
 }
 
@@ -30,14 +41,64 @@ fn target_picker_intro(width: u16) -> Vec<Line<'static>> {
     lines
 }
 
-fn target_candidate_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+fn target_candidate_window_lines(
+    app: &ShellApp,
+    width: u16,
+    line_budget: usize,
+) -> Vec<Line<'static>> {
     let candidates = app.router.target_picker().candidates();
     let label_width = candidate_label_width(candidates);
-    candidates
-        .iter()
-        .enumerate()
-        .map(|(index, candidate)| target_picker_row(app, index, candidate, label_width, width))
-        .collect()
+    let show_window_label = candidates.len() > line_budget;
+    let row_budget = line_budget
+        .saturating_sub(usize::from(show_window_label))
+        .max(1);
+    let range = visible_candidate_range(
+        candidates.len(),
+        app.router.target_picker().cursor(),
+        row_budget,
+    );
+    let mut lines = Vec::new();
+    if show_window_label {
+        lines.push(candidate_window_label(
+            range.start,
+            range.end,
+            candidates.len(),
+        ));
+    }
+    lines.extend(
+        range.map(|index| target_picker_row(app, index, &candidates[index], label_width, width)),
+    );
+    lines
+}
+
+fn visible_candidate_range(
+    total: usize,
+    cursor: usize,
+    row_budget: usize,
+) -> std::ops::Range<usize> {
+    let visible = row_budget.min(total).max(1);
+    let centered = cursor.saturating_sub(visible / 2);
+    let start = centered.min(total.saturating_sub(visible));
+    start..(start + visible).min(total)
+}
+
+fn candidate_window_label(start: usize, end: usize, total: usize) -> Line<'static> {
+    muted(&format!(
+        " targets {}-{} of {} · ↑/↓ scroll",
+        start + 1,
+        end,
+        total
+    ))
+}
+
+fn target_consent_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    let Some(candidate) = app.router.target_picker().selected() else {
+        return Vec::new();
+    };
+    vec![
+        blank(),
+        target_identity_line("Enter selects", &candidate.path, width as usize),
+    ]
 }
 
 fn target_picker_footer(width: u16) -> Vec<Line<'static>> {

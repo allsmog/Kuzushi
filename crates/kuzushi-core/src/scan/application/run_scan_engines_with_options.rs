@@ -6,27 +6,53 @@ pub fn run_scan_engines_with_options(
     scanners: &[Box<dyn ScanEngine>],
     options: &ScanRunOptions,
 ) -> Result<ScanRun> {
+    run_scan_engines_with_options_and_cancellation(
+        workspace,
+        store,
+        scanners,
+        options,
+        &ScanCancellation::default(),
+    )
+}
+
+pub fn run_scan_engines_with_options_and_cancellation(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    scanners: &[Box<dyn ScanEngine>],
+    options: &ScanRunOptions,
+    cancellation: &ScanCancellation,
+) -> Result<ScanRun> {
+    ensure_scan_active(cancellation)?;
     preflight_scan_engines(scanners)?;
     workspace.ensure_state_dir()?;
 
     let run_id = scan_run_id(options);
-    store.record_run_started(&run_id, workspace.root(), "running")?;
-
-    let cancellation = ScanCancellation::default();
-    let mut scan_output = collect_scan_engine_outputs(workspace, scanners, &cancellation, options)?;
-    apply_scan_run_options(&mut scan_output.findings, options);
-    index_scan_static_evidence(workspace, options, &scan_output)?;
-
-    for finding in &scan_output.findings {
-        store.insert_finding(&run_id, finding)?;
-    }
-    store.record_run_finished(&run_id, "completed", scan_output.findings.len())?;
-
-    Ok(ScanRun {
-        id: run_id,
-        target: workspace.root().to_path_buf(),
-        findings_count: scan_output.findings.len(),
+    store.with_run_lifecycle(&run_id, workspace.root(), || {
+        let mut scan_output =
+            collect_scan_engine_outputs(workspace, scanners, cancellation, options)?;
+        ensure_scan_active(cancellation)?;
+        apply_scan_run_options(&mut scan_output.findings, options);
+        index_scan_static_evidence(workspace, options, &scan_output)?;
+        for finding in &scan_output.findings {
+            store.insert_finding(&run_id, finding)?;
+        }
+        let findings_count = scan_output.findings.len();
+        Ok((
+            ScanRun {
+                id: run_id.clone(),
+                target: workspace.root().to_path_buf(),
+                findings_count,
+            },
+            findings_count,
+        ))
     })
+}
+
+fn ensure_scan_active(cancellation: &ScanCancellation) -> Result<()> {
+    if cancellation.is_cancelled() {
+        anyhow::bail!("scan cancelled")
+    }
+    Ok(())
 }
 
 fn preflight_scan_engines(scanners: &[Box<dyn ScanEngine>]) -> Result<()> {

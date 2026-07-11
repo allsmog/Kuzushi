@@ -5,6 +5,32 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+## v0.24.0-alpha.7 — native control plane, hardened execution, phase cockpit
+
+**Additive:**
+
+- The Rust-native control plane now ships the CLI and every advertised MCP
+  server through one versioned native-runtime contract, with platform smoke
+  checks covering packaged executables and external-engine health boundaries.
+- The shell gains the phase cockpit, explicit prompt/navigation modes,
+  generation-safe target hydration, durable run status semantics, and richer
+  evidence, proof, and remediation projections without changing headless JSON
+  contracts.
+- KWP modules now carry explicit tool effect, approval, workspace, path, and
+  protocol-version policy through the shared registry dispatch boundary.
+
+**Security and reliability:**
+
+- Workspace reads, writes, subprocesses, artifact ledgers, and finding proof
+  replay now use bounded, target-confined adapters with explicit cancellation
+  and interruption states.
+- Registry preparation rejects unknown or unsafe input before dispatch, keeps
+  model/runtime selection explicit, and prevents target-local steering or
+  silent execution-policy fallback.
+- Release builds use the workspace Rust toolchain and exercise native runtime,
+  atomic-write, cancellation, recon-process, and MCP contracts on each target
+  platform before publishing.
+
 **Fixed:**
 
 - `cargo test --workspace` release blockers: the BDD onboarding skip-path

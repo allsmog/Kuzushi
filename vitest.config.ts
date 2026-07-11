@@ -16,13 +16,13 @@ export default defineConfig({
       "tests/langgraph-bridge/schema.test.ts",
       "tests/langgraph-bridge/oauth-models.test.ts",
       "tests/langgraph-bridge/oauth-login.test.ts",
+      "tests/native-wrapper.test.ts",
     ],
     exclude: [
       "**/node_modules/**",
       "**/.claude/worktrees/**",
       "**/.worktrees/**",
       ".codex-active/**",
-      ".ralph/**",
       "benchmarks/**",
     ],
     coverage: {

@@ -6,7 +6,14 @@ pub(crate) fn carlini_threat_hunt_module() -> BuiltinModule {
         "Carlini Threat Hunt",
         ModuleKind::Offense,
         "Compatibility alias for the offense-review threat-model hunt executor.",
-        vec![carlini_threat_hunt_tool()],
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Hunt,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Required,
+            ),
+            vec![carlini_threat_hunt_tool()],
+        ),
         vec![dag(
             "carlini-threat-hunt:run",
             "findings",
@@ -36,6 +43,7 @@ pub(in crate::modules) fn carlini_threat_hunt_options() -> Vec<OptionSpec> {
             OptionType::String,
             "Prompt text or path override for Carlini threat hunt.",
         )
+        .inline_or_workspace_file()
         .advanced(),
         model_option(),
     ]
@@ -88,35 +96,46 @@ pub(crate) fn taint_iris_module() -> BuiltinModule {
         "Taint IRIS",
         ModuleKind::Defense,
         "LLM-driven taint analysis selecting relevant CWEs then tracing source to sink.",
-        vec![hidden_tool_with_options(
-            "taint-iris:hunt",
-            "Compatibility alias for taint-iris-next:hunt in hunt mode.",
-            vec![
-                target_option(),
-                max_findings_option(20),
-                opt("maxCwes", OptionType::Int, "Maximum CWEs to select.")
-                    .aliases(&["max_cwes"])
-                    .advanced(),
-                opt(
-                    "maxBudgetUsd",
-                    OptionType::Float,
-                    "Maximum runtime budget for this hunt.",
-                )
-                .aliases(&["max_budget_usd"])
-                .advanced(),
-                opt(
-                    "TAINT_IRIS_PROMPT",
-                    OptionType::String,
-                    "Prompt text or path override for taint IRIS.",
-                )
-                .advanced(),
-                opt("cwe", OptionType::StringList, "Explicit CWE(s) to hunt.").advanced(),
-                mcps_option(),
-                model_option(),
-            ],
-        )],
+        vec![taint_iris_tool()],
         vec![dag("taint-iris:hunt", "findings", &["context:build"])],
     )
+}
+
+fn taint_iris_tool() -> ToolDescriptor {
+    let options = vec![
+        target_option(),
+        max_findings_option(20),
+        opt("maxCwes", OptionType::Int, "Maximum CWEs to select.")
+            .aliases(&["max_cwes"])
+            .advanced(),
+        opt(
+            "maxBudgetUsd",
+            OptionType::Float,
+            "Maximum runtime budget for this hunt.",
+        )
+        .aliases(&["max_budget_usd"])
+        .advanced(),
+        opt(
+            "TAINT_IRIS_PROMPT",
+            OptionType::String,
+            "Prompt text or path override for taint IRIS.",
+        )
+        .inline_or_workspace_file()
+        .advanced(),
+        opt("cwe", OptionType::StringList, "Explicit CWE(s) to hunt.").advanced(),
+        mcps_option(),
+        model_option(),
+    ];
+    hidden_tool_with_options(
+        "taint-iris:hunt",
+        "Compatibility alias for taint-iris-next:hunt in hunt mode.",
+        options,
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Hunt,
+        RuntimeRequirement::Always,
+        FindingStoreRequirement::Required,
+    ))
 }
 
 pub(crate) fn taint_iris_next_module() -> BuiltinModule {
@@ -136,12 +155,38 @@ pub(crate) fn taint_iris_next_module() -> BuiltinModule {
 
 fn taint_iris_next_tools() -> Vec<ToolDescriptor> {
     vec![
-        taint_iris_next_hunt_tool(),
-        taint_iris_next_dataflow_plan_tool(),
-        taint_iris_next_source_sink_trace_tool(),
-        taint_iris_next_finding_review_tool(),
-        taint_iris_next_catalog_tool(),
-        taint_iris_next_codeql_db_tool(),
+        taint_iris_next_hunt_tool().with_policy(workspace_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Always,
+            FindingStoreRequirement::Required,
+        )),
+        taint_iris_next_dataflow_plan_tool().with_policy(workspace_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
+        taint_iris_next_source_sink_trace_tool().with_policy(workspace_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
+        taint_iris_next_finding_review_tool().with_policy(workspace_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Always,
+            FindingStoreRequirement::Required,
+        )),
+        taint_iris_next_catalog_tool().with_policy(ToolPolicy::new(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Always,
+            ToolEffect::Read,
+            WorkspaceRequirement::Required,
+            FindingStoreRequirement::Optional,
+        )),
+        taint_iris_next_codeql_db_tool().with_policy(workspace_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Always,
+            FindingStoreRequirement::Optional,
+        )),
     ]
 }
 
@@ -389,37 +434,49 @@ pub(crate) fn systems_hunt_module() -> BuiltinModule {
 fn systems_hunt_tools() -> Vec<ToolDescriptor> {
     systems_hunt_tool_specs()
         .into_iter()
-        .map(|(name, description)| {
-            hidden_tool_with_options(name, description, systems_hunt_options())
+        .map(|(name, description, runtime_requirement)| {
+            hidden_tool_with_options(name, description, systems_hunt_options()).with_policy(
+                workspace_policy(
+                    ToolPhase::Hunt,
+                    runtime_requirement,
+                    FindingStoreRequirement::Required,
+                ),
+            )
         })
         .collect()
 }
 
-fn systems_hunt_tool_specs() -> Vec<(&'static str, &'static str)> {
+fn systems_hunt_tool_specs() -> Vec<(&'static str, &'static str, RuntimeRequirement)> {
     vec![
         (
             "systems-hunt:systems-context-gatherer",
             "Gather ranked systems-programming attack surfaces.",
+            RuntimeRequirement::Never,
         ),
         (
             "systems-hunt:systems-invariant-extract",
             "Extract invariants from gathered systems context.",
+            RuntimeRequirement::Always,
         ),
         (
             "systems-hunt:systems-trigger-synth",
             "Synthesize trigger hypotheses from systems invariants.",
+            RuntimeRequirement::Always,
         ),
         (
             "systems-hunt:systems-hunt",
             "Run the bundled systems invariant and trigger hunt.",
+            RuntimeRequirement::Always,
         ),
         (
             "systems-hunt:deep-semantic-cwe-select",
             "Select deep-semantic CWE classes for systems hunting.",
+            RuntimeRequirement::Always,
         ),
         (
             "systems-hunt:deep-semantic-hunt",
             "Run deep-semantic systems finding review.",
+            RuntimeRequirement::Always,
         ),
     ]
 }
@@ -487,9 +544,10 @@ fn include_non_production_option() -> OptionSpec {
 }
 
 fn systems_hunt_artifact_dir_option() -> OptionSpec {
-    opt("artifactDir", OptionType::String, "Artifact directory.")
+    opt("artifactDir", OptionType::Path, "Artifact directory.")
         .aliases(&["artifact_dir"])
         .default(json!(".kuzushi/systems-hunt"))
+        .state_write()
         .advanced()
 }
 

@@ -1,5 +1,7 @@
 use super::*;
 
+pub(super) const MAX_SUPPORTED_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
 impl SecretSeverity {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -61,48 +63,65 @@ impl Default for SecretScanOptions {
 impl SecretScanOptions {
     pub fn from_tool_input(input: &Value) -> Result<Self> {
         let mut options = Self::default();
+        options.apply_limits(input);
+        options.extend_excluded_directories(input);
+        options.extend_binary_extensions(input);
+        options.apply_severity_filter(input)?;
+        Ok(options)
+    }
 
+    fn apply_limits(&mut self, input: &Value) {
         if let Some(value) = input.get("maxFileBytes").and_then(Value::as_u64) {
-            options.max_file_bytes = value.max(1024);
+            self.max_file_bytes = value.clamp(1024, MAX_SUPPORTED_FILE_BYTES);
         }
-
         if let Some(value) = input.get("maxFindings").and_then(Value::as_u64) {
-            options.max_findings = value.max(1).min(10_000) as usize;
+            self.max_findings = value.clamp(1, 10_000) as usize;
         }
+    }
 
+    fn extend_excluded_directories(&mut self, input: &Value) {
         if let Some(values) = input.get("excludeDirs").and_then(Value::as_array) {
             for value in values.iter().filter_map(Value::as_str) {
                 if !value.trim().is_empty() {
-                    options.exclude_dirs.insert(value.trim().to_string());
+                    self.exclude_dirs.insert(value.trim().to_string());
                 }
             }
         }
+    }
 
+    fn extend_binary_extensions(&mut self, input: &Value) {
         if let Some(values) = input.get("binaryExts").and_then(Value::as_array) {
             for value in values.iter().filter_map(Value::as_str) {
-                let trimmed = value.trim();
-                if trimmed.is_empty() {
-                    continue;
+                if let Some(extension) = normalize_binary_extension(value) {
+                    self.binary_exts.insert(extension);
                 }
-                let ext = if trimmed.starts_with('.') {
-                    trimmed.to_ascii_lowercase()
-                } else {
-                    format!(".{}", trimmed.to_ascii_lowercase())
-                };
-                options.binary_exts.insert(ext);
             }
         }
+    }
 
+    fn apply_severity_filter(&mut self, input: &Value) -> Result<()> {
         if let Some(values) = input.get("severity").and_then(Value::as_array) {
             let mut severities = BTreeSet::new();
             for value in values.iter().filter_map(Value::as_str) {
                 severities.insert(SecretSeverity::try_from(value)?);
             }
-            options.severity = Some(severities);
+            self.severity = Some(severities);
         }
-
-        Ok(options)
+        Ok(())
     }
+}
+
+fn normalize_binary_extension(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = trimmed.to_ascii_lowercase();
+    Some(if normalized.starts_with('.') {
+        normalized
+    } else {
+        format!(".{normalized}")
+    })
 }
 
 #[derive(Debug, Clone, Default)]

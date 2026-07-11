@@ -25,17 +25,20 @@ pub mod tool;
 pub mod transport;
 
 pub use chain::{run_chain, AttackChain, ChainOutcome};
-pub use observer::{HopObserver, NoopObserver};
-pub use planner::{run_planned_chain, PlannerBudget, PlannerStep};
 pub use engagement::{prepare_chain_run, PreparedChainRun};
-pub use persistence::persist_chain_finding;
-pub use sandbox_curl::SandboxCurlTransport;
-pub use spec::{ChainSpec, PlaySpec};
-pub use tool::{execute_offense_chain, execute_offense_planned};
 pub use engagement_scope::{EngagementScope, ScopeDecision, ScopeEntry, ScopeTarget, ScopeWindow};
 pub use executor::run_play;
 pub use http_probe::HttpProbePlay;
-pub use prompt_injection::PromptInjectionPlay;
+pub use observer::{HopObserver, NoopObserver};
+pub use persistence::{persist_chain_finding, persist_chain_finding_for_run};
+pub use planner::{run_planned_chain, PlannerBudget, PlannerStep};
 pub use play::{Play, PlayOutcome};
 pub use play_context::{AuthorizedTarget, PlayContext};
+pub use prompt_injection::PromptInjectionPlay;
+pub use sandbox_curl::SandboxCurlTransport;
+pub use spec::{ChainSpec, PlaySpec};
+pub use tool::{
+    execute_offense_chain, execute_offense_chain_for_run, execute_offense_planned,
+    execute_offense_planned_for_run,
+};
 pub use transport::{PlayRequest, PlayResponse, PlayTransport};

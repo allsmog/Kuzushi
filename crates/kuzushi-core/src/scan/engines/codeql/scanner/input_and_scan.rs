@@ -16,6 +16,13 @@ impl CodeqlScanner {
             .transpose()?;
         scanner.threads = positive_u32(input, "threads")?;
         scanner.ram = positive_u32(input, "ram")?;
+        scanner.command_timeout = crate::bounded_subprocess::timeout_from_input(
+            input,
+            &["timeoutMs", "timeout_ms"],
+            DEFAULT_CODEQL_SCAN_TIMEOUT_MS,
+            MAX_CODEQL_SCAN_TIMEOUT_MS,
+            "codeql:scan timeoutMs",
+        )?;
         scanner.multi_language = input
             .get("multiLanguage")
             .or_else(|| input.get("multi_language"))
@@ -75,5 +82,19 @@ mod tests {
             .to_string();
 
         assert!(error.contains("buildMode must be one of"));
+    }
+
+    #[test]
+    fn command_timeout_is_defaulted_and_bounded_at_input_boundary() {
+        let scanner = CodeqlScanner::from_tool_input(&json!({})).unwrap();
+        assert_eq!(
+            scanner.command_timeout,
+            std::time::Duration::from_millis(DEFAULT_CODEQL_SCAN_TIMEOUT_MS)
+        );
+        assert!(CodeqlScanner::from_tool_input(&json!({"timeoutMs": 0})).is_err());
+        assert!(CodeqlScanner::from_tool_input(&json!({
+            "timeoutMs": MAX_CODEQL_SCAN_TIMEOUT_MS + 1
+        }))
+        .is_err());
     }
 }

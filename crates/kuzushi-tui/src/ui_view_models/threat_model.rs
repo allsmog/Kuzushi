@@ -1,5 +1,5 @@
 use crate::app::JsonFileState;
-use crate::{ShellApp, ThreatPatch};
+use crate::{ShellApp, ThreatPatch, ViewDataState};
 use std::path::PathBuf;
 
 pub(crate) fn threat_model_doc(app: &ShellApp) -> Option<serde_json::Value> {
@@ -32,6 +32,7 @@ pub(crate) fn threat_summary_review(app: &ShellApp) -> ThreatSummaryReview {
         }
         ThreatModelArtifact::Malformed => ThreatSummaryReview::malformed(patch),
         ThreatModelArtifact::NonFile => ThreatSummaryReview::non_file(patch),
+        ThreatModelArtifact::Targetless => ThreatSummaryReview::targetless(patch),
         _ => ThreatSummaryReview::unknown(patch),
     }
 }
@@ -84,6 +85,22 @@ impl ThreatSummaryReview {
         }
     }
 
+    fn targetless(patch: Option<&ThreatPatch>) -> Self {
+        Self {
+            status: "no target selected".to_string(),
+            summary: "select a target before loading threat-model artifacts".to_string(),
+            threats: "—".to_string(),
+            assets: "—".to_string(),
+            actors: "—".to_string(),
+            flows: "—".to_string(),
+            trust_boundaries: "—".to_string(),
+            assumptions: vec!["targetless browsing does not inspect cwd".to_string()],
+            missing_inputs: vec!["target <path> (or target .)".to_string()],
+            proposed_changes: proposed_changes(patch),
+            limitations: vec!["no workspace artifacts were read".to_string()],
+        }
+    }
+
     fn malformed(patch: Option<&ThreatPatch>) -> Self {
         Self {
             status: "malformed".to_string(),
@@ -121,21 +138,22 @@ impl ThreatSummaryReview {
     }
 }
 
-fn threat_model_root(app: &ShellApp) -> PathBuf {
-    app.target_owned()
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
 fn read_threat_model_artifact(app: &ShellApp) -> ThreatModelArtifact {
-    let path = threat_model_artifact_path(&threat_model_root(app));
-    match app.workbench_cache().borrow_mut().json_file(&path) {
-        JsonFileState::Present(value) if value.is_object() => ThreatModelArtifact::Present(value),
-        JsonFileState::Present(_) | JsonFileState::Malformed | JsonFileState::Unreadable => {
-            ThreatModelArtifact::Malformed
+    let Some(root) = app.target() else {
+        return ThreatModelArtifact::Targetless;
+    };
+    let path = threat_model_artifact_path(root);
+    match app.workbench_cache().borrow().cached_json_file(root, &path) {
+        ViewDataState::Ready(JsonFileState::Present(value)) if value.is_object() => {
+            ThreatModelArtifact::Present(value)
         }
-        JsonFileState::NonFile => ThreatModelArtifact::NonFile,
-        JsonFileState::Missing => ThreatModelArtifact::Missing,
+        ViewDataState::Ready(JsonFileState::Present(_))
+        | ViewDataState::Ready(JsonFileState::Malformed)
+        | ViewDataState::Ready(JsonFileState::Unreadable) => ThreatModelArtifact::Malformed,
+        ViewDataState::Ready(JsonFileState::NonFile) => ThreatModelArtifact::NonFile,
+        ViewDataState::Ready(JsonFileState::Missing)
+        | ViewDataState::NotRequested
+        | ViewDataState::Loading => ThreatModelArtifact::Missing,
     }
 }
 
@@ -160,6 +178,7 @@ enum ThreatModelArtifact {
     Malformed,
     NonFile,
     Missing,
+    Targetless,
 }
 
 fn doc_summary(doc: &serde_json::Value) -> String {
@@ -318,6 +337,7 @@ mod tests {
         std::fs::write(artifact_path, "{not-json").unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let review = threat_summary_review(&app);
 
@@ -344,6 +364,7 @@ mod tests {
         std::fs::write(artifact_path, "[]").unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let review = threat_summary_review(&app);
 
@@ -366,6 +387,7 @@ mod tests {
         std::fs::create_dir(artifact_path).unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let review = threat_summary_review(&app);
 
@@ -392,5 +414,16 @@ mod tests {
             threat_model_artifact_path(root),
             kuzushi_core::capabilities::persistent_threat_model_path(root)
         );
+    }
+
+    #[test]
+    fn targetless_threat_model_view_does_not_read_cwd_artifacts() {
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+
+        let review = threat_summary_review(&app);
+
+        assert_eq!(review.status, "no target selected");
+        assert!(review.summary.contains("select a target"));
+        assert_eq!(review.limitations, vec!["no workspace artifacts were read"]);
     }
 }

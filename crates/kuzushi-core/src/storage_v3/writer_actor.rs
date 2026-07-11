@@ -3,7 +3,7 @@ use crate::event_log::{EventEnvelope, EventKind, EventLog};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 mod commands;
 mod dispatch;
@@ -11,10 +11,10 @@ mod lifecycle;
 mod staleness;
 mod writes;
 
-pub use commands::{StorageWriterActor, StorageWriterActorConfig, StorageWriterActorHandle};
 pub use commands::{
     ControlCommand, DecisionCommand, WatcherCommand, WriteLane, WriterCommand, WriterLaneScheduler,
 };
+pub use commands::{StorageWriterActor, StorageWriterActorConfig, StorageWriterActorHandle};
 use lifecycle::require_state;
 pub use lifecycle::{WriterActorState, WriterLifecycle};
 pub use writes::{
@@ -34,6 +34,7 @@ pub struct WriteReceipt {
 }
 
 struct StorageWriter {
+    _ownership: crate::file_lock::ExclusiveFileLock,
     log: EventLog,
     projection: ProjectionDb,
     lifecycle: WriterLifecycle,
@@ -41,12 +42,19 @@ struct StorageWriter {
 
 impl StorageWriter {
     fn open(log_dir: impl AsRef<Path>, projection_path: impl AsRef<Path>) -> Result<Self> {
+        let log_dir = log_dir.as_ref();
+        let projection_path = projection_path.as_ref();
+        validate_workspace_storage_path(log_dir)?;
+        validate_workspace_storage_path(projection_path)?;
+        let ownership =
+            crate::file_lock::ExclusiveFileLock::acquire(&log_dir.join(".storage-writer.lock"))?;
         let log = EventLog::open(log_dir)?;
         log.verify_chain()?;
         let projection = ProjectionDb::open(projection_path)?;
         let mut lifecycle = WriterLifecycle::recovering();
         lifecycle.recover(log.head_seq()?, projection.meta()?.applied_seq)?;
         let mut writer = Self {
+            _ownership: ownership,
             log,
             projection,
             lifecycle,
@@ -153,7 +161,10 @@ impl StorageWriter {
         })
     }
 
-    fn record_finding_observation(&mut self, observation: ObservationWrite) -> Result<WriteReceipt> {
+    fn record_finding_observation(
+        &mut self,
+        observation: ObservationWrite,
+    ) -> Result<WriteReceipt> {
         require_state(self.lifecycle.state(), WriterActorState::Live)?;
         let event = self.log.append(
             EventKind::FindingObserved,
@@ -291,7 +302,58 @@ impl StorageWriter {
         }
         Ok(())
     }
+}
 
+pub(crate) struct StorageWriterSession {
+    writer: StorageWriter,
+}
+
+impl StorageWriterSession {
+    pub(crate) fn open(
+        log_dir: impl AsRef<Path>,
+        projection_path: impl AsRef<Path>,
+    ) -> Result<Self> {
+        Ok(Self {
+            writer: StorageWriter::open(log_dir, projection_path)?,
+        })
+    }
+
+    pub(crate) fn commit_many(
+        &mut self,
+        commands: Vec<WriterCommand>,
+    ) -> Result<Vec<WriteReceipt>> {
+        commands
+            .into_iter()
+            .map(|command| self.writer.execute_command(command))
+            .collect()
+    }
+}
+
+fn validate_workspace_storage_path(path: &Path) -> Result<()> {
+    let Some(state_dir) = workspace_state_ancestor(path) else {
+        return Ok(());
+    };
+    let workspace_root = state_dir
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace state ancestor includes target root");
+    let relative = path.strip_prefix(workspace_root)?;
+    crate::workspace::validated_workspace_descendant(workspace_root, relative)?;
+    Ok(())
+}
+
+fn workspace_state_ancestor(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .find(|ancestor| {
+            ancestor.file_name().and_then(|name| name.to_str())
+                == Some(crate::workspace::WORKSPACE_STATE_VERSION_DIR)
+                && ancestor
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+                    == Some(crate::workspace::KUZUSHI_STATE_DIR)
+        })
+        .map(Path::to_path_buf)
 }
 
 #[cfg(test)]

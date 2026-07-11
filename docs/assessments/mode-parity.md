@@ -29,12 +29,13 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 | Explicit input precedence | ✓ | ✓ | ✓ | Explicit JSON or command input overlays stored options. |
 | Prompt override files | ◐ | ◐ | ◐ | Direct prompt-aware tools load `.kuzushi/prompts/<module>/<verb>.md` when the matching `_PROMPT` option is unset; `sast:scan` forwards its `sast/triage.md` and `sast/verify.md` overrides to internal stages. |
 | Runtime no-silent-fallback policy | ✓ | ✓ | ✓ | Runtime-backed tools resolve a configured or explicit input model and fail on incompatible provider/runtime pairs; project-local model steering is rejected. |
-| Findings store support | ✓ | ✓ | ✓ | Tools that require a store use the shared `tool_needs_finding_store` predicate before mode dispatch. |
-| Trace/run artifacts | ✓ | ✓ | ✓ | Tool dispatch writes canonical run artifacts where the mode starts a traced run. Operator/budget cancellation persists as `canceled`; watchdog/process loss persists as `interrupted`. |
-| Workspace target consent | ✓ | ✓ | ✓ | Workspace-backed commands require an explicit target such as `--target <path>` or `--target .`; modes must not silently substitute cwd. |
+| Findings store support | ✓ | ✓ | ✓ | Tools that require a store use the shared `tool_needs_finding_store` predicate before mode dispatch. Verification proof is attached by durable finding identity, not a scan-local row id. |
+| Trace/run artifacts | ✓ | ✓ | ✓ | Tool dispatch writes the canonical run bundle plus prepared `input.json` and normalized `result.json`. A running summary exists before dispatch; completed, partial, skipped, failed, canceled, and interrupted remain distinct terminal outcomes. |
+| Verification provenance | ✓ | ✓ | ✓ | Persisted proof carries both the verification run id and the discovery scan it verified. A later observation may reuse proof by durable identity, but is marked for revalidation; shell replay opens the verification run only. |
+| Workspace target consent | ✓ | ✓ | ✓ | Workspace-backed commands require an explicit target such as `--target <path>` or `--target .`; modes must not silently substitute cwd. A live shell run keeps the target captured at launch even if ambient app state later changes. |
 | Cancellation | ◐ | ✓ | ◐ | Shell/TUI work has live cancellation controls. Core scan engines accept cancellation tokens, but headless CLI scan/run do not currently install a dedicated SIGINT handler. |
-| Plain/scripted output | ✓ | ✓ | ✓ | Plain output reuses the same projections as TTY output. Bare `--plain` emits a self-contained summary; scripted scan requires an explicit target, waits for terminal completion, writes its run bundle, and exits nonzero for invalid, failed, canceled, or interrupted outcomes. |
-| Interactive views | N/A | ✓ | N/A | Workbench, Activity, replay/trace, prompt editor, and guided pickers are shell-only. |
+| Plain/scripted output | ✓ | ✓ | ✓ | Plain output reuses the same projections as TTY output. Bare `--plain` emits a self-contained summary; scripted scan requires an explicit target, waits for terminal completion, writes its run bundle, and exits nonzero for invalid, partial, failed, canceled, or interrupted outcomes. |
+| Interactive views | N/A | ✓ | N/A | Workbench, Activity, replay/trace, and guided pickers are shell-only. Descriptor-declared model prompts can be reviewed from Planning with `p`; the Vim-lite prompt document saves the existing workspace override and returns to Planning without launching work. |
 | Machine output | ✓ | N/A | ✓ | Scan has CI/scripted output; headless `run` always prints the tool result as pretty JSON on stdout. |
 
 ## Intentional Asymmetries
@@ -45,6 +46,11 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 - **Prompt/Navigate input modes are shell-only.** Prompt mode owns all printable
   text and submission. `F2` enters Navigate mode, where view bindings operate
   and printable keys never edit the command; `Esc` returns to Prompt mode.
+- **Prompt preflight is shell-only.** Planning offers `p Review prompt` for a
+  selected model-backed task only when its descriptor declares an editable
+  prompt. The document opens in Normal mode (`j/k`, `Ctrl+f/b`, `gg/G`), `i`
+  enters Insert mode, `:w` saves the project override, and `:q` returns to the
+  unchanged Planning setup. Saving never launches the task.
 - **Ordered onboarding gate is shell-only.** The interactive front door runs a
   single ordered gate — Target → Model → Credentials → Planning — via the pure
   `initial_onboarding_phase` fn. A bare `kuzushi` (no `--target`) opens the
@@ -73,14 +79,37 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
   flag.
 - **Pipeline JSONL artifacts are scan-owned.** All three write the canonical run bundle:
   `run.json`, `events.jsonl`, `trace.jsonl`, `failures.json`,
-  `report.md`, `artifacts.json`, and legacy `summary.json`. Single-tool
-  run/shell dispatch also writes tool input/result artifacts, but scan
-  orchestration owns pipeline files such as `triage.jsonl` and `verify.jsonl`
-  unless a tool explicitly emits them.
+  `report.md`, and `artifacts.json`, plus `input.json` and `result.json` for the
+  dispatched tool. These are the shared tool input/result artifacts. SAST scan
+  orchestration additionally owns declared
+  `scan-input.json`, `triage.jsonl`, `verify.jsonl`, and `patch.jsonl` files;
+  patch events do not share the verification log.
+- **Umbrella scan identity is parent plus children.** Scan, shell, and run use
+  the caller's context run id as the canonical `data.runId` for `sast:scan`.
+  Engine-native ids remain under `data.runIds`. Core findings, findings count,
+  CLI `--fail-on`, and scan-scoped SARIF use that full run-id union and
+  de-duplicate by durable finding identity.
 - **Interactive workspace lifecycle is shell-only.** The Rust
   `ToolExecutionContext` carries the same resolved `WorkspaceTarget` when a
   mode has an explicit target, but only the shell owns interactive workspace
-  switching and picker lifecycle.
+  switching and picker lifecycle. The shell blocks target changes while work is
+  live and asks the operator to retry after finish/cancel; activation
+  atomically clears target-derived caches before hydrating the new workspace,
+  so absent artifacts cannot leak from the previous target.
+- **Journey chrome is shell-only.** Phase truth is derived from an unfiltered
+  findings-ledger projection. Filtering the visible Workbench list changes the
+  composition, never the workspace totals or the current journey phase.
+- **The PDF-exact phase cockpit is shell-only presentation.** Workbench pages
+  `1`–`4` and guided Activity sessions render Map, Hunt, Confirm, and Fix from
+  one `PhaseCockpitModel`; the shell's plain renderer flattens that same model.
+  Activity retains the phase captured when work starts, while generic
+  non-guided tools retain the standard Activity composition. Manual page
+  navigation, pane zoom, and cinematic terminal styling never mutate the
+  reality-derived journey phase or shared run/finding artifacts.
+- **Verification replay is shell-only presentation over shared provenance.**
+  The proof sidecar replays `verification_run_id`, never the finding's discovery
+  `scan_id`, and labels proof inherited by a later scan as requiring
+  revalidation.
 - **DAG descriptors are not automatically execution ordering.** In the current
   Rust path, a `depends_on` edge is execution input only when the owning scan
   executor consumes it. Otherwise it is progress/catalog metadata.

@@ -99,9 +99,7 @@ impl DrawerContent {
 /// `findings_model` projection (finding *selection* is clamped app-side, so the
 /// reducer only needs leg/drawer counts). Called once per keystroke.
 pub(crate) fn workbench_depth_bounds(app: &ShellApp, nav: &WorkbenchNav) -> NavBounds {
-    let legs = app
-        .domain()
-        .taint_flow()
+    let legs = current_taint_flow(app)
         .map(|flow| flow.stages.len().saturating_sub(1))
         .unwrap_or(0);
     NavBounds {
@@ -139,7 +137,7 @@ fn finding_row(row: &FindingListRow) -> FindingRow {
 }
 
 fn flow_legs(app: &ShellApp) -> (Option<String>, Vec<TraceLeg>) {
-    let Some(flow) = app.domain().taint_flow() else {
+    let Some(flow) = current_taint_flow(app) else {
         return (None, Vec::new());
     };
     let stage_count = flow.stages.len();
@@ -166,6 +164,13 @@ fn flow_legs(app: &ShellApp) -> (Option<String>, Vec<TraceLeg>) {
         })
         .collect();
     (Some(format!("{} · {}", flow.cwe, flow.severity)), legs)
+}
+
+fn current_taint_flow(app: &ShellApp) -> Option<&crate::TaintFlowSnapshot> {
+    match super::current_finding_for_detail(app) {
+        Some((_, finding)) => app.domain().taint_flow_for_finding(&finding),
+        None => app.domain().taint_flow(),
+    }
 }
 
 fn stage_label(message: &str, file: &str, line: u32) -> String {

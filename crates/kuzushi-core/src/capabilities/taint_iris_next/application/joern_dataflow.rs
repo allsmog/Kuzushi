@@ -90,7 +90,7 @@ pub(crate) fn resolve_joern_cpg_path(scan_root: &Path) -> PathBuf {
 fn flow_script_path() -> Option<PathBuf> {
     configured_flow_script_path()
         .or_else(flow_script_near_current_exe)
-        .or_else(flow_script_under_current_dir)
+        .or_else(flow_script_in_source_tree)
 }
 
 fn configured_flow_script_path() -> Option<PathBuf> {
@@ -116,10 +116,10 @@ fn flow_script_candidates_above(mut dir: PathBuf) -> Vec<PathBuf> {
     candidates
 }
 
-fn flow_script_under_current_dir() -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    let cwd_candidate = cwd.join("scripts").join("taint_iris_next_flows.sc");
-    cwd_candidate.exists().then_some(cwd_candidate)
+fn flow_script_in_source_tree() -> Option<PathBuf> {
+    flow_script_candidates_above(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+        .into_iter()
+        .find(|candidate| candidate.exists())
 }
 
 /// Run Joern over the given CPG with one source/sink regex per ranked

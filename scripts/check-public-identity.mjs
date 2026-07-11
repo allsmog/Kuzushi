@@ -46,7 +46,7 @@ const requiredIdentityReferences = [
       "kz>",
       ".kuzushi/v3/runs/<runId>/",
       "native/<platform>-<arch>/kuzushi",
-      "native/<platform>-<arch>/kz",
+      "argv0 alias",
     ],
   },
   {
@@ -85,9 +85,12 @@ const requiredIdentityReferences = [
   {
     label: "native staging alias identity",
     file: "scripts/stage-native-binary.mjs",
-    // One shipped binary per platform; kz is an argv0 alias of kuzushi and is
-    // retired from the staged payload (the wrapper dispatches it).
+    // kz is an argv0 alias; the remaining staged files are the native runtime.
+    needles: ["nativeRuntimeBinaries.map", "kuzushi-ts", "kz"],
+    /* Retired literal contract kept below only as migration context.
     needles: ['["kuzushi.exe"] : ["kuzushi"]', '"kuzushi-ts", "kz"]'],
+  },
+    */
   },
   {
     label: "Rust CLI help identity",
@@ -151,7 +154,7 @@ const requiredIdentityReferences = [
       "KUZUSHI_NATIVE_BIN must point to a file",
       'overrideName !== "kuzushi" && overrideName !== "kz"',
       "KUZUSHI_NATIVE_BIN must point to a",
-      "native/<platform>-<arch>/kz",
+      "native/<platform>-<arch>/kuzushi",
       "Could not find the Kuzushi native binary",
       "kuzushi doctor --target .",
     ],

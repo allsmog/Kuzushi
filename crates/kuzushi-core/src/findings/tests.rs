@@ -725,6 +725,61 @@ mod tests {
         assert_eq!(rebuilt_identity_count, identity_count);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn file_backed_insert_omits_provenance_for_outside_symlink() {
+        const OUTSIDE_TOKEN: &str = "OUTSIDE-REQUIREMENTS-TOKEN-MUST-NOT-PERSIST";
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let workspace_root = workspace.path().canonicalize().unwrap();
+        let outside_file = outside.path().join("requirements.txt");
+        std::fs::write(&outside_file, OUTSIDE_TOKEN).unwrap();
+        std::os::unix::fs::symlink(
+            &outside_file,
+            workspace_root.join("requirements.txt"),
+        )
+        .unwrap();
+        let db_path = workspace_root.join(".kuzushi/v3/index.sqlite3");
+        let log_path = workspace_root.join(".kuzushi/v3/log");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let store = FindingStore::open(&db_path).unwrap();
+        let run_id = "run-symlink-provenance";
+        store
+            .record_run_started(run_id, &workspace_root, "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "dep-hygiene",
+            "dep-hygiene/unpinned",
+            "requirements.txt",
+            1,
+            Some(1),
+            Severity::Medium,
+            "Dependency is not pinned",
+        );
+
+        store.insert_finding(run_id, &finding).unwrap();
+
+        let events = crate::event_log::EventLog::open(&log_path)
+            .unwrap()
+            .read_all()
+            .unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[1].event_kind,
+            crate::event_log::EventKind::FindingObserved
+        );
+        assert!(events[1]
+            .payload
+            .get("blobHash")
+            .is_none_or(serde_json::Value::is_null));
+        assert!(!serde_json::to_string(&events).unwrap().contains(OUTSIDE_TOKEN));
+        assert!(!serde_json::to_string(&store.list_findings_for_scan_id(run_id).unwrap())
+            .unwrap()
+            .contains(OUTSIDE_TOKEN));
+        assert!(!crate::workspace::workspace_objects_dir(&workspace_root).exists());
+        assert_eq!(std::fs::read_to_string(outside_file).unwrap(), OUTSIDE_TOKEN);
+    }
+
     #[test]
     fn file_backed_save_verification_records_v3_event_and_projection() {
         let temp = tempfile::tempdir().unwrap();
@@ -763,6 +818,8 @@ mod tests {
                     duration_ms: 250,
                     cost_usd: 0.125,
                     notes: vec!["empirical proof".to_string()],
+                    verification_run_id: Some("verify-run-v3".to_string()),
+                    verified_scan_id: Some(run_id.to_string()),
                     created_at: String::new(),
                 },
             )
@@ -781,14 +838,23 @@ mod tests {
         );
 
         let conn = rusqlite::Connection::open(db_path).unwrap();
-        let projected: (String, i64, String) = conn
+        let projected: (String, i64, String, String, String) = conn
             .query_row(
-                "select stable_fp, proof_level, proof_verdict from verification_events",
+                "select stable_fp, proof_level, proof_verdict, verification_run_id, verified_scan_id from verification_events",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )
             .unwrap();
-        assert_eq!(projected, (stable_fp, 4, "exploited".to_string()));
+        assert_eq!(
+            projected,
+            (
+                stable_fp,
+                4,
+                "exploited".to_string(),
+                "verify-run-v3".to_string(),
+                run_id.to_string(),
+            )
+        );
         let old_table_count: i64 = conn
             .query_row(
                 "select count(*) from sqlite_master where type = 'table' and name = 'verifications'",
@@ -922,23 +988,24 @@ mod tests {
         );
 
         let conn = rusqlite::Connection::open(db_path).unwrap();
-        let projected: (String, String, String) = conn
+        let projected: (String, String, String, i64) = conn
             .query_row(
-                "select stable_fp, patch_run_id, diff_object from patch_attempt_events",
+                "select stable_fp, patch_run_id, diff_object, diff_size_bytes from patch_attempt_events",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
         assert_eq!(projected.0, stable_fp);
         assert_eq!(projected.1, "patch-run-v3");
         assert!(projected.2.len() >= 4);
-        assert!(temp
+        assert_eq!(projected.3, "diff --git a/src/app.rs b/src/app.rs\n".len() as i64);
+        let object_path = temp
             .path()
             .join(".kuzushi/v3/objects/blake3")
             .join(&projected.2[0..2])
             .join(&projected.2[2..4])
-            .join(&projected.2)
-            .is_file());
+            .join(&projected.2);
+        assert!(object_path.is_file());
         let read_back = store
             .get_patch_results_for_finding(&finding.fingerprint)
             .unwrap();
@@ -948,6 +1015,20 @@ mod tests {
             read_back[0].diff.as_deref(),
             Some("diff --git a/src/app.rs b/src/app.rs\n")
         );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let outside = temp.path().join("outside-patch-secret");
+            std::fs::write(&outside, "secret").unwrap();
+            std::fs::remove_file(&object_path).unwrap();
+            symlink(&outside, &object_path).unwrap();
+            let error = store
+                .get_patch_results_for_finding(&finding.fingerprint)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("symlink") || error.contains("non-symlink"), "{error}");
+            assert_eq!(std::fs::read_to_string(outside).unwrap(), "secret");
+        }
         let old_table_count: i64 = conn
             .query_row(
                 "select count(*) from sqlite_master where type = 'table' and name = 'patch_results'",
@@ -1878,6 +1959,8 @@ mod tests {
                     duration_ms: 88,
                     cost_usd: 0.0,
                     notes: vec!["confirmed by fixture".to_string()],
+                    verification_run_id: None,
+                    verified_scan_id: None,
                     created_at: String::new(),
                 },
             )
@@ -1919,6 +2002,8 @@ mod tests {
             duration_ms: 321,
             cost_usd: 0.0,
             notes: vec!["browser fixture recorded runtime evidence".to_string()],
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: "now".to_string(),
         });
 
@@ -1979,6 +2064,8 @@ mod tests {
             duration_ms: 321,
             cost_usd: 0.0,
             notes: Vec::new(),
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: "now".to_string(),
         };
         let verified = runtime_validation_summary(Some(&verification));
@@ -2013,6 +2100,8 @@ mod tests {
             duration_ms: 321,
             cost_usd: 0.0,
             notes: Vec::new(),
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: "now".to_string(),
         });
         assert_eq!(
@@ -2615,6 +2704,8 @@ mod tests {
             duration_ms: 1234,
             cost_usd: 0.05,
             notes: vec!["one".to_string(), "two".to_string()],
+            verification_run_id: Some("verify-run-roundtrip".to_string()),
+            verified_scan_id: Some("run-v1".to_string()),
             created_at: String::new(),
         };
         let row_id = store.save_verification(finding_id, &record).unwrap();
@@ -2633,6 +2724,11 @@ mod tests {
         assert_eq!(fetched.duration_ms, 1234);
         assert!((fetched.cost_usd - 0.05).abs() < 1e-9);
         assert_eq!(fetched.notes, vec!["one".to_string(), "two".to_string()]);
+        assert_eq!(
+            fetched.verification_run_id.as_deref(),
+            Some("verify-run-roundtrip")
+        );
+        assert_eq!(fetched.verified_scan_id.as_deref(), Some("run-v1"));
         assert!(!fetched.created_at.is_empty());
     }
 
@@ -2665,6 +2761,8 @@ mod tests {
             duration_ms: 100,
             cost_usd: 0.0,
             notes: vec![],
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: String::new(),
         };
         let later = PersistedVerification {
@@ -2677,6 +2775,8 @@ mod tests {
             duration_ms: 200,
             cost_usd: 0.0,
             notes: vec![],
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: String::new(),
         };
         store.save_verification(finding_id, &earlier).unwrap();
@@ -2705,6 +2805,10 @@ mod tests {
             "test",
         );
         let finding_id = store.insert_finding("run-v-bad", &finding).unwrap();
+        let stable_fp = store.list_findings_for_scan_id("run-v-bad").unwrap()[0]
+            .identity_id
+            .clone()
+            .unwrap();
         store
             .conn
             .execute(
@@ -2714,12 +2818,12 @@ mod tests {
                   proof_verdict, backend, duration_ms, cost_usd, notes_json,
                   actor, created_at, payload_json
                 ) values (
-                  'bad-verdict', 999, 'fp_bad_verdict', ?1, 4,
+                  'bad-verdict', 999, ?2, ?1, 4,
                   'surprise', 'plain', 0, 0.0, '[]',
                   'test', '2026-01-01T00:00:00Z', '{}'
                 )
                 "#,
-                rusqlite::params![finding_id],
+                rusqlite::params![finding_id, stable_fp],
             )
             .unwrap();
 
@@ -2772,6 +2876,8 @@ mod tests {
                     duration_ms: 200,
                     cost_usd: 0.0,
                     notes: vec![],
+                    verification_run_id: None,
+                    verified_scan_id: None,
                     created_at: String::new(),
                 },
             )
@@ -2788,6 +2894,58 @@ mod tests {
             scan_rows[0].verification.as_ref().map(|v| v.proof_level),
             Some(4)
         );
+    }
+
+    #[test]
+    fn rescan_hydrates_prior_verification_by_durable_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
+        for run_id in ["scan-a", "scan-b"] {
+            store
+                .record_run_started(run_id, Path::new("/repo"), "running")
+                .unwrap();
+        }
+        let finding = Finding::new_tool(
+            "verify-test",
+            "rule.test",
+            "src/x.rs",
+            10,
+            None,
+            Severity::High,
+            "same durable finding",
+        );
+        let finding_id = store.insert_finding("scan-a", &finding).unwrap();
+        store
+            .save_verification(
+                finding_id,
+                &PersistedVerification {
+                    proof_level: 4,
+                    proof_verdict: PersistedProofVerdict::Exploited,
+                    backend: PersistedSandboxBackend::Bwrap,
+                    language: Some("rust".to_string()),
+                    harness_path: None,
+                    crash_evidence: Some("SIGSEGV".to_string()),
+                    duration_ms: 200,
+                    cost_usd: 0.0,
+                    notes: vec![],
+                    verification_run_id: Some("verify-a".to_string()),
+                    verified_scan_id: Some("scan-a".to_string()),
+                    created_at: String::new(),
+                },
+            )
+            .unwrap();
+
+        store.insert_finding("scan-b", &finding).unwrap();
+        let rescanned = store.list_findings_for_scan_id("scan-b").unwrap();
+        let proof = rescanned[0]
+            .verification
+            .as_ref()
+            .expect("prior proof should follow durable identity");
+
+        assert_eq!(rescanned[0].scan_id.as_deref(), Some("scan-b"));
+        assert_eq!(proof.verification_run_id.as_deref(), Some("verify-a"));
+        assert_eq!(proof.verified_scan_id.as_deref(), Some("scan-a"));
     }
 
     #[test]

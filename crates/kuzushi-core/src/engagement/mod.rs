@@ -2,7 +2,6 @@ use crate::fs_atomic::now_ms;
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
 
 pub const ENGAGEMENT_DIR: &str = "engagement";
@@ -69,12 +68,13 @@ pub fn write_engagement_harness(
     request: EngagementHarnessRequest,
 ) -> Result<EngagementHarnessReport> {
     let harness = build_engagement_harness(workspace, request);
-    let path = engagement_harness_path(workspace);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("Could not create {}", parent.display()))?;
-    }
     let body = toml::to_string_pretty(&harness).context("Could not serialize engagement harness")?;
-    fs::write(&path, body).with_context(|| format!("Could not write {}", path.display()))?;
+    let path = crate::workspace::write_workspace_file(
+        workspace.root(),
+        PathBuf::from(ENGAGEMENT_DIR).join(HARNESS_FILE),
+        body.as_bytes(),
+    )
+    .context("Could not write engagement harness")?;
     Ok(EngagementHarnessReport { harness, path })
 }
 
@@ -196,6 +196,7 @@ fn default_engine(id: impl Into<String>) -> HarnessEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::tempdir;
 
     #[test]
@@ -225,5 +226,19 @@ mod tests {
         let body = fs::read_to_string(report.path).unwrap();
         assert!(body.contains("taint-iris:hunt"));
         assert!(body.contains("CWE-918"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn harness_writer_rejects_symlinked_output_directory() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        symlink(outside.path(), temp.path().join("engagement")).unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+
+        assert!(write_engagement_harness(&workspace, EngagementHarnessRequest::default()).is_err());
+        assert!(!outside.path().join(HARNESS_FILE).exists());
     }
 }

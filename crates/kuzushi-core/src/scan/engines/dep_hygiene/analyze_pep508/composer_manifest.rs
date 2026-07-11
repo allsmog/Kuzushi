@@ -15,11 +15,7 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_composer_json(
         .collect()
 }
 
-fn section_findings(
-    file_path: &Path,
-    value: &Value,
-    section: &str,
-) -> Vec<DepHygieneFinding> {
+fn section_findings(file_path: &Path, value: &Value, section: &str) -> Vec<DepHygieneFinding> {
     value
         .get(section)
         .and_then(Value::as_object)
@@ -54,7 +50,9 @@ fn composer_finding(
             name,
             constraint,
             DepHygieneSeverity::Medium,
-            format!("{section}: floor-only range; add an upper bound to fix the supply-chain surface"),
+            format!(
+                "{section}: floor-only range; add an upper bound to fix the supply-chain surface"
+            ),
         ));
     }
     None

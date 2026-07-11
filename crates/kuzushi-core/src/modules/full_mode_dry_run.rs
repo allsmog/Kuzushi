@@ -85,7 +85,7 @@ pub(crate) fn read_full_mode_scope_file(
             path.display()
         );
     }
-    let body = std::fs::read_to_string(path)
+    let body = crate::bounded_file::read_utf8_text(path, 4 * 1024 * 1024)
         .with_context(|| format!("could not read scope file {}", path.display()))?;
     Ok(non_empty_full_mode_scope_files(full_mode_scope_lines(
         &body,

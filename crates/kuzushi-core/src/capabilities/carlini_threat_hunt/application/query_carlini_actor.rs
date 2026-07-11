@@ -20,46 +20,76 @@ pub(crate) fn query_carlini_actor(
     target: &Path,
     options: &CarliniInput,
     model: &str,
-    inventory: &[(String, String)],
+    inventory_block: &str,
     actor_hunt: &ActorHunt,
     actor_fingerprint: &str,
     debug_artifacts: Option<&CarliniDebugArtifacts>,
 ) -> Result<CarliniActorQuery> {
-    let prompt = build_actor_prompt(target, actor_hunt, options, inventory, actor_fingerprint);
+    let prompt = build_actor_prompt(target, actor_hunt, options, inventory_block, actor_fingerprint);
     write_carlini_actor_prompt_artifact(debug_artifacts, actor_fingerprint, &prompt);
-    let request = carlini_actor_request(model, target, prompt, input);
     let contract = StructuredJsonContract::new(
         "carlini-threat-hunt:run",
         "CarliniThreatFindings",
         findings_schema(),
     );
-    let request = request.with_structured_output(contract.runtime_contract());
-    let initial = runtime.query_blocking(request.clone())?;
-    write_carlini_actor_response_artifact(debug_artifacts, actor_fingerprint, "initial", &initial);
-    let mut accumulated_cost = initial.cost_usd;
-    let response = if initial.truncated {
-        match retry_carlini_with_higher_output_budget(runtime, &request) {
-            Ok(retry) => {
-                accumulated_cost += retry.cost_usd;
-                write_carlini_actor_response_artifact(
-                    debug_artifacts,
-                    actor_fingerprint,
-                    "retry",
-                    &retry,
-                );
-                retry
-            }
-            Err(_) => initial,
-        }
-    } else {
-        initial
-    };
+    let request = carlini_actor_request(model, target, prompt, input)
+        .with_structured_output(contract.runtime_contract());
+    let (response, accumulated_cost) =
+        run_carlini_actor_with_retry(runtime, &request, debug_artifacts, actor_fingerprint)?;
     if let Some(value) = extract_carlini_findings_response(&response) {
         return Ok(CarliniActorQuery {
             value,
             cost_usd: accumulated_cost,
         });
     }
+    repair_carlini_actor_findings(
+        runtime,
+        &request,
+        response,
+        contract,
+        debug_artifacts,
+        actor_fingerprint,
+        accumulated_cost,
+    )
+}
+
+/// Run the initial actor query and, when the model truncated its output, one
+/// higher-budget retry. Returns the chosen response plus the total cost paid
+/// across both calls (the retry is dropped on error, keeping the initial).
+fn run_carlini_actor_with_retry(
+    runtime: &dyn AgentRuntime,
+    request: &AgentQueryRequest,
+    debug_artifacts: Option<&CarliniDebugArtifacts>,
+    actor_fingerprint: &str,
+) -> Result<(AgentQueryResponse, f64)> {
+    let initial = runtime.query_blocking(request.clone())?;
+    write_carlini_actor_response_artifact(debug_artifacts, actor_fingerprint, "initial", &initial);
+    let accumulated_cost = initial.cost_usd;
+    if !initial.truncated {
+        return Ok((initial, accumulated_cost));
+    }
+    match retry_carlini_with_higher_output_budget(runtime, request) {
+        Ok(retry) => {
+            write_carlini_actor_response_artifact(debug_artifacts, actor_fingerprint, "retry", &retry);
+            let total_cost = accumulated_cost + retry.cost_usd;
+            Ok((retry, total_cost))
+        }
+        Err(_) => Ok((initial, accumulated_cost)),
+    }
+}
+
+/// Structured-output was not present in `response`; parse-or-repair it into the
+/// findings object. Adds only the repair-pass delta to `accumulated_cost` (the
+/// caller already counted the response's own cost).
+fn repair_carlini_actor_findings(
+    runtime: &dyn AgentRuntime,
+    request: &AgentQueryRequest,
+    response: AgentQueryResponse,
+    contract: StructuredJsonContract,
+    debug_artifacts: Option<&CarliniDebugArtifacts>,
+    actor_fingerprint: &str,
+    accumulated_cost: f64,
+) -> Result<CarliniActorQuery> {
     let response_cost = response.cost_usd;
     let costed = parse_or_repair_required_structured_json_with_cost(
         response,
@@ -71,7 +101,7 @@ pub(crate) fn query_carlini_actor(
                 actor_fingerprint,
                 &repair_prompt,
             );
-            let repair_request = repair_request_from(&request, repair_prompt, output);
+            let repair_request = repair_request_from(request, repair_prompt, output);
             let repair_response = runtime.query_blocking(repair_request);
             if let Ok(response) = &repair_response {
                 write_carlini_actor_response_artifact(
@@ -84,10 +114,6 @@ pub(crate) fn query_carlini_actor(
             repair_response
         },
     )?;
-    // `parse_or_repair_required_structured_json_with_cost` reports the
-    // initial response cost plus any repair cost. We've already counted
-    // the initial response above (in `accumulated_cost`), so add the
-    // repair-only delta.
     let repair_only_cost = (costed.cost_usd - response_cost).max(0.0);
     Ok(CarliniActorQuery {
         value: costed.value,

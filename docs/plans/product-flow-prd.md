@@ -355,8 +355,11 @@ corroborate it, see it — cheaply and defensibly.**
 8. **Human judgment is sticky.** Manual FP/confirm survives every re-run.
 9. **No silent fallback.** Model/provider/runtime never change without consent;
    every path resolves models through `resolve_tool_model` / `ctx.config.model`.
-10. **Local-first.** The only bytes that leave the machine go to the operator's
-    model provider; deterministic detectors (secrets, Semgrep) run offline.
+10. **Local-first, with explicit network boundaries.** Bundled detectors run
+    locally. External scanners and model providers follow their selected
+    configuration: Semgrep registry configs such as `auto` fetch rules, while
+    Kuzushi disables Semgrep metrics. Operators who require an offline run must
+    select only bundled detectors or provide already-local scanner rules.
 
 ---
 
@@ -416,7 +419,8 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
 - G6. Confirmed-vs-guess (evidence tier + oracle + votes) visible in every list.
 - G7. Delegate cheap work to weak models, hard work to strong; cost-per-confirmed
   surfaced; budget enforced per-call.
-- G8. Keyless first run reaches a real finding in ~60s via `demo`.
+- G8. Keyless first run records real deterministic scanner signals as
+  `signal_only` findings in ~60s via `demo`.
 - G9. Every phase reachable identically in shell, `scan --until`, and `run`.
 - G10. Detection quality is a reproducible number (F1 + head-to-head + gate).
 

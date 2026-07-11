@@ -51,7 +51,7 @@ async fn verify_catches_cwe121_stack_overflow() {
         timeout_ms: 90_000,
         trust_plain_backend: true,
     };
-    let outcome = verify_finding(&finding, opts).await.unwrap();
+    let outcome = verify_finding(&finding, opts, tmp.path()).await.unwrap();
 
     eprintln!("{}", serde_json::to_string_pretty(&outcome).unwrap());
 

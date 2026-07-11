@@ -1,7 +1,6 @@
-use super::{run_artifact_path, RunLlmCallAudit, RunTraceStep};
+use super::{read_run_artifact_text, RunArtifactRead, RunLlmCallAudit, RunTraceStep};
 use crate::artifact_contract::{canonical_run_artifact_spec, CanonicalRunArtifactSpec};
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 pub(crate) struct RunTraceAudit {
@@ -10,39 +9,18 @@ pub(crate) struct RunTraceAudit {
 }
 
 pub(crate) fn load_run_trace_audit(target: &Path, run_id: &str) -> RunTraceAudit {
-    let trace_path = run_artifact_path(target, run_id, run_trace_audit_spec().leaf);
-    match read_trace_audit_body(&trace_path) {
-        TraceAuditBody::Present(body) => trace_audit_from_jsonl(&body),
-        TraceAuditBody::Missing => empty_trace_audit(),
-        TraceAuditBody::Invalid => invalid_trace_audit(),
+    match read_run_artifact_text(target, run_id, run_trace_audit_spec().leaf) {
+        RunArtifactRead::Ready { value, .. } => trace_audit_from_jsonl(&value),
+        RunArtifactRead::Missing { .. } => empty_trace_audit(),
+        RunArtifactRead::NonFile { .. }
+        | RunArtifactRead::Unsafe { .. }
+        | RunArtifactRead::Unreadable { .. } => invalid_trace_audit(),
     }
 }
 
 fn run_trace_audit_spec() -> &'static CanonicalRunArtifactSpec {
     canonical_run_artifact_spec("trace.jsonl")
         .expect("runtime trace audit artifact must be in shared spec")
-}
-
-enum TraceAuditBody {
-    Present(String),
-    Missing,
-    Invalid,
-}
-
-fn read_trace_audit_body(path: &Path) -> TraceAuditBody {
-    match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return TraceAuditBody::Invalid,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return TraceAuditBody::Missing;
-        }
-        Err(_) => return TraceAuditBody::Invalid,
-    }
-
-    match fs::read_to_string(path) {
-        Ok(body) => TraceAuditBody::Present(body),
-        Err(_) => TraceAuditBody::Invalid,
-    }
 }
 
 fn empty_trace_audit() -> RunTraceAudit {

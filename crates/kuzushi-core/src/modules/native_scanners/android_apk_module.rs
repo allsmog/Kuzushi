@@ -7,16 +7,16 @@ pub(in crate::modules) fn android_apk_module() -> BuiltinModule {
         ModuleKind::Defense,
         "Unpack, decompile, and analyze Android APKs so Kuzushi's existing Java/Kotlin SAST engines can run against the decompiled source and Kuzushi can emit Android-framework-aware findings.",
         vec![
-            check_env_tool(),
-            prepare_tool(),
-            manifest_scan_tool(),
-            network_security_config_tool(),
-            fileprovider_scan_tool(),
-            code_scan_tool(),
-            sast_handoff_tool(),
-            native_libs_tool(),
-            hybrid_detect_tool(),
-            scan_tool(),
+            check_env_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+            prepare_tool().with_policy(target_write_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+            manifest_scan_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Required)),
+            network_security_config_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Required)),
+            fileprovider_scan_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Required)),
+            code_scan_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Required)),
+            sast_handoff_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+            native_libs_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Required)),
+            hybrid_detect_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Required)),
+            scan_tool().with_policy(target_write_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Required)),
         ],
         vec![],
     )
@@ -34,6 +34,7 @@ fn native_libs_tool() -> ToolDescriptor {
                 "Override the lib/<abi>/ root. Defaults to <target>/android-decompiled/raw/lib.",
             )
             .aliases(&["lib_root"])
+            .workspace_read()
             .advanced(),
         ],
     )
@@ -46,7 +47,15 @@ fn scan_tool() -> ToolDescriptor {
         vec![
             apk_option(),
             decompiler_option(),
+            apk_timeout_option(),
             target_option(),
+            opt(
+                "runId",
+                OptionType::String,
+                "Internal parent run artifact id supplied by scan-mode dispatch.",
+            )
+            .aliases(&["run_id"])
+            .advanced(),
             opt(
                 "skipCode",
                 OptionType::Bool,
@@ -82,6 +91,7 @@ fn hybrid_detect_tool() -> ToolDescriptor {
                 "Override the unzipped APK root. Defaults to <target>/android-decompiled/raw.",
             )
             .aliases(&["raw_root"])
+            .workspace_read()
             .advanced(),
         ],
     )
@@ -99,6 +109,7 @@ fn code_scan_tool() -> ToolDescriptor {
                 "Override path to the decompiled jadx sources directory. Defaults to <target>/android-decompiled/jadx/sources.",
             )
             .aliases(&["jadx_dir"])
+            .workspace_read()
             .advanced(),
             opt(
                 "includeLibraries",
@@ -150,6 +161,7 @@ fn decompiled_root_option() -> OptionSpec {
         "Override path to the android-decompiled/ root produced by android-apk:prepare. Defaults to <target>/android-decompiled.",
     )
     .aliases(&["decompiled_root"])
+    .workspace_read()
     .advanced()
 }
 
@@ -160,6 +172,7 @@ fn nsc_path_option() -> OptionSpec {
         "Override path to network_security_config.xml. Defaults to <target>/android-decompiled/apktool/res/xml/network_security_config.xml.",
     )
     .aliases(&["config_path"])
+    .workspace_read()
     .advanced()
 }
 
@@ -170,6 +183,7 @@ fn file_paths_option() -> OptionSpec {
         "Override path to file_paths.xml. Defaults to <target>/android-decompiled/apktool/res/xml/file_paths.xml.",
     )
     .aliases(&["file_paths_path"])
+    .workspace_read()
     .advanced()
 }
 
@@ -191,6 +205,7 @@ fn prepare_tool() -> ToolDescriptor {
             jadx_bin_option(),
             apktool_bin_option(),
             unzip_bin_option(),
+            apk_timeout_option(),
             target_option(),
         ],
     )
@@ -203,6 +218,7 @@ fn apk_option() -> OptionSpec {
         "Path to the .apk file to analyze. Operator is responsible for acquiring it (Play Store, APKMirror, sideload) within their HackerOne program's scope.",
     )
     .aliases(&["apkPath", "apk_path", "file"])
+    .external_read()
     .required()
 }
 
@@ -216,9 +232,21 @@ fn decompiler_option() -> OptionSpec {
     .default(json!("both"))
 }
 
+fn apk_timeout_option() -> OptionSpec {
+    opt(
+        "timeoutMs",
+        OptionType::Int,
+        "Per-decompiler subprocess deadline in milliseconds. A deadline kills and reaps the complete process tree.",
+    )
+    .aliases(&["timeout_ms"])
+    .default(json!(DEFAULT_ANDROID_COMMAND_TIMEOUT_MS))
+    .advanced()
+}
+
 fn jadx_bin_option() -> OptionSpec {
     opt("jadxBin", OptionType::Path, "Path to the jadx binary.")
         .aliases(&["jadx_bin", "jadx"])
+        .executable()
         .advanced()
 }
 
@@ -229,11 +257,13 @@ fn apktool_bin_option() -> OptionSpec {
         "Path to the apktool binary.",
     )
     .aliases(&["apktool_bin", "apktool"])
+    .executable()
     .advanced()
 }
 
 fn unzip_bin_option() -> OptionSpec {
     opt("unzipBin", OptionType::Path, "Path to the unzip binary.")
         .aliases(&["unzip_bin", "unzip"])
+        .executable()
         .advanced()
 }

@@ -1,6 +1,6 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 const R_DEPENDENCY_FIELDS: &[&str] = &["Depends", "Imports", "Suggests", "LinkingTo"];
@@ -39,12 +39,7 @@ pub(super) fn r_description_edges(target: &Path, path: &Path) -> Result<Vec<Sbom
         .collect())
 }
 
-fn field_components(
-    target: &Path,
-    path: &Path,
-    field: &str,
-    value: &str,
-) -> Vec<SbomComponent> {
+fn field_components(target: &Path, path: &Path, field: &str, value: &str) -> Vec<SbomComponent> {
     dependency_names(value)
         .into_iter()
         .map(|name| component(target, path, "r", field, &name, None))

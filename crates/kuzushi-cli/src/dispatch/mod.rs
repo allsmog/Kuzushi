@@ -20,6 +20,7 @@ pub(crate) async fn dispatch_command(
     plain: bool,
     load: Vec<String>,
 ) -> Result<()> {
+    reject_dynamic_load_for_command(&command, &load)?;
     match command {
         Command::Shell { target } => dispatch_shell_command(target, default_target, plain, load),
         scan @ Command::Scan { .. } => dispatch_scan_command(scan, default_target).await,
@@ -62,6 +63,97 @@ async fn dispatch_scan_command(command: Command, default_target: Option<PathBuf>
         gate,
     )
     .await
+}
+
+fn reject_dynamic_load_for_command(command: &Command, specifiers: &[String]) -> Result<()> {
+    if specifiers.is_empty() || matches!(command, Command::Shell { .. } | Command::Run { .. }) {
+        return Ok(());
+    }
+    if matches!(command, Command::Scan { .. }) {
+        anyhow::bail!(
+            "--load is supported by shell and `kuzushi run`, not `kuzushi scan`. Next: invoke the trusted dynamic tool with `kuzushi --load <specifier> run <module:tool>`."
+        );
+    }
+    anyhow::bail!(
+        "--load is supported only by shell and `kuzushi run`; this command does not load dynamic modules. Next: remove `--load`, or invoke the trusted tool with `kuzushi --load <specifier> run <module:tool>`."
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reject_dynamic_load_for_command;
+    use crate::command::Command;
+
+    fn dynamic_specifier() -> Vec<String> {
+        vec!["file:///tmp/module.mjs".to_string()]
+    }
+
+    #[test]
+    fn scan_rejects_dynamic_load_instead_of_silently_discarding_it() {
+        let command = Command::Scan {
+            target: None,
+            mode: None,
+            tasks: Vec::new(),
+            triage: None,
+            json: false,
+            ci: false,
+            budget: None,
+            since: None,
+            include_worktree: false,
+            fail_on: None,
+            sarif: None,
+        };
+        let error = reject_dynamic_load_for_command(&command, &dynamic_specifier())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("not `kuzushi scan`"), "{error}");
+        assert!(error.contains("kuzushi --load <specifier> run"), "{error}");
+    }
+
+    #[test]
+    fn metadata_doctor_and_findings_commands_reject_dynamic_load() {
+        let commands = [
+            Command::Modules { json: false },
+            Command::Doctor { json: false },
+            Command::Findings {
+                limit: 50,
+                severity: Vec::new(),
+                verdict: Vec::new(),
+                decision: Vec::new(),
+                completeness: Vec::new(),
+                status: Vec::new(),
+                confidence: Vec::new(),
+                state: Vec::new(),
+                name: None,
+                file_path: None,
+                vuln_source: Vec::new(),
+                json: false,
+            },
+        ];
+
+        for command in commands {
+            let error = reject_dynamic_load_for_command(&command, &dynamic_specifier())
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("supported only by shell"), "{error}");
+        }
+    }
+
+    #[test]
+    fn shell_and_run_are_the_only_dynamic_load_surfaces() {
+        let shell = Command::Shell { target: None };
+        let run = Command::Run {
+            tool: "example:run".to_string(),
+            input: "{}".to_string(),
+            options: Vec::new(),
+            autonomy: None,
+        };
+
+        assert!(reject_dynamic_load_for_command(&shell, &dynamic_specifier()).is_ok());
+        assert!(reject_dynamic_load_for_command(&run, &dynamic_specifier()).is_ok());
+        assert!(reject_dynamic_load_for_command(&Command::Modules { json: false }, &[]).is_ok());
+    }
 }
 
 fn dispatch_shell_command(
@@ -128,8 +220,4 @@ pub(crate) fn load_dynamic_modules(
         registry.load_dynamic_module(specifier, &options)?;
     }
     Ok(())
-}
-
-fn target_or_default(target: Option<PathBuf>, default_target: &Option<PathBuf>) -> Option<PathBuf> {
-    target.or_else(|| default_target.clone())
 }

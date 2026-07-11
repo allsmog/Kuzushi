@@ -16,7 +16,8 @@ use crate::app::{
 use crate::{ShellApp, ShellView};
 use anyhow::Result;
 use kuzushi_core::{
-    Finding, NestedProjectKind, ToolExecutionContext, TriageVerdict, WorkspaceTarget,
+    ExecutionAuthorization, Finding, NestedProjectKind, ToolExecutionContext, TriageVerdict,
+    WorkspaceTarget,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -55,12 +56,14 @@ impl ShellApp {
     }
 
     /// Dispatch the head of the planning queue (if any) on `workspace`.
-    /// No-op when the queue is empty or another tool is already running.
+    /// No-op when the queue is empty or any live job still owns an execution
+    /// slot. Holding the step here keeps it queued instead of popping it and
+    /// then losing it at the background-tool admission boundary.
     pub(crate) fn dispatch_next_planning_task(
         &mut self,
         workspace: WorkspaceTarget,
     ) -> Vec<ShellEffect> {
-        if self.tool_is_running() {
+        if self.has_running_work() {
             self.log_planning_queue_stalled();
             return Vec::new();
         }
@@ -120,12 +123,14 @@ impl ShellApp {
                 self.pending_planning_step_count(),
             ),
         );
-        self.start_background_tool(
+        let authorization = planning_step_authorization(step.task);
+        self.start_authorized_background_tool(
             step.tool_name,
             step.input,
             workspace,
             "planning queue task in flight",
             self.session_thinking_level_owned(),
+            authorization,
         );
         Vec::new()
     }
@@ -251,7 +256,9 @@ impl ShellApp {
         if queued == 0 {
             return;
         }
-        let running = self.running_tool_name_owned().unwrap_or_default();
+        let running = self
+            .running_tool_name_owned()
+            .unwrap_or_else(|| "active work".to_string());
         self.log(
             "planning",
             format!("plan queued ({queued} step(s)) — waiting for {running} to finish first",),
@@ -390,18 +397,32 @@ impl ShellApp {
     /// drop the queued tasks that transitively depended on it, and keep running
     /// the independent remainder — failure of one task no longer kills the run.
     pub(crate) fn fail_planning_task(&mut self, tool_name: &str, error: &str) -> Vec<ShellEffect> {
-        self.engagement.clear_running_tool();
-        if let Some(task) = planning_task_for_tool(tool_name) {
-            let skipped = self.skip_queued_dependents(task);
-            self.log_skipped_dependents(task, &skipped);
-            self.engagement.record_failed_task(FailedPlanningTask {
-                task,
-                error: first_line(error),
-                adjustment: retry_adjustment_from_error(error),
-                blocked: skipped,
-            });
-        }
+        self.record_planning_task_failure(tool_name, error);
         self.resume_or_advance_planning_queue()
+    }
+
+    pub(crate) fn pause_planning_task_after_failure(&mut self, tool_name: &str, error: &str) {
+        self.record_planning_task_failure(tool_name, error);
+        self.engagement.pause_planning_queue();
+        self.log(
+            "planning",
+            format!("plan paused after {tool_name} failed; resume explicitly after review"),
+        );
+    }
+
+    fn record_planning_task_failure(&mut self, tool_name: &str, error: &str) {
+        self.engagement.clear_running_tool();
+        let Some(task) = planning_task_for_tool(tool_name) else {
+            return;
+        };
+        let skipped = self.skip_queued_dependents(task);
+        self.log_skipped_dependents(task, &skipped);
+        self.engagement.record_failed_task(FailedPlanningTask {
+            task,
+            error: first_line(error),
+            adjustment: retry_adjustment_from_error(error),
+            blocked: skipped,
+        });
     }
 
     /// Remove from the queue every task that transitively depends on `failed`.
@@ -526,6 +547,8 @@ impl ShellApp {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let prepared = match self.registry().prepare_tool_input_for_dispatch(
             "module-recommender:recommend",
@@ -732,6 +755,8 @@ impl ShellApp {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         self.registry().prepare_tool_input_for_dispatch(
             tool_name,
@@ -752,6 +777,13 @@ impl ShellApp {
             "run `recommend` when you want suggested next modules",
         );
     }
+}
+
+fn planning_step_authorization(task: PlanningTaskId) -> ExecutionAuthorization {
+    if task == PlanningTaskId::PatchFindings {
+        return ExecutionAuthorization::interactive_request();
+    }
+    ExecutionAuthorization::default()
 }
 
 fn map_recommendation_notice(root: &Path) -> String {
@@ -1047,6 +1079,18 @@ mod tests {
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].tool_name, "patch:finding");
         assert_eq!(steps[0].input["fingerprint"], expected);
+    }
+
+    #[test]
+    fn confirmed_patch_plan_requests_scoped_interactive_authorization() {
+        assert_eq!(
+            planning_step_authorization(PatchFindings),
+            ExecutionAuthorization::interactive_request()
+        );
+        assert_eq!(
+            planning_step_authorization(VerifyFindings),
+            ExecutionAuthorization::default()
+        );
     }
 
     #[test]

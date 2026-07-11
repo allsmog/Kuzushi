@@ -51,13 +51,46 @@ devex_send_line() {
 # devex_capture <session> <out.txt> <out.ansi>
 # Plain capture for content/honesty checks; -e capture for palette audits.
 devex_capture() {
-  tmux capture-pane -t "$1" -p > "$2"
-  tmux capture-pane -t "$1" -e -p > "$3"
+  if [ "$(tmux display-message -p -t "$1" '#{alternate_on}')" = 1 ]; then
+    # While a full-screen app is live, tmux's current pane is the TUI and
+    # `-a` is the saved shell screen. Capture the current pane.
+    tmux capture-pane -t "$1" -p > "$2"
+    tmux capture-pane -t "$1" -e -p > "$3"
+  else
+    # After a full-screen app exits, recover its saved alternate screen when
+    # available; headless journeys have no alternate screen and fall back to
+    # ordinary shell output.
+    tmux capture-pane -t "$1" -a -q -p > "$2"
+    tmux capture-pane -t "$1" -a -q -e -p > "$3"
+    if ! LC_ALL=C grep -aq '[^[:space:]]' "$2"; then
+      tmux capture-pane -t "$1" -p > "$2"
+      tmux capture-pane -t "$1" -e -p > "$3"
+    fi
+  fi
 }
 
 # devex_pane_contains <session> <fixed-substring>  (case-insensitive)
 devex_pane_contains() {
-  tmux capture-pane -t "$1" -p 2>/dev/null | grep -Fiq -- "$2"
+  if [ "$(tmux display-message -p -t "$1" '#{alternate_on}' 2>/dev/null)" = 1 ]; then
+    tmux capture-pane -t "$1" -p 2>/dev/null | grep -Fiq -- "$2"
+  else
+    tmux capture-pane -t "$1" -p 2>/dev/null | grep -Fiq -- "$2" \
+      || tmux capture-pane -t "$1" -a -q -p 2>/dev/null | grep -Fiq -- "$2"
+  fi
+}
+
+# devex_ansi_has_profile <capture.ansi> <indexed|truecolor>
+# Looks only for SGR color forms emitted by Ratatui. Keeping this in the
+# capture layer means content checks remain independent of terminal styling.
+devex_ansi_has_profile() {
+  local esc pattern
+  esc=$(printf '\033')
+  case $2 in
+    indexed)   pattern="${esc}\\[[0-9;]*(38|48);5;[0-9]+m";;
+    truecolor) pattern="${esc}\\[[0-9;]*(38|48);2;[0-9]+;[0-9]+;[0-9]+m";;
+    *) return 2;;
+  esac
+  LC_ALL=C grep -aEq "$pattern" "$1"
 }
 
 # devex_shell_quote <word...>  — printf %q each word onto one line.

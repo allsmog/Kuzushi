@@ -10,7 +10,7 @@ pub(crate) fn view_status_segment(app: &ShellApp) -> String {
 fn primary_view_status(app: &ShellApp) -> Option<String> {
     match &app.shell_view() {
         ShellView::Home => Some("home".to_string()),
-        ShellView::Catalog => Some("catalog".to_string()),
+        ShellView::Catalog => Some("capabilities".to_string()),
         ShellView::Recommend => Some("recommend".to_string()),
         ShellView::Module => Some(focused_or_default(app, "module")),
         ShellView::ModuleRun => Some(module_run_status(app)),

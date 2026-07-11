@@ -1,5 +1,7 @@
 pub use super::descriptor::{
-    canonical_tool_phase, BuiltinModule, DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec,
-    OptionType, RuntimeRequirement, ToolDescriptor, ToolPhase,
+    canonical_tool_phase, ApprovalPolicy, BuiltinModule, DagNodeDescriptor, ModuleKind,
+    FileReferenceSemantics, FindingStoreRequirement, ModuleMetadata, OptionSpec, OptionType,
+    PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor, ToolEffect, ToolPhase, ToolPolicy,
+    WorkspaceRequirement,
 };
-pub use super::execution_context::ToolExecutionContext;
+pub use super::execution_context::{ExecutionAuthorization, ToolExecutionContext};

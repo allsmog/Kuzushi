@@ -3,14 +3,8 @@ use super::*;
 #[derive(Debug)]
 pub(crate) enum ScanEvent {
     Stage(String),
-    Finished {
-        run_id: String,
-        findings_count: usize,
-        cost_usd: Option<f64>,
-    },
-    Failed {
-        error: String,
-    },
+    Finished { result: serde_json::Value },
+    Failed { error: String },
 }
 
 #[derive(Debug)]
@@ -86,6 +80,7 @@ pub(crate) fn background_tool_worker(
     input: serde_json::Value,
     run_id: String,
     thinking_level: Option<String>,
+    authorization: ExecutionAuthorization,
     sink: JobEventSink,
     trace_handle: Option<TraceHandle>,
     cancel: ScanCancellation,
@@ -105,6 +100,7 @@ pub(crate) fn background_tool_worker(
         input,
         &run_id,
         thinking_level,
+        authorization,
         trace_handle,
         cancel.clone(),
     );

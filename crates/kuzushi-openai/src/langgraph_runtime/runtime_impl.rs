@@ -1,8 +1,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput,
-    AgentToolLoopRequest, LoopHistoryEntry, TriageOutcome, TriageRequest,
+    AgentLoopStep, AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
+    AgentStructuredOutput, AgentToolLoopRequest, LoopHistoryEntry, ScanCancellation, TriageOutcome,
+    TriageRequest,
 };
 
 use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
@@ -13,6 +14,8 @@ use super::runtime_config::LangGraphRuntime;
 use super::triage::{
     clamp_outcome, normalize_triage_confidence, triage_prompt, triage_system_prompt,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -63,6 +66,30 @@ impl AgentRuntime for LangGraphRuntime {
         })
     }
 
+    fn query_blocking_controlled(
+        &self,
+        request: AgentQueryRequest,
+        control: AgentQueryControl,
+    ) -> Result<AgentQueryResponse> {
+        control.ensure_active()?;
+        let local = ScanCancellation::default();
+        let done = Arc::new(AtomicBool::new(false));
+        let watchdog = spawn_query_control_watchdog(
+            local.clone(),
+            self.cancellation.clone(),
+            control.clone(),
+            Arc::clone(&done),
+        );
+        let result = self
+            .clone()
+            .with_cancellation(local)
+            .query_blocking(request);
+        done.store(true, Ordering::SeqCst);
+        let _ = watchdog.join();
+        control.ensure_active()?;
+        result
+    }
+
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
         let prompt = triage_prompt(&request.finding, request.prompt_template.as_deref())?;
         let response = self.query_blocking(
@@ -91,6 +118,28 @@ impl AgentRuntime for LangGraphRuntime {
     fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
         run_preflight_tool_loop_blocking(self, request)
     }
+}
+
+fn spawn_query_control_watchdog(
+    local: ScanCancellation,
+    existing: Option<ScanCancellation>,
+    control: AgentQueryControl,
+    done: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        while !done.load(Ordering::SeqCst) {
+            if control.is_cancelled()
+                || control.is_expired()
+                || existing
+                    .as_ref()
+                    .is_some_and(ScanCancellation::is_cancelled)
+            {
+                local.cancel();
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+    })
 }
 
 pub(crate) struct ModelCredential {

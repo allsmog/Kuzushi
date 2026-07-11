@@ -10,11 +10,12 @@ pub(crate) fn persist_agentic_sast_findings(
     };
     workspace.ensure_state_dir()?;
     let run_id = Uuid::new_v4().to_string();
-    store.record_run_started(&run_id, target, "running")?;
-    for finding in findings {
-        store.insert_finding(&run_id, finding)?;
-    }
-    store.record_run_finished(&run_id, "completed", findings.len())?;
+    store.with_run_lifecycle(&run_id, target, || {
+        for finding in findings {
+            store.insert_finding(&run_id, finding)?;
+        }
+        Ok(((), findings.len()))
+    })?;
 
     Ok(Some(AgenticSastPersistedRun {
         run_id,

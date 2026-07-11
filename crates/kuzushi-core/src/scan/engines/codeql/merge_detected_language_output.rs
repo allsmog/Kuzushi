@@ -83,15 +83,23 @@ pub(crate) fn codeql_repo_name(target: &Path) -> String {
 }
 
 pub(crate) fn remove_stale_codeql_database(db_path: &Path) -> Result<()> {
-    if !db_path.exists() {
-        return Ok(());
-    }
-    if db_path.is_dir() {
-        fs::remove_dir_all(db_path)
-            .with_context(|| format!("codeql: could not remove stale {}", db_path.display()))
-    } else {
-        fs::remove_file(db_path)
-            .with_context(|| format!("codeql: could not remove stale {}", db_path.display()))
+    match fs::symlink_metadata(db_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => anyhow::bail!(
+            "codeql: refusing symlinked database output {}",
+            db_path.display()
+        ),
+        Ok(metadata) if metadata.file_type().is_dir() => fs::remove_dir_all(db_path)
+            .with_context(|| format!("codeql: could not remove stale {}", db_path.display())),
+        Ok(metadata) if metadata.file_type().is_file() => fs::remove_file(db_path)
+            .with_context(|| format!("codeql: could not remove stale {}", db_path.display())),
+        Ok(_) => anyhow::bail!(
+            "codeql: database output is not a regular file or directory: {}",
+            db_path.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("codeql: could not inspect {}", db_path.display()))
+        }
     }
 }
 

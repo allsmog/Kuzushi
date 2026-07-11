@@ -31,7 +31,10 @@ pub(super) fn repository_license_findings(
         return Ok(Vec::new());
     }
     let Some(license_file) = repository_license_file(target)? else {
-        return Ok(vec![missing_license_file_finding(target, &declared[0].path)]);
+        return Ok(vec![missing_license_file_finding(
+            target,
+            &declared[0].path,
+        )]);
     };
     Ok(license_file_mismatch(target, &license_file, &declared)
         .map(|finding| vec![finding])
@@ -46,7 +49,7 @@ fn declared_manifest_licenses(manifests: &[PathBuf]) -> Result<Vec<DeclaredLicen
 }
 
 fn declared_manifest_license(path: &Path) -> Result<Option<DeclaredLicense>> {
-    let text = fs::read_to_string(path)
+    let text = crate::bounded_file::read_utf8_text(path, MAX_LICENSE_MANIFEST_BYTES)
         .with_context(|| format!("license-scan: read {}", path.display()))?;
     match manifest_license(path, &text)? {
         ManifestLicense::Declared(license) => Ok(Some(DeclaredLicense {
@@ -86,7 +89,8 @@ fn license_file_mismatch(
     license_file: &Path,
     declared: &[DeclaredLicense],
 ) -> Option<LicenseScanFinding> {
-    let file_kind = license_text_kind(&fs::read_to_string(license_file).ok()?)?;
+    let text = crate::bounded_file::read_utf8_text(license_file, MAX_LICENSE_FILE_BYTES).ok()?;
+    let file_kind = license_text_kind(&text)?;
     declared.iter().find_map(|item| {
         let manifest_kind = license_text_kind(&item.license)?;
         (manifest_kind != file_kind)

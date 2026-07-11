@@ -1,10 +1,22 @@
 use super::*;
+use crate::scan::domain::scanner_binary_available;
 
 #[derive(Debug, Clone)]
 pub struct ScanRun {
     pub id: String,
     pub target: PathBuf,
     pub findings_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SkippedDefaultScanEngine {
+    pub(crate) id: &'static str,
+    pub(crate) warning: String,
+}
+
+pub(crate) struct DefaultScanEngineSelection {
+    pub(crate) engines: Vec<Box<dyn ScanEngine>>,
+    pub(crate) skipped: Vec<SkippedDefaultScanEngine>,
 }
 
 pub fn run_semgrep_scan(
@@ -16,29 +28,62 @@ pub fn run_semgrep_scan(
     workspace.ensure_state_dir()?;
 
     let run_id = Uuid::new_v4().to_string();
-    store.record_run_started(&run_id, workspace.root(), "running")?;
-
-    let findings = scanner.scan(workspace.root())?;
-    for finding in &findings {
-        store.insert_finding(&run_id, finding)?;
-    }
-    store.record_run_finished(&run_id, "completed", findings.len())?;
-
-    Ok(ScanRun {
-        id: run_id,
-        target: workspace.root().to_path_buf(),
-        findings_count: findings.len(),
+    store.with_run_lifecycle(&run_id, workspace.root(), || {
+        let findings = scanner.scan(workspace.root())?;
+        for finding in &findings {
+            store.insert_finding(&run_id, finding)?;
+        }
+        let findings_count = findings.len();
+        Ok((
+            ScanRun {
+                id: run_id.clone(),
+                target: workspace.root().to_path_buf(),
+                findings_count,
+            },
+            findings_count,
+        ))
     })
 }
 
 pub fn default_scan_engines() -> Vec<Box<dyn ScanEngine>> {
-    vec![
-        Box::new(SemgrepScanner::default()),
-        Box::new(DepHygieneScanner),
-        Box::new(CargoAuditScanner),
-        Box::new(SecretScanScanner),
-        Box::new(IacScanScanner::default()),
-    ]
+    select_default_scan_engines().engines
+}
+
+pub(crate) fn select_default_scan_engines() -> DefaultScanEngineSelection {
+    default_scan_engine_selection(
+        scanner_binary_available("semgrep"),
+        CargoAuditScanner::binary_available(),
+    )
+}
+
+fn default_scan_engine_selection(
+    semgrep_available: bool,
+    cargo_audit_available: bool,
+) -> DefaultScanEngineSelection {
+    let mut engines: Vec<Box<dyn ScanEngine>> = Vec::new();
+    let mut skipped = Vec::new();
+    if semgrep_available {
+        engines.push(Box::new(SemgrepScanner::default()));
+    } else {
+        skipped.push(SkippedDefaultScanEngine {
+            id: "semgrep",
+            warning: "optional auto task semgrep skipped: semgrep was not found on PATH; continuing with built-in scanners"
+                .to_string(),
+        });
+    }
+    engines.push(Box::new(DepHygieneScanner));
+    if cargo_audit_available {
+        engines.push(Box::new(CargoAuditScanner));
+    } else {
+        skipped.push(SkippedDefaultScanEngine {
+            id: "cargo-audit",
+            warning: "optional auto task cargo-audit skipped: `cargo audit` was not found; continuing with built-in scanners"
+                .to_string(),
+        });
+    }
+    engines.push(Box::new(SecretScanScanner));
+    engines.push(Box::new(IacScanScanner::default()));
+    DefaultScanEngineSelection { engines, skipped }
 }
 
 pub fn scan_engines_for_tasks(tasks: &[String]) -> Result<Vec<Box<dyn ScanEngine>>> {
@@ -68,6 +113,14 @@ pub fn scan_engines_for_tasks(tasks: &[String]) -> Result<Vec<Box<dyn ScanEngine
     }
 
     Ok(scanners)
+}
+
+#[cfg(test)]
+pub(in crate::scan) fn default_scan_engine_selection_for_test(
+    semgrep_available: bool,
+    cargo_audit_available: bool,
+) -> DefaultScanEngineSelection {
+    default_scan_engine_selection(semgrep_available, cargo_audit_available)
 }
 
 pub fn run_scan_engines(

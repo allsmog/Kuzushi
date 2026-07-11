@@ -60,7 +60,10 @@ fn carlini_finding_from_object(
     Some(finding)
 }
 
-fn carlini_location(object: &Map<String, Value>, target: &Path) -> Option<(String, u32, Option<u32>)> {
+fn carlini_location(
+    object: &Map<String, Value>,
+    target: &Path,
+) -> Option<(String, u32, Option<u32>)> {
     let file_path = read_object_string(object, &["filePath", "file_path"])?;
     let file_path = normalize_file_path(target, &file_path)?;
     let start_line = read_positive_line(object, &["startLine", "start_line"]).unwrap_or(1) as u32;
@@ -114,11 +117,12 @@ pub(crate) fn persist_findings(
     };
     workspace.ensure_state_dir()?;
     let run_id = Uuid::new_v4().to_string();
-    store.record_run_started(&run_id, target, "running")?;
-    for finding in findings {
-        store.insert_finding(&run_id, finding)?;
-    }
-    store.record_run_finished(&run_id, "completed", findings.len())?;
+    store.with_run_lifecycle(&run_id, target, || {
+        for finding in findings {
+            store.insert_finding(&run_id, finding)?;
+        }
+        Ok(((), findings.len()))
+    })?;
     Ok(Some(CarliniThreatHuntPersistedRun {
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),

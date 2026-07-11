@@ -7,24 +7,23 @@ assertion_line: 33
 Kuzushi · target:no target · page:confirm · o idle · modules:all modules
  type next guided workflow · type scan run scan · type options sast:scan tune scanners · type ask ask the agent
 
- -- SOURCE · 0 files ---------------------------------------------------------------------------------------------------
-       ∅  no source tree
-       no finding-bearing files yet — run `scan` to populate the tree.
-
-       > scan                  populate finding-bearing files
-
- -- [CODE·] |  DFD·  |  CHAIN·  |  FLOW·  |  RISK·  --------------------------------------------------------------------
+ -- FINDING ------------------------------------------------------------------------------------------------------------
        ∅  no finding selected
-       select a finding to show source context.
+       select a finding to inspect its path and proof
 
-       > scan                  populate findings
-       > open <id>             pin a finding
+       > 2                     open Hunt and choose a finding
+ -- ATTACK PATH --------------------------------------------------------------------------------------------------------
+       ∅  no taint flow
+       no taint flow yet — run `taint-iris:hunt`
 
- -- REVIEW QUEUE - showing 0 of 0 - 0 open - 0 complete ----------------------------------------------------------------
-∅ review queue empty
-no findings loaded for review
-> findings
-> filter completeness:open
+       > taint-iris:hunt       generate a source-to-sink path
+ -- DATA-FLOW LADDER ---------------------------------------------------------------------------------------------------
+       ∅  no data-flow ladder
+       no taint flow yet — run `taint-iris:hunt`
 
- -- DETAILS ------------------------------------------------------------------------------------------------------------
-no finding selected — move through FINDINGS to preview details here.
+       > taint-iris-next:hunt  generate a selected source-to-sink path
+ -- PROOF --------------------------------------------------------------------------------------------------------------
+       ∅  no finding selected
+       select a finding to inspect its path and proof
+
+       > 2                     open Hunt and choose a finding

@@ -7,25 +7,58 @@ impl ShellApp {
         catalog_model(self).module_count
     }
 
+    pub fn catalog_cursor_command(&self) -> Option<String> {
+        let model = catalog_model(self);
+        let commands = catalog_action_commands(&model);
+        let cursor = self.router.catalog().cursor();
+        commands
+            .get(cursor.min(commands.len().saturating_sub(1)))
+            .cloned()
+    }
+
     pub fn catalog_cursor_module_id(&self) -> Option<String> {
         let model = catalog_model(self);
-        let modules = catalog_module_ids(&model);
+        let ids = catalog_action_ids(&model);
         let cursor = self.router.catalog().cursor();
-        modules
-            .get(cursor.min(modules.len().saturating_sub(1)))
-            .cloned()
+        ids.get(cursor.min(ids.len().saturating_sub(1))).cloned()
     }
 
     pub fn move_catalog_cursor(&mut self, delta: i32) {
         let count = self.catalog_module_count();
         self.router.catalog_mut().move_cursor(delta, count);
+        self.keep_catalog_selection_visible();
+    }
+
+    fn keep_catalog_selection_visible(&mut self) {
+        let cursor = self.router.catalog().cursor();
+        // The overlay reserves rows for the cockpit chrome, capability header,
+        // NEXT action, and category rails. Use the remaining action-row budget
+        // so the selected entry stays inside the modal on short terminals.
+        let visible_rows = usize::from(self.viewport().rows.saturating_sub(17)).max(3);
+        let scroll = self.router.modules().scroll();
+        let next = if cursor < scroll {
+            cursor
+        } else if cursor >= scroll.saturating_add(visible_rows) {
+            cursor.saturating_add(1).saturating_sub(visible_rows)
+        } else {
+            scroll
+        };
+        *self.router.modules_mut().scroll_mut() = next;
     }
 }
 
-fn catalog_module_ids(model: &CatalogModel) -> Vec<String> {
+fn catalog_action_ids(model: &CatalogModel) -> Vec<String> {
     model
         .groups
         .iter()
         .flat_map(|group| group.rows.iter().map(|row| row.id.clone()))
+        .collect()
+}
+
+fn catalog_action_commands(model: &CatalogModel) -> Vec<String> {
+    model
+        .groups
+        .iter()
+        .flat_map(|group| group.rows.iter().map(|row| row.command.clone()))
         .collect()
 }

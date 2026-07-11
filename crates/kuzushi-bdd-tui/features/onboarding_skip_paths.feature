@@ -2,12 +2,13 @@ Feature: Skip paths
   Esc on a phase picker hands off to the Workbench cockpit.
   The documented `KUZUSHI_SKIP_ONBOARDING` env bypasses the flow.
 
-  Scenario: KUZUSHI_SKIP_ONBOARDING short-circuits to Catalog
+  Scenario: KUZUSHI_SKIP_ONBOARDING short-circuits to Workbench
     Given a fresh kuzushi workspace
     And the env var "KUZUSHI_SKIP_ONBOARDING" is set to "1"
     And no model is configured
     When I launch the shell
-    Then the status segment shows "modules"
+    Then the status segment shows "workbench"
+    And I see "AIM - ATTACK SURFACE"
     And I do not see "CHOOSE A MODEL"
 
   Scenario: Esc leaves the phase picker for Workbench

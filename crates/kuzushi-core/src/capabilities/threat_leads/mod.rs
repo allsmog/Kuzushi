@@ -11,13 +11,16 @@ use output::tool_output;
 
 use crate::capabilities::threat_model::persistent_threat_model_path;
 use crate::modules::ToolExecutionContext;
+use crate::workspace::write_workspace_state_file;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
+#[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const THREAT_LEADS_ARTIFACT_FILE: &str = "threat-leads.json";
 const THREAT_LEADS_SUMMARY_FILE: &str = "threat-leads.md";
+const MAX_THREAT_LEADS_BYTES: usize = 16 * 1024 * 1024;
 
 pub fn execute_threat_leads_tool(
     name: &str,
@@ -72,7 +75,11 @@ fn emit_build_done(ctx: &ToolExecutionContext<'_>, report: &Value) {
 }
 
 fn plural(count: u64) -> &'static str {
-    if count == 1 { "" } else { "s" }
+    if count == 1 {
+        ""
+    } else {
+        "s"
+    }
 }
 
 pub fn build_threat_leads(target: &Path) -> Result<Value> {
@@ -122,59 +129,65 @@ fn threat_leads_report(target: &Path, leads: Vec<Value>) -> Value {
 
 pub fn read_threat_leads(target: &Path) -> Result<Value> {
     let path = threat_leads_artifact_path(target);
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("Could not read threat leads artifact {}", path.display()))?;
+    let text = crate::workspace::read_workspace_text(target, &path, MAX_THREAT_LEADS_BYTES)?;
     serde_json::from_str(&text)
         .with_context(|| format!("Could not parse threat leads artifact {}", path.display()))
 }
 
 fn resolve_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    if let Some(target) = explicit_target(input)? {
+    if let Some(target) = explicit_target(input, ctx)? {
         return Ok(target);
     }
-    if let Some(workspace) = ctx.workspace {
-        return Ok(workspace.root().to_path_buf());
-    }
-    std::env::current_dir().context("Could not resolve current directory")
+    ctx.workspace
+        .map(|workspace| workspace.root().to_path_buf())
+        .context("threat-leads requires an explicit active workspace")
 }
 
-fn explicit_target(input: &Value) -> Result<Option<PathBuf>> {
+fn explicit_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Option<PathBuf>> {
     let Some(target) = input.get("target").and_then(Value::as_str) else {
         return Ok(None);
     };
     let trimmed = target.trim();
     if trimmed.is_empty() {
-        return Ok(None);
+        anyhow::bail!("threat-leads target may not be blank");
     }
     let path = PathBuf::from(trimmed);
     Ok(Some(if path.is_absolute() {
         path
     } else {
-        std::env::current_dir()?.join(path)
+        ctx.workspace
+            .map(|workspace| workspace.root().join(path))
+            .context("threat-leads requires an explicit active workspace")?
     }))
 }
 
 fn read_threat_model(target: &Path) -> Result<Value> {
     let path = persistent_threat_model_path(target);
-    let text = fs::read_to_string(&path)
-        .with_context(|| format!("Could not read threat model {}", path.display()))?;
+    let text = crate::workspace::read_workspace_text(target, &path, MAX_THREAT_LEADS_BYTES)?;
     serde_json::from_str(&text).with_context(|| format!("Could not parse {}", path.display()))
 }
 
 fn write_threat_leads(target: &Path, report: &Value) -> Result<()> {
     let path = threat_leads_artifact_path(target);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Could not create {}", parent.display()))?;
-    }
-    fs::write(
-        &path,
-        format!("{}\n", serde_json::to_string_pretty(report)?),
-    )
-    .with_context(|| format!("Could not write {}", path.display()))?;
     let summary_path = threat_leads_summary_path(target);
-    fs::write(&summary_path, render_threat_leads_markdown(report))
-        .with_context(|| format!("Could not write {}", summary_path.display()))
+    let artifact = format!("{}\n", serde_json::to_string_pretty(report)?);
+    let artifact_relative = path
+        .strip_prefix(target)
+        .context("Threat-leads artifact path escaped the workspace")?;
+    let summary_relative = summary_path
+        .strip_prefix(target)
+        .context("Threat-leads summary path escaped the workspace")?;
+    write_workspace_state_file(
+        target,
+        artifact_relative,
+        artifact.as_bytes(),
+    )?;
+    write_workspace_state_file(
+        target,
+        summary_relative,
+        render_threat_leads_markdown(report).as_bytes(),
+    )?;
+    Ok(())
 }
 
 pub(super) fn threat_leads_artifact_path(target: &Path) -> PathBuf {
@@ -223,5 +236,25 @@ mod tests {
                 &persistent_threat_model_path(Path::new("/repo"))
             )
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn threat_leads_writer_rejects_a_symlinked_artifact() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().expect("workspace");
+        let mut outside = tempfile::NamedTempFile::new().expect("outside");
+        std::io::Write::write_all(&mut outside, b"outside").expect("seed outside");
+        fs::create_dir_all(crate::workspace::workspace_state_root(workspace.path()))
+            .expect("state dir");
+        symlink(outside.path(), threat_leads_artifact_path(workspace.path()))
+            .expect("symlink artifact");
+
+        let error = write_threat_leads(workspace.path(), &serde_json::json!({ "leads": [] }))
+            .expect_err("symlink must be rejected");
+
+        assert!(error.to_string().contains("symlink"));
+        assert_eq!(fs::read_to_string(outside.path()).unwrap(), "outside");
     }
 }

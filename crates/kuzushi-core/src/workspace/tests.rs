@@ -10,6 +10,17 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn missing_workspace_target_suggests_parser_valid_cli_placement() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("missing");
+
+        let error = WorkspaceTarget::new(&missing).unwrap_err().to_string();
+
+        assert!(error.contains("kuzushi --target . scan"), "{error}");
+        assert!(!error.contains("scan --target"), "{error}");
+    }
+
+    #[test]
     fn resolves_v3_state_paths_under_project() {
         let tmp = tempfile::tempdir().unwrap();
         let target = WorkspaceTarget::new(tmp.path()).unwrap();
@@ -35,6 +46,32 @@ mod tests {
             workspace_attachments_path(target.root()),
             target.root().join(".kuzushi/v3/attachments.json")
         );
+    }
+
+    #[test]
+    fn initializing_workspace_state_keeps_generated_state_out_of_git() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = WorkspaceTarget::new(tmp.path()).unwrap();
+
+        target.ensure_state_dir().unwrap();
+
+        assert_eq!(
+            fs::read_to_string(target.root().join(".kuzushi/.gitignore")).unwrap(),
+            "*\n!scope.toml\n!prompts/\n!prompts/**\n!v3/\nv3/*\n!v3/config.toml\n"
+        );
+    }
+
+    #[test]
+    fn initializing_workspace_state_preserves_an_existing_ignore_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = WorkspaceTarget::new(tmp.path()).unwrap();
+        let ignore_path = target.root().join(".kuzushi/.gitignore");
+        fs::create_dir_all(ignore_path.parent().unwrap()).unwrap();
+        fs::write(&ignore_path, "v3/runs/\n").unwrap();
+
+        target.ensure_state_dir().unwrap();
+
+        assert_eq!(fs::read_to_string(ignore_path).unwrap(), "v3/runs/\n");
     }
 
     #[test]

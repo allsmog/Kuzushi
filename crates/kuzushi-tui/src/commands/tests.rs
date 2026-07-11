@@ -816,7 +816,6 @@ mod tests {
             "prompt",
             "provider",
             "project-model",
-            "pwn",
             "queue-command",
             "quickstart",
             "keymap",

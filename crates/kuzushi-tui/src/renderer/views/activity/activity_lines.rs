@@ -2,8 +2,9 @@ use super::dag_pane::dag_row_style;
 use super::feed_pane::feed_row_style;
 use super::*;
 use crate::ui_view_models::{
-    activity_view_model, ActiveActivityViewModel, ActivityEmptyStateModel, ActivityPlainDagCell,
-    ActivityPlainFeedCell, ActivityPlainPaneHeaderCell, ActivityPlainPaneRow, ActivityViewModel,
+    activity_view_model, phase_cockpit_model, ActiveActivityViewModel, ActivityEmptyStateModel,
+    ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneHeaderCell, ActivityPlainPaneRow,
+    ActivityViewModel, PhaseCockpitModel,
 };
 use std::time::Instant;
 
@@ -12,13 +13,43 @@ use std::time::Instant;
 ///   right ~54% — OUTPUT deck (findings and generated artifacts)
 ///   footer    — single-line focus pane summary
 pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    match activity_view_model(app) {
+        ActivityViewModel::Active(activity) => match phase_cockpit_model(app) {
+            Some(phase) => phase_activity_lines(Vec::new(), area, activity, &phase),
+            None => active_activity_lines(activity_context_lines(app, area), area, activity),
+        },
+        ActivityViewModel::Inactive(empty) => {
+            inactive_activity_lines(activity_context_lines(app, area), area.width, empty)
+        }
+    }
+}
+
+fn activity_context_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
+    lines
+}
 
-    match activity_view_model(app) {
-        ActivityViewModel::Active(activity) => active_activity_lines(lines, area, activity),
-        ActivityViewModel::Inactive(empty) => inactive_activity_lines(lines, area.width, empty),
+fn phase_activity_lines(
+    mut lines: Vec<Line<'static>>,
+    area: Rect,
+    activity: ActiveActivityViewModel<'_>,
+    phase: &PhaseCockpitModel,
+) -> Vec<Line<'static>> {
+    lines.extend(activity_phase_header_lines(&phase.header, area));
+    lines.extend(super::super::workbench::phase_cockpit_plain_lines(
+        phase,
+        area.width as usize,
+    ));
+    lines.push(blank());
+    lines.push(divider(&activity.header().summary_title, area.width));
+    if let Some(banner) = activity.abort_banner() {
+        lines.push(Line::styled(banner, theme::warn()));
     }
+    append_activity_pane_lines(&mut lines, area, &activity);
+    lines.push(blank());
+    append_activity_footer(&mut lines, area.width, &activity);
+    lines
 }
 
 fn inactive_activity_lines(
@@ -46,6 +77,18 @@ fn active_activity_lines(
         lines.push(Line::from(vec![Span::styled(banner, theme::warn())]));
     }
 
+    append_activity_pane_lines(&mut lines, area, &activity);
+
+    lines.push(blank());
+    append_activity_footer(&mut lines, area.width, &activity);
+    lines
+}
+
+fn append_activity_pane_lines(
+    lines: &mut Vec<Line<'static>>,
+    area: Rect,
+    activity: &ActiveActivityViewModel<'_>,
+) {
     let widths = activity.plain_pane_widths(area.width);
     let pane_header = activity.plain_pane_header(widths);
     lines.push(Line::from(vec![
@@ -59,9 +102,14 @@ fn active_activity_lines(
             .into_iter()
             .map(activity_pane_line),
     );
+}
 
-    lines.push(blank());
-    let footer = activity.footer(area.width);
+fn append_activity_footer(
+    lines: &mut Vec<Line<'static>>,
+    width: u16,
+    activity: &ActiveActivityViewModel<'_>,
+) {
+    let footer = activity.footer(width);
     lines.push(Line::from(vec![Span::styled(
         footer.body_line,
         theme::label(),
@@ -73,7 +121,6 @@ fn active_activity_lines(
             .collect::<Vec<_>>();
         keybind_hint_line(&pairs)
     }));
-    lines
 }
 
 fn activity_pane_line(row: ActivityPlainPaneRow) -> Line<'static> {

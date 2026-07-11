@@ -7,14 +7,13 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_nimble_file(
     raw.lines()
         .filter_map(requires_args)
         .flat_map(quoted_values)
-        .filter_map(|value| nimble_dependency(&value).and_then(|dep| nimble_finding(file_path, dep)))
+        .filter_map(|value| {
+            nimble_dependency(&value).and_then(|dep| nimble_finding(file_path, dep))
+        })
         .collect()
 }
 
-fn nimble_finding(
-    file_path: &Path,
-    dependency: NimbleDependency<'_>,
-) -> Option<DepHygieneFinding> {
+fn nimble_finding(file_path: &Path, dependency: NimbleDependency<'_>) -> Option<DepHygieneFinding> {
     let constraint = dependency.constraint.unwrap_or("");
     let trimmed = constraint.trim();
     if is_floating_nimble_constraint(trimmed) {
@@ -72,7 +71,10 @@ fn nimble_dependency(value: &str) -> Option<NimbleDependency<'_>> {
     if name.is_empty() {
         return None;
     }
-    let constraint = value.strip_prefix(name).map(str::trim).filter(|rest| !rest.is_empty());
+    let constraint = value
+        .strip_prefix(name)
+        .map(str::trim)
+        .filter(|rest| !rest.is_empty());
     Some(NimbleDependency { name, constraint })
 }
 

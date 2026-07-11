@@ -15,14 +15,14 @@ fn context_strip_model_reports_idle_shell_state() {
     assert_eq!(model.context_state, "missing");
     assert_eq!(model.model, "unconfigured");
     assert_eq!(model.findings, "0 findings");
-    assert_eq!(model.view, "catalog");
+    assert_eq!(model.view, "capabilities");
     assert_eq!(model.phase, None);
     assert_eq!(model.cost, Some("$0.00".to_string()));
     assert_eq!(
         model.compact_segments(),
         [
             "mode:shell",
-            "view:catalog",
+            "view:capabilities",
             "target:none",
             "model:unconfigured",
             "ctx:not built",

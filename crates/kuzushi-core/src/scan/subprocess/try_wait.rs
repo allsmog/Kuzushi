@@ -11,7 +11,12 @@ impl RegisteredChild {
         };
         let status = managed.child.try_wait()?;
         if status.is_some() {
-            children.remove(&self.id);
+            // The process leader may exit while descendants still hold its
+            // stdout/stderr pipes open. Reap the whole managed group before
+            // output readers join so a descendant cannot outlive the tool.
+            if let Some(mut managed) = children.remove(&self.id) {
+                kill_managed_child(&mut managed);
+            }
         }
         Ok(status)
     }
@@ -33,6 +38,19 @@ impl RegisteredChild {
 pub(in crate::scan) struct ManagedChild {
     pub(in crate::scan) child: Child,
     pub(in crate::scan) process_group_id: Option<u32>,
+    #[cfg(windows)]
+    pub(in crate::scan) job_handle: Option<isize>,
+}
+
+#[cfg(windows)]
+impl Drop for ManagedChild {
+    fn drop(&mut self) {
+        if let Some(job_handle) = self.job_handle.take() {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(job_handle as _);
+            }
+        }
+    }
 }
 
 pub(in crate::scan) fn kill_managed_child(child: &mut ManagedChild) {
@@ -46,10 +64,55 @@ pub(in crate::scan) fn kill_managed_child(child: &mut ManagedChild) {
         }
     }
 
+    #[cfg(windows)]
+    if let Some(job_handle) = child.job_handle.take() {
+        unsafe {
+            windows_sys::Win32::System::JobObjects::TerminateJobObject(job_handle as _, 1);
+            windows_sys::Win32::Foundation::CloseHandle(job_handle as _);
+        }
+        return;
+    }
+
     let _ = child.child.kill();
 }
 
-pub(in crate::scan) fn child_process_group_id(child: &Child) -> Option<u32> {
+#[cfg(windows)]
+pub(in crate::scan) fn create_kill_on_close_job(child: &Child) -> Result<isize> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    let job = unsafe {
+        windows_sys::Win32::System::JobObjects::CreateJobObjectW(std::ptr::null(), std::ptr::null())
+    };
+    if job.is_null() {
+        return Err(std::io::Error::last_os_error()).context("create Windows child-process job");
+    }
+    let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    let configured = unsafe {
+        SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+    };
+    let assigned = configured != 0
+        && unsafe { AssignProcessToJobObject(job, child.as_raw_handle() as _) } != 0;
+    if !assigned {
+        let error = std::io::Error::last_os_error();
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(job);
+        }
+        return Err(error).context("assign child process to Windows kill-on-close job");
+    }
+    Ok(job as isize)
+}
+
+pub(crate) fn child_process_group_id(child: &Child) -> Option<u32> {
     #[cfg(unix)]
     {
         Some(child.id())
@@ -62,7 +125,7 @@ pub(in crate::scan) fn child_process_group_id(child: &Child) -> Option<u32> {
     }
 }
 
-pub(in crate::scan) fn configure_scanner_process_group(command: &mut Command) {
+pub(crate) fn configure_scanner_process_group(command: &mut Command) {
     #[cfg(unix)]
     unsafe {
         command.pre_exec(|| {
@@ -101,7 +164,7 @@ pub(in crate::scan) const SCANNER_ENV_ALLOWLIST: &[&str] = &[
     "TERM",
 ];
 
-pub(in crate::scan) fn configure_scanner_subprocess_env(command: &mut Command) {
+pub(crate) fn configure_scanner_subprocess_env(command: &mut Command) {
     command.env_clear();
     for (key, value) in scrubbed_scanner_environment() {
         command.env(key, value);

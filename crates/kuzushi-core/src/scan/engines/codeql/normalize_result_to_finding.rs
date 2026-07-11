@@ -10,10 +10,12 @@ pub(crate) fn normalize_codeql_result_to_finding(
     let message = codeql_result_message(result, rule, &rule_id);
     let severity = codeql_result_severity(result, rule);
 
-    Some(Finding::new_tool(
-        "codeql", rule_id, file_path, start_line, None, severity, message,
+    Some(
+        Finding::new_tool(
+            "codeql", rule_id, file_path, start_line, None, severity, message,
+        )
+        .with_static_proof_state(StaticProofState::SignalOnly),
     )
-    .with_static_proof_state(StaticProofState::SignalOnly))
 }
 
 fn codeql_result_rule_id(result: &CodeqlSarifResult) -> String {
@@ -58,10 +60,7 @@ fn append_codeql_flow_evidence(message: String, result: &CodeqlSarifResult) -> S
     }
 }
 
-fn codeql_result_severity(
-    result: &CodeqlSarifResult,
-    rule: Option<&CodeqlSarifRule>,
-) -> Severity {
+fn codeql_result_severity(result: &CodeqlSarifResult, rule: Option<&CodeqlSarifRule>) -> Severity {
     map_codeql_severity(rule_problem_severity(rule), result.level.as_deref())
 }
 

@@ -18,11 +18,8 @@ fn artifact_record_candidates(workspace: &WorkspaceTarget) -> Result<Vec<String>
         "x-ray/invariants.md".to_string(),
         "x-ray/architecture.svg".to_string(),
     ]);
-    collect_run_artifact_paths(
-        workspace.root(),
-        &runs_root(workspace.root()),
-        &mut candidates,
-    )?;
+    let runs = crate::run_artifacts::checked_runs_root(workspace.root())?;
+    collect_run_artifact_paths(workspace.root(), &runs, &mut candidates)?;
     candidates.sort();
     candidates.dedup();
     Ok(candidates)
@@ -42,15 +39,26 @@ fn workspace_artifact_record(
     workspace: &WorkspaceTarget,
     source_path: String,
 ) -> Result<Option<ArtifactKnowledgeRecord>> {
-    let absolute = workspace.root().join(&source_path);
-    if !absolute.is_file() || !is_indexable_text_path(&absolute) {
+    let absolute = crate::workspace::validated_workspace_descendant(
+        workspace.root(),
+        Path::new(&source_path),
+    )?;
+    let metadata = match fs::symlink_metadata(&absolute) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("Could not inspect artifact {}", absolute.display()))
+        }
+    };
+    if !metadata.is_file() || !is_indexable_text_path(&absolute) {
         return Ok(None);
     }
     let metadata = json!({
         "sourceKind": if is_run_artifact_source_path(workspace.root(), &source_path) { "run-artifact" } else { "artifact-file" },
         "relativePath": source_path,
     });
-    let module_id = infer_module_id(&source_path, &absolute)?;
+    let module_id = infer_module_id(workspace, &source_path, &absolute)?;
     let run_id = infer_run_id(&source_path);
     let title = infer_title(&source_path, &absolute);
     ArtifactKnowledgeRecord::from_text_source(
@@ -63,7 +71,6 @@ fn workspace_artifact_record(
         metadata,
     )
     .map(Some)
-    .or(Ok(None))
 }
 
 pub(crate) fn collect_run_artifact_paths(
@@ -71,19 +78,49 @@ pub(crate) fn collect_run_artifact_paths(
     dir: &Path,
     out: &mut Vec<String>,
 ) -> Result<()> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir).with_context(|| format!("Could not read {}", dir.display()))? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_run_artifact_paths(root, &path, out)?;
-        } else if path.is_file() && is_indexable_text_path(&path) {
-            out.push(relative_workspace_path(root, &path));
+    match fs::symlink_metadata(dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            anyhow::bail!(
+                "Artifact directory must not be a symlink: {}",
+                dir.display()
+            )
+        }
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => anyhow::bail!("Artifact path is not a directory: {}", dir.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("Could not inspect {}", dir.display()))
         }
     }
+    for entry in fs::read_dir(dir).with_context(|| format!("Could not read {}", dir.display()))? {
+        collect_run_artifact_entry(root, entry?, out)?;
+    }
     Ok(())
+}
+
+fn collect_run_artifact_entry(
+    root: &Path,
+    entry: fs::DirEntry,
+    out: &mut Vec<String>,
+) -> Result<()> {
+    let kind = entry.file_type()?;
+    if kind.is_symlink() {
+        return Ok(());
+    }
+    let path = entry.path();
+    if kind.is_dir() {
+        return collect_run_artifact_paths(root, &path, out);
+    }
+    if kind.is_file() {
+        append_indexable_run_artifact(root, &path, out);
+    }
+    Ok(())
+}
+
+fn append_indexable_run_artifact(root: &Path, path: &Path, out: &mut Vec<String>) {
+    if is_indexable_text_path(path) {
+        out.push(relative_workspace_path(root, path));
+    }
 }
 
 pub(crate) fn is_indexable_text_path(path: &Path) -> bool {
@@ -93,12 +130,16 @@ pub(crate) fn is_indexable_text_path(path: &Path) -> bool {
     )
 }
 
-pub(crate) fn infer_module_id(source_path: &str, absolute: &Path) -> Result<String> {
+pub(crate) fn infer_module_id(
+    workspace: &WorkspaceTarget,
+    source_path: &str,
+    absolute: &Path,
+) -> Result<String> {
     if let Some(module_id) = infer_static_artifact_module_id(source_path) {
         return Ok(module_id);
     }
     if source_path.ends_with("run.json") {
-        return Ok(infer_summary_artifact_module_id(absolute));
+        return infer_summary_artifact_module_id(workspace, absolute);
     }
     Ok("artifact".to_string())
 }
@@ -119,15 +160,19 @@ fn infer_static_artifact_module_id(source_path: &str) -> Option<String> {
     None
 }
 
-fn infer_summary_artifact_module_id(absolute: &Path) -> String {
-    let body = fs::read_to_string(absolute).unwrap_or_default();
+fn infer_summary_artifact_module_id(
+    workspace: &WorkspaceTarget,
+    absolute: &Path,
+) -> Result<String> {
+    let body = crate::bounded_file::read_utf8_text_within(workspace.root(), absolute, 1024 * 1024)
+        .with_context(|| format!("Could not classify run artifact {}", absolute.display()))?;
     if body.contains("carliniThreatHunt") || body.contains("carlini-threat-hunt") {
-        return "carlini-threat-hunt".to_string();
+        return Ok("carlini-threat-hunt".to_string());
     }
     if body.contains("xRay") || body.contains("x-ray") {
-        return "x-ray".to_string();
+        return Ok("x-ray".to_string());
     }
-    "sast".to_string()
+    Ok("sast".to_string())
 }
 
 fn context_snapshot_record_source_path() -> String {
@@ -196,5 +241,64 @@ mod tests {
         );
         assert!(is_run_artifact_source_path(root, &source_path));
         assert_eq!(infer_run_id(&source_path), Some("run-1".to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn artifact_discovery_rejects_symlinked_runs_root() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::create_dir_all(target.path().join(".kuzushi/v3")).unwrap();
+        fs::write(outside.path().join("report.md"), "secret").unwrap();
+        symlink(outside.path(), target.path().join(".kuzushi/v3/runs")).unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+
+        let error = artifact_record_candidates(&workspace).unwrap_err();
+
+        assert!(error.to_string().contains("must not be a symlink"));
+        assert_eq!(
+            fs::read_to_string(outside.path().join("report.md")).unwrap(),
+            "secret"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_artifact_discovery_skips_nested_symlink_directories() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let run = target.path().join(".kuzushi/v3/runs/run-safe");
+        fs::create_dir_all(&run).unwrap();
+        fs::write(outside.path().join("report.md"), "secret").unwrap();
+        symlink(outside.path(), run.join("linked")).unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+
+        let candidates = artifact_record_candidates(&workspace).unwrap();
+
+        assert!(!candidates.iter().any(|path| path.contains("linked")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn artifact_record_rejects_symlinked_persistent_artifact() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = target.path().join("outside.md");
+        let linked = target.path().join("x-ray/x-ray.md");
+        fs::write(&outside, "secret").unwrap();
+        fs::create_dir_all(linked.parent().unwrap()).unwrap();
+        symlink(&outside, &linked).unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+
+        let error =
+            workspace_artifact_record(&workspace, "x-ray/x-ray.md".to_string()).unwrap_err();
+
+        assert!(error.to_string().contains("must not be a symlink"));
+        assert_eq!(fs::read_to_string(outside).unwrap(), "secret");
     }
 }

@@ -7,3 +7,4 @@ use crate::modules::registry::{
 use crate::options::ToolOptionStore;
 
 mod with_v2_builtins;
+pub use with_v2_builtins::PreparedToolInput;

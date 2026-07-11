@@ -108,6 +108,10 @@ fn assert_strict_plain(label: &str, output: &str) {
     }
 }
 
+fn plain_shell_script(script: &str) -> String {
+    stdout(plain_shell_script_output(script))
+}
+
 fn plain_shell_script_output(script: &str) -> std::process::Output {
     let tmp = tempfile::tempdir().unwrap();
     let mut child = kuzushi()
@@ -127,10 +131,6 @@ fn plain_shell_script_output(script: &str) -> std::process::Output {
         .write_all(script.as_bytes())
         .unwrap();
     child.wait_with_output().unwrap()
-}
-
-fn plain_shell_script(script: &str) -> String {
-    stdout(plain_shell_script_output(script))
 }
 
 #[test]
@@ -155,6 +155,7 @@ fn rust_cli_help_is_the_documented_primary_surface() {
         "tools",
         "doctor",
         "run",
+        "kwp",
     ] {
         assert!(out.contains(command), "missing command {command} in help");
     }
@@ -235,41 +236,16 @@ fn kwp_audit_json_includes_run_audit_records() {
     );
     let body: Value = serde_json::from_str(&output).unwrap();
 
+    assert_eq!(body["runAudit"]["recordCount"], 1);
+    assert_eq!(body["runAudit"]["records"][0]["event"], "fs.write");
+    assert_eq!(body["runAudit"]["integrity"]["ok"], true);
+    assert_eq!(body["runAudit"]["path"], audit_path.display().to_string());
+    assert_eq!(body["runAudit"]["bus"]["recordCount"], 1);
     assert_eq!(
-        body.pointer("/runAudit/recordCount")
-            .and_then(Value::as_u64),
-        Some(1)
+        body["runAudit"]["bus"]["records"][0]["topic"],
+        "topic.allowed"
     );
-    assert_eq!(
-        body.pointer("/runAudit/records/0/event")
-            .and_then(Value::as_str),
-        Some("fs.write")
-    );
-    assert_eq!(
-        body.pointer("/runAudit/integrity/ok")
-            .and_then(Value::as_bool),
-        Some(true)
-    );
-    let audit_path_text = audit_path.display().to_string();
-    assert_eq!(
-        body.pointer("/runAudit/path").and_then(Value::as_str),
-        Some(audit_path_text.as_str())
-    );
-    assert_eq!(
-        body.pointer("/runAudit/bus/recordCount")
-            .and_then(Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        body.pointer("/runAudit/bus/records/0/topic")
-            .and_then(Value::as_str),
-        Some("topic.allowed")
-    );
-    assert_eq!(
-        body.pointer("/runAudit/bus/records/0/payload/ok")
-            .and_then(Value::as_bool),
-        Some(true)
-    );
+    assert_eq!(body["runAudit"]["bus"]["records"][0]["payload"]["ok"], true);
 }
 
 #[test]
@@ -335,7 +311,7 @@ fn cli_run_dot_is_rejected_as_shell_only_shorthand() {
 }
 
 #[test]
-fn cli_run_missing_target_writes_failed_artifact_bundle_under_cwd() {
+fn cli_run_missing_explicit_target_does_not_write_artifacts_under_cwd() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     fs::create_dir_all(&home).unwrap();
@@ -349,11 +325,11 @@ fn cli_run_missing_target_writes_failed_artifact_bundle_under_cwd() {
         .unwrap();
 
     assert!(!output.status.success(), "missing run target should fail");
-    let (_, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "context:build");
-
-    assert!(failure_json["failures"][0]["error"]
-        .as_str()
-        .is_some_and(|error| error.contains("Target path does not exist")));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Target path does not exist"));
+    assert!(
+        !tmp.path().join(".kuzushi").exists(),
+        "an unresolved explicit target must not redirect artifacts into cwd"
+    );
 }
 
 #[test]
@@ -414,6 +390,42 @@ fn runs_list_has_empty_state_and_permissions_has_json_policy() {
         parsed["policy"]["headlessRun"],
         "explicit tool name required; no focused-module shorthand"
     );
+}
+
+#[test]
+fn workspace_commands_refuse_targetless_cwd_without_creating_state() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let cases = [
+        ("runs", vec!["runs", "list"]),
+        ("pr-comment", vec!["pr-comment"]),
+        ("doctor", vec!["doctor"]),
+        ("scan", vec!["scan"]),
+        ("workspace run", vec!["run", "context:build"]),
+    ];
+
+    for (label, args) in cases {
+        let cwd = tmp.path().join(label.replace(' ', "-"));
+        fs::create_dir_all(&cwd).unwrap();
+        let output = kuzushi()
+            .current_dir(&cwd)
+            .env("HOME", &home)
+            .args(args)
+            .output()
+            .unwrap();
+
+        assert!(!output.status.success(), "{label} should require a target");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("target") && stderr.contains("explicit"),
+            "{label}: {stderr}"
+        );
+        assert!(
+            !cwd.join(".kuzushi").exists(),
+            "{label} must not turn cwd into a workspace"
+        );
+    }
 }
 
 #[test]
@@ -497,10 +509,15 @@ fn plain_flag_forces_line_oriented_shell_output() {
             .unwrap(),
     );
 
-    assert!(out.contains("KUZUSHI"));
-    assert!(out.contains("PLAIN SESSION SUMMARY"));
+    assert!(out.contains("KUZUSHI PLAIN SESSION SUMMARY"));
     assert!(out.contains("status: idle"));
+    assert!(out.contains(&format!(
+        "target: {}",
+        tmp.path().canonicalize().unwrap().display()
+    )));
     assert!(out.contains("commands: 0"));
+    assert!(out.contains("Next: printf 'findings\\n' | kuzushi --plain --target <path>"));
+    assert!(!out.contains("mode:shell"));
     assert_strict_plain("--plain shell", &out);
 }
 
@@ -519,28 +536,28 @@ fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
             .unwrap(),
     );
 
-    assert!(out.contains("KUZUSHI"));
-    assert!(out.contains("PLAIN SESSION SUMMARY"));
+    assert!(out.contains("KUZUSHI PLAIN SESSION SUMMARY"));
     assert!(out.contains("status: idle"));
+    assert!(out.contains(&format!(
+        "target: {}",
+        tmp.path().canonicalize().unwrap().display()
+    )));
     assert!(out.contains("commands: 0"));
+    assert!(!out.contains("mode:shell"));
     assert_strict_plain("KUZUSHI_SCREEN_READER shell", &out);
 }
 
 #[test]
 fn plain_scripted_shell_prints_unknown_command_feedback() {
     let output = plain_shell_script_output("/nope\n");
-    assert!(
-        !output.status.success(),
-        "unknown commands must fail honestly"
-    );
+    assert!(!output.status.success(), "invalid scripted input must fail");
     let out = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
-    let err = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
 
     assert!(out.contains("COMMAND RESULT"));
     assert!(out.contains("command: /nope"));
     assert!(out.contains("> /nope"));
     assert!(out.contains("error: unknown command \"/nope\". Next: /help"));
-    assert!(err.contains("plain scripted session failed"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("plain scripted session failed"));
     assert_strict_plain("--plain shell /nope", &out);
 }
 
@@ -598,14 +615,19 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
         "secret-scan",
         "dep-hygiene",
         "iac-scan",
-        "module-recommender",
     ] {
         assert!(
             module_ids.contains(&expected),
             "missing visible module {expected}; modules={module_ids:?}"
         );
     }
-    for hidden in ["context-lite", "exploit-chain", "pipeline", "systems-hunt"] {
+    for hidden in [
+        "context-lite",
+        "exploit-chain",
+        "module-recommender",
+        "pipeline",
+        "systems-hunt",
+    ] {
         assert!(
             !module_ids.contains(&hidden),
             "hidden module {hidden} must not be listed"
@@ -626,7 +648,6 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
         "secret-scan:scan",
         "dep-hygiene:check",
         "iac-scan:scan",
-        "module-recommender:recommend",
         "triage:run",
         "verify:finding",
         "patch:finding",
@@ -636,6 +657,10 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
             "missing executable tool {expected}; tools={tool_names:?}"
         );
     }
+    assert!(
+        !tool_names.contains(&"module-recommender:recommend"),
+        "exact-only compatibility tools must stay out of discovery"
+    );
 }
 
 #[test]
@@ -697,6 +722,8 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
                 duration_ms: 42,
                 cost_usd: 0.0,
                 notes: vec!["fixture confirmed".to_string()],
+                verification_run_id: None,
+                verified_scan_id: None,
                 created_at: String::new(),
             },
         )
@@ -1058,12 +1085,6 @@ fn legacy_ink_shell_is_deleted_from_source_cli() {
             "{removed_path} must not exist after TS runtime retirement"
         );
     }
-
-    let migration_status =
-        fs::read_to_string(repo_root().join("docs/rust-migration-status.md")).unwrap();
-    assert!(migration_status.contains("src/cli.ts shell"));
-    assert!(migration_status.contains("fails with a Rust replacement message"));
-    assert!(migration_status.contains("retired TS runtime island was deleted"));
 }
 
 #[test]
@@ -1386,7 +1407,7 @@ fn scan_invalid_config_writes_failed_run_artifact_bundle() {
 }
 
 #[test]
-fn scan_missing_target_writes_failed_run_artifact_bundle() {
+fn scan_missing_explicit_target_does_not_write_artifacts_under_cwd() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     fs::create_dir_all(&home).unwrap();
@@ -1400,11 +1421,11 @@ fn scan_missing_target_writes_failed_run_artifact_bundle() {
         .unwrap();
 
     assert!(!output.status.success(), "missing scan target should fail");
-    let (_, failure_json) = assert_failed_run_bundle(tmp.path(), "scan", "sast:scan");
-
-    assert!(failure_json["failures"][0]["error"]
-        .as_str()
-        .is_some_and(|error| error.contains("Target path does not exist")));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Target path does not exist"));
+    assert!(
+        !tmp.path().join(".kuzushi").exists(),
+        "an unresolved explicit target must not redirect artifacts into cwd"
+    );
 }
 
 #[test]

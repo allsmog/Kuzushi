@@ -4,24 +4,23 @@ use super::markdown::render_report_markdown;
 use super::{CanonicalReportArtifact, RunReportBuild};
 use crate::artifact_contract::{
     canonical_run_artifact_spec, CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS,
-    OPTIONAL_RUN_ARTIFACTS,
-    TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
+    OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
 };
 use crate::run_artifacts::{
-    list_run_summaries, load_run_artifacts, load_run_summary, run_dir, write_run_artifact_text,
-    RunArtifact, RunSummary,
+    list_run_summaries, load_run_artifacts, load_run_summary, read_run_artifact_text, run_dir,
+    write_run_artifact_text, RunArtifact, RunArtifactRead, RunSummary,
 };
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub fn build_run_report(target: impl AsRef<Path>, run_id: Option<&str>) -> Result<RunReportBuild> {
     let target = target.as_ref();
     let summary = source_summary(target, run_id)?;
     let declared_artifacts = load_run_artifacts(target, &summary.run_id)?;
-    let canonical_artifacts = load_canonical_artifacts(target, &summary.run_id, &declared_artifacts);
+    let canonical_artifacts =
+        load_canonical_artifacts(target, &summary.run_id, &declared_artifacts);
     let failure_handoffs = load_report_failure_handoffs(target, &summary.run_id)?;
     let markdown = render_report_markdown(
         &summary,
@@ -76,34 +75,44 @@ fn load_canonical_artifacts(
     declared_artifacts: &[RunArtifact],
 ) -> Vec<CanonicalReportArtifact> {
     let dir = run_dir(target, run_id);
+    let reader = ReportArtifactReader { target, run_id };
     let mut artifacts = canonical_report_json_specs()
         .into_iter()
-        .map(|spec| load_canonical_artifact(&dir, spec))
+        .map(|spec| load_canonical_artifact(&reader, &dir, spec))
         .collect::<Vec<_>>();
-    artifacts.extend(load_declared_json_artifacts(&dir, declared_artifacts));
-    artifacts.extend(load_canonical_text_artifacts(&dir));
+    artifacts.extend(load_declared_json_artifacts(
+        &reader,
+        &dir,
+        declared_artifacts,
+    ));
+    artifacts.extend(load_canonical_text_artifacts(&reader, &dir));
     artifacts.push(generated_report_artifact(&dir));
-    artifacts.extend(load_optional_json_artifacts(&dir));
-    artifacts.extend(load_optional_text_artifacts(&dir));
+    artifacts.extend(load_optional_json_artifacts(&reader, &dir));
+    artifacts.extend(load_optional_text_artifacts(&reader, &dir));
     artifacts
 }
 
-fn load_declared_json_artifacts(run_dir: &Path, artifacts: &[RunArtifact]) -> Vec<CanonicalReportArtifact> {
+fn load_declared_json_artifacts(
+    reader: &ReportArtifactReader<'_>,
+    run_dir: &Path,
+    artifacts: &[RunArtifact],
+) -> Vec<CanonicalReportArtifact> {
     artifacts
         .iter()
         .filter(|artifact| artifact.kind == "json")
         .filter(|artifact| !is_shared_report_leaf(&artifact_leaf(&artifact.path)))
-        .filter_map(|artifact| load_declared_json_artifact(run_dir, artifact))
+        .filter_map(|artifact| load_declared_json_artifact(reader, run_dir, artifact))
         .collect()
 }
 
 fn load_declared_json_artifact(
+    reader: &ReportArtifactReader<'_>,
     run_dir: &Path,
     artifact: &RunArtifact,
 ) -> Option<CanonicalReportArtifact> {
     let path = declared_artifact_path(run_dir, &artifact.path);
     let file = artifact_leaf(&artifact.path);
-    match read_json_file(&path) {
+    match reader.read_json(Path::new(&artifact.path)) {
         JsonArtifactRead::Present(value) => Some(CanonicalReportArtifact::present(
             file,
             artifact.label.clone(),
@@ -147,11 +156,12 @@ fn is_shared_report_leaf(leaf: &str) -> bool {
 }
 
 fn load_canonical_artifact(
+    reader: &ReportArtifactReader<'_>,
     run_dir: &Path,
     spec: &CanonicalRunArtifactSpec,
 ) -> CanonicalReportArtifact {
     let path = run_dir.join(spec.leaf);
-    match read_canonical_json_file(spec.leaf, &path) {
+    match reader.read_canonical_json(spec.leaf) {
         JsonArtifactRead::Present(value) => CanonicalReportArtifact::present(
             spec.leaf,
             spec.label,
@@ -170,19 +180,23 @@ fn load_canonical_artifact(
     }
 }
 
-fn load_canonical_text_artifacts(run_dir: &Path) -> Vec<CanonicalReportArtifact> {
+fn load_canonical_text_artifacts(
+    reader: &ReportArtifactReader<'_>,
+    run_dir: &Path,
+) -> Vec<CanonicalReportArtifact> {
     canonical_report_text_specs()
         .into_iter()
-        .map(|spec| load_canonical_text_artifact(run_dir, spec))
+        .map(|spec| load_canonical_text_artifact(reader, run_dir, spec))
         .collect()
 }
 
 fn load_canonical_text_artifact(
+    reader: &ReportArtifactReader<'_>,
     run_dir: &Path,
     spec: &CanonicalRunArtifactSpec,
 ) -> CanonicalReportArtifact {
     let path = run_dir.join(spec.leaf);
-    match read_text_file(&path) {
+    match reader.read_text(Path::new(spec.leaf)) {
         TextArtifactRead::Present(body) => CanonicalReportArtifact::present(
             spec.leaf,
             spec.label,
@@ -219,27 +233,34 @@ fn canonical_report_text_specs() -> Vec<&'static CanonicalRunArtifactSpec> {
         .collect()
 }
 
-fn load_optional_text_artifacts(run_dir: &Path) -> Vec<CanonicalReportArtifact> {
+fn load_optional_text_artifacts(
+    reader: &ReportArtifactReader<'_>,
+    run_dir: &Path,
+) -> Vec<CanonicalReportArtifact> {
     OPTIONAL_RUN_ARTIFACTS
         .iter()
-        .filter_map(|spec| load_optional_text_artifact(run_dir, spec))
+        .filter_map(|spec| load_optional_text_artifact(reader, run_dir, spec))
         .collect()
 }
 
-fn load_optional_json_artifacts(run_dir: &Path) -> Vec<CanonicalReportArtifact> {
+fn load_optional_json_artifacts(
+    reader: &ReportArtifactReader<'_>,
+    run_dir: &Path,
+) -> Vec<CanonicalReportArtifact> {
     TOOL_INPUT_ARTIFACTS
         .iter()
         .chain(TOOL_RESULT_ARTIFACTS.iter())
-        .filter_map(|spec| load_optional_json_artifact(run_dir, spec))
+        .filter_map(|spec| load_optional_json_artifact(reader, run_dir, spec))
         .collect()
 }
 
 fn load_optional_json_artifact(
+    reader: &ReportArtifactReader<'_>,
     run_dir: &Path,
     spec: &CanonicalRunArtifactSpec,
 ) -> Option<CanonicalReportArtifact> {
     let path = run_dir.join(spec.leaf);
-    match read_json_file(&path) {
+    match reader.read_json(Path::new(spec.leaf)) {
         JsonArtifactRead::Present(value) => Some(CanonicalReportArtifact::present(
             spec.leaf,
             spec.label,
@@ -257,11 +278,12 @@ fn load_optional_json_artifact(
 }
 
 fn load_optional_text_artifact(
+    reader: &ReportArtifactReader<'_>,
     run_dir: &Path,
     spec: &CanonicalRunArtifactSpec,
 ) -> Option<CanonicalReportArtifact> {
     let path = run_dir.join(spec.leaf);
-    match read_text_file(&path) {
+    match reader.read_text(Path::new(spec.leaf)) {
         TextArtifactRead::Present(body) => Some(CanonicalReportArtifact::present(
             spec.leaf,
             spec.label,
@@ -336,7 +358,10 @@ fn sarif_result_uris(result: &Value) -> Vec<&Value> {
 
 fn count_string_values<'a>(values: impl Iterator<Item = &'a Value>) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
-    for value in values.filter_map(Value::as_str).filter(|value| !value.trim().is_empty()) {
+    for value in values
+        .filter_map(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+    {
         *counts.entry(value.to_string()).or_insert(0) += 1;
     }
     counts
@@ -346,7 +371,10 @@ fn sarif_count_segment(label: &str, counts: BTreeMap<String, usize>) -> Option<S
     if counts.is_empty() {
         return None;
     }
-    Some(format!("{label} {}", sarif_count_segments(&counts).join(", ")))
+    Some(format!(
+        "{label} {}",
+        sarif_count_segments(&counts).join(", ")
+    ))
 }
 
 fn sarif_count_segments(counts: &BTreeMap<String, usize>) -> Vec<String> {
@@ -369,51 +397,81 @@ enum TextArtifactRead {
     Missing,
 }
 
-fn read_json_file(path: &Path) -> JsonArtifactRead {
-    match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return JsonArtifactRead::Malformed("JSON artifact is not a file".to_string()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return JsonArtifactRead::Missing;
+#[derive(Clone, Copy)]
+struct ReportArtifactReader<'a> {
+    target: &'a Path,
+    run_id: &'a str,
+}
+
+impl ReportArtifactReader<'_> {
+    fn read_json(&self, artifact: &Path) -> JsonArtifactRead {
+        match self.read_text_with_label(artifact, "JSON") {
+            TextArtifactRead::Present(body) => match serde_json::from_str(&body) {
+                Ok(value) => JsonArtifactRead::Present(value),
+                Err(error) => JsonArtifactRead::Malformed(format!("malformed JSON: {error}")),
+            },
+            TextArtifactRead::Malformed(error) => JsonArtifactRead::Malformed(error),
+            TextArtifactRead::Missing => JsonArtifactRead::Missing,
         }
-        Err(_) => return JsonArtifactRead::Malformed("unreadable JSON artifact".to_string()),
     }
-    let Ok(body) = fs::read_to_string(path) else {
-        return JsonArtifactRead::Malformed("unreadable JSON artifact".to_string());
-    };
-    match serde_json::from_str(&body) {
-        Ok(value) => JsonArtifactRead::Present(value),
-        Err(error) => JsonArtifactRead::Malformed(format!("malformed JSON: {error}")),
-    }
-}
 
-fn read_canonical_json_file(file: &str, path: &Path) -> JsonArtifactRead {
-    match read_json_file(path) {
-        JsonArtifactRead::Present(value) if !canonical_json_shape_matches(file, &value) => {
-            JsonArtifactRead::Malformed("malformed JSON: expected object".to_string())
+    fn read_canonical_json(&self, file: &str) -> JsonArtifactRead {
+        match self.read_json(Path::new(file)) {
+            JsonArtifactRead::Present(value) if !value.is_object() => {
+                JsonArtifactRead::Malformed("malformed JSON: expected object".to_string())
+            }
+            result => result,
         }
-        result => result,
     }
-}
 
-fn canonical_json_shape_matches(file: &str, value: &Value) -> bool {
-    let _ = file;
-    value.is_object()
-}
-
-fn read_text_file(path: &Path) -> TextArtifactRead {
-    match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => read_text_artifact_body(path),
-        Ok(_) => TextArtifactRead::Malformed("text artifact is not a file".to_string()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => TextArtifactRead::Missing,
-        Err(_) => TextArtifactRead::Malformed("unreadable text artifact".to_string()),
+    fn read_text(&self, artifact: &Path) -> TextArtifactRead {
+        self.read_text_with_label(artifact, "text")
     }
-}
 
-fn read_text_artifact_body(path: &Path) -> TextArtifactRead {
-    match fs::read_to_string(path) {
-        Ok(body) => TextArtifactRead::Present(body),
-        Err(_) => TextArtifactRead::Malformed("unreadable text artifact".to_string()),
+    fn read_text_with_label(&self, artifact: &Path, label: &str) -> TextArtifactRead {
+        let artifact = match self.relative_artifact_reference(artifact) {
+            Ok(artifact) => artifact,
+            Err(error) => {
+                return TextArtifactRead::Malformed(format!(
+                    "unsafe {label} artifact: {error}"
+                ))
+            }
+        };
+        match read_run_artifact_text(self.target, self.run_id, artifact) {
+            RunArtifactRead::Ready { value, .. } => TextArtifactRead::Present(value),
+            RunArtifactRead::Missing { .. } => TextArtifactRead::Missing,
+            RunArtifactRead::NonFile { .. } => {
+                TextArtifactRead::Malformed(format!("{label} artifact is not a file"))
+            }
+            RunArtifactRead::Unsafe { error } => {
+                TextArtifactRead::Malformed(format!("unsafe {label} artifact: {error}"))
+            }
+            RunArtifactRead::Unreadable { error, .. } => {
+                TextArtifactRead::Malformed(format!("unreadable {label} artifact: {error}"))
+            }
+        }
+    }
+
+    fn relative_artifact_reference(&self, artifact: &Path) -> Result<PathBuf> {
+        if artifact.is_relative() {
+            return Ok(artifact.to_path_buf());
+        }
+        let run_dir = run_dir(self.target, self.run_id)
+            .canonicalize()
+            .context("Could not resolve report run directory")?;
+        let parent = artifact
+            .parent()
+            .context("Declared run artifact has no parent")?
+            .canonicalize()
+            .context("Could not resolve declared run artifact directory")?;
+        let leaf = artifact
+            .file_name()
+            .context("Declared run artifact has no file name")?;
+        parent
+            .join(leaf)
+            .strip_prefix(run_dir)
+            .map(Path::to_path_buf)
+            .context("Declared run artifact is outside its run directory")
     }
 }
 
@@ -430,6 +488,7 @@ fn generated_report_artifact(run_dir: &Path) -> CanonicalReportArtifact {
 
 fn write_report_markdown(target: &Path, run_id: &str, markdown: &str) -> Result<PathBuf> {
     let spec = canonical_report_spec("report.md");
-    let artifact = write_run_artifact_text(target, run_id, spec.leaf, spec.label, spec.kind, markdown)?;
+    let artifact =
+        write_run_artifact_text(target, run_id, spec.leaf, spec.label, spec.kind, markdown)?;
     Ok(PathBuf::from(artifact.path))
 }

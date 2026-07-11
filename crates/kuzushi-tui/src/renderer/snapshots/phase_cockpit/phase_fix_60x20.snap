@@ -1,0 +1,26 @@
+---
+source: Kuzushi TUI.pdf
+sha256: fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545
+phase: fix
+size: 60x20
+---
+KUZUSHI · target ./phase-target · view fix · ● LIVE
+ 組  map ✓ · 崩  hunt ✓ · 作  confirm ● · 掛  fix ·
+ ▸ NEXT triage & verify
+│FIX · BREAKDOWN REPORT
+│1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal · 6 open
+│report sarif/all · preview only · no report written
+│◆ F-0001  CRITICAL  SQL injection reaches query
+│ ── ATTACK TREE ──────────────────────────────────────────
+│◇ OR — any one chain
+│ ── DFD ──────────────────────────────────────────────────
+│3 zones · 3 nodes · 2 flows · 2 boundary crossings
+│ ── REMEDIATION ──────────────────────────────────────────
+│F-0001  patch staged for review
+│▸ findings export report.sarif sarif
+│
+mode:run · workbench            6 findings · 1 C · 2 H · 2 M
+────────────────────────────────────────────────────────────
+ Ctrl+C request abort   findings list
+ Esc back   history events
+NAVIGATION MODE — view keys active · Esc returns to prompt

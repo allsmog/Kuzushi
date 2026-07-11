@@ -1,12 +1,11 @@
 use anyhow::{Context, Result};
 use kuzushi_core::findings::{ReviewDecisionVerdict, TriageVerdict};
 use kuzushi_core::{
-    load_run_summary, run_artifact_path, tool_result_artifact_spec, workspace_findings_db_path,
-    FindingStore, WorkspaceTarget,
+    load_run_summary, read_run_artifact_text, tool_result_artifact_spec,
+    workspace_findings_db_path, FindingStore, WorkspaceTarget,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn runs_diff_command(
@@ -78,6 +77,8 @@ pub(crate) fn runs_diff(
     base_run_id: &str,
     compare_run_id: &str,
 ) -> Result<RunsDiff> {
+    let workspace = WorkspaceTarget::new(target)?;
+    let target = workspace.root();
     let base_status = load_run_status(target, base_run_id);
     let compare_status = load_run_status(target, compare_run_id);
     let base = load_run_findings(target, base_run_id)?;
@@ -269,9 +270,8 @@ fn changed_finding(
 }
 
 fn load_run_findings(target: &Path, run_id: &str) -> Result<BTreeMap<String, RunsFindingRow>> {
-    let path = run_artifact_path(target, run_id, run_result_artifact_leaf());
-    let body =
-        fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
+    let (path, body) = read_run_artifact_text(target, run_id, run_result_artifact_leaf())
+        .require("Run result snapshot")?;
     let value = serde_json::from_str::<Value>(&body)
         .with_context(|| format!("Could not parse {}", path.display()))?;
     Ok(finding_array(&value)

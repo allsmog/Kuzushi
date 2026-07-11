@@ -58,6 +58,35 @@ fn workbench_footer_advertises_export_when_findings_exist() {
 }
 
 #[test]
+fn workbench_footer_only_advertises_enter_for_an_actionable_findings_pane() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Terrain));
+    app.router
+        .workbench_mut()
+        .set_focus(crate::app::WorkbenchPane::Center);
+    assert!(footer_keybindings(&app)
+        .iter()
+        .all(|binding| binding.key != "Enter"));
+
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Coverage));
+    app.router
+        .workbench_mut()
+        .set_focus(crate::app::WorkbenchPane::Findings);
+    assert!(footer_keybindings(&app).contains(&bind("Enter", "review")));
+
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Ship));
+    assert!(footer_keybindings(&app).contains(&bind("Enter", "open")));
+}
+
+#[test]
 fn footer_keybindings_include_shell_completion_prefix() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Home);

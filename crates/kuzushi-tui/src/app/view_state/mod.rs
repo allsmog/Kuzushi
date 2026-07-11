@@ -95,8 +95,8 @@ pub use routes::{
     AuthPickerRouteState, AuthRouteState, CatalogRouteState, CommandPaletteRouteState,
     DefaultScrollRouteState, FilePickerRouteState, FindingsRouteState, HelpRouteState,
     ModelCatalogRouteState, ModelPickerRouteState, NavigationRouteState, PlanningPickerRouteState,
-    RouterState, SceneRouteState, ScrollRouteState, TargetPickerRouteState, ToolsRouteState,
-    WorkbenchRouteState,
+    PromptDocumentMode, PromptDocumentState, RouterState, SceneRouteState, ScrollRouteState,
+    TargetPickerRouteState, ToolsRouteState, WorkbenchRouteState,
 };
 pub use sast_task_row::AuthLoginView;
 pub use sast_task_row::CompletionCycle;
@@ -120,9 +120,9 @@ pub use theme_picker::{
 };
 pub use update_available::{UpdateAvailableFooter, UpdateAvailableSnapshot, UpdateAvailableStatus};
 pub(crate) use workbench_cache::{
-    DfdModelCacheKey, JsonFileState, ProjectScopeTreeState, PromptMutationsState,
-    RiskByModuleCacheKey, StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey,
-    WorkbenchCache,
+    harness_file_path, DfdModelCacheKey, DirectoryListingState, JsonFileState, PathState,
+    ProjectScopeTreeState, PromptMutationsState, RiskByModuleCacheKey, RunTraceCacheState,
+    StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey, WorkbenchCache,
 };
 pub use workbench_nav::BoundedScroll;
 pub use workbench_nav::DrawerTab;

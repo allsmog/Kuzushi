@@ -53,7 +53,9 @@ fn pipfile_finding(
             name,
             constraint,
             DepHygieneSeverity::Medium,
-            format!("{section}: floor-only range; add an upper bound to fix the supply-chain surface"),
+            format!(
+                "{section}: floor-only range; add an upper bound to fix the supply-chain surface"
+            ),
         ));
     }
     None

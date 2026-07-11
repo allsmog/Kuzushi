@@ -119,9 +119,13 @@ impl ShellApp {
 
     #[cfg(test)]
     pub(crate) fn set_active_tool_run_id_for_test(&mut self, run_id: &str) {
+        let target = self.target_owned();
         self.runtime_state
             .tool_run_mut()
             .set_run_id_for_test(Some(run_id.to_string()));
+        self.runtime_state
+            .tool_run_mut()
+            .set_target_for_test(target);
     }
 
     #[cfg(test)]

@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::AgentQueryControl;
 
 pub enum RuntimeHandle<'a> {
     Borrowed(&'a dyn AgentRuntime),
@@ -18,6 +19,14 @@ impl<'a> RuntimeHandle<'a> {
 impl<'a> AgentRuntime for RuntimeHandle<'a> {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         self.inner().query_blocking(request)
+    }
+
+    fn query_blocking_controlled(
+        &self,
+        request: AgentQueryRequest,
+        control: AgentQueryControl,
+    ) -> Result<AgentQueryResponse> {
+        self.inner().query_blocking_controlled(request, control)
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {

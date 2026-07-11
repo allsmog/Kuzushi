@@ -1,52 +1,92 @@
 use super::*;
+use crate::WorkspaceTarget;
 
 const THREAT_MODEL_FILE: &str = "threat-model.json";
+const MAX_THREAT_MODEL_JSON_BYTES: usize = 16 * 1024 * 1024;
 
 pub fn persistent_threat_model_path(root: &Path) -> PathBuf {
     crate::workspace::workspace_state_root(root).join(THREAT_MODEL_FILE)
 }
 
 pub fn load_persistent_threat_model(root: &Path) -> Option<Value> {
-    let path = persistent_threat_model_path(root);
-    let raw = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
+    try_load_persistent_threat_model(root).ok().flatten()
+}
+
+pub fn try_load_persistent_threat_model(root: &Path) -> Result<Option<Value>> {
+    let path = checked_persistent_threat_model_path(root)?;
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error)
+            .with_context(|| format!("Could not inspect threat model {}", path.display())),
+        Ok(metadata) if metadata.file_type().is_file() && !metadata.file_type().is_symlink() => {
+            let body = crate::bounded_file::read_utf8_text_within(
+                root,
+                &path,
+                MAX_THREAT_MODEL_JSON_BYTES,
+            )
+            .with_context(|| format!("Could not read threat model {}", path.display()))?;
+            serde_json::from_str(&body)
+                .with_context(|| format!("Threat model {} is malformed", path.display()))
+                .map(Some)
+        }
+        Ok(_) => anyhow::bail!("Threat model {} is not a regular file", path.display()),
+    }
 }
 
 pub fn save_persistent_threat_model(root: &Path, document: &Value, force: bool) -> Result<bool> {
-    let path = persistent_threat_model_path(root);
-    if should_preserve_persistent_threat_model(&path, force) {
+    crate::workspace::ensure_workspace_descendant_dir(
+        root,
+        Path::new(crate::workspace::KUZUSHI_STATE_DIR),
+    )?;
+    let path = checked_persistent_threat_model_path(root)?;
+    if should_preserve_persistent_threat_model(&path, force)? {
         return Ok(false);
     }
     write_persistent_threat_model(&path, document)?;
     Ok(true)
 }
 
-fn should_preserve_persistent_threat_model(path: &Path, force: bool) -> bool {
-    !force && path.exists() && persistent_threat_model_user_edited(path)
+fn should_preserve_persistent_threat_model(path: &Path, force: bool) -> Result<bool> {
+    if force {
+        return Ok(false);
+    }
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            persistent_threat_model_user_edited(path)
+        }
+        Ok(_) => anyhow::bail!(
+            "Existing threat model {} is not a regular file; refusing to overwrite it",
+            path.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error)
+            .with_context(|| format!("Could not inspect existing threat model {}", path.display())),
+    }
 }
 
-fn persistent_threat_model_user_edited(path: &Path) -> bool {
-    read_json_optional(path)
-        .and_then(|existing| {
-            existing
-                .get("userEdited")
-                .and_then(Value::as_bool)
-                .map(bool::from)
-        })
-        .unwrap_or(false)
+fn persistent_threat_model_user_edited(path: &Path) -> Result<bool> {
+    let read = crate::bounded_file::read_utf8_text_prefix(path, MAX_THREAT_MODEL_JSON_BYTES)
+        .with_context(|| format!("Could not read existing threat model {}", path.display()))?;
+    anyhow::ensure!(
+        !read.truncated,
+        "Existing threat model {} exceeds the {} byte limit; refusing to overwrite it",
+        path.display(),
+        MAX_THREAT_MODEL_JSON_BYTES
+    );
+    let existing: Value = serde_json::from_str(&read.text).with_context(|| {
+        format!(
+            "Existing threat model {} is malformed; refusing to overwrite it",
+            path.display()
+        )
+    })?;
+    Ok(existing
+        .get("userEdited")
+        .and_then(Value::as_bool)
+        .unwrap_or(false))
 }
 
 fn write_persistent_threat_model(path: &Path, document: &Value) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Could not create {}", parent.display()))?;
-    }
-    fs::write(
-        &path,
-        format!("{}\n", serde_json::to_string_pretty(document)?),
-    )
-    .with_context(|| format!("Could not write {}", path.display()))?;
-    Ok(())
+    write_json_atomic(path, document)
 }
 
 pub(crate) fn write_normalized_artifact(
@@ -54,20 +94,54 @@ pub(crate) fn write_normalized_artifact(
     output_dir: &str,
     document: &Value,
 ) -> Result<PathBuf> {
-    let dir = resolve_output_dir(root, output_dir);
-    fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
-    let path = dir.join("normalized-threat-model.json");
-    fs::write(
-        &path,
-        format!("{}\n", serde_json::to_string_pretty(document)?),
-    )
-    .with_context(|| format!("Could not write {}", path.display()))?;
+    let path = checked_normalized_artifact_path(root, output_dir)?;
+    write_json_atomic(&path, document)?;
     Ok(path)
 }
 
 pub(crate) fn read_json_optional(path: &Path) -> Option<Value> {
-    let raw = fs::read_to_string(path).ok()?;
-    serde_json::from_str::<Value>(&raw).ok()
+    let read = crate::bounded_file::read_utf8_text_prefix(path, MAX_THREAT_MODEL_JSON_BYTES).ok()?;
+    if read.truncated {
+        return None;
+    }
+    serde_json::from_str::<Value>(&read.text).ok()
+}
+
+fn checked_persistent_threat_model_path(root: &Path) -> Result<PathBuf> {
+    let path = persistent_threat_model_path(root);
+    let relative = path
+        .strip_prefix(root)
+        .context("Persistent threat model path escaped the workspace")?;
+    crate::workspace::validated_workspace_descendant(root, relative)
+}
+
+fn checked_normalized_artifact_path(root: &Path, output_dir: &str) -> Result<PathBuf> {
+    let workspace = WorkspaceTarget::new(root)?;
+    let directory = resolve_output_dir(workspace.root(), output_dir);
+    let relative = directory.strip_prefix(workspace.root()).with_context(|| {
+        format!(
+            "Threat-model output directory {} must stay inside workspace {}",
+            directory.display(),
+            workspace.root().display()
+        )
+    })?;
+    let artifact = relative.join("normalized-threat-model.json");
+    ensure_artifact_parent(workspace.root(), &artifact)?;
+    crate::workspace::validated_workspace_descendant(workspace.root(), artifact)
+}
+
+fn ensure_artifact_parent(root: &Path, artifact: &Path) -> Result<()> {
+    let Some(parent) = artifact.parent().filter(|path| !path.as_os_str().is_empty()) else {
+        return Ok(());
+    };
+    crate::workspace::ensure_workspace_descendant_dir(root, parent)?;
+    Ok(())
+}
+
+fn write_json_atomic(path: &Path, document: &Value) -> Result<()> {
+    let body = format!("{}\n", serde_json::to_string_pretty(document)?);
+    crate::fs_atomic::write_atomic(path, &body)
+        .with_context(|| format!("Could not write {}", path.display()))
 }
 
 pub(crate) fn resolve_output_dir(root: &Path, output_dir: &str) -> PathBuf {
@@ -81,27 +155,29 @@ pub(crate) fn resolve_output_dir(root: &Path, output_dir: &str) -> PathBuf {
 
 pub(crate) fn resolve_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     match read_string(input, &["target"]) {
-        Some(target) => resolve_explicit_target(PathBuf::from(target)),
+        Some(target) => resolve_explicit_target(PathBuf::from(target), ctx),
         None => resolve_context_target(ctx),
     }
 }
 
-fn resolve_explicit_target(candidate: PathBuf) -> Result<PathBuf> {
+fn resolve_explicit_target(candidate: PathBuf, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     if candidate.is_absolute() {
         return Ok(candidate);
     }
-    Ok(current_target_dir()?.join(candidate))
+    Ok(required_target_dir(ctx)?.join(candidate))
 }
 
 fn resolve_context_target(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     match ctx.workspace {
         Some(workspace) => Ok(workspace.root().to_path_buf()),
-        None => current_target_dir(),
+        None => anyhow::bail!("threat-model requires an explicit active workspace"),
     }
 }
 
-fn current_target_dir() -> Result<PathBuf> {
-    std::env::current_dir().context("Could not resolve current directory")
+fn required_target_dir<'a>(ctx: &'a ToolExecutionContext<'_>) -> Result<&'a Path> {
+    ctx.workspace
+        .map(WorkspaceTarget::root)
+        .context("threat-model requires an explicit active workspace")
 }
 
 #[cfg(test)]
@@ -117,5 +193,74 @@ mod tests {
             persistent_threat_model_path(root),
             state_root.join(THREAT_MODEL_FILE)
         );
+    }
+
+    #[test]
+    fn loading_missing_threat_model_does_not_create_workspace_state() {
+        let workspace = tempfile::tempdir().unwrap();
+
+        assert!(try_load_persistent_threat_model(workspace.path())
+            .unwrap()
+            .is_none());
+        assert!(!workspace.path().join(".kuzushi").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persistent_writer_does_not_follow_workspace_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "sentinel").unwrap();
+        fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
+        symlink(
+            outside.path(),
+            workspace.path().join(".kuzushi/threat-model.json"),
+        )
+        .unwrap();
+
+        assert!(save_persistent_threat_model(workspace.path(), &json!({"safe": true}), true)
+            .is_err());
+        assert_eq!(fs::read_to_string(outside.path()).unwrap(), "sentinel");
+        assert!(load_persistent_threat_model(workspace.path()).is_none());
+    }
+
+    #[test]
+    fn persistent_writer_preserves_malformed_existing_document_by_default() {
+        let workspace = tempfile::tempdir().unwrap();
+        fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
+        let path = persistent_threat_model_path(workspace.path());
+        fs::write(&path, "operator notes that are not valid JSON").unwrap();
+
+        let error = save_persistent_threat_model(workspace.path(), &json!({"safe": true}), false)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("malformed"));
+        assert_eq!(
+            fs::read_to_string(path).unwrap(),
+            "operator notes that are not valid JSON"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn normalized_writer_does_not_follow_workspace_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "sentinel").unwrap();
+        let output = workspace.path().join(".kuzushi/tm-artifacts");
+        fs::create_dir_all(&output).unwrap();
+        symlink(outside.path(), output.join("normalized-threat-model.json")).unwrap();
+
+        assert!(write_normalized_artifact(
+            workspace.path(),
+            ".kuzushi/tm-artifacts",
+            &json!({"safe": true}),
+        )
+        .is_err());
+        assert_eq!(fs::read_to_string(outside.path()).unwrap(), "sentinel");
     }
 }

@@ -10,6 +10,54 @@ fn projection_starts_at_zero_watermark() {
 }
 
 #[test]
+fn opening_legacy_projection_adds_verification_provenance_columns() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("index.sqlite3");
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        r#"
+        create table verification_events (
+          event_hash text primary key,
+          seq integer not null unique,
+          stable_fp text not null,
+          finding_id integer,
+          identity_id text,
+          proof_level integer not null,
+          proof_verdict text not null,
+          backend text not null,
+          language text,
+          harness_path text,
+          crash_evidence text,
+          duration_ms integer not null,
+          cost_usd real not null,
+          notes_json text not null,
+          actor text not null,
+          created_at text not null,
+          payload_json text not null
+        );
+        "#,
+    )
+    .unwrap();
+    drop(conn);
+
+    drop(ProjectionDb::open(&db_path).unwrap());
+
+    let conn = Connection::open(&db_path).unwrap();
+    assert!(table_has_column(
+        &conn,
+        "verification_events",
+        "verification_run_id"
+    )
+    .unwrap());
+    assert!(table_has_column(
+        &conn,
+        "verification_events",
+        "verified_scan_id"
+    )
+    .unwrap());
+}
+
+#[test]
 fn event_projection_commits_event_and_watermark_together() {
     let db = ProjectionDb::open_in_memory().unwrap();
     let tmp = tempfile::tempdir().unwrap();

@@ -94,16 +94,6 @@ export interface TriageAgentConfig {
  */
 export type ModuleRank = "manual" | "low" | "normal" | "good" | "great" | "excellent";
 
-/** Numeric ordering matching msf::RankingName. */
-export const RANK_VALUE: Record<ModuleRank, number> = {
-  manual: 0,
-  low: 100,
-  normal: 300,
-  good: 400,
-  great: 500,
-  excellent: 600,
-};
-
 /** Qualitative notes about runtime behavior (msf::Notes). */
 export interface ModuleNotes {
   /** stable | crash-safe | crash-service-down — how stable at runtime. */
@@ -421,6 +411,60 @@ export interface ExecutionContext {
  * A tool exposed by a module — callable from shell mode (via LLM tool dispatch),
  * run mode (direct headless invocation), or pipeline mode (if wrapped as a task).
  */
+export type NativeDynamicOptionType =
+  | "string"
+  | "bool"
+  | "int"
+  | "float"
+  | "path"
+  | "enum"
+  | "string-list"
+  | "json";
+
+export type NativeDynamicPathSemantics =
+  | "workspace-read"
+  | "state-write"
+  | "target-write"
+  | "external-read"
+  | "external-write"
+  | "executable";
+
+interface NativeDynamicOptionSpecBase {
+  readonly name: string;
+  readonly description: string;
+  readonly required?: boolean;
+  readonly advanced?: boolean;
+  readonly evasion?: boolean;
+  readonly default?: unknown;
+  readonly choices?: readonly string[];
+  readonly aliases?: readonly string[];
+  readonly deprecatedAliases?: readonly string[];
+}
+
+/** Descriptor-native option metadata accepted by the trusted Node bridge. */
+export type NativeDynamicOptionSpec = NativeDynamicOptionSpecBase &
+  (
+    | {
+        readonly type: "path";
+        /** Controls containment and stored-option provenance. */
+        readonly pathSemantics: NativeDynamicPathSemantics;
+      }
+    | {
+        readonly type: Exclude<NativeDynamicOptionType, "path">;
+        readonly pathSemantics?: never;
+      }
+  );
+
+/** Editable instruction template projected into the native prompt preflight. */
+export interface NativeDynamicPromptSpec {
+  readonly role: string;
+  readonly moduleId: string;
+  readonly verb: string;
+  readonly optionKey: string;
+  readonly defaultContent: string;
+  readonly contextNote?: string;
+}
+
 export interface ModuleTool {
   /** Fully qualified name: "module:action" (e.g. "blackbox:recon"). */
   readonly name: string;
@@ -429,11 +473,32 @@ export interface ModuleTool {
   /** JSON Schema for the tool's input parameters. */
   readonly inputSchema: JSONSchema;
   /**
+   * Optional native descriptor projection. When present, the trusted dynamic
+   * host uses this instead of deriving options from `inputSchema`.
+   */
+  readonly options?: ReadonlyArray<NativeDynamicOptionSpec>;
+  /** Optional operator-reviewable prompt templates for model-backed tools. */
+  readonly prompts?: ReadonlyArray<NativeDynamicPromptSpec>;
+  /**
    * Whether this tool can run without interactive confirmation.
    * Tools marked headless: true work in all three modes.
    * Tools marked headless: false require shell mode (approval gate in run/pipeline modes).
    */
   readonly headless: boolean;
+  /**
+   * Native runtime requirement carried into the Rust ToolDescriptor.
+   * `always` makes every mode construct the operator-selected runtime before
+   * dispatch; omitted/`never` keeps deterministic tools runtime-free.
+   */
+  readonly runtimeRequirement?: "never" | "always";
+  /** Journey/catalog grouping metadata consumed by native and SDK hosts. */
+  readonly phase?: "map" | "hunt" | "confirm" | "fix" | "operate";
+  /** Native dispatch side-effect contract. Required when loaded through `--load`. */
+  readonly effect?: "read" | "workspace-write" | "target-write" | "external-action";
+  /** Native approval contract. Required when loaded through `--load`. */
+  readonly approval?: "none" | "explicit";
+  /** Active-workspace capability requirement. Required when loaded through `--load`. */
+  readonly workspaceRequirement?: "optional" | "required";
   /**
    * Optional reliability tier — defaults to the module's rank if unset.
    * Used by `search rank:...` and `info` output.

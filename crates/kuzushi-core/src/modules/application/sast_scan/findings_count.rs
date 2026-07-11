@@ -1,26 +1,6 @@
 use super::*;
 
 impl SastPipelineReports {
-    pub(in crate::modules) fn findings_count(&self) -> usize {
-        self.native.as_ref().map_or(0, |run| run.findings_count)
-            + self.agentic.as_ref().map_or(0, |report| report.count)
-            + self.carlini.as_ref().map_or(0, |report| report.count)
-            + self
-                .taint_iris_next
-                .as_ref()
-                .map_or(0, |report| report.count)
-            + self.systems_hunt.as_ref().map_or(0, |report| report.count)
-    }
-
-    pub(in crate::modules) fn primary_run_id(&self) -> Result<String> {
-        self.native_run_id()
-            .or_else(|| self.agentic_run_id())
-            .or_else(|| self.carlini_run_id())
-            .or_else(|| self.taint_iris_next_run_id())
-            .or_else(|| self.systems_hunt_run_id())
-            .context("sast:scan completed without a persisted run id")
-    }
-
     pub(in crate::modules) fn run_ids(&self, primary: String) -> SastRunIds {
         SastRunIds {
             primary,
@@ -75,16 +55,17 @@ pub(in crate::modules) fn run_sast_pipeline_reports(
     store: &crate::findings::FindingStore,
     options: &ScanRunOptions,
 ) -> Result<SastPipelineReports> {
-    let tasks = parse_sast_tasks(input)?;
-    let selected = SastTaskSelection::from_tasks(tasks)?;
+    let request = parse_sast_tasks(input)?;
+    let selected = SastTaskSelection::from_tasks(request.tasks, request.source)?;
     selected.ensure_non_empty()?;
     let mut reports = SastPipelineReports {
-        native: selected.run_native(workspace, store, options)?,
+        native: selected.run_native(workspace, store, options, ctx)?,
         agentic: None,
         carlini: None,
         taint_iris_next: None,
         systems_hunt: None,
         engine_ids: selected.engine_ids.clone(),
+        skipped_engines: selected.skipped_engines.clone(),
     };
     fill_agentic_reports(
         registry,
@@ -100,9 +81,11 @@ pub(in crate::modules) fn run_sast_pipeline_reports(
 
 pub(in crate::modules) struct SastTaskSelection {
     pub(in crate::modules) scanners: Vec<Box<dyn ScanEngine>>,
+    pub(in crate::modules) explicit_native_selection: bool,
     pub(in crate::modules) run_agentic: bool,
     pub(in crate::modules) run_carlini: bool,
     pub(in crate::modules) run_taint_iris_next: bool,
     pub(in crate::modules) run_systems_hunt: bool,
     pub(in crate::modules) engine_ids: Vec<&'static str>,
+    pub(in crate::modules) skipped_engines: Vec<crate::scan::SkippedDefaultScanEngine>,
 }

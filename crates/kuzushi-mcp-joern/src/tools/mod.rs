@@ -5,7 +5,6 @@ mod graph_handlers;
 mod health;
 mod method_at;
 mod parse_query_handlers;
-mod stub;
 mod tool_types;
 
 #[cfg(test)]

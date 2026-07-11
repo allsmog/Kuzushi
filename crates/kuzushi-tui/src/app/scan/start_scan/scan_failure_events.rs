@@ -54,7 +54,7 @@ impl ShellApp {
         })];
         if let Some(run_id) = run_id {
             effects.push(ShellEffect::RecordScanRun(ScanRunRecord {
-                target: self.target_owned(),
+                target: self.scan_target_owned(),
                 run_id,
                 target_label: self.scan_target_label(),
                 outcome: ScanRunOutcome::Canceled {
@@ -78,7 +78,7 @@ impl ShellApp {
         run_id
             .map(|run_id| {
                 vec![ShellEffect::RecordScanRun(ScanRunRecord {
-                    target: self.target_owned(),
+                    target: self.scan_target_owned(),
                     run_id,
                     target_label: self.scan_target_label(),
                     outcome: ScanRunOutcome::Interrupted {
@@ -132,7 +132,8 @@ impl ShellApp {
     /// same store the RefreshFindings effect reloads — so the cancel message
     /// can report how many partial findings survived the abort.
     fn count_store_findings(&mut self, run_id: &str) -> Option<usize> {
-        let store = self.open_store().ok()?;
+        let target = self.scan_target_owned()?;
+        let (_, store) = open_finding_store_for_target(Some(&target)).ok()?;
         let filter = kuzushi_core::FindingListFilter {
             run_id: vec![run_id.to_string()],
             limit: 0,
@@ -158,7 +159,7 @@ impl ShellApp {
         run_id
     }
 
-    fn mark_scan_activity_failed(&mut self, error: &str) {
+    pub(super) fn mark_scan_activity_failed(&mut self, error: &str) {
         if let Some(session) = self.activity_mut() {
             session.mark_incomplete_tasks_after_failure();
             session.apply_step(
@@ -179,7 +180,7 @@ impl ShellApp {
         run_id
             .map(|run_id| {
                 ShellEffect::RecordScanRun(ScanRunRecord {
-                    target: self.target_owned(),
+                    target: self.scan_target_owned(),
                     run_id,
                     target_label: self.scan_target_label(),
                     outcome: ScanRunOutcome::Failed {

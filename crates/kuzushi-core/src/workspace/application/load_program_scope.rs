@@ -2,6 +2,7 @@ use super::*;
 use crate::workspace::domain::ProgramScope;
 
 const SCOPE_FILE_NAME: &str = "scope.toml";
+const MAX_PROGRAM_SCOPE_BYTES: usize = 1024 * 1024;
 const PROGRAM_SCOPE_SCAFFOLD: &str = r#"# Kuzushi program scope.
 # Empty lists are a no-op. Add only assets you are authorized to test.
 #
@@ -25,11 +26,11 @@ cidrs = []
 /// malformed scope.
 pub fn load_program_scope(workspace: &WorkspaceTarget) -> Result<Option<ProgramScope>> {
     let path = program_scope_path(workspace);
-    if !path.exists() {
+    let Some(body) =
+        read_optional_workspace_text(workspace.root(), &path, MAX_PROGRAM_SCOPE_BYTES)?
+    else {
         return Ok(None);
-    }
-    let body = std::fs::read_to_string(&path)
-        .with_context(|| format!("Could not read {}", path.display()))?;
+    };
     let scope = ProgramScope::parse(&body)
         .with_context(|| format!("Could not parse {}", path.display()))?;
     Ok(Some(scope))
@@ -37,18 +38,21 @@ pub fn load_program_scope(workspace: &WorkspaceTarget) -> Result<Option<ProgramS
 
 pub fn write_program_scope_scaffold(workspace: &WorkspaceTarget) -> Result<std::path::PathBuf> {
     let path = program_scope_path(workspace);
-    if path.exists() {
+    if read_optional_workspace_text(workspace.root(), &path, MAX_PROGRAM_SCOPE_BYTES)?.is_some() {
         anyhow::bail!(
             "{} already exists. Edit it directly, or remove it before reinitializing.",
             path.display()
         );
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Could not create {}", parent.display()))?;
-    }
-    std::fs::write(&path, PROGRAM_SCOPE_SCAFFOLD)
-        .with_context(|| format!("Could not write {}", path.display()))?;
+    let relative = path
+        .strip_prefix(workspace.root())
+        .context("Program scope path escaped the workspace")?;
+    write_workspace_state_file(
+        workspace.root(),
+        relative,
+        PROGRAM_SCOPE_SCAFFOLD.as_bytes(),
+    )
+    .with_context(|| format!("Could not write {}", path.display()))?;
     Ok(path)
 }
 
@@ -124,5 +128,31 @@ mod tests {
             .to_string();
 
         assert!(err.contains("already exists"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn program_scope_rejects_an_outside_symlink_for_reads_and_scaffolding() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "OUTSIDE_PROGRAM_SCOPE_TOKEN").unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
+        symlink(outside.path(), program_scope_path(&workspace)).unwrap();
+
+        let read_error = load_program_scope(&workspace).unwrap_err().to_string();
+        let write_error = write_program_scope_scaffold(&workspace)
+            .unwrap_err()
+            .to_string();
+
+        assert!(read_error.contains("symlink"), "{read_error}");
+        assert!(write_error.contains("symlink"), "{write_error}");
+        assert!(!read_error.contains("OUTSIDE_PROGRAM_SCOPE_TOKEN"));
+        assert_eq!(
+            fs::read_to_string(outside.path()).unwrap(),
+            "OUTSIDE_PROGRAM_SCOPE_TOKEN"
+        );
     }
 }

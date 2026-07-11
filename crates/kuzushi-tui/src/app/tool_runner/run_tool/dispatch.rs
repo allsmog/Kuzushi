@@ -20,7 +20,7 @@ impl ShellApp {
         &mut self,
         prepare: RunToolPreparation,
     ) -> Vec<ShellEffect> {
-        if self.blocked_by_running_tool() {
+        if self.tool_launch_blocked(&prepare.tool_name) {
             return Vec::new();
         }
         let Some(request) = self.prepare_run_tool_request(prepare) else {
@@ -56,37 +56,56 @@ impl ShellApp {
         input: serde_json::Value,
         workspace: WorkspaceTarget,
         tool_thinking_level: Option<String>,
+        authorization: ExecutionAuthorization,
     ) -> Vec<ShellEffect> {
+        if self.tool_launch_blocked(&tool_name) {
+            return Vec::new();
+        }
         let prereqs = prereq_steps_for(&tool_name, workspace.root());
         if !prereqs.is_empty() {
-            self.set_shell_view(ShellView::ModuleRun);
             return self.start_prereq_chain(
                 prereqs,
                 tool_name,
                 input,
                 workspace,
                 tool_thinking_level,
+                authorization,
             );
         }
         let status = tool_run_status(&tool_name);
-        self.set_shell_view(ShellView::ModuleRun);
-        self.start_background_tool(tool_name, input, workspace, status, tool_thinking_level);
+        self.start_authorized_background_tool(
+            tool_name,
+            input,
+            workspace,
+            status,
+            tool_thinking_level,
+            authorization,
+        );
         Vec::new()
     }
 
-    fn blocked_by_running_tool(&mut self) -> bool {
-        let Some(tool_name) = self.running_tool_name_owned() else {
+    pub(crate) fn tool_launch_blocked(&mut self, requested_tool: &str) -> bool {
+        if !self.has_running_work() {
             return false;
-        };
+        }
+        if let Some(active_tool) = self.running_tool_name_owned() {
+            self.log(
+                "tool",
+                format!(
+                    "{active_tool} is still running; wait for its result before starting {requested_tool}"
+                ),
+            );
+            self.set_waiting_activity(
+                active_tool,
+                "another tool was requested while this run is still active",
+            );
+            return true;
+        }
         self.log(
             "tool",
             format!(
-                "{tool_name} is still running; wait for its result before starting another tool"
+                "{requested_tool} launch blocked — finish or cancel the active work, then retry"
             ),
-        );
-        self.set_waiting_activity(
-            tool_name,
-            "another tool was requested while this run is still active",
         );
         true
     }
@@ -136,6 +155,8 @@ impl ShellApp {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         match self.registry().prepare_tool_input_for_dispatch(
             tool_name,
@@ -191,11 +212,17 @@ impl ShellApp {
     }
 
     fn request_run_confirmation(&mut self, request: &RunToolRequest) -> bool {
-        let Some(confirm) = confirm_gate_for_tool(
+        let input_gate = confirm_gate_for_tool(
             &request.tool_name,
             &request.input,
             self.engagement.confirm_allowlist(),
-        ) else {
+        );
+        let descriptor_gate = || {
+            self.registry()
+                .resolve_tool(&request.tool_name)
+                .and_then(|descriptor| descriptor_approval_confirm(descriptor, &request.input))
+        };
+        let Some(confirm) = input_gate.or_else(descriptor_gate) else {
             return false;
         };
         self.log(
@@ -249,6 +276,7 @@ impl RunToolRequest {
             input: self.input,
             workspace: self.workspace,
             thinking_level: self.thinking_level,
+            authorization: ExecutionAuthorization::default(),
         }
     }
 }

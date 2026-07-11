@@ -1,5 +1,5 @@
 use kuzushi_core::modules::{BuiltinModule, DagNodeDescriptor, ModuleRegistry};
-use kuzushi_core::RunTraceStep;
+use kuzushi_core::{RunTraceStep, WorkflowPhase};
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Instant;
 
@@ -209,7 +209,13 @@ impl SubsystemAggregate {
 #[derive(Debug, Clone)]
 pub struct ActivitySession {
     pub run_id: String,
+    /// Engagement phase at the moment this run started. This is transient
+    /// presentation state: it keeps a live/finished Activity composition on
+    /// the phase that launched it even when newly persisted artifacts advance
+    /// the workspace-derived journey underneath the operator.
+    pub origin_phase: Option<WorkflowPhase>,
     pub started_at: Instant,
+    pub completed_at: Option<Instant>,
     pub tasks: BTreeMap<String, DagTaskRow>,
     pub step_task_ids: BTreeMap<usize, String>,
     pub subsystem_aggregate: SubsystemAggregate,
@@ -283,12 +289,46 @@ impl ActivitySession {
     pub fn new(run_id: impl Into<String>) -> Self {
         Self {
             run_id: run_id.into(),
+            origin_phase: None,
             started_at: Instant::now(),
+            completed_at: None,
             tasks: BTreeMap::new(),
             step_task_ids: BTreeMap::new(),
             subsystem_aggregate: SubsystemAggregate::default(),
             events: VecDeque::with_capacity(ACTIVITY_FEED_RING_CAPACITY),
         }
+    }
+
+    /// Capture the workflow phase that launched this activity session.
+    pub fn with_origin_phase(mut self, phase: WorkflowPhase) -> Self {
+        self.origin_phase = Some(phase);
+        self
+    }
+
+    /// Construct a session whose phase origin is known at launch time.
+    pub fn for_phase(run_id: impl Into<String>, phase: WorkflowPhase) -> Self {
+        Self::new(run_id).with_origin_phase(phase)
+    }
+
+    pub(crate) fn for_optional_phase(
+        run_id: impl Into<String>,
+        phase: Option<WorkflowPhase>,
+    ) -> Self {
+        match phase {
+            Some(phase) => Self::for_phase(run_id, phase),
+            None => Self::new(run_id),
+        }
+    }
+
+    pub fn elapsed_secs(&self) -> u64 {
+        self.completed_at
+            .unwrap_or_else(Instant::now)
+            .saturating_duration_since(self.started_at)
+            .as_secs()
+    }
+
+    pub fn mark_terminal(&mut self) {
+        self.completed_at.get_or_insert_with(Instant::now);
     }
 
     /// Apply one trace step, updating the matching DAG row (or the subsystem
@@ -349,6 +389,21 @@ impl ActivitySession {
         row.started_at.get_or_insert_with(Instant::now);
         row.completed_at = Some(Instant::now());
         row.last_label = "tool reported skipped".to_string();
+        finalize_activity_row_details(row);
+    }
+
+    pub fn mark_task_partial(&mut self, tool_name: &str, reason: &str) {
+        let task_id = collapse_doubled_tail(tool_name);
+        let module_id = task_id.split(':').next().unwrap_or(&task_id).to_string();
+        let row = self
+            .tasks
+            .entry(task_id.clone())
+            .or_insert_with(|| DagTaskRow::queued(task_id, module_id, Vec::new()));
+        row.state = DagTaskState::Failing;
+        row.started_at.get_or_insert_with(Instant::now);
+        row.completed_at = Some(Instant::now());
+        row.severity = Some("warn".to_string());
+        row.last_label = format!("partial result: {reason}");
         finalize_activity_row_details(row);
     }
 
@@ -526,6 +581,7 @@ impl ActivitySession {
             mark_activity_row_canceled(row, now);
         }
         mark_subsystems_canceled(&mut self.subsystem_aggregate);
+        self.completed_at.get_or_insert(now);
     }
 
     pub fn mark_active_tasks_canceling(&mut self) {
@@ -541,6 +597,7 @@ impl ActivitySession {
         for row in self.tasks.values_mut() {
             mark_activity_row_success_terminal(row, now, context);
         }
+        self.completed_at.get_or_insert(now);
     }
 
     pub fn mark_incomplete_tasks_after_failure(&mut self) {
@@ -548,6 +605,20 @@ impl ActivitySession {
         for row in self.tasks.values_mut() {
             mark_activity_row_failure_terminal(row, now);
         }
+        self.completed_at.get_or_insert(now);
+    }
+
+    pub fn mark_incomplete_tasks_after_skipped(&mut self) {
+        let now = Instant::now();
+        for row in self.tasks.values_mut() {
+            if matches!(
+                row.state,
+                DagTaskState::Queued | DagTaskState::Active | DagTaskState::Canceling
+            ) {
+                mark_never_started_row_skipped(row, now, "not run after tool skipped");
+            }
+        }
+        self.completed_at.get_or_insert(now);
     }
 
     fn seed_registry_module(&mut self, module: &BuiltinModule) -> usize {
@@ -1698,6 +1769,15 @@ mod tests {
             session.tasks.get("verify:finding").unwrap().state,
             DagTaskState::Skipped
         );
+    }
+
+    #[test]
+    fn settled_session_elapsed_time_uses_terminal_timestamp() {
+        let mut session = ActivitySession::new("r-settled");
+        session.started_at = Instant::now() - std::time::Duration::from_secs(10);
+        session.completed_at = Some(session.started_at + std::time::Duration::from_secs(3));
+
+        assert_eq!(session.elapsed_secs(), 3);
     }
 
     #[test]

@@ -1,5 +1,6 @@
-use super::*;
+use super::bounded_fs as fs;
 use super::target::ignored_dir;
+use super::*;
 
 pub(super) fn collect_lockfiles(
     target: &Path,
@@ -21,10 +22,12 @@ fn collect_lockfiles_in(
         anyhow::bail!("sbom-scan scan cancelled");
     }
     for entry in fs::read_dir(dir).with_context(|| format!("sbom-scan: read {}", dir.display()))? {
-        let path = entry?.path();
-        if path.is_dir() && !ignored_dir(&path) {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let path = entry.path();
+        if file_type.is_dir() && !ignored_dir(&path) {
             collect_lockfiles_in(target, &path, lockfiles, cancellation)?;
-        } else if is_lockfile(&path) {
+        } else if file_type.is_file() && is_lockfile(&path) {
             lockfiles.push(lockfile_digest(target, &path)?);
         }
     }
@@ -65,8 +68,7 @@ fn is_lockfile(path: &Path) -> bool {
 }
 
 fn lockfile_digest(target: &Path, path: &Path) -> Result<SbomLockfile> {
-    let bytes =
-        fs::read(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+    let bytes = fs::read(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     Ok(SbomLockfile {
         path: relative_display(target, path),
         sha256: format!(

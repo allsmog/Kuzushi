@@ -175,22 +175,22 @@ mod tests {
     }
 
     #[test]
-    fn prompt_edit_seeds_override_file_and_logs_editor_command() {
+    fn prompt_edit_does_not_create_empty_override_without_declared_template() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
 
         run_prompt_verb(&mut app, "edit triage");
 
         let path = prompt_override_path(temp.path());
-        assert!(path.exists());
+        assert!(!path.exists());
         assert!(app
             .log_lines()
             .iter()
-            .any(|line| line.body.contains("edit override at")));
+            .any(|line| line.body.contains("no editable built-in template")));
     }
 
     #[test]
-    fn prompt_edit_reports_unreadable_override_path() {
+    fn prompt_edit_without_declared_template_does_not_touch_unreadable_path() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
         let path = prompt_override_path(temp.path());
@@ -201,7 +201,7 @@ mod tests {
         assert!(app
             .log_lines()
             .iter()
-            .any(|line| line.body.contains("could not edit unreadable override at")));
+            .any(|line| line.body.contains("no editable built-in template")));
         assert!(!app
             .log_lines()
             .iter()
@@ -220,7 +220,7 @@ mod tests {
         assert!(app
             .log_lines()
             .iter()
-            .any(|line| line.body.contains("could not set unreadable override at")));
+            .any(|line| line.body.contains("could not set override at")));
         assert!(path.is_dir());
         assert!(!app
             .log_lines()
@@ -433,5 +433,182 @@ mod tests {
             .log_lines()
             .iter()
             .any(|line| line.body.contains("removed override")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prompt_effects_refuse_symlinked_override_directory() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_prompt = outside.path().join("triage.md");
+        std::fs::write(&outside_prompt, "outside-prompt-secret").unwrap();
+        let prompts = target.path().join(".kuzushi/prompts");
+        std::fs::create_dir_all(&prompts).unwrap();
+        symlink(outside.path(), prompts.join("sast")).unwrap();
+        let mut app = prompt_test_app(target.path());
+
+        for command in [
+            "show triage",
+            "list",
+            "set triage \"replacement\"",
+            "reset triage",
+            "edit triage",
+        ] {
+            run_prompt_verb(&mut app, command);
+        }
+
+        assert_eq!(
+            std::fs::read_to_string(&outside_prompt).unwrap(),
+            "outside-prompt-secret"
+        );
+        assert!(!app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.contains("outside-prompt-secret")));
+        assert!(!app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.trim() == "- triage"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tune_effects_refuse_symlinked_house_rules_directory() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_rules = outside.path().join("sast.md");
+        std::fs::write(&outside_rules, "outside-house-rule-secret").unwrap();
+        let state = target.path().join(".kuzushi");
+        std::fs::create_dir_all(&state).unwrap();
+        symlink(outside.path(), state.join("house-rules")).unwrap();
+        let mut app = prompt_test_app(target.path());
+
+        for command in ["show", "set \"replacement\"", "reset"] {
+            run_tune_verb(&mut app, command);
+        }
+
+        assert_eq!(
+            std::fs::read_to_string(&outside_rules).unwrap(),
+            "outside-house-rule-secret"
+        );
+        assert!(!app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.contains("outside-house-rule-secret")));
+    }
+
+    #[test]
+    fn prompt_document_opens_builtin_without_creating_override() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        let prompt = app
+            .prompt_spec_for_tool("agentic-sast:scan")
+            .expect("agentic prompt descriptor");
+        let path = kuzushi_core::prompt_override_path(temp.path(), "agentic-sast", "scan");
+
+        app.open_prompt_document_effect(PromptDocumentOpen {
+            prompt,
+            origin: ShellView::PlanningPicker,
+        });
+
+        let document = app.router.prompts().document().expect("open document");
+        assert_eq!(app.shell_view(), ShellView::PromptsEditor);
+        assert_eq!(document.source, "built-in");
+        assert!(document.text().contains("agentic SAST scanner"));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn prompt_document_vim_write_persists_and_returns_to_setup() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        let prompt = app
+            .prompt_spec_for_tool("agentic-sast:scan")
+            .expect("agentic prompt descriptor");
+        let path = kuzushi_core::prompt_override_path(temp.path(), "agentic-sast", "scan");
+        app.open_prompt_document_effect(PromptDocumentOpen {
+            prompt,
+            origin: ShellView::PlanningPicker,
+        });
+
+        for code in [
+            KeyCode::Char('i'),
+            KeyCode::Char('X'),
+            KeyCode::Esc,
+            KeyCode::Char(':'),
+            KeyCode::Char('w'),
+            KeyCode::Char('q'),
+        ] {
+            let update = app.reduce_key(key(code));
+            EffectRuntime::execute(&mut app, update.effects);
+        }
+        let update = app.reduce_key(key(KeyCode::Enter));
+        EffectRuntime::execute(&mut app, update.effects);
+
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        assert!(app.router.prompts().document().is_none());
+        assert!(std::fs::read_to_string(path).unwrap().starts_with('X'));
+    }
+
+    #[test]
+    fn dirty_prompt_document_requires_discard_confirmation() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        let prompt = app
+            .prompt_spec_for_tool("agentic-sast:scan")
+            .expect("agentic prompt descriptor");
+        app.open_prompt_document_effect(PromptDocumentOpen {
+            prompt,
+            origin: ShellView::PlanningPicker,
+        });
+
+        for code in [KeyCode::Char('i'), KeyCode::Char('X'), KeyCode::Esc] {
+            app.reduce_key(key(code));
+        }
+        app.reduce_key(key(KeyCode::Esc));
+
+        assert_eq!(
+            app.router.prompts().document().unwrap().mode,
+            PromptDocumentMode::ConfirmDiscard
+        );
+        app.reduce_key(key(KeyCode::Char('n')));
+        assert_eq!(app.shell_view(), ShellView::PromptsEditor);
+        app.reduce_key(key(KeyCode::Esc));
+        app.reduce_key(key(KeyCode::Char('y')));
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    }
+
+    #[test]
+    fn planning_picker_review_key_opens_selected_agentic_prompt() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        app.open_phase_picker(WorkflowPhase::Hunt);
+        app.engagement
+            .planning_picker_mut()
+            .selected_mut()
+            .insert(PlanningTaskId::ScanAgenticSast);
+
+        let agentic_index = app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .position(|row| row.id == PlanningTaskId::ScanAgenticSast)
+            .unwrap();
+        while app.engagement.planning_picker().cursor() < agentic_index {
+            app.reduce_key(key(KeyCode::Down));
+        }
+        let update = app.reduce_key(key(KeyCode::Char('p')));
+        EffectRuntime::execute(&mut app, update.effects);
+
+        assert_eq!(app.shell_view(), ShellView::PromptsEditor);
+        assert_eq!(
+            app.router.prompts().document().unwrap().origin,
+            ShellView::PlanningPicker
+        );
     }
 }
