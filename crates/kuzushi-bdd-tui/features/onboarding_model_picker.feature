@@ -15,7 +15,7 @@ Feature: First-run model picker
     When I launch the shell
     And I press "Down"
     And I press "Down"
-    Then I see "> OpenAI OAuth GPT-5.4"
+    Then I see "▸ OpenAI OAuth GPT-5.4"
 
   Scenario: Esc on the model picker falls through to Workbench
     Given a fresh kuzushi workspace
