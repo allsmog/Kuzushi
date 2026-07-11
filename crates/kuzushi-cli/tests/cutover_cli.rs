@@ -108,7 +108,7 @@ fn assert_strict_plain(label: &str, output: &str) {
     }
 }
 
-fn plain_shell_script(script: &str) -> String {
+fn plain_shell_script_output(script: &str) -> std::process::Output {
     let tmp = tempfile::tempdir().unwrap();
     let mut child = kuzushi()
         .env("KUZUSHI_SKIP_ONBOARDING", "1")
@@ -117,6 +117,7 @@ fn plain_shell_script(script: &str) -> String {
         .arg(tmp.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     child
@@ -125,7 +126,11 @@ fn plain_shell_script(script: &str) -> String {
         .unwrap()
         .write_all(script.as_bytes())
         .unwrap();
-    stdout(child.wait_with_output().unwrap())
+    child.wait_with_output().unwrap()
+}
+
+fn plain_shell_script(script: &str) -> String {
+    stdout(plain_shell_script_output(script))
 }
 
 #[test]
@@ -493,10 +498,9 @@ fn plain_flag_forces_line_oriented_shell_output() {
     );
 
     assert!(out.contains("KUZUSHI"));
-    assert!(out.contains("mode:shell"));
-    assert!(out.contains("ATTACK SURFACE"));
-    assert!(out.contains("DFD / AIM"));
-    assert!(out.contains("no findings yet"));
+    assert!(out.contains("PLAIN SESSION SUMMARY"));
+    assert!(out.contains("status: idle"));
+    assert!(out.contains("commands: 0"));
     assert_strict_plain("--plain shell", &out);
 }
 
@@ -516,19 +520,27 @@ fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
     );
 
     assert!(out.contains("KUZUSHI"));
-    assert!(out.contains("mode:shell"));
-    assert!(out.contains("ATTACK SURFACE"));
+    assert!(out.contains("PLAIN SESSION SUMMARY"));
+    assert!(out.contains("status: idle"));
+    assert!(out.contains("commands: 0"));
     assert_strict_plain("KUZUSHI_SCREEN_READER shell", &out);
 }
 
 #[test]
 fn plain_scripted_shell_prints_unknown_command_feedback() {
-    let out = plain_shell_script("/nope\n");
+    let output = plain_shell_script_output("/nope\n");
+    assert!(
+        !output.status.success(),
+        "unknown commands must fail honestly"
+    );
+    let out = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let err = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
 
     assert!(out.contains("COMMAND RESULT"));
     assert!(out.contains("command: /nope"));
     assert!(out.contains("> /nope"));
     assert!(out.contains("error: unknown command \"/nope\". Next: /help"));
+    assert!(err.contains("plain scripted session failed"));
     assert_strict_plain("--plain shell /nope", &out);
 }
 
