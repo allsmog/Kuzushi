@@ -263,7 +263,8 @@ async function writeOutputs(options, targets, rendered) {
 
 async function writeRequestedFiles(options, targets, rendered) {
   if (options.outDir) await writeTextFiles(options.outDir, rendered);
-  if (options.status) await writeStatus(options.status, targets, rendered, options.verified === true);
+  if (options.status)
+    await writeStatus(options.status, targets, rendered, options.verified === true);
 }
 
 function writeJson(rendered) {
