@@ -22,17 +22,24 @@ impl FindingStore {
     /// Current lifecycle status per `stable_fp` from the projection. Absent
     /// entries mean the finding has never had a lifecycle event (default open).
     pub fn current_statuses_for(&self, stable_fps: &[String]) -> Result<BTreeMap<String, String>> {
+        if stable_fps.is_empty() {
+            return Ok(BTreeMap::new());
+        }
         let mut statuses = BTreeMap::new();
-        let mut stmt = self
-            .conn
-            .prepare("select current_status from stable_findings where stable_fp = ?1")?;
-        for stable_fp in stable_fps {
-            let status: Option<String> = stmt
-                .query_row(params![stable_fp], |row| row.get(0))
-                .optional()?;
-            if let Some(status) = status {
-                statuses.insert(stable_fp.clone(), status);
-            }
+        let requested = serde_json::to_string(stable_fps)?;
+        let mut stmt = self.conn.prepare(
+            r#"
+            select stable_fp, current_status
+              from stable_findings
+             where stable_fp in (select value from json_each(?1))
+            "#,
+        )?;
+        let rows = stmt.query_map(params![requested], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (stable_fp, status) = row?;
+            statuses.insert(stable_fp, status);
         }
         Ok(statuses)
     }

@@ -112,20 +112,54 @@ pub(super) fn recommend_keybindings() -> Vec<ViewKeybinding> {
     ]
 }
 
-pub(super) fn workbench_keybindings() -> Vec<ViewKeybinding> {
+pub(super) fn workbench_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
     // Keep the focused-pane controls first. The footer intentionally compacts
     // a long binding list on ordinary 80-column terminals, so ordering is a
     // discoverability contract: pane cycling, opening, and moving must survive
     // before page/visualization shortcuts and secondary actions.
-    let mut bindings = workbench_primary_pane_keybindings().to_vec();
-    bindings.push(workbench_open_keybinding());
+    let page = crate::ui_view_models::active_workbench_page(app);
+    let viewport = app.viewport();
+    let interactive_panes = page.interactive_panes_for_viewport(
+        app.router.workbench().center_mode(),
+        viewport.columns,
+        viewport.rows,
+    );
+    let mut bindings = workbench_pane_cycle_keybindings(interactive_panes);
+    bindings.extend(workbench_open_keybindings(app, interactive_panes));
     bindings.extend(workbench_movement_keybindings());
-    bindings.extend(workbench_secondary_pane_keybindings());
     bindings.extend(workbench_page_keybindings());
     bindings.extend(workbench_zoom_keybindings());
     bindings.extend(workbench_center_keybindings());
-    bindings.extend(workbench_secondary_action_keybindings());
+    bindings.extend(workbench_secondary_action_keybindings(page));
+    bindings.extend(workbench_return_keybindings(app));
     bindings
+}
+
+fn workbench_pane_cycle_keybindings(panes: &[WorkbenchPane]) -> Vec<ViewKeybinding> {
+    if panes.len() <= 1 {
+        return Vec::new();
+    }
+    [
+        workbench_primary_pane_keybindings()[0],
+        workbench_secondary_pane_keybindings()[0],
+    ]
+    .into()
+}
+
+fn workbench_open_keybindings(app: &ShellApp, panes: &[WorkbenchPane]) -> Vec<ViewKeybinding> {
+    if app.router.workbench().focus() != WorkbenchPane::Findings
+        || !panes.contains(&WorkbenchPane::Findings)
+    {
+        return Vec::new();
+    }
+    vec![workbench_open_keybinding()]
+}
+
+fn workbench_return_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
+    if app.router.workbench().focus() != WorkbenchPane::Details {
+        return Vec::new();
+    }
+    vec![bind_char('q', "q", "review list", ViewHotkeyAction::Back)]
 }
 
 fn workbench_primary_pane_keybindings() -> [ViewKeybinding; 1] {
@@ -148,8 +182,30 @@ fn workbench_secondary_pane_keybindings() -> [ViewKeybinding; 1] {
 
 fn workbench_movement_keybindings() -> Vec<ViewKeybinding> {
     vec![
-        bind_char('j', "j/k", "move", ViewHotkeyAction::WorkbenchScrollNext),
-        bind_char('k', "j/k", "move", ViewHotkeyAction::WorkbenchScrollPrev),
+        bind_char(
+            'j',
+            "j/k/↑/↓",
+            "move",
+            ViewHotkeyAction::WorkbenchScrollNext,
+        ),
+        bind_char(
+            'k',
+            "j/k/↑/↓",
+            "move",
+            ViewHotkeyAction::WorkbenchScrollPrev,
+        ),
+        bind(
+            HotkeyTrigger::Down,
+            "j/k/↑/↓",
+            "move",
+            ViewHotkeyAction::WorkbenchScrollNext,
+        ),
+        bind(
+            HotkeyTrigger::Up,
+            "j/k/↑/↓",
+            "move",
+            ViewHotkeyAction::WorkbenchScrollPrev,
+        ),
         bind_char('g', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollFirst),
         bind_char('G', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollLast),
     ]
@@ -226,15 +282,41 @@ fn workbench_open_keybinding() -> ViewKeybinding {
     )
 }
 
-fn workbench_secondary_action_keybindings() -> Vec<ViewKeybinding> {
-    vec![
+fn workbench_secondary_action_keybindings(page: WorkbenchPage) -> Vec<ViewKeybinding> {
+    let mut bindings = vec![
         bind_char('n', "n/N", "page", ViewHotkeyAction::WorkbenchPageNext),
         bind_char('N', "n/N", "page", ViewHotkeyAction::WorkbenchPagePrev),
-        bind_char('v', "v", "validate", ViewHotkeyAction::WorkbenchValidate),
-        bind_char('x', "x", "suppress", ViewHotkeyAction::WorkbenchSuppress),
-        bind_char('c', "c", "chain", ViewHotkeyAction::WorkbenchOrderChain),
-        bind_char('D', "D", "cluster", ViewHotkeyAction::WorkbenchCluster),
-    ]
+    ];
+    match page {
+        WorkbenchPage::Review => bindings.extend([
+            bind_char(
+                'v',
+                "v",
+                "draft verify",
+                ViewHotkeyAction::WorkbenchValidate,
+            ),
+            bind_char(
+                'x',
+                "x",
+                "draft suppress",
+                ViewHotkeyAction::WorkbenchSuppress,
+            ),
+            bind_char(
+                'c',
+                "c",
+                "draft chain",
+                ViewHotkeyAction::WorkbenchOrderChain,
+            ),
+        ]),
+        WorkbenchPage::Coverage => bindings.push(bind_char(
+            'D',
+            "D",
+            "cluster",
+            ViewHotkeyAction::WorkbenchCluster,
+        )),
+        WorkbenchPage::Terrain | WorkbenchPage::Ship => {}
+    }
+    bindings
 }
 
 pub(super) fn threat_keybindings() -> Vec<ViewKeybinding> {

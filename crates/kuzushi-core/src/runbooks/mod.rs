@@ -31,7 +31,9 @@ pub use patch_edits::{
 };
 pub use runtime::RunbookRuntime;
 pub use untrusted::{
-    render_untrusted_derived_block, render_untrusted_repo_block, render_untrusted_repo_blocks,
+    decode_untrusted_record, render_untrusted_data_section, render_untrusted_derived_block,
+    render_untrusted_repo_block, render_untrusted_repo_blocks, UntrustedRecord,
+    UntrustedRecordKind,
 };
 pub use validator_catalogs::{validator_catalog, ValidatorCatalogKind};
 pub use verdict_chain::{SnippetShown, VerdictChainArtifact, VerifierVoteRecord};

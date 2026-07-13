@@ -1,3 +1,4 @@
+use super::{activity_view_model, ActivityViewModel};
 use crate::{OptionsView, ShellApp, ShellView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,6 +54,7 @@ pub(crate) fn routing_mode_segment(app: &ShellApp) -> String {
 
 pub(crate) fn uses_activity_frame(app: &ShellApp) -> bool {
     matches!(app.shell_view(), ShellView::Activity)
+        && matches!(activity_view_model(app), ActivityViewModel::Active(_))
 }
 
 /// The Workbench command center owns the full body region with a frame-level
@@ -108,7 +110,7 @@ fn interactive_only_plain_model(app: &ShellApp) -> Option<PlainInteractiveOnlyMo
             title: "AUTH PICKER",
             next: format!(
                 "This picker needs an interactive terminal. Use `auth login {}` or set credentials before relaunch.",
-                app.router.auth_picker().provider()
+                crate::app::auth_provider_label(app.router.auth_picker().provider())
             ),
         }),
         ShellView::TargetPicker => Some(PlainInteractiveOnlyModel {

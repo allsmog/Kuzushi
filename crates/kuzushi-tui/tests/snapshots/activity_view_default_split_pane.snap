@@ -6,9 +6,9 @@ assertion_line: 89
 
  -- ACTIVITY  run r-snapshot  ·  2/3 done  ·  1 running ----------------------------------------------------------------
  -- TASKS                                    |  -- OUTPUT
-# + context:build                         <… | views  [findings·]  surface·   dfd·   heatmap·   path·   chain·
-  + semgrep:scan                          <… | -- FINDINGS ------------------------------------------------
-  * triage:run                            <… |   opens the guided workflow for the target.
+# + context:build                         <… | views  [no artifacts yet]
+  + semgrep:scan                          <… | -- OUTPUT ------------------------------------------------
+  * triage:run                            <… |   No generated artifacts yet — live progress remains in TASKS.
      + triage start                          |
      + evidence-collect                      |
      + stage1 kept 14/14                     |
@@ -24,6 +24,6 @@ assertion_line: 89
      22:13:20   ↳ … [triage:run] evidence-c… |
      22:13:20   ↳ … [triage:run] verdict=li… |
 
- * FOCUS  hover [j/k] to inspect a task
- j/k/g/G scroll   Tab pane   [/] views   f findings   o open   V verbose   Space pause   x reset view   Enter focus
- b background   Esc leave
+ * LIVE · current triage:run · last progress 0s ago · task-selector ran
+ * PROMPT  type a command · F2 enables Activity controls
+ F2 controls   findings list   back workbench   Ctrl+C stop / exit

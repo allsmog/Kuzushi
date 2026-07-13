@@ -258,6 +258,7 @@ create table if not exists patch_attempt_events (
   test_command text,
   worktree_path text,
   cost_usd real,
+  provider_spend_unresolved integer,
   validator_log text,
   history_json text not null,
   actor text not null,

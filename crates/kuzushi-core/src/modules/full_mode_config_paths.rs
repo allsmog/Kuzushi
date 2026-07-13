@@ -125,7 +125,7 @@ pub(crate) fn full_mode_spend_limiter(
 
 pub(crate) fn persist_full_mode_report(
     ctx: &ToolExecutionContext<'_>,
-    report: &crate::capabilities::full_mode_multi::FullModeReport,
+    report: &mut crate::capabilities::full_mode_multi::FullModeReport,
 ) -> Result<()> {
     let Some(workspace) = ctx.workspace else {
         return Ok(());
@@ -133,8 +133,8 @@ pub(crate) fn persist_full_mode_report(
     let store = FindingStore::open(workspace.findings_db_path())?;
     let scan_id = format!("full-mode-{}", uuid::Uuid::new_v4());
     store.with_run_lifecycle(&scan_id, workspace.root(), || {
-        for finding in &report.findings {
-            let _ = store.insert_finding(&scan_id, finding)?;
+        for finding in &mut report.findings {
+            finding.id = Some(store.insert_finding(&scan_id, finding)?);
         }
         Ok(((), report.findings.len()))
     })
@@ -148,18 +148,14 @@ pub(crate) fn run_classifier_score_tool(
     let run = prepare_classifier_score(&input, ctx, runtime)?;
     let routed = classifier_routed_runtime(run.runtime, ctx, run.workspace.root())?;
     let gate = classifier_gate(&routed, run.workspace, run.target_percentile)?;
-    let score = gate.score(&run.finding, run.workspace.root())?;
+    let (score, cost) = gate.score_with_cost(&run.finding, run.workspace.root())?;
     let should_audit = gate.should_deep_audit(score);
     let threshold = gate.current_threshold();
     let n = gate.samples_seen();
-    save_classifier_skip_if_needed(&run, &gate, score, should_audit)?;
-    Ok(classifier_score_response(
-        &run.finding,
-        score,
-        should_audit,
-        threshold,
-        n,
-    ))
+    save_classifier_skip_if_needed(&run, &gate, score, should_audit, cost)?;
+    let mut result = classifier_score_response(&run.finding, score, should_audit, threshold, n);
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
+    Ok(result)
 }
 
 struct ClassifierScoreRun<'a> {
@@ -252,11 +248,12 @@ fn save_classifier_skip_if_needed(
     gate: &crate::capabilities::classifier_gate::LikelyVulnClassifier<'_>,
     score: f32,
     should_audit: bool,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Result<()> {
     let Some(id) = run.finding.id.filter(|_| !should_audit) else {
         return Ok(());
     };
-    let outcome = gate.skip_outcome(score);
+    let outcome = gate.skip_outcome_with_cost(score, cost);
     run.store.record_auto_triage(id, &outcome)
 }
 

@@ -18,10 +18,11 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         area.width as usize,
         " ",
     );
+    let completion_hint = app.completion_preview_ref();
     let hint = prompt
         .placeholder
-        .clone()
-        .or_else(|| app.completion_preview())
+        .as_deref()
+        .or(completion_hint.as_deref())
         .unwrap_or_default();
     let line = Line::from(vec![
         // Prompt prefix in c-muted per `design/mockups/_shared.jsx::footer`
@@ -39,6 +40,9 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
 }
 
 fn inactive_prompt_line(app: &ShellApp) -> Option<Line<'static>> {
+    if let Some(text) = captured_overlay_prompt(app.shell_view()) {
+        return Some(disabled_prompt_line(text));
+    }
     if app.input_mode() == crate::InputMode::Navigate {
         return Some(disabled_prompt_line(
             "NAVIGATION MODE — view keys active · Esc returns to prompt",
@@ -51,6 +55,14 @@ fn inactive_prompt_line(app: &ShellApp) -> Option<Line<'static>> {
     }
     (app.is_picker_view() && !app.picker_prompt_focused())
         .then(|| disabled_prompt_line("command prompt paused — : to type a command"))
+}
+
+fn captured_overlay_prompt(view: crate::ShellView) -> Option<&'static str> {
+    match view {
+        crate::ShellView::QuitConfirm => Some("y confirm · n/Esc stay"),
+        crate::ShellView::CommandPalette => Some("type to filter · Enter load · Esc close"),
+        _ => None,
+    }
 }
 
 fn disabled_prompt_line(text: &'static str) -> Line<'static> {

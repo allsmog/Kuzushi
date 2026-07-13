@@ -181,7 +181,7 @@ fn collapsed_catalog_model(app: &ShellApp) -> CatalogCollapsedModel {
 
 fn collapsed_target_warning(app: &ShellApp) -> Option<&'static str> {
     if app.target().is_none() {
-        return Some("[!] no target selected; run `target .`, then `next`");
+        return Some("[!] target required; Enter opens picker · `target <path>` · `demo` offline");
     }
     app.findings()
         .is_empty()

@@ -5,6 +5,9 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+mod worker;
+use worker::spawn_hydration_worker;
+
 const VIEW_HYDRATION_CHANNEL_CAPACITY: usize = 128;
 pub(super) const MAX_VIEW_HYDRATION_WORKERS: usize = 2;
 
@@ -26,6 +29,7 @@ struct ViewHydrationBatch {
     generation: u64,
     target: PathBuf,
     keys: Vec<ViewHydrationKey>,
+    cancellation: ViewHydrationCancellation,
     handle: JoinHandle<()>,
 }
 
@@ -84,14 +88,15 @@ impl ViewHydrationRuntime {
     ) -> ViewHydrationDrain {
         self.activate_target(&target);
         let mut drain = ViewHydrationDrain::default();
+        let cancellation = ViewHydrationCancellation::default();
         for key in keys {
-            match caught_read(self.reader.as_ref(), &target, &key) {
-                Ok(value) => drain.results.push(ViewHydrationResult {
+            match caught_read(self.reader.as_ref(), &target, &key, &cancellation) {
+                Ok(Some(value)) => drain.results.push(ViewHydrationResult {
                     target: target.clone(),
                     key,
                     value,
                 }),
-                Err(()) => drain.failures.push(ViewHydrationFailure {
+                Ok(None) | Err(()) => drain.failures.push(ViewHydrationFailure {
                     target: target.clone(),
                     key,
                 }),
@@ -112,6 +117,9 @@ impl ViewHydrationRuntime {
 
     pub(crate) fn invalidate(&mut self) {
         self.generation = self.generation.wrapping_add(1);
+        for batch in &self.handles {
+            batch.cancellation.cancel();
+        }
         self.in_flight.clear();
         self.retryable_failures.clear();
     }
@@ -145,11 +153,13 @@ impl ViewHydrationRuntime {
         wake: Option<TerminalLoopWake>,
     ) {
         let generation = self.generation;
+        let cancellation = ViewHydrationCancellation::default();
         let handle = spawn_hydration_worker(
             generation,
             target.clone(),
             keys.clone(),
             Arc::clone(&self.reader),
+            cancellation.clone(),
             self.tx.clone(),
             wake,
         );
@@ -157,6 +167,7 @@ impl ViewHydrationRuntime {
             generation,
             target,
             keys,
+            cancellation,
             handle,
         });
     }
@@ -201,6 +212,7 @@ impl ViewHydrationRuntime {
                     generation: batch_generation,
                     target,
                     keys,
+                    cancellation: _,
                     handle,
                 } = batch;
                 let panicked = handle.join().is_err();
@@ -222,57 +234,16 @@ impl ViewHydrationRuntime {
     }
 }
 
-fn spawn_hydration_worker(
-    generation: u64,
-    target: PathBuf,
-    keys: Vec<ViewHydrationKey>,
-    reader: Arc<dyn ViewArtifactReader>,
-    tx: SyncSender<ViewHydrationMessage>,
-    wake: Option<TerminalLoopWake>,
-) -> JoinHandle<()> {
-    std::thread::spawn(move || {
-        for key in keys {
-            let message = hydration_message(generation, &target, key, reader.as_ref());
-            if tx.send(message).is_err() {
-                return;
-            }
-            if let Some(wake) = wake.as_ref() {
-                wake.notify();
-            }
-        }
-    })
-}
-
-fn hydration_message(
-    generation: u64,
-    target: &Path,
-    key: ViewHydrationKey,
-    reader: &dyn ViewArtifactReader,
-) -> ViewHydrationMessage {
-    match caught_read(reader, target, &key) {
-        Ok(value) => ViewHydrationMessage::Result {
-            generation,
-            result: ViewHydrationResult {
-                target: target.to_path_buf(),
-                key,
-                value,
-            },
-        },
-        Err(()) => ViewHydrationMessage::Failed {
-            generation,
-            target: target.to_path_buf(),
-            key,
-        },
-    }
-}
-
 fn caught_read(
     reader: &dyn ViewArtifactReader,
     target: &Path,
     key: &ViewHydrationKey,
-) -> Result<ViewHydrationValue, ()> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.read(target, key)))
-        .map_err(|_| ())
+    cancellation: &ViewHydrationCancellation,
+) -> Result<Option<ViewHydrationValue>, ()> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        reader.read_cancellable(target, key, cancellation)
+    }))
+    .map_err(|_| ())
 }
 
 fn collect_panicked_batch_failures(

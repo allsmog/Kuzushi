@@ -9,6 +9,38 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
+    fn langgraph_triage_cost_distinguishes_unpriced_estimate_from_reported_zero() {
+        let structured = || {
+            Some(serde_json::json!({
+                "verdict": "true_positive",
+                "confidence": 0.8,
+                "rationale": "reachable"
+            }))
+        };
+        let unpriced = crate::langgraph_runtime::triage_outcome_from_response(
+            kuzushi_core::AgentQueryResponse {
+                structured: structured(),
+                estimated_cost_usd: Some(0.25),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let reported_zero = crate::langgraph_runtime::triage_outcome_from_response(
+            kuzushi_core::AgentQueryResponse {
+                structured: structured(),
+                cost_usd_reported: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(unpriced.cost_usd, 0.0);
+        assert!(!unpriced.cost_usd_exact);
+        assert_eq!(reported_zero.cost_usd, 0.0);
+        assert!(reported_zero.cost_usd_exact);
+    }
+
+    #[test]
     fn uses_configured_bridge_command() {
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,

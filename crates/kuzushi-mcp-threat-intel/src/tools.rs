@@ -2,18 +2,29 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use kuzushi_mcp_common::{Tool, ToolHandler, ToolRegistry};
+use kuzushi_mcp_common::{ReadRootCapability, Tool, ToolHandler, ToolRegistry};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::path::Path;
 
 pub(crate) const ARTIFACT_ENV: &str = "KUZUSHI_MCP_THREAT_INTEL_ARTIFACT";
+const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 
-pub(crate) fn build_registry() -> ToolRegistry {
+pub(crate) fn build_registry() -> Result<ToolRegistry> {
+    Ok(build_registry_with_capability(
+        ReadRootCapability::from_environment()?,
+    ))
+}
+
+fn build_registry_with_capability(read_capability: ReadRootCapability) -> ToolRegistry {
     ToolRegistry::new()
-        .register(candidates_descriptor(), CandidatesHandler)
+        .register(
+            candidates_descriptor(),
+            CandidatesHandler(read_capability.clone()),
+        )
         .register(
             packages_by_ecosystem_descriptor(),
-            PackagesByEcosystemHandler,
+            PackagesByEcosystemHandler(read_capability),
         )
 }
 
@@ -38,13 +49,13 @@ fn packages_by_ecosystem_descriptor() -> Tool {
     }
 }
 
-struct CandidatesHandler;
-struct PackagesByEcosystemHandler;
+struct CandidatesHandler(ReadRootCapability);
+struct PackagesByEcosystemHandler(ReadRootCapability);
 
 #[async_trait]
 impl ToolHandler for CandidatesHandler {
     async fn call(&self, _args: Value) -> Result<Value> {
-        load_artifact()
+        load_artifact(&self.0)
     }
 }
 
@@ -55,7 +66,7 @@ impl ToolHandler for PackagesByEcosystemHandler {
             .get("ecosystem")
             .and_then(Value::as_str)
             .map(str::to_string);
-        let artifact = load_artifact()?;
+        let artifact = load_artifact(&self.0)?;
         let packages = artifact
             .get("packages")
             .and_then(Value::as_array)
@@ -88,14 +99,15 @@ impl ToolHandler for PackagesByEcosystemHandler {
     }
 }
 
-pub(crate) fn load_artifact() -> Result<Value> {
+pub(crate) fn load_artifact(read_capability: &ReadRootCapability) -> Result<Value> {
     let path = std::env::var(ARTIFACT_ENV).with_context(|| {
         format!(
             "{ARTIFACT_ENV} is unset — the bridge should set it to the absolute path of \
              .kuzushi/threat-intel/candidates.json before attaching this MCP."
         )
     })?;
-    let body = std::fs::read_to_string(&path)
+    let body = read_capability
+        .read_utf8(Path::new(&path), MAX_ARTIFACT_BYTES)
         .with_context(|| format!("reading threat-intel artifact at {path}"))?;
     serde_json::from_str(&body)
         .with_context(|| format!("parsing threat-intel candidates at {path}"))
@@ -122,13 +134,13 @@ mod tests {
         )
         .unwrap();
         std::env::set_var(ARTIFACT_ENV, &path);
-        let all = PackagesByEcosystemHandler.call(json!({})).await.unwrap();
+        let handler = PackagesByEcosystemHandler(
+            ReadRootCapability::new([tmp.path().to_path_buf()]).unwrap(),
+        );
+        let all = handler.call(json!({})).await.unwrap();
         let groups = all["groups"].as_array().unwrap();
         assert_eq!(groups.len(), 2);
-        let npm = PackagesByEcosystemHandler
-            .call(json!({"ecosystem": "npm"}))
-            .await
-            .unwrap();
+        let npm = handler.call(json!({"ecosystem": "npm"})).await.unwrap();
         assert_eq!(npm["total"], 2);
         std::env::remove_var(ARTIFACT_ENV);
     }

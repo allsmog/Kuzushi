@@ -66,6 +66,10 @@ impl LiveTraceBudget {
             });
     }
 
+    pub(crate) fn take_dropped_live(&self) -> usize {
+        self.dropped_live.swap(0, Ordering::AcqRel)
+    }
+
     #[cfg(test)]
     pub(crate) fn reserve_for_test(&self) -> bool {
         self.try_reserve()

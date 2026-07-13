@@ -38,7 +38,9 @@ export function createMockRunArtifactStore(
     if (typeof name !== "string" || name.length === 0) {
       throw new Error("RunArtifactStore: name must be a non-empty string");
     }
-    if (name.startsWith("/") || name.includes("..")) {
+    const segments = name.split(/[\\/]/);
+    const absolute = name.startsWith("/") || name.startsWith("\\") || /^[A-Za-z]:[\\/]/.test(name);
+    if (absolute || segments.includes("..")) {
       throw new Error(`RunArtifactStore: name "${name}" escapes module run dir`);
     }
     return `${root}/${name}`;

@@ -1,4 +1,4 @@
-use super::{cost_model, format_session_cost};
+use super::{context_snapshot_state, cost_model, format_session_cost};
 use crate::{
     app::PathState, HealthFooter, HealthSnapshot, HealthStatus, ShellApp, ViewDataState,
     ViewHealthChecks,
@@ -10,6 +10,7 @@ pub(crate) enum HealthTone {
     Pass,
     Warn,
     Fail,
+    Pending,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +33,7 @@ pub(crate) struct HealthModel {
 pub(crate) struct HealthDisplayModel {
     pub(crate) status: HealthStatus,
     pub(crate) body_rows: Vec<String>,
+    pub(crate) summary: String,
     pub(crate) footer: HealthFooter,
 }
 
@@ -62,9 +64,11 @@ pub(crate) fn health_display_model(app: &ShellApp) -> HealthDisplayModel {
 
 impl From<HealthSnapshot> for HealthDisplayModel {
     fn from(snapshot: HealthSnapshot) -> Self {
+        let summary = snapshot.footer.stage.clone();
         Self {
             status: snapshot.status,
             body_rows: snapshot.body_rows,
+            summary,
             footer: snapshot.footer,
         }
     }
@@ -75,6 +79,7 @@ fn default_health_display_model(app: &ShellApp) -> HealthDisplayModel {
     HealthDisplayModel {
         status: default_status(app),
         body_rows: default_body_rows(&model),
+        summary: model.summary.clone(),
         footer: default_footer(app, &model),
     }
 }
@@ -85,7 +90,7 @@ fn default_status(app: &ShellApp) -> HealthStatus {
             .target()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "none".to_string()),
-        ctx: "live".to_string(),
+        ctx: health_context_label(context_snapshot_state(app)).to_string(),
         model: app
             .config()
             .model
@@ -93,6 +98,14 @@ fn default_status(app: &ShellApp) -> HealthStatus {
             .unwrap_or_else(|| "unconfigured".to_string()),
         module: "doctor".to_string(),
         cost: default_cost(app),
+    }
+}
+
+fn health_context_label(state: &str) -> &'static str {
+    match state {
+        "present" => "✓ built",
+        "malformed" => "! malformed",
+        _ => "not built",
     }
 }
 
@@ -110,9 +123,6 @@ fn default_body_rows(model: &HealthModel) -> Vec<String> {
         " -- CURRENT PREFLIGHT".to_string(),
     ];
     rows.extend(model.rows.iter().map(default_check_row));
-    rows.push(String::new());
-    rows.push(" -- SUMMARY".to_string());
-    rows.push(format!("   {}", model.summary));
     rows
 }
 
@@ -140,6 +150,7 @@ fn health_symbol(tone: HealthTone) -> &'static str {
         HealthTone::Pass => "✓",
         HealthTone::Warn => "!",
         HealthTone::Fail => "✗",
+        HealthTone::Pending => "…",
     }
 }
 
@@ -339,7 +350,7 @@ fn cached_path_state(app: &ShellApp, path: &Path) -> PathState {
 
 fn loading_health_row(check: &'static str) -> HealthRow {
     health_row(
-        HealthTone::Warn,
+        HealthTone::Pending,
         check,
         "check loading",
         "wait for health refresh",
@@ -347,6 +358,9 @@ fn loading_health_row(check: &'static str) -> HealthRow {
 }
 
 fn health_summary(rows: &[HealthRow]) -> String {
+    if rows.iter().any(|row| row.tone == HealthTone::Pending) {
+        return "health checks loading".to_string();
+    }
     let fail = rows
         .iter()
         .filter(|row| row.tone == HealthTone::Fail)
@@ -381,5 +395,9 @@ fn health_status(tone: HealthTone) -> &'static str {
         HealthTone::Pass => "pass",
         HealthTone::Warn => "warn",
         HealthTone::Fail => "fail",
+        HealthTone::Pending => "loading",
     }
 }
+
+#[cfg(test)]
+mod tests;

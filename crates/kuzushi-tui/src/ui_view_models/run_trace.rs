@@ -1,16 +1,19 @@
 use crate::{
     app::{RunTraceCacheState, ViewDataState},
-    ShellApp,
+    ReconSnapshot, ShellApp,
 };
 use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
 use kuzushi_core::{RunArtifactRead, RunArtifactTextRead, RunTraceStep};
 
 const RUN_TRIAGE_FILE: &str = "triage.jsonl";
 const RUN_VERIFY_FILE: &str = "verify.jsonl";
+const RUN_PATCH_FILE: &str = "patch.jsonl";
+const RUN_RESULT_FILE: &str = "result.json";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AliasReferenceModel {
     pub(crate) rows: Vec<AliasReferenceRow>,
+    pub(crate) overflow_count: usize,
     pub(crate) empty_message: &'static str,
 }
 
@@ -25,6 +28,7 @@ pub(crate) struct ReplayModel {
     pub(crate) run_id: String,
     pub(crate) artifacts: Vec<RunArtifactDetail>,
     pub(crate) metadata_missing: bool,
+    pub(crate) recon: Option<ReconSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,6 +43,7 @@ pub(crate) struct TraceModel {
 pub(crate) struct RunArtifactDetail {
     pub(crate) label: &'static str,
     pub(crate) detail: String,
+    display_state: RunArtifactDisplayState,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,19 +62,38 @@ pub(crate) struct TraceStep {
 
 pub(crate) fn replay_model(app: &ShellApp, run_id: &str) -> ReplayModel {
     let metadata = run_metadata_artifact_detail(app, run_id);
+    let result = run_artifact_detail(app, run_id, "result", RUN_RESULT_FILE);
     let triage = run_artifact_detail(app, run_id, "triage", RUN_TRIAGE_FILE);
     let metadata_missing = metadata.artifact_state() == RunArtifactState::Missing;
     ReplayModel {
         run_id: run_id.to_string(),
         metadata_missing,
-        artifacts: vec![metadata.into_display(), triage.into_display()],
+        artifacts: vec![
+            metadata.into_display(),
+            result.into_display(),
+            triage.into_display(),
+        ],
+        recon: replay_recon_snapshot(app, run_id),
     }
+}
+
+fn replay_recon_snapshot(app: &ShellApp, run_id: &str) -> Option<ReconSnapshot> {
+    let ViewDataState::Ready(RunArtifactRead::Ready { value, .. }) =
+        cached_artifact_text(app, run_id, RUN_RESULT_FILE)
+    else {
+        return None;
+    };
+    serde_json::from_str(&value)
+        .ok()
+        .and_then(|result| crate::app::recon_snapshot_from_result(&result))
+        .filter(ReconSnapshot::has_evidence)
 }
 
 pub(crate) fn trace_model(app: &ShellApp, run_id: &str) -> TraceModel {
     let trace = run_artifact_detail(app, run_id, "trace", run_trace_artifact_leaf());
     let triage = run_artifact_detail(app, run_id, "triage", RUN_TRIAGE_FILE);
     let verify = run_artifact_detail(app, run_id, "verify", RUN_VERIFY_FILE);
+    let patch = run_artifact_detail(app, run_id, "patch", RUN_PATCH_FILE);
     let trace_exists = trace.artifact_state() == RunArtifactState::File;
     TraceModel {
         run_id: run_id.to_string(),
@@ -79,13 +103,16 @@ pub(crate) fn trace_model(app: &ShellApp, run_id: &str) -> TraceModel {
             trace.into_display(),
             triage.into_display(),
             verify.into_display(),
+            patch.into_display(),
         ],
     }
 }
 
 pub(crate) fn alias_reference_model(app: &ShellApp) -> AliasReferenceModel {
+    let aliases = super::findings::cached_sorted_finding_alias_indices(app);
+    let overflow_count = aliases.len().saturating_sub(3);
     AliasReferenceModel {
-        rows: super::findings::cached_sorted_finding_alias_indices(app)
+        rows: aliases
             .into_iter()
             .take(3)
             .filter_map(|(alias, index)| {
@@ -100,6 +127,7 @@ pub(crate) fn alias_reference_model(app: &ShellApp) -> AliasReferenceModel {
                 })
             })
             .collect(),
+        overflow_count,
         empty_message: "aliases: load findings first with findings",
     }
 }
@@ -259,6 +287,29 @@ enum RunArtifactState {
     Loading,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunArtifactDisplayState {
+    Ready,
+    Malformed,
+    Invalid,
+    Missing,
+    NonFile,
+    Loading,
+}
+
+impl RunArtifactDetail {
+    pub(crate) fn state_label(&self) -> Option<&'static str> {
+        match self.display_state {
+            RunArtifactDisplayState::Ready => None,
+            RunArtifactDisplayState::Malformed => Some("MALFORMED"),
+            RunArtifactDisplayState::Invalid => Some("INVALID"),
+            RunArtifactDisplayState::Missing => Some("MISSING"),
+            RunArtifactDisplayState::NonFile => Some("NOT A FILE"),
+            RunArtifactDisplayState::Loading => Some("LOADING"),
+        }
+    }
+}
+
 impl RunArtifactPath {
     fn artifact_state(&self) -> RunArtifactState {
         artifact_state(&self.state)
@@ -267,23 +318,24 @@ impl RunArtifactPath {
     fn into_display(self) -> RunArtifactDetail {
         let display = match &self.state {
             ViewDataState::Ready(state) => state.display_path(),
-            ViewDataState::NotRequested | ViewDataState::Loading => "loading".to_string(),
+            ViewDataState::NotRequested | ViewDataState::Loading => "artifact metadata".to_string(),
         };
-        let detail = match artifact_state(&self.state) {
+        let display_state = match artifact_state(&self.state) {
             RunArtifactState::File
                 if self.label == "metadata" && metadata_json_malformed(&self.state) =>
             {
-                format!("{display} (malformed)")
+                RunArtifactDisplayState::Malformed
             }
-            RunArtifactState::File => display,
-            RunArtifactState::Invalid => format!("{display} (invalid)"),
-            RunArtifactState::Missing => format!("{display} (missing)"),
-            RunArtifactState::NonFile => format!("{display} (not a file)"),
-            RunArtifactState::Loading => "loading artifact metadata".to_string(),
+            RunArtifactState::File => RunArtifactDisplayState::Ready,
+            RunArtifactState::Invalid => RunArtifactDisplayState::Invalid,
+            RunArtifactState::Missing => RunArtifactDisplayState::Missing,
+            RunArtifactState::NonFile => RunArtifactDisplayState::NonFile,
+            RunArtifactState::Loading => RunArtifactDisplayState::Loading,
         };
         RunArtifactDetail {
             label: self.label,
-            detail,
+            detail: display,
+            display_state,
         }
     }
 }
@@ -337,9 +389,9 @@ mod tests {
         let model = alias_reference_model(&app);
 
         assert_eq!(model.rows.len(), 3);
+        assert_eq!(model.overflow_count, 1);
         assert_eq!(model.rows[0].alias, "F-0001");
         assert_eq!(model.rows[0].detail, "aaaa1111 first");
-        assert!(model.rows.iter().all(|row| !row.detail.contains("hidden")));
     }
 
     #[test]
@@ -349,6 +401,7 @@ mod tests {
         let model = alias_reference_model(&app);
 
         assert!(model.rows.is_empty());
+        assert_eq!(model.overflow_count, 0);
         assert_eq!(
             model.empty_message,
             "aliases: load findings first with findings"
@@ -369,7 +422,11 @@ mod tests {
         assert!(model
             .artifacts
             .iter()
-            .all(|artifact| artifact.detail == "<unsafe run artifact path> (invalid)"));
+            .all(|artifact| artifact.detail == "<unsafe run artifact path>"));
+        assert!(model
+            .artifacts
+            .iter()
+            .all(|artifact| artifact.state_label() == Some("INVALID")));
     }
 
     #[test]
@@ -381,6 +438,9 @@ mod tests {
                 label: "query".to_string(),
                 latency_ms: Some(25),
                 cost_usd: Some(0.02),
+                observed_cost_usd: None,
+                provider_spend_unresolved: false,
+                call_attempted: None,
                 module_id: Some("triage".to_string()),
                 verb: Some("run".to_string()),
                 parent_step: Some(7),
@@ -425,7 +485,8 @@ mod tests {
 
         assert!(!model.metadata_missing);
         assert_eq!(model.artifacts[0].label, "metadata");
-        assert!(model.artifacts[0].detail.ends_with("run.json (not a file)"));
+        assert!(model.artifacts[0].detail.ends_with("run.json"));
+        assert_eq!(model.artifacts[0].state_label(), Some("NOT A FILE"));
     }
 
     #[test]
@@ -442,7 +503,8 @@ mod tests {
 
         assert!(!model.metadata_missing);
         assert_eq!(model.artifacts[0].label, "metadata");
-        assert!(model.artifacts[0].detail.ends_with("run.json (malformed)"));
+        assert!(model.artifacts[0].detail.ends_with("run.json"));
+        assert_eq!(model.artifacts[0].state_label(), Some("MALFORMED"));
     }
 
     #[test]
@@ -459,7 +521,8 @@ mod tests {
 
         assert!(!model.metadata_missing);
         assert_eq!(model.artifacts[0].label, "metadata");
-        assert!(model.artifacts[0].detail.ends_with("run.json (malformed)"));
+        assert!(model.artifacts[0].detail.ends_with("run.json"));
+        assert_eq!(model.artifacts[0].state_label(), Some("MALFORMED"));
     }
 
     #[test]
@@ -475,9 +538,8 @@ mod tests {
 
         assert!(!model.trace_exists);
         assert_eq!(model.artifacts[0].label, "trace");
-        assert!(model.artifacts[0]
-            .detail
-            .ends_with("trace.jsonl (not a file)"));
+        assert!(model.artifacts[0].detail.ends_with("trace.jsonl"));
+        assert_eq!(model.artifacts[0].state_label(), Some("NOT A FILE"));
         assert_eq!(model.steps.len(), 1);
         assert_eq!(model.steps[0].label, "trace artifact path is not a file");
     }

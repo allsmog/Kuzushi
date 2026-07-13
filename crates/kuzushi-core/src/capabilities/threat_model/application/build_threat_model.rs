@@ -39,7 +39,7 @@ fn build_agentic_threat_model(
         artifacts.persisted,
     );
     emit_threat_model_done(ctx, verb, flavor, &summary);
-    Ok(threat_model_response(
+    threat_model_response(
         input,
         flavor,
         generated,
@@ -48,7 +48,7 @@ fn build_agentic_threat_model(
         summary,
         lines,
         source_bundle,
-    ))
+    )
 }
 
 fn take_threat_model_findings(
@@ -128,7 +128,8 @@ fn explicit_prompt_override_requested(input: &Value, ctx: &ToolExecutionContext<
     let Some(prompt) = read_string(input, &["THREAT_MODEL_PROMPT"]) else {
         return false;
     };
-    !prompt_matches_workspace_default_prompt(input, ctx, &prompt)
+    !prompt_text_matches(DEFAULT_THREAT_MODEL_GUIDANCE, &prompt)
+        && !prompt_matches_workspace_default_prompt(input, ctx, &prompt)
 }
 
 fn prompt_matches_workspace_default_prompt(
@@ -144,8 +145,19 @@ fn prompt_matches_workspace_default_prompt(
         return false;
     };
     let path = crate::options::prompt_override_path(&target, "threat-model", "build");
-    crate::bounded_file::read_utf8_text(&path, MAX_SOURCE_BYTES)
-        .is_ok_and(|content| prompt_text_matches(&content, prompt))
+    let Ok(content) = crate::bounded_file::read_utf8_text(&path, MAX_SOURCE_BYTES) else {
+        return false;
+    };
+    if prompt_text_matches(&content, prompt) {
+        return true;
+    }
+    let relative = crate::options::relative_prompt_override_path("threat-model", "build");
+    let composed = crate::prompts::compose_target_prompt_context(
+        DEFAULT_THREAT_MODEL_GUIDANCE,
+        &relative.display().to_string(),
+        &content,
+    );
+    prompt_text_matches(&composed, prompt)
 }
 
 fn prompt_text_matches(file_content: &str, prompt: &str) -> bool {
@@ -230,6 +242,7 @@ struct GeneratedThreatModel {
     document: Value,
     bridge_findings: Option<Vec<Value>>,
     cost_usd: f64,
+    cost_usd_exact: bool,
 }
 
 fn generate_threat_model_document(
@@ -244,6 +257,7 @@ fn generate_threat_model_document(
     let costed = query_threat_model_document(runtime, ctx, flavor, verb, input, prompt)?;
     let mut generated = normalize_threat_model_raw(costed.value, &input.methodology)?;
     generated.cost_usd = costed.cost_usd;
+    generated.cost_usd_exact = costed.cost_usd_exact;
     emit_validation_done(ctx, verb);
     Ok(generated)
 }
@@ -311,6 +325,7 @@ fn normalize_threat_model_raw(raw: Value, methodology: &str) -> Result<Generated
         document,
         bridge_findings,
         cost_usd: 0.0,
+        cost_usd_exact: true,
     })
 }
 
@@ -365,7 +380,7 @@ fn threat_model_response(
     summary: ThreatModelSummary,
     mut lines: Vec<String>,
     source_bundle: ThreatModelSourceBundle,
-) -> Value {
+) -> Result<Value> {
     append_top_threats(&mut lines, &generated.document);
     let persistent_artifact = persistent_threat_model_path(&input.target);
     let artifact_items = threat_model_artifacts(
@@ -373,25 +388,62 @@ fn threat_model_response(
         &persistent_artifact,
         artifacts.persisted,
     );
-    json!({
+    let cost = generated_threat_model_cost(&generated)?;
+    let data = threat_model_result_data(
+        input,
+        flavor,
+        generated,
+        artifacts,
+        findings,
+        source_bundle,
+        persistent_artifact,
+    );
+    let mut result = json!({
         "ok": summary.threat_count > 0 || summary.node_count > 0 || summary.flow_count > 0,
         "output": lines.join("\n"),
         "artifacts": artifact_items,
-        "data": {
-            "target": input.target.display().to_string(),
-            "repoName": input.repo_name,
-            "artifactDir": input.output_dir,
-            "normalizedArtifact": artifacts.normalized_artifact.display().to_string(),
-            "threatModelPath": persistent_artifact.display().to_string(),
-            "provider": flavor.provider(),
-            "methodology": input.methodology,
-            "slice": input.slice,
-            "stages": input.stages,
-            "sources": source_bundle.metadata_json(),
-            "document": generated.document,
-            "findings": findings,
-            "persisted": artifacts.persisted,
-        },
-        "costUsd": generated.cost_usd,
+        "data": data,
+    });
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
+    Ok(result)
+}
+
+fn generated_threat_model_cost(
+    generated: &GeneratedThreatModel,
+) -> Result<crate::runtime::RuntimeCostReport> {
+    let observed = crate::runtime::RuntimeCost::from_usd(
+        generated.cost_usd,
+        "threat-model generated cost",
+    )?;
+    Ok(if generated.cost_usd_exact {
+        crate::runtime::RuntimeCostReport::known(observed)
+    } else {
+        crate::runtime::RuntimeCostReport::incomplete(observed)
+    })
+}
+
+fn threat_model_result_data(
+    input: BuildInput,
+    flavor: BuildFlavor,
+    generated: GeneratedThreatModel,
+    artifacts: ThreatModelArtifacts,
+    findings: Vec<Value>,
+    source_bundle: ThreatModelSourceBundle,
+    persistent_artifact: PathBuf,
+) -> Value {
+    json!({
+        "target": input.target.display().to_string(),
+        "repoName": input.repo_name,
+        "artifactDir": input.output_dir,
+        "normalizedArtifact": artifacts.normalized_artifact.display().to_string(),
+        "threatModelPath": persistent_artifact.display().to_string(),
+        "provider": flavor.provider(),
+        "methodology": input.methodology,
+        "slice": input.slice,
+        "stages": input.stages,
+        "sources": source_bundle.metadata_json(),
+        "document": generated.document,
+        "findings": findings,
+        "persisted": artifacts.persisted,
     })
 }

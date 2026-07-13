@@ -7,8 +7,20 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         ShellView::ModuleRun => Some(module_run_keybindings(app)),
         ShellView::PromptsEditor => Some(prompts_editor_keybindings(app)),
         ShellView::AgentChat => Some(agent_chat_keybindings(app)),
+        ShellView::Activity => Some(activity_keybindings(app)),
         _ => None,
     }
+}
+
+fn activity_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    bindings.extend([
+        bind("scan", "start scan"),
+        bind("run <tool>", "launch tool"),
+        bind("jobs", "run control"),
+    ]);
+    bindings
 }
 
 fn threat_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {

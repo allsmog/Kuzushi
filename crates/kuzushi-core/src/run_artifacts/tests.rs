@@ -5,6 +5,7 @@ mod tests {
         CANONICAL_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS, SCAN_PIPELINE_ARTIFACTS,
         TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
     };
+    use crate::runtime::{RuntimeCost, RuntimeCostReport};
     use std::fs;
     use std::io::Write;
     use std::path::Path;
@@ -494,6 +495,56 @@ mod tests {
         .unwrap();
 
         assert_eq!(next_run_trace_step_number(tmp.path(), run_id), 3);
+    }
+
+    #[test]
+    fn trace_append_paths_reject_invalid_cost_before_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (index, invalid) in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
+            .into_iter()
+            .enumerate()
+        {
+            let direct_id = format!("invalid-trace-direct-{index}");
+            let numbered_id = format!("invalid-trace-numbered-{index}");
+            let step = RunTraceStep::new(1, "reasoning", "invalid").with_cost_usd(Some(invalid));
+
+            assert!(append_run_trace_step(tmp.path(), &direct_id, &step).is_err());
+            assert!(
+                append_run_trace_step_with_next_number(tmp.path(), &numbered_id, &step).is_err()
+            );
+            assert!(!run_artifact_path(tmp.path(), &direct_id, "trace.jsonl").exists());
+            assert!(!run_artifact_path(tmp.path(), &numbered_id, "trace.jsonl").exists());
+        }
+    }
+
+    #[test]
+    fn trace_loaders_count_negative_cost_as_malformed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-invalid-trace-cost";
+        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
+        fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
+        fs::write(
+            &trace_path,
+            [
+                r#"{"n":1,"kind":"reasoning","label":"invalid","cost_usd":-1.0,"latency_ms":1,"model":"m","provider":"p","prompt_hash":"h"}"#,
+                r#"{"n":2,"kind":"reasoning","label":"valid","cost_usd":0.0,"latency_ms":1,"model":"m","provider":"p","prompt_hash":"h"}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        let trace = load_run_trace(tmp.path(), run_id).unwrap();
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", None, "target").complete(),
+        )
+        .unwrap();
+        let summary = load_run_summary(tmp.path(), run_id).unwrap();
+
+        assert_eq!(trace.steps.len(), 1);
+        assert_eq!(trace.malformed_lines, 1);
+        assert_eq!(summary.llm_calls.len(), 1);
+        assert_eq!(summary.trace_malformed_lines, Some(1));
     }
 
     #[test]
@@ -1431,6 +1482,143 @@ mod tests {
     }
 
     #[test]
+    fn terminal_receipt_replaces_profile_model_with_models_toml_role_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi")).unwrap();
+        fs::write(
+            home.join(".kuzushi/models.toml"),
+            "[roles.deep_auditor]\nprimary = \"anthropic:claude-opus-4-7\"\n",
+        )
+        .unwrap();
+        let router = crate::agent_router::AgentRouter::load(&crate::config::ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+        let routed = receipt_routed_runtime(router, None);
+        let actual = routed
+            .resolve_model_for_role(crate::agent_router::AgentRole::DeepAuditor, 0, None)
+            .unwrap();
+
+        complete_run_with_observed_models(
+            tmp.path(),
+            "tool-models-toml",
+            "openai:profile-default",
+            &[actual.as_str()],
+        );
+
+        let summary = load_run_summary(tmp.path(), "tool-models-toml").unwrap();
+        assert_eq!(summary.model.as_deref(), Some("anthropic:claude-opus-4-7"));
+        assert_eq!(summary.llm_calls[0].model, "anthropic:claude-opus-4-7");
+    }
+
+    #[test]
+    fn terminal_receipt_replaces_profile_model_with_role_option_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut options = crate::options::ToolOptionStore::new();
+        options.set_value(
+            crate::options::OptionScope::Global,
+            crate::options::OptionTarget::All,
+            "MODEL_DEEP_AUDITOR",
+            serde_json::json!("openai:setg-deep-auditor"),
+        );
+        let routed =
+            receipt_routed_runtime(crate::agent_router::AgentRouter::empty(), Some(&options));
+        let actual = routed
+            .resolve_model_for_role(crate::agent_router::AgentRole::DeepAuditor, 0, None)
+            .unwrap();
+
+        complete_run_with_observed_models(
+            tmp.path(),
+            "tool-model-option",
+            "openai:profile-default",
+            &[actual.as_str()],
+        );
+
+        let summary = load_run_summary(tmp.path(), "tool-model-option").unwrap();
+        assert_eq!(summary.model.as_deref(), Some("openai:setg-deep-auditor"));
+        assert_eq!(summary.llm_calls[0].model, "openai:setg-deep-auditor");
+    }
+
+    #[test]
+    fn multi_model_receipt_uses_llm_calls_instead_of_claiming_one_primary_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        complete_run_with_observed_models(
+            tmp.path(),
+            "tool-multi-model",
+            "openai:profile-default",
+            &["openai:triage", "anthropic:deep-auditor"],
+        );
+
+        let summary = load_run_summary(tmp.path(), "tool-multi-model").unwrap();
+        assert_eq!(summary.model, None);
+        assert_eq!(
+            summary
+                .llm_calls
+                .iter()
+                .map(|call| call.model.as_str())
+                .collect::<Vec<_>>(),
+            vec!["openai:triage", "anthropic:deep-auditor"]
+        );
+    }
+
+    struct ReceiptNoopRuntime;
+
+    impl crate::runtime::AgentRuntime for ReceiptNoopRuntime {
+        fn triage_finding_blocking(
+            &self,
+            _request: crate::runtime::TriageRequest,
+        ) -> anyhow::Result<crate::findings::TriageOutcome> {
+            anyhow::bail!("unused receipt test runtime")
+        }
+    }
+
+    fn receipt_routed_runtime(
+        router: crate::agent_router::AgentRouter,
+        options: Option<&crate::options::ToolOptionStore>,
+    ) -> crate::agent_router::RoutedRuntime<'static> {
+        let routed = crate::agent_router::RoutedRuntime::new(
+            Arc::new(ReceiptNoopRuntime),
+            Arc::new(router),
+            Some("openai:profile-default".to_string()),
+        );
+        match options {
+            Some(options) => routed.with_option_store(options),
+            None => routed,
+        }
+    }
+
+    fn complete_run_with_observed_models(
+        target: &Path,
+        run_id: &str,
+        predicted_model: &str,
+        observed_models: &[&str],
+    ) {
+        let record = ToolRunRecord::new(target, run_id, "tool", "deep-audit:run");
+        record_tool_run_started_with_metadata(
+            record,
+            &serde_json::json!({}),
+            Some(predicted_model.to_string()),
+            None,
+        );
+        for (index, model) in observed_models.iter().enumerate() {
+            append_run_trace_step(
+                target,
+                run_id,
+                &RunTraceStep::new(index + 1, "reasoning", "role-routed model call")
+                    .with_model_metadata(
+                        *model,
+                        crate::runtime::model_provider(model),
+                        format!("fnv1a64:receipt-{index}"),
+                    ),
+            )
+            .unwrap();
+        }
+        record_tool_run_complete(record, &serde_json::json!({"status": "completed"}));
+    }
+
+    #[test]
     fn summary_survives_torn_write_leftover_and_next_read_recovers() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-torn-write";
@@ -1498,6 +1686,21 @@ mod tests {
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)
+    }
+
+    fn assert_git_status_clean(target: &Path, operation: &str) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(target)
+            .args(["status", "--porcelain", "--untracked-files=all"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git status failed for {operation}");
+        assert!(
+            output.stdout.is_empty(),
+            "{operation} dirtied fresh repository: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
 
     #[test]
@@ -3095,6 +3298,146 @@ mod tests {
         assert!(report.contains("Status: canceled"));
     }
 
+    #[test]
+    fn invalid_summary_cost_cannot_replace_prior_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-summary-invalid-cost";
+        let valid = RunSummary::running(run_id, "tool", None, "target").with_cost(Some(0.25));
+        write_run_summary(tmp.path(), &valid).unwrap();
+
+        for invalid in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let error = write_run_summary(tmp.path(), &valid.clone().with_cost(Some(invalid)))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("finite non-negative"), "{error}");
+            assert_eq!(
+                load_run_summary(tmp.path(), run_id).unwrap().cost_usd,
+                Some(0.25)
+            );
+        }
+
+        let mut contradictory = valid.clone().with_cost(None);
+        contradictory.observed_cost_usd = Some(0.1);
+        assert!(write_run_summary(tmp.path(), &contradictory).is_err());
+        contradictory.provider_spend_unresolved = true;
+        contradictory.cost_usd = Some(0.2);
+        assert!(write_run_summary(tmp.path(), &contradictory).is_err());
+    }
+
+    #[test]
+    fn invalid_llm_call_cost_is_rejected_before_summary_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-summary-invalid-llm-cost";
+        let mut summary = RunSummary::running(run_id, "tool", None, "target");
+        summary.llm_calls.push(RunLlmCallAudit {
+            n: 1,
+            kind: "reasoning".to_string(),
+            verb: None,
+            model: "openai:gpt-test".to_string(),
+            provider: "openai".to_string(),
+            prompt_hash: "hash".to_string(),
+            latency_ms: Some(1),
+            cost_usd: Some(-1.0),
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
+            call_attempted: Some(true),
+        });
+
+        assert!(write_run_summary(tmp.path(), &summary).is_err());
+        assert!(!run_artifact_path(tmp.path(), run_id, "run.json").exists());
+    }
+
+    #[test]
+    fn explicitly_unattempted_llm_call_cannot_carry_spend() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-summary-unattempted-spend";
+        let mut summary = RunSummary::running(run_id, "tool", None, "target");
+        let mut call = valid_llm_call(Some(0.1));
+        call.call_attempted = Some(false);
+        summary.llm_calls.push(call);
+
+        let error = write_run_summary(tmp.path(), &summary)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("explicitly unattempted"), "{error}");
+        assert!(!run_artifact_path(tmp.path(), run_id, "run.json").exists());
+    }
+
+    #[test]
+    fn invalid_on_disk_summary_and_llm_costs_are_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (run_id, pointer) in [
+            ("invalid-summary-disk", "/costUsd"),
+            ("invalid-llm-disk", "/llmCalls/0/costUsd"),
+        ] {
+            let mut summary = RunSummary::running(run_id, "tool", None, "target");
+            summary.llm_calls.push(valid_llm_call(Some(0.0)));
+            let mut value = serde_json::to_value(summary).unwrap();
+            if pointer == "/costUsd" {
+                value
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("costUsd".to_string(), serde_json::json!(-1.0));
+            } else {
+                *value.pointer_mut(pointer).unwrap() = serde_json::json!(-1.0);
+            }
+            let path = run_artifact_path(tmp.path(), run_id, "run.json");
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, serde_json::to_vec(&value).unwrap()).unwrap();
+
+            assert!(load_run_summary(tmp.path(), run_id).is_err());
+        }
+    }
+
+    #[test]
+    fn summary_cost_preserves_unavailable_exact_zero_and_incomplete_observed() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (run_id, cost) in [
+            ("summary-cost-absent", None),
+            ("summary-cost-zero", Some(0.0)),
+        ] {
+            write_run_summary(
+                tmp.path(),
+                &RunSummary::running(run_id, "tool", None, "target").with_cost(cost),
+            )
+            .unwrap();
+            assert_eq!(load_run_summary(tmp.path(), run_id).unwrap().cost_usd, cost);
+        }
+
+        let observed = RuntimeCost::from_usd(0.125, "test observed cost").unwrap();
+        let incomplete = RunSummary::running("summary-cost-incomplete", "tool", None, "target")
+            .with_cost_report(RuntimeCostReport::incomplete(observed));
+        write_run_summary(tmp.path(), &incomplete).unwrap();
+        let loaded = load_run_summary(tmp.path(), "summary-cost-incomplete").unwrap();
+        assert_eq!(loaded.cost_usd, None);
+        assert_eq!(loaded.observed_cost_usd, Some(0.125));
+        assert!(loaded.provider_spend_unresolved);
+        assert_eq!(
+            loaded
+                .checked_cost_report()
+                .unwrap()
+                .observed_usd_if_available(),
+            Some(0.125)
+        );
+    }
+
+    fn valid_llm_call(cost_usd: Option<f64>) -> RunLlmCallAudit {
+        RunLlmCallAudit {
+            n: 1,
+            kind: "reasoning".to_string(),
+            verb: None,
+            model: "openai:gpt-test".to_string(),
+            provider: "openai".to_string(),
+            prompt_hash: "hash".to_string(),
+            latency_ms: Some(1),
+            cost_usd,
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
+            call_attempted: Some(true),
+        }
+    }
+
     fn assert_canonical_run_files_exist(target: &Path, run_id: &str) {
         let dir = run_dir(target, run_id);
         for leaf in [
@@ -3717,6 +4060,104 @@ mod tests {
             1,
             "{trace}"
         );
+    }
+
+    #[test]
+    fn same_status_retry_rejects_different_result_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-divergent-terminal";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "context:build");
+        record_tool_run_started(record, &serde_json::json!({}));
+        try_record_tool_run_complete(
+            record,
+            &serde_json::json!({"ok": true, "status": "completed", "data": {"value": 1}}),
+        )
+        .unwrap();
+
+        let error = try_record_tool_run_complete(
+            record,
+            &serde_json::json!({"ok": true, "status": "completed", "data": {"value": 2}}),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("different result content"), "{error}");
+        let result: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(result.pointer("/data/value"), Some(&serde_json::json!(1)));
+    }
+
+    #[test]
+    fn concurrent_same_status_terminalizations_commit_only_one_result() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = Arc::new(tmp.path().to_path_buf());
+        let run_id = "tool-concurrent-result";
+        record_tool_run_started(
+            ToolRunRecord::new(target.as_path(), run_id, "tool", "context:build"),
+            &serde_json::json!({}),
+        );
+        let barrier = Arc::new(Barrier::new(2));
+        let handles = [1, 2].map(|value| {
+            let target = Arc::clone(&target);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                try_record_tool_run_complete(
+                    ToolRunRecord::new(target.as_path(), run_id, "tool", "context:build"),
+                    &serde_json::json!({
+                        "ok": true,
+                        "status": "completed",
+                        "data": {"value": value}
+                    }),
+                )
+            })
+        });
+
+        let outcomes = handles.map(|handle| handle.join().unwrap());
+
+        assert_eq!(outcomes.iter().filter(|outcome| outcome.is_ok()).count(), 1);
+        assert!(outcomes
+            .iter()
+            .filter_map(|outcome| outcome.as_ref().err())
+            .any(|error| error.to_string().contains("different result content")));
+        let events = load_run_events(target.as_path(), run_id).unwrap();
+        assert_eq!(
+            events
+                .events
+                .iter()
+                .filter(|event| event.status == "completed")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn terminalization_rejects_missing_invalid_and_non_file_run_metadata() {
+        for corruption in ["missing", "invalid", "non-file"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let run_id = format!("tool-terminal-{corruption}");
+            let record = ToolRunRecord::new(tmp.path(), &run_id, "tool", "context:build");
+            record_tool_run_started(record, &serde_json::json!({}));
+            let metadata = run_artifact_path(tmp.path(), &run_id, "run.json");
+            fs::remove_file(&metadata).unwrap();
+            match corruption {
+                "invalid" => fs::write(&metadata, "{").unwrap(),
+                "non-file" => fs::create_dir(&metadata).unwrap(),
+                _ => {}
+            }
+
+            let error = try_record_tool_run_complete(
+                record,
+                &serde_json::json!({"ok": true, "status": "completed"}),
+            )
+            .unwrap_err()
+            .to_string();
+
+            assert!(error.contains("terminal state"), "{corruption}: {error}");
+            assert!(error.contains("run.json"), "{corruption}: {error}");
+        }
     }
 
     #[test]
@@ -4574,6 +5015,190 @@ mod tests {
     }
 
     #[test]
+    fn completed_tool_summary_preserves_incomplete_observed_result_cost() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-completed-incomplete-cost";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "triage:run");
+        record_tool_run_started(record, &serde_json::json!({}));
+
+        try_record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "observedCostUsd": 0.125,
+                "providerSpendUnresolved": true,
+                "data": {
+                    "observedCostUsd": 0.125,
+                    "providerSpendUnresolved": true
+                }
+            }),
+        )
+        .unwrap();
+
+        let summary = load_run_summary(tmp.path(), run_id).unwrap();
+        assert_eq!(summary.cost_usd, None);
+        assert_eq!(summary.observed_cost_usd, Some(0.125));
+        assert!(summary.provider_spend_unresolved);
+        let (_, body) = read_run_artifact_text(tmp.path(), run_id, "run.json")
+            .require("Run metadata")
+            .unwrap();
+        assert!(body.contains("\"observedCostUsd\": 0.125"));
+        assert!(body.contains("\"providerSpendUnresolved\": true"));
+    }
+
+    #[test]
+    fn failed_tool_summary_uses_exact_costed_model_steps_from_its_trace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-failed-costed-trace";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "triage:run");
+        record_tool_run_started(record, &serde_json::json!({}));
+        append_terminal_model_trace(tmp.path(), run_id, 1, Some(0.01));
+        append_terminal_model_trace(tmp.path(), run_id, 2, Some(0.02));
+
+        try_record_tool_run_failed(record, "provider parse failed").unwrap();
+
+        let summary = load_run_summary(tmp.path(), run_id).unwrap();
+        assert!((summary.cost_usd.unwrap() - 0.03).abs() < 1e-9);
+        let trace = load_run_trace(tmp.path(), run_id).unwrap();
+        assert_eq!(
+            trace
+                .steps
+                .iter()
+                .filter_map(|step| step.cost_usd)
+                .sum::<f64>(),
+            0.03
+        );
+    }
+
+    #[test]
+    fn canceled_tool_summary_uses_exact_trace_cost_without_terminal_double_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-canceled-costed-trace";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "triage:run");
+        record_tool_run_started(record, &serde_json::json!({}));
+        append_model_preflight_trace(tmp.path(), run_id, 1);
+        append_terminal_model_trace(tmp.path(), run_id, 1, Some(0.04));
+
+        try_record_tool_run_canceled(record, "operator canceled").unwrap();
+
+        let summary = load_run_summary(tmp.path(), run_id).unwrap();
+        assert_eq!(summary.cost_usd, Some(0.04));
+        let trace = load_run_trace(tmp.path(), run_id).unwrap();
+        assert_eq!(
+            trace.steps.iter().filter_map(|step| step.cost_usd).count(),
+            1,
+            "terminal trace must not repeat the derived cost"
+        );
+    }
+
+    #[test]
+    fn canceled_tool_summary_preserves_incomplete_trace_subtotal() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-canceled-incomplete-trace";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "triage:run");
+        record_tool_run_started(record, &serde_json::json!({}));
+        append_terminal_model_trace(tmp.path(), run_id, 1, Some(0.04));
+        append_terminal_model_trace(tmp.path(), run_id, 2, None);
+
+        try_record_tool_run_canceled(record, "operator canceled").unwrap();
+
+        let summary = load_run_summary(tmp.path(), run_id).unwrap();
+        assert_eq!(summary.cost_usd, None);
+        assert_eq!(summary.observed_cost_usd, Some(0.04));
+        assert!(summary.provider_spend_unresolved);
+    }
+
+    #[test]
+    fn failed_tool_distinguishes_pre_runtime_from_incomplete_trace_cost() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (run_id, add_unpriced_call) in [("pre-runtime", false), ("unpriced", true)] {
+            let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "triage:run");
+            record_tool_run_started(record, &serde_json::json!({}));
+            if add_unpriced_call {
+                append_terminal_model_trace(tmp.path(), run_id, 1, Some(0.02));
+                append_terminal_model_trace(tmp.path(), run_id, 2, None);
+            }
+            try_record_tool_run_failed(record, "failed").unwrap();
+            let summary = load_run_summary(tmp.path(), run_id).unwrap();
+            assert_eq!(summary.cost_usd, None);
+            if add_unpriced_call {
+                assert_eq!(summary.observed_cost_usd, Some(0.02));
+                assert!(summary.provider_spend_unresolved);
+            } else {
+                assert_eq!(summary.observed_cost_usd, None);
+                assert!(!summary.provider_spend_unresolved);
+                assert!(summary.checked_cost_report().unwrap().is_unavailable());
+            }
+        }
+    }
+
+    #[test]
+    fn trace_cost_overflow_refuses_terminal_summary_persistence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-trace-cost-overflow";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "triage:run");
+        record_tool_run_started(record, &serde_json::json!({}));
+        append_terminal_model_trace(tmp.path(), run_id, 1, Some(f64::MAX));
+        append_terminal_model_trace(tmp.path(), run_id, 2, Some(f64::MAX));
+
+        let error = try_record_tool_run_failed(record, "failed")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("could not add"), "{error}");
+        assert_eq!(
+            load_run_summary(tmp.path(), run_id).unwrap().status,
+            "running"
+        );
+    }
+
+    #[test]
+    fn tool_result_rejects_negative_cost_before_summary_persistence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-invalid-result-cost";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "triage:run");
+        record_tool_run_started(record, &serde_json::json!({}));
+
+        let error = try_record_tool_run_complete(
+            record,
+            &serde_json::json!({"ok": true, "costUsd": -0.01}),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("finite non-negative"), "{error}");
+        assert_eq!(
+            load_run_summary(tmp.path(), run_id).unwrap().status,
+            "running"
+        );
+    }
+
+    fn append_terminal_model_trace(target: &Path, run_id: &str, n: usize, cost_usd: Option<f64>) {
+        append_run_trace_step_with_next_number(
+            target,
+            run_id,
+            &RunTraceStep::new(n, "reasoning", format!("model call {n}"))
+                .with_latency_ms(Some(1))
+                .with_model_metadata("openai:gpt-test", "openai", format!("hash-{n}"))
+                .with_cost_usd(cost_usd),
+        )
+        .unwrap();
+    }
+
+    fn append_model_preflight_trace(target: &Path, run_id: &str, n: usize) {
+        append_run_trace_step_with_next_number(
+            target,
+            run_id,
+            &RunTraceStep::new(n, "tool-progress", "tool-loop preflight ok")
+                .with_verb("next-step")
+                .with_latency_ms(Some(1))
+                .with_model_metadata("openai:gpt-test", "openai", format!("hash-{n}")),
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn ok_false_tool_result_writes_failure_handoff_without_explicit_status() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-ok-false";
@@ -4641,6 +5266,689 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(run_ids, vec!["run-c", "run-b", "run-a"]);
+    }
+
+    #[test]
+    fn run_summary_pages_preserve_canonical_order_and_issue_visibility() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (run_id, started_at) in [("run-a", 100), ("run-b", 200), ("run-c", 300)] {
+            let mut summary = RunSummary::running(run_id, "tool", None, "target").complete();
+            summary.started_at_unix = started_at;
+            write_run_summary(tmp.path(), &summary).unwrap();
+        }
+        fs::create_dir_all(runs_root(tmp.path()).join("broken-run")).unwrap();
+
+        let first = list_run_summary_entries_page(tmp.path(), 0, 2).unwrap();
+        let second = list_run_summary_entries_page(tmp.path(), 2, 2).unwrap();
+        let recent = list_recent_run_summary_entries(tmp.path(), 2).unwrap();
+
+        assert_eq!(
+            first
+                .iter()
+                .map(|entry| entry.run_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["run-c", "run-b"]
+        );
+        assert_eq!(recent, first);
+        assert_eq!(second[0].run_id, "run-a");
+        assert_eq!(second[1].run_id, "broken-run");
+        assert!(matches!(second[1].state, RunSummaryEntryState::Issue(_)));
+    }
+
+    #[test]
+    fn direct_history_and_pointer_reads_initialize_ignored_state() {
+        for operation in ["offset", "cursor", "repair-latest"] {
+            let tmp = tempfile::tempdir().unwrap();
+            if !init_git_repo(tmp.path()) {
+                return;
+            }
+
+            match operation {
+                "offset" => {
+                    assert!(list_run_summary_entries_page(tmp.path(), 0, 10)
+                        .unwrap()
+                        .is_empty());
+                }
+                "cursor" => {
+                    assert!(list_run_summary_entries_cursor_page(tmp.path(), None, 10)
+                        .unwrap()
+                        .entries
+                        .is_empty());
+                }
+                "repair-latest" => {
+                    assert_eq!(repair_latest_run_pointer(tmp.path()).unwrap(), None);
+                }
+                _ => unreachable!(),
+            }
+
+            assert_git_status_clean(tmp.path(), operation);
+        }
+    }
+
+    #[test]
+    fn run_history_page_rebuilds_legacy_and_malformed_indexes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = runs_root(tmp.path());
+        fs::create_dir_all(root.join("legacy-a")).unwrap();
+        let mut summary = RunSummary::running("legacy-a", "tool", None, "target").complete();
+        summary.started_at_unix = 42;
+        fs::write(
+            root.join("legacy-a/run.json"),
+            serde_json::to_string(&summary).unwrap(),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("legacy-broken")).unwrap();
+        let legacy_path =
+            crate::run_artifacts::checked_legacy_run_history_index_path(tmp.path()).unwrap();
+        fs::write(&legacy_path, "legacy jsonl index\n").unwrap();
+
+        let migrated = list_run_summary_entries_page(tmp.path(), 0, 10).unwrap();
+        assert_eq!(run_entry_ids(&migrated), vec!["legacy-a", "legacy-broken"]);
+        assert!(!legacy_path.exists());
+        let index_path = crate::run_artifacts::checked_run_history_index_path(tmp.path()).unwrap();
+        assert!(index_path.is_file());
+        fs::write(&index_path, "not-json\n").unwrap();
+
+        let rebuilt = list_run_summary_entries_page(tmp.path(), 0, 10).unwrap();
+        assert_eq!(run_entry_ids(&rebuilt), vec!["legacy-a", "legacy-broken"]);
+        assert!(matches!(rebuilt[1].state, RunSummaryEntryState::Issue(_)));
+    }
+
+    #[test]
+    fn run_history_dirty_marker_recovers_summary_index_crash_window() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut first = RunSummary::running("run-a", "tool", None, "target").complete();
+        first.started_at_unix = 10;
+        write_run_summary(tmp.path(), &first).unwrap();
+        let mut second = RunSummary::running("run-b", "tool", None, "target").complete();
+        second.started_at_unix = 20;
+        write_run_summary(tmp.path(), &second).unwrap();
+        first.started_at_unix = 30;
+        fs::write(
+            run_artifact_path(tmp.path(), "run-a", "run.json"),
+            serde_json::to_string(&first).unwrap(),
+        )
+        .unwrap();
+        let dirty = crate::run_artifacts::checked_run_history_dirty_path(tmp.path()).unwrap();
+        fs::write(&dirty, "dirty\n").unwrap();
+
+        let page = list_run_summary_entries_page(tmp.path(), 0, 10).unwrap();
+
+        assert_eq!(run_entry_ids(&page), vec!["run-a", "run-b"]);
+        assert!(!dirty.exists());
+    }
+
+    #[test]
+    fn next_indexed_write_preserves_an_unmarked_canonical_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut first = RunSummary::running("run-first", "tool", None, "target").complete();
+        first.started_at_unix = 1;
+        write_run_summary(tmp.path(), &first).unwrap();
+        let mut external = RunSummary::running("run-external", "tool", None, "target").complete();
+        external.started_at_unix = 2;
+        let external_path = run_artifact_path(tmp.path(), "run-external", "run.json");
+        fs::create_dir_all(external_path.parent().unwrap()).unwrap();
+        fs::write(&external_path, serde_json::to_vec(&external).unwrap()).unwrap();
+        let mut next = RunSummary::running("run-next", "tool", None, "target").complete();
+        next.started_at_unix = 3;
+
+        write_run_summary(tmp.path(), &next).unwrap();
+        let page = list_recent_run_summary_entries(tmp.path(), 10).unwrap();
+
+        assert_eq!(
+            run_entry_ids(&page),
+            vec!["run-next", "run-external", "run-first"]
+        );
+    }
+
+    #[test]
+    fn recent_run_page_reconciles_changed_unrequested_history() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (run_id, started_at) in [("run-old", 1), ("run-new", 2)] {
+            let mut summary = RunSummary::running(run_id, "tool", None, "target").complete();
+            summary.started_at_unix = started_at;
+            write_run_summary(tmp.path(), &summary).unwrap();
+        }
+        fs::write(
+            run_artifact_path(tmp.path(), "run-old", "run.json"),
+            "{ invalid legacy metadata",
+        )
+        .unwrap();
+
+        let recent = list_recent_run_summary_entries(tmp.path(), 1).unwrap();
+
+        assert_eq!(run_entry_ids(&recent), vec!["run-new"]);
+    }
+
+    #[test]
+    fn repeated_summary_upserts_keep_one_index_version_per_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let running = RunSummary::running("run-one", "tool", None, "target");
+        write_run_summary(tmp.path(), &running).unwrap();
+        write_run_summary(tmp.path(), &running.clone().complete()).unwrap();
+        write_run_summary(tmp.path(), &running.complete()).unwrap();
+
+        let index_path = crate::run_artifacts::checked_run_history_index_path(tmp.path()).unwrap();
+        let connection = rusqlite::Connection::open(index_path).unwrap();
+        let count: i64 = connection
+            .query_row("SELECT count(*) FROM run_history_entries", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn bounded_history_reports_truncation_and_fails_closed() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (run_id, started_at) in [("run-a", 1), ("run-b", 2), ("run-c", 3)] {
+            write_completed_summary_at(tmp.path(), run_id, started_at);
+        }
+        crate::run_artifacts::run_history_index::rebuild_with_policy(tmp.path(), 2, 1_024).unwrap();
+
+        let indexed = crate::run_artifacts::run_history_index::load_run_history_cursor_page(
+            tmp.path(),
+            None,
+            10,
+        )
+        .unwrap();
+        let error = list_run_summary_entries_cursor_page(tmp.path(), None, 10).unwrap_err();
+
+        assert_eq!(indexed_run_ids(&indexed.entries), vec!["run-c", "run-b"]);
+        assert_eq!(indexed.info.canonical_total, 3);
+        assert_eq!(indexed.info.retained_count, 2);
+        assert!(indexed.info.truncated);
+        assert_truncated_page_error(&error);
+        assert_eq!(list_run_summary_entries(tmp.path()).unwrap().len(), 3);
+        assert!(indexed.info.oldest_retained.is_some());
+        assert!(indexed.info.canonical_digest.starts_with("sha256:"));
+        assert!(indexed.info.table_digest.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn byte_retention_keeps_a_canonical_prefix() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (run_id, started_at) in [("run-a", 1), ("run-b", 2), ("run-c", 3)] {
+            write_completed_summary_at(tmp.path(), run_id, started_at);
+        }
+        crate::run_artifacts::run_history_index::rebuild_with_policy(tmp.path(), 10, 75).unwrap();
+
+        let indexed = crate::run_artifacts::run_history_index::load_run_history_cursor_page(
+            tmp.path(),
+            None,
+            10,
+        )
+        .unwrap();
+        let error = list_run_summary_entries_cursor_page(tmp.path(), None, 10).unwrap_err();
+
+        assert_eq!(indexed_run_ids(&indexed.entries), vec!["run-c"]);
+        assert_eq!(indexed.info.retained_count, 1);
+        assert!(indexed.info.retained_bytes <= 75);
+        assert!(indexed.info.truncated);
+        assert_truncated_page_error(&error);
+    }
+
+    #[test]
+    fn repeated_upsert_of_an_evicted_run_does_not_increment_total() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (run_id, started_at) in [("run-a", 1), ("run-b", 2), ("run-c", 3)] {
+            write_completed_summary_at(tmp.path(), run_id, started_at);
+        }
+        crate::run_artifacts::run_history_index::rebuild_with_policy(tmp.path(), 2, 1_024).unwrap();
+        write_completed_summary_at(tmp.path(), "run-a", 999);
+
+        let indexed = crate::run_artifacts::run_history_index::load_run_history_cursor_page(
+            tmp.path(),
+            None,
+            10,
+        )
+        .unwrap();
+
+        assert_eq!(indexed.info.canonical_total, 3);
+        assert_eq!(indexed.info.retained_count, 2);
+        assert!(indexed.info.truncated);
+        assert_eq!(indexed_run_ids(&indexed.entries), vec!["run-c", "run-b"]);
+    }
+
+    #[test]
+    fn keyset_pages_are_stable_across_timestamp_ties() {
+        let tmp = tempfile::tempdir().unwrap();
+        for run_id in ["run-a", "run-c", "run-b"] {
+            write_completed_summary_at(tmp.path(), run_id, 7);
+        }
+        fs::create_dir_all(runs_root(tmp.path()).join("broken-run")).unwrap();
+
+        let first = list_run_summary_entries_cursor_page(tmp.path(), None, 2).unwrap();
+        let second =
+            list_run_summary_entries_cursor_page(tmp.path(), first.next_cursor.as_ref(), 2)
+                .unwrap();
+
+        assert_eq!(run_entry_ids(&first.entries), vec!["run-c", "run-b"]);
+        assert_eq!(run_entry_ids(&second.entries), vec!["run-a", "broken-run"]);
+        assert!(second.next_cursor.is_none());
+    }
+
+    #[test]
+    fn cursor_from_an_old_generation_fails_explicitly() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_completed_summary_at(tmp.path(), "run-a", 1);
+        write_completed_summary_at(tmp.path(), "run-b", 2);
+        let first = list_run_summary_entries_cursor_page(tmp.path(), None, 1).unwrap();
+        let cursor = first.next_cursor.unwrap();
+        write_completed_summary_at(tmp.path(), "run-c", 3);
+
+        let error = list_run_summary_entries_cursor_page(tmp.path(), Some(&cursor), 1).unwrap_err();
+
+        assert!(error.to_string().contains("older index generation"));
+    }
+
+    #[test]
+    fn corrupt_index_rebuild_uses_a_fresh_cursor_generation() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_completed_summary_at(tmp.path(), "run-a", 1);
+        write_completed_summary_at(tmp.path(), "run-b", 2);
+        let before = list_run_summary_entries_cursor_page(tmp.path(), None, 1).unwrap();
+        let old_generation = before.history.generation;
+        let index_path = crate::run_artifacts::checked_run_history_index_path(tmp.path()).unwrap();
+        fs::write(&index_path, "corrupt index").unwrap();
+
+        let after = list_run_summary_entries_cursor_page(tmp.path(), None, 1).unwrap();
+
+        assert_ne!(after.history.generation, old_generation);
+        assert!(
+            list_run_summary_entries_cursor_page(tmp.path(), before.next_cursor.as_ref(), 1,)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn invalid_metadata_to_valid_summary_rebuilds_canonical_digest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = run_artifact_path(tmp.path(), "run-broken", "run.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "{ invalid").unwrap();
+        let initial = list_run_summary_entries_cursor_page(tmp.path(), None, 10).unwrap();
+        assert!(matches!(
+            initial.entries[0].state,
+            RunSummaryEntryState::Issue(_)
+        ));
+
+        write_completed_summary_at(tmp.path(), "run-broken", 11);
+        let repaired = list_run_summary_entries_cursor_page(tmp.path(), None, 10).unwrap();
+
+        assert!(matches!(
+            repaired.entries[0].state,
+            RunSummaryEntryState::Ready(_)
+        ));
+        assert_ne!(
+            repaired.history.canonical_digest,
+            initial.history.canonical_digest
+        );
+    }
+
+    #[test]
+    fn concurrent_creators_count_one_canonical_run() {
+        let tmp = Arc::new(tempfile::tempdir().unwrap());
+        let barrier = Arc::new(Barrier::new(3));
+        let mut workers = Vec::new();
+        for _ in 0..2 {
+            let target = Arc::clone(&tmp);
+            let barrier = Arc::clone(&barrier);
+            workers.push(std::thread::spawn(move || {
+                barrier.wait();
+                write_completed_summary_at(target.path(), "run-shared", 1);
+            }));
+        }
+        barrier.wait();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        let page = list_run_summary_entries_cursor_page(tmp.path(), None, 10).unwrap();
+
+        assert_eq!(page.history.canonical_total, 1);
+        assert_eq!(run_entry_ids(&page.entries), vec!["run-shared"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ordinary_new_runs_update_the_existing_index_in_place() {
+        use std::os::unix::fs::MetadataExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let first = RunSummary::running("run-first", "tool", None, "target").complete();
+        write_run_summary(tmp.path(), &first).unwrap();
+        let index_path = crate::run_artifacts::checked_run_history_index_path(tmp.path()).unwrap();
+        let original_inode = fs::metadata(&index_path).unwrap().ino();
+
+        let second = RunSummary::running("run-second", "tool", None, "target").complete();
+        write_run_summary(tmp.path(), &second).unwrap();
+
+        assert_eq!(fs::metadata(index_path).unwrap().ino(), original_inode);
+        assert_eq!(
+            run_entry_ids(&list_recent_run_summary_entries(tmp.path(), 2).unwrap()),
+            vec!["run-second", "run-first"]
+        );
+    }
+
+    #[test]
+    fn run_history_pages_bound_untrusted_header_and_window_sizes() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-one", "tool", None, "target").complete(),
+        )
+        .unwrap();
+        let index_path = crate::run_artifacts::checked_run_history_index_path(tmp.path()).unwrap();
+        let connection = rusqlite::Connection::open(&index_path).unwrap();
+        connection
+            .execute(
+                "UPDATE run_history_meta SET retained_count = 1000001 WHERE singleton = 1",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        assert_eq!(
+            run_entry_ids(&list_run_summary_entries_page(tmp.path(), 0, 1).unwrap()),
+            vec!["run-one"]
+        );
+        assert!(list_run_summary_entries_page(tmp.path(), usize::MAX, 1).is_err());
+        assert!(list_run_summary_entries_page(tmp.path(), 0, usize::MAX).is_err());
+
+        let oversized = fs::File::create(&index_path).unwrap();
+        oversized.set_len(512 * 1024 * 1024 + 1).unwrap();
+        drop(oversized);
+        assert_eq!(
+            run_entry_ids(&list_run_summary_entries_page(tmp.path(), 0, 1).unwrap()),
+            vec!["run-one"]
+        );
+    }
+
+    #[test]
+    fn run_history_rejects_schema_triggers_and_rebuilds_from_canonical_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let summary = RunSummary::running("run-one", "tool", None, "target").complete();
+        write_run_summary(tmp.path(), &summary).unwrap();
+        let index_path = crate::run_artifacts::checked_run_history_index_path(tmp.path()).unwrap();
+        let connection = rusqlite::Connection::open(index_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TRIGGER untrusted_history_trigger
+                 AFTER UPDATE ON run_history_meta BEGIN
+                   UPDATE run_history_meta SET retained_count = 999;
+                 END;",
+            )
+            .unwrap();
+        drop(connection);
+
+        let page = list_recent_run_summary_entries(tmp.path(), 1).unwrap();
+
+        assert_eq!(run_entry_ids(&page), vec!["run-one"]);
+    }
+
+    #[test]
+    fn run_history_restores_deleted_and_timestamp_tampered_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_completed_summary_at(tmp.path(), "run-a", 1);
+        write_completed_summary_at(tmp.path(), "run-b", 2);
+        let index_path = crate::run_artifacts::checked_run_history_index_path(tmp.path()).unwrap();
+        let connection = rusqlite::Connection::open(&index_path).unwrap();
+        connection
+            .execute(
+                "UPDATE run_history_entries SET started_at_unix = 999 WHERE run_id = 'run-a'",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute("DELETE FROM run_history_entries WHERE run_id = 'run-b'", [])
+            .unwrap();
+        drop(connection);
+
+        let page = list_recent_run_summary_entries(tmp.path(), 10).unwrap();
+
+        assert_eq!(run_entry_ids(&page), vec!["run-b", "run-a"]);
+        let connection = rusqlite::Connection::open(index_path).unwrap();
+        let restored: Vec<(String, i64)> = connection
+            .prepare("SELECT run_id, started_at_unix FROM run_history_entries ORDER BY run_id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(restored, vec![("run-a".into(), 1), ("run-b".into(), 2)]);
+    }
+
+    #[test]
+    fn hidden_ordering_key_tamper_forces_rebuild() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_completed_summary_at(tmp.path(), "run-a", 1);
+        write_completed_summary_at(tmp.path(), "run-b", 2);
+        let index_path = crate::run_artifacts::checked_run_history_index_path(tmp.path()).unwrap();
+        let connection = rusqlite::Connection::open(&index_path).unwrap();
+        connection
+            .pragma_update(None, "ignore_check_constraints", true)
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE run_history_entries SET ready_run_id = 'run-z' WHERE run_id = 'run-a'",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        let page = list_recent_run_summary_entries(tmp.path(), 10).unwrap();
+
+        assert_eq!(run_entry_ids(&page), vec!["run-b", "run-a"]);
+        let connection = rusqlite::Connection::open(index_path).unwrap();
+        let restored: String = connection
+            .query_row(
+                "SELECT ready_run_id FROM run_history_entries WHERE run_id = 'run-a'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(restored, "run-a");
+    }
+
+    #[test]
+    fn canonical_timestamp_change_is_not_blessed_by_index_upsert() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_completed_summary_at(tmp.path(), "run-a", 1);
+        write_completed_summary_at(tmp.path(), "run-b", 2);
+        let path = run_artifact_path(tmp.path(), "run-a", "run.json");
+        let mut changed: RunSummary = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        changed.started_at_unix = 3;
+        fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
+
+        let page = list_recent_run_summary_entries(tmp.path(), 10).unwrap();
+
+        assert_eq!(run_entry_ids(&page), vec!["run-a", "run-b"]);
+    }
+
+    #[test]
+    fn off_page_canonical_timestamp_change_reorders_a_small_page() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (run_id, started_at) in [("run-a", 1), ("run-b", 2), ("run-c", 3)] {
+            write_completed_summary_at(tmp.path(), run_id, started_at);
+        }
+        assert_eq!(
+            run_entry_ids(&list_recent_run_summary_entries(tmp.path(), 1).unwrap()),
+            vec!["run-c"]
+        );
+        let path = run_artifact_path(tmp.path(), "run-a", "run.json");
+        let mut changed: RunSummary = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        changed.started_at_unix = 4;
+        fs::write(path, serde_json::to_vec(&changed).unwrap()).unwrap();
+
+        let page = list_recent_run_summary_entries(tmp.path(), 1).unwrap();
+
+        assert_eq!(run_entry_ids(&page), vec!["run-a"]);
+    }
+
+    #[test]
+    fn offset_page_fails_closed_when_an_evicted_run_moves_above_retention() {
+        let tmp = tempfile::tempdir().unwrap();
+        let generation = rewrite_evicted_run_above_retention(tmp.path());
+
+        let error = list_run_summary_entries_page(tmp.path(), 0, 1).unwrap_err();
+
+        assert_truncated_page_error(&error);
+        assert_eq!(run_history_generation(tmp.path()), generation);
+        assert_eq!(
+            run_entry_ids(&list_run_summary_entries(tmp.path()).unwrap()),
+            vec!["run-a", "run-c", "run-b"]
+        );
+    }
+
+    #[test]
+    fn cursor_page_fails_closed_when_an_evicted_run_moves_above_retention() {
+        let tmp = tempfile::tempdir().unwrap();
+        let generation = rewrite_evicted_run_above_retention(tmp.path());
+
+        let error = list_run_summary_entries_cursor_page(tmp.path(), None, 1).unwrap_err();
+
+        assert_truncated_page_error(&error);
+        assert_eq!(run_history_generation(tmp.path()), generation);
+        assert_eq!(
+            run_entry_ids(&list_run_summary_entries(tmp.path()).unwrap()),
+            vec!["run-a", "run-c", "run-b"]
+        );
+    }
+
+    #[test]
+    fn failed_dirty_marker_quarantine_is_a_stable_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_completed_summary_at(tmp.path(), "run-a", 1);
+        let dirty = crate::run_artifacts::checked_run_history_dirty_path(tmp.path()).unwrap();
+        fs::create_dir(&dirty).unwrap();
+        fs::create_dir(
+            dirty
+                .parent()
+                .unwrap()
+                .join("run-history.index.dirty.invalid"),
+        )
+        .unwrap();
+        let generation_before = run_history_generation(tmp.path());
+
+        let first = list_recent_run_summary_entries(tmp.path(), 10).unwrap_err();
+        let second = list_recent_run_summary_entries(tmp.path(), 10).unwrap_err();
+
+        assert!(first.to_string().contains("quarantine already exists"));
+        assert!(second.to_string().contains("quarantine already exists"));
+        assert_eq!(run_history_generation(tmp.path()), generation_before);
+    }
+
+    #[test]
+    fn canonical_summary_write_survives_derived_index_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let initial = RunSummary::running("run-first", "tool", None, "target").complete();
+        write_run_summary(tmp.path(), &initial).unwrap();
+        let index_path = crate::run_artifacts::checked_run_history_index_path(tmp.path()).unwrap();
+        fs::remove_file(&index_path).unwrap();
+        fs::create_dir(&index_path).unwrap();
+        let next = RunSummary::running("run-next", "tool", None, "target").complete();
+
+        let summary_path = write_run_summary(tmp.path(), &next).unwrap();
+
+        assert!(summary_path.is_file());
+        let loaded = load_run_summary(tmp.path(), "run-next").unwrap();
+        assert_eq!(loaded.run_id, next.run_id);
+        assert_eq!(loaded.status, next.status);
+    }
+
+    #[test]
+    fn dirty_marker_failure_does_not_hide_a_new_canonical_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let initial = RunSummary::running("run-first", "tool", None, "target").complete();
+        write_run_summary(tmp.path(), &initial).unwrap();
+        let dirty = crate::run_artifacts::checked_run_history_dirty_path(tmp.path()).unwrap();
+        fs::create_dir(&dirty).unwrap();
+        let next = RunSummary::running("run-next", "tool", None, "target").complete();
+
+        write_run_summary(tmp.path(), &next).unwrap();
+        let page = list_recent_run_summary_entries(tmp.path(), 2).unwrap();
+
+        assert_eq!(run_entry_ids(&page), vec!["run-next", "run-first"]);
+        assert!(!dirty.exists());
+        assert!(dirty
+            .parent()
+            .unwrap()
+            .join("run-history.index.dirty.invalid")
+            .is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn derived_index_symlink_is_never_followed_or_overwritten() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let initial = RunSummary::running("run-first", "tool", None, "target").complete();
+        write_run_summary(tmp.path(), &initial).unwrap();
+        let index_path = crate::run_artifacts::checked_run_history_index_path(tmp.path()).unwrap();
+        let outside = tmp.path().join("outside.sqlite3");
+        fs::rename(&index_path, &outside).unwrap();
+        let outside_before = fs::read(&outside).unwrap();
+        symlink(&outside, &index_path).unwrap();
+
+        let next = RunSummary::running("run-next", "tool", None, "target").complete();
+        write_run_summary(tmp.path(), &next).unwrap();
+
+        assert_eq!(fs::read(outside).unwrap(), outside_before);
+        let loaded = load_run_summary(tmp.path(), "run-next").unwrap();
+        assert_eq!(loaded.run_id, next.run_id);
+        assert_eq!(loaded.status, next.status);
+    }
+
+    fn run_entry_ids(entries: &[RunSummaryEntry]) -> Vec<&str> {
+        entries.iter().map(|entry| entry.run_id.as_str()).collect()
+    }
+
+    fn indexed_run_ids(entries: &[run_history_index::RunHistoryIndexEntry]) -> Vec<&str> {
+        entries.iter().map(|entry| entry.run_id.as_str()).collect()
+    }
+
+    fn assert_truncated_page_error(error: &anyhow::Error) {
+        let message = error.to_string();
+        assert!(message.contains("retention is truncated"), "{message}");
+        assert!(message.contains("list_run_summary_entries"), "{message}");
+    }
+
+    fn rewrite_evicted_run_above_retention(target: &Path) -> i64 {
+        for (run_id, started_at) in [("run-a", 1), ("run-b", 2), ("run-c", 3)] {
+            write_completed_summary_at(target, run_id, started_at);
+        }
+        run_history_index::rebuild_with_policy(target, 2, 1_024).unwrap();
+        let generation = run_history_generation(target);
+        let root_modified = fs::metadata(runs_root(target)).unwrap().modified().unwrap();
+        let path = run_artifact_path(target, "run-a", "run.json");
+        let mut changed: RunSummary = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        changed.started_at_unix = 4;
+        fs::write(path, serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert_eq!(
+            fs::metadata(runs_root(target)).unwrap().modified().unwrap(),
+            root_modified
+        );
+        generation
+    }
+
+    fn write_completed_summary_at(target: &Path, run_id: &str, started_at_unix: u64) {
+        let mut summary = RunSummary::running(run_id, "tool", None, "target").complete();
+        summary.started_at_unix = started_at_unix;
+        write_run_summary(target, &summary).unwrap();
+    }
+
+    fn run_history_generation(target: &Path) -> i64 {
+        let index = crate::run_artifacts::checked_run_history_index_path(target).unwrap();
+        rusqlite::Connection::open(index)
+            .unwrap()
+            .query_row(
+                "SELECT generation FROM run_history_meta WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
     }
 
     #[test]
@@ -4835,6 +6143,9 @@ mod tests {
             prompt_hash: "fnv1a64:abc".to_string(),
             latency_ms: Some(12),
             cost_usd: Some(0.01),
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
+            call_attempted: Some(true),
         }])
         .with_trace_malformed_lines(Some(1))
         .with_artifact(RunArtifact {

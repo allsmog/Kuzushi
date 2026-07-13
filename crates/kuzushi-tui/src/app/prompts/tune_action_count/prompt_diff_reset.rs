@@ -89,7 +89,10 @@ impl ShellApp {
             }
         };
         match kuzushi_core::workspace::remove_workspace_state_file(target, relative) {
-            Ok(true) => self.log("prompt", format!("removed override {}", path.display())),
+            Ok(true) => {
+                self.invalidate_prompt_view_cache();
+                self.log("prompt", format!("removed override {}", path.display()));
+            }
             Ok(false) => self.log(
                 "prompt",
                 format!("no override at {} to reset", path.display()),

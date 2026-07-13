@@ -631,17 +631,9 @@ mod tests {
             target: scan_root.clone(),
             scan_root,
             repo_root: PathBuf::from("."),
+            source_paths: std::sync::Arc::from([]),
             mode: TaintIrisNextMode::Hunt,
-            caps: TaintIrisNextCaps {
-                max_catalog_entries: 1,
-                max_candidates_per_cwe: 10,
-                max_evidence_per_cwe: 10,
-                max_files_per_query: 10,
-                max_specs_per_cwe: 10,
-                max_agent_findings: 10,
-                codeql_analyze_timeout_ms: 1000,
-                min_evidence_level: "candidate".to_string(),
-            },
+            caps: dataflow_test_caps(),
             languages: vec!["cpp".to_string()],
             context_status: TaintIrisNextArtifactStatus {
                 ok: true,
@@ -668,8 +660,22 @@ mod tests {
             },
             max_budget_usd: None,
             allow_deterministic_fallback: false,
+            system_prompt: taint_iris_next_system_prompt(),
             cwe_focus: Vec::new(),
             discovered_signals: DiscoveredSignals::default(),
+        }
+    }
+
+    fn dataflow_test_caps() -> TaintIrisNextCaps {
+        TaintIrisNextCaps {
+            max_catalog_entries: 1,
+            max_candidates_per_cwe: 10,
+            max_evidence_per_cwe: 10,
+            max_files_per_query: 10,
+            max_specs_per_cwe: 10,
+            max_agent_findings: 10,
+            codeql_analyze_timeout_ms: 1000,
+            min_evidence_level: "candidate".to_string(),
         }
     }
 

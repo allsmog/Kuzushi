@@ -201,7 +201,10 @@ mod tests {
         let repo = temp.path();
         initialize_repo(repo);
         let control = unattended_patch_control();
-        let worktree = create_disposable_worktree(repo, control).unwrap();
+        let mut input = json!({"fingerprint": "finding-1"});
+        bind_patch_source_snapshot(repo, &mut input).unwrap();
+        let source_commit = patch_source_commit(&input).unwrap();
+        let worktree = create_disposable_worktree(repo, &source_commit, control).unwrap();
         let plan = PatchValidationPlan {
             build: None,
             test: None,

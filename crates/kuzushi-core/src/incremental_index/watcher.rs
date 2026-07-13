@@ -279,6 +279,9 @@ fn classify_notify_result_with_state(
 
 fn runtime_state_path(root: &Path, path: &Path) -> Option<PathBuf> {
     let relative = watch_relative_path(root, path)?;
+    if is_sqlite_shared_memory(&relative) {
+        return None;
+    }
     if relative.starts_with(".kuzushi/v3") {
         return Some(relative);
     }
@@ -286,6 +289,12 @@ fn runtime_state_path(root: &Path, path: &Path) -> Option<PathBuf> {
         return Some(PathBuf::from(".kuzushi/codeql-db"));
     }
     is_legacy_workspace_artifact(&relative).then_some(relative)
+}
+
+fn is_sqlite_shared_memory(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".sqlite3-shm"))
 }
 
 fn is_legacy_workspace_artifact(path: &Path) -> bool {
@@ -341,4 +350,23 @@ fn paths_to_events(
     event: impl Fn(PathBuf) -> WatchEvent,
 ) -> Vec<WatchEvent> {
     paths.into_iter().map(event).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn watcher_ignores_sqlite_shared_memory_but_keeps_wal_changes() {
+        let root = Path::new("/tmp/workspace");
+
+        assert_eq!(
+            runtime_state_path(root, &root.join(".kuzushi/v3/index.sqlite3-shm")),
+            None
+        );
+        assert_eq!(
+            runtime_state_path(root, &root.join(".kuzushi/v3/index.sqlite3-wal")),
+            Some(PathBuf::from(".kuzushi/v3/index.sqlite3-wal"))
+        );
+    }
 }

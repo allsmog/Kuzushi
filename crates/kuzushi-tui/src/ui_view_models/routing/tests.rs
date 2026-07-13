@@ -48,11 +48,13 @@ fn routing_mode_prioritizes_agent_over_plan() {
 }
 
 #[test]
-fn uses_activity_frame_only_for_activity_view() {
+fn uses_activity_frame_only_for_active_activity_view() {
     let mut app = ShellApp::new(V2Config::default(), None);
     assert!(!uses_activity_frame(&app));
 
     app.set_shell_view(ShellView::Activity);
+    assert!(!uses_activity_frame(&app));
+    app.set_activity(Some(crate::ActivitySession::new("run-active")));
     assert!(uses_activity_frame(&app));
 
     app.set_shell_view(ShellView::ModuleRun);

@@ -1,0 +1,65 @@
+{
+  "artifacts": [
+    {
+      "kind": "json",
+      "label": "tool input",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/input.json"
+    },
+    {
+      "kind": "json",
+      "label": "failure handoff",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/failures.json"
+    }
+  ],
+  "data": {
+    "error": "--option target /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmplI3z1Z conflicts with cwd /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpYW5NT0. Pass one canonical workspace target.",
+    "tool": "secret-scan:scan"
+  },
+  "errors": [
+    "--option target /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmplI3z1Z conflicts with cwd /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpYW5NT0. Pass one canonical workspace target."
+  ],
+  "fallback_context": {
+    "allowedProofLevel": "artifact-review-only; runtime verification did not run",
+    "artifactsAvailable": [
+      {
+        "kind": "json",
+        "label": "tool input",
+        "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/input.json"
+      }
+    ],
+    "cause": "--option target /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmplI3z1Z conflicts with cwd /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpYW5NT0. Pass one canonical workspace target.",
+    "claimsForbidden": [
+      "success claim without explicit verification",
+      "verified claim",
+      "exploited claim",
+      "fixed claim",
+      "empirical proof claim",
+      "runtime proof claim",
+      "exploit proven",
+      "fix confirmed",
+      "false positive verdict",
+      "no vulnerability verdict"
+    ],
+    "failedStage": "secret-scan:scan",
+    "fallbackPrompt": "Continue the failed Kuzushi run for secret-scan:scan. Cause: --option target /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmplI3z1Z conflicts with cwd /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpYW5NT0. Pass one canonical workspace target.. Proof level: artifact-review-only; runtime verification did not run. Missing artifacts: none. Inspect next: /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/failures.json, /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/result.json, /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/input.json, /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/artifacts.json, /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/run.json, /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/report.md. Forbidden claims: success claim without explicit verification, verified claim, exploited claim, fixed claim, empirical proof claim, runtime proof claim, exploit proven, fix confirmed, false positive verdict, no vulnerability verdict. Recovery options: Rerun secret-scan:scan after fixing the reported cause., Keep follow-up claims at artifact-review-only proof level..",
+    "missingArtifacts": [],
+    "nextFilesOrArtifactsToInspect": [
+      "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/failures.json",
+      "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/result.json",
+      "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/input.json",
+      "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/artifacts.json",
+      "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/run.json",
+      "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/report.md"
+    ],
+    "recoveryOptions": [
+      "Rerun secret-scan:scan after fixing the reported cause.",
+      "Keep follow-up claims at artifact-review-only proof level."
+    ],
+    "whatFailed": "secret-scan:scan did not complete successfully: --option target /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmplI3z1Z conflicts with cwd /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpYW5NT0. Pass one canonical workspace target."
+  },
+  "ok": false,
+  "output": "--option target /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmplI3z1Z conflicts with cwd /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpYW5NT0. Pass one canonical workspace target.",
+  "status": "failed",
+  "summary": "secret-scan:scan failed",
+  "warnings": []
+}

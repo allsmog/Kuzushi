@@ -114,9 +114,11 @@ pub struct DomainCache {
     taint_flows: Vec<TaintFlowSnapshot>,
     program_scope: Option<ProgramScope>,
     findings: Vec<Finding>,
+    findings_revision: u64,
     findings_total: usize,
     findings_read_watermark: Option<u64>,
     review_decisions: Vec<ReviewDecisionRecord>,
+    review_decisions_revision: u64,
     finding_ledger_counts: Option<FindingLedgerCounts>,
     workspace_stale: Option<WorkspaceStaleSummary>,
     /// Cached "YOUR TOOLS" shelf (favorites + recents). Loaded from disk on
@@ -152,9 +154,11 @@ impl DomainCache {
             taint_flows: Vec::new(),
             program_scope: None,
             findings: Vec::new(),
+            findings_revision: 0,
             findings_total: 0,
             findings_read_watermark: None,
             review_decisions: Vec::new(),
+            review_decisions_revision: 0,
             finding_ledger_counts: None,
             workspace_stale: None,
             tool_shelf: ToolShelf::default(),
@@ -201,9 +205,11 @@ impl DomainCache {
 
     fn clear_target_findings(&mut self) {
         self.findings.clear();
+        self.bump_findings_revision();
         self.findings_total = 0;
         self.findings_read_watermark = None;
         self.review_decisions.clear();
+        self.bump_review_decisions_revision();
         self.finding_ledger_counts = None;
     }
 
@@ -480,12 +486,18 @@ impl DomainCache {
     }
 
     pub(crate) fn findings_mut(&mut self) -> &mut Vec<Finding> {
+        self.bump_findings_revision();
         &mut self.findings
     }
 
     pub(crate) fn set_findings(&mut self, findings: Vec<Finding>) {
         self.findings_total = findings.len();
         self.findings = findings;
+        self.bump_findings_revision();
+    }
+
+    pub(crate) fn findings_revision(&self) -> u64 {
+        self.findings_revision
     }
 
     pub(crate) fn set_findings_total_count(&mut self, total: usize) {
@@ -502,6 +514,11 @@ impl DomainCache {
 
     pub(crate) fn set_review_decisions(&mut self, decisions: Vec<ReviewDecisionRecord>) {
         self.review_decisions = decisions;
+        self.bump_review_decisions_revision();
+    }
+
+    pub(crate) fn review_decisions_revision(&self) -> u64 {
+        self.review_decisions_revision
     }
 
     pub(crate) fn finding_ledger_counts(&self) -> Option<FindingLedgerCounts> {
@@ -510,6 +527,14 @@ impl DomainCache {
 
     pub(crate) fn set_finding_ledger_counts(&mut self, counts: FindingLedgerCounts) {
         self.finding_ledger_counts = Some(counts);
+    }
+
+    fn bump_findings_revision(&mut self) {
+        self.findings_revision = self.findings_revision.wrapping_add(1);
+    }
+
+    fn bump_review_decisions_revision(&mut self) {
+        self.review_decisions_revision = self.review_decisions_revision.wrapping_add(1);
     }
 }
 

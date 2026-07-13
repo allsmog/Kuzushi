@@ -8,6 +8,8 @@ use crate::tool::ToolRegistry;
 
 use super::ServerInfo;
 
+const MAX_INLINE_TOOL_TEXT_BYTES: usize = 64 * 1024;
+
 pub(crate) async fn dispatch(
     req: &JsonRpcRequest,
     info: &ServerInfo,
@@ -65,14 +67,17 @@ fn tool_name(params: &Value) -> std::result::Result<&str, (i32, String)> {
 
 async fn tool_call_result(registry: &ToolRegistry, name: &str, arguments: Value) -> Value {
     match registry.call(name, arguments).await {
-        Ok(value) => json!({
-            "content": [{
-                "type": "text",
-                "text": serde_json::to_string_pretty(&value).unwrap_or_default(),
-            }],
-            "structuredContent": value,
-            "isError": false,
-        }),
+        Ok(value) => {
+            let text = bounded_tool_text(&value);
+            json!({
+                "content": [{
+                    "type": "text",
+                    "text": text,
+                }],
+                "structuredContent": value,
+                "isError": false,
+            })
+        }
         Err(err) => json!({
             "content": [{
                 "type": "text",
@@ -80,6 +85,16 @@ async fn tool_call_result(registry: &ToolRegistry, name: &str, arguments: Value)
             }],
             "isError": true,
         }),
+    }
+}
+
+fn bounded_tool_text(value: &Value) -> String {
+    match super::transport::bounded_json_bytes(value, MAX_INLINE_TOOL_TEXT_BYTES) {
+        Ok(Some(bytes)) => String::from_utf8(bytes).unwrap_or_default(),
+        Ok(None) => format!(
+            "structured tool result omitted from text content because it exceeds {MAX_INLINE_TOOL_TEXT_BYTES} bytes"
+        ),
+        Err(error) => format!("structured tool result could not be rendered as text: {error}"),
     }
 }
 

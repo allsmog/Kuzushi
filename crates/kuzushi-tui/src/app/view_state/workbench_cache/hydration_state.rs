@@ -3,6 +3,7 @@ use super::*;
 impl WorkbenchCache {
     pub(crate) fn view_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
         match hydration_group(key) {
+            HydrationGroup::Completion => self.completion_hydration_needed(target, key),
             HydrationGroup::Run => self.run_hydration_needed(target, key),
             HydrationGroup::Project => self.project_hydration_needed(target, key),
             HydrationGroup::Workspace => self.workspace_hydration_needed(target, key),
@@ -31,6 +32,7 @@ impl WorkbenchCache {
         self.hydrating_view_data
             .remove(&(target.clone(), key.clone()));
         match hydration_group(&key) {
+            HydrationGroup::Completion => self.apply_completion_hydration(target, key, value),
             HydrationGroup::Run => self.apply_run_hydration(target, key, value),
             HydrationGroup::Project => self.apply_project_hydration(target, key, value),
             HydrationGroup::Workspace => self.apply_workspace_hydration(target, key, value),
@@ -106,6 +108,9 @@ impl WorkbenchCache {
             ViewHydrationKey::HealthChecks { credential_env } => self
                 .cached_health_checks(Some(target), credential_env)
                 .is_not_requested(),
+            ViewHydrationKey::TargetProfile => {
+                self.cached_target_profile(Some(target)).is_not_requested()
+            }
             ViewHydrationKey::MapArtifacts => self
                 .cached_map_artifacts_built(Some(target))
                 .is_not_requested(),
@@ -126,12 +131,9 @@ impl WorkbenchCache {
             (ViewHydrationKey::LatestRunPointer, ViewHydrationValue::LatestRunPointer(state)) => {
                 self.latest_run_pointer = Some(LatestRunPointerCache { target, state });
             }
-            (
-                ViewHydrationKey::RunSummaryEntries,
-                ViewHydrationValue::RunSummaryEntries(entries),
-            ) => {
-                self.run_summary_entries = Some(RunSummaryEntriesCache { target, entries });
-                self.invalidate_legacy_run_summary_index();
+            (ViewHydrationKey::RunSummaryEntries, ViewHydrationValue::RunSummaryEntries(state)) => {
+                self.run_summary_entries = Some(RunSummaryEntriesCache { target, state });
+                self.invalidate_run_summary_dependents();
             }
             (
                 ViewHydrationKey::RunArtifactText { run_id, leaf },
@@ -235,6 +237,9 @@ impl WorkbenchCache {
             (ViewHydrationKey::MapArtifacts, ViewHydrationValue::MapArtifacts(built)) => {
                 self.map_artifacts.store(target, built);
             }
+            (ViewHydrationKey::TargetProfile, ViewHydrationValue::TargetProfile(profile)) => {
+                self.target_profile = Some(TargetProfileCache { target, profile });
+            }
             (ViewHydrationKey::TargetBase, ViewHydrationValue::TargetBase(base)) => {
                 self.target_base = Some(TargetBaseCache { target, base });
             }
@@ -245,6 +250,7 @@ impl WorkbenchCache {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HydrationGroup {
+    Completion,
     Run,
     Project,
     Workspace,
@@ -253,6 +259,9 @@ enum HydrationGroup {
 
 fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
     match key {
+        ViewHydrationKey::FileCompletionValues
+        | ViewHydrationKey::FindingCompletionValues
+        | ViewHydrationKey::RunIdCompletionValues => HydrationGroup::Completion,
         ViewHydrationKey::LatestRunPointer
         | ViewHydrationKey::RunSummaryEntries
         | ViewHydrationKey::RunArtifactText { .. }
@@ -269,6 +278,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         | ViewHydrationKey::DirectoryListing { .. }
         | ViewHydrationKey::PromptOverrideHash { .. } => HydrationGroup::Workspace,
         ViewHydrationKey::HealthChecks { .. }
+        | ViewHydrationKey::TargetProfile
         | ViewHydrationKey::MapArtifacts
         | ViewHydrationKey::TargetBase => HydrationGroup::Status,
     }

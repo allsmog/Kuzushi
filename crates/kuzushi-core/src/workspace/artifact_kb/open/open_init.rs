@@ -31,37 +31,64 @@ impl ArtifactKnowledgeStore {
     }
 
     pub fn init(&self) -> Result<()> {
-        self.conn.execute_batch(
-            r#"
-            create table if not exists artifact_kb_records (
-              id text primary key,
-              source_path text not null,
-              module_id text not null,
-              run_id text,
-              content_hash text not null,
-              title text not null,
-              summary text not null,
-              body text not null,
-              refs_json text not null default '[]',
-              metadata_json text not null default '{}',
-              indexed_at_unix integer not null
-            );
-            create index if not exists idx_artifact_kb_source
-              on artifact_kb_records(source_path, module_id, run_id);
-            create index if not exists idx_artifact_kb_module
-              on artifact_kb_records(module_id, indexed_at_unix desc);
-
-            create virtual table if not exists artifact_kb_fts using fts5(
-              id unindexed,
-              title,
-              summary,
-              body,
-              refs,
-              metadata,
-              tokenize = 'unicode61'
-            );
-            "#,
-        )?;
+        init_record_schema(&self.conn)?;
+        init_refresh_schema(&self.conn)?;
+        init_search_schema(&self.conn)?;
         Ok(())
     }
+}
+
+fn init_record_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        create table if not exists artifact_kb_records (
+          id text primary key, source_path text not null, module_id text not null,
+          run_id text, content_hash text not null, title text not null,
+          summary text not null, body text not null,
+          refs_json text not null default '[]',
+          metadata_json text not null default '{}', indexed_at_unix integer not null
+        );
+        create index if not exists idx_artifact_kb_source
+          on artifact_kb_records(source_path, module_id, run_id);
+        create index if not exists idx_artifact_kb_module
+          on artifact_kb_records(module_id, indexed_at_unix desc);
+        "#,
+    )?;
+    Ok(())
+}
+
+fn init_refresh_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        create table if not exists artifact_kb_source_state (
+          source_path text primary key, record_id text not null,
+          size_bytes integer not null, modified_secs integer not null,
+          modified_nanos integer not null
+        );
+        create index if not exists idx_artifact_kb_source_record
+          on artifact_kb_source_state(record_id);
+        create table if not exists artifact_kb_checkpoints (
+          checkpoint_key text primary key, checkpoint_value integer not null
+        );
+        create table if not exists artifact_kb_state (
+          state_key text primary key, state_value text not null
+        );
+        create table if not exists artifact_kb_finding_quarantine (
+          created_seq integer primary key, fingerprint text not null, reason text not null
+        );
+        "#,
+    )?;
+    Ok(())
+}
+
+fn init_search_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        create virtual table if not exists artifact_kb_fts using fts5(
+          id unindexed, title, summary, body, refs, metadata,
+          tokenize = 'unicode61'
+        );
+        "#,
+    )?;
+    Ok(())
 }

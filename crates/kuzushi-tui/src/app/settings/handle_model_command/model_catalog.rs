@@ -71,7 +71,7 @@ impl ShellApp {
         self.log(
             "model",
             format!(
-                "{} / {} selected (no fallback model) — showing config, Esc to go back",
+                "{} / {} selected (no fallback model) — showing config; type `back` to return",
                 model_choice_display_selector(choice),
                 choice.thinking_level
             ),

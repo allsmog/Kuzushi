@@ -37,6 +37,7 @@ fn context_strip_model_formats_target_model_context_and_cost() {
     app.set_target(Some(PathBuf::from("/tmp/acme")));
     app.domain_mut().context_view_mut().exists = true;
     app.config_mut().model = Some("openai:gpt-5.2".to_string());
+    app.session_mut().mark_session_api_key_ready("openai");
     app.session_mut().set_session_cost_usd_for_test(0.42);
 
     let model = context_strip_model(&app);
@@ -50,6 +51,18 @@ fn context_strip_model_formats_target_model_context_and_cost() {
     assert!(model
         .compact_segments()
         .contains(&"ctx:✓ built".to_string()));
+}
+
+#[test]
+fn context_strip_qualifies_configured_models_with_missing_auth() {
+    assert_eq!(
+        qualified_model_segment(Some("openai:gpt-5.5"), false),
+        "openai:gpt-5.5 [auth missing]"
+    );
+    assert_eq!(
+        qualified_model_segment(Some("openai:gpt-5.5"), true),
+        "openai:gpt-5.5"
+    );
 }
 
 #[test]

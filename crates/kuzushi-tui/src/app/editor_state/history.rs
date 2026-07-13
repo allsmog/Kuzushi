@@ -18,6 +18,7 @@ impl EditorState {
         self.history_index = Some(next);
         self.input = self.command_history[next].clone();
         self.cursor = self.char_count();
+        self.touch_completion_preview();
     }
 
     pub(crate) fn history_next(&mut self) {
@@ -37,6 +38,7 @@ impl EditorState {
             cursor: 0,
         });
         self.cursor = 0;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn history_search_input(&mut self, ch: char) {
@@ -69,6 +71,7 @@ impl EditorState {
         if let Some(command) = chosen {
             self.input = command;
             self.cursor = self.char_count();
+            self.touch_completion_preview();
         }
     }
 
@@ -100,11 +103,13 @@ impl EditorState {
         self.history_index = Some(index);
         self.input = self.command_history[index].clone();
         self.cursor = self.char_count();
+        self.touch_completion_preview();
     }
 
     fn restore_history_draft(&mut self) {
         self.history_index = None;
         self.input = std::mem::take(&mut self.history_draft);
         self.cursor = self.char_count();
+        self.touch_completion_preview();
     }
 }

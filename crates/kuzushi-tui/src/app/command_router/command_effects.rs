@@ -364,6 +364,8 @@ impl ShellApp {
                 Some(self.reduce_component_selection(selection.as_deref()))
             }
             ShellCommand::Findings => {
+                self.set_active_findings_filter(None);
+                self.prepare_findings_list_view();
                 Some(self.open_workbench_effects(crate::app::WorkbenchPane::Findings))
             }
             ShellCommand::FindingsFilter(expression) => {
@@ -541,7 +543,7 @@ impl ShellApp {
     fn open_home_view(&mut self) {
         self.clear_focused_module();
         self.router.catalog_mut().collapse();
-        self.open_workbench(WorkbenchPane::Findings);
+        self.open_cached_workbench(WorkbenchPane::Findings);
         self.log("home", "showing the phase cockpit");
     }
 
@@ -618,10 +620,7 @@ impl ShellApp {
 
     fn open_onboarding_picker(&mut self) {
         if self.target().is_none() {
-            self.log(
-                "onboarding",
-                "no active workspace target; set one with `target <path>` first",
-            );
+            self.open_target_picker();
             return;
         }
         self.open_planning_picker();
@@ -639,10 +638,7 @@ impl ShellApp {
             );
         }
         let Some(journey) = crate::ui_view_models::journey_model(self) else {
-            self.log(
-                "journey",
-                "no active workspace target; set one with `target <path>` first",
-            );
+            self.open_target_picker();
             return;
         };
         self.open_phase_picker(journey.current);
@@ -650,10 +646,7 @@ impl ShellApp {
 
     fn open_requested_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
         if self.target().is_none() {
-            self.log(
-                "journey",
-                "no active workspace target; set one with `target <path>` first",
-            );
+            self.open_target_picker();
             return;
         }
         self.workbench_cache()
@@ -677,10 +670,7 @@ impl ShellApp {
     }
 
     fn open_filtered_findings_view(&mut self) {
-        self.set_shell_view(ShellView::Workbench);
-        self.router
-            .workbench_mut()
-            .set_focus(crate::app::WorkbenchPane::Findings);
+        self.prepare_findings_list_view();
     }
 
     fn reduce_findings_since(&mut self, reference: &str) -> Vec<ShellEffect> {
@@ -716,15 +706,8 @@ impl ShellApp {
     }
 
     fn show_permissions_status(&mut self) {
-        self.set_shell_view(ShellView::Config);
-        self.log(
-            "permissions",
-            "model fallback forbidden without explicit consent; headless run requires explicit tool names",
-        );
-        self.log(
-            "permissions",
-            "network egress, filesystem writes outside staged flows, and destructive actions require approval; denial leaves state unchanged",
-        );
+        self.set_shell_view(ShellView::Permissions);
+        self.log("view", "permission policy");
     }
 
     fn open_tune_view(&mut self) {

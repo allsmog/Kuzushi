@@ -9,6 +9,79 @@ use kuzushi_core::{
 use std::collections::BTreeMap;
 
 #[test]
+fn visible_projection_cache_reuses_shared_storage_until_findings_change() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_findings(vec![Finding::new_semgrep(
+        "demo.rule",
+        "src/lib.rs",
+        7,
+        None,
+        Severity::High,
+        "finding",
+    )]);
+
+    let first = projected_visible_findings(&app);
+    let cached = projected_visible_findings(&app);
+    assert!(std::sync::Arc::ptr_eq(&first, &cached));
+
+    app.findings_mut()[0].severity = Severity::Critical;
+    let refreshed = projected_visible_findings(&app);
+    assert!(!std::sync::Arc::ptr_eq(&cached, &refreshed));
+    assert_eq!(refreshed[0].finding.severity, Severity::Critical);
+}
+
+#[test]
+fn provenance_filtered_projection_refreshes_when_run_history_finishes_loading() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let run_id = "run-provenance-hydration";
+    let mut summary =
+        RunSummary::running(run_id, "scan", None, workspace.root().display().to_string());
+    summary.target_git = Some(RunTargetGitMetadata {
+        sha: "abcdef1234567890".to_string(),
+        branch: Some("main".to_string()),
+        dirty: false,
+    });
+    write_run_summary(workspace.root(), &summary.complete()).unwrap();
+
+    let mut finding = Finding::new_tool(
+        "semgrep",
+        "demo.provenance-filter",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "finding with delayed run provenance",
+    );
+    finding.scan_id = Some(run_id.to_string());
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_findings(vec![finding]);
+    app.set_active_findings_filter(Some("branch:main dirty:clean".to_string()));
+
+    let key = crate::app::ViewHydrationKey::RunSummaryEntries;
+    app.workbench_cache()
+        .borrow_mut()
+        .mark_view_hydration_loading(workspace.root(), std::slice::from_ref(&key));
+    let loading = projected_visible_findings(&app);
+    assert!(loading.is_empty());
+
+    let entries = kuzushi_core::list_recent_run_summary_entries(workspace.root(), 100).unwrap();
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(crate::app::ViewHydrationResult {
+            target: workspace.root().to_path_buf(),
+            key,
+            value: crate::app::ViewHydrationValue::RunSummaryEntries(
+                crate::app::RunSummaryEntriesState::Ready(entries),
+            ),
+        });
+    let ready = projected_visible_findings(&app);
+
+    assert_eq!(ready.len(), 1);
+    assert!(!std::sync::Arc::ptr_eq(&loading, &ready));
+}
+
+#[test]
 fn findings_model_projects_counts_rows_and_selection() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let mut high = Finding::new_semgrep(
@@ -24,6 +97,7 @@ fn findings_model_projects_counts_rows_and_selection() {
         confidence: 0.91,
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     high.identity_id = Some("fi_0123456789abcdef0123456789abcdef".to_string());
     let medium = Finding::new_tool(
@@ -141,6 +215,7 @@ fn findings_model_applies_active_filter_to_visible_rows() {
         confidence: 0.86,
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     *app.findings_mut() = vec![open, confirmed];
 
@@ -200,6 +275,7 @@ fn findings_model_counts_reviewed_by_durable_identity() {
         confidence: 0.91,
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     let mut rerun = Finding::new_tool(
         "semgrep",
@@ -246,6 +322,7 @@ fn selected_finding_detail_uses_durable_identity_review_decision() {
         confidence: 0.91,
         rationale: "operator confirmed this identity".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     reviewed.triaged_by = Some(TriageAuthor::Human);
 
@@ -318,6 +395,7 @@ fn selected_finding_detail_includes_run_summary_provenance() {
     finding.scan_id = Some("run-detail".to_string());
 
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.hydrate_all_view_data_for_test();
     *app.findings_mut() = vec![finding];
 
     let detail = selected_finding_detail_model(&app).expect("selected finding");
@@ -783,6 +861,7 @@ fn selected_finding_detail_uses_same_proof_badge_as_list() {
         confidence: 0.91,
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     *app.findings_mut() = vec![finding];

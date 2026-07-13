@@ -8,8 +8,8 @@ KUZUSHI · target ./phase-target · view map · ● LIVE · cost $0.37 · ctx:�
  組  map ✓ · 崩  hunt ✓ · 作  confirm ● · 掛  fix ·
  ▸ NEXT triage & verify
  next map target · context build build context · attach <path> seed materials
-│MAP · RECON
-│ ● LIVE run hase-run · 42s · context:build
+│▸ MAP · RECON
+│ ● LIVE run …hase-run · 42s · context:build
 │ ── RECON ────────────────────────────────────────────────────────────────────
 │ … 4 earlier trace rows
 │   5  context:build  mapped external client · 23ms · $0.0100
@@ -26,5 +26,5 @@ KUZUSHI · target ./phase-target · view map · ● LIVE · cost $0.37 · ctx:�
 │
 mode:run · 作  confirm 3/4 · ⛭ 掛  fix ·...   6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
- Ctrl+C request abort   findings list   Esc back   history events
+ Ctrl+C request abort   Esc prompt
 NAVIGATION MODE — view keys active · Esc returns to prompt

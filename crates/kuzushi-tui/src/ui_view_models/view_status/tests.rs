@@ -28,6 +28,12 @@ fn view_status_reflects_actual_view_before_focused_module() {
     app.set_shell_view(ShellView::Tools);
     assert_eq!(view_status_segment(&app), "tools");
 
+    app.set_shell_view(ShellView::Permissions);
+    assert_eq!(view_status_segment(&app), "permissions");
+
+    app.set_shell_view(ShellView::CommandPalette);
+    assert_eq!(view_status_segment(&app), "palette");
+
     app.router.threat_mut().open(ThreatView::Stride);
     app.set_shell_view(ShellView::Threat);
     assert_eq!(view_status_segment(&app), "threats:stride");

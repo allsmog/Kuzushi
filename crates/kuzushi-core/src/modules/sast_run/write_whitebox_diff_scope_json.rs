@@ -54,12 +54,38 @@ pub(in crate::modules) fn true_positive_findings_for_sast_runs(
 pub(in crate::modules) fn sast_patch_input(sast_input: &Value, fingerprint: &str) -> Value {
     let mut patch_input = Map::new();
     patch_input.insert("fingerprint".to_string(), json!(fingerprint));
-    for key in ["maxIterations", "buildCmd", "testCmd"] {
+    for key in [
+        "maxIterations",
+        "buildCmd",
+        "testCmd",
+        crate::remediation::patch::PATCH_SOURCE_COMMIT_INPUT_KEY,
+    ] {
         if let Some(value) = sast_input.get(key) {
             patch_input.insert(key.to_string(), value.clone());
         }
     }
     Value::Object(patch_input)
+}
+
+#[cfg(test)]
+mod sast_patch_tests {
+    use super::*;
+
+    #[test]
+    fn nested_patch_input_propagates_the_bound_source_commit() {
+        let source_commit = "0123456789012345678901234567890123456789";
+        let input = json!({
+            "autoPatch": true,
+            (crate::remediation::patch::PATCH_SOURCE_COMMIT_INPUT_KEY): source_commit,
+        });
+
+        let patch_input = sast_patch_input(&input, "finding-1");
+
+        assert_eq!(
+            patch_input[crate::remediation::patch::PATCH_SOURCE_COMMIT_INPUT_KEY],
+            source_commit
+        );
+    }
 }
 
 pub(in crate::modules) fn write_triage_jsonl(

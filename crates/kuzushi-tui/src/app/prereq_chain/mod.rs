@@ -1,4 +1,4 @@
-use kuzushi_core::ExecutionAuthorization;
+use kuzushi_core::{ExecutionAuthorization, PreparedToolInput};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -55,13 +55,19 @@ pub enum PrereqPlanAction {
 pub struct PrereqChain {
     pub remaining: Vec<PrereqStep>,
     pub final_tool: String,
-    pub final_input: Value,
+    pub final_input: PrereqFinalInput,
     pub final_thinking_level: Option<String>,
     pub running_step: Option<String>,
     pub final_dispatched: bool,
     pub approved: bool,
     pub regenerate_existing: bool,
     pub authorization: ExecutionAuthorization,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrereqFinalInput {
+    Raw(Value),
+    Prepared(PreparedToolInput),
 }
 
 impl PrereqChain {
@@ -74,7 +80,7 @@ impl PrereqChain {
         Self {
             remaining: steps,
             final_tool,
-            final_input,
+            final_input: PrereqFinalInput::Raw(final_input),
             final_thinking_level,
             running_step: None,
             final_dispatched: false,
@@ -82,6 +88,17 @@ impl PrereqChain {
             regenerate_existing: false,
             authorization: ExecutionAuthorization::default(),
         }
+    }
+
+    pub(crate) fn new_prepared(
+        steps: Vec<PrereqStep>,
+        final_tool: String,
+        final_input: PreparedToolInput,
+        final_thinking_level: Option<String>,
+    ) -> Self {
+        let mut chain = Self::new(steps, final_tool, Value::Null, final_thinking_level);
+        chain.final_input = PrereqFinalInput::Prepared(final_input);
+        chain
     }
 
     pub(crate) fn with_authorization(mut self, authorization: ExecutionAuthorization) -> Self {

@@ -15,6 +15,7 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command as ProcessCommand, Stdio};
+mod auth_provider;
 mod handle_model_command;
 mod model_choices;
 mod normalize_thinking_level;
@@ -23,6 +24,7 @@ mod shell_model_validation;
 pub use normalize_thinking_level::*;
 #[cfg(test)]
 mod tests;
+pub(crate) use auth_provider::{auth_provider_label, AuthProvider};
 pub(crate) use model_choices::model_choices;
 pub(super) use model_choices::preferred_model_choice_index;
 pub(crate) use model_choices::ModelChoice;

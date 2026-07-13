@@ -1,4 +1,4 @@
-use super::format_session_cost;
+use super::{format_runtime_cost, format_session_cost};
 use crate::ShellApp;
 
 const DEFAULT_SESSION_BUDGET_USD: f64 = 5.0;
@@ -45,18 +45,52 @@ pub(crate) fn cost_model(app: &ShellApp) -> CostModel {
         .unwrap_or(DEFAULT_SESSION_BUDGET_USD);
     let session_cost = session.session_cost_usd();
     let last_tool = session.last_tool_cost_usd();
-    let session_text = format_session_cost(session_cost);
-    let last_tool_text = last_tool_text(last_tool);
+    let (session_text, last_tool_text) = cost_texts(app);
     let budget_text = budget_text(session.session_budget_usd());
     CostModel {
-        budget_rows: cost_budget_rows(session_cost, last_tool, cap),
+        budget_rows: cost_budget_rows(
+            session_cost,
+            last_tool,
+            cap,
+            session.cost_accounting_is_complete(),
+        ),
         spend_rows: cost_spend_rows(
             session_text.clone(),
             last_tool_text.clone(),
             budget_text.clone(),
         ),
         auth_spend_cells: [session_text, last_tool_text],
-        budget_status: budget_status(session_cost, session.session_budget_usd()),
+        budget_status: budget_status(
+            session_cost,
+            session.session_budget_usd(),
+            session.cost_accounting_is_complete(),
+        ),
+    }
+}
+
+fn cost_texts(app: &ShellApp) -> (String, String) {
+    let session = app.session();
+    let accounting_error = session.cost_accounting_error();
+    let session_text = if session.cost_accounting_is_complete() {
+        format_session_cost(session.session_cost_usd())
+    } else {
+        format_runtime_cost(session.session_cost_report(), accounting_error)
+    };
+    let last_tool_text = session
+        .last_tool_cost_report()
+        .map(|report| format_last_tool_cost(report, accounting_error))
+        .unwrap_or_else(|| "\u{2014}".to_string());
+    (session_text, last_tool_text)
+}
+
+fn format_last_tool_cost(
+    report: kuzushi_core::runtime::RuntimeCostReport,
+    accounting_error: Option<&str>,
+) -> String {
+    if report.is_complete() && accounting_error.is_none() {
+        format!("${:.4}", report.observed_usd())
+    } else {
+        format_runtime_cost(report, accounting_error)
     }
 }
 
@@ -74,16 +108,35 @@ fn cost_spend_row(label: &str, value: String) -> CostSpendRow {
     }
 }
 
-fn cost_budget_rows(session: f64, last_tool: Option<f64>, cap: f64) -> Vec<CostBudgetRow> {
-    let mut rows = vec![cost_budget_row("this session    ", session, cap)];
+fn cost_budget_rows(
+    session: f64,
+    last_tool: Option<f64>,
+    cap: f64,
+    accounting_complete: bool,
+) -> Vec<CostBudgetRow> {
+    let mut rows = vec![cost_budget_row(
+        "this session    ",
+        session,
+        cap,
+        !accounting_complete,
+    )];
     if let Some(last) = last_tool {
-        rows.push(cost_budget_row("last tool       ", last, cap));
+        rows.push(cost_budget_row(
+            "last tool       ",
+            last,
+            cap,
+            !accounting_complete,
+        ));
     }
     rows
 }
 
-fn cost_budget_row(label: &'static str, used: f64, cap: f64) -> CostBudgetRow {
-    let percent = capped_percent(used, cap);
+fn cost_budget_row(label: &'static str, used: f64, cap: f64, force_halt: bool) -> CostBudgetRow {
+    let percent = if force_halt {
+        100
+    } else {
+        capped_percent(used, cap)
+    };
     let fill = bar_fill(percent);
     CostBudgetRow {
         tone: cost_tone(percent),
@@ -120,20 +173,24 @@ fn capped_percent(used: f64, cap: f64) -> usize {
     }
 }
 
-fn last_tool_text(last_tool: Option<f64>) -> String {
-    last_tool
-        .map(|cost| format!("${cost:.4}"))
-        .unwrap_or_else(|| "\u{2014}".to_string())
-}
-
 fn budget_text(budget: Option<f64>) -> String {
     budget
         .map(|value| format!("${value:.2}"))
         .unwrap_or_else(|| "unset (default $5.00 soft cap shown above)".to_string())
 }
 
-fn budget_status(session_cost: f64, budget: Option<f64>) -> Option<CostBudgetStatus> {
+fn budget_status(
+    session_cost: f64,
+    budget: Option<f64>,
+    accounting_complete: bool,
+) -> Option<CostBudgetStatus> {
     let budget = budget?;
+    if !accounting_complete {
+        return Some(CostBudgetStatus {
+            tone: CostTone::Danger,
+            cells: [format!("${budget:.2}"), "halted".to_string()],
+        });
+    }
     let percent = uncapped_percent(session_cost, budget);
     Some(CostBudgetStatus {
         tone: cost_tone(percent),

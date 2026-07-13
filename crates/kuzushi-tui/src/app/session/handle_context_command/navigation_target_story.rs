@@ -76,27 +76,38 @@ impl ShellApp {
         if self.target_activation_blocked() {
             return Vec::new();
         }
-        let label = activation.path.display().to_string();
         match WorkspaceTarget::new(&activation.path) {
-            Ok(workspace) => {
-                let Some(phases) = self.target_phase_config(&workspace) else {
-                    return Vec::new();
-                };
-                let starts_scripted_scan =
-                    activation.source == TargetActivationSource::ScriptedScan;
-                let mut effects = self.activate_target_with_phases(workspace, phases);
-                self.apply_initial_onboarding_phase();
-                self.finish_target_activation(activation);
-                if starts_scripted_scan {
-                    effects.extend(self.reduce_scan_start(None, None));
-                }
-                effects
-            }
+            Ok(workspace) => self.activate_resolved_target(workspace, activation),
             Err(error) => {
-                self.log("error", format!("invalid target {label:?}: {error}"));
+                self.set_error_notice(
+                    "target",
+                    target_activation_error_message(&activation.path, &error),
+                );
                 Vec::new()
             }
         }
+    }
+
+    fn activate_resolved_target(
+        &mut self,
+        workspace: WorkspaceTarget,
+        activation: TargetActivation,
+    ) -> Vec<ShellEffect> {
+        let root = workspace.root().to_path_buf();
+        if !self.ensure_target_state_dir(&workspace, &root) {
+            return Vec::new();
+        }
+        let Some(phases) = self.target_phase_config(&workspace) else {
+            return Vec::new();
+        };
+        let scan_input = target_activation_scan_input(activation.source);
+        let mut effects = self.activate_target_with_phases(workspace, phases);
+        self.apply_initial_onboarding_phase();
+        self.finish_target_activation(activation);
+        if let Some(input) = scan_input {
+            effects.extend(self.reduce_scan_start(None, input));
+        }
+        effects
     }
 
     fn log_current_target(&mut self) {
@@ -109,6 +120,10 @@ impl ShellApp {
 
     #[cfg(test)]
     pub(crate) fn activate_target(&mut self, workspace: WorkspaceTarget) -> Vec<ShellEffect> {
+        let root = workspace.root().to_path_buf();
+        if !self.ensure_target_state_dir(&workspace, &root) {
+            return Vec::new();
+        }
         let Some(phases) = self.target_phase_config(&workspace) else {
             return Vec::new();
         };
@@ -136,9 +151,7 @@ impl ShellApp {
         self.config_mut().phases = phases;
         refresh_auto_open_prefs_from_store(self);
         self.set_target(Some(root.clone()));
-        self.workbench_cache()
-            .borrow_mut()
-            .run_summary_entries(Some(&root));
+        self.schedule_target_profile_hydration(&root);
         self.workbench_cache()
             .borrow_mut()
             .git_metadata(Some(&root));
@@ -146,10 +159,8 @@ impl ShellApp {
         if let Some(error) = option_store_error {
             self.log("options", error);
         }
-        if self.ensure_target_state_dir(&workspace, &root) {
-            self.record_active_target(&root);
-            self.refresh_active_scope_tree(&root);
-        }
+        self.record_active_target(&root);
+        self.refresh_active_scope_tree(&root);
         self.reload_tool_shelf();
         Self::target_activation_effects(root)
     }
@@ -293,7 +304,10 @@ impl ShellApp {
             Err(error) => {
                 self.log(
                     "target",
-                    format!("set {} but state dir init failed: {error}", root.display()),
+                    format!(
+                        "target activation failed before state changed — could not initialize {}: {error}",
+                        root.display()
+                    ),
                 );
                 false
             }
@@ -523,6 +537,52 @@ impl ShellApp {
             self.show_story();
         }
     }
+}
+
+fn target_activation_scan_input(
+    source: TargetActivationSource,
+) -> Option<Option<serde_json::Value>> {
+    match source {
+        TargetActivationSource::ScriptedScan => Some(None),
+        TargetActivationSource::OfflineDemo => Some(Some(kuzushi_core::offline_demo_scan_input())),
+        TargetActivationSource::Command | TargetActivationSource::Picker => None,
+    }
+}
+
+#[cfg(test)]
+mod workspace_initialization_tests {
+    use super::*;
+
+    #[test]
+    fn unsafe_workspace_policy_rejects_activation_before_target_changes() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::create_dir(target.path().join(".kuzushi")).unwrap();
+        std::fs::write(target.path().join(".kuzushi/.gitignore"), "").unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let effects = app.activate_target_effect(TargetActivation {
+            path: target.path().to_path_buf(),
+            selected_scope: None,
+            source: TargetActivationSource::Command,
+        });
+
+        assert!(effects.is_empty());
+        assert!(app.target().is_none());
+        assert!(!target.path().join(".kuzushi/v3").exists());
+    }
+}
+
+fn target_activation_error_message(path: &Path, error: &anyhow::Error) -> String {
+    let label = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("selected path");
+    let reason = if error.to_string().contains("does not exist") {
+        "does not exist"
+    } else {
+        "is not a usable directory"
+    };
+    format!("Target {label:?} {reason}. Next: target <existing-directory>")
 }
 
 fn target_revision_refresh_effects() -> Vec<ShellEffect> {

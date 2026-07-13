@@ -79,7 +79,19 @@ impl ShellApp {
     }
 
     pub fn log(&mut self, prefix: impl Into<String>, body: impl Into<String>) {
-        self.domain.push_log(prefix, body);
+        let prefix = prefix.into();
+        let body = body.into();
+        let surface_workbench_error =
+            prefix == "error" && self.shell_view() == ShellView::Workbench;
+        self.domain.push_log(prefix, body.clone());
+        if surface_workbench_error {
+            self.advisory_mut().notice = Some(Notice {
+                source: "workbench".to_string(),
+                message: body,
+                severity: NoticeSeverity::Error,
+                since: std::time::Instant::now(),
+            });
+        }
     }
 
     pub fn log_lines(&self) -> &[LogLine] {
@@ -323,10 +335,12 @@ impl ShellApp {
 
     #[doc(hidden)]
     pub fn set_focused_module(&mut self, module: Option<String>) {
+        self.bump_command_provider_generation();
         self.router.set_focused_module(module);
     }
 
     pub(crate) fn clear_focused_module(&mut self) {
+        self.bump_command_provider_generation();
         self.router.clear_focused_module();
     }
 
@@ -343,6 +357,7 @@ impl ShellApp {
     }
 
     pub(crate) fn registry_mut(&mut self) -> &mut ModuleRegistry {
+        self.bump_command_provider_generation();
         self.session.registry_mut()
     }
 
@@ -452,7 +467,19 @@ impl ShellApp {
 
     #[doc(hidden)]
     pub fn set_scan_panel(&mut self, scan: Option<ScanPanelState>) {
+        let changed = self.scan().and_then(|scan| scan.run_id.as_deref())
+            != scan.as_ref().and_then(|scan| scan.run_id.as_deref());
         self.domain.set_scan(scan);
+        self.bump_completion_generation_when(changed);
+    }
+
+    pub(crate) fn set_scan_run_id(&mut self, run_id: String) {
+        let changed = self.scan().and_then(|scan| scan.run_id.as_deref()) != Some(run_id.as_str());
+        let Some(scan) = self.domain.scan_mut() else {
+            return;
+        };
+        scan.run_id = Some(run_id);
+        self.bump_completion_generation_when(changed);
     }
 
     #[cfg(test)]
@@ -531,7 +558,9 @@ impl ShellApp {
     }
 
     pub(crate) fn take_active_tool_run_id(&mut self) -> Option<String> {
-        self.runtime_state.tool_run_mut().take_run_id()
+        let run_id = self.runtime_state.tool_run_mut().take_run_id();
+        self.bump_completion_generation_when(run_id.is_some());
+        run_id
     }
 
     pub(crate) fn take_active_tool_target(&mut self) -> Option<PathBuf> {
@@ -556,9 +585,11 @@ impl ShellApp {
         target: PathBuf,
         model_override: Option<String>,
     ) {
+        let changed = self.active_tool_run_id() != Some(run_id.as_str());
         self.runtime_state
             .tool_run_mut()
             .start(tool_name, cancel, run_id, target, model_override);
+        self.bump_completion_generation_when(changed);
     }
 
     pub(crate) fn finish_tool_run(&mut self) {
@@ -667,6 +698,24 @@ impl ShellApp {
         self.domain.workbench_cache()
     }
 
+    fn bump_completion_generation(&self) {
+        self.workbench_cache()
+            .borrow_mut()
+            .bump_completion_generation();
+    }
+
+    pub(crate) fn bump_completion_generation_when(&self, changed: bool) {
+        if changed {
+            self.bump_completion_generation();
+        }
+    }
+
+    fn bump_command_provider_generation(&self) {
+        self.workbench_cache()
+            .borrow_mut()
+            .bump_command_provider_generation();
+    }
+
     pub(crate) fn findings(&self) -> &[Finding] {
         self.domain.findings()
     }
@@ -687,8 +736,18 @@ impl ShellApp {
         self.domain.findings_mut()
     }
 
+    pub(crate) fn findings_revision(&self) -> u64 {
+        self.domain.findings_revision()
+    }
+
     pub fn set_findings(&mut self, findings: Vec<Finding>) {
+        let completion_values = finding_completion_values_from_findings(&findings);
         self.domain.set_findings(findings);
+        if let Some(target) = self.target_owned() {
+            self.workbench_cache()
+                .borrow_mut()
+                .store_finding_completion_values(&target, completion_values);
+        }
     }
 
     pub(crate) fn set_findings_total_count(&mut self, total: usize) {
@@ -727,7 +786,7 @@ impl ShellApp {
         };
         self.invalidate_view_hydration();
         let changes = ExternalTargetStateChanges::classify(&target, relative_paths);
-        let (findings_changed, run_summaries_changed) = {
+        let (findings_changed, _run_summaries_changed) = {
             self.workbench_cache()
                 .borrow_mut()
                 .invalidate_state_artifact_paths(&target, relative_paths)
@@ -736,18 +795,23 @@ impl ShellApp {
         if changes.project_scopes {
             self.reload_external_project_scope_tree(&target);
         }
-        if run_summaries_changed {
-            self.workbench_cache()
-                .borrow_mut()
-                .run_summary_entries(Some(&target));
-        }
-        if !findings_changed {
+        if !findings_changed || self.findings_projection_is_current(&target) {
             return Vec::new();
         }
         vec![ShellEffect::RefreshFindings(FindingsRefresh {
             announce: false,
-            filter: None,
+            filter: self.active_findings_filter().clone(),
         })]
+    }
+
+    fn findings_projection_is_current(&self, target: &std::path::Path) -> bool {
+        let Some(read_watermark) = self.findings_read_watermark() else {
+            return false;
+        };
+        let path = target.join(".kuzushi/v3/index.sqlite3");
+        kuzushi_core::FindingStore::open_read_only(path)
+            .and_then(|store| store.projection_meta())
+            .is_ok_and(|meta| meta.applied_seq == read_watermark)
     }
 
     pub(crate) fn clear_workspace_stale(&mut self) {
@@ -756,6 +820,10 @@ impl ShellApp {
 
     pub(crate) fn review_decisions(&self) -> &[kuzushi_core::findings::ReviewDecisionRecord] {
         self.domain.review_decisions()
+    }
+
+    pub(crate) fn review_decisions_revision(&self) -> u64 {
+        self.domain.review_decisions_revision()
     }
 
     pub(crate) fn set_review_decisions(
@@ -818,7 +886,20 @@ impl ShellApp {
     }
 
     pub fn set_activity(&mut self, activity: Option<ActivitySession>) {
+        let changed = self.activity().map(|activity| activity.run_id.as_str())
+            != activity.as_ref().map(|activity| activity.run_id.as_str());
         self.domain.set_activity(activity);
+        self.bump_completion_generation_when(changed);
+    }
+
+    pub(crate) fn set_activity_run_id(&mut self, run_id: String) {
+        let changed =
+            self.activity().map(|activity| activity.run_id.as_str()) != Some(run_id.as_str());
+        let Some(activity) = self.domain.activity_mut() else {
+            return;
+        };
+        activity.run_id = run_id;
+        self.bump_completion_generation_when(changed);
     }
 
     pub(crate) fn live_activity(&self) -> Option<&LiveActivity> {
@@ -954,4 +1035,60 @@ fn contextual_overlay_view(view: ShellView) -> bool {
             | ShellView::Keymap
             | ShellView::UpdateAvailable
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_command_from_workbench_sets_error_notice_and_keeps_log() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+
+        let effects = app
+            .reduce_command_effects(&ShellCommand::Unknown("not-a-command".to_string()))
+            .expect("unknown command handled synchronously");
+
+        assert!(effects.is_empty());
+        let notice = app.advisory().notice.as_ref().expect("visible notice");
+        assert_eq!(notice.severity, NoticeSeverity::Error);
+        assert!(notice.message.contains("unknown command"));
+        assert!(notice.message.contains("Next:"));
+        assert!(app
+            .log_lines()
+            .iter()
+            .any(|line| line.prefix == "error" && line.body.contains("not-a-command")));
+    }
+
+    #[test]
+    fn ordinary_view_error_log_remains_transcript_only() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Tools);
+
+        app.log("error", "visible in this view's transcript");
+
+        assert!(app.advisory().notice.is_none());
+        assert!(app.log_lines().iter().any(|line| line.prefix == "error"));
+    }
+
+    #[test]
+    fn run_preparation_error_from_workbench_uses_notice_boundary() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.set_shell_view(ShellView::Workbench);
+
+        let effects = app.prepare_run_tool_launch(RunToolPreparation {
+            tool_name: "semgrep:scan".to_string(),
+            input: Some("{".to_string()),
+            target: Some(workspace.root().to_path_buf()),
+        });
+
+        assert!(effects.is_empty());
+        let notice = app.advisory().notice.as_ref().expect("visible notice");
+        assert_eq!(notice.severity, NoticeSeverity::Error);
+        assert!(notice.message.contains("run input must be JSON"));
+        assert!(notice.message.contains("Next: run <tool> {}"));
+    }
 }

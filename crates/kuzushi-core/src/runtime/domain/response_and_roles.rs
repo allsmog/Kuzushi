@@ -10,6 +10,7 @@ impl AgentToolPolicy {
             tools: tools.into_iter().map(Into::into).collect(),
             mcps: false,
             mcps_attached: Vec::new(),
+            mcp_read_roots: Vec::new(),
         }
     }
 
@@ -39,8 +40,13 @@ impl AgentToolPolicy {
     /// that wants the MCP surface attached — it never attaches a
     /// server whose backing artifact is missing.
     pub fn with_mcps_for_target(self, target: &std::path::Path) -> Self {
-        let plan = crate::runtime::mcp_probe::mcp_attachment_plan_for_target(target);
-        self.with_mcps_plan(plan)
+        let Ok(target) = std::fs::canonicalize(target) else {
+            return self.with_mcps_plan(Vec::new());
+        };
+        let plan = crate::runtime::mcp_probe::mcp_attachment_plan_for_target(&target);
+        let mut policy = self.with_mcps_plan(plan);
+        policy.mcp_read_roots = vec![target];
+        policy
     }
 
     pub fn is_default(&self) -> bool {
@@ -48,6 +54,7 @@ impl AgentToolPolicy {
             && self.tools.is_empty()
             && !self.mcps
             && self.mcps_attached.is_empty()
+            && self.mcp_read_roots.is_empty()
     }
 }
 
@@ -58,6 +65,7 @@ impl Default for AgentToolPolicy {
             tools: Vec::new(),
             mcps: false,
             mcps_attached: Vec::new(),
+            mcp_read_roots: Vec::new(),
         }
     }
 }
@@ -76,6 +84,7 @@ mod policy_tests {
             policy.mcps_attached.is_empty(),
             "default policy must not list any attachments"
         );
+        assert!(policy.mcp_read_roots.is_empty());
         assert!(policy.is_default(), "fresh default policy is_default");
     }
 
@@ -143,6 +152,18 @@ mod policy_tests {
         assert!(names.contains(&"context"));
         assert!(!names.contains(&"joern"));
         assert!(!names.contains(&"codeql"));
+        assert_eq!(
+            policy.mcp_read_roots,
+            vec![std::fs::canonicalize(tmp.path()).unwrap()]
+        );
+        let json = serde_json::to_value(&policy).unwrap();
+        assert_eq!(
+            json["mcpReadRoots"][0],
+            std::fs::canonicalize(tmp.path())
+                .unwrap()
+                .display()
+                .to_string()
+        );
     }
 
     #[test]
@@ -162,6 +183,7 @@ mod policy_tests {
             attachments[1]["artifactPath"],
             "/work/.kuzushi/context-snapshot.json"
         );
+        assert!(json.get("mcpReadRoots").is_none());
         let round_tripped: AgentToolPolicy = serde_json::from_value(json).expect("deserialise");
         assert_eq!(round_tripped, policy);
     }
@@ -178,6 +200,17 @@ mod policy_tests {
         let policy: AgentToolPolicy = serde_json::from_value(json).expect("deserialise");
         assert!(policy.mcps);
         assert!(policy.mcps_attached.is_empty());
+        assert!(policy.mcp_read_roots.is_empty());
+    }
+
+    #[test]
+    fn missing_target_does_not_grant_cwd_or_attach_servers() {
+        let policy = AgentToolPolicy::default()
+            .with_mcps_for_target(std::path::Path::new("/definitely/missing/kuzushi-target"));
+
+        assert!(!policy.mcps);
+        assert!(policy.mcps_attached.is_empty());
+        assert!(policy.mcp_read_roots.is_empty());
     }
 }
 
@@ -187,13 +220,22 @@ pub struct AgentQueryResponse {
     pub text: String,
     #[serde(default)]
     pub structured: Option<Value>,
-    /// Cost in USD for this single API call. Populated by providers
-    /// that track token usage (e.g. `AnthropicOAuthRuntime` reads
-    /// `usage.input_tokens` / `usage.output_tokens` and multiplies by
-    /// the per-model rate). Defaults to `0.0` for providers that
-    /// don't surface usage.
+    /// Exact provider-reported cost in USD for this single API call.
+    /// Defaults to `0.0` for compatibility; consult `cost_usd_reported`
+    /// before treating a zero as exact.
     #[serde(default)]
     pub cost_usd: f64,
+    /// True when the provider explicitly reported `cost_usd`, including an
+    /// explicit zero. Legacy positive values are inferred as reported for
+    /// compatibility; a default zero without this bit is unresolved observed
+    /// spend because receiving a response proves the provider call occurred.
+    #[serde(default)]
+    pub cost_usd_reported: bool,
+    /// Locally calculated estimate when usage is available but the provider
+    /// does not report an exact monetary charge. Never aggregate this as
+    /// actual spend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_cost_usd: Option<f64>,
     /// Input/output token counts when the provider reports them.
     /// Used for cost aggregation and as a sanity check on the cost
     /// calculation. Both default to `0`.
@@ -205,6 +247,29 @@ pub struct AgentQueryResponse {
     pub truncated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_reason: Option<String>,
+}
+
+impl AgentQueryResponse {
+    /// Validate provider-reported cost before it enters aggregation or
+    /// persistence. The response is returned unchanged for ergonomic use at
+    /// runtime adapter boundaries.
+    pub fn validate_cost(self) -> anyhow::Result<Self> {
+        self.checked_cost_report()?;
+        Ok(self)
+    }
+
+    pub fn checked_cost_report(&self) -> anyhow::Result<super::RuntimeCostReport> {
+        let cost = super::RuntimeCost::from_usd(self.cost_usd, "agent query response cost")?;
+        if let Some(estimate) = self.estimated_cost_usd {
+            super::RuntimeCost::from_usd(estimate, "agent query response estimated cost")?;
+        }
+        if self.cost_usd_reported || self.cost_usd != 0.0 {
+            return Ok(super::RuntimeCostReport::known(cost));
+        }
+        // A provider response proves that a call happened. Missing usage is
+        // unresolved spend, not the absence of a cost receipt.
+        Ok(super::RuntimeCostReport::INCOMPLETE_ZERO)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

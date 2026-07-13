@@ -6,14 +6,15 @@ pub(crate) fn query_deep_semantic_findings(
     input: &Value,
     target: &Path,
     cwes: &[DeepSemanticCweSelection],
-) -> Result<Value> {
+    system_prompt: &str,
+) -> Result<CostedStructuredJson<Value>> {
     let inventory = collect_inventory(target, 80, 2048)?;
-    query_required_structured_json(
+    query_required_structured_json_with_cost(
         runtime,
         AgentQueryRequest::new(
             model,
             target.to_path_buf(),
-            DEEP_SEMANTIC_HUNT_SYSTEM_PROMPT.to_string(),
+            system_prompt.to_string(),
             deep_semantic_hunt_prompt(cwes, &inventory),
         )
         .with_tool_policy(whitebox_static_policy_for_target(target))

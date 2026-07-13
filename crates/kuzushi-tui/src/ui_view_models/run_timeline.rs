@@ -1,5 +1,5 @@
 use super::scan_status;
-use crate::{ScanPanelState, ShellApp, ViewDataState};
+use crate::{RunSummaryEntriesState, ScanPanelState, ShellApp, ViewDataState};
 use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
 use kuzushi_core::{
     RunSummary, RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue, RunTargetGitMetadata,
@@ -76,7 +76,8 @@ fn past_runs_model(app: &ShellApp) -> Vec<PastRun> {
         .borrow()
         .cached_run_summary_entries(Some(target))
     {
-        ViewDataState::Ready(entries) => entries,
+        ViewDataState::Ready(RunSummaryEntriesState::Ready(entries)) => entries,
+        ViewDataState::Ready(RunSummaryEntriesState::Failed(_)) => Vec::new(),
         ViewDataState::NotRequested | ViewDataState::Loading => Vec::new(),
     };
     entries.into_iter().map(past_run_from_entry).collect()
@@ -87,7 +88,7 @@ fn active_scan_row(app: &ShellApp, scan: &ScanPanelState) -> RunTimelineRow {
         cells: [
             scan.run_id
                 .as_deref()
-                .map(short_id)
+                .map(crate::app::compact_run_reference)
                 .unwrap_or_else(pending_id),
             scan_status(scan),
             active_scan_findings_label(scan),
@@ -147,7 +148,7 @@ fn past_run_rows(
 fn past_run_row(past: &PastRun) -> RunTimelineRow {
     RunTimelineRow {
         cells: [
-            short_id(&past.run_id),
+            crate::app::compact_run_reference(&past.run_id),
             past.status_label().to_string(),
             finding_count_label(past.findings),
             past.revision.clone(),
@@ -155,16 +156,6 @@ fn past_run_row(past: &PastRun) -> RunTimelineRow {
         ],
         tone: past.status_kind,
     }
-}
-
-fn short_id(run_id: &str) -> String {
-    let chars: Vec<char> = run_id.chars().collect();
-    if chars.len() <= 16 {
-        return run_id.to_string();
-    }
-    let head: String = chars.iter().take(6).collect();
-    let tail: String = chars.iter().skip(chars.len() - 6).collect();
-    format!("{head}…{tail}")
 }
 
 fn pending_id() -> String {

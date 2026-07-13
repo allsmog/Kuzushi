@@ -2,7 +2,9 @@ use crate::evidence::static_evidence::{StaticEvidenceNode, StaticEvidenceStore};
 use crate::findings::{Finding, Severity, StaticProofState, TriageVerdict};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
+use crate::structured_output::{
+    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
+};
 use crate::whitebox_static::{
     agentic_hunter_thinking_level,
     whitebox_static_policy_for_target,

@@ -190,10 +190,10 @@ impl ShellApp {
     fn transition_after_model_choice(&mut self, provider: &'static str) {
         // A credentialed provider with no wired credentials opens the inline
         // credential-entry step (API key / OAuth / offline demo) instead of
-        // stranding the operator on the Workbench. `auth_ready_for_provider`
-        // returns `true` for providers that need no credentials, so those
-        // continue straight to the planner.
-        if !auth_ready_for_provider(provider) {
+        // stranding the operator on the Workbench. Session readiness also
+        // recognizes a key accepted moments earlier, before its environment
+        // effect is drained.
+        if !self.provider_auth_ready_for(provider) {
             self.open_credential_entry(provider.to_string());
             return;
         }
@@ -241,7 +241,11 @@ impl ShellApp {
             "onboarding",
             "browsing without a target — set one later with `target <path>`, or run `demo` for the offline fixture",
         );
-        self.open_workbench(WorkbenchPane::Findings);
+        self.clear_focused_module();
+        self.router.catalog_mut().collapse();
+        self.router.catalog_mut().jump_start();
+        self.router.modules_mut().open();
+        self.set_shell_view(ShellView::Catalog);
     }
 
     fn defer_model_picker(&mut self) {
@@ -253,6 +257,17 @@ impl ShellApp {
     }
 
     fn handle_auth_picker_key(&mut self, code: KeyCode) -> InputUpdate {
+        match code {
+            KeyCode::Esc => {
+                self.return_to_model_picker();
+                return InputUpdate::handled();
+            }
+            KeyCode::Char('q') => {
+                self.defer_auth_picker();
+                return InputUpdate::handled();
+            }
+            _ => {}
+        }
         if self.handle_auth_api_key_draft_key(code) {
             return InputUpdate::handled();
         }
@@ -267,10 +282,6 @@ impl ShellApp {
             }
             KeyCode::Char('d') => self.reduce_picker_command(ShellCommand::Demo),
             KeyCode::Enter => self.accept_auth_picker_choice(),
-            KeyCode::Esc | KeyCode::Char('q') => {
-                self.defer_auth_picker();
-                InputUpdate::handled()
-            }
             _ => InputUpdate::ignored(),
         }
     }
@@ -281,13 +292,13 @@ impl ShellApp {
         }
         match code {
             // With an empty draft these are picker chords, not key text:
-            // `j/k` navigate, `q` defers, and `d` runs the offline fixture —
+            // `j/k` navigate and `d` runs the offline fixture —
             // the same keyless escape hatch offered on the model/target
-            // pickers. Once the operator starts pasting a key, they become
-            // literal key characters again.
+            // pickers. `q` is reserved for explicit defer at every draft
+            // length; pasted values still arrive through the paste handler.
             KeyCode::Char(ch)
                 if self.router.auth_picker().key_draft().is_empty()
-                    && matches!(ch, 'j' | 'k' | 'q' | 'd') =>
+                    && matches!(ch, 'j' | 'k' | 'd') =>
             {
                 false
             }
@@ -339,7 +350,7 @@ impl ShellApp {
         if !self.router.auth_picker().key_draft_trimmed().is_empty() {
             return self.accept_pasted_auth_api_key(provider, api_key_provider);
         }
-        if auth_ready_for_provider(api_key_provider) {
+        if self.provider_auth_ready_for(api_key_provider) {
             let effects = self.select_api_key_model_for_provider(provider);
             self.log(
                 "onboarding",
@@ -349,10 +360,10 @@ impl ShellApp {
             return effects;
         }
         let env_var = api_key_env_var(api_key_provider);
-        self.log(
-            "onboarding",
-            format!("paste {env_var} here, then press Enter; value stays session-only and hidden"),
-        );
+        let message =
+            format!("API key is empty — paste {env_var}, then press Enter; it stays session-only and hidden");
+        self.set_warn_notice("onboarding", message.clone());
+        self.log("onboarding", message);
         Vec::new()
     }
 
@@ -364,6 +375,8 @@ impl ShellApp {
         let env_var = api_key_env_var(api_key_provider);
         let key = self.router.auth_picker_mut().take_key_draft_trimmed();
         let mut effects = self.select_api_key_model_for_provider(provider);
+        self.session_mut()
+            .mark_session_api_key_ready(api_key_provider);
         self.log(
             "onboarding",
             format!("{env_var} accepted for this session; value hidden"),
@@ -382,7 +395,10 @@ impl ShellApp {
             let effects = self.select_oauth_model_for_provider(provider);
             self.log(
                 "onboarding",
-                format!("{provider} OAuth already stored; continuing"),
+                format!(
+                    "{} OAuth already stored; continuing",
+                    auth_provider_label(provider)
+                ),
             );
             self.transition_after_auth_ready();
             return effects;
@@ -390,7 +406,8 @@ impl ShellApp {
         self.log(
             "onboarding",
             format!(
-                "dispatching OAuth login for {provider}; complete in the browser, then re-run /onboarding"
+                "dispatching OAuth login for {}; complete in the browser, then re-run /onboarding",
+                auth_provider_label(provider)
             ),
         );
         self.reduce_picker_auth_login(provider)
@@ -440,6 +457,11 @@ impl ShellApp {
             "auth deferred — set credentials and re-run /onboarding, or run `demo` for the offline fixture",
         );
         self.open_workbench(WorkbenchPane::Findings);
+    }
+
+    fn return_to_model_picker(&mut self) {
+        self.router.auth_picker_mut().clear_key_draft();
+        self.open_model_picker();
     }
 
     pub(crate) fn transition_after_auth_ready(&mut self) {
@@ -687,8 +709,9 @@ impl ShellApp {
 
     fn log_toggle_outcome(&mut self, outcome: &ToggleOutcome) {
         let message = toggle_outcome_message(outcome);
-        if matches!(outcome, ToggleOutcome::Blocked { .. }) {
+        if toggle_outcome_is_refusal(outcome) {
             self.set_warn_notice("planning", message.clone());
+            return;
         }
         self.log("planning", message);
     }
@@ -909,17 +932,15 @@ fn task_word(count: usize) -> &'static str {
 /// stored under in `oauth-credentials.json` (`openai` shares the
 /// `openai-codex` ChatGPT credential).
 fn oauth_credential_provider(provider: &str) -> &str {
-    match provider {
-        "openai" | "openai-codex" => "openai-codex",
-        other => other,
-    }
+    AuthProvider::from_scene_provider(provider)
+        .map(AuthProvider::oauth_credential_key)
+        .unwrap_or(provider)
 }
 
 fn api_key_auth_provider(provider: &str) -> &str {
-    match provider {
-        "openai-codex" => "openai",
-        other => other,
-    }
+    AuthProvider::from_scene_provider(provider)
+        .map(AuthProvider::api_key_provider)
+        .unwrap_or(provider)
 }
 
 fn toggle_outcome_message(outcome: &ToggleOutcome) -> String {
@@ -929,7 +950,7 @@ fn toggle_outcome_message(outcome: &ToggleOutcome) -> String {
         ToggleOutcome::Blocked { task, dependents } => blocked_toggle_message(*task, dependents),
         ToggleOutcome::MissingCli { task, cli } => {
             format!(
-                "{} needs `{cli}` on PATH — install it or set KUZUSHI_*_BIN",
+                "{} needs `{cli}` on PATH — install it, then reopen this phase",
                 task.label()
             )
         }
@@ -937,6 +958,15 @@ fn toggle_outcome_message(outcome: &ToggleOutcome) -> String {
             format!("{} unavailable — {reason}", task.label())
         }
     }
+}
+
+fn toggle_outcome_is_refusal(outcome: &ToggleOutcome) -> bool {
+    matches!(
+        outcome,
+        ToggleOutcome::Blocked { .. }
+            | ToggleOutcome::MissingCli { .. }
+            | ToggleOutcome::MissingPrereq { .. }
+    )
 }
 
 fn toggle_on_message(task: PlanningTaskId, auto_added: &[PlanningTaskId]) -> String {
@@ -1042,6 +1072,51 @@ mod tests {
         assert!(notice
             .message
             .contains("cannot uncheck Gather repo context"));
+        assert!(app
+            .log_lines()
+            .iter()
+            .any(|line| line.body == notice.message));
+    }
+
+    #[test]
+    fn missing_cli_planning_toggle_is_visible_as_a_warning_notice() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let outcome = ToggleOutcome::MissingCli {
+            task: PlanningTaskId::BuildCodePropertyGraph,
+            cli: "joern-parse",
+        };
+
+        app.log_toggle_outcome(&outcome);
+
+        let notice = app.advisory().notice.as_ref().expect("warning notice");
+        assert_eq!(notice.severity, crate::NoticeSeverity::Warn);
+        assert!(notice.message.contains("`joern-parse` on PATH"));
+        assert!(notice.message.contains("reopen this phase"));
+        assert_eq!(
+            app.log_lines()
+                .iter()
+                .filter(|line| line.body == notice.message)
+                .count(),
+            1,
+            "notice creation should keep exactly one transcript receipt"
+        );
+    }
+
+    #[test]
+    fn missing_prerequisite_planning_toggle_is_visible_as_a_warning_notice() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let outcome = ToggleOutcome::MissingPrereq {
+            task: PlanningTaskId::BuildCodeQlDatabase,
+            reason: "source language could not be inferred".to_string(),
+        };
+
+        app.log_toggle_outcome(&outcome);
+
+        let notice = app.advisory().notice.as_ref().expect("warning notice");
+        assert_eq!(notice.severity, crate::NoticeSeverity::Warn);
+        assert!(notice
+            .message
+            .contains("source language could not be inferred"));
         assert!(app
             .log_lines()
             .iter()

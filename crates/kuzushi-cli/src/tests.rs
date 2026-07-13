@@ -732,16 +732,18 @@ mod tests {
     }
 
     #[test]
-    fn shell_startup_progress_names_real_first_finding_commands() {
+    fn shell_startup_progress_names_the_real_interactive_entry_path() {
         let bare = shell_startup_progress_messages(None).join("\n");
         assert!(bare.contains("loading config"));
         assert!(bare.contains("native registry"));
-        assert!(bare.contains("first finding: scan ., then findings"));
+        assert!(bare.contains("choose a target in the picker"));
+        assert!(bare.contains("press d for the offline demo"));
+        assert!(!bare.contains("scan ."));
 
         let targeted = shell_startup_progress_messages(Some(Path::new("."))).join("\n");
         assert!(targeted.contains("target ."));
-        assert!(targeted.contains("first finding: scan, then findings"));
-        assert!(!targeted.contains("scan ."));
+        assert!(targeted.contains("opening operator shell"));
+        assert!(!targeted.contains("first finding"));
     }
 
     #[test]
@@ -893,7 +895,7 @@ mod tests {
         let summary = load_run_summary(tmp.path(), &run_id).unwrap();
         assert_eq!(summary.status, "completed");
         assert_eq!(summary.started_at_unix, started.started_at_unix);
-        assert_eq!(summary.model.as_deref(), Some("openai:gpt-test"));
+        assert_eq!(summary.model.as_deref(), Some("local"));
         assert_eq!(summary.loaded_modules, loaded_modules);
         assert!(summary.config_hash.as_deref().is_some_and(|hash| {
             hash.starts_with("sha256:") && hash.len() == "sha256:".len() + 64
@@ -931,7 +933,7 @@ mod tests {
         let failed_summary = load_run_summary(tmp.path(), &failed_run_id).unwrap();
         assert_eq!(failed_summary.status, "failed");
         assert_eq!(failed_summary.error.as_deref(), Some("bridge failed"));
-        assert_eq!(failed_summary.model.as_deref(), Some("openai:gpt-test"));
+        assert_eq!(failed_summary.model.as_deref(), Some("local"));
         assert!(failed_summary.config_hash.is_some());
         let failed_labels = failed_summary
             .artifacts
@@ -949,6 +951,26 @@ mod tests {
                 artifact.path
             );
         }
+    }
+
+    #[test]
+    fn cli_runtime_free_tool_receipt_does_not_claim_the_profile_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = kuzushi_core::V2Config {
+            model: Some("openai:gpt-test".to_string()),
+            ..Default::default()
+        };
+        let run_id = start_cli_tool_run_with_loaded_modules(
+            tmp.path(),
+            "workspace:status",
+            &serde_json::json!({}),
+            &config,
+            Vec::new(),
+        );
+
+        let summary = load_run_summary(tmp.path(), &run_id).unwrap();
+
+        assert_eq!(summary.model, None);
     }
 
     #[test]

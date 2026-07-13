@@ -273,6 +273,13 @@ fn taint_iris_next_report_from_tool_output(output: &Value) -> Result<TaintIrisNe
         .context("taint-iris-next:hunt data.persisted was invalid")?;
     let selected_cwes = selected_cwes_from_taint_iris_next_data(&data);
     let count = taint_iris_next_count(&data, &findings, &review_candidates);
+    let exact_cost = output.get("costUsd").and_then(Value::as_f64);
+    let observed_cost = output
+        .get("observedCostUsd")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let cost_usd = exact_cost.unwrap_or(observed_cost);
+    crate::runtime::RuntimeCost::from_usd(cost_usd, "taint-iris-next subtool cost")?;
     Ok(TaintIrisNextReport {
         target: taint_iris_next_string(&data, "target", ""),
         status: taint_iris_next_string(&data, "status", ""),
@@ -282,7 +289,8 @@ fn taint_iris_next_report_from_tool_output(output: &Value) -> Result<TaintIrisNe
         review_candidates,
         selected_cwes,
         persisted,
-        cost_usd: output.get("costUsd").and_then(Value::as_f64).unwrap_or(0.0),
+        cost_usd,
+        cost_usd_exact: exact_cost.is_some(),
         ok: output.get("ok").and_then(Value::as_bool).unwrap_or(true),
         output: taint_iris_next_string(output, "output", ""),
         data,
@@ -329,4 +337,69 @@ fn findings_count_excluding_review_candidates(
     review_candidates: &[crate::findings::Finding],
 ) -> usize {
     findings.len().saturating_sub(review_candidates.len())
+}
+
+#[cfg(test)]
+mod canonical_report_cost_tests {
+    use super::*;
+
+    #[test]
+    fn normalized_incomplete_subtool_reports_rehydrate_observed_cost() {
+        let agentic: AgenticSastReport = serde_json::from_value(json!({
+            "target": "/repo",
+            "count": 0,
+            "findings": [],
+            "observedCostUsd": 0.125,
+            "costUsdExact": false
+        }))
+        .unwrap();
+        let carlini: CarliniThreatHuntReport = serde_json::from_value(json!({
+            "target": "/repo",
+            "count": 0,
+            "actors": 1,
+            "actorRuns": 1,
+            "promptInventoryFiles": 0,
+            "threatFocusedPromptFiles": 0,
+            "findings": [],
+            "observedCostUsd": 0.125,
+            "costUsdExact": false
+        }))
+        .unwrap();
+        let systems: SystemsHuntReport = serde_json::from_value(json!({
+            "target": "/repo",
+            "count": 0,
+            "findings": [],
+            "artifacts": [],
+            "observedCostUsd": 0.125,
+            "costUsdExact": false
+        }))
+        .unwrap();
+
+        for (observed, exact) in [
+            (agentic.cost_usd, agentic.cost_usd_exact),
+            (carlini.cost_usd, carlini.cost_usd_exact),
+            (systems.cost_usd, systems.cost_usd_exact),
+        ] {
+            assert_eq!(observed, 0.125);
+            assert!(!exact);
+        }
+    }
+
+    #[test]
+    fn legacy_exact_subtool_report_defaults_cost_exactness_to_true() {
+        let report: AgenticSastReport = serde_json::from_value(json!({
+            "target": "/repo",
+            "count": 0,
+            "findings": [],
+            "costUsd": 0.25
+        }))
+        .unwrap();
+
+        assert_eq!(report.cost_usd, 0.25);
+        assert!(report.cost_usd_exact);
+        assert!(serde_json::to_value(report)
+            .unwrap()
+            .get("costUsdExact")
+            .is_none());
+    }
 }

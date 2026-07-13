@@ -31,8 +31,11 @@ pub(crate) mod sqlite_connection;
 pub(crate) mod structured_output;
 #[cfg(test)]
 pub(crate) mod test_env;
+pub(crate) mod yaml;
 
 mod code_index;
 mod public_exports;
-pub use demo::{offline_demo_scan_input, offline_demo_task_labels, prepare_demo_fixture};
+pub use demo::{
+    demo_fixture_path, offline_demo_scan_input, offline_demo_task_labels, prepare_demo_fixture,
+};
 pub use public_exports::*;

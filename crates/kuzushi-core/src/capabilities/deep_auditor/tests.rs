@@ -134,6 +134,7 @@ mod tests {
             steps_used: 3,
             truncated: false,
             cost_usd: 0.012,
+            cost_usd_exact: true,
             transcript: vec![],
         };
         let analysis = parse_vuln_analysis(&outcome);
@@ -152,6 +153,7 @@ mod tests {
             steps_used: 1,
             truncated: false,
             cost_usd: 0.0,
+            cost_usd_exact: true,
             transcript: vec![],
         };
         let analysis = parse_vuln_analysis(&outcome);
@@ -169,6 +171,7 @@ mod tests {
             steps_used: 1,
             truncated: false,
             cost_usd: 0.0,
+            cost_usd_exact: true,
             transcript: vec![],
         };
         let analysis = parse_vuln_analysis(&outcome);
@@ -197,6 +200,7 @@ mod tests {
             steps_used: 24,
             truncated: true,
             cost_usd: 0.0,
+            cost_usd_exact: true,
             transcript: vec![],
         };
         let analysis = parse_vuln_analysis(&outcome);
@@ -221,7 +225,7 @@ mod tests {
                     input: serde_json::json!({ "file": "foo.c" }),
                     call_id: "c1".to_string(),
                 },
-                cost_usd: None,
+                cost_usd: Some(0.0),
             },
             AgentLoopStep::Final {
                 text: String::new(),
@@ -251,6 +255,44 @@ mod tests {
 
         // Spend settled at 0.05, not the 1.0 deposit.
         assert!((limiter.total_spent(Operation::DeepAudit).unwrap() - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn deep_auditor_retains_deposit_when_any_loop_step_cost_is_unknown() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("foo.c"), "void foo() {}\n").unwrap();
+        let steps = vec![
+            AgentLoopStep::ToolCall {
+                call: ToolCall {
+                    name: "read_source".to_string(),
+                    input: serde_json::json!({ "file": "foo.c" }),
+                    call_id: "c1".to_string(),
+                },
+                cost_usd: None,
+            },
+            AgentLoopStep::Final {
+                text: String::new(),
+                structured: Some(serde_json::json!({
+                    "triggerable": false,
+                    "rationale": "guarded",
+                    "confidence": 0.9,
+                    "evidence": []
+                })),
+                cost_usd: Some(0.05),
+            },
+        ];
+        let runtime = routed_runtime_with_role(steps);
+        let limiter = SpendLimiter::open_in_memory().unwrap();
+        let cfg = DeepAuditConfig::new(tmp.path());
+
+        let outcome = run_deep_auditor(&runtime, Some(&limiter), &cfg, &finding()).unwrap();
+
+        assert_eq!(outcome.cost_usd, 0.05);
+        assert!(!outcome.cost_usd_exact);
+        assert_eq!(
+            limiter.total_spent(Operation::DeepAudit).unwrap(),
+            cfg.deposit_usd
+        );
     }
 
     #[test]

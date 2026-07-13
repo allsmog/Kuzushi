@@ -1,9 +1,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentLoopStep, AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
-    AgentStructuredOutput, AgentToolLoopRequest, LoopHistoryEntry, ScanCancellation, TriageOutcome,
-    TriageRequest,
+    runtime::RuntimeCostReport, AgentLoopStep, AgentQueryControl, AgentQueryRequest,
+    AgentQueryResponse, AgentRuntime, AgentStructuredOutput, AgentToolLoopRequest,
+    LoopHistoryEntry, ScanCancellation, TriageOutcome, TriageRequest,
 };
 
 use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
@@ -27,43 +27,13 @@ fn clamp_token_count_u32(value: u64) -> u32 {
 impl AgentRuntime for LangGraphRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         let credential = self.credential_for_model(&request.model)?;
-        let structured_output = request.structured_output;
-        let runtime_options = request.runtime_options;
-        let thinking_level = request
-            .thinking_level
-            .or_else(|| self.thinking_level.clone());
-        let bridge_request = BridgeRequest {
-            protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
-            model: request.model,
-            cwd: request.cwd.display().to_string(),
-            system_prompt: request.system_prompt,
-            prompt: request.prompt,
-            structured_output,
-            api_key_env: credential.env,
-            api_key: credential.value,
-            base_url: self.base_url.clone(),
-            thinking_level,
-            max_output_tokens: request.max_output_tokens,
-            tool_policy: request.tool_policy,
-            runtime_options,
-            temperature: request.temperature,
-        };
-
+        let bridge_request = bridge_request_from(self, request, credential);
         let response = run_bridge_with_transport_retries(
             &self.command,
             bridge_request,
             self.cancellation.as_ref(),
         )?;
-
-        Ok(AgentQueryResponse {
-            text: response.text.unwrap_or_default(),
-            structured: response.structured,
-            cost_usd: response.cost_usd.unwrap_or(0.0),
-            input_tokens: clamp_token_count_u32(response.input_tokens.unwrap_or(0)),
-            output_tokens: clamp_token_count_u32(response.output_tokens.unwrap_or(0)),
-            truncated: response.truncated,
-            stop_reason: response.stop_reason,
-        })
+        agent_response_from_bridge(response).validate_cost()
     }
 
     fn query_blocking_controlled(
@@ -117,6 +87,47 @@ impl AgentRuntime for LangGraphRuntime {
 
     fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
         run_preflight_tool_loop_blocking(self, request)
+    }
+}
+
+fn bridge_request_from(
+    runtime: &LangGraphRuntime,
+    request: AgentQueryRequest,
+    credential: ModelCredential,
+) -> BridgeRequest {
+    let thinking_level = request
+        .thinking_level
+        .or_else(|| runtime.thinking_level.clone());
+    BridgeRequest {
+        protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+        model: request.model,
+        cwd: request.cwd.display().to_string(),
+        system_prompt: request.system_prompt,
+        prompt: request.prompt,
+        structured_output: request.structured_output,
+        api_key_env: credential.env,
+        api_key: credential.value,
+        base_url: runtime.base_url.clone(),
+        thinking_level,
+        max_output_tokens: request.max_output_tokens,
+        tool_policy: request.tool_policy,
+        runtime_options: request.runtime_options,
+        temperature: request.temperature,
+    }
+}
+
+fn agent_response_from_bridge(response: BridgeResponse) -> AgentQueryResponse {
+    let cost_usd_reported = response.cost_usd.is_some();
+    AgentQueryResponse {
+        text: response.text.unwrap_or_default(),
+        structured: response.structured,
+        cost_usd: response.cost_usd.unwrap_or(0.0),
+        cost_usd_reported,
+        estimated_cost_usd: None,
+        input_tokens: clamp_token_count_u32(response.input_tokens.unwrap_or(0)),
+        output_tokens: clamp_token_count_u32(response.output_tokens.unwrap_or(0)),
+        truncated: response.truncated,
+        stop_reason: response.stop_reason,
     }
 }
 
@@ -261,7 +272,8 @@ pub(super) fn is_transient_bridge_error(message: &str) -> bool {
 }
 
 pub(crate) fn triage_outcome_from_response(response: AgentQueryResponse) -> Result<TriageOutcome> {
-    let call_cost = response.cost_usd;
+    let response = response.validate_cost()?;
+    let call_cost = response.checked_cost_report()?;
     if let Some(structured) = response.structured {
         return structured_triage_outcome(structured, call_cost);
     }
@@ -270,16 +282,19 @@ pub(crate) fn triage_outcome_from_response(response: AgentQueryResponse) -> Resu
 
 fn structured_triage_outcome(
     mut structured: serde_json::Value,
-    call_cost: f64,
+    call_cost: RuntimeCostReport,
 ) -> Result<TriageOutcome> {
     normalize_triage_confidence(&mut structured);
     let mut outcome = serde_json::from_value::<TriageOutcome>(structured)
         .map_err(|error| anyhow::anyhow!("LangGraph triage JSON violated schema: {error}"))?;
-    outcome.cost_usd = call_cost;
-    Ok(clamp_outcome(outcome))
+    apply_call_cost(&mut outcome, call_cost);
+    clamp_outcome(outcome).validate_cost()
 }
 
-fn text_triage_outcome(response: AgentQueryResponse, call_cost: f64) -> Result<TriageOutcome> {
+fn text_triage_outcome(
+    response: AgentQueryResponse,
+    call_cost: RuntimeCostReport,
+) -> Result<TriageOutcome> {
     if response.truncated {
         let stop_reason = response.stop_reason.as_deref().unwrap_or("length");
         anyhow::bail!(
@@ -302,8 +317,13 @@ fn text_triage_outcome(response: AgentQueryResponse, call_cost: f64) -> Result<T
             "LangGraph triage response violated triage schema: {error}; raw response: {text}"
         )
     })?;
-    outcome.cost_usd = call_cost;
-    Ok(clamp_outcome(outcome))
+    apply_call_cost(&mut outcome, call_cost);
+    clamp_outcome(outcome).validate_cost()
+}
+
+fn apply_call_cost(outcome: &mut TriageOutcome, call_cost: RuntimeCostReport) {
+    outcome.cost_usd = call_cost.observed_usd();
+    outcome.cost_usd_exact = call_cost.is_complete();
 }
 
 fn strip_whole_json_fence(text: &str) -> &str {

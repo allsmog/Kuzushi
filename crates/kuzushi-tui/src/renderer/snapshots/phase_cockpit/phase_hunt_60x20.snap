@@ -13,14 +13,14 @@ KUZUSHI · target ./phase-target · view hunt · ● LIVE
 │HUNT
 │no queued strategy proposals
 │       ∅  no hunt proposals
-│REVIEW QUEUE · 6
+│▸ REVIEW QUEUE · 6
 │▸F-0001  C rt open       SQL injection reaches query
-│ F-0002  H sig open       Order identifier crosses...
-│ F-0003  H sig open       Template input reaches renderer
+│  src/auth/login.rs:17
+│  ▸ next:patch · Enter open
 │FINDINGS HEATMAP
 │  module               CRIT   HIGH   MED    LOW    INFO
 mode:run · workbench            6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────────────────────────
- Ctrl+C request abort   findings list
- Esc back   history events
+ Ctrl+C request abort
+ Esc prompt
 NAVIGATION MODE — view keys active · Esc returns to prompt

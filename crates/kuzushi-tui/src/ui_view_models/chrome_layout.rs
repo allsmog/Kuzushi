@@ -1,3 +1,4 @@
+use super::{activity_view_model, ActivityViewModel};
 use crate::{ShellApp, ShellView};
 
 /// The Activity view is a focused full-frame dashboard: it carries its own
@@ -5,6 +6,7 @@ use crate::{ShellApp, ShellView};
 /// keybind footer, and status strip would only duplicate it — suppress them.
 fn activity_supplies_own_chrome(app: &ShellApp) -> bool {
     matches!(app.shell_view(), ShellView::Activity)
+        && matches!(activity_view_model(app), ActivityViewModel::Active(_))
 }
 
 fn onboarding_supplies_own_guidance(app: &ShellApp) -> bool {
@@ -29,6 +31,9 @@ pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> 
         || terminal_height < 12
     {
         return 0;
+    }
+    if terminal_height == 12 {
+        return 1;
     }
     2
 }
@@ -107,16 +112,27 @@ mod tests {
         let app = ShellApp::new(V2Config::default(), None);
 
         assert_eq!(transcript_chrome_height(&app, 11), 0);
-        assert_eq!(transcript_chrome_height(&app, 12), 2);
+        assert_eq!(transcript_chrome_height(&app, 12), 1);
+        assert_eq!(transcript_chrome_height(&app, 13), 2);
     }
 
     #[test]
     fn activity_view_suppresses_all_generic_chrome() {
-        let app = app_in_view(ShellView::Activity);
+        let mut app = app_in_view(ShellView::Activity);
+        app.set_activity(Some(crate::ActivitySession::new("run-active")));
 
         assert_eq!(transcript_chrome_height(&app, 24), 0);
         assert_eq!(keybind_footer_chrome_height(&app, 24, 80), 0);
         assert_eq!(status_footer_chrome_height(&app, 24), 0);
+    }
+
+    #[test]
+    fn idle_activity_uses_standard_orientation_chrome() {
+        let app = app_in_view(ShellView::Activity);
+
+        assert_eq!(transcript_chrome_height(&app, 24), 2);
+        assert_eq!(keybind_footer_chrome_height(&app, 24, 80), 2);
+        assert_eq!(status_footer_chrome_height(&app, 24), 1);
     }
 
     #[test]

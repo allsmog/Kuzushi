@@ -505,6 +505,55 @@ fn report_summarizes_canonical_trace_cost() {
 }
 
 #[test]
+fn report_marks_overflowing_trace_totals_invalid() {
+    let temp = tempdir().unwrap();
+    let source = completed_summary(temp.path(), "run-trace-overflow", "agentic-sast:scan");
+    write_run_summary(temp.path(), &source).unwrap();
+    let dir = run_dir(temp.path(), "run-trace-overflow");
+    fs::write(
+        dir.join("trace.jsonl"),
+        [
+            serde_json::to_string(&json!({
+                "n": 1,
+                "kind": "reasoning",
+                "label": "first",
+                "cost_usd": f64::MAX,
+                "latency_ms": u64::MAX,
+            }))
+            .unwrap(),
+            serde_json::to_string(&json!({
+                "n": 2,
+                "kind": "done",
+                "label": "second",
+                "cost_usd": f64::MAX,
+                "latency_ms": 1,
+            }))
+            .unwrap(),
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+
+    let report = build_run_report(temp.path(), Some("run-trace-overflow")).unwrap();
+
+    assert!(
+        report.report_markdown.contains("latency invalid"),
+        "{}",
+        report.report_markdown
+    );
+    assert!(
+        report.report_markdown.contains("cost invalid"),
+        "{}",
+        report.report_markdown
+    );
+    assert!(
+        !report.report_markdown.contains("cost $inf"),
+        "{}",
+        report.report_markdown
+    );
+}
+
+#[test]
 fn report_counts_prompt_hash_only_trace_llm_calls() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-trace-prompt-hash", "triage:run");
@@ -909,6 +958,9 @@ fn report_summarizes_run_metadata_and_artifact_manifest() {
             prompt_hash: "fnv1a64:abc123".to_string(),
             latency_ms: Some(10),
             cost_usd: Some(0.125),
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
+            call_attempted: Some(true),
         }]);
     write_run_summary(temp.path(), &source).unwrap();
     write_run_artifact_json(
@@ -2378,6 +2430,9 @@ fn report_markdown_surfaces_llm_audit_metadata_from_run_json() {
                 prompt_hash: "fnv1a64:abc123".to_string(),
                 latency_ms: Some(42),
                 cost_usd: Some(0.0042),
+                observed_cost_usd: None,
+                provider_spend_unresolved: false,
+                call_attempted: Some(true),
             },
         ]);
     write_run_summary(temp.path(), &source).unwrap();

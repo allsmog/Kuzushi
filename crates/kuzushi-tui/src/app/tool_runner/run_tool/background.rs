@@ -9,6 +9,7 @@ mod dispatch;
 mod preflight;
 
 impl ShellApp {
+    #[cfg(test)]
     pub(crate) fn start_background_tool(
         &mut self,
         tool_name: String,
@@ -36,9 +37,16 @@ impl ShellApp {
         thinking_level: Option<String>,
         authorization: ExecutionAuthorization,
     ) {
-        self.start_background_tool_with_activity_and_authorization(
+        let prepared = match self.prepare_background_tool_input(&tool_name, input, &workspace) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.log("error", format!("{tool_name} input invalid: {error}"));
+                return;
+            }
+        };
+        self.start_prepared_background_tool_with_activity_and_authorization(
             tool_name,
-            input,
+            prepared,
             workspace,
             status,
             thinking_level,
@@ -56,9 +64,16 @@ impl ShellApp {
         thinking_level: Option<String>,
         activity: Option<LiveActivity>,
     ) {
-        self.start_background_tool_with_activity_and_authorization(
+        let prepared = match self.prepare_background_tool_input(&tool_name, input, &workspace) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.log("error", format!("{tool_name} input invalid: {error}"));
+                return;
+            }
+        };
+        self.start_prepared_background_tool_with_activity_and_authorization(
             tool_name,
-            input,
+            prepared,
             workspace,
             status,
             thinking_level,
@@ -67,30 +82,50 @@ impl ShellApp {
         );
     }
 
-    fn start_background_tool_with_activity_and_authorization(
+    pub(crate) fn start_authorized_prepared_background_tool(
         &mut self,
         tool_name: String,
-        input: serde_json::Value,
+        input: PreparedToolInput,
+        workspace: WorkspaceTarget,
+        status: &'static str,
+        thinking_level: Option<String>,
+        authorization: ExecutionAuthorization,
+    ) {
+        self.start_prepared_background_tool_with_activity_and_authorization(
+            tool_name,
+            input,
+            workspace,
+            status,
+            thinking_level,
+            None,
+            authorization,
+        );
+    }
+
+    fn start_prepared_background_tool_with_activity_and_authorization(
+        &mut self,
+        tool_name: String,
+        input: PreparedToolInput,
         workspace: WorkspaceTarget,
         status: &'static str,
         thinking_level: Option<String>,
         activity: Option<LiveActivity>,
         authorization: ExecutionAuthorization,
     ) {
-        if self.reject_background_tool_launch(&workspace, &tool_name, &input) {
+        if self.reject_prepared_background_tool_launch(&workspace, &tool_name, &input) {
             return;
         }
-
-        let seed = match self.background_tool_run_seed(&workspace, &tool_name, &input) {
-            Ok(seed) => seed,
-            Err(error) => {
-                self.report_tool_launch_persistence_failure(&tool_name, error);
-                return;
-            }
+        let Some(seed) = self.initialize_background_tool_run(&workspace, &tool_name, &input) else {
+            return;
         };
+        let run_id = seed.run_id.clone();
+        let runtime_backed =
+            self.registry()
+                .tool_wants_runtime(&tool_name, input.value(), self.config());
         let Some(ticket) = self.try_start_exclusive_job(JobKind::Run, tool_name.clone()) else {
             return;
         };
+        self.begin_run_cost_tracking(&run_id, runtime_backed);
         let dispatch = self.background_tool_dispatch(seed, ticket);
         self.launch_prepared_background_tool(
             dispatch,
@@ -105,7 +140,57 @@ impl ShellApp {
         self.open_activity_for_started_background_tool();
     }
 
+    fn reject_prepared_background_tool_launch(
+        &mut self,
+        workspace: &WorkspaceTarget,
+        tool_name: &str,
+        input: &PreparedToolInput,
+    ) -> bool {
+        if input.tool_name() != tool_name {
+            self.log(
+                "error",
+                format!(
+                    "{tool_name} launch rejected: prepared input belongs to {}",
+                    input.tool_name()
+                ),
+            );
+            return true;
+        }
+        self.reject_background_tool_launch(workspace, tool_name, input.value())
+    }
+
+    fn initialize_background_tool_run(
+        &mut self,
+        workspace: &WorkspaceTarget,
+        tool_name: &str,
+        input: &PreparedToolInput,
+    ) -> Option<BackgroundToolRunSeed> {
+        let seed = match self.background_tool_run_seed(workspace, tool_name, input.value()) {
+            Ok(seed) => seed,
+            Err(error) => {
+                self.report_tool_launch_persistence_failure(tool_name, error);
+                return None;
+            }
+        };
+        Some(seed)
+    }
+
     fn reject_background_tool_launch(
+        &mut self,
+        workspace: &WorkspaceTarget,
+        tool_name: &str,
+        input: &serde_json::Value,
+    ) -> bool {
+        let runtime_backed = self
+            .registry()
+            .tool_wants_runtime(tool_name, input, self.config());
+        if self.reject_runtime_launch_while_budget_halted(runtime_backed, tool_name) {
+            return true;
+        }
+        self.reject_background_tool_state(workspace, tool_name, input)
+    }
+
+    fn reject_background_tool_state(
         &mut self,
         workspace: &WorkspaceTarget,
         tool_name: &str,
@@ -117,11 +202,19 @@ impl ShellApp {
         if self.reject_pending_prompt_mutation(workspace, tool_name) {
             return true;
         }
-        if let Some(error) = self.langgraph_background_tool_launch_blocker(tool_name, input) {
-            self.log("error", error);
-            return true;
-        }
-        false
+        self.reject_langgraph_background_tool_launch(tool_name, input)
+    }
+
+    fn reject_langgraph_background_tool_launch(
+        &mut self,
+        tool_name: &str,
+        input: &serde_json::Value,
+    ) -> bool {
+        let Some(error) = self.langgraph_background_tool_launch_blocker(tool_name, input) else {
+            return false;
+        };
+        self.log("error", error);
+        true
     }
 
     fn background_tool_dispatch(
@@ -169,13 +262,13 @@ impl ShellApp {
         dispatch: BackgroundToolDispatch,
         workspace: WorkspaceTarget,
         tool_name: String,
-        input: serde_json::Value,
+        input: PreparedToolInput,
         thinking_level: Option<String>,
         status: &str,
         activity: Option<LiveActivity>,
         authorization: ExecutionAuthorization,
     ) {
-        let model_override = active_model_override_from_input(&input, &dispatch.config);
+        let model_override = active_model_override_from_input(input.value(), &dispatch.config);
         BackgroundToolWorkerLaunch::from_dispatch(
             dispatch,
             workspace,
@@ -185,6 +278,24 @@ impl ShellApp {
             authorization,
         )
         .attach_and_start(self, status, activity, model_override);
+    }
+
+    pub(crate) fn prepare_background_tool_input(
+        &self,
+        tool_name: &str,
+        input: serde_json::Value,
+        workspace: &WorkspaceTarget,
+    ) -> anyhow::Result<PreparedToolInput> {
+        let ctx = ToolExecutionContext {
+            config: self.config(),
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        self.registry()
+            .prepare_dispatch_input(tool_name, input, &ctx, Some(self.option_store()))
     }
 
     fn reject_pending_prompt_mutation(

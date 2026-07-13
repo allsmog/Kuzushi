@@ -1,7 +1,7 @@
-//! Ignored design-parity tests for the Claude Design mockup bundle.
+//! Design-parity tests for the Claude Design mockup bundle.
 //!
 //! Run with:
-//! `cargo test -p kuzushi-tui --test parity -- --ignored`
+//! `cargo test -p kuzushi-tui --test parity`
 
 use std::{path::PathBuf, process::Command};
 

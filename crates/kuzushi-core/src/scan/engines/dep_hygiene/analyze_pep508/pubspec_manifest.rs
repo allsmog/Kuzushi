@@ -1,5 +1,5 @@
 use super::*;
-use serde_yaml::Value as YamlValue;
+use serde_json::Value as YamlValue;
 
 const PUBSPEC_SECTIONS: &[&str] = &["dependencies", "dev_dependencies"];
 
@@ -7,7 +7,7 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_pubspec_yaml(
     file_path: &Path,
     raw: &str,
 ) -> Vec<DepHygieneFinding> {
-    let Ok(value) = serde_yaml::from_str::<YamlValue>(raw) else {
+    let Ok(value) = crate::yaml::parse_value(raw) else {
         return Vec::new();
     };
     PUBSPEC_SECTIONS
@@ -19,11 +19,10 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_pubspec_yaml(
 fn section_findings(file_path: &Path, value: &YamlValue, section: &str) -> Vec<DepHygieneFinding> {
     value
         .get(section)
-        .and_then(YamlValue::as_mapping)
+        .and_then(YamlValue::as_object)
         .into_iter()
         .flat_map(|dependencies| dependencies.iter())
         .filter_map(|(name, dependency)| {
-            let name = name.as_str()?;
             pubspec_finding(file_path, section, name, dependency_version(dependency)?)
         })
         .collect()
@@ -64,8 +63,8 @@ fn pubspec_finding(
 fn dependency_version(value: &YamlValue) -> Option<&str> {
     value.as_str().or_else(|| {
         value
-            .as_mapping()?
-            .get(YamlValue::from("version"))?
+            .as_object()?
+            .get("version")?
             .as_str()
     })
 }

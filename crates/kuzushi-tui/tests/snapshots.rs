@@ -9,6 +9,7 @@ use kuzushi_core::{
     latest_run_path, run_dir, Finding, ModuleRegistry, ScanCancellation, Severity, ToolOptionStore,
     TriageOutcome, TriageVerdict, V2Config,
 };
+use kuzushi_core::{write_run_summary, RunSummary};
 use kuzushi_tui::{
     render_plain_app, OptionsFilter, OptionsView, ShellApp, ShellCommand, ShellView, ThreatView,
 };
@@ -80,8 +81,8 @@ impl Drop for ScopedHome {
 }
 
 fn reset_snapshot_target(name: &str) -> PathBuf {
-    let root = PathBuf::from("target")
-        .join("kuzushi-tui-snapshots")
+    let root = std::env::temp_dir()
+        .join(format!("kuzushi-tui-snapshots-{}", std::process::id()))
         .join(name);
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root)
@@ -104,20 +105,15 @@ fn write_snapshot_run_metadata(
     findings: u64,
     target: &str,
 ) {
-    let path = snapshot_run_dir(root, run_id).join("run.json");
-    fs::write(
-        path,
-        serde_json::json!({
-            "runId": run_id,
-            "kind": "scan",
-            "status": status,
-            "target": target,
-            "startedAtUnix": 1,
-            "findings": findings,
-        })
-        .to_string(),
-    )
-    .unwrap();
+    let mut summary = RunSummary::running(run_id, "scan", None, target);
+    summary.started_at_unix = 1;
+    summary.findings = Some(findings);
+    let summary = match status {
+        "completed" => summary.complete(),
+        "failed" => summary.failed("snapshot fixture failure"),
+        other => panic!("unsupported snapshot run status {other}"),
+    };
+    write_run_summary(root, &summary).unwrap();
 }
 
 fn assert_plain_snapshot(name: &str, actual: &str) {
@@ -308,6 +304,7 @@ fn workbench_list_view_with_two_findings() {
         confidence: 0.91,
         rationale: "concatenated input".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     let untriaged = Finding::new_tool(
         "codeql",
@@ -410,6 +407,7 @@ fn module_run_view_with_findings_and_active_scan() {
         confidence: 0.92,
         rationale: "input concatenated".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     app.set_findings(vec![finding]);
     app.set_scan_panel(Some(kuzushi_tui::ScanPanelState {

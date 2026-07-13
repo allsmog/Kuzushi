@@ -178,6 +178,17 @@ repository context is not embedded in the editable template. A tool without
 prompt metadata must not be presented as editable merely because it uses a
 model.
 
+Prompt provenance is part of the dispatch contract. Text auto-loaded from
+`<target>/.kuzushi/prompts/<module>/<verb>.md`, or read through a prompt path
+inside the target, is repository-owned data. The shared preparation boundary
+wraps it as optional focus/context below the descriptor's immutable built-in
+safety and output-contract instructions; it never becomes a replacement
+system prompt. Target-local workspace option stores may not set descriptor
+prompt keys. Explicit inline prompt text from one-shot tool input, shell
+session options, or the operator-owned global option store remains an explicit
+operator replacement. Scan, shell, and run all apply this split through the
+same Rust registry preparation path.
+
 ## 7. Writing a tool
 
 Every tool:
@@ -578,11 +589,16 @@ rejected, and registration is atomic. A dynamic module cannot replace an
 already loaded module or tool. `headless` has no implicit default:
 `headless: false` remains usable in the shell, while `kuzushi run` rejects it.
 Dynamic policy also has no permissive default. `effect` is one of `read`,
-`workspace-write`, `target-write`, or `external-action`; target/external
-effects require `approval: "explicit"`. `workspaceRequirement` is `optional`
-or `required`. Effectful tools must declare a concrete journey `phase` rather
+`workspace-write`, `target-write`, `repository-execute`, or `external-action`;
+target writes, repository-selected command execution, and external effects
+require `approval: "explicit"`. `workspaceRequirement` is `optional` or
+`required`. Effectful tools must declare a concrete journey `phase` rather
 than falling into `operate`, so an unknown extension can never escape the
-autonomy ceiling.
+autonomy ceiling. A `repository-execute` surface must bind its resolved
+commands into canonical prepared input before authorization, disclose them
+before an interactive dispatch (or emit the exact preflight for an explicit
+headless invocation), and fail closed when an isolating execution backend is
+unavailable.
 
 Every explicit option with `type: "path"` must also declare
 `pathSemantics`: `workspace-read`, `state-write`, `target-write`,
@@ -710,9 +726,20 @@ describe("my-module", () => {
 });
 ```
 
-`createMockToolContext` populates every `ExecutionContext` field with
-permissive defaults and accepts per-field overrides. See
-`src/testing/index.ts` for the full helper list.
+`createMockToolContext` keeps its compatibility profile populated with
+recording runtime, logger, UI, datastore, workspace, event, and print handles.
+Pass a field as explicit `undefined` to test that handle's absence, or pass
+`{ profile: "headless" }` to omit the runtime and optional operator-facing
+handles together. Any handle explicitly supplied to a headless profile wins.
+When `host` is not overridden, its capability set is inferred from the final
+resolved handles. An explicit host capability set remains authoritative, but
+the helper rejects a capability that advertises an omitted handle.
+
+`assertToolResult(result, { costUsdMax })` treats cost as measured data rather
+than assuming an omitted cost is zero. Both the bound and `result.costUsd` must
+be finite, nonnegative numbers; missing, nonnumeric, negative, `NaN`, and
+infinite values fail with a diagnostic. See `src/testing/index.ts` for the full
+helper list.
 
 ## 15. Scaffolding status
 

@@ -23,7 +23,9 @@ expect: ▸
 expect-ansi-profile: indexed
 ask: Palette — is the selected recon command/tool/module row visible through both the non-color marker and theme styling?
 keys: Escape
-submit: quit
+# The target gate is a strict picker, so prompt text is intentionally paused.
+# Use the shell's global two-stage quit chord before changing TERM/theme.
+keys: C-c C-c
 wait: 2
 env-unset: NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_THEME=high-contrast KUZUSHI_REDUCED_MOTION=1
@@ -38,7 +40,7 @@ keys: Down
 snap: high-contrast-palette-selection
 expect: ▸
 keys: Escape
-submit: quit
+keys: C-c C-c
 wait: 2
 env-unset: NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1

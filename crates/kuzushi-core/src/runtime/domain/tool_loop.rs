@@ -76,6 +76,25 @@ pub enum AgentLoopStep {
     },
 }
 
+impl AgentLoopStep {
+    pub fn validate_cost(self) -> Result<Self> {
+        if let Some(cost_usd) = self.cost_usd() {
+            super::RuntimeCost::from_usd(cost_usd, "agent loop step cost")?;
+        }
+        Ok(self)
+    }
+
+    pub fn cost_usd(&self) -> Option<f64> {
+        match self {
+            Self::ToolCall { cost_usd, .. } | Self::Final { cost_usd, .. } => *cost_usd,
+        }
+    }
+
+    pub fn checked_cost_report(&self) -> Result<super::RuntimeCostReport> {
+        super::RuntimeCostReport::from_optional(self.cost_usd(), "agent loop step cost")
+    }
+}
+
 pub trait ToolCallHandler: Send {
     fn run(&mut self, call: &ToolCall) -> Result<ToolResult>;
 }

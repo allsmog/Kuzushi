@@ -47,9 +47,9 @@ impl ShellApp {
         self.apply_shell_hotkey(action)
     }
 
-    /// Pane-aware Workbench navigation: `Tab` cycles focus, `j/k/g/G` move
-    /// within the focused pane (FINDINGS cursor, or SOURCE/CENTER/DETAILS scroll),
-    /// and `Enter` selects the cursored finding when the FINDINGS pane is focused.
+    /// Pane-aware Workbench navigation: `Tab` cycles focus, `j/k` or arrows
+    /// move within the focused pane (FINDINGS cursor, or other pane scroll),
+    /// `g/G` jump, and `Enter` selects the cursored finding.
     fn apply_workbench_hotkey(&mut self, action: ViewHotkeyAction) -> Option<InputUpdate> {
         match action {
             ViewHotkeyAction::WorkbenchCyclePane => self.cycle_workbench_pane(false),
@@ -73,9 +73,9 @@ impl ShellApp {
                 self.set_workbench_page(crate::ui_view_models::active_workbench_page(self).prev())
             }
             ViewHotkeyAction::WorkbenchPage(page) => self.set_workbench_page(page),
-            ViewHotkeyAction::WorkbenchValidate => return Some(self.validate_workbench_finding()),
+            ViewHotkeyAction::WorkbenchValidate => return Some(self.draft_workbench_validation()),
             ViewHotkeyAction::WorkbenchSuppress => return Some(self.draft_workbench_suppression()),
-            ViewHotkeyAction::WorkbenchOrderChain => return Some(self.order_workbench_chain()),
+            ViewHotkeyAction::WorkbenchOrderChain => return Some(self.draft_workbench_chain()),
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
             ViewHotkeyAction::Back if self.focus_workbench_findings_before_back() => {}
             _ => return None,
@@ -309,7 +309,7 @@ impl ShellApp {
         self.open_finding_at_cursor();
     }
 
-    fn validate_workbench_finding(&mut self) -> InputUpdate {
+    fn draft_workbench_validation(&mut self) -> InputUpdate {
         let Some(finding) = self.current_workbench_finding() else {
             self.log(
                 "verify",
@@ -318,10 +318,10 @@ impl ShellApp {
             return InputUpdate::handled();
         };
         let input = serde_json::json!({ "fingerprint": finding.fingerprint }).to_string();
-        self.reduce_hotkey_command(ShellCommand::RunTool {
-            tool: Some("verify:exploit".to_string()),
-            input: Some(input),
-        })
+        self.set_input(format!("run verify:exploit {input}"));
+        self.set_input_mode(InputMode::Prompt);
+        self.log("verify", "draft loaded — press Enter to start verification");
+        InputUpdate::handled()
     }
 
     fn draft_workbench_suppression(&mut self) -> InputUpdate {
@@ -343,11 +343,14 @@ impl ShellApp {
             .set(WorkbenchPane::Details, 0);
     }
 
-    fn order_workbench_chain(&mut self) -> InputUpdate {
-        self.reduce_hotkey_command(ShellCommand::RunTool {
-            tool: Some("exploit-chain:scan".to_string()),
-            input: None,
-        })
+    fn draft_workbench_chain(&mut self) -> InputUpdate {
+        self.set_input("run exploit-chain:scan {}".to_string());
+        self.set_input_mode(InputMode::Prompt);
+        self.log(
+            "chain",
+            "draft loaded — press Enter to start exploit-chain analysis",
+        );
+        InputUpdate::handled()
     }
 
     fn reduce_hotkey_command(&mut self, command: ShellCommand) -> InputUpdate {
@@ -373,10 +376,10 @@ impl ShellApp {
 
     fn apply_scroll_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
         match action {
-            ViewHotkeyAction::ViewScrollUp => self.scroll_up(1),
-            ViewHotkeyAction::ViewScrollDown => self.scroll_down(1),
-            ViewHotkeyAction::ViewScrollTop => self.scroll_to_top(),
-            ViewHotkeyAction::ViewScrollBottom => self.scroll_to_bottom(),
+            ViewHotkeyAction::ViewScrollUp => self.scroll_current_view_up(1),
+            ViewHotkeyAction::ViewScrollDown => self.scroll_current_view_down(1),
+            ViewHotkeyAction::ViewScrollTop => self.scroll_current_view_to_top(),
+            ViewHotkeyAction::ViewScrollBottom => self.scroll_current_view_to_bottom(),
             ViewHotkeyAction::ViewPageUp => self.page_up_current_view(),
             ViewHotkeyAction::ViewPageDown => self.page_down_current_view(),
             _ => return false,
@@ -588,6 +591,10 @@ impl ShellApp {
     }
 
     fn load_catalog_action(&mut self) -> InputUpdate {
+        if self.target().is_none() {
+            self.open_target_picker();
+            return InputUpdate::handled();
+        }
         let Some(command) = self.catalog_cursor_command() else {
             self.log("capability", "no capability action is available");
             return InputUpdate::handled();
@@ -672,11 +679,24 @@ impl ShellApp {
         let page = self.router.activity().deck_page;
         match page {
             ActivityDeckPage::Findings => self.open_activity_findings_review(),
+            ActivityDeckPage::Recon => self.open_activity_recon_detail(),
             page => match page.scene_page() {
                 Some(scene_page) => self.open_scene_to_page(scene_page),
                 None => self.log("activity", "this output view has no full visualization"),
             },
         }
+    }
+
+    fn open_activity_recon_detail(&mut self) {
+        if !matches!(self.shell_view(), ShellView::Module) {
+            self.push_nav_history(self.shell_view());
+        }
+        self.set_focused_module(Some("recon".to_string()));
+        self.set_shell_view(ShellView::Module);
+        self.log(
+            "activity",
+            "opened full recon detail; use back to return to the run",
+        );
     }
 
     fn open_activity_findings_review(&mut self) {
@@ -860,14 +880,19 @@ const FOCUSED_HOTKEY_HANDLERS: &[FocusedHotkeyHandler] = &[
 ];
 
 fn activity_task_deck_page(task_id: &str) -> Option<ActivityDeckPage> {
+    activity_nonfinding_deck_page(task_id)
+        .or_else(|| task_produces_findings(task_id).then_some(ActivityDeckPage::Findings))
+}
+
+fn activity_nonfinding_deck_page(task_id: &str) -> Option<ActivityDeckPage> {
+    if task_id.starts_with("recon:") {
+        return Some(ActivityDeckPage::Recon);
+    }
     if task_id == "threat-model:build" {
         return Some(ActivityDeckPage::Dfd);
     }
     if let Some(page) = viz_page_for_tool(task_id) {
         return Some(ActivityDeckPage::from_scene_page(page));
-    }
-    if task_produces_findings(task_id) {
-        return Some(ActivityDeckPage::Findings);
     }
     None
 }

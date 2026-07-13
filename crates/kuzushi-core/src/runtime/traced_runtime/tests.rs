@@ -16,6 +16,7 @@ impl TraceSink for VecSink {
 
 struct FakeRuntime {
     responses: Mutex<Vec<Result<AgentQueryResponse>>>,
+    triage_cost_usd_exact: bool,
 }
 
 #[async_trait]
@@ -34,6 +35,7 @@ impl AgentRuntime for FakeRuntime {
             confidence: 0.8,
             rationale: "evidence matches".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: self.triage_cost_usd_exact,
         })
     }
 
@@ -69,6 +71,7 @@ fn fresh_runtime(responses: Vec<Result<AgentQueryResponse>>) -> (Arc<VecSink>, F
         Arc::new(VecSink::default()),
         FakeRuntime {
             responses: Mutex::new(responses),
+            triage_cost_usd_exact: true,
         },
     )
 }
@@ -226,42 +229,7 @@ fn traced_triage_emits_reasoning_step() {
     let traced = traced(&runtime, sink.clone());
 
     let _ = traced
-        .triage_finding_blocking(TriageRequest {
-            model: "openai:gpt-test".to_string(),
-            cwd: ".".into(),
-            finding: Finding {
-                id: None,
-                scan_id: None,
-                identity_id: None,
-                identity_match_tier: None,
-                fingerprint: "fp".to_string(),
-                rule_id: "test".to_string(),
-                title: "SQL injection".to_string(),
-                severity: Severity::High,
-                file_path: "src/lib.rs".to_string(),
-                start_line: 1,
-                end_line: None,
-                message: "evidence".to_string(),
-                tool: "test".to_string(),
-                actor_fingerprint: None,
-                static_proof_state: None,
-                triage: None,
-                triaged_by: None,
-                verification: None,
-                created_at: String::new(),
-                vuln_source: None,
-                dedup_key: None,
-                source_signature: None,
-                corroboration_count: 0,
-                suppressed: false,
-                snoozed_until: None,
-                remediation: None,
-                references: Vec::new(),
-                evidence: Vec::new(),
-                sources: Vec::new(),
-            },
-            prompt_template: None,
-        })
+        .triage_finding_blocking(triage_request("SQL injection"))
         .unwrap();
 
     let steps = sink.steps.lock().unwrap();
@@ -273,4 +241,40 @@ fn traced_triage_emits_reasoning_step() {
     assert_eq!(steps[0].model.as_deref(), Some("openai:gpt-test"));
     assert_eq!(steps[0].provider.as_deref(), Some("openai"));
     assert!(steps[0].prompt_hash.is_some());
+    assert_eq!(steps[1].cost_usd, Some(0.0));
+}
+
+#[test]
+fn traced_triage_omits_unreported_zero_cost() {
+    let (sink, mut runtime) = fresh_runtime(vec![]);
+    runtime.triage_cost_usd_exact = false;
+    let traced = traced(&runtime, sink.clone());
+
+    let _ = traced
+        .triage_finding_blocking(triage_request("Unpriced triage"))
+        .unwrap();
+
+    let steps = sink.steps.lock().unwrap();
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[1].kind, "reasoning");
+    assert_eq!(steps[1].cost_usd, None);
+}
+
+fn triage_request(title: &str) -> TriageRequest {
+    let mut finding = Finding::new_tool(
+        "test",
+        "test",
+        "src/lib.rs",
+        1,
+        None,
+        Severity::High,
+        "evidence",
+    );
+    finding.title = title.to_string();
+    TriageRequest {
+        model: "openai:gpt-test".to_string(),
+        cwd: ".".into(),
+        finding,
+        prompt_template: None,
+    }
 }

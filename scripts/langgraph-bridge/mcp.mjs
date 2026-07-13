@@ -1,10 +1,12 @@
-import { statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
+import { sep } from "node:path";
 import process from "node:process";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
 export async function mcpToolsForRequest(request) {
   if (!agentMcpsEnabled(request)) return { tools: [], close: async () => {} };
   const mcpServers = mcpServerConfig(request);
+  if (Object.keys(mcpServers).length === 0) return { tools: [], close: async () => {} };
   const client = new MultiServerMCPClient({
     mcpServers,
     onConnectionError: (server, error) => {
@@ -78,11 +80,12 @@ function agentMcpsEnabled(request) {
 }
 
 export function mcpServerConfig(request) {
-  const cwd = mcpCwdFor(request);
-  const env = { ...process.env, ...mcpEnvironment(request) };
+  const readRoots = mcpReadRootsFor(request);
+  if (readRoots.length === 0) return {};
+  const cwd = mcpCwdFor(request, readRoots);
   const plan = attachmentPlan(request);
-  if (plan.length > 0) return plannedServerConfig(plan, cwd, env);
-  return defaultServerConfig(cwd, env);
+  if (plan.length > 0) return plannedServerConfig(plan, cwd, request, readRoots);
+  return defaultServerConfig(cwd, request, readRoots);
 }
 
 // The artifact-gated plan computed by `mcp_attachment_plan_for_target`
@@ -95,60 +98,105 @@ function attachmentPlan(request) {
   return raw.filter((entry) => typeof entry?.name === "string" && entry.name.length > 0);
 }
 
-function plannedServerConfig(plan, cwd, env) {
+function plannedServerConfig(plan, cwd, request, readRoots) {
   const servers = {};
   for (const attachment of plan) {
-    servers[attachment.name] = plannedServer(attachment, cwd, env);
+    servers[attachment.name] = plannedServer(attachment, cwd, request, readRoots);
   }
   return servers;
 }
 
-function plannedServer(attachment, cwd, env) {
+function plannedServer(attachment, cwd, request, readRoots) {
   const token = attachment.name.toUpperCase().replaceAll("-", "_");
+  const artifact = artifactEnv(attachment, token, readRoots);
   return {
     transport: "stdio",
     command: process.env[`KUZUSHI_MCP_${token}_BIN`] || `kuzushi-mcp-${attachment.name}`,
     args: [],
     cwd,
-    env: { ...env, ...artifactEnv(attachment, token) },
+    env: serverEnvironment(attachment.name, request, readRoots, artifact, true),
   };
 }
 
 // Artifact-backed servers read their input path from
 // `KUZUSHI_MCP_<NAME>_ARTIFACT`; the joern server predates that
 // convention and reads `KUZUSHI_JOERN_CPG`.
-function artifactEnv(attachment, token) {
+function artifactEnv(attachment, token, readRoots) {
   const path = attachment.artifactPath ?? attachment.artifact_path;
   if (typeof path !== "string" || path.length === 0) return {};
-  const env = { [`KUZUSHI_MCP_${token}_ARTIFACT`]: path };
-  if (attachment.name === "joern") env.KUZUSHI_JOERN_CPG = path;
+  const authorizedPath = authorizedArtifactPath(path, readRoots);
+  const env = { [`KUZUSHI_MCP_${token}_ARTIFACT`]: authorizedPath };
+  if (attachment.name === "joern") env.KUZUSHI_JOERN_CPG = authorizedPath;
   return env;
+}
+
+function authorizedArtifactPath(path, readRoots) {
+  let canonical;
+  try {
+    canonical = realpathSync(path);
+  } catch (error) {
+    throw new Error(`planned MCP artifact is unavailable: ${path}`, { cause: error });
+  }
+  if (!readRoots.some((root) => pathWithinRoot(canonical, root))) {
+    throw new Error(`planned MCP artifact is outside the read roots: ${path}`);
+  }
+  const metadata = statSync(canonical);
+  if (!metadata.isFile() && !metadata.isDirectory()) {
+    throw new Error(`planned MCP artifact is not a regular file or directory: ${path}`);
+  }
+  return canonical;
 }
 
 // Legacy surface for callers that only set `toolPolicy.mcps = true`
 // (or force `KUZUSHI_AGENT_MCPS=1`) without an attachment plan.
-function defaultServerConfig(cwd, env) {
+function defaultServerConfig(cwd, request, readRoots) {
   return {
-    treesitter: stdioServer("KUZUSHI_MCP_TREESITTER_BIN", "kuzushi-mcp-treesitter", cwd, env),
-    joern: stdioServer("KUZUSHI_MCP_JOERN_BIN", "kuzushi-mcp-joern", cwd, env),
-    codeql: stdioServer("KUZUSHI_MCP_CODEQL_BIN", "kuzushi-mcp-codeql", cwd, env),
+    treesitter: stdioServer(
+      "treesitter",
+      "KUZUSHI_MCP_TREESITTER_BIN",
+      "kuzushi-mcp-treesitter",
+      cwd,
+      request,
+      readRoots,
+    ),
+    joern: stdioServer(
+      "joern",
+      "KUZUSHI_MCP_JOERN_BIN",
+      "kuzushi-mcp-joern",
+      cwd,
+      request,
+      readRoots,
+    ),
+    codeql: stdioServer(
+      "codeql",
+      "KUZUSHI_MCP_CODEQL_BIN",
+      "kuzushi-mcp-codeql",
+      cwd,
+      request,
+      readRoots,
+    ),
   };
 }
 
-function stdioServer(envName, fallbackCommand, cwd, env) {
+function stdioServer(name, envName, fallbackCommand, cwd, request, readRoots) {
   return {
     transport: "stdio",
     command: process.env[envName] || fallbackCommand,
     args: [],
     cwd,
-    env,
+    env: serverEnvironment(name, request, readRoots),
   };
 }
 
-function mcpCwdFor(request) {
+function mcpCwdFor(request, readRoots) {
   const candidate = request?.cwd;
-  if (!directoryExists(candidate)) return process.cwd();
-  return candidate;
+  if (!directoryExists(candidate)) return readRoots[0];
+  const canonical = realpathSync(candidate);
+  return readRoots.some((root) => pathWithinRoot(canonical, root)) ? canonical : readRoots[0];
+}
+
+function pathWithinRoot(candidate, root) {
+  return candidate === root || candidate.startsWith(`${root}${sep}`);
 }
 
 function directoryExists(candidate) {
@@ -163,4 +211,79 @@ function directoryExists(candidate) {
 function mcpEnvironment(request) {
   const raw = request?.runtimeOptions?.mcpEnvironment ?? request?.runtime_options?.mcp_environment;
   return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+}
+
+const COMMON_CHILD_ENV = ["PATH"];
+const READ_CAPABILITY_SERVERS = new Set([
+  "treesitter",
+  "joern",
+  "codeql",
+  "context",
+  "entry-points",
+  "threat-model",
+  "threat-intel",
+  "x-ray",
+]);
+const SERVER_CHILD_ENV = {
+  joern: [
+    "HOME",
+    "TMPDIR",
+    "JAVA_HOME",
+    "JOERN_SERVER_URL",
+    "KUZUSHI_JOERN_BIN",
+    "KUZUSHI_JOERN_CPG",
+    "KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS",
+  ],
+  codeql: [
+    "HOME",
+    "TMPDIR",
+    "XDG_CACHE_HOME",
+    "KUZUSHI_CODEQL_BIN",
+    "KUZUSHI_CODEQL_CACHE_DIR",
+    "KUZUSHI_CODEQL_PREWARM",
+  ],
+};
+
+function serverEnvironment(name, request, readRoots, fixed = {}, forceReadCapability = false) {
+  const requested = mcpEnvironment(request);
+  const env = selectedEnvironment(requested, [
+    ...COMMON_CHILD_ENV,
+    ...(SERVER_CHILD_ENV[name] ?? []),
+  ]);
+  if (forceReadCapability || READ_CAPABILITY_SERVERS.has(name)) {
+    env.KUZUSHI_MCP_READ_ROOTS = JSON.stringify(readRoots);
+  }
+  return Object.assign(env, fixed);
+}
+
+function selectedEnvironment(requested, names) {
+  const env = {};
+  for (const name of names) {
+    const value = requested[name] ?? process.env[name];
+    if (typeof value === "string") env[name] = value;
+  }
+  return env;
+}
+
+function mcpReadRootsFor(request) {
+  const raw = request?.toolPolicy?.mcpReadRoots ?? request?.toolPolicy?.mcp_read_roots;
+  if (!Array.isArray(raw)) return [];
+  const roots = raw.map(canonicalReadRoot);
+  return [...new Set(roots)];
+}
+
+function canonicalReadRoot(root) {
+  if (typeof root !== "string" || root.length === 0) {
+    throw new Error("MCP read roots must be non-empty path strings");
+  }
+  let canonical;
+  try {
+    canonical = realpathSync(root);
+  } catch (error) {
+    throw new Error(`MCP read root is unavailable: ${root}`, { cause: error });
+  }
+  if (!statSync(canonical).isDirectory()) {
+    throw new Error(`MCP read root is not a directory: ${root}`);
+  }
+  return canonical;
 }

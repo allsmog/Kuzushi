@@ -7,8 +7,8 @@ size: 60x20
 KUZUSHI · target ./phase-target · view map · ● LIVE
  組  map ✓ · 崩  hunt ✓ · 作  confirm ● · 掛  fix ·
  ▸ NEXT triage & verify
-│MAP · RECON
-│ ● LIVE run hase-run · 42s · context:build
+│▸ MAP · RECON
+│ ● LIVE run …hase-run · 42s · context:build
 │ ── RECON ────────────────────────────────────────────────
 │ … 7 earlier trace rows
 │   8  context:build  recording edge trust boundary ·...
@@ -21,6 +21,6 @@ KUZUSHI · target ./phase-target · view map · ● LIVE
 │artifacts · files 3 · dfd 3n/2f · findings 6 · chains 1
 mode:run · workbench            6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────────────────────────
- Ctrl+C request abort   findings list
- Esc back   history events
+ Ctrl+C request abort
+ Esc prompt
 NAVIGATION MODE — view keys active · Esc returns to prompt

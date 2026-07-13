@@ -8,7 +8,21 @@ pub struct AgenticSastReport {
     pub findings: Vec<Finding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persisted: Option<AgenticSastPersistedRun>,
+    /// Exact and incomplete cost envelopes use different JSON field names.
+    /// Accept the canonical incomplete form when `sast:scan` rehydrates this
+    /// report from a normalized subtool result.
+    #[serde(alias = "observedCostUsd")]
     pub cost_usd: f64,
+    #[serde(default = "default_cost_usd_exact", skip_serializing_if = "is_true")]
+    pub cost_usd_exact: bool,
+}
+
+const fn default_cost_usd_exact() -> bool {
+    true
+}
+
+const fn is_true(value: &bool) -> bool {
+    *value
 }
 
 impl AgenticSastReport {
@@ -25,7 +39,15 @@ impl AgenticSastReport {
             self.output(),
             json!(self),
         );
-        output["costUsd"] = json!(self.cost_usd);
+        let observed =
+            crate::runtime::RuntimeCost::from_usd(self.cost_usd, "agentic SAST report cost")
+                .expect("agentic SAST report cost was checked before construction");
+        let cost = if self.cost_usd_exact {
+            crate::runtime::RuntimeCostReport::known(observed)
+        } else {
+            crate::runtime::RuntimeCostReport::incomplete(observed)
+        };
+        crate::module_result::apply_runtime_cost_report(&mut output, cost);
         output
     }
 

@@ -95,6 +95,20 @@ mod tests {
     }
 
     #[test]
+    fn cost_line_labels_unresolved_provider_spend_as_observed() {
+        let input = PrCommentInput {
+            cost_usd: 0.25,
+            provider_spend_unresolved: true,
+            ..PrCommentInput::default()
+        };
+
+        let body = build_pr_comment(&input);
+
+        assert!(body.contains("observed total **$0.25**"));
+        assert!(body.contains("provider spend unresolved"));
+    }
+
+    #[test]
     fn findings_table_includes_cwe_and_evidence_preview() {
         let mut finding = make_finding(Severity::High, "fcwe", "CWE-89 SQL injection");
         finding.message = "Evidence: query builder receives request param".to_string();

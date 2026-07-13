@@ -71,29 +71,17 @@ pub(in crate::app) fn auth_login_status_message(
 }
 
 pub(in crate::app) fn auth_provider_display_name(provider: &str) -> &str {
-    match provider {
-        "openai-codex" => "openai",
-        "github-copilot" => "github-copilot",
-        _ => provider,
-    }
+    auth_provider_label(provider)
 }
 
 pub(in crate::app) fn auth_login_process_provider_arg(provider: &str) -> &str {
-    match provider {
-        "openai-codex" => "openai",
-        _ => provider,
-    }
+    AuthProvider::from_scene_provider(provider)
+        .map(AuthProvider::login_command_name)
+        .unwrap_or(provider)
 }
 
 pub(crate) fn normalize_auth_provider(provider: &str) -> std::result::Result<&'static str, String> {
-    match provider.trim().to_ascii_lowercase().as_str() {
-        "" | "openai" => Ok("openai-codex"),
-        "anthropic" | "claude" => Ok("anthropic"),
-        "github-copilot" | "copilot" => Ok("github-copilot"),
-        other => Err(format!(
-            "unsupported auth login provider {other:?}. Supported: openai, anthropic, github-copilot. Next: auth login openai browser"
-        )),
-    }
+    AuthProvider::from_login_command(provider).map(AuthProvider::oauth_model_provider)
 }
 
 pub(crate) fn normalize_auth_method(

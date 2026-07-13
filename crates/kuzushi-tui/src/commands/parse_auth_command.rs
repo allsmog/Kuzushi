@@ -91,14 +91,13 @@ pub(crate) fn parse_workspace_command(parts: Vec<&str>) -> ShellCommand {
         None | Some("status") => ShellCommand::Workspace(WorkspaceCommand::Status),
         Some("reindex" | "index") => ShellCommand::Workspace(WorkspaceCommand::Reindex),
         Some("export") => match parts.get(1).copied() {
-            Some("findings") => parse_workspace_findings_export_args(
-                parts.get(2..).unwrap_or_default(),
-                "findings export",
-            ),
+            Some("findings") => {
+                parse_workspace_findings_export_args(parts.get(2..).unwrap_or_default())
+            }
             Some(other) => ShellCommand::Workspace(WorkspaceCommand::Unsupported(format!(
                 "workspace export {other}"
             ))),
-            None => parse_workspace_findings_export_args(&[], "findings export"),
+            None => parse_workspace_findings_export_args(&[]),
         },
         Some("scope") => match parts.get(1).copied() {
             Some("init") => ShellCommand::Workspace(WorkspaceCommand::ScopeInit),
@@ -118,14 +117,11 @@ pub(crate) fn parse_workspace_command(parts: Vec<&str>) -> ShellCommand {
     }
 }
 
-pub(crate) fn parse_workspace_findings_export_args(
-    args: &[&str],
-    missing_label: &str,
-) -> ShellCommand {
+pub(crate) fn parse_workspace_findings_export_args(args: &[&str]) -> ShellCommand {
     let Some((output, format, completeness, allow_empty)) = workspace_findings_export_args(args)
     else {
         return ShellCommand::Workspace(WorkspaceCommand::Unsupported(format!(
-            "usage: {missing_label} <path> [format] [--completeness open|complete] [--allow-empty] (format: json|jsonl|sarif|csv|markdown-bundle)"
+            "usage: findings export <path> [format] [--completeness open|complete] [--allow-empty] (format: json|jsonl|sarif|csv|markdown-bundle; alias: workspace export findings)"
         )));
     };
     ShellCommand::Workspace(WorkspaceCommand::ExportFindings {

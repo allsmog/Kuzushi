@@ -32,4 +32,29 @@ mod tests {
             .iter()
             .any(|line| line.body.contains("requires an explicit model")));
     }
+
+    #[test]
+    fn terminal_plan_event_settles_matching_activity_once() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_activity(Some(ActivitySession::new("plan-cost")));
+        let cost = kuzushi_core::runtime::RuntimeCost::from_usd(0.025, "plan cost").unwrap();
+        let event = || PlanEvent::Failed {
+            error: "fixture failure".to_string(),
+            audit: AgentCallAudit::test()
+                .with_cost(kuzushi_core::runtime::RuntimeCostReport::known(cost)),
+        };
+
+        app.apply_plan_event(event());
+        app.apply_plan_event(event());
+
+        assert_eq!(app.session().session_cost_usd(), 0.025);
+        assert_eq!(
+            app.activity()
+                .unwrap()
+                .runtime_cost_report()
+                .unwrap()
+                .exact_usd(),
+            Some(0.025)
+        );
+    }
 }

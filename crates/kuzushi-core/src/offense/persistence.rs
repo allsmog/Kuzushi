@@ -168,6 +168,8 @@ mod tests {
             steps,
             completed,
             summary: "chain summary".to_string(),
+            cost_usd: 0.0,
+            cost_usd_exact: true,
         }
     }
 

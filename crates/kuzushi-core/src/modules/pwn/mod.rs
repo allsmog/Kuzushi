@@ -29,16 +29,63 @@ pub(in crate::modules) fn pwn_module() -> BuiltinModule {
 }
 
 fn pwn_tools() -> Vec<ToolDescriptor> {
+    let mut tools = pwn_analysis_tools();
+    tools.extend(pwn_execution_tools());
+    tools
+}
+
+fn pwn_analysis_tools() -> Vec<ToolDescriptor> {
     vec![
-        pwn_profile_binary_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
-        pwn_reverse_tool().with_policy(external_action_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
-        pwn_state_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
-        pwn_calibrate_local_tool().with_policy(external_action_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
-        pwn_run_candidates_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
-        pwn_auto_solve_tool().with_policy(external_action_policy(ToolPhase::Hunt, RuntimeRequirement::Always, FindingStoreRequirement::Optional)),
-        pwn_menu_probe_tool().with_policy(external_action_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
-        pwn_exploit_run_tool().with_policy(external_action_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
-        pwn_heap_uaf_scan_tool().with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        pwn_profile_binary_tool().with_policy(workspace_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
+        pwn_reverse_tool().with_policy(external_action_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
+        pwn_state_tool().with_policy(workspace_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
+        pwn_calibrate_local_tool().with_policy(external_action_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
+        pwn_run_candidates_tool().with_policy(workspace_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
+    ]
+}
+
+fn pwn_execution_tools() -> Vec<ToolDescriptor> {
+    vec![
+        pwn_auto_solve_tool().with_policy(external_action_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Always,
+            FindingStoreRequirement::Optional,
+        )),
+        pwn_menu_probe_tool().with_policy(external_action_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
+        pwn_exploit_run_tool().with_policy(external_action_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
+        pwn_heap_uaf_scan_tool().with_policy(workspace_policy(
+            ToolPhase::Hunt,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
     ]
 }
 
@@ -1198,7 +1245,20 @@ fn attach_auto_solve_loop_report(output: &mut Value, model: &str, loop_report: &
             "reason": "configured LLM observe/replan loop",
             "decision": loop_report.get("finalDecision").cloned(),
             "iterations": loop_report.get("iterations").cloned(),
+            "costUsd": loop_report.get("costUsd").cloned(),
+            "costUsdExact": loop_report.get("costUsdExact").cloned(),
         }),
+    );
+    object.insert(
+        "costUsd".to_string(),
+        loop_report.get("costUsd").cloned().unwrap_or(Value::Null),
+    );
+    object.insert(
+        "costUsdExact".to_string(),
+        loop_report
+            .get("costUsdExact")
+            .cloned()
+            .unwrap_or(Value::Bool(false)),
     );
     object.insert(
         "actionExecution".to_string(),
@@ -1219,75 +1279,159 @@ fn run_pwn_observe_replan_loop(
     reverse_summary: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let mut observations = Vec::new();
-    let mut iterations = Vec::new();
-    let mut all_results = Vec::new();
-    let mut final_decision = Value::Null;
-
+    let mut state = PwnPlannerLoopState::new();
     for round in 0..PWN_AUTO_MAX_ROUNDS {
-        if let Some(trace) = ctx.trace {
-            let _ = trace
-                .step("reasoning", "auto-solve", format!("planner round {round}"))
-                .emit();
-        }
-        let decision = query_pwn_strategy_planner(
+        trace_pwn_planner_round(ctx, round);
+        let planner_round = execute_pwn_planner_round(
             runtime,
             model,
             target,
+            binary,
             profile,
             reverse_summary,
-            &observations,
+            &state.observations,
+            ctx,
             round,
         )?;
-        validate_pwn_strategy_decision(&decision)?;
-        let planner_report = planner_report(
-            true,
-            Some(model.to_string()),
-            "configured LLM observe/replan loop",
-            Some(decision.clone()),
-        );
-        let action_results =
-            execute_pwn_llm_actions(ctx, binary, &planner_report, profile, reverse_summary)?;
-        let round_results = action_results
+        if state.record(round, planner_round)? {
+            break;
+        }
+    }
+    Ok(state.into_report())
+}
+
+struct PwnPlannerRound {
+    decision: Value,
+    action_results: Value,
+    cost: crate::runtime::RuntimeCostReport,
+}
+
+struct PwnPlannerLoopState {
+    observations: Vec<Value>,
+    iterations: Vec<Value>,
+    all_results: Vec<Value>,
+    final_decision: Value,
+    total_cost: crate::runtime::RuntimeCostReport,
+}
+
+impl PwnPlannerLoopState {
+    fn new() -> Self {
+        Self {
+            observations: Vec::new(),
+            iterations: Vec::new(),
+            all_results: Vec::new(),
+            final_decision: Value::Null,
+            total_cost: crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        }
+    }
+
+    fn record(&mut self, round: usize, planner_round: PwnPlannerRound) -> Result<bool> {
+        self.total_cost = self
+            .total_cost
+            .checked_add(planner_round.cost, "pwn planner runtime cost")?;
+        let round_results = planner_round
+            .action_results
             .get("results")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
         let stopped = round_results.iter().any(is_stop_result);
-        observations.push(compact_json_strings(
-            &json!({
-                "round": round,
-                "decision": compact_decision_for_observation(&decision),
-                "actionExecution": action_results,
-            }),
-            1800,
+        let observation = pwn_round_observation(round, &planner_round);
+        self.observations.push(observation);
+        self.all_results.extend(round_results);
+        self.iterations.push(pwn_round_iteration(
+            round,
+            &planner_round,
+            self.observations.last(),
         ));
-        all_results.extend(round_results);
-        iterations.push(json!({
-            "round": round,
-            "decision": decision,
-            "actionExecution": observations.last().and_then(|obs| obs.get("actionExecution")).cloned(),
-        }));
-        final_decision = planner_report
-            .get("decision")
-            .cloned()
-            .unwrap_or(Value::Null);
-        if stopped || !has_followup_action(iterations.last()) {
-            break;
-        }
+        self.final_decision = planner_round.decision;
+        Ok(stopped || !has_followup_action(self.iterations.last()))
     }
 
-    Ok(json!({
-        "finalDecision": final_decision,
-        "iterations": iterations,
-        "observations": observations,
-        "actionExecution": {
-            "executed": !all_results.is_empty(),
-            "maxRounds": PWN_AUTO_MAX_ROUNDS,
-            "maxActionsPerRound": PWN_AUTO_MAX_ACTIONS,
-            "results": all_results,
-        }
-    }))
+    fn into_report(self) -> Value {
+        json!({
+            "finalDecision": self.final_decision,
+            "iterations": self.iterations,
+            "observations": self.observations,
+            "actionExecution": {
+                "executed": !self.all_results.is_empty(),
+                "maxRounds": PWN_AUTO_MAX_ROUNDS,
+                "maxActionsPerRound": PWN_AUTO_MAX_ACTIONS,
+                "results": self.all_results,
+            },
+            "costUsd": self.total_cost.observed_usd(),
+            "costUsdExact": self.total_cost.is_complete(),
+        })
+    }
+}
+
+fn trace_pwn_planner_round(ctx: &ToolExecutionContext<'_>, round: usize) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("reasoning", "auto-solve", format!("planner round {round}"))
+            .emit();
+    }
+}
+
+fn execute_pwn_planner_round(
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    target: &Path,
+    binary: &Path,
+    profile: &Value,
+    reverse_summary: &Value,
+    observations: &[Value],
+    ctx: &ToolExecutionContext<'_>,
+    round: usize,
+) -> Result<PwnPlannerRound> {
+    let (decision, cost) = query_pwn_strategy_planner(
+        runtime,
+        model,
+        target,
+        profile,
+        reverse_summary,
+        observations,
+        round,
+    )?;
+    validate_pwn_strategy_decision(&decision)?;
+    let report = planner_report(
+        true,
+        Some(model.to_string()),
+        "configured LLM observe/replan loop",
+        Some(decision.clone()),
+        cost,
+    );
+    let action_results = execute_pwn_llm_actions(ctx, binary, &report, profile, reverse_summary)?;
+    Ok(PwnPlannerRound {
+        decision,
+        action_results,
+        cost,
+    })
+}
+
+fn pwn_round_observation(round: usize, planner_round: &PwnPlannerRound) -> Value {
+    compact_json_strings(
+        &json!({
+            "round": round,
+            "decision": compact_decision_for_observation(&planner_round.decision),
+            "actionExecution": planner_round.action_results,
+        }),
+        1800,
+    )
+}
+
+fn pwn_round_iteration(
+    round: usize,
+    planner_round: &PwnPlannerRound,
+    observation: Option<&Value>,
+) -> Value {
+    json!({
+        "round": round,
+        "decision": planner_round.decision,
+        "actionExecution": observation.and_then(|item| item.get("actionExecution")).cloned(),
+        "costUsd": planner_round.cost.observed_usd(),
+        "costUsdExact": planner_round.cost.is_complete(),
+    })
 }
 
 #[cfg(test)]
@@ -1303,7 +1447,7 @@ fn plan_auto_solve_strategy(
         runtime.with_context(|| crate::runtime::missing_agent_runtime_message("pwn:auto-solve"))?;
     let model = resolve_tool_model("pwn:auto-solve", input, ctx)?;
     let observations = Vec::new();
-    let decision = query_pwn_strategy_planner(
+    let (decision, cost) = query_pwn_strategy_planner(
         runtime,
         &model,
         target,
@@ -1318,6 +1462,7 @@ fn plan_auto_solve_strategy(
         Some(model),
         "configured LLM planner",
         Some(decision),
+        cost,
     ))
 }
 
@@ -1342,12 +1487,15 @@ fn planner_report(
     model: Option<String>,
     reason: &str,
     decision: Option<Value>,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Value {
     json!({
         "used": used,
         "model": model,
         "reason": reason,
         "decision": decision,
+        "costUsd": cost.observed_usd(),
+        "costUsdExact": cost.is_complete(),
     })
 }
 
@@ -1359,12 +1507,13 @@ fn query_pwn_strategy_planner(
     reverse_summary: &Value,
     observations: &[Value],
     round: usize,
-) -> Result<Value> {
+) -> Result<(Value, crate::runtime::RuntimeCostReport)> {
     let facts = target_facts(target);
     let prompt = pwn_strategy_prompt(&facts, profile, reverse_summary, observations, round)?;
     let request = pwn_strategy_request(model, target, prompt);
-    let response = runtime.query_blocking(request)?;
-    pwn_strategy_response_json(response)
+    let response = crate::runtime::query_blocking_checked(runtime, request)?;
+    let cost = response.checked_cost_report()?;
+    Ok((pwn_strategy_response_json(response)?, cost))
 }
 
 fn pwn_strategy_schema() -> Value {
@@ -2642,6 +2791,8 @@ mod tests {
             self.requests.lock().unwrap().push(request);
             Ok(AgentQueryResponse {
                 structured: Some(planner_stop_response()),
+                cost_usd: 0.25,
+                cost_usd_reported: true,
                 ..AgentQueryResponse::default()
             })
         }
@@ -2671,6 +2822,8 @@ mod tests {
             let response = self.responses.lock().unwrap().remove(0);
             Ok(AgentQueryResponse {
                 structured: Some(response),
+                cost_usd: 0.1,
+                cost_usd_reported: true,
                 ..AgentQueryResponse::default()
             })
         }
@@ -2779,6 +2932,8 @@ mod tests {
 
         assert_eq!(report["used"], json!(true));
         assert_eq!(report["model"], json!("openai:gpt-test"));
+        assert_eq!(report["costUsd"], json!(0.25));
+        assert_eq!(report["costUsdExact"], json!(true));
         let requests = runtime.requests.lock().unwrap();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].model, "openai:gpt-test");
@@ -2810,6 +2965,8 @@ mod tests {
         assert!(requests[1].prompt.contains("Prior observations"));
         assert!(requests[1].prompt.contains("controlled output path"));
         assert_eq!(report["iterations"].as_array().unwrap().len(), 2);
+        assert!((report["costUsd"].as_f64().unwrap() - 0.2).abs() < f64::EPSILON);
+        assert_eq!(report["costUsdExact"], json!(true));
         assert_eq!(
             report["actionExecution"]["results"]
                 .as_array()

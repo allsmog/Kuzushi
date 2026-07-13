@@ -5,7 +5,7 @@ assertion_line: 33
  KUZUSHI › capabilities · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
 CAPABILITIES · MAP · 3 actions
-Phase-native actions first. Press e for engines and installed integrations.
+[!] target required; Enter opens picker · `target <path>` · `demo` offline
 
 > NEXT Load Quick map — Build context and entry points
 

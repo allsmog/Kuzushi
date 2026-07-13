@@ -14,8 +14,9 @@ wait-for: 5 ACTIVITY
 # Queue a tool while the demo run is live — should land in the steer queue.
 type: queue run secret-scan:scan {}
 keys: Enter
-wait: 1
+wait: 0.1
 snap: steer-queued-mid-run
+expect: queued: 1 pending
 ask: Queueing while busy — did the shell say the tool was QUEUED (pending), not silently dropped and not falsely running?
 submit: jobs
 wait: 2

@@ -82,6 +82,38 @@ pub(crate) fn append_failed_trace(record: ToolRunRecord<'_>) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn append_recovered_interruption_event(
+    target: &Path,
+    summary: &RunSummary,
+    message: &str,
+) -> Result<()> {
+    if run_event_exists(target, summary, "interrupted")? {
+        return Ok(());
+    }
+    let mut event = RunEvent::new(0, "run", "interrupted", message);
+    if let Some(tool) = summary.tool.as_deref() {
+        event = event.with_tool(tool);
+    }
+    append_run_event(target, &summary.run_id, &event)?;
+    Ok(())
+}
+
+pub(crate) fn append_recovered_interruption_trace(
+    target: &Path,
+    summary: &RunSummary,
+) -> Result<()> {
+    let label = "run interrupted during recovery";
+    if run_trace_exists(target, summary, label)? {
+        return Ok(());
+    }
+    let mut step = RunTraceStep::new(0, "refused", label).with_severity("danger");
+    if let Some(tool) = summary.tool.as_deref() {
+        step = step.with_tool_name(tool);
+    }
+    append_run_trace_step_with_next_number(target, &summary.run_id, &step)?;
+    Ok(())
+}
+
 fn tool_event_exists(record: ToolRunRecord<'_>, status: &str) -> Result<bool> {
     Ok(load_run_events(record.target, record.run_id)?
         .events
@@ -98,6 +130,30 @@ fn trace_label_exists(record: ToolRunRecord<'_>, label: &str) -> Result<bool> {
         .steps
         .into_iter()
         .any(|step| step.label == label && trace_step_matches_tool(&step, record.tool)))
+}
+
+fn run_event_exists(target: &Path, summary: &RunSummary, status: &str) -> Result<bool> {
+    Ok(load_run_events(target, &summary.run_id)?
+        .events
+        .into_iter()
+        .any(|event| {
+            event.kind == "run"
+                && event.status == status
+                && event.tool.as_deref() == summary.tool.as_deref()
+        }))
+}
+
+fn run_trace_exists(target: &Path, summary: &RunSummary, label: &str) -> Result<bool> {
+    Ok(load_run_trace(target, &summary.run_id)?
+        .steps
+        .into_iter()
+        .any(|step| {
+            step.label == label
+                && summary
+                    .tool
+                    .as_deref()
+                    .is_none_or(|tool| trace_step_matches_tool(&step, tool))
+        }))
 }
 
 fn trace_step_matches_tool(step: &RunTraceStep, tool: &str) -> bool {

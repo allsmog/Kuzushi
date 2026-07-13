@@ -1,4 +1,3 @@
-use super::context_snapshot::context_snapshot_relative_path;
 use crate::app::rank_fuzzy;
 use crate::commands::{
     shell_command_specs, shell_help_examples, ShellCommandCategory, ShellCommandSpec,
@@ -217,38 +216,35 @@ fn help_alias_text(spec: &ShellCommandSpec) -> String {
 }
 
 fn quickstart_steps(app: &ShellApp) -> Vec<QuickstartStep> {
-    // M1 §1.2: the Quickstart paints full-screen now (no embedded transcript
-    // chrome) so it can carry the complete bug-bounty operator path —
-    // scope, scan, triage, export, observe.
     vec![
-        quickstart_step(
-            "1",
-            "kuzushi doctor             CLI preflight (run from your terminal, not here)",
-        ),
+        quickstart_step("1", quickstart_target_step(app)),
         quickstart_step(
             "2",
-            format!(
-                "onboarding (or context build -> {})  planner: context / x-ray / STRIDE / PASTA / CPG / CodeQL / threat intel",
-                context_snapshot_relative_path()
-            ),
+            "doctor                     check scanners, runtime, and credentials here",
         ),
-        quickstart_step("3", quickstart_target_step(app)),
+        quickstart_step(
+            "3",
+            "model                      choose a model; use auth to connect, or demo to stay offline",
+        ),
         quickstart_step(
             "4",
-            "options sast:scan          tune model, backend, budgets before scanning",
+            "next                       open the current phase planner; Space toggles tasks, Enter runs",
         ),
         quickstart_step(
             "5",
-            "next                       open the current phase picker and review checked tasks",
+            "findings                   review results in the Workbench queue",
         ),
         quickstart_step(
             "6",
-            "run sast:scan              explicit umbrella SAST run, outside the guided spine",
+            "open F-0001                inspect evidence, proof state, and the next action",
         ),
-        quickstart_step("7", "findings · open F-0001     inspect evidence and proof state"),
+        quickstart_step(
+            "7",
+            "verify F-0001              collect stronger proof before remediation",
+        ),
         quickstart_step(
             "8",
-            "workspace export findings · kuzushi pr-comment  report bundle / PR text",
+            "findings export report.sarif sarif  write a shareable report",
         ),
     ]
 }

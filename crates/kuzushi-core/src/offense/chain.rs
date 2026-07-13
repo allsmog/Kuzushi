@@ -52,7 +52,7 @@ impl AttackChain {
 
 /// The recorded result of running a chain: every hop's outcome, and whether
 /// the full chain completed (every link landed).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChainOutcome {
     pub chain: String,
@@ -60,6 +60,10 @@ pub struct ChainOutcome {
     pub steps: Vec<PlayOutcome>,
     pub completed: bool,
     pub summary: String,
+    #[serde(default)]
+    pub cost_usd: f64,
+    #[serde(default)]
+    pub cost_usd_exact: bool,
 }
 
 /// Authorize `target_host` once, then run the chain's plays in order. A
@@ -126,6 +130,8 @@ fn finish_chain(chain: &AttackChain, target: &str, steps: Vec<PlayOutcome>) -> C
         steps,
         completed,
         summary,
+        cost_usd: 0.0,
+        cost_usd_exact: true,
     }
 }
 

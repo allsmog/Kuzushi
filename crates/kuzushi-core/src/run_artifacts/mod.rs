@@ -12,10 +12,12 @@ mod jsonl_append;
 mod jsonl_numbering;
 mod llm_audit;
 mod output_declared_artifacts;
+mod process_identity;
 mod run_artifact;
 mod run_artifact_reader;
 mod run_events;
 mod run_failures;
+mod run_history_index;
 mod run_ledger;
 mod run_paths;
 mod run_reproducibility_metadata;
@@ -23,9 +25,11 @@ mod run_summary_store;
 mod running;
 #[cfg(test)]
 mod tests;
+mod tool_output_cost;
 mod tool_run_failure_result;
 mod tool_run_record;
 mod tool_run_record_events;
+mod trace_cost;
 mod trace_handle;
 mod trace_step_builder;
 mod write_run_artifact_json;
@@ -46,22 +50,28 @@ pub use run_failures::{
     load_run_failure_context, load_run_failures, output_with_run_fallback_context,
     write_run_failures, FailureToLlmContext, RunFailure, RunFailures,
 };
+pub use run_history_index::{RunHistoryCursor, RunHistoryPageInfo};
 pub(crate) use run_paths::{
-    checked_latest_run_path, checked_run_artifact_path, checked_runs_root,
+    checked_latest_run_path, checked_legacy_run_history_index_path, checked_run_artifact_path,
+    checked_run_history_dirty_path, checked_run_history_index_path, checked_runs_root,
     ensure_run_artifact_parent, ensure_run_dir,
 };
 pub use run_paths::{
     latest_run_path, new_run_id, run_artifact_path, run_dir, runs_root, ArtifactPath, RunId,
 };
+pub(crate) use run_summary_store::{list_current_run_summary_prefix, CurrentRunSummaryPrefix};
 pub use run_summary_store::{
-    list_run_summaries, list_run_summary_entries, load_run_summary, read_latest_run_pointer,
-    repair_latest_run_pointer, write_run_summary, LatestRunPointerIssue, LatestRunPointerState,
-    RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue,
+    list_recent_run_summary_entries, list_run_summaries, list_run_summary_entries,
+    list_run_summary_entries_cursor_page, list_run_summary_entries_page, load_run_summary,
+    read_latest_run_pointer, repair_latest_run_pointer, write_run_summary, LatestRunPointerIssue,
+    LatestRunPointerState, RunSummaryEntriesCursorPage, RunSummaryEntry, RunSummaryEntryState,
+    RunSummaryIssue,
 };
 pub use running::{
     RunEnvFingerprint, RunHouseRuleFingerprint, RunLlmCallAudit, RunPromptOverrideFingerprint,
     RunSummary, RunTargetGitMetadata, RunTraceStep,
 };
+pub use tool_output_cost::tool_run_output_cost_report;
 pub use tool_run_record::{
     record_tool_run_canceled, record_tool_run_complete, record_tool_run_failed,
     record_tool_run_interrupted, record_tool_run_refused, record_tool_run_started,
@@ -69,6 +79,9 @@ pub use tool_run_record::{
     tool_run_output_cost_usd, tool_run_output_findings_count, try_record_tool_run_canceled,
     try_record_tool_run_complete, try_record_tool_run_failed, try_record_tool_run_interrupted,
     try_record_tool_run_refused, try_record_tool_run_started_with_reproducibility, ToolRunRecord,
+};
+pub use trace_cost::{
+    reconcile_terminal_cost_reports, terminal_model_call_cost_report, trace_cost_report,
 };
 pub use trace_handle::{
     current_parent_step, with_parent_step, BroadcastSink, JsonlSink, ParentScope, TraceHandle,

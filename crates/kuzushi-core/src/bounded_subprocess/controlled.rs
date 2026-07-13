@@ -1,10 +1,12 @@
 use super::{DEFAULT_STDERR_LIMIT, DEFAULT_STDOUT_LIMIT};
 use anyhow::{Context, Result};
-use std::io::{Read, Write};
-use std::process::{Child, ChildStdin, Command, ExitStatus, Output, Stdio};
-use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::thread;
 use std::time::{Duration, Instant};
+
+mod io;
+
+use io::ControlledIo;
 
 const CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
@@ -14,6 +16,68 @@ pub(super) fn controlled_output(
     input: Option<Vec<u8>>,
     cancellation: Option<&crate::scan::ScanCancellation>,
     timeout: Duration,
+) -> Result<Output> {
+    controlled_output_with_stdout(
+        command,
+        label,
+        input,
+        None,
+        cancellation,
+        timeout,
+        DEFAULT_STDOUT_LIMIT,
+        DEFAULT_STDERR_LIMIT,
+    )
+}
+
+pub(super) fn controlled_output_with_limits(
+    command: &mut Command,
+    label: &str,
+    stdout_limit: usize,
+    stderr_limit: usize,
+    timeout: Duration,
+) -> Result<Output> {
+    controlled_output_with_stdout(
+        command,
+        label,
+        None,
+        None,
+        None,
+        timeout,
+        stdout_limit,
+        stderr_limit,
+    )
+}
+
+pub(super) fn controlled_output_to_file(
+    command: &mut Command,
+    label: &str,
+    input: Option<Vec<u8>>,
+    stdout: std::fs::File,
+    stdout_limit: u64,
+    cancellation: Option<&crate::scan::ScanCancellation>,
+    timeout: Duration,
+) -> Result<Output> {
+    controlled_output_with_stdout(
+        command,
+        label,
+        input,
+        Some((stdout, stdout_limit)),
+        cancellation,
+        timeout,
+        DEFAULT_STDOUT_LIMIT,
+        DEFAULT_STDERR_LIMIT,
+    )
+}
+
+fn controlled_output_with_stdout(
+    command: &mut Command,
+    label: &str,
+    input: Option<Vec<u8>>,
+    stdout: Option<(std::fs::File, u64)>,
+    cancellation: Option<&crate::scan::ScanCancellation>,
+    timeout: Duration,
+    stdout_limit: usize,
+    stderr_limit: usize,
 ) -> Result<Output> {
     anyhow::ensure!(
         !timeout.is_zero(),
@@ -26,199 +90,46 @@ pub(super) fn controlled_output(
     let deadline = Instant::now()
         .checked_add(timeout)
         .with_context(|| format!("{label} deadline is outside the supported clock range"))?;
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    if input.is_some() {
-        command.stdin(Stdio::piped());
-    }
-    crate::scan::configure_scanner_process_group(command);
+    configure_controlled_stdio(command, input.is_some());
+    let process_group = crate::scan::configure_scanner_process_group(command)?;
     let mut child = command
         .spawn()
         .with_context(|| format!("Could not start {label}"))?;
-    let process_group_id = crate::scan::child_process_group_id(&child);
-    let io = match ControlledIo::capture(&mut child, input, label) {
-        Ok(io) => io,
-        Err(error) => return Err(terminate_unregistered_child(child, process_group_id, error)),
-    };
+    let io =
+        match ControlledIo::capture(&mut child, input, label, stdout, stdout_limit, stderr_limit) {
+            Ok(io) => io,
+            Err(error) => return Err(terminate_unregistered_child(child, process_group, error)),
+        };
     let local_cancellation = crate::scan::ScanCancellation::default();
     let cancellation = cancellation.unwrap_or(&local_cancellation);
-    let child = match cancellation.register_child(child, process_group_id) {
+    let child = match cancellation.register_prepared_child(child, process_group) {
         Ok(child) => child,
         Err(error) => return Err(io.join_cleanup(error)),
     };
     wait_for_controlled_output(child, io, cancellation, deadline, timeout, label)
 }
 
+fn configure_controlled_stdio(command: &mut Command, has_input: bool) {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if has_input {
+        command.stdin(Stdio::piped());
+    }
+}
+
 fn terminate_unregistered_child(
     mut child: Child,
-    process_group_id: Option<u32>,
+    process_group: crate::scan::PreparedProcessGroup,
     error: anyhow::Error,
 ) -> anyhow::Error {
-    #[cfg(unix)]
-    if let Some(group) = process_group_id {
-        unsafe {
-            libc::killpg(group as libc::pid_t, libc::SIGKILL);
-        }
-    } else {
-        let _ = child.kill();
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = process_group_id;
+    let group_owned = process_group.process_group_id().is_some();
+    drop(process_group);
+    if !group_owned {
         let _ = child.kill();
     }
     match child.wait() {
         Ok(_) => error,
         Err(cleanup) => anyhow::Error::new(cleanup).context(error),
     }
-}
-
-type ControlledReader = JoinHandle<Result<Vec<u8>>>;
-type ControlledWriter = JoinHandle<Result<()>>;
-type ControlledFailure = Arc<Mutex<Option<String>>>;
-
-struct ControlledIo {
-    stdout: ControlledReader,
-    stderr: ControlledReader,
-    stdin: Option<ControlledWriter>,
-    failure: ControlledFailure,
-}
-
-impl ControlledIo {
-    fn capture(child: &mut Child, input: Option<Vec<u8>>, label: &str) -> Result<Self> {
-        let stdout = child
-            .stdout
-            .take()
-            .with_context(|| format!("Could not capture {label} stdout"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .with_context(|| format!("Could not capture {label} stderr"))?;
-        let stdin = input
-            .map(|input| controlled_stdin(child, label).map(|stdin| (stdin, input)))
-            .transpose()?;
-        let failure = Arc::new(Mutex::new(None));
-        let stdout =
-            spawn_controlled_reader(stdout, DEFAULT_STDOUT_LIMIT, "stdout", Arc::clone(&failure));
-        let stderr =
-            spawn_controlled_reader(stderr, DEFAULT_STDERR_LIMIT, "stderr", Arc::clone(&failure));
-        let stdin =
-            stdin.map(|(stdin, input)| spawn_controlled_writer(stdin, input, Arc::clone(&failure)));
-        Ok(Self {
-            stdout,
-            stderr,
-            stdin,
-            failure,
-        })
-    }
-
-    fn failure(&self) -> Result<Option<String>> {
-        self.failure
-            .lock()
-            .map(|slot| slot.clone())
-            .map_err(|_| anyhow::anyhow!("subprocess output failure state was poisoned"))
-    }
-
-    fn join(self, status: ExitStatus, label: &str) -> Result<Output> {
-        let stdout = join_controlled_reader(self.stdout, label, "stdout");
-        let stderr = join_controlled_reader(self.stderr, label, "stderr");
-        let stdin = if let Some(stdin) = self.stdin {
-            stdin
-                .join()
-                .map_err(|_| anyhow::anyhow!("{label} stdin writer panicked"))?
-        } else {
-            Ok(())
-        };
-        let stdout = stdout?;
-        let stderr = stderr?;
-        stdin?;
-        Ok(Output {
-            status,
-            stdout,
-            stderr,
-        })
-    }
-
-    fn join_cleanup(self, error: anyhow::Error) -> anyhow::Error {
-        let stdout = join_controlled_reader(self.stdout, "subprocess", "stdout");
-        let stderr = join_controlled_reader(self.stderr, "subprocess", "stderr");
-        let stdin = self.stdin.map(|writer| {
-            writer
-                .join()
-                .map_err(|_| anyhow::anyhow!("subprocess stdin writer panicked"))?
-        });
-        [
-            stdout.map(|_| ()),
-            stderr.map(|_| ()),
-            stdin.unwrap_or(Ok(())),
-        ]
-        .into_iter()
-        .filter_map(Result::err)
-        .fold(error, |primary, cleanup| cleanup.context(primary))
-    }
-}
-
-fn controlled_stdin(child: &mut Child, label: &str) -> Result<ChildStdin> {
-    child
-        .stdin
-        .take()
-        .with_context(|| format!("Could not capture {label} stdin"))
-}
-
-fn spawn_controlled_reader<R: Read + Send + 'static>(
-    reader: R,
-    limit: usize,
-    stream: &'static str,
-    failure: ControlledFailure,
-) -> ControlledReader {
-    thread::spawn(move || match read_controlled_pipe(reader, limit, stream) {
-        Ok(bytes) => Ok(bytes),
-        Err(error) => {
-            record_controlled_failure(&failure, &error);
-            Err(error)
-        }
-    })
-}
-
-fn read_controlled_pipe(mut reader: impl Read, limit: usize, stream: &str) -> Result<Vec<u8>> {
-    let mut bytes = Vec::with_capacity(limit.min(64 * 1024));
-    reader
-        .by_ref()
-        .take((limit + 1) as u64)
-        .read_to_end(&mut bytes)?;
-    anyhow::ensure!(
-        bytes.len() <= limit,
-        "subprocess {stream} exceeded the {limit}-byte capture limit"
-    );
-    Ok(bytes)
-}
-
-fn spawn_controlled_writer(
-    mut stdin: ChildStdin,
-    input: Vec<u8>,
-    failure: ControlledFailure,
-) -> ControlledWriter {
-    thread::spawn(move || {
-        let result = stdin.write_all(&input).map_err(anyhow::Error::from);
-        drop(stdin);
-        if let Err(error) = &result {
-            record_controlled_failure(&failure, error);
-        }
-        result
-    })
-}
-
-fn record_controlled_failure(failure: &ControlledFailure, error: &anyhow::Error) {
-    if let Ok(mut slot) = failure.lock() {
-        if slot.is_none() {
-            *slot = Some(error.to_string());
-        }
-    }
-}
-
-fn join_controlled_reader(reader: ControlledReader, label: &str, stream: &str) -> Result<Vec<u8>> {
-    reader
-        .join()
-        .map_err(|_| anyhow::anyhow!("{label} {stream} reader panicked"))?
 }
 
 fn wait_for_controlled_output(
@@ -232,12 +143,37 @@ fn wait_for_controlled_output(
     loop {
         match controlled_wait_step(&child, &io, cancellation, deadline, timeout, label) {
             ControlledWaitStep::Running => thread::sleep(CONTROL_POLL_INTERVAL),
-            ControlledWaitStep::Exited(status) => return io.join(status, label),
+            ControlledWaitStep::Exited(status) => {
+                let status_succeeded = status.success();
+                let joined = io.join(status, label);
+                return resolve_exited_output(
+                    joined,
+                    status_succeeded,
+                    cancellation.is_cancelled(),
+                    label,
+                );
+            }
             ControlledWaitStep::Failed(error) => {
                 return Err(terminate_controlled_child(&child, io, error));
             }
         }
     }
+}
+
+fn resolve_exited_output<T>(
+    joined: Result<T>,
+    status_succeeded: bool,
+    cancellation_requested: bool,
+    label: &str,
+) -> Result<T> {
+    if status_succeeded || !cancellation_requested {
+        return joined;
+    }
+    let message = format!("{label} was cancelled and killed");
+    Err(match joined {
+        Ok(_) => anyhow::anyhow!(message),
+        Err(error) => error.context(message),
+    })
 }
 
 enum ControlledWaitStep {
@@ -297,4 +233,43 @@ fn terminate_controlled_child(
         Err(cleanup) => cleanup.context(error),
     };
     io.join_cleanup(error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancellation_wins_when_killed_process_exit_wins_poll_race() {
+        let error = resolve_exited_output(Ok(()), false, true, "fixture")
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(error, "fixture was cancelled and killed");
+    }
+
+    #[test]
+    fn late_cancellation_does_not_replace_successful_completion() {
+        let output = resolve_exited_output(Ok("complete"), true, true, "fixture").unwrap();
+
+        assert_eq!(output, "complete");
+    }
+
+    #[test]
+    fn cancellation_keeps_join_failure_in_its_error_chain() {
+        let error = resolve_exited_output::<()>(
+            Err(anyhow::anyhow!("pipe failed")),
+            false,
+            true,
+            "fixture",
+        )
+        .unwrap_err();
+        let chain = format!("{error:#}");
+
+        assert!(
+            chain.contains("fixture was cancelled and killed"),
+            "{chain}"
+        );
+        assert!(chain.contains("pipe failed"), "{chain}");
+    }
 }

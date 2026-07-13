@@ -13,13 +13,7 @@ const packageFileShapeFailures = packageFileEntryShapeFailures(rawPackageFileEnt
 const entries = Array.isArray(rawPackageFileEntries)
   ? rawPackageFileEntries.filter((entry) => typeof entry === "string")
   : [];
-const manifestRecordFields = [
-  "bin",
-  "scripts",
-  "dependencies",
-  "devDependencies",
-  "exports",
-];
+const manifestRecordFields = ["bin", "scripts", "dependencies", "devDependencies", "exports"];
 const manifestRecordShapeFailures = manifestRecordFields.flatMap((field) =>
   packageRecordFieldFailures(field, manifest[field]),
 );
@@ -53,7 +47,6 @@ const allowedPackageEntries = [
   "scripts/langgraph-bridge.mjs",
   "scripts/langgraph-bridge",
   "scripts/kuzushi-dynamic-module-host.mjs",
-  "scripts/check-native-bindings.mjs",
   "schemas",
   "examples/kwp/agentic-fuzz",
   "assets/pashov-xray",
@@ -67,9 +60,7 @@ const expectedPackageBin = {
   kuzushi: "./bin/kuzushi-rs.mjs",
   kz: "./bin/kuzushi-rs.mjs",
 };
-const allowedLifecycleScripts = {
-  postinstall: "node scripts/check-native-bindings.mjs",
-};
+const allowedLifecycleScripts = {};
 const requiredReleaseScripts = {
   prepack: "pnpm build:clean && pnpm build:native",
   "verify:pack": "node scripts/verify-pack.mjs && node scripts/smoke-packed-runtime.mjs",
@@ -87,7 +78,6 @@ const expectedPackageScripts = {
   "export:source": "bash scripts/export-clean-source.sh",
   "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
   prepare: "husky",
-  postinstall: "node scripts/check-native-bindings.mjs",
   dev: "cargo run -p kuzushi-cli",
   "dev:rust": "cargo run -p kuzushi-cli",
   "link:local": "node scripts/link-local.mjs",
@@ -103,10 +93,11 @@ const expectedPackageScripts = {
   "typecheck:all": "node scripts/typecheck-all.mjs",
   "typecheck:benchmarks": "tsc -p benchmarks/tsconfig.json --noEmit",
   "typecheck:perf": "tsc -p perf/tsconfig.json --noEmit",
-  test: "vitest run",
+  test: "vitest run && node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs scripts/setup-contract.test.mjs",
   "test:rust": "cargo test --workspace",
   "test:e2e": "bash tests/e2e/run-smoke.sh",
-  "test:coverage": "vitest run --coverage",
+  "test:coverage":
+    "vitest run --coverage && node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs scripts/setup-contract.test.mjs",
   "quality:crap-risk":
     "node --test scripts/crap-risk-test-mapping.test.mjs && node scripts/crap-risk-gate.mjs",
   "quality:identity": "node scripts/check-public-identity.mjs",
@@ -122,6 +113,7 @@ const expectedPackageScripts = {
   "benchmark:freeze": "tsx benchmarks/freeze-baseline.ts",
   "benchmark:diff": "tsx benchmarks/sarif-diff.ts",
   "benchmark:regression": "tsx benchmarks/regression-check.ts",
+  "benchmark:regression:test": "node --test benchmarks/regression-check.test.mjs",
   "benchmark:scoreboard": "tsx benchmarks/scoreboard.ts",
   "eval:kuzushi-whitebox-static": "node --import tsx evals/kuzushi-whitebox-static/run.ts",
   perf: "tsx perf/harness.ts",
@@ -153,14 +145,13 @@ const expectedPackageMetadata = {
     "pnpm@10.30.0+sha512.2b5753de015d480eeb88f5b5b61e0051f05b4301808a82ec8b840c9d2adf7748eb352c83f5c1593ca703ff1017295bc3fdd3119abb9686efc96b9fcb18200937",
 };
 const expectedPackageKeywords = ["sast", "security", "semgrep", "ai", "triage"];
-const expectedOnlyBuiltDependencies = ["better-sqlite3", "esbuild"];
+const expectedOnlyBuiltDependencies = ["esbuild"];
 const expectedPackageDependencies = {
   "@langchain/anthropic": "^1.0.0",
   "@langchain/core": "^1.0.0",
   "@langchain/langgraph": "^1.0.0",
   "@langchain/mcp-adapters": "^1.0.0",
   "@langchain/openai": "^1.0.0",
-  "better-sqlite3": "^12.8.0",
   zod: "^4.3.6",
 };
 const expectedPnpmLockfileRootDependencyVersions = {
@@ -171,7 +162,6 @@ const expectedPnpmLockfileRootDependencyVersions = {
     "@langchain/mcp-adapters":
       "1.1.3(@cfworker/json-schema@4.1.1)(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))(@langchain/langgraph@1.4.7(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))(zod@4.4.3))",
     "@langchain/openai": "1.5.3(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))",
-    "better-sqlite3": "12.11.1",
     zod: "4.4.3",
   },
   devDependencies: {
@@ -179,7 +169,6 @@ const expectedPnpmLockfileRootDependencyVersions = {
     "@cfworker/json-schema": "4.1.1",
     "@commitlint/cli": "21.2.0(@types/node@22.19.11)(typescript@5.9.3)",
     "@commitlint/config-conventional": "21.2.0",
-    "@types/better-sqlite3": "7.6.13",
     "@types/node": "22.19.11",
     "@vitest/coverage-v8":
       "3.2.7(vitest@3.2.7(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0))",
@@ -198,7 +187,6 @@ const expectedPackageDevDependencies = {
   "@cfworker/json-schema": "^4.1.1",
   "@commitlint/cli": "^21.2.0",
   "@commitlint/config-conventional": "^21.2.0",
-  "@types/better-sqlite3": "^7.6.13",
   "@types/node": "^22.13.4",
   "@vitest/coverage-v8": "^3.2.7",
   chalk: "^5.4.1",
@@ -323,7 +311,7 @@ const packageScriptRuntimePolicyFixtures = {
   allowed: [
     "cargo run -p kuzushi-cli",
     "pnpm build:clean && pnpm build:native",
-    "node scripts/check-native-bindings.mjs",
+    "node scripts/build-native-runtime.mjs",
     "tsx benchmarks/harness.ts",
     "node scripts/check-retired-ts-runtime.mjs",
   ],
@@ -332,7 +320,6 @@ const packageScriptRuntimePolicyFixtures = {
     "tsx src/ui/App.tsx",
     "node dist/cli.js",
     "pnpm build:clean && node dist/cli.js",
-    "node scripts/check-native-bindings.mjs && tsx src/copilot/shell.ts",
     "node dist/copilot/shell.js",
     "node dist/ui/App.js",
   ],
@@ -363,7 +350,6 @@ const scriptRuntimePolicyFailures = packageScriptRuntimePolicyFailures(packageSc
 const scriptRuntimePolicyFixtureFailures = packageScriptRuntimePolicyFixtureFailures(
   packageScriptRuntimePolicyFixtures,
 );
-const nativeBindingScriptFailures = nativeBindingScriptContentFailures();
 const releaseScriptFailures = releaseScriptFailuresFor(packageScripts);
 const publishWrapperFailures = publishWrapperContentFailures();
 const metadataFailures = packageMetadataFailures(manifest);
@@ -402,7 +388,6 @@ if (
   scriptSurfaceFailures.length > 0 ||
   scriptRuntimePolicyFailures.length > 0 ||
   scriptRuntimePolicyFixtureFailures.length > 0 ||
-  nativeBindingScriptFailures.length > 0 ||
   releaseScriptFailures.length > 0 ||
   publishWrapperFailures.length > 0 ||
   metadataFailures.length > 0 ||
@@ -441,7 +426,6 @@ if (
     ...scriptSurfaceFailures,
     ...scriptRuntimePolicyFailures,
     ...scriptRuntimePolicyFixtureFailures,
-    ...nativeBindingScriptFailures,
     ...releaseScriptFailures,
     ...publishWrapperFailures,
     ...metadataFailures,
@@ -860,36 +844,6 @@ function packageScriptRuntimePolicyFixtureFailures(fixtures) {
     ...fixtures.allowed
       .filter(scriptCommandViolatesRuntimePolicy)
       .map((command) => `package script-runtime allowed fixture is denied ${command}`),
-  ];
-}
-
-function nativeBindingScriptContentFailures() {
-  const content = readPackageContractText("scripts/check-native-bindings.mjs");
-  const source = content.source;
-  const required = [
-    "[kuzushi postinstall]",
-    'const NATIVE_DEPS = ["better-sqlite3"]',
-    '["pnpm", ["rebuild", modName]]',
-    '["npm", ["rebuild", modName]]',
-    "NODE_MODULE_VERSION",
-    "result.status === 0",
-    'result.error?.code === "ENOENT"',
-    "failed to load for an unexpected reason",
-    "Skipping auto-rebuild",
-    "ABI mismatch on Node ${process.version}",
-    "Could not auto-rebuild ${dep}. Manual fix",
-    "rebuilt successfully for Node ${process.version}",
-    "process.exit(0)",
-  ];
-  const forbidden = ["OpenAI Codex", "[codex postinstall]", "kuzushi-ts"];
-  return [
-    ...content.failures,
-    ...required
-      .filter((token) => !source.includes(token))
-      .map((token) => `scripts/check-native-bindings.mjs must mention ${token}`),
-    ...forbidden
-      .filter((token) => source.includes(token))
-      .map((token) => `scripts/check-native-bindings.mjs must not mention ${token}`),
   ];
 }
 

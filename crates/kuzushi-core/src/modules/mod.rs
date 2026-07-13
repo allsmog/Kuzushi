@@ -128,7 +128,7 @@ pub use builtins::PreparedToolInput;
 pub use options::coerce_option_value;
 pub use registry::ModuleRegistry;
 pub use runtime_requirements::{
-    agent_runtime_tool_names, tool_defaults_to_workspace, tool_needs_finding_store,
-    tool_needs_runtime, tool_requires_agent_runtime, tool_uses_agent_runtime,
+    agent_runtime_tool_names, tool_defaults_to_workspace, tool_execution_model,
+    tool_needs_finding_store, tool_needs_runtime, tool_requires_agent_runtime, tool_uses_agent_runtime,
     tool_uses_finding_store, tool_wants_runtime, wants_sast_runtime,
 };

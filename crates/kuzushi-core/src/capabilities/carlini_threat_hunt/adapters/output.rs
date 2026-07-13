@@ -14,7 +14,14 @@ impl CarliniThreatHuntReport {
             self.output(),
             json!(self),
         );
-        output["costUsd"] = json!(self.cost_usd);
+        let observed = RuntimeCost::from_usd(self.cost_usd, "Carlini report cost")
+            .expect("Carlini validates runtime cost before report construction");
+        let cost = if self.cost_usd_exact {
+            RuntimeCostReport::known(observed)
+        } else {
+            RuntimeCostReport::incomplete(observed)
+        };
+        crate::module_result::apply_runtime_cost_report(&mut output, cost);
         output
     }
 
@@ -129,17 +136,25 @@ pub(crate) fn carlini_artifact_context(
     ctx: &ToolExecutionContext<'_>,
     target: &Path,
 ) -> ArtifactKnowledgePromptContext {
-    index_carlini_workspace_artifacts(ctx, target);
-
-    let mut context = ctx.artifact_knowledge_context(
+    let refresh = refresh_carlini_workspace_artifacts(ctx, target);
+    let context = ctx.artifact_knowledge_context(
         target,
         "carlini threat hunt actor flows threat model x-ray context",
         20,
     );
+    let mut context = select_carlini_artifact_context(context, target);
+    append_carlini_refresh_status(&mut context, refresh);
+    context
+}
+
+fn select_carlini_artifact_context(
+    context: ArtifactKnowledgePromptContext,
+    target: &Path,
+) -> ArtifactKnowledgePromptContext {
     if context.snippets.is_empty() {
         return context_with_explicit_carlini_snippets(context, target);
     }
-
+    let mut context = context;
     let preferred = preferred_carlini_context_snippets(target, &context.snippets);
     if preferred.is_empty() {
         context.snippets.truncate(6);
@@ -154,14 +169,34 @@ pub(crate) fn carlini_artifact_context(
     context
 }
 
-fn index_carlini_workspace_artifacts(ctx: &ToolExecutionContext<'_>, target: &Path) {
+fn refresh_carlini_workspace_artifacts(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+) -> Result<crate::artifact_kb::ArtifactRefreshReport> {
     let workspace = ctx
         .workspace
         .filter(|workspace| workspace.root() == target)
         .cloned()
-        .or_else(|| crate::workspace::WorkspaceTarget::new(target).ok());
-    if let Some(workspace) = &workspace {
-        let _ = crate::artifact_kb::index_workspace_artifacts(workspace);
+        .map(Ok)
+        .unwrap_or_else(|| crate::workspace::WorkspaceTarget::new(target))?;
+    crate::artifact_kb::refresh_workspace_artifacts(&workspace)
+}
+
+fn append_carlini_refresh_status(
+    context: &mut ArtifactKnowledgePromptContext,
+    refresh: Result<crate::artifact_kb::ArtifactRefreshReport>,
+) {
+    match refresh {
+        Ok(report) if report.partial => context.status.push_str(&format!(
+            "; bounded refresh partial (indexed {}, unchanged {})",
+            report.indexed, report.unchanged
+        )),
+        Ok(_) => {}
+        Err(error) => {
+            context
+                .status
+                .push_str(&format!("; bounded refresh unavailable: {error}"));
+        }
     }
 }
 

@@ -85,8 +85,13 @@ fn write_x_ray_artifact(repo_root: &Path, file_name: &str, content: &str) -> Res
 }
 
 pub(crate) fn render_x_ray_run_summary(data: &XRayReportData) -> String {
+    let cost_label = if data.cost_usd_exact {
+        "Cost"
+    } else {
+        "Observed cost"
+    };
     format!(
-        "x-ray:run complete for {} ({})\n  Runtime:      {}\n  Verdict:      {}{}\n  Entry points: {}\n  Invariants:   {}\n  Cost:         ${}\n\nArtifacts:\n  - {}\n  - {}\n  - {}\n  - {}",
+        "x-ray:run complete for {} ({})\n  Runtime:      {}\n  Verdict:      {}{}\n  Entry points: {}\n  Invariants:   {}\n  {cost_label}:         ${}\n\nArtifacts:\n  - {}\n  - {}\n  - {}\n  - {}",
         data.repo_name,
         data.target,
         data.runtime_mode,
@@ -143,6 +148,7 @@ pub fn read_x_ray_report_artifacts(
         entry_point_counts: parse_entry_point_counts(&markdown.entry_points),
         invariant_counts: parse_invariant_counts(&markdown.invariants),
         cost_usd,
+        cost_usd_exact: true,
     })
 }
 

@@ -90,6 +90,7 @@ fn confirmed_finding() -> kuzushi_core::Finding {
         confidence: 0.9,
         rationale: "operator confirmed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.triaged_by = Some(kuzushi_core::findings::TriageAuthor::Human);
     finding

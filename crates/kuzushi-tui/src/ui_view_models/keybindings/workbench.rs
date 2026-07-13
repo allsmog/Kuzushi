@@ -18,8 +18,12 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         Some(binding) => replace_enter_binding(&mut bindings, binding),
         None => bindings.retain(|binding| binding.key != "Enter"),
     }
-    prioritize_phase_controls(&mut bindings);
-    bindings.extend([bind("Ctrl+G", "palette"), bind("scan", "run scan")]);
+    prioritize_phase_controls(&mut bindings, app);
+    bindings.extend([
+        bind("Ctrl+G", "palette"),
+        bind("scan", "guided plan"),
+        bind("run sast:scan {}", "rescan now"),
+    ]);
     if !app.findings().is_empty() {
         bindings.push(bind(WORKBENCH_REPORT_COMMAND, "export report"));
     }
@@ -27,14 +31,33 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     bindings
 }
 
-fn prioritize_phase_controls(bindings: &mut [FooterKeybinding]) {
+fn prioritize_phase_controls(bindings: &mut [FooterKeybinding], app: &ShellApp) {
     // Preserve the PDF phase controls before secondary cursor shortcuts at
     // compact widths. This changes presentation order only.
-    const KEYS: [&str; 5] = ["1..4", "Tab", "Z", "z", "Enter"];
+    const PHASE_KEYS: [&str; 5] = ["1..4", "Tab", "Z", "z", "Enter"];
+    const REVIEW_KEYS: [&str; 12] = [
+        "q",
+        "Enter",
+        "j/k/↑/↓",
+        "v",
+        "x",
+        "c",
+        "n/N",
+        "Tab",
+        "1..4",
+        "Z",
+        "z",
+        "g/G",
+    ];
+    let keys = if app.router.workbench().focus() == WorkbenchPane::Findings {
+        REVIEW_KEYS.as_slice()
+    } else {
+        PHASE_KEYS.as_slice()
+    };
     bindings.sort_by_key(|binding| {
-        KEYS.iter()
+        keys.iter()
             .position(|key| *key == binding.key)
-            .unwrap_or(KEYS.len())
+            .unwrap_or(keys.len())
     });
 }
 

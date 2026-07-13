@@ -1,8 +1,10 @@
 use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use serde_yaml::{Mapping, Value};
+use serde_json::Value;
 use std::path::Path;
+
+type Mapping = serde_json::Map<String, Value>;
 
 pub(super) use super::dependency_graph::is_pnpm_lock;
 
@@ -14,7 +16,7 @@ const PACKAGE_DEPENDENCY_BLOCKS: &[&str] =
 pub(super) fn pnpm_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_yaml::from_str(&text).context("sbom-scan: parse pnpm-lock.yaml")?;
+    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pnpm-lock.yaml")?;
     let source = relative_display(target, path);
     let mut edges = importer_edges(&value, &source);
     edges.extend(package_edges(&value, &source));
@@ -24,7 +26,7 @@ pub(super) fn pnpm_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDepe
 pub(super) fn pnpm_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_yaml::from_str(&text).context("sbom-scan: parse pnpm-lock.yaml")?;
+    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pnpm-lock.yaml")?;
     let source = relative_display(target, path);
     let mut components = importer_components(target, path, &value, &source);
     components.extend(package_components(target, path, &value, &source));
@@ -45,7 +47,7 @@ fn importer_dependency_edges(importer: &Value, source: &str) -> Vec<SbomDependen
         .iter()
         .filter_map(|block| mapping_child(importer, block))
         .flat_map(|dependencies| dependencies.keys())
-        .filter_map(package_key)
+        .filter_map(|key| package_key(key))
         .map(|to| SbomDependencyEdge {
             from: "root".to_string(),
             to: to.to_string(),
@@ -84,7 +86,7 @@ fn package_components(
     mapping_child(value, "packages")
         .into_iter()
         .flat_map(|packages| packages.keys())
-        .filter_map(package_key)
+        .filter_map(|key| package_key(key))
         .filter_map(pnpm_component_from_key)
         .map(|locked| locked.to_component(target, path, source))
         .collect()
@@ -103,7 +105,7 @@ fn package_dependency_components(
         .collect()
 }
 
-fn package_dependency_edges(key: &Value, package: &Value, source: &str) -> Vec<SbomDependencyEdge> {
+fn package_dependency_edges(key: &str, package: &Value, source: &str) -> Vec<SbomDependencyEdge> {
     let Some(from) = package_key(key).map(pnpm_package_name) else {
         return Vec::new();
     };
@@ -111,7 +113,7 @@ fn package_dependency_edges(key: &Value, package: &Value, source: &str) -> Vec<S
         .iter()
         .filter_map(|block| mapping_child(package, block))
         .flat_map(|dependencies| dependencies.keys())
-        .filter_map(package_key)
+        .filter_map(|key| package_key(key))
         .map(|to| SbomDependencyEdge {
             from: from.clone(),
             to: to.to_string(),
@@ -135,7 +137,7 @@ fn dependency_block_components(
         .collect()
 }
 
-fn locked_dependency(key: &Value, dependency: &Value) -> Option<LockedPackage> {
+fn locked_dependency(key: &str, dependency: &Value) -> Option<LockedPackage> {
     let name = package_key(key)?.to_string();
     let version = dependency_version(dependency)?;
     Some(LockedPackage { name, version })
@@ -149,27 +151,22 @@ fn dependency_version(dependency: &Value) -> Option<String> {
 }
 
 fn mapping_child_value<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    mapping(value)?.get(Value::String(key.to_string()))
+    mapping(value)?.get(key)
 }
 
 fn mapping_child<'a>(value: &'a Value, key: &str) -> Option<&'a Mapping> {
     mapping(value)?
-        .get(Value::String(key.to_string()))
+        .get(key)
         .and_then(mapping)
 }
 
 fn mapping(value: &Value) -> Option<&Mapping> {
-    match value {
-        Value::Mapping(mapping) => Some(mapping),
-        _ => None,
-    }
+    value.as_object()
 }
 
-fn package_key(value: &Value) -> Option<&str> {
-    value
-        .as_str()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
+fn package_key(value: &str) -> Option<&str> {
+    let value = value.trim();
+    (!value.is_empty()).then_some(value)
 }
 
 fn pnpm_package_name(key: &str) -> String {

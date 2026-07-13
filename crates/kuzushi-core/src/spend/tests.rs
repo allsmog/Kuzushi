@@ -123,4 +123,28 @@ mod tests {
         // Estimate stays committed — the budget is held, the row is unsettled.
         assert!((total - 40.0).abs() < 1e-9);
     }
+
+    #[test]
+    fn finite_ledger_rows_that_overflow_the_sum_are_rejected() {
+        let s = fresh();
+        {
+            let state = s.lock();
+            for _ in 0..2 {
+                state
+                    .conn
+                    .execute(
+                        "insert into spend_ledger(op, est_usd, actual_usd, created_at, settled_at) values (?, ?, null, 0, null)",
+                        rusqlite::params![Operation::Triage.as_db_str(), f64::MAX],
+                    )
+                    .unwrap();
+            }
+        }
+
+        let error = s.total_spent(Operation::Triage).unwrap_err().to_string();
+
+        assert!(error.contains("finite non-negative"), "{error}");
+        assert!(s.deposit(Operation::Triage, 1.0).is_ok());
+        s.set_cap(Operation::Triage, f64::MAX).unwrap();
+        assert!(s.deposit(Operation::Triage, 1.0).is_err());
+    }
 }

@@ -91,23 +91,124 @@ fn legacy_palette_line(value: String, width: usize) -> Line<'static> {
 
 pub(crate) fn render_command_palette_overlay(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let model = command_palette_model(app);
+    let body_area = overlay_body_area(area);
+    if onboarding_overlay_origin(app) {
+        frame.render_widget(Clear, area);
+    } else {
+        render_overlay_backdrop(frame, area);
+    }
+    if compact_command_palette(body_area) {
+        render_compact_command_palette(frame, body_area, &model);
+        return;
+    }
     let row_count = model.rows.len();
-    let modal = command_palette_rect(area, row_count);
+    let modal = command_palette_rect(body_area, row_count);
     let row_width = modal.width.saturating_sub(2) as usize;
-    let rows = model
-        .rows
-        .into_iter()
-        .map(|row| palette_row_line(row, row_width))
-        .collect::<Vec<_>>();
-    render_overlay_backdrop(frame, area);
-    frame.render_widget(Clear, modal);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::subtle())
         .title(Span::styled(" COMMAND PALETTE ", theme::heading()));
     let inner = block.inner(modal);
+    let rows = palette_rows_for_capacity(model.rows, inner.height as usize)
+        .into_iter()
+        .map(|row| palette_row_line(row, row_width))
+        .collect::<Vec<_>>();
+    frame.render_widget(Clear, modal);
     frame.render_widget(block, modal);
     frame.render_widget(Paragraph::new(rows), inner);
+}
+
+fn onboarding_overlay_origin(app: &ShellApp) -> bool {
+    matches!(
+        app.router.overlay_origin(),
+        Some(
+            ShellView::TargetPicker
+                | ShellView::ModelPicker
+                | ShellView::AuthMethodPicker
+                | ShellView::PlanningPicker
+        )
+    )
+}
+
+fn compact_command_palette(area: Rect) -> bool {
+    area.height <= 5
+}
+
+fn render_compact_command_palette(frame: &mut Frame<'_>, area: Rect, model: &CommandPaletteModel) {
+    if area.height == 0 {
+        return;
+    }
+    frame.render_widget(
+        Paragraph::new(compact_palette_rows(
+            model,
+            area.width as usize,
+            area.height as usize,
+        )),
+        area,
+    );
+}
+
+fn compact_palette_rows(
+    model: &CommandPaletteModel,
+    width: usize,
+    height: usize,
+) -> Vec<Line<'static>> {
+    let mut rows = Vec::with_capacity(height);
+    if height >= 4 {
+        rows.push(Line::styled(
+            fit(" COMMAND PALETTE", width),
+            theme::heading(),
+        ));
+    }
+    rows.push(compact_palette_query(&model.rows, width));
+    rows.push(compact_palette_selection(&model.rows, width));
+    rows.push(Line::styled(
+        fit("↑/↓ move · Enter load · Esc close", width),
+        theme::muted(),
+    ));
+    rows.truncate(height);
+    rows
+}
+
+fn compact_palette_query(rows: &[PaletteRow], width: usize) -> Line<'static> {
+    rows.iter()
+        .find(|row| matches!(row, PaletteRow::Query(_)))
+        .cloned()
+        .map(|row| palette_row_line(row, width))
+        .unwrap_or_else(|| Line::styled(fit(" › filter commands", width), theme::label()))
+}
+
+fn compact_palette_selection(rows: &[PaletteRow], width: usize) -> Line<'static> {
+    rows.iter()
+        .find(|row| {
+            matches!(
+                row,
+                PaletteRow::Match { selected: true, .. } | PaletteRow::Empty(_)
+            ) || matches!(row, PaletteRow::Legacy(value) if value.trim_start().starts_with('▸'))
+        })
+        .cloned()
+        .map(|row| palette_row_line(row, width))
+        .unwrap_or_else(|| Line::styled(fit(" ∅ no matching commands", width), theme::muted()))
+}
+
+fn palette_rows_for_capacity(rows: Vec<PaletteRow>, capacity: usize) -> Vec<PaletteRow> {
+    if rows.len() <= capacity {
+        return rows;
+    }
+    let guidance = rows
+        .iter()
+        .rev()
+        .find(|row| matches!(row, PaletteRow::Guidance(_)))
+        .cloned();
+    let reserved = usize::from(guidance.is_some());
+    let mut visible = rows
+        .into_iter()
+        .take(capacity.saturating_sub(reserved))
+        .collect::<Vec<_>>();
+    if let Some(guidance) = guidance {
+        visible.push(guidance);
+    }
+    visible
 }
 
 fn command_palette_rect(area: Rect, row_count: usize) -> Rect {

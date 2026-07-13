@@ -17,16 +17,7 @@ pub(crate) fn threat_model_module() -> BuiltinModule {
 
 fn threat_model_tools() -> Vec<ToolDescriptor> {
     vec![
-        tool_with_options(
-                "threat-model:build",
-                "Build a threat model for the current target.",
-                threat_model_build_options(),
-            )
-            .with_policy(workspace_policy(
-                ToolPhase::Map,
-                RuntimeRequirement::InputAware,
-                FindingStoreRequirement::Optional,
-            )),
+        threat_model_build_tool(),
         tool_with_options(
                 "threat-model:read",
                 "Read the current threat model artifact.",
@@ -48,6 +39,26 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
                 WorkspaceRequirement::Optional,
             )),
     ]
+}
+
+fn threat_model_build_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-model:build",
+        "Build a threat model for the current target.",
+        threat_model_build_options(),
+    )
+    .with_prompt(editable_prompt(
+        "threat-model guidance",
+        "threat-model",
+        "build",
+        "THREAT_MODEL_PROMPT",
+        crate::capabilities::threat_model::DEFAULT_THREAT_MODEL_GUIDANCE.to_string(),
+    ))
+    .with_policy(workspace_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::InputAware,
+        FindingStoreRequirement::Optional,
+    ))
 }
 
 fn threat_model_build_options() -> Vec<OptionSpec> {
@@ -146,18 +157,8 @@ fn x_ray_tools() -> Vec<ToolDescriptor> {
         FindingStoreRequirement::Optional,
     );
     vec![
-        tool_with_options(
-                "x-ray:run",
-                "Analyze repository structure, entry points, invariants, and attack surface; persist the report artifact.",
-                x_ray_options(),
-            )
-            .with_policy(write_policy),
-        hidden_tool_with_options(
-                "x-ray:x-ray",
-                "Compatibility alias for x-ray:run.",
-                x_ray_options(),
-            )
-            .with_policy(write_policy),
+        x_ray_run_tool(write_policy, false),
+        x_ray_run_tool(write_policy, true),
         tool(
                 "x-ray:read",
                 "Read the latest repository architecture and attack-surface report.",
@@ -172,10 +173,38 @@ fn x_ray_tools() -> Vec<ToolDescriptor> {
     ]
 }
 
+fn x_ray_run_tool(policy: ToolPolicy, alias: bool) -> ToolDescriptor {
+    let descriptor = if alias {
+        hidden_tool_with_options("x-ray:x-ray", "Compatibility alias for x-ray:run.", x_ray_options())
+    } else {
+        tool_with_options(
+            "x-ray:run",
+            "Analyze repository structure, entry points, invariants, and attack surface; persist the report artifact.",
+            x_ray_options(),
+        )
+    };
+    descriptor
+        .with_prompt(editable_prompt(
+            "x-ray instructions",
+            "x-ray",
+            "run",
+            "X_RAY_PROMPT",
+            crate::capabilities::x_ray::x_ray_system_prompt(),
+        ))
+        .with_policy(policy)
+}
+
 fn x_ray_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
         model_option(),
+        opt(
+            "X_RAY_PROMPT",
+            OptionType::String,
+            "System prompt text or workspace-file override for X-Ray.",
+        )
+        .inline_or_workspace_file()
+        .advanced(),
         opt(
             "effort",
             OptionType::String,

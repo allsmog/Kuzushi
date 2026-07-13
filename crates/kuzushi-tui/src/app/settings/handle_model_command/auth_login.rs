@@ -46,7 +46,14 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_picker_auth_login(&mut self, provider: &str) -> Vec<ShellEffect> {
-        self.reduce_auth_login(Some(provider), true)
+        let Some(provider) = AuthProvider::from_scene_provider(provider) else {
+            self.log(
+                "error",
+                format!("unsupported onboarding auth provider {provider:?}"),
+            );
+            return Vec::new();
+        };
+        self.reduce_auth_login(Some(provider.login_command_name()), true)
     }
 
     fn reduce_auth_login(
@@ -113,7 +120,8 @@ impl ShellApp {
             self.log(
                 "onboarding",
                 format!(
-                    "OAuth not completed for {provider} — pick another method, or press d for the offline demo"
+                    "OAuth not completed for {} — pick another method, or press d for the offline demo",
+                    auth_provider_label(provider)
                 ),
             );
             self.open_credential_entry(provider.to_string());
@@ -231,8 +239,7 @@ fn auth_login_detail(provider: &str, method: &str) -> &'static str {
 }
 
 fn oauth_credential_provider_for_login(provider: &str) -> &str {
-    match provider {
-        "openai" | "openai-codex" => "openai-codex",
-        other => other,
-    }
+    AuthProvider::from_scene_provider(provider)
+        .map(AuthProvider::oauth_credential_key)
+        .unwrap_or(provider)
 }

@@ -186,27 +186,33 @@ fn hidden_env_status(name: &str) -> &'static str {
 }
 
 fn oauth_status(provider: &str) -> String {
-    if crate::app::oauth_provider_status(provider).starts_with("stored") {
-        "OAuth ready".to_string()
-    } else {
-        "OAuth missing".to_string()
-    }
+    oauth_model_status(&crate::app::oauth_provider_status(provider)).to_string()
 }
 
 fn anthropic_auth_status() -> String {
-    auth_pair_status(
-        std::env::var_os("ANTHROPIC_API_KEY").is_some(),
-        crate::app::oauth_provider_status("anthropic").starts_with("stored"),
-    )
-    .to_string()
+    let env_ready = std::env::var_os("ANTHROPIC_API_KEY").is_some();
+    let oauth = crate::app::oauth_provider_status("anthropic");
+    anthropic_model_auth_status(env_ready, &oauth).to_string()
 }
 
-fn auth_pair_status(env_ready: bool, oauth_ready: bool) -> &'static str {
-    match (env_ready, oauth_ready) {
-        (true, true) => "ANTHROPIC_API_KEY/OAuth ready",
-        (true, false) => "ANTHROPIC_API_KEY set",
-        (false, true) => "OAuth ready",
-        (false, false) => "ANTHROPIC auth missing",
+fn anthropic_model_auth_status(env_ready: bool, oauth: &str) -> &'static str {
+    match (env_ready, oauth_model_status(oauth)) {
+        (true, "OAuth ready") => "ANTHROPIC_API_KEY/OAuth ready",
+        (true, _) => "ANTHROPIC_API_KEY set",
+        (false, "OAuth missing") => "ANTHROPIC auth missing",
+        (false, status) => status,
+    }
+}
+
+fn oauth_model_status(status: &str) -> &'static str {
+    if status.starts_with("stored") {
+        "OAuth ready"
+    } else if status.starts_with("expired") {
+        "OAuth expired"
+    } else if matches!(status, "incomplete" | "unreadable") {
+        "OAuth invalid"
+    } else {
+        "OAuth missing"
     }
 }
 

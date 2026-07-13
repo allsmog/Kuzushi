@@ -129,9 +129,6 @@ impl ShellApp {
         refresh_auto_open_prefs_from_store(app);
         app.workbench_cache()
             .borrow_mut()
-            .run_summary_entries(target.map(WorkspaceTarget::root));
-        app.workbench_cache()
-            .borrow_mut()
             .git_metadata(target.map(WorkspaceTarget::root));
         app.hydrate_persisted_scene_snapshots(target.map(|target| target.root()));
         app.refresh_program_scope();

@@ -72,6 +72,47 @@ fn strategy_queue_missing_file_is_empty() {
     assert!(load_strategy_queue(&workspace).unwrap().is_empty());
 }
 
+#[test]
+fn direct_strategy_load_initializes_ignored_state() {
+    let temp = tempfile::tempdir().unwrap();
+    if !initialize_git_fixture(temp.path()) {
+        return;
+    }
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+
+    assert!(load_strategy_queue(&workspace).unwrap().is_empty());
+
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(temp.path())
+        .args(["status", "--porcelain", "--untracked-files=all"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(
+        output.stdout.is_empty(),
+        "strategy load dirtied fresh repository: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+fn initialize_git_fixture(root: &std::path::Path) -> bool {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    };
+    git(&["init", "-q"])
+        && git(&["config", "user.email", "test@example.com"])
+        && git(&["config", "user.name", "Kuzushi Test"])
+        && std::fs::write(root.join("README.md"), "fixture\n").is_ok()
+        && git(&["add", "README.md"])
+        && git(&["commit", "-q", "-m", "initial"])
+}
+
 #[cfg(unix)]
 #[test]
 fn strategy_ledgers_reject_symlinks_without_touching_their_targets() {

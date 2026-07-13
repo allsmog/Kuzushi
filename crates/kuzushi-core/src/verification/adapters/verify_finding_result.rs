@@ -7,6 +7,8 @@ use crate::findings::Finding;
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 
+pub(crate) const DEFAULT_VERIFY_PROMPT: &str = "Treat this finding as a false positive until proven otherwise. Read the actual code at the cited location, then search for a reason it CANNOT be exploited — input validation, sanitization, an authentication or authorization gate, a type or length constraint, unreachable code, or no attacker control over the tainted input. Return exploitable=true only when attacker-controlled input reaches the sink with no blocking control in between; return exploitable=false when the evidence is incomplete.";
+
 /// Build the prompt for the independent exploitability verifier.
 ///
 /// Deliberately context-isolated: the verifier receives only the *claim*
@@ -25,9 +27,7 @@ pub(in crate::verification::adapters) fn build_verify_prompt(
     let prefix = template
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(
-            "Treat this finding as a false positive until proven otherwise. Read the actual code at the cited location, then search for a reason it CANNOT be exploited — input validation, sanitization, an authentication or authorization gate, a type or length constraint, unreachable code, or no attacker control over the tainted input. Return exploitable=true only when attacker-controlled input reaches the sink with no blocking control in between; return exploitable=false when the evidence is incomplete.",
-        );
+        .unwrap_or(DEFAULT_VERIFY_PROMPT);
     Ok(format!("{prefix}\n\nClaimed finding:\n{claim_json}"))
 }
 

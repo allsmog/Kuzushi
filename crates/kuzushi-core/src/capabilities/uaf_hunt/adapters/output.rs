@@ -20,7 +20,14 @@ pub fn report_to_tool_json(report: &UafHuntReport) -> Value {
             json!(report),
         )
     };
-    result["costUsd"] = json!(report.cost_usd);
+    let observed = crate::runtime::RuntimeCost::from_usd(report.cost_usd, "UAF hunt cost")
+        .expect("agent loop validates cost before report construction");
+    let cost = if report.cost_usd_exact {
+        crate::runtime::RuntimeCostReport::known(observed)
+    } else {
+        crate::runtime::RuntimeCostReport::incomplete(observed)
+    };
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
     if let Some(artifact) = transcript_artifact(report) {
         result["artifacts"] = json!([artifact]);
     }
@@ -69,6 +76,7 @@ mod tests {
             steps_used: 4,
             truncated: false,
             cost_usd: 0.03,
+            cost_usd_exact: true,
         };
 
         let output = report_to_tool_json(&report);
@@ -95,6 +103,7 @@ mod tests {
             steps_used: 4,
             truncated: true,
             cost_usd: 0.03,
+            cost_usd_exact: true,
         };
 
         let output = report_to_tool_json(&report);

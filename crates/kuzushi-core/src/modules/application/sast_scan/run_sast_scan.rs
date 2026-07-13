@@ -26,18 +26,34 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
     match result {
         Ok(output) => Ok(output),
         Err(error) => {
-            let persistence = crate::run_artifacts::try_record_tool_run_failed(
-                crate::run_artifacts::ToolRunRecord::new(
-                    workspace.root(),
-                    &primary_run_id,
-                    "scan",
-                    "sast:scan",
-                ),
-                &error.to_string(),
+            let persistence = persist_sast_terminal_error(
+                workspace,
+                &primary_run_id,
+                &error,
+                sast_execution_was_canceled(ctx),
             );
             Err(error_with_persistence(error, persistence))
         }
     }
+}
+
+fn sast_execution_was_canceled(ctx: &ToolExecutionContext<'_>) -> bool {
+    ctx.cancellation
+        .is_some_and(crate::scan::ScanCancellation::is_cancelled)
+}
+
+fn persist_sast_terminal_error(
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+    error: &anyhow::Error,
+    canceled: bool,
+) -> Result<()> {
+    let record =
+        crate::run_artifacts::ToolRunRecord::new(workspace.root(), run_id, "scan", "sast:scan");
+    if canceled {
+        return crate::run_artifacts::try_record_tool_run_canceled(record, &error.to_string());
+    }
+    crate::run_artifacts::try_record_tool_run_failed(record, &error.to_string())
 }
 
 fn run_started_sast_scan(
@@ -67,7 +83,7 @@ fn run_started_sast_scan(
         whitebox_static: whitebox_static.is_some(),
     })?;
     let findings_count = executed.findings_count;
-    let (artifacts, result) = executed.into_result(workspace, whitebox_static.as_ref());
+    let (artifacts, result) = executed.into_result(workspace, whitebox_static.as_ref())?;
     let summary_artifact = write_sast_summary(workspace, &primary_run_id, &artifacts, &result)?;
     write_sast_run_metadata(
         workspace,
@@ -103,13 +119,24 @@ fn ensure_sast_run_started(
     if crate::run_artifacts::load_run_summary(workspace.root(), run_id).is_ok() {
         return Ok(());
     }
+    let execution_model = sast_execution_model(input, ctx.config.model.as_deref());
     crate::run_artifacts::try_record_tool_run_started_with_reproducibility(
         crate::run_artifacts::ToolRunRecord::new(workspace.root(), run_id, "scan", "sast:scan"),
         input,
-        ctx.config.model.clone(),
+        execution_model,
         crate::config::config_hash(ctx.config).ok(),
         registry.loaded_module_specifiers(),
     )
+}
+
+/// Model recorded in the execution receipt, rather than merely configured in
+/// the operator profile. Scanner-only SAST runs do not invoke an agent runtime,
+/// so attaching the configured cloud model to them would misstate provenance.
+fn sast_execution_model(input: &Value, configured_model: Option<&str>) -> Option<String> {
+    if !wants_sast_runtime(input) {
+        return None;
+    }
+    string_input_any(input, &["model"]).or_else(|| configured_model.map(str::to_string))
 }
 
 fn error_with_persistence(error: anyhow::Error, persistence: Result<()>) -> anyhow::Error {
@@ -118,6 +145,56 @@ fn error_with_persistence(error: anyhow::Error, persistence: Result<()>) -> anyh
         Err(persistence) => anyhow::anyhow!(
             "{error:#}; additionally, run artifact persistence failed: {persistence:#}"
         ),
+    }
+}
+
+#[cfg(test)]
+mod terminal_error_tests {
+    use super::*;
+    use crate::config::V2Config;
+    use crate::findings::FindingStore;
+    use crate::run_artifacts::{load_run_summary, try_record_tool_run_failed, ToolRunRecord};
+    use crate::scan::ScanCancellation;
+
+    #[test]
+    fn nested_sast_cancellation_persists_canceled_before_outer_terminalization() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let cancellation = ScanCancellation::default();
+        cancellation.cancel();
+        let run_id = "scan-canceled-shared";
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+            cancellation: Some(&cancellation),
+            authorization: Default::default(),
+        };
+
+        let error = run_sast_scan_with_registry(
+            &registry,
+            serde_json::json!({
+                "runId": run_id,
+                "taskMode": "manual",
+                "tasks": ["secret-scan"]
+            }),
+            &ctx,
+            None,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
+        let summary = load_run_summary(target.path(), run_id).unwrap();
+        assert_eq!(summary.status, "canceled");
+        let record = ToolRunRecord::new(target.path(), run_id, "scan", "sast:scan");
+        let rewrite = try_record_tool_run_failed(record, "late scanner failure").unwrap_err();
+        assert!(rewrite
+            .to_string()
+            .contains("already terminal with status canceled"));
     }
 }
 
@@ -250,7 +327,7 @@ impl ExecutedSastScan {
         self,
         workspace: &crate::workspace::WorkspaceTarget,
         whitebox_static: Option<&WhiteboxStaticPolicy>,
-    ) -> (SastRunArtifacts, Value) {
+    ) -> Result<(SastRunArtifacts, Value)> {
         let ExecutedSastScan {
             primary_run_id,
             run_ids,
@@ -274,8 +351,8 @@ impl ExecutedSastScan {
             post_processing: &post_processing,
             artifacts: &artifacts,
             lines,
-        });
-        (artifacts, result)
+        })?;
+        Ok((artifacts, result))
     }
 }
 
@@ -326,7 +403,8 @@ struct SastScanResultParts<'a> {
     lines: Vec<String>,
 }
 
-fn sast_scan_result(parts: SastScanResultParts<'_>) -> Value {
+fn sast_scan_result(parts: SastScanResultParts<'_>) -> Result<Value> {
+    let cost = sast_cost_report(parts.reports, parts.post_processing)?;
     let output = parts.lines.join("\n");
     let summary = output
         .lines()
@@ -340,21 +418,21 @@ fn sast_scan_result(parts: SastScanResultParts<'_>) -> Value {
         .map(|skipped| json!(skipped.warning))
         .collect::<Vec<_>>();
     let mut result =
-        crate::module_result::completed_output_result(summary, output, sast_scan_data(parts));
+        crate::module_result::completed_output_result(summary, output, sast_scan_data(parts)?);
     result["warnings"] = json!(warnings);
-    result
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
+    Ok(result)
 }
 
-fn sast_scan_data(parts: SastScanResultParts<'_>) -> Value {
+fn sast_scan_data(parts: SastScanResultParts<'_>) -> Result<Value> {
     let paths = parts.whitebox_artifacts.artifact_paths(parts.artifacts);
-    json!({
+    Ok(json!({
         "runId": parts.primary_run_id,
         "runIds": sast_run_ids_json(parts.run_ids),
         "target": parts.workspace.root().display().to_string(),
         "mode": whitebox_mode_label(parts.whitebox_static),
         "whiteboxStatic": parts.whitebox_static.map(|policy| policy.to_json()),
         "findingsCount": parts.findings_count,
-        "costUsd": sast_cost_usd(parts.reports, parts.post_processing),
         "coreFindings": parts.core_findings,
         "db": parts.workspace.findings_db_path().display().to_string(),
         "engines": parts.reports.engine_ids.clone(),
@@ -373,47 +451,72 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Value {
         "verification": verification_json(parts.post_processing),
         "patch": patch_json(parts.post_processing),
         "artifacts": sast_artifacts_json(parts.artifacts, paths),
+    }))
+}
+
+fn sast_cost_report(
+    reports: &SastPipelineReports,
+    post_processing: &SastPostProcessing,
+) -> Result<crate::runtime::RuntimeCostReport> {
+    let mut total = crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO);
+    for report in sast_engine_cost_reports(reports)? {
+        total = total.checked_add(report, "SAST engine aggregated cost")?;
+    }
+    if let Some(triage) = post_processing.triage.as_ref() {
+        total = total.checked_add(tool_output_cost_report(triage)?, "SAST triage cost")?;
+    }
+    for output in post_processing
+        .verification_results
+        .iter()
+        .chain(post_processing.patch_results.iter())
+    {
+        total = total.checked_add(tool_output_cost_report(output)?, "SAST post-process cost")?;
+    }
+    Ok(total)
+}
+
+fn sast_engine_cost_reports(
+    reports: &SastPipelineReports,
+) -> Result<Vec<crate::runtime::RuntimeCostReport>> {
+    [
+        reports
+            .agentic
+            .as_ref()
+            .map(|report| (report.cost_usd, report.cost_usd_exact, "agentic SAST")),
+        reports
+            .carlini
+            .as_ref()
+            .map(|report| (report.cost_usd, report.cost_usd_exact, "Carlini")),
+        reports
+            .taint_iris_next
+            .as_ref()
+            .map(|report| (report.cost_usd, report.cost_usd_exact, "taint iris next")),
+        reports
+            .systems_hunt
+            .as_ref()
+            .map(|report| (report.cost_usd, report.cost_usd_exact, "systems hunt")),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|(cost, exact, label)| cost_report_from_fields(cost, exact, label))
+    .collect()
+}
+
+fn cost_report_from_fields(
+    cost_usd: f64,
+    exact: bool,
+    label: &str,
+) -> Result<crate::runtime::RuntimeCostReport> {
+    let observed = crate::runtime::RuntimeCost::from_usd(cost_usd, label)?;
+    Ok(if exact {
+        crate::runtime::RuntimeCostReport::known(observed)
+    } else {
+        crate::runtime::RuntimeCostReport::incomplete(observed)
     })
 }
 
-fn sast_cost_usd(reports: &SastPipelineReports, post_processing: &SastPostProcessing) -> f64 {
-    reports
-        .agentic
-        .as_ref()
-        .map(|report| report.cost_usd)
-        .unwrap_or(0.0)
-        + reports
-            .carlini
-            .as_ref()
-            .map(|report| report.cost_usd)
-            .unwrap_or(0.0)
-        + reports
-            .taint_iris_next
-            .as_ref()
-            .map(|report| report.cost_usd)
-            .unwrap_or(0.0)
-        + reports
-            .systems_hunt
-            .as_ref()
-            .map(|report| report.cost_usd)
-            .unwrap_or(0.0)
-        + tool_output_cost_usd(post_processing.triage.as_ref())
-        + post_processing
-            .verification_results
-            .iter()
-            .map(|result| tool_output_cost_usd(Some(result)))
-            .sum::<f64>()
-        + post_processing
-            .patch_results
-            .iter()
-            .map(|result| tool_output_cost_usd(Some(result)))
-            .sum::<f64>()
-}
-
-fn tool_output_cost_usd(output: Option<&Value>) -> f64 {
-    output
-        .and_then(crate::run_artifacts::tool_run_output_cost_usd)
-        .unwrap_or(0.0)
+fn tool_output_cost_report(output: &Value) -> Result<crate::runtime::RuntimeCostReport> {
+    crate::run_artifacts::tool_run_output_cost_report(output)
 }
 
 fn sast_run_ids_json(run_ids: SastRunIds) -> Value {
@@ -469,4 +572,37 @@ fn sast_artifacts_json(artifacts: &SastRunArtifacts, paths: WhiteboxArtifactPath
         "verifyJsonl": artifacts.verify_jsonl.display().to_string(),
         "patchJsonl": artifacts.patch_jsonl.display().to_string(),
     })
+}
+
+#[cfg(test)]
+mod execution_model_tests {
+    use super::*;
+
+    #[test]
+    fn scanner_only_scan_does_not_claim_the_configured_model() {
+        let input = json!({
+            "taskMode": "manual",
+            "tasks": ["secret-scan", "iac-scan"],
+            "triage": false,
+            "verify": false,
+            "autoPatch": false,
+        });
+
+        assert_eq!(sast_execution_model(&input, Some("openai:gpt-5.5")), None);
+    }
+
+    #[test]
+    fn runtime_scan_records_the_effective_model() {
+        let configured = json!({ "triage": true });
+        assert_eq!(
+            sast_execution_model(&configured, Some("openai:gpt-5.5")),
+            Some("openai:gpt-5.5".to_string())
+        );
+
+        let explicit = json!({ "triage": true, "model": "anthropic:claude-sonnet-4-6" });
+        assert_eq!(
+            sast_execution_model(&explicit, Some("openai:gpt-5.5")),
+            Some("anthropic:claude-sonnet-4-6".to_string())
+        );
+    }
 }

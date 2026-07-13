@@ -1,7 +1,9 @@
 use crate::capabilities::agentic_sast::{collect_agentic_repo_inventory, require_json_object};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
+use crate::structured_output::{
+    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
+};
 use crate::whitebox_static::agent_tool_policy_for_input_and_target;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

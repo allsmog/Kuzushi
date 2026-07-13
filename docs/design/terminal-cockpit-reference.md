@@ -35,8 +35,9 @@ Visual acceptance regression guards:
   only the modal selection owns the accent.
 - Never-started Activity tasks project as skipped/not run and remain collapsed
   behind `V`; canceling/canceled is reserved for work that actually started.
-- Phase-specific Activity composition retains the real `TASKS` and `OUTPUT`
-  panes. Terminal elapsed time freezes when the run settles.
+- Phase-origin Activity retains the real `TASKS` and `OUTPUT` panes under a
+  compact phase/current-stage strip; it does not embed the full phase cockpit.
+  Terminal elapsed time freezes when the run settles.
 - A live run owns the target captured at launch. Target activation clears every
   target-derived cache before new artifacts hydrate.
 - Proof replay uses the persisted verification run, never the discovery scan;
@@ -73,7 +74,7 @@ cell buffer.
 
 | Reference | Phase | Required composition |
 | --- | --- | --- |
-| 1a | Map | Full-width live trace; current operation and elapsed time; real progress, budget, and artifact telemetry; one complete `NEXT`. |
+| 1a | Map | Full-width artifact/browse composition in Workbench. While `context:build` is live, run-owned Activity shows its build trace, named stage, last real progress age, and fixed stall warning instead of embedding this page. |
 | 1b | Hunt | `SOURCE`, hunt/proposal state, and `REVIEW QUEUE` across the upper cockpit; `FINDINGS HEATMAP` spanning below. |
 | 1c | Confirm | Selected finding header; finding-keyed `ATTACK PATH`; source-to-sink ladder; `PROOF · REPLAY` sidecar only when persisted verification evidence exists. Replay uses the verification run id, and proof from an earlier scan carries a revalidation warning. |
 | 1d | Fix | `KUZUSHI · BREAKDOWN REPORT`; truthful totals; attack tree and DFD; remediation/patch state; complete findings-export action. |

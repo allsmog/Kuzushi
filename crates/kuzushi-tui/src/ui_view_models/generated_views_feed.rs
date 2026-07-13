@@ -3,15 +3,20 @@
 //! chains) into a compact selectable list plus inspector. Live trace rows live
 //! in the TASKS pane.
 
-use super::activity_feed_rows::{ActivityFeedPaneRow, ActivityFeedRowTone};
+use super::activity_feed_rows::{
+    activity_feed_pane_rows, ActivityFeedPaneRow, ActivityFeedRowTone,
+};
 use super::findings::{findings_model, FindingListRow};
 use super::viz_data::{
     attack_tree, cached_findings_heatmap, cached_risk_by_module, dfd_model, taint_flow_path,
     AttackTree, DfdFlowModel, DfdModel, FindingsHeatmap, ModuleRisk, RiskByModule, TaintFlowPath,
 };
 use super::SeverityTone;
-use crate::{ActivityDeckPage, ActivityRouteState, ActivitySession, ChainSeverity, ShellApp};
+use crate::{
+    ActivityDeckPage, ActivityRouteState, ActivitySession, ChainSeverity, ReconSnapshot, ShellApp,
+};
 use kuzushi_core::RunSummary;
+use std::time::Instant;
 
 const DECK_WINDOW_ROWS: usize = 7;
 
@@ -23,9 +28,9 @@ pub(crate) fn activity_deck_rows(
     session: &ActivitySession,
     route: &ActivityRouteState,
     width: usize,
-    _running_tool: Option<&str>,
+    running_tool: Option<&str>,
 ) -> Vec<ActivityFeedPaneRow> {
-    activity_deck_page_rows(app, session, route, width)
+    activity_deck_page_rows(app, session, route, width, running_tool)
 }
 
 pub(crate) fn activity_deck_plain_extra_rows(
@@ -33,8 +38,9 @@ pub(crate) fn activity_deck_plain_extra_rows(
     session: &ActivitySession,
     route: &ActivityRouteState,
     width: usize,
+    running_tool: Option<&str>,
 ) -> Vec<ActivityFeedPaneRow> {
-    activity_deck_page_rows(app, session, route, width)
+    activity_deck_page_rows(app, session, route, width, running_tool)
 }
 
 fn activity_deck_page_rows(
@@ -42,9 +48,16 @@ fn activity_deck_page_rows(
     session: &ActivitySession,
     route: &ActivityRouteState,
     width: usize,
+    running_tool: Option<&str>,
 ) -> Vec<ActivityFeedPaneRow> {
-    let mut rows = activity_deck_header_rows(app, session, route, width);
-    rows.extend(match route.deck_page {
+    if running_tool == Some("context:build") {
+        return context_build_trace_rows(session, route, width, running_tool);
+    }
+    let Some(page) = effective_deck_page(app, route.deck_page) else {
+        return no_artifact_rows(app, session, width);
+    };
+    let mut rows = activity_deck_header_rows(app, session, page);
+    rows.extend(match page {
         ActivityDeckPage::Findings => findings_deck_rows(app, route.deck_cursor, width),
         ActivityDeckPage::AttackSurface => {
             attack_surface_deck_rows(&cached_risk_by_module(app), route.deck_cursor, width)
@@ -59,6 +72,9 @@ fn activity_deck_page_rows(
         ActivityDeckPage::ExploitChain => {
             exploit_chain_deck_rows(&attack_tree(app), route.deck_cursor, width)
         }
+        ActivityDeckPage::Recon => {
+            recon_deck_rows(app.domain().recon_snapshot(), route.deck_cursor, width)
+        }
     });
     rows.into_iter()
         .map(|paned| row(clip(paned.text, width), paned.tone))
@@ -68,13 +84,9 @@ fn activity_deck_page_rows(
 fn activity_deck_header_rows(
     app: &ShellApp,
     session: &ActivitySession,
-    route: &ActivityRouteState,
-    _width: usize,
+    active: ActivityDeckPage,
 ) -> Vec<ActivityFeedPaneRow> {
-    let mut rows = vec![row(
-        deck_tabs(app, route.deck_page),
-        ActivityFeedRowTone::Primary,
-    )];
+    let mut rows = vec![row(deck_tabs(app, active), ActivityFeedRowTone::Primary)];
     if let Some(status) = artifact_source_status_row(app, session) {
         rows.push(status);
     }
@@ -84,22 +96,140 @@ fn activity_deck_header_rows(
 fn deck_tabs(app: &ShellApp, active: ActivityDeckPage) -> String {
     let labels = ActivityDeckPage::ALL
         .iter()
-        .map(|page| deck_tab(app, *page, active))
+        .copied()
+        .filter(|page| deck_page_has_content(app, *page))
+        .map(|page| deck_tab(page, active))
         .collect::<Vec<_>>()
         .join(" ");
     format!("views  {labels}")
 }
 
-fn deck_tab(app: &ShellApp, page: ActivityDeckPage, active: ActivityDeckPage) -> String {
-    let mut label = page.label().to_string();
-    if !deck_page_has_content(app, page) {
-        label.push('·');
-    }
+fn deck_tab(page: ActivityDeckPage, active: ActivityDeckPage) -> String {
+    let label = page.label();
     if page == active {
         format!("[{label}]")
     } else {
         format!(" {label} ")
     }
+}
+
+fn effective_deck_page(app: &ShellApp, requested: ActivityDeckPage) -> Option<ActivityDeckPage> {
+    deck_page_has_content(app, requested)
+        .then_some(requested)
+        .or_else(|| {
+            ActivityDeckPage::ALL
+                .iter()
+                .copied()
+                .find(|page| deck_page_has_content(app, *page))
+        })
+}
+
+fn no_artifact_rows(
+    app: &ShellApp,
+    session: &ActivitySession,
+    width: usize,
+) -> Vec<ActivityFeedPaneRow> {
+    let mut rows = vec![row(
+        "views  [no artifacts yet]".to_string(),
+        ActivityFeedRowTone::Muted,
+    )];
+    if let Some(status) = artifact_source_status_row(app, session) {
+        rows.push(status);
+    }
+    let hint = if session.tasks.is_empty() {
+        "  This run has not produced a generated artifact."
+    } else {
+        "  No generated artifacts yet — live progress remains in TASKS."
+    };
+    rows.extend([
+        row(rule("OUTPUT", width), ActivityFeedRowTone::Subtle),
+        row(hint.to_string(), ActivityFeedRowTone::Muted),
+    ]);
+    rows
+}
+
+fn context_build_trace_rows(
+    session: &ActivitySession,
+    route: &ActivityRouteState,
+    width: usize,
+    running_tool: Option<&str>,
+) -> Vec<ActivityFeedPaneRow> {
+    let mut rows = vec![
+        row(
+            "views  [build trace]".to_string(),
+            ActivityFeedRowTone::Primary,
+        ),
+        row(rule("CONTEXT BUILD", width), ActivityFeedRowTone::Success),
+        row(
+            format!("  CURRENT  {}", current_context_stage(session)),
+            ActivityFeedRowTone::Primary,
+        ),
+    ];
+    rows.extend(context_build_stage_ladder(session));
+    rows.push(row(
+        "  RECENT SIGNALS".to_string(),
+        ActivityFeedRowTone::Muted,
+    ));
+    rows.extend(activity_feed_pane_rows(
+        session,
+        route,
+        width.saturating_sub(2),
+        running_tool,
+        Instant::now(),
+    ));
+    rows.into_iter()
+        .map(|paned| row(clip(paned.text, width), paned.tone))
+        .collect()
+}
+
+fn current_context_stage(session: &ActivitySession) -> String {
+    session
+        .events
+        .back()
+        .map(|event| event.step.label.clone())
+        .or_else(|| {
+            session
+                .tasks
+                .get("context:build")
+                .map(|task| task.last_label.clone())
+        })
+        .filter(|label| !label.trim().is_empty())
+        .unwrap_or_else(|| "waiting for the first progress signal".to_string())
+}
+
+fn context_build_stage_ladder(session: &ActivitySession) -> Vec<ActivityFeedPaneRow> {
+    const STAGES: [&str; 5] = [
+        "scan repository files",
+        "infer repository context",
+        "build repository inventory",
+        "map attack surface",
+        "write context snapshot",
+    ];
+    let current = context_build_stage_position(&current_context_stage(session));
+    STAGES
+        .iter()
+        .enumerate()
+        .map(|(index, label)| context_build_stage_row(index + 1, current, label))
+        .collect()
+}
+
+fn context_build_stage_position(label: &str) -> usize {
+    label
+        .split_whitespace()
+        .nth(1)
+        .and_then(|fraction| fraction.split('/').next())
+        .and_then(|position| position.parse::<usize>().ok())
+        .filter(|position| (1..=5).contains(position))
+        .unwrap_or(1)
+}
+
+fn context_build_stage_row(position: usize, current: usize, label: &str) -> ActivityFeedPaneRow {
+    let (glyph, tone) = match position.cmp(&current) {
+        std::cmp::Ordering::Less => ("✓", ActivityFeedRowTone::Success),
+        std::cmp::Ordering::Equal => ("▸", ActivityFeedRowTone::Primary),
+        std::cmp::Ordering::Greater => ("·", ActivityFeedRowTone::Subtle),
+    };
+    row(format!("  {glyph} {position}/5  {label}"), tone)
 }
 
 fn deck_page_has_content(app: &ShellApp, page: ActivityDeckPage) -> bool {
@@ -109,6 +239,10 @@ fn deck_page_has_content(app: &ShellApp, page: ActivityDeckPage) -> bool {
         ActivityDeckPage::Dfd => dfd_model(app).empty_hint.is_none(),
         ActivityDeckPage::AttackPath => app.domain().taint_flow().is_some(),
         ActivityDeckPage::ExploitChain => app.domain().has_exploit_chains(),
+        ActivityDeckPage::Recon => app
+            .domain()
+            .recon_snapshot()
+            .is_some_and(ReconSnapshot::has_evidence),
     }
 }
 
@@ -174,6 +308,112 @@ fn artifact_source_status_tone(status: &str) -> ActivityFeedRowTone {
 }
 
 // ── Activity artifact pages ───────────────────────────────────────────────
+
+fn recon_deck_rows(
+    snapshot: Option<&ReconSnapshot>,
+    cursor: usize,
+    width: usize,
+) -> Vec<ActivityFeedPaneRow> {
+    let Some(snapshot) = snapshot.filter(|snapshot| snapshot.has_evidence()) else {
+        return empty_deck_rows("RECON EVIDENCE", "no recon evidence captured yet", width);
+    };
+    let model = super::recon_snapshot_activity_model(snapshot, usize::MAX);
+    let index = selected_index(model.rows.len(), cursor);
+    let mut rows = recon_header_rows(snapshot, width);
+    rows.extend(recon_window_rows(&model.rows, index, width));
+    rows.push(row(String::new(), ActivityFeedRowTone::Subtle));
+    rows.extend(selected_recon_rows(&model.rows[index], snapshot, width));
+    rows
+}
+
+fn recon_header_rows(snapshot: &ReconSnapshot, width: usize) -> Vec<ActivityFeedPaneRow> {
+    vec![
+        row(rule("RECON EVIDENCE", width), ActivityFeedRowTone::Success),
+        row(
+            format!(
+                "  {} hosts · {} services · {} notes · {}",
+                snapshot.hosts.len(),
+                snapshot.services.len(),
+                snapshot.notes.len(),
+                snapshot.last_tool.as_deref().unwrap_or("recon")
+            ),
+            ActivityFeedRowTone::Subtle,
+        ),
+        row(
+            "  IMPORTED EVIDENCE".to_string(),
+            ActivityFeedRowTone::Primary,
+        ),
+    ]
+}
+
+fn recon_window_rows(
+    evidence: &[super::ModuleActivityRow],
+    selected: usize,
+    width: usize,
+) -> Vec<ActivityFeedPaneRow> {
+    visible_window(evidence.len(), selected)
+        .map(|index| recon_list_row(&evidence[index], index == selected, width))
+        .collect()
+}
+
+fn recon_list_row(
+    evidence: &super::ModuleActivityRow,
+    active: bool,
+    width: usize,
+) -> ActivityFeedPaneRow {
+    let [first, second, third, fourth] = &evidence.cells;
+    let text = match evidence.kind {
+        super::ModuleActivityKind::ReconService => {
+            format!("service  {first}:{second} · {third} · {fourth}")
+        }
+        super::ModuleActivityKind::ReconHost => format!("host     {first} · {second}"),
+        super::ModuleActivityKind::ReconNote => format!("note     {first} · {third}"),
+        _ => format!("{first} · {second}"),
+    };
+    row(
+        format!(
+            "  {} {}",
+            selection_marker(active),
+            truncate(&text, width.saturating_sub(5))
+        ),
+        activity_selection_tone(active),
+    )
+}
+
+fn selected_recon_rows(
+    evidence: &super::ModuleActivityRow,
+    snapshot: &ReconSnapshot,
+    width: usize,
+) -> Vec<ActivityFeedPaneRow> {
+    let [first, second, third, fourth] = &evidence.cells;
+    let detail = [first, second, third, fourth]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" · ");
+    vec![
+        row(
+            "  SELECTED RECON EVIDENCE".to_string(),
+            ActivityFeedRowTone::Primary,
+        ),
+        row(
+            format!("  {}", truncate(&detail, width.saturating_sub(2))),
+            ActivityFeedRowTone::Muted,
+        ),
+        row(
+            format!(
+                "  target: {}",
+                snapshot.last_target.as_deref().unwrap_or("workspace")
+            ),
+            ActivityFeedRowTone::Subtle,
+        ),
+        row(
+            "  action: o opens full recon detail".to_string(),
+            ActivityFeedRowTone::Subtle,
+        ),
+    ]
+}
 
 fn findings_deck_rows(app: &ShellApp, cursor: usize, width: usize) -> Vec<ActivityFeedPaneRow> {
     let model = findings_model(app);
@@ -890,7 +1130,81 @@ fn clip(text: String, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuzushi_core::{write_run_summary, V2Config, WorkspaceTarget};
+    use kuzushi_core::{
+        write_run_summary, ReconHost, ReconNote, ReconService, V2Config, WorkspaceTarget,
+    };
+
+    #[test]
+    fn live_context_build_uses_one_truthful_build_trace_instead_of_empty_artifact_tabs() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let mut session = ActivitySession::new("context-run");
+        session.apply_step(
+            kuzushi_core::RunTraceStep::new(
+                1,
+                "tool-progress",
+                "stage 3/5 · building repository inventory",
+            )
+            .with_module_id("context")
+            .with_verb("build"),
+        );
+        let route = ActivityRouteState::default();
+
+        let rows = activity_deck_page_rows(&app, &session, &route, 120, Some("context:build"));
+        let rendered = rows
+            .iter()
+            .map(|row| row.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("views  [build trace]"), "{rendered}");
+        assert!(rendered.contains("CONTEXT BUILD"), "{rendered}");
+        assert!(
+            rendered.contains("building repository inventory"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("✓ 2/5"), "{rendered}");
+        assert!(rendered.contains("▸ 3/5"), "{rendered}");
+        assert_eq!(rows[0].text, "views  [build trace]");
+    }
+
+    #[test]
+    fn output_without_artifacts_does_not_advertise_empty_generated_views() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let session = ActivitySession::new("empty-run");
+        let route = ActivityRouteState::default();
+
+        let rows = activity_deck_page_rows(&app, &session, &route, 120, None);
+        let rendered = rows
+            .iter()
+            .map(|row| row.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("[no artifacts yet]"), "{rendered}");
+        assert!(!rendered.contains("findings·"), "{rendered}");
+        assert!(!rendered.contains("surface·"), "{rendered}");
+    }
+
+    #[test]
+    fn recon_deck_renders_imported_host_service_and_note_evidence() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.domain_mut().set_recon_snapshot(recon_snapshot());
+        let session = ActivitySession::new("run-recon");
+        let mut route = ActivityRouteState::default();
+        route.set_deck_page(ActivityDeckPage::Recon);
+
+        let rows = activity_deck_page_rows(&app, &session, &route, 120, None);
+        let rendered = rows
+            .iter()
+            .map(|row| row.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("RECON EVIDENCE"), "{rendered}");
+        assert!(rendered.contains("acme.example:443"), "{rendered}");
+        assert!(rendered.contains("httpx"), "{rendered}");
+        assert!(rendered.contains("status-code"), "{rendered}");
+    }
 
     #[test]
     fn activity_deck_labels_partial_run_artifacts() {
@@ -900,7 +1214,8 @@ mod tests {
             summary
         });
 
-        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, &fixture.route, 160);
+        let rows =
+            activity_deck_page_rows(&fixture.app, &fixture.session, &fixture.route, 160, None);
 
         let status = artifact_source_status(&rows).expect("artifact source status row");
         assert_eq!(status.tone, ActivityFeedRowTone::Warn);
@@ -921,7 +1236,8 @@ mod tests {
             summary.failed("semgrep exited nonzero")
         });
 
-        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, &fixture.route, 160);
+        let rows =
+            activity_deck_page_rows(&fixture.app, &fixture.session, &fixture.route, 160, None);
 
         let status = artifact_source_status(&rows).expect("artifact source status row");
         assert_eq!(status.tone, ActivityFeedRowTone::Danger);
@@ -933,7 +1249,8 @@ mod tests {
     fn activity_deck_omits_artifact_warning_for_completed_runs() {
         let fixture = app_with_run_summary("run-completed", kuzushi_core::RunSummary::complete);
 
-        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, &fixture.route, 160);
+        let rows =
+            activity_deck_page_rows(&fixture.app, &fixture.session, &fixture.route, 160, None);
 
         assert!(artifact_source_status(&rows).is_none(), "{rows:?}");
     }
@@ -952,7 +1269,8 @@ mod tests {
         ));
         write_run_summary(workspace.root(), &summary).unwrap();
 
-        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
         let session = ActivitySession::new(run_id);
         ActivityDeckFixture {
             _temp: temp,
@@ -972,5 +1290,36 @@ mod tests {
     fn artifact_source_status(rows: &[ActivityFeedPaneRow]) -> Option<&ActivityFeedPaneRow> {
         rows.iter()
             .find(|row| row.text.contains("artifact source:"))
+    }
+
+    fn recon_snapshot() -> ReconSnapshot {
+        ReconSnapshot {
+            hosts: vec![ReconHost {
+                id: "h1".to_string(),
+                workspace_id: "ws".to_string(),
+                address: "192.0.2.10".to_string(),
+                hostname: Some("acme.example".to_string()),
+                state: "alive".to_string(),
+            }],
+            services: vec![ReconService {
+                id: "s1".to_string(),
+                host_id: "h1".to_string(),
+                port: 443,
+                proto: "tcp".to_string(),
+                name: Some("https".to_string()),
+                banner: Some("HTTP/2".to_string()),
+                state: "open".to_string(),
+            }],
+            notes: vec![ReconNote {
+                id: "n1".to_string(),
+                workspace_id: "ws".to_string(),
+                host_id: Some("h1".to_string()),
+                service_id: Some("s1".to_string()),
+                ntype: "httpx".to_string(),
+                data: serde_json::json!({ "status-code": 200 }),
+            }],
+            last_tool: Some("recon:import".to_string()),
+            last_target: Some("httpx.json".to_string()),
+        }
     }
 }

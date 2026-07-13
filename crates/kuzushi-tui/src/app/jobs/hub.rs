@@ -223,6 +223,10 @@ impl JobHub {
         self.trace_budget.clone()
     }
 
+    pub(crate) fn take_dropped_live_trace_count(&self) -> usize {
+        self.trace_budget.take_dropped_live()
+    }
+
     #[cfg(test)]
     pub(crate) fn drain(&mut self, limit: usize) -> Vec<ShellEvent> {
         let mut events = Vec::with_capacity(limit);

@@ -1,7 +1,7 @@
 use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use serde_yaml::Value;
+use serde_json::Value;
 use std::path::Path;
 
 pub(super) fn is_helm_chart(path: &Path) -> bool {
@@ -21,7 +21,7 @@ pub(super) fn helm_chart_components(
     path: &Path,
     text: &str,
 ) -> Result<Vec<SbomComponent>> {
-    let value: Value = serde_yaml::from_str(text).context("sbom-scan: parse Chart.yaml")?;
+    let value = crate::yaml::parse_value(text).context("sbom-scan: parse Chart.yaml")?;
     Ok(chart_dependencies(&value)
         .filter_map(|dependency| chart_component(target, path, dependency))
         .collect())
@@ -30,21 +30,21 @@ pub(super) fn helm_chart_components(
 pub(super) fn helm_chart_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_yaml::from_str(&text).context("sbom-scan: parse Chart.yaml")?;
+    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse Chart.yaml")?;
     Ok(dependency_edges(target, path, &value))
 }
 
 pub(super) fn helm_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_yaml::from_str(&text).context("sbom-scan: parse Chart.lock")?;
+    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse Chart.lock")?;
     Ok(dependency_edges(target, path, &value))
 }
 
 pub(super) fn helm_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_yaml::from_str(&text).context("sbom-scan: parse Chart.lock")?;
+    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse Chart.lock")?;
     Ok(chart_dependencies(&value)
         .filter_map(|dependency| chart_lock_component(target, path, dependency))
         .collect())
@@ -89,7 +89,7 @@ fn chart_component(target: &Path, path: &Path, value: &Value) -> Option<SbomComp
 fn chart_dependencies(value: &Value) -> impl Iterator<Item = &Value> {
     value
         .get("dependencies")
-        .and_then(Value::as_sequence)
+        .and_then(Value::as_array)
         .into_iter()
         .flatten()
 }

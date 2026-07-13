@@ -8,16 +8,17 @@ pub(crate) fn build_recommendation_report_ranked(
     request: RecommenderRequest,
     ranking: ModelRanking<'_>,
 ) -> RecommendationReport {
-    match ranking.rank(&request) {
-        Some(recommendations) => model_report(request, recommendations, ranking.model_label()),
-        None => build_recommendation_report(request),
+    let outcome = ranking.rank(&request);
+    match outcome.recommendations.clone() {
+        Some(recommendations) => model_report(request, recommendations, outcome),
+        None => fallback_report(request, outcome),
     }
 }
 
 fn model_report(
     request: RecommenderRequest,
     recommendations: Vec<ModuleRecommendation>,
-    model_label: Option<&str>,
+    outcome: super::model_ranking::ModelRankingOutcome,
 ) -> RecommendationReport {
     let recommendations = demote_blocked_scanners(&request, recommendations);
     let warnings = warnings_for(&request);
@@ -26,7 +27,7 @@ fn model_report(
         "Recommended {} module tool(s) for {} — ranked by {}.",
         recommendations.len(),
         request.target,
-        model_label.unwrap_or("the session model")
+        outcome.model.as_deref().unwrap_or("the session model")
     );
     RecommendationReport {
         ok: true,
@@ -40,6 +41,9 @@ fn model_report(
         },
         recommendations,
         components,
+        cost_usd: outcome.cost.observed_usd(),
+        cost_usd_exact: outcome.cost.is_complete(),
+        provider_spend_unresolved: outcome.provider_spend_unresolved,
         warnings,
         errors: Vec::new(),
     }
@@ -74,9 +78,28 @@ pub(crate) fn build_recommendation_report(request: RecommenderRequest) -> Recomm
         },
         recommendations,
         components,
+        cost_usd: 0.0,
+        cost_usd_exact: true,
+        provider_spend_unresolved: false,
         warnings,
         errors: Vec::new(),
     }
+}
+
+fn fallback_report(
+    request: RecommenderRequest,
+    outcome: super::model_ranking::ModelRankingOutcome,
+) -> RecommendationReport {
+    let mut report = build_recommendation_report(request);
+    report.cost_usd = outcome.cost.observed_usd();
+    report.cost_usd_exact = outcome.cost.is_complete();
+    report.provider_spend_unresolved = outcome.provider_spend_unresolved;
+    if let Some(reason) = outcome.fallback_reason {
+        report.warnings.push(format!(
+            "model ranking was not used; deterministic catalog fallback: {reason}"
+        ));
+    }
+    report
 }
 
 fn recommendation_from_rule(

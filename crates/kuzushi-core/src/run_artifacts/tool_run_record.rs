@@ -8,6 +8,7 @@ use super::tool_run_record_events::{
 use super::*;
 use crate::artifact_contract::{tool_input_artifact_spec, tool_result_artifact_spec};
 use crate::module_result::{normalize_module_result, tool_result_status, ToolResultStatus};
+use serde_json::json;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ToolRunRecord<'a> {
@@ -88,9 +89,10 @@ pub fn record_tool_run_complete(record: ToolRunRecord<'_>, output: &Value) {
 
 pub fn try_record_tool_run_complete(record: ToolRunRecord<'_>, output: &Value) -> Result<()> {
     let status = tool_result_status_label(tool_result_status(output));
+    let terminal_digest = terminal_result_digest(status, &normalize_module_result(output.clone()));
     let _guard = super::run_ledger::acquire_run_terminal_lock(record.target, record.run_id)?;
-    reject_conflicting_terminalization(record, status)?;
-    let mut artifacts = existing_run_artifacts(record);
+    validate_terminalization(record, status, &terminal_digest)?;
+    let mut artifacts = existing_run_artifacts(record)?;
     let output_artifacts =
         record_output_declared_artifacts(record.target, record.run_id, output, &artifacts)?;
     artifacts.extend(output_artifacts);
@@ -101,10 +103,15 @@ pub fn try_record_tool_run_complete(record: ToolRunRecord<'_>, output: &Value) -
     )?);
     let output = result_output_for_status(record, status, output, &mut artifacts)?;
     artifacts.push(result_artifact(record, &output)?);
-    let summary = completed_summary(record, &output, artifacts);
-    let summary = apply_output_status(status, summary, &output);
+    let summary = completed_summary(record, &output, artifacts)?;
+    let summary = apply_output_status(status, summary, &output)
+        .with_terminal_result_sha256(Some(terminal_digest));
     append_tool_event(record, status, "tool result recorded")?;
-    append_done_trace(record, status, tool_run_output_cost_usd(&output))?;
+    append_done_trace(
+        record,
+        status,
+        tool_run_output_cost_report(&output)?.exact_usd(),
+    )?;
     write_run_summary(record.target, &summary)?;
     Ok(())
 }
@@ -114,10 +121,11 @@ pub fn record_tool_run_failed(record: ToolRunRecord<'_>, error: &str) {
 }
 
 pub fn try_record_tool_run_failed(record: ToolRunRecord<'_>, error: &str) -> Result<()> {
+    let terminal_digest = terminal_result_digest("failed", &json!({ "error": error }));
     let _guard = super::run_ledger::acquire_run_terminal_lock(record.target, record.run_id)?;
-    reject_conflicting_terminalization(record, "failed")?;
-    let mut artifacts = existing_run_artifacts(record);
-    let mut summary = failed_summary(record, error, &artifacts);
+    validate_terminalization(record, "failed", &terminal_digest)?;
+    let mut artifacts = existing_run_artifacts(record)?;
+    let mut summary = failed_summary(record, error, &artifacts)?;
     let failure_artifact = write_run_failures(
         record.target,
         record.run_id,
@@ -135,7 +143,9 @@ pub fn try_record_tool_run_failed(record: ToolRunRecord<'_>, error: &str) -> Res
         error,
         &artifacts,
     );
-    summary = summary.with_artifact(result_artifact(record, &output)?);
+    summary = summary
+        .with_artifact(result_artifact(record, &output)?)
+        .with_terminal_result_sha256(Some(terminal_digest));
     append_tool_event(record, "failed", "tool failed")?;
     append_failed_trace(record)?;
     write_run_summary(record.target, &summary)?;
@@ -163,13 +173,17 @@ pub fn record_tool_run_refused(record: ToolRunRecord<'_>, reason: &str) {
 }
 
 pub fn try_record_tool_run_refused(record: ToolRunRecord<'_>, reason: &str) -> Result<()> {
+    let terminal_digest = terminal_result_digest("skipped", &json!({ "reason": reason }));
     let _guard = super::run_ledger::acquire_run_terminal_lock(record.target, record.run_id)?;
-    reject_conflicting_terminalization(record, "skipped")?;
-    let artifacts = existing_run_artifacts(record);
-    let summary = artifacts.into_iter().fold(
-        summary_seed(record).skipped(reason),
-        RunSummary::with_artifact,
-    );
+    validate_terminalization(record, "skipped", &terminal_digest)?;
+    let artifacts = existing_run_artifacts(record)?;
+    let summary = artifacts
+        .into_iter()
+        .fold(
+            summary_seed(record)?.skipped(reason),
+            RunSummary::with_artifact,
+        )
+        .with_terminal_result_sha256(Some(terminal_digest));
     append_tool_event(record, "skipped", reason)?;
     append_done_trace(record, "skipped", None)?;
     write_run_summary(record.target, &summary)?;
@@ -181,18 +195,24 @@ fn try_record_interrupted_tool_run(
     status: &str,
     reason: &str,
 ) -> Result<()> {
+    let terminal_digest = terminal_result_digest(status, &json!({ "reason": reason }));
     let _guard = super::run_ledger::acquire_run_terminal_lock(record.target, record.run_id)?;
-    reject_conflicting_terminalization(record, status)?;
-    let artifacts = existing_run_artifacts(record);
-    let seed = summary_seed(record);
+    validate_terminalization(record, status, &terminal_digest)?;
+    let artifacts = existing_run_artifacts(record)?;
+    let seed = summary_seed(record)?;
     let summary = if status == "canceled" {
         seed.canceled(reason)
     } else {
         seed.interrupted(reason)
-    };
+    }
+    .with_cost_report(super::trace_cost::trace_cost_report(
+        record.target,
+        record.run_id,
+    )?);
     let summary = artifacts
         .into_iter()
-        .fold(summary, RunSummary::with_artifact);
+        .fold(summary, RunSummary::with_artifact)
+        .with_terminal_result_sha256(Some(terminal_digest));
     let message = format!("tool {status}: {reason}");
     append_tool_event(record, status, &message)?;
     append_done_trace(record, status, None)?;
@@ -201,11 +221,9 @@ fn try_record_interrupted_tool_run(
 }
 
 pub fn tool_run_output_cost_usd(output: &Value) -> Option<f64> {
-    output
-        .get("costUsd")
-        .and_then(Value::as_f64)
-        .or_else(|| output.pointer("/data/costUsd").and_then(Value::as_f64))
-        .filter(|cost| cost.is_finite() && *cost >= 0.0)
+    tool_run_output_cost_report(output)
+        .ok()
+        .and_then(crate::runtime::RuntimeCostReport::exact_usd)
 }
 
 pub fn tool_run_output_findings_count(output: &Value) -> Option<u64> {
@@ -247,26 +265,45 @@ fn completed_summary(
     record: ToolRunRecord<'_>,
     output: &Value,
     artifacts: Vec<RunArtifact>,
-) -> RunSummary {
-    let seed = summary_seed(record)
+) -> Result<RunSummary> {
+    let seed = summary_seed(record)?;
+    let output_cost = tool_run_output_cost_report(output)?;
+    let trace_cost = super::trace_cost::trace_cost_report(record.target, record.run_id)?;
+    let terminal_cost = super::trace_cost::reconcile_terminal_cost_reports(
+        output_cost,
+        trace_cost,
+        "tool terminal",
+    )?;
+    let cost = super::trace_cost::reconcile_terminal_cost_reports(
+        seed.checked_cost_report()?,
+        terminal_cost,
+        "tool terminal seed",
+    )?;
+    let seed = seed
         .complete()
         .with_findings(tool_run_output_findings_count(output))
-        .with_cost(tool_run_output_cost_usd(output));
+        .with_cost_report(cost);
     let seed = with_output_model(seed, output);
-    artifacts.into_iter().fold(seed, RunSummary::with_artifact)
+    Ok(artifacts.into_iter().fold(seed, RunSummary::with_artifact))
 }
 
-fn summary_seed(record: ToolRunRecord<'_>) -> RunSummary {
+fn summary_seed(record: ToolRunRecord<'_>) -> Result<RunSummary> {
     let seed = RunSummary::running(
         record.run_id.to_string(),
         record.kind,
         Some(record.tool.to_string()),
         record.target.display().to_string(),
     );
-    match load_run_summary(record.target, record.run_id) {
-        Ok(existing) => summary_seed_from_existing(seed, &existing),
-        Err(_) => seed,
-    }
+    let existing =
+        super::run_summary_store::load_run_summary_without_repair(record.target, record.run_id)
+            .with_context(|| {
+                format!(
+                    "could not load {} before terminalizing run {}",
+                    run_artifact_path(record.target, record.run_id, "run.json").display(),
+                    record.run_id,
+                )
+            })?;
+    Ok(summary_seed_from_existing(seed, &existing))
 }
 
 fn summary_seed_from_existing(mut seed: RunSummary, existing: &RunSummary) -> RunSummary {
@@ -310,11 +347,18 @@ fn apply_output_status(status: &str, mut summary: RunSummary, output: &Value) ->
     summary
 }
 
-fn failed_summary(record: ToolRunRecord<'_>, error: &str, artifacts: &[RunArtifact]) -> RunSummary {
-    artifacts.iter().cloned().fold(
-        summary_seed(record).failed(error.to_string()),
+fn failed_summary(
+    record: ToolRunRecord<'_>,
+    error: &str,
+    artifacts: &[RunArtifact],
+) -> Result<RunSummary> {
+    let cost = super::trace_cost::trace_cost_report(record.target, record.run_id)?;
+    Ok(artifacts.iter().cloned().fold(
+        summary_seed(record)?
+            .failed(error.to_string())
+            .with_cost_report(cost),
         RunSummary::with_artifact,
-    )
+    ))
 }
 
 fn tool_result_status_label(status: ToolResultStatus) -> &'static str {
@@ -330,21 +374,60 @@ fn failure_like_status(status: &str) -> bool {
     matches!(status, "partial" | "failed")
 }
 
-fn reject_conflicting_terminalization(record: ToolRunRecord<'_>, status: &str) -> Result<()> {
-    let Ok(summary) = load_run_summary(record.target, record.run_id) else {
-        return Ok(());
-    };
+fn validate_terminalization(
+    record: ToolRunRecord<'_>,
+    status: &str,
+    terminal_digest: &str,
+) -> Result<()> {
+    let summary =
+        super::run_summary_store::load_run_summary_without_repair(record.target, record.run_id)
+            .with_context(|| {
+                format!(
+                    "could not verify existing terminal state for run {} from {}",
+                    record.run_id,
+                    run_artifact_path(record.target, record.run_id, "run.json").display(),
+                )
+            })?;
     if !is_terminal_run_status(&summary.status) {
         return Ok(());
     }
-    if summary.status == status {
-        return Ok(());
+    ensure_same_terminal_status(record, status, &summary)?;
+    ensure_same_terminal_content(record, terminal_digest, &summary)
+}
+
+fn ensure_same_terminal_status(
+    record: ToolRunRecord<'_>,
+    status: &str,
+    summary: &RunSummary,
+) -> Result<()> {
+    if summary.status != status {
+        anyhow::bail!(
+            "run {} is already terminal with status {}; refusing to rewrite it as {status}",
+            record.run_id,
+            summary.status
+        )
     }
-    anyhow::bail!(
-        "run {} is already terminal with status {}; refusing to rewrite it as {status}",
-        record.run_id,
-        summary.status
-    )
+    Ok(())
+}
+
+fn ensure_same_terminal_content(
+    record: ToolRunRecord<'_>,
+    terminal_digest: &str,
+    summary: &RunSummary,
+) -> Result<()> {
+    let Some(existing_digest) = summary.terminal_result_sha256.as_deref() else {
+        anyhow::bail!(
+            "run {} is already terminal but has no terminal result digest; refusing an unverifiable retry",
+            record.run_id
+        )
+    };
+    if existing_digest != terminal_digest {
+        anyhow::bail!(
+            "run {} is already terminal with different result content; refusing a divergent retry",
+            record.run_id
+        )
+    }
+    Ok(())
 }
 
 fn is_terminal_run_status(status: &str) -> bool {
@@ -354,10 +437,22 @@ fn is_terminal_run_status(status: &str) -> bool {
     )
 }
 
-fn existing_run_artifacts(record: ToolRunRecord<'_>) -> Vec<RunArtifact> {
-    load_run_summary(record.target, record.run_id)
+fn existing_run_artifacts(record: ToolRunRecord<'_>) -> Result<Vec<RunArtifact>> {
+    super::run_summary_store::load_run_summary_without_repair(record.target, record.run_id)
         .map(|summary| summary.artifacts)
-        .unwrap_or_default()
+        .with_context(|| format!("could not load artifacts for run {}", record.run_id))
+}
+
+pub(super) fn terminal_result_digest(status: &str, result: &Value) -> String {
+    let bytes = serde_json::to_vec(&json!({
+        "status": status,
+        "result": result,
+    }))
+    .expect("terminal intent is always JSON serializable");
+    format!(
+        "sha256:{}",
+        kuzushi_mcp_common::cache::sha256_hex_bytes(&bytes)
+    )
 }
 
 fn attach_failure_artifact(

@@ -44,7 +44,7 @@ impl SemgrepScanner {
         }
 
         let mut command = self.semgrep_command(target);
-        configure_scanner_process_group(&mut command);
+        let process_group = configure_scanner_process_group(&mut command)?;
 
         let mut child = command.spawn().map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
@@ -56,9 +56,8 @@ impl SemgrepScanner {
                 )
             }
         })?;
-        let process_group_id = child_process_group_id(&child);
         let readers = capture_scanner_process_pipes(&mut child, "semgrep")?;
-        let child = cancel.register_child(child, process_group_id)?;
+        let child = cancel.register_prepared_child(child, process_group)?;
         let status = wait_for_scanner_process(&child, cancel)?;
         let output = join_scanner_process_readers(readers, "semgrep")?;
 

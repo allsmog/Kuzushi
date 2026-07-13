@@ -21,5 +21,19 @@ pub struct CarliniThreatHuntReport {
     pub persisted: Option<CarliniThreatHuntPersistedRun>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kb_context: Option<ArtifactKnowledgePromptContext>,
+    /// Exact and incomplete cost envelopes use different JSON field names.
+    /// Accept the canonical incomplete form when `sast:scan` rehydrates this
+    /// report from a normalized subtool result.
+    #[serde(alias = "observedCostUsd")]
     pub cost_usd: f64,
+    #[serde(default = "default_cost_usd_exact", skip_serializing_if = "is_true")]
+    pub cost_usd_exact: bool,
+}
+
+const fn default_cost_usd_exact() -> bool {
+    true
+}
+
+const fn is_true(value: &bool) -> bool {
+    *value
 }

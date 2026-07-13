@@ -1,5 +1,12 @@
 use super::runtime_event_drains::JOB_DRAIN_LIMIT;
 use super::*;
+use std::sync::Arc;
+
+struct NoopTraceSink;
+
+impl kuzushi_core::TraceSink for NoopTraceSink {
+    fn record(&self, _step: &RunTraceStep) {}
+}
 
 #[test]
 fn job_drain_preserves_trace_terminal_order() {
@@ -28,7 +35,7 @@ fn job_drain_preserves_trace_terminal_order() {
 }
 
 #[test]
-fn job_drain_collects_messages_before_applying_updates() {
+fn zero_duration_job_slice_applies_one_event_and_keeps_tail() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     let ticket = app.jobs_mut().start(JobKind::Run, "scan");
     app.set_scan_panel(Some(ScanPanelState {
@@ -40,21 +47,17 @@ fn job_drain_collects_messages_before_applying_updates() {
         abort_requested: false,
         error: None,
     }));
-    ticket.send(ShellEvent::Scan(ScanEvent::Stage(
-        "running semgrep".to_string(),
-    )));
+    ticket.send(ShellEvent::Scan(ScanEvent::Stage("first".to_string())));
+    ticket.send(ShellEvent::Scan(ScanEvent::Stage("second".to_string())));
 
-    let messages = app.drain_job_messages();
+    let outcome = app.drain_job_events_for(std::time::Duration::ZERO);
 
-    assert!(matches!(
-        &messages[..],
-        [Msg::Job(ShellEvent::Scan(ScanEvent::Stage(stage)))] if stage == "running semgrep"
-    ));
-    assert_eq!(app.scan().unwrap().stage, "running");
+    assert!(outcome.changed);
+    assert!(outcome.time_slice_exhausted);
+    assert_eq!(app.scan().unwrap().stage, "first");
 
-    assert!(update_many_and_execute_effects(&mut app, messages));
-
-    assert_eq!(app.scan().unwrap().stage, "running semgrep");
+    assert!(app.drain_job_events());
+    assert_eq!(app.scan().unwrap().stage, "second");
 }
 
 #[test]
@@ -120,6 +123,7 @@ fn job_drain_finishes_plan_slot_and_clears_liveness() {
     let cancel = ticket.cancel.clone();
     ticket.send(ShellEvent::Plan(PlanEvent::Failed {
         error: "planner failed".to_string(),
+        audit: AgentCallAudit::test(),
     }));
     app.set_plan_cancel(Some(cancel));
     app.set_planner_running(true);
@@ -146,7 +150,8 @@ fn job_drain_finishes_agent_slot_and_clears_liveness() {
             model: "unknown".to_string(),
             provider: "unknown".to_string(),
             prompt_hash: "test".to_string(),
-            cost_usd: None,
+            cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+            call_attempted: true,
         },
     }));
     let agent = AgentChatView {
@@ -178,6 +183,7 @@ fn job_drain_finishes_threat_slot_and_clears_liveness() {
     let cancel = ticket.cancel.clone();
     ticket.send(ShellEvent::Threat(ThreatPatchEvent::Failed {
         error: "threat failed".to_string(),
+        audit: AgentCallAudit::test(),
     }));
     app.set_threat_cancel(Some(cancel));
     app.set_threat_worker_running(true);
@@ -219,6 +225,52 @@ fn job_drain_is_budgeted_and_keeps_buffered_tail() {
     assert_eq!(app.activity().unwrap().events.len(), JOB_DRAIN_LIMIT + 5);
     assert_eq!(budget.pending(), 0);
     assert!(app.jobs().is_running(JobKind::Run));
+}
+
+#[test]
+fn dropped_live_trace_degrades_cost_until_terminal_reconciliation() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    let ticket = app.jobs_mut().start(JobKind::Run, "runtime tool");
+    let budget = app.jobs().trace_budget();
+    for _ in 0..LIVE_TRACE_CHANNEL_CAPACITY {
+        assert!(budget.reserve_for_test());
+    }
+    let sink = StampedTraceSink::new(Arc::new(NoopTraceSink), ticket.sink(), budget);
+    app.set_activity(Some(ActivitySession::new("runtime-drop")));
+    app.begin_run_cost_tracking("runtime-drop", true);
+
+    kuzushi_core::TraceSink::record(
+        &sink,
+        &RunTraceStep::new(1, "llm", "provider call")
+            .with_call_attempted(true)
+            .with_cost_usd(Some(0.20))
+            .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:test"),
+    );
+
+    assert!(app.drain_job_events());
+    assert!(!app.session().cost_accounting_is_complete());
+    assert!(!app
+        .activity()
+        .unwrap()
+        .runtime_cost_report()
+        .unwrap()
+        .is_complete());
+
+    let terminal = kuzushi_core::runtime::RuntimeCostReport::known(
+        kuzushi_core::runtime::RuntimeCost::from_usd(0.20, "terminal cost").unwrap(),
+    );
+    app.settle_run_cost_report("runtime-drop", terminal);
+
+    assert!(app.session().cost_accounting_is_complete());
+    assert_eq!(app.session().session_cost_usd(), 0.20);
+    assert_eq!(
+        app.activity()
+            .unwrap()
+            .runtime_cost_report()
+            .unwrap()
+            .exact_usd(),
+        Some(0.20)
+    );
 }
 
 #[test]

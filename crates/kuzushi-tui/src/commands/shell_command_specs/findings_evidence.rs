@@ -13,11 +13,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
             "findings filter state:new rank:high",
             "findings filter decision:confirmed completeness:open",
             "findings filter confidence:confirmed",
+            "findings filter clear",
             "/findings filter <expr>",
         ],
         category: ShellCommandCategory::FindingsEvidence,
         description:
-            "filter findings by severity, confidence (proof), review decision, or completeness",
+            "filter findings by severity, confidence, decision, or completeness; use clear to reset",
     },
     ShellCommandSpec {
         command: "component <scope|path|all>",

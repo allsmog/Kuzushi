@@ -3,6 +3,7 @@ use super::*;
 impl ShellApp {
     pub(crate) fn apply_plan_event(&mut self, event: PlanEvent) {
         self.set_planner_running(false);
+        self.settle_active_run_cost_report(plan_event_audit(&event).settlement_cost());
         if self.discard_aborted_plan_event() {
             return;
         }
@@ -24,7 +25,7 @@ impl ShellApp {
 
     fn apply_finished_plan_event(&mut self, event: PlanEvent) {
         match event {
-            PlanEvent::Proposed(plan) => {
+            PlanEvent::Proposed { plan, .. } => {
                 self.log(
                     "plan",
                     format!(
@@ -35,7 +36,7 @@ impl ShellApp {
                 self.engagement.set_pending_plan(plan);
                 self.set_completed_activity("plan", "proposal ready for review");
             }
-            PlanEvent::Failed { error } => {
+            PlanEvent::Failed { error, .. } => {
                 self.log("error", format!("planner failed: {error}"));
                 self.set_refused_activity("plan", "planner failed");
             }
@@ -45,5 +46,11 @@ impl ShellApp {
     pub fn set_pending_plan(&mut self, plan: PlanProposal) {
         self.set_planner_running(false);
         self.engagement.set_pending_plan(plan);
+    }
+}
+
+fn plan_event_audit(event: &PlanEvent) -> &AgentCallAudit {
+    match event {
+        PlanEvent::Proposed { audit, .. } | PlanEvent::Failed { audit, .. } => audit,
     }
 }

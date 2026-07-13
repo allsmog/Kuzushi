@@ -1,10 +1,11 @@
 use super::*;
 use crate::ui_view_models::{DfdModel, RiskByModule};
 use cache_entries::{
-    project_scope_tree_for_target, run_summary_index_from_entries, DirectoryListingCache,
-    GitMetadataCache, JsonFileCache, LatestRunPointerCache, PathStateCache,
-    ProjectModelDocumentCache, PromptMutationsCache, RunArtifactTextCache, RunSummaryEntriesCache,
-    RunTraceCache, ScopeTreeCache, SourceFileCache, StrategyQueueCache, TargetBaseCache,
+    project_scope_tree_for_target, run_summary_index_from_entries, CompletionValuesCache,
+    DirectoryListingCache, FileCompletionValuesCache, GitMetadataCache, JsonFileCache,
+    LatestRunPointerCache, PathStateCache, ProjectModelDocumentCache, PromptMutationsCache,
+    RunArtifactTextCache, RunSummaryEntriesCache, RunTraceCache, ScopeTreeCache, SourceFileCache,
+    StrategyQueueCache, TargetBaseCache, TargetProfileCache,
 };
 #[cfg(test)]
 use cache_entries::{read_json_file, RunSummaryCache, RunSummaryCacheKey};
@@ -20,9 +21,11 @@ use map_artifacts_cache::MapArtifactsCache;
 use prompt_override_cache::PromptOverrideCache;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use view_model_fragments::ViewModelFragmentCache;
 
 mod cache_entries;
+mod completion_values;
 mod finding_alias_cache;
 mod hydrated_reads;
 mod hydration_state;
@@ -36,15 +39,24 @@ pub(crate) use cache_entries::{
     RunTraceCacheState, StrategyQueueState,
 };
 pub(crate) use view_model_fragments::{
-    DfdModelCacheKey, RiskByModuleCacheKey, VisibleFindingProjection, VisibleFindingsCacheKey,
+    DfdModelCacheKey, ReviewQueueCacheKey, RiskByModuleCacheKey, VisibleFindingProjection,
+    VisibleFindingsCacheKey,
 };
 
 #[derive(Debug, Default)]
 pub(crate) struct WorkbenchCache {
     target_base: Option<TargetBaseCache>,
+    target_profile: Option<TargetProfileCache>,
     #[cfg(test)]
     run_summaries: Option<RunSummaryCache>,
     run_summary_entries: Option<RunSummaryEntriesCache>,
+    file_completion_values: Option<FileCompletionValuesCache>,
+    finding_completion_values: Option<CompletionValuesCache>,
+    run_id_completion_values: Option<CompletionValuesCache>,
+    completion_generation: u64,
+    command_provider_generation: u64,
+    #[cfg(test)]
+    completion_source_reads: std::cell::Cell<usize>,
     latest_run_pointer: Option<LatestRunPointerCache>,
     source_file: Option<SourceFileCache>,
     git_metadata: Option<GitMetadataCache>,
@@ -185,9 +197,11 @@ impl WorkbenchCache {
     }
 
     pub(crate) fn invalidate_run_summaries(&mut self) {
-        self.invalidate_legacy_run_summary_index();
+        self.invalidate_run_summary_dependents();
         self.run_summary_entries = None;
         self.latest_run_pointer = None;
+        self.run_id_completion_values = None;
+        self.bump_completion_generation();
     }
 
     #[cfg(test)]
@@ -212,6 +226,7 @@ impl WorkbenchCache {
         state
     }
 
+    #[cfg(test)]
     pub(crate) fn run_summary_entries(&mut self, target: Option<&Path>) -> Vec<RunSummaryEntry> {
         let Some(target) = target else {
             return Vec::new();
@@ -221,13 +236,18 @@ impl WorkbenchCache {
             .as_ref()
             .filter(|cache| cache.target == target)
         {
-            return cache.entries.clone();
+            return match &cache.state {
+                RunSummaryEntriesState::Ready(entries) => entries.clone(),
+                RunSummaryEntriesState::Failed(_) => Vec::new(),
+            };
         }
-        let entries = kuzushi_core::list_run_summary_entries(target).unwrap_or_default();
+        let entries =
+            kuzushi_core::list_recent_run_summary_entries(target, 100).unwrap_or_default();
         self.run_summary_entries = Some(RunSummaryEntriesCache {
             target: target.to_path_buf(),
-            entries: entries.clone(),
+            state: RunSummaryEntriesState::Ready(entries.clone()),
         });
+        self.invalidate_run_summary_dependents();
         entries
     }
 
@@ -297,6 +317,8 @@ impl WorkbenchCache {
         self.json_files.clear();
         self.path_states.clear();
         self.directory_listings.clear();
+        self.file_completion_values = None;
+        self.bump_completion_generation();
         self.run_traces.clear();
         self.run_artifact_texts.clear();
         self.map_artifacts.invalidate();
@@ -323,10 +345,15 @@ impl WorkbenchCache {
             run_summaries_changed |= changed.1;
         }
         if run_summaries_changed {
-            self.invalidate_legacy_run_summary_index();
+            self.invalidate_run_summary_dependents();
             self.run_summary_entries = None;
             self.latest_run_pointer = None;
+            self.run_id_completion_values = None;
         }
+        if findings_changed {
+            self.finding_completion_values = None;
+        }
+        self.bump_completion_generation_when(findings_changed | run_summaries_changed);
         self.strategy_queue = None;
         self.prompt_mutations = None;
         self.project_model_document = None;
@@ -340,6 +367,11 @@ impl WorkbenchCache {
 
     #[cfg(not(test))]
     fn invalidate_legacy_run_summary_index(&mut self) {}
+
+    fn invalidate_run_summary_dependents(&mut self) {
+        self.invalidate_legacy_run_summary_index();
+        self.view_models.invalidate_visible_findings();
+    }
 
     fn invalidate_state_artifact_path(
         &mut self,
@@ -440,6 +472,10 @@ impl WorkbenchCache {
         self.prompt_mutations = None;
     }
 
+    pub(crate) fn invalidate_prompt_overrides(&mut self) {
+        self.prompt_overrides.invalidate();
+    }
+
     /// Cached read of the engagement harness file
     /// (`<target>/engagement/harness.toml`); `None` when the target is unset
     /// or the harness file is missing/unreadable.
@@ -505,23 +541,43 @@ impl WorkbenchCache {
     pub(crate) fn sorted_finding_alias_indices(
         &mut self,
         findings: &[Finding],
+        findings_revision: u64,
     ) -> Vec<(String, usize)> {
-        self.finding_aliases.sorted_indices(findings)
+        self.finding_aliases
+            .sorted_indices(findings, findings_revision)
     }
 
     pub(crate) fn visible_findings(
         &self,
         key: &VisibleFindingsCacheKey,
-    ) -> Option<Vec<VisibleFindingProjection>> {
+    ) -> Option<Arc<[VisibleFindingProjection]>> {
         self.view_models.visible_findings(key)
     }
 
     pub(crate) fn cache_visible_findings(
         &mut self,
         key: VisibleFindingsCacheKey,
-        projected: Vec<VisibleFindingProjection>,
+        projected: Arc<[VisibleFindingProjection]>,
     ) {
         self.view_models.cache_visible_findings(key, projected);
+    }
+
+    pub(crate) fn review_queue(
+        &self,
+        key: &ReviewQueueCacheKey,
+    ) -> Option<(Arc<[crate::ui_view_models::ReviewQueueRow]>, usize, usize)> {
+        self.view_models.review_queue(key)
+    }
+
+    pub(crate) fn cache_review_queue(
+        &mut self,
+        key: ReviewQueueCacheKey,
+        rows: Arc<[crate::ui_view_models::ReviewQueueRow]>,
+        open_count: usize,
+        complete_count: usize,
+    ) {
+        self.view_models
+            .cache_review_queue(key, rows, open_count, complete_count);
     }
 
     pub(crate) fn risk_by_module(&self, key: &RiskByModuleCacheKey) -> Option<RiskByModule> {

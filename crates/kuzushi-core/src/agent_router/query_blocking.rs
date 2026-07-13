@@ -5,7 +5,9 @@ use crate::runtime::AgentQueryControl;
 impl AgentRuntime for RoutedRuntime<'_> {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         validate_routed_request_model("query", &request.model)?;
-        self.inner.query_blocking(request)
+        self.inner
+            .query_blocking(request)
+            .and_then(AgentQueryResponse::validate_cost)
     }
 
     fn query_blocking_controlled(
@@ -14,12 +16,16 @@ impl AgentRuntime for RoutedRuntime<'_> {
         control: AgentQueryControl,
     ) -> Result<AgentQueryResponse> {
         validate_routed_request_model("query", &request.model)?;
-        self.inner.query_blocking_controlled(request, control)
+        self.inner
+            .query_blocking_controlled(request, control)
+            .and_then(AgentQueryResponse::validate_cost)
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
         validate_routed_request_model("triage", &request.model)?;
-        self.inner.triage_finding_blocking(request)
+        self.inner
+            .triage_finding_blocking(request)
+            .and_then(TriageOutcome::validate_cost)
     }
 
     fn supports_tools(&self) -> bool {
@@ -32,7 +38,9 @@ impl AgentRuntime for RoutedRuntime<'_> {
         history: &[LoopHistoryEntry],
     ) -> Result<AgentLoopStep> {
         validate_routed_request_model("tool-loop", &request.model)?;
-        self.inner.next_step_blocking(request, history)
+        self.inner
+            .next_step_blocking(request, history)
+            .and_then(AgentLoopStep::validate_cost)
     }
 }
 

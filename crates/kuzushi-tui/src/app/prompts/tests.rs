@@ -23,12 +23,6 @@ mod tests {
         kuzushi_core::house_rule_path(target, "sast")
     }
 
-    fn relative_prompt_override_path() -> String {
-        kuzushi_core::relative_prompt_override_path("sast", "triage")
-            .display()
-            .to_string()
-    }
-
     fn relative_prompt_override_root() -> String {
         kuzushi_core::relative_module_prompt_root("sast")
             .display()
@@ -74,6 +68,52 @@ mod tests {
     }
 
     #[test]
+    fn prompt_set_rejects_an_empty_override() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+
+        let effects = app.handle_prompt_verb("set triage \"\"");
+
+        assert!(effects.is_empty());
+        assert!(!prompt_override_path(temp.path()).exists());
+        assert!(app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.contains("requires a name and quoted value")));
+    }
+
+    #[test]
+    fn prompt_write_invalidates_the_cached_override_hash() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        app.set_shell_view(ShellView::PromptsEditor);
+        let path = prompt_override_path(temp.path());
+        app.hydrate_all_view_data_for_test();
+        assert!(matches!(
+            app.workbench_cache()
+                .borrow()
+                .cached_prompt_override_hash(temp.path(), &path),
+            ViewDataState::Ready(Ok(None))
+        ));
+
+        run_prompt_verb(&mut app, "set triage \"focus auth boundaries\"");
+
+        assert!(matches!(
+            app.workbench_cache()
+                .borrow()
+                .cached_prompt_override_hash(temp.path(), &path),
+            ViewDataState::NotRequested
+        ));
+        app.hydrate_all_view_data_for_test();
+        assert!(matches!(
+            app.workbench_cache()
+                .borrow()
+                .cached_prompt_override_hash(temp.path(), &path),
+            ViewDataState::Ready(Ok(Some(_)))
+        ));
+    }
+
+    #[test]
     fn prompt_mutate_returns_record_effect_without_touching_disk() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
@@ -91,6 +131,19 @@ mod tests {
             }
             _ => panic!("expected a prompt mutation record effect"),
         }
+    }
+
+    #[test]
+    fn prompt_mutate_rejects_an_empty_candidate() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+
+        let effects = app.handle_prompt_verb("mutate triage \"\"");
+
+        assert!(effects.is_empty());
+        assert!(app.log_lines().iter().any(|line| line
+            .body
+            .contains("mutate requires a verb and quoted value")));
     }
 
     #[test]
@@ -137,7 +190,7 @@ mod tests {
         let mut app = prompt_test_app(temp.path());
         app.set_shell_view(ShellView::PromptsEditor);
         app.set_input_mode(InputMode::Navigate);
-        let path = kuzushi_core::prompt_override_path(temp.path(), "sast", "scan");
+        let path = kuzushi_core::prompt_override_path(temp.path(), "sast", "triage");
 
         let update = app.reduce_key(key(KeyCode::Char('s')));
 
@@ -179,9 +232,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
 
-        run_prompt_verb(&mut app, "edit triage");
+        run_prompt_verb(&mut app, "edit scan");
 
-        let path = prompt_override_path(temp.path());
+        let path = kuzushi_core::prompt_override_path(temp.path(), "sast", "scan");
         assert!(!path.exists());
         assert!(app
             .log_lines()
@@ -193,10 +246,10 @@ mod tests {
     fn prompt_edit_without_declared_template_does_not_touch_unreadable_path() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let path = prompt_override_path(temp.path());
+        let path = kuzushi_core::prompt_override_path(temp.path(), "sast", "scan");
         std::fs::create_dir_all(&path).unwrap();
 
-        run_prompt_verb(&mut app, "edit triage");
+        run_prompt_verb(&mut app, "edit scan");
 
         assert!(app
             .log_lines()
@@ -378,13 +431,13 @@ mod tests {
     }
 
     #[test]
-    fn prompt_show_reports_unreadable_override_file() {
+    fn prompt_show_reports_unreadable_undeclared_override_file() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let path = prompt_override_path(temp.path());
+        let path = kuzushi_core::prompt_override_path(temp.path(), "sast", "scan");
         std::fs::create_dir_all(&path).unwrap();
 
-        run_prompt_verb(&mut app, "show triage");
+        run_prompt_verb(&mut app, "show scan");
 
         assert!(app
             .log_lines()
@@ -393,7 +446,7 @@ mod tests {
         assert!(app
             .log_lines()
             .iter()
-            .any(|line| line.body.contains(&relative_prompt_override_path())));
+            .any(|line| line.body.contains(".kuzushi/prompts/sast/scan.md")));
     }
 
     #[test]
@@ -511,7 +564,8 @@ mod tests {
         let path = kuzushi_core::prompt_override_path(temp.path(), "agentic-sast", "scan");
 
         app.open_prompt_document_effect(PromptDocumentOpen {
-            prompt,
+            prompts: vec![prompt],
+            prompt_index: 0,
             origin: ShellView::PlanningPicker,
         });
 
@@ -520,6 +574,9 @@ mod tests {
         assert_eq!(document.source, "built-in");
         assert!(document.text().contains("agentic SAST scanner"));
         assert!(!path.exists());
+
+        app.reduce_key(key(KeyCode::Char('l')));
+        assert_eq!(app.router.prompts().document().unwrap().cursor_col, 1);
     }
 
     #[test]
@@ -531,7 +588,8 @@ mod tests {
             .expect("agentic prompt descriptor");
         let path = kuzushi_core::prompt_override_path(temp.path(), "agentic-sast", "scan");
         app.open_prompt_document_effect(PromptDocumentOpen {
-            prompt,
+            prompts: vec![prompt],
+            prompt_index: 0,
             origin: ShellView::PlanningPicker,
         });
 
@@ -555,6 +613,38 @@ mod tests {
     }
 
     #[test]
+    fn prompt_document_refuses_empty_override_instead_of_claiming_it_is_active() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        let prompt = app
+            .prompt_spec_for_tool("agentic-sast:scan")
+            .expect("agentic prompt descriptor");
+        let path = kuzushi_core::prompt_override_path(temp.path(), "agentic-sast", "scan");
+        app.open_prompt_document_effect(PromptDocumentOpen {
+            prompts: vec![prompt],
+            prompt_index: 0,
+            origin: ShellView::PlanningPicker,
+        });
+        let document = app.router.prompts_mut().document_mut().unwrap();
+        document.lines = vec![String::new()];
+        document.trailing_newline = false;
+        document.dirty = true;
+        document.mode = PromptDocumentMode::Command;
+        document.command = "wq".to_string();
+
+        let update = app.reduce_key(key(KeyCode::Enter));
+
+        assert!(update.effects.is_empty());
+        assert!(!path.exists());
+        assert_eq!(app.shell_view(), ShellView::PromptsEditor);
+        assert!(app.router.prompts().document().unwrap().dirty);
+        assert!(app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.contains("empty files use the built-in default")));
+    }
+
+    #[test]
     fn dirty_prompt_document_requires_discard_confirmation() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
@@ -562,7 +652,8 @@ mod tests {
             .prompt_spec_for_tool("agentic-sast:scan")
             .expect("agentic prompt descriptor");
         app.open_prompt_document_effect(PromptDocumentOpen {
-            prompt,
+            prompts: vec![prompt],
+            prompt_index: 0,
             origin: ShellView::PlanningPicker,
         });
 
@@ -609,6 +700,86 @@ mod tests {
         assert_eq!(
             app.router.prompts().document().unwrap().origin,
             ShellView::PlanningPicker
+        );
+    }
+
+    #[test]
+    fn planning_prompt_review_never_falls_back_to_another_selected_row() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        app.open_phase_picker(WorkflowPhase::Hunt);
+        let semgrep_index = app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .position(|row| row.id == PlanningTaskId::ScanSemgrep)
+            .unwrap();
+        let agentic_index = app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .position(|row| row.id == PlanningTaskId::ScanAgenticSast)
+            .unwrap();
+        let selected = app.engagement.planning_picker_mut().selected_mut();
+        selected.clear();
+        selected.extend([PlanningTaskId::ScanSemgrep, PlanningTaskId::ScanAgenticSast]);
+
+        app.engagement
+            .planning_picker_mut()
+            .set_cursor(semgrep_index);
+        assert!(!app.planning_prompt_review_available());
+        assert!(app.review_planning_prompt().is_empty());
+
+        app.engagement
+            .planning_picker_mut()
+            .set_cursor(agentic_index);
+        assert!(app.planning_prompt_review_available());
+    }
+
+    #[test]
+    fn prompts_surface_uses_all_declared_systems_hunt_roles() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        app.set_focused_module(Some("systems-hunt".to_string()));
+        let prompts = app.focused_prompt_specs();
+
+        assert_eq!(prompts.len(), 5);
+        assert_eq!(prompts[0].verb, "invariants");
+        assert_eq!(prompts[1].verb, "triggers");
+        assert_eq!(prompts[2].verb, "hunt");
+        assert_eq!(prompts[3].verb, "deep-semantic-cwe-select");
+        assert_eq!(prompts[4].verb, "deep-semantic-hunt");
+    }
+
+    #[test]
+    fn multi_role_prompt_review_cycles_in_declared_order_and_protects_edits() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        let prompts = app.prompt_specs_for_tool("systems-hunt:systems-hunt");
+        assert_eq!(prompts.len(), 3);
+        app.open_prompt_document_effect(PromptDocumentOpen {
+            prompts,
+            prompt_index: 0,
+            origin: ShellView::PlanningPicker,
+        });
+
+        let update = app.reduce_key(key(KeyCode::Char(']')));
+        EffectRuntime::execute(&mut app, update.effects);
+        assert_eq!(
+            app.router.prompts().document().unwrap().role,
+            "trigger synthesis"
+        );
+
+        for code in [KeyCode::Char('i'), KeyCode::Char('X'), KeyCode::Esc] {
+            app.reduce_key(key(code));
+        }
+        let update = app.reduce_key(key(KeyCode::Char(']')));
+        assert!(update.effects.is_empty());
+        assert_eq!(
+            app.router.prompts().document().unwrap().role,
+            "trigger synthesis"
         );
     }
 }

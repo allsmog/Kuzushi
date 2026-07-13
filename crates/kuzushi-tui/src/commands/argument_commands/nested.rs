@@ -8,7 +8,7 @@ pub(crate) fn parse_nested_shell_command(
     let command = match verb {
         "options" => options_command(args, OptionsFilter::Standard),
         "findings" | "f" => parse_findings_command(args),
-        "export" => parse_workspace_findings_export_args(args, "findings export"),
+        "export" => parse_workspace_findings_export_args(args),
         "recon:import" | "recon-import" => parse_recon_import_command(args),
         "recon" if args.first() == Some(&"import") => {
             parse_recon_import_command(args.get(1..).unwrap_or_default())
@@ -281,20 +281,19 @@ pub(crate) fn options_command(args: &[&str], filter: OptionsFilter) -> ShellComm
 
 pub(crate) fn parse_findings_command(args: &[&str]) -> ShellCommand {
     match args.first().copied() {
-        Some("filter") => {
-            let expression = args.get(1..).unwrap_or_default().join(" ");
-            if expression.trim().is_empty() {
-                ShellCommand::Unknown("findings filter".to_string())
-            } else {
-                ShellCommand::FindingsFilter(expression)
-            }
-        }
-        Some("export") => parse_workspace_findings_export_args(
-            args.get(1..).unwrap_or_default(),
-            "findings export",
-        ),
+        Some("filter") => parse_findings_filter(args.get(1..).unwrap_or_default()),
+        Some("export") => parse_workspace_findings_export_args(args.get(1..).unwrap_or_default()),
         Some(other) => ShellCommand::Unknown(format!("findings {other}")),
         None => ShellCommand::Findings,
+    }
+}
+
+fn parse_findings_filter(args: &[&str]) -> ShellCommand {
+    let expression = args.join(" ");
+    match expression.trim() {
+        "" => ShellCommand::Unknown("findings filter".to_string()),
+        "clear" => ShellCommand::Findings,
+        _ => ShellCommand::FindingsFilter(expression),
     }
 }
 

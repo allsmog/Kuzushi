@@ -478,6 +478,7 @@ mod tests {
             confidence: 0.4,
             rationale: "unclear".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: true,
         });
 
         let progress = progress_from_findings(true, &[finding]);
@@ -505,6 +506,7 @@ mod tests {
             confidence: 0.92,
             rationale: "guarded".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: true,
         });
 
         let progress = progress_from_findings(true, &[finding]);

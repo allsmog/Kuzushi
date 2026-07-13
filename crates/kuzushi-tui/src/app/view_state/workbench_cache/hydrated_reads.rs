@@ -2,10 +2,27 @@ use super::*;
 use kuzushi_core::workspace::ProjectModelDocument;
 
 impl WorkbenchCache {
+    pub(crate) fn cached_target_profile(
+        &self,
+        target: Option<&Path>,
+    ) -> ViewDataState<TargetProfile> {
+        let Some(target) = target else {
+            return ViewDataState::NotRequested;
+        };
+        if let Some(cache) = self
+            .target_profile
+            .as_ref()
+            .filter(|cache| cache.target == target)
+        {
+            return ViewDataState::Ready(cache.profile);
+        }
+        self.loading_state(target, &ViewHydrationKey::TargetProfile)
+    }
+
     pub(crate) fn cached_run_summary_entries(
         &self,
         target: Option<&Path>,
-    ) -> ViewDataState<Vec<RunSummaryEntry>> {
+    ) -> ViewDataState<RunSummaryEntriesState> {
         let Some(target) = target else {
             return ViewDataState::NotRequested;
         };
@@ -14,7 +31,7 @@ impl WorkbenchCache {
             .as_ref()
             .filter(|cache| cache.target == target)
         {
-            return ViewDataState::Ready(cache.entries.clone());
+            return ViewDataState::Ready(cache.state.clone());
         }
         self.loading_state(target, &ViewHydrationKey::RunSummaryEntries)
     }
@@ -24,8 +41,11 @@ impl WorkbenchCache {
         target: Option<&Path>,
     ) -> ViewDataState<BTreeMap<String, RunSummary>> {
         match self.cached_run_summary_entries(target) {
-            ViewDataState::Ready(entries) => {
+            ViewDataState::Ready(RunSummaryEntriesState::Ready(entries)) => {
                 ViewDataState::Ready(run_summary_index_from_entries(&entries))
+            }
+            ViewDataState::Ready(RunSummaryEntriesState::Failed(_)) => {
+                ViewDataState::Ready(BTreeMap::new())
             }
             ViewDataState::Loading => ViewDataState::Loading,
             ViewDataState::NotRequested => ViewDataState::NotRequested,

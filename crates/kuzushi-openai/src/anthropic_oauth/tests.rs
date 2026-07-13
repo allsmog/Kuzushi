@@ -117,7 +117,9 @@ mod tests {
         assert_eq!(response.structured.unwrap()["ok"], true);
         assert_eq!(response.input_tokens, 1000);
         assert_eq!(response.output_tokens, 500);
-        assert!(response.cost_usd > 0.0);
+        assert_eq!(response.cost_usd, 0.0);
+        assert!(!response.cost_usd_reported);
+        assert!(response.estimated_cost_usd.unwrap() > 0.0);
     }
 
     #[test]
@@ -186,6 +188,34 @@ mod tests {
     }
 
     #[test]
+    fn triage_cost_distinguishes_unpriced_estimate_from_reported_zero() {
+        let structured = || {
+            Some(json!({
+                "verdict": "true_positive",
+                "confidence": 0.8,
+                "rationale": "reachable"
+            }))
+        };
+        let unpriced = triage_outcome_from_response(AgentQueryResponse {
+            structured: structured(),
+            estimated_cost_usd: Some(0.25),
+            ..Default::default()
+        })
+        .unwrap();
+        let reported_zero = triage_outcome_from_response(AgentQueryResponse {
+            structured: structured(),
+            cost_usd_reported: true,
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(unpriced.cost_usd, 0.0);
+        assert!(!unpriced.cost_usd_exact);
+        assert_eq!(reported_zero.cost_usd, 0.0);
+        assert!(reported_zero.cost_usd_exact);
+    }
+
+    #[test]
     fn triage_outcome_from_response_errors_on_plain_or_empty_content() {
         let plain = triage_outcome_from_response(AgentQueryResponse {
             text: "plain rationale".to_string(),
@@ -221,37 +251,53 @@ mod tests {
         assert!(err.contains("violated schema"));
     }
 
+    #[test]
+    fn triage_outcome_rejects_invalid_provider_cost_before_parsing() {
+        for cost_usd in [-1.0, f64::NAN, f64::INFINITY] {
+            let error = triage_outcome_from_response(AgentQueryResponse {
+                structured: Some(json!({
+                    "verdict": "true_positive",
+                    "confidence": 0.8,
+                    "rationale": "reachable"
+                })),
+                cost_usd,
+                ..Default::default()
+            })
+            .unwrap_err()
+            .to_string();
+            assert!(error.contains("finite non-negative"), "{error}");
+        }
+    }
+
     // ----- cost estimation -----------------------------------------
 
     #[test]
     fn cost_estimate_uses_haiku_rates_for_haiku_models() {
-        let cost = estimate_cost_usd("claude-haiku-4-5-20251001", 1000, 1000);
+        let cost = estimate_cost_usd("claude-haiku-4-5-20251001", 1000, 1000).unwrap();
         // Haiku: $0.0008/k in + $0.004/k out × 1k each.
         assert!((cost - (0.0008 + 0.004)).abs() < 1e-9);
     }
 
     #[test]
     fn cost_estimate_uses_sonnet_rates_for_sonnet_models() {
-        let cost = estimate_cost_usd("claude-sonnet-4-6", 1000, 1000);
+        let cost = estimate_cost_usd("claude-sonnet-4-6", 1000, 1000).unwrap();
         assert!((cost - (0.003 + 0.015)).abs() < 1e-9);
     }
 
     #[test]
     fn cost_estimate_uses_opus_rates_for_opus_models() {
-        let cost = estimate_cost_usd("claude-opus-4-7", 1000, 1000);
+        let cost = estimate_cost_usd("claude-opus-4-7", 1000, 1000).unwrap();
         assert!((cost - (0.015 + 0.075)).abs() < 1e-9);
     }
 
     #[test]
-    fn cost_estimate_falls_back_to_sonnet_rates_for_unknown_models() {
-        let unknown = estimate_cost_usd("some-future-model", 1000, 1000);
-        let sonnet = estimate_cost_usd("claude-sonnet-4-6", 1000, 1000);
-        assert!((unknown - sonnet).abs() < 1e-9);
+    fn cost_estimate_is_unavailable_for_unknown_models() {
+        assert_eq!(estimate_cost_usd("some-future-model", 1000, 1000), None);
     }
 
     #[test]
     fn cost_estimate_zero_when_no_tokens() {
-        assert_eq!(estimate_cost_usd("claude-haiku-4-5", 0, 0), 0.0);
+        assert_eq!(estimate_cost_usd("claude-haiku-4-5", 0, 0), Some(0.0));
     }
 
     // ----- model_for_tier ------------------------------------------

@@ -19,5 +19,9 @@ impl ShellApp {
                 self.open_workbench(WorkbenchPane::Findings);
             }
         }
+        let destination = self.shell_view();
+        self.router
+            .navigation_mut()
+            .accept_back_transition(destination);
     }
 }

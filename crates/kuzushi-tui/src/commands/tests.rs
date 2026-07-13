@@ -77,6 +77,10 @@ mod tests {
             ShellCommand::FindingsFilter("state:new rank:high run:scan-1".to_string())
         );
         assert_eq!(
+            parse_command("findings filter clear"),
+            ShellCommand::Findings
+        );
+        assert_eq!(
             parse_command("decision suppressed reviewed under policy"),
             ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
                 verdict: "suppressed".to_string(),
@@ -656,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    fn export_aliases_report_the_complete_canonical_usage() {
+    fn export_aliases_report_the_complete_friendly_usage() {
         for command in [
             "export",
             "findings export",
@@ -670,6 +674,10 @@ mod tests {
             };
             assert!(
                 message.contains("usage: findings export <path> [format]"),
+                "unexpected usage for {command}: {message}"
+            );
+            assert!(
+                message.contains("alias: workspace export findings"),
                 "unexpected usage for {command}: {message}"
             );
         }
@@ -873,7 +881,7 @@ mod tests {
                 "run .",
                 "findings",
                 "open F-0001",
-                "model 1"
+                "findings export report.sarif sarif"
             ]
         );
 

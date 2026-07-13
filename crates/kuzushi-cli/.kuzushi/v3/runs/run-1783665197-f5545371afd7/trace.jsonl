@@ -1,0 +1,2 @@
+{"n":1,"kind":"tool","label":"secret-scan:scan started","module_id":"secret-scan","verb":"scan"}
+{"n":2,"kind":"refused","label":"secret-scan:scan failed","module_id":"secret-scan","verb":"scan","severity":"danger"}

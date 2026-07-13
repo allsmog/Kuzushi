@@ -76,7 +76,9 @@ fn row_metrics(row: &MapConsoleRow) -> String {
     if let Some(latency) = row.latency_ms {
         metrics.push(format!("{latency}ms"));
     }
-    if let Some(cost) = row.cost_usd.filter(|cost| *cost > 0.0) {
+    if row.cost_invalid {
+        metrics.push("cost invalid".to_string());
+    } else if let Some(cost) = row.cost_usd.filter(|cost| *cost > 0.0) {
         metrics.push(format!("${cost:.4}"));
     }
     (!metrics.is_empty())
@@ -116,9 +118,30 @@ mod tests {
             severity: None,
             latency_ms: Some(12),
             cost_usd: None,
+            cost_invalid: false,
         };
 
         let text = console_line(&row, 120).to_string();
         assert!(text.contains("01:02:03.045"), "{text}");
+    }
+
+    #[test]
+    fn invalid_console_cost_is_explicit() {
+        let row = MapConsoleRow {
+            sequence: 1,
+            started_at_ms: None,
+            kind: "reasoning".to_string(),
+            label: "provider response".to_string(),
+            module: Some("sast".to_string()),
+            verb: Some("scan".to_string()),
+            severity: None,
+            latency_ms: None,
+            cost_usd: None,
+            cost_invalid: true,
+        };
+
+        let text = console_line(&row, 120).to_string();
+        assert!(text.contains("cost invalid"), "{text}");
+        assert!(!text.contains("inf"), "{text}");
     }
 }

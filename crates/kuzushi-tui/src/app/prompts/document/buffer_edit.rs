@@ -27,6 +27,7 @@ impl ShellApp {
             .cursor_col
             .saturating_add_signed(delta)
             .min(document.current_line_len());
+        document.pending_g = false;
     }
 
     pub(super) fn move_prompt_document_to_end(&mut self) {

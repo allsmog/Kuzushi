@@ -4,16 +4,27 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use kuzushi_mcp_common::{Tool, ToolHandler, ToolRegistry};
+use kuzushi_mcp_common::{ReadRootCapability, Tool, ToolHandler, ToolRegistry};
 use serde_json::{json, Value};
+use std::path::Path;
 
 pub(crate) const ARTIFACT_ENV: &str = "KUZUSHI_MCP_THREAT_MODEL_ARTIFACT";
+const MAX_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 
-pub(crate) fn build_registry() -> ToolRegistry {
+pub(crate) fn build_registry() -> Result<ToolRegistry> {
+    Ok(build_registry_with_capability(
+        ReadRootCapability::from_environment()?,
+    ))
+}
+
+fn build_registry_with_capability(read_capability: ReadRootCapability) -> ToolRegistry {
     ToolRegistry::new()
-        .register(get_descriptor(), GetHandler)
-        .register(threats_descriptor(), ThreatsHandler)
-        .register(elements_descriptor(), ElementsHandler)
+        .register(get_descriptor(), GetHandler(read_capability.clone()))
+        .register(
+            threats_descriptor(),
+            ThreatsHandler(read_capability.clone()),
+        )
+        .register(elements_descriptor(), ElementsHandler(read_capability))
 }
 
 fn get_descriptor() -> Tool {
@@ -49,14 +60,14 @@ fn elements_descriptor() -> Tool {
     }
 }
 
-struct GetHandler;
-struct ThreatsHandler;
-struct ElementsHandler;
+struct GetHandler(ReadRootCapability);
+struct ThreatsHandler(ReadRootCapability);
+struct ElementsHandler(ReadRootCapability);
 
 #[async_trait]
 impl ToolHandler for GetHandler {
     async fn call(&self, _args: Value) -> Result<Value> {
-        load_artifact()
+        load_artifact(&self.0)
     }
 }
 
@@ -67,7 +78,7 @@ impl ToolHandler for ThreatsHandler {
             .get("severity")
             .and_then(Value::as_str)
             .map(|s| s.to_ascii_lowercase());
-        let artifact = load_artifact()?;
+        let artifact = load_artifact(&self.0)?;
         let threats = artifact
             .get("threats")
             .and_then(Value::as_array)
@@ -92,19 +103,20 @@ impl ToolHandler for ThreatsHandler {
 #[async_trait]
 impl ToolHandler for ElementsHandler {
     async fn call(&self, _args: Value) -> Result<Value> {
-        let artifact = load_artifact()?;
+        let artifact = load_artifact(&self.0)?;
         Ok(artifact.get("elements").cloned().unwrap_or(json!([])))
     }
 }
 
-pub(crate) fn load_artifact() -> Result<Value> {
+pub(crate) fn load_artifact(read_capability: &ReadRootCapability) -> Result<Value> {
     let path = std::env::var(ARTIFACT_ENV).with_context(|| {
         format!(
             "{ARTIFACT_ENV} is unset — the bridge should set it to the absolute path of \
              .kuzushi/threat-model.json (or the PASTA sibling) before attaching this MCP."
         )
     })?;
-    let body = std::fs::read_to_string(&path)
+    let body = read_capability
+        .read_utf8(Path::new(&path), MAX_ARTIFACT_BYTES)
         .with_context(|| format!("reading threat-model artifact at {path}"))?;
     serde_json::from_str(&body)
         .with_context(|| format!("parsing threat-model at {path}: expected valid JSON"))
@@ -130,12 +142,10 @@ mod tests {
         )
         .unwrap();
         std::env::set_var(ARTIFACT_ENV, &path);
-        let high = ThreatsHandler
-            .call(json!({"severity": "HIGH"}))
-            .await
-            .unwrap();
+        let handler = ThreatsHandler(ReadRootCapability::new([tmp.path().to_path_buf()]).unwrap());
+        let high = handler.call(json!({"severity": "HIGH"})).await.unwrap();
         assert_eq!(high["total"], 1);
-        let all = ThreatsHandler.call(json!({})).await.unwrap();
+        let all = handler.call(json!({})).await.unwrap();
         assert_eq!(all["total"], 2);
         std::env::remove_var(ARTIFACT_ENV);
     }

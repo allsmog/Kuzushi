@@ -296,12 +296,24 @@ fn run_prepared(
 }
 
 fn success(outcome: ChainOutcome, finding_id: Option<i64>, warnings: Vec<String>) -> Value {
+    let observed = crate::runtime::RuntimeCost::from_usd(
+        outcome.cost_usd,
+        "offense chain outcome cost",
+    )
+    .expect("offense planner validates cost before constructing the outcome");
+    let cost = if outcome.cost_usd_exact {
+        crate::runtime::RuntimeCostReport::known(observed)
+    } else {
+        crate::runtime::RuntimeCostReport::incomplete(observed)
+    };
     let mut output = format!("{} :: {}", outcome.chain, outcome.summary);
     for warning in &warnings {
         output.push_str(&format!("\n[!] {warning}"));
     }
     let data = success_data(outcome, finding_id, &warnings);
-    crate::module_result::completed_output_result(output.clone(), output, data)
+    let mut result = crate::module_result::completed_output_result(output.clone(), output, data);
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
+    result
 }
 
 fn success_data(outcome: ChainOutcome, finding_id: Option<i64>, warnings: &[String]) -> Value {

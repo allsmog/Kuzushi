@@ -52,7 +52,7 @@ Shell (kuzushi)
 ├── Finding detail ... proof ladder, evidence, sources[], corroboration, votes
 ├── Advanced catalog . the 42 modules as composable parts, grouped by phase
 │                       (was the tile home + Recommend/Module/ModuleRun)
-├── Activity ......... live DAG + output deck (auto-opens on run/scan)
+├── Activity ......... run-owned live tasks + context-aware output (auto-opens on run/scan)
 └── Utility views .... logs, help, config, replay/trace, KB, threat views
 ```
 
@@ -95,6 +95,14 @@ Wide terminal (≥ ~100 cols):
 
 Compact terminal (< ~80 cols) collapses toward the review path (phase pane +
 prompt), exactly as the current Workbench does, so findings/detail stay readable.
+
+When a run starts, **Activity owns the primary frame**. The phase contributes a
+compact phase/current-stage strip only; Activity never embeds the full phase
+cockpit beneath or beside its own panes. At tall sizes, OUTPUT and TASKS stack
+vertically so both receive useful height. The full Map/Hunt/Confirm/Fix cockpit
+returns when the operator browses Workbench after artifacts exist. This
+run-time handoff takes precedence over the illustrative side-by-side preview
+above: width changes geometry, not frame ownership.
 
 **Top bar** `Kuzushi · <project> · <target-facts> · <LIVE?> ······ <phase chip>`.
 - `LIVE` lights only on real run activity (`has_run_activity`), never on view.

@@ -23,6 +23,7 @@ pub(super) fn finding_header_lines(
             ),
         ]),
         Line::styled(fit(&finding.title, width), theme::heading()),
+        Line::styled(fit(&finding.location, width), theme::muted()),
     ]
 }
 
@@ -60,15 +61,32 @@ pub(super) fn compact_proof_lines(
     width: usize,
 ) -> Vec<Line<'static>> {
     let Some(proof) = proof else {
-        return missing_runtime_proof_lines(finding, width);
+        return compact_missing_runtime_proof_lines(finding, width);
     };
     let mut lines = proof_summary_lines(proof, width)
         .into_iter()
         .take(1)
         .collect::<Vec<_>>();
+    lines.push(compact_decision_line(finding, width));
     lines.push(verification_command_line(finding, width));
     append_replay_provenance(&mut lines, proof, width);
     lines
+}
+
+fn compact_missing_runtime_proof_lines(
+    finding: &FindingDetailModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    vec![
+        Line::styled("runtime proof has not run", theme::warn()),
+        compact_decision_line(finding, width),
+        verification_command_line(finding, width),
+    ]
+}
+
+fn compact_decision_line(finding: &FindingDetailModel, width: usize) -> Line<'static> {
+    let decision = finding.decision.replace('_', " ");
+    Line::styled(fit(&format!("decision: {decision}"), width), theme::label())
 }
 
 fn runtime_proof_lines(

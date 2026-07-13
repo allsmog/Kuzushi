@@ -47,6 +47,7 @@ impl PhaseRenderState {
         self.scroll.get(pane)
     }
 
+    #[cfg(test)]
     pub(in crate::renderer::views) fn activity() -> Self {
         Self {
             focus: None,

@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 
 const MAX_RG_STDOUT_BYTES: usize = 32 * 1024 * 1024;
 const MAX_RG_STDERR_BYTES: usize = 1024 * 1024;
+const MAX_RG_ARG_BYTES: usize = 16 * 1024;
 
 /// True iff a usable `rg` is on PATH. Probed once per process.
 pub(crate) fn rg_available() -> bool {
@@ -26,38 +27,82 @@ pub(crate) fn rg_available() -> bool {
 /// Run ripgrep over the same file inventory the in-process backend would walk
 /// and feed each match line through the existing per-query state machine.
 ///
-/// The walker (`collect_taint_iris_next_source_files`) is reused so file-set
-/// behavior — extension filter, null-byte gate, max-files cap, max-bytes cap,
-/// `should_skip_path` exclusions — stays identical to the inproc backend.
-/// Only the inner `O(files × lines × queries)` substring loop is replaced
-/// with a single `rg --json --fixed-strings` invocation.
+/// The plan's bounded path inventory is reused so extension filtering,
+/// max-files coverage, and directory exclusions stay identical to the inproc
+/// backend. File bodies are deliberately left to rg; pre-reading them here
+/// would double the dominant I/O cost of this backend.
 pub(super) fn collect_structural_candidates_via_rg(
     plan: &TaintIrisNextPlan,
 ) -> Result<Vec<TaintIrisNextCandidate>> {
-    // No max_files cap: rg fans the catalog patterns out across the entire
-    // walked file list with SIMD substring search, so capping the walker
-    // would just skip files alphabetically without recovering any
-    // performance worth the recall loss.
-    let files = collect_taint_iris_next_source_files(&plan.scan_root, None, 128 * 1024)?;
-    if files.is_empty() {
+    if plan.source_paths.is_empty() {
         return Ok(Vec::new());
     }
-    let by_relative_path: BTreeMap<String, &TaintIrisNextSourceFile> = files
-        .iter()
-        .map(|file| (file.relative_path.clone(), file))
-        .collect();
-
     let substrings = rg_substring_set(&plan.structural_queries);
     if substrings.is_empty() {
         return Ok(Vec::new());
     }
-
-    let absolute_paths: Vec<PathBuf> = files
-        .iter()
-        .map(|file| plan.scan_root.join(&file.relative_path))
-        .collect();
-
+    let by_relative_path = source_descriptors_by_relative_path(plan);
+    let absolute_paths = absolute_source_paths(plan);
     let hits = run_rg(&plan.scan_root, &substrings, &absolute_paths)?;
+    let hits_by_file = group_rg_hits(hits, &by_relative_path);
+    Ok(collect_round_robin_candidates(
+        plan,
+        &by_relative_path,
+        hits_by_file,
+    ))
+}
+
+fn source_descriptors_by_relative_path(
+    plan: &TaintIrisNextPlan,
+) -> BTreeMap<String, TaintIrisNextSourceFile> {
+    plan.source_paths
+        .iter()
+        .map(source_descriptor_entry)
+        .collect()
+}
+
+fn source_descriptor_entry(
+    path: &TaintIrisNextSourcePath,
+) -> (String, TaintIrisNextSourceFile) {
+    (
+        path.relative_path.clone(),
+        TaintIrisNextSourceFile {
+            relative_path: path.relative_path.clone(),
+            language: path.language.clone(),
+            lines: Vec::new(),
+        },
+    )
+}
+
+fn absolute_source_paths(plan: &TaintIrisNextPlan) -> Vec<PathBuf> {
+    plan.source_paths
+        .iter()
+        .map(|path| path.absolute_path.clone())
+        .collect()
+}
+
+fn group_rg_hits(
+    hits: Vec<RgHit>,
+    sources: &BTreeMap<String, TaintIrisNextSourceFile>,
+) -> BTreeMap<String, Vec<RgHit>> {
+    let mut hits_by_file: BTreeMap<String, Vec<RgHit>> = BTreeMap::new();
+    for hit in hits
+        .into_iter()
+        .filter(|hit| sources.contains_key(&hit.relative_path))
+    {
+        hits_by_file
+            .entry(hit.relative_path.clone())
+            .or_default()
+            .push(hit);
+    }
+    hits_by_file
+}
+
+fn collect_round_robin_candidates(
+    plan: &TaintIrisNextPlan,
+    sources: &BTreeMap<String, TaintIrisNextSourceFile>,
+    mut hits_by_file: BTreeMap<String, Vec<RgHit>>,
+) -> Vec<TaintIrisNextCandidate> {
     let mut state = super::structural_candidates::CandidateCollectionState::default();
     // Group hits by file and process round-robin across files. The raw
     // rg output is alphabetical: a single hot file like postgres'
@@ -69,35 +114,35 @@ pub(super) fn collect_structural_candidates_via_rg(
     // processed before any file is revisited — so the structural
     // pass sees broad coverage even when there's a hot file early
     // in the walk order.
-    let mut hits_by_file: BTreeMap<String, Vec<RgHit>> = BTreeMap::new();
-    for hit in hits {
-        if !by_relative_path.contains_key(&hit.relative_path) {
-            continue;
-        }
-        hits_by_file
-            .entry(hit.relative_path.clone())
-            .or_default()
-            .push(hit);
-    }
     let mut round = 0usize;
     loop {
-        let mut produced_in_round = false;
-        for hits_for_file in hits_by_file.values_mut() {
-            if let Some(hit) = hits_for_file.get(round).cloned() {
-                let Some(source_file) = by_relative_path.get(&hit.relative_path).copied() else {
-                    continue;
-                };
-                let line_index = hit.line_no.saturating_sub(1) as usize;
-                state.record_line_matches(plan, source_file, line_index, &hit.line);
-                produced_in_round = true;
-            }
-        }
-        if !produced_in_round {
+        if !record_rg_hit_round(plan, sources, &mut hits_by_file, round, &mut state) {
             break;
         }
         round += 1;
     }
-    Ok(state.into_candidates())
+    state.into_candidates()
+}
+
+fn record_rg_hit_round(
+    plan: &TaintIrisNextPlan,
+    sources: &BTreeMap<String, TaintIrisNextSourceFile>,
+    hits_by_file: &mut BTreeMap<String, Vec<RgHit>>,
+    round: usize,
+    state: &mut super::structural_candidates::CandidateCollectionState,
+) -> bool {
+    let mut produced = false;
+    for hit in hits_by_file
+        .values_mut()
+        .filter_map(|hits| hits.get(round).cloned())
+    {
+        if let Some(source_file) = sources.get(&hit.relative_path) {
+            let line_index = hit.line_no.saturating_sub(1) as usize;
+            state.record_line_matches(plan, source_file, line_index, &hit.line);
+            produced = true;
+        }
+    }
+    produced
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +196,28 @@ fn run_rg(
     substrings: &BTreeSet<String>,
     paths: &[PathBuf],
 ) -> Result<Vec<RgHit>> {
+    let fixed_arg_bytes = rg_fixed_arg_bytes(substrings);
+    let batches = rg_path_batches(paths, fixed_arg_bytes)?;
+    let mut hits = Vec::new();
+    let mut remaining_stdout = MAX_RG_STDOUT_BYTES;
+    for batch in batches {
+        if remaining_stdout == 0 {
+            anyhow::bail!("taint-iris-next rg aggregate output exceeded its bounded limit");
+        }
+        let (mut batch_hits, stdout_bytes) =
+            run_rg_batch(scan_root, substrings, batch, remaining_stdout)?;
+        remaining_stdout = remaining_stdout.saturating_sub(stdout_bytes);
+        hits.append(&mut batch_hits);
+    }
+    Ok(hits)
+}
+
+fn run_rg_batch(
+    scan_root: &Path,
+    substrings: &BTreeSet<String>,
+    paths: &[PathBuf],
+    stdout_limit: usize,
+) -> Result<(Vec<RgHit>, usize)> {
     let mut cmd = Command::new("rg");
     cmd.arg("--json")
         .arg("--fixed-strings")
@@ -168,7 +235,7 @@ fn run_rg(
     let output = crate::bounded_subprocess::output_with_limits(
         &mut cmd,
         "taint-iris-next rg",
-        MAX_RG_STDOUT_BYTES,
+        stdout_limit,
         MAX_RG_STDERR_BYTES,
     )
     .context("could not invoke rg for taint-iris-next structural backend")?;
@@ -180,7 +247,64 @@ fn run_rg(
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    parse_rg_json(scan_root, &output.stdout)
+    let stdout_bytes = output.stdout.len();
+    Ok((parse_rg_json(scan_root, &output.stdout)?, stdout_bytes))
+}
+
+fn rg_fixed_arg_bytes(substrings: &BTreeSet<String>) -> usize {
+    let flags = [
+        "rg",
+        "--json",
+        "--fixed-strings",
+        "--ignore-case",
+        "--no-heading",
+        "--no-config",
+        "--no-messages",
+        "--max-filesize=128K",
+    ];
+    flags.iter().map(|arg| arg.len() + 1).sum::<usize>()
+        + substrings
+            .iter()
+            .map(|substring| 3 + estimated_arg_bytes(substring))
+            .sum::<usize>()
+}
+
+fn rg_path_batches<'a>(
+    paths: &'a [PathBuf],
+    fixed_arg_bytes: usize,
+) -> Result<Vec<&'a [PathBuf]>> {
+    if fixed_arg_bytes >= MAX_RG_ARG_BYTES {
+        anyhow::bail!("taint-iris-next rg patterns exceed the command-line budget");
+    }
+    let mut batches = Vec::new();
+    let mut start = 0;
+    while start < paths.len() {
+        let end = rg_batch_end(paths, start, fixed_arg_bytes)?;
+        batches.push(&paths[start..end]);
+        start = end;
+    }
+    Ok(batches)
+}
+
+fn rg_batch_end(paths: &[PathBuf], start: usize, fixed_arg_bytes: usize) -> Result<usize> {
+    let mut bytes = fixed_arg_bytes;
+    let mut end = start;
+    while let Some(path) = paths.get(end) {
+        let path_bytes = estimated_arg_bytes(&path.to_string_lossy());
+        if bytes.saturating_add(path_bytes) > MAX_RG_ARG_BYTES {
+            break;
+        }
+        bytes += path_bytes;
+        end += 1;
+    }
+    if end == start {
+        anyhow::bail!("taint-iris-next rg path exceeds the command-line budget");
+    }
+    Ok(end)
+}
+
+fn estimated_arg_bytes(value: &str) -> usize {
+    value.len().saturating_mul(2).saturating_add(3)
 }
 
 fn parse_rg_json(scan_root: &Path, stdout: &[u8]) -> Result<Vec<RgHit>> {
@@ -311,5 +435,27 @@ mod tests {
             br#"{"type":"match","data":{"line_number":1}}"#,
         )
         .is_err());
+    }
+
+    #[test]
+    fn rg_path_batches_stay_bounded_and_preserve_order() {
+        let paths = (0..400)
+            .map(|index| PathBuf::from(format!("/very/long/repository/path/{index:04}/source.rs")))
+            .collect::<Vec<_>>();
+
+        let batches = rg_path_batches(&paths, 512).unwrap();
+
+        assert!(batches.len() > 1);
+        assert_eq!(
+            batches.iter().flat_map(|batch| batch.iter()).collect::<Vec<_>>(),
+            paths.iter().collect::<Vec<_>>()
+        );
+        assert!(batches.iter().all(|batch| {
+            512 + batch
+                .iter()
+                .map(|path| estimated_arg_bytes(&path.to_string_lossy()))
+                .sum::<usize>()
+                <= MAX_RG_ARG_BYTES
+        }));
     }
 }

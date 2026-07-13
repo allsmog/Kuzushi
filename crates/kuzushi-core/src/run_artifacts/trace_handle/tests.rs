@@ -112,6 +112,41 @@ fn broadcast_sink_counts_dropped_live_sends() {
 }
 
 #[test]
+fn trace_handle_rejects_invalid_cost_before_any_sink_dispatch() {
+    let inner = Arc::new(VecSink::default());
+    let inner_dyn: Arc<dyn TraceSink> = inner.clone();
+    let (tx, rx) = mpsc::channel::<RunTraceStep>();
+    let broadcast = Arc::new(BroadcastSink::new(inner_dyn, tx));
+    let handle = TraceHandle::new(broadcast.clone());
+
+    let emitted = handle
+        .step("reasoning", "run", "invalid cost")
+        .with_cost_usd(f64::NAN)
+        .emit();
+
+    assert_eq!(emitted, 0);
+    assert_eq!(handle.rejected_invalid_steps(), 1);
+    assert_eq!(broadcast.rejected_invalid_steps(), 0);
+    assert!(inner.steps.lock().unwrap().is_empty());
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn broadcast_sink_rejects_direct_invalid_step_before_inner_and_live_sinks() {
+    let inner = Arc::new(VecSink::default());
+    let inner_dyn: Arc<dyn TraceSink> = inner.clone();
+    let (tx, rx) = mpsc::channel::<RunTraceStep>();
+    let broadcast = BroadcastSink::new(inner_dyn, tx);
+    let invalid = RunTraceStep::new(1, "reasoning", "invalid").with_cost_usd(Some(f64::INFINITY));
+
+    broadcast.record(&invalid);
+
+    assert_eq!(broadcast.rejected_invalid_steps(), 1);
+    assert!(inner.steps.lock().unwrap().is_empty());
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
 fn drop_emits_step_when_emit_is_not_called() {
     let sink = Arc::new(VecSink::default());
     let handle = TraceHandle::new(sink.clone()).for_module("verify");

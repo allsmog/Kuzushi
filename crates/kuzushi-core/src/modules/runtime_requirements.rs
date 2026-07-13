@@ -104,6 +104,26 @@ pub fn tool_wants_runtime(tool_name: &str, input: &Value, config: &V2Config) -> 
         || tool_optionally_wants_runtime(tool_name, input, config)
 }
 
+/// Model that this invocation will actually execute, for durable receipts.
+/// Runtime-free tools must not inherit the operator's configured model merely
+/// because one is available in the profile.
+pub fn tool_execution_model(
+    tool_name: &str,
+    input: &Value,
+    config: &V2Config,
+) -> Option<String> {
+    if !tool_wants_runtime(tool_name, input, config) {
+        return None;
+    }
+    input
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .map(str::to_string)
+        .or_else(|| config.model.clone())
+}
+
 pub(super) fn input_aware_tool_needs_runtime(tool_name: &str, input: &Value) -> bool {
     input_specific_runtime_requirement(tool_name, input).unwrap_or(false)
 }
@@ -286,6 +306,30 @@ mod tests {
             &json!({"whiteboxStatic": true})
         ));
         assert!(!tool_needs_runtime("sast:scan", &json!({})));
+    }
+
+    #[test]
+    fn execution_receipts_name_only_models_that_the_tool_will_use() {
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-5.5".to_string());
+
+        assert_eq!(
+            tool_execution_model("recon:import", &json!({}), &config),
+            None
+        );
+        assert_eq!(
+            tool_execution_model("deep-audit:run", &json!({}), &config).as_deref(),
+            Some("openai:gpt-5.5")
+        );
+        assert_eq!(
+            tool_execution_model(
+                "threat-model:build",
+                &json!({"model": "anthropic:claude-sonnet-4-6"}),
+                &config,
+            )
+            .as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
     }
 
     #[test]

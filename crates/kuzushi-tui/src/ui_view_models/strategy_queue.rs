@@ -121,7 +121,11 @@ fn strategy_queue_snapshot(app: &ShellApp, source: &StrategyQueueSource) -> Stra
             rows: vec![strategy_queue_error_row(error.clone())],
             summary: format!("could not read strategy queue: {error}"),
         },
-        ViewDataState::NotRequested | ViewDataState::Loading => StrategyQueueSnapshot {
+        ViewDataState::NotRequested => StrategyQueueSnapshot {
+            rows: Vec::new(),
+            summary: "strategy queue not generated — run `recommend`".to_string(),
+        },
+        ViewDataState::Loading => StrategyQueueSnapshot {
             rows: Vec::new(),
             summary: "strategy queue is loading".to_string(),
         },

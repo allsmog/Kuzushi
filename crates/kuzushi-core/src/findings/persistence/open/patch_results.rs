@@ -7,9 +7,11 @@ use crate::storage_v3::writer_actor::{
 
 impl FindingStore {
     pub fn insert_patch_result(&self, result: &PatchResult) -> Result<()> {
+        let cost_usd = validated_patch_cost_usd(result)?;
+        let cost_usd_micros = cost_usd.and_then(legacy_cost_usd_micros);
         let history_json =
             serde_json::to_string(&result.history).context("Could not serialize patch history")?;
-        self.record_v3_patch_attempt(result, &history_json)?;
+        self.record_v3_patch_attempt(result, &history_json, cost_usd, cost_usd_micros)?;
         Ok(())
     }
 
@@ -23,7 +25,8 @@ impl FindingStore {
             r#"
             select patch_run_id, fingerprint, repo, diff_object, diff_size_bytes, status, iterations,
                    build_command, test_command, worktree_path, cost_usd,
-                   validator_log, history_json, created_at, created_at
+                   provider_spend_unresolved, validator_log, history_json,
+                   created_at, created_at
             from patch_attempt_events
             where fingerprint = ?1
             order by seq desc
@@ -40,7 +43,13 @@ impl FindingStore {
             .collect())
     }
 
-    fn record_v3_patch_attempt(&self, result: &PatchResult, history_json: &str) -> Result<()> {
+    fn record_v3_patch_attempt(
+        &self,
+        result: &PatchResult,
+        history_json: &str,
+        cost_usd: Option<f64>,
+        cost_usd_micros: Option<i64>,
+    ) -> Result<()> {
         let target = self
             .v3_target_for_fingerprint(&result.fingerprint, "patch attempt")?
             .context("patch results require a file-backed v3 finding store")?;
@@ -62,7 +71,9 @@ impl FindingStore {
                 build_command: result.build_command.clone(),
                 test_command: result.test_command.clone(),
                 worktree_path: result.worktree_path.clone(),
-                cost_usd_micros: result.cost_usd.map(cost_usd_to_micros),
+                cost_usd,
+                cost_usd_micros,
+                provider_spend_unresolved: result.provider_spend_unresolved,
                 validator_log: result.validator_log.clone(),
                 history_json: history_json.to_string(),
                 actor: "patch-runner".to_string(),
@@ -123,9 +134,10 @@ struct StoredPatchResult {
 
 fn row_to_v3_patch_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredPatchResult> {
     let status: String = row.get(5)?;
-    let history_json: String = row.get(12)?;
-    Ok(StoredPatchResult {
-        result: PatchResult {
+    let cost_usd: Option<f64> = row.get(10)?;
+    let stored_unresolved: Option<bool> = row.get(11)?;
+    let history_json: String = row.get(13)?;
+    let result = PatchResult {
         patch_run_id: row.get(0)?,
         fingerprint: row.get(1)?,
         repo: row.get(2)?,
@@ -135,15 +147,29 @@ fn row_to_v3_patch_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredPat
         build_command: row.get(7)?,
         test_command: row.get(8)?,
         worktree_path: row.get(9)?,
-        cost_usd: row.get(10)?,
-        validator_log: row.get(11)?,
+        cost_usd,
+        provider_spend_unresolved: stored_unresolved.unwrap_or(false),
+        validator_log: row.get(12)?,
         history: serde_json::from_str::<Vec<PatchAttempt>>(&history_json)
             .map_err(|error| to_sql_error(anyhow::Error::new(error)))?,
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
-        },
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+    };
+    result.validated_cost_usd().map_err(to_sql_error)?;
+    Ok(StoredPatchResult {
+        result,
         diff_size_bytes: optional_nonnegative_u64(row, 4)?,
     })
+}
+
+fn validated_patch_cost_usd(result: &PatchResult) -> Result<Option<f64>> {
+    result.validated_cost_usd()
+}
+
+fn legacy_cost_usd_micros(cost_usd: f64) -> Option<i64> {
+    let micros = cost_usd * 1_000_000.0;
+    let rounded = micros.round();
+    (rounded.is_finite() && rounded < i64::MAX as f64).then_some(rounded as i64)
 }
 
 fn optional_nonnegative_u64(
@@ -164,4 +190,67 @@ fn optional_nonnegative_u64(
             })
         })
         .transpose()
+}
+
+#[cfg(test)]
+mod cost_tests {
+    use super::*;
+
+    #[test]
+    fn patch_cost_validation_rejects_invalid_values_without_rejecting_finite_real_values() {
+        for invalid in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(validated_patch_cost_usd(&patch_result(Some(invalid), false)).is_err());
+        }
+        assert_eq!(
+            validated_patch_cost_usd(&patch_result(Some(f64::MAX), false)).unwrap(),
+            Some(f64::MAX)
+        );
+        assert_eq!(legacy_cost_usd_micros(f64::MAX), None);
+    }
+
+    #[test]
+    fn legacy_micros_are_compatibility_only_and_do_not_replace_exact_cost() {
+        assert_eq!(legacy_cost_usd_micros(0.0), Some(0));
+        let unresolved = patch_result(Some(0.25), true);
+        assert_eq!(validated_patch_cost_usd(&unresolved).unwrap(), Some(0.25));
+        assert_eq!(legacy_cost_usd_micros(0.25), Some(250_000));
+        assert!(unresolved.validated_cost_usd().is_ok());
+    }
+
+    #[test]
+    fn legacy_row_without_cost_or_unresolved_bit_stays_unavailable_not_unresolved() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let stored = conn
+            .query_row(
+                "select 'patch-run', 'fp', '/repo', null, null, 'UNKNOWN', 0,
+                        null, null, null, null, null, null, '[]', null, null",
+                [],
+                row_to_v3_patch_result,
+            )
+            .unwrap();
+
+        assert_eq!(stored.result.cost_usd, None);
+        assert!(!stored.result.provider_spend_unresolved);
+        assert_eq!(stored.result.validated_cost_usd().unwrap(), None);
+    }
+
+    fn patch_result(cost_usd: Option<f64>, provider_spend_unresolved: bool) -> PatchResult {
+        PatchResult {
+            patch_run_id: "patch-cost-test".to_string(),
+            fingerprint: "fp-test".to_string(),
+            repo: "/repo".to_string(),
+            diff: None,
+            status: PatchStatus::Unknown,
+            iterations: 1,
+            build_command: None,
+            test_command: None,
+            worktree_path: None,
+            cost_usd,
+            provider_spend_unresolved,
+            validator_log: None,
+            history: Vec::new(),
+            created_at: None,
+            updated_at: None,
+        }
+    }
 }

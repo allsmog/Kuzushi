@@ -49,7 +49,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            read_git_remote(tmp.path()).as_deref(),
+            read_git_remote(tmp.path()).unwrap().as_deref(),
             Some("git@example.com:org/repo.git")
         );
     }
@@ -75,5 +75,27 @@ mod tests {
         let back: CacheManifest = serde_json::from_str(&s).unwrap();
         assert_eq!(back.repos.len(), 1);
         assert_eq!(back.repos[0].fingerprint.hash, "abc123");
+    }
+
+    #[test]
+    fn malformed_manifest_fails_instead_of_becoming_an_empty_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("manifest.json");
+        std::fs::write(&path, b"{").unwrap();
+
+        let error = super::super::manifest::read_manifest_path(&path).unwrap_err();
+
+        assert!(error.to_string().contains("malformed"));
+    }
+
+    #[test]
+    fn oversized_manifest_is_rejected_before_parsing() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("manifest.json");
+        std::fs::write(&path, vec![b' '; 1024 * 1024 + 1]).unwrap();
+
+        let error = super::super::manifest::read_manifest_path(&path).unwrap_err();
+
+        assert!(error.to_string().contains("1048576-byte limit"));
     }
 }

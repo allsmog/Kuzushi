@@ -12,9 +12,8 @@ pub(crate) fn normalize_deep_semantic_findings(
         return Ok((findings, artifacts));
     };
     for item in items.iter().take(max_findings) {
-        let Some((mut finding, artifact)) = item
-            .as_object()
-            .and_then(normalized_deep_semantic_item)
+        let Some((mut finding, artifact)) =
+            item.as_object().and_then(normalized_deep_semantic_item)
         else {
             continue;
         };
@@ -87,8 +86,16 @@ fn deep_semantic_start_line(object: &serde_json::Map<String, Value>) -> u32 {
     first_line_field(
         object,
         &[
-            "startLine", "start_line", "line", "lines", "anchorLine", "line_start",
-            "lineStart", "anchorLines", "lineRange", "line_range",
+            "startLine",
+            "start_line",
+            "line",
+            "lines",
+            "anchorLine",
+            "line_start",
+            "lineStart",
+            "anchorLines",
+            "lineRange",
+            "line_range",
         ],
     )
     .max(1) as u32
@@ -105,8 +112,12 @@ fn deep_semantic_hardening_notes(object: &serde_json::Map<String, Value>) -> Vec
     first_string_array_field(
         object,
         &[
-            "hardeningNotes", "missingHardening", "missing_hardening", "recommendation",
-            "recommendations", "fix",
+            "hardeningNotes",
+            "missingHardening",
+            "missing_hardening",
+            "recommendation",
+            "recommendations",
+            "fix",
         ],
     )
 }
@@ -115,7 +126,10 @@ fn deep_semantic_impact(object: &serde_json::Map<String, Value>) -> Option<Strin
     optional_string(first_string_field(
         object,
         &[
-            "impact", "exploitability", "exploitability_notes", "exploitabilityNotes",
+            "impact",
+            "exploitability",
+            "exploitability_notes",
+            "exploitabilityNotes",
         ],
     ))
 }

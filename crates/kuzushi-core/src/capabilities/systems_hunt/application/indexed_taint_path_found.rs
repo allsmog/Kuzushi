@@ -22,29 +22,6 @@ pub(crate) fn surface_warrants_taint_check(surface: &RankedSystemsSurface) -> bo
         .any(|reason| needles.iter().any(|needle| reason.contains(needle)))
 }
 
-pub(crate) fn query_systems_triggers(
-    runtime: &dyn AgentRuntime,
-    model: &str,
-    target: &Path,
-    context: &SystemsContextOutput,
-    invariants: &SystemsInvariantOutput,
-    options: &SystemsHuntInput,
-    agent_tool_policy: AgentToolPolicy,
-    thinking_level: &str,
-) -> Result<SystemsTriggerOutput> {
-    Ok(query_systems_triggers_with_cost(
-        runtime,
-        model,
-        target,
-        context,
-        invariants,
-        options,
-        agent_tool_policy,
-        thinking_level,
-    )?
-    .value)
-}
-
 pub(crate) fn query_systems_triggers_with_cost(
     runtime: &dyn AgentRuntime,
     model: &str,
@@ -60,7 +37,7 @@ pub(crate) fn query_systems_triggers_with_cost(
         AgentQueryRequest::new(
             model.to_string(),
             target.to_path_buf(),
-            SYSTEMS_TRIGGER_SYSTEM_PROMPT.to_string(),
+            options.trigger_system_prompt.clone(),
             format!(
                 "Synthesize at most {} attacker trigger hypotheses per surface. Return JSON with triggers[].\n\n\
                  For each surface you have file_path + line_number markers; use Read to fetch source as needed (line text is not embedded to keep this prompt small).\n\n\

@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+const GOVULNCHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 #[derive(Debug, Clone, Default)]
 pub struct GovulncheckScanner;
 
@@ -29,8 +31,13 @@ impl ScanEngine for GovulncheckScanner {
             .current_dir(target)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let output = crate::bounded_subprocess::output(&mut command, "govulncheck")
-            .with_context(|| "govulncheck: failed to invoke `govulncheck -json ./...`")?;
+        let output = crate::bounded_subprocess::output_with_control(
+            &mut command,
+            "govulncheck",
+            Some(cancellation),
+            GOVULNCHECK_TIMEOUT,
+        )
+        .with_context(|| "govulncheck: failed to invoke `govulncheck -json ./...`")?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("govulncheck failed: {}", stderr.trim());
@@ -247,5 +254,17 @@ mod tests {
         assert!(parse_govulncheck_json(Path::new("/repo"), "not-json\n").is_err());
         assert!(parse_govulncheck_json(Path::new("/repo"), "\n").is_err());
         assert!(parse_govulncheck_json(Path::new("/repo"), r#"{"finding":{}}"#).is_err());
+    }
+
+    #[test]
+    fn cancelled_scan_stops_before_govulncheck_preflight() {
+        let cancellation = ScanCancellation::default();
+        cancellation.cancel();
+
+        let error = GovulncheckScanner
+            .scan(Path::new("."), &cancellation)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
     }
 }

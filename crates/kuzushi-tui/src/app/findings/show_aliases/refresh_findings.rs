@@ -1,7 +1,18 @@
 use super::*;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 impl ShellApp {
+    /// Reload findings without changing the operator's active projection.
+    /// Call `refresh_findings` only when the caller explicitly wants the
+    /// unfiltered ledger and has intentionally cleared the filter.
+    pub(crate) fn refresh_findings_preserving_active_filter(&mut self, announce: bool) {
+        let Some(expression) = self.active_findings_filter().clone() else {
+            self.refresh_findings(announce);
+            return;
+        };
+        self.refresh_findings_filtered(&expression);
+    }
+
     pub(crate) fn refresh_findings(&mut self, announce: bool) {
         let store = match self.open_store() {
             Ok(store) => store,
@@ -12,7 +23,7 @@ impl ShellApp {
         };
 
         let filter = FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT);
-        let read_watermark = self.current_findings_projection_watermark();
+        let read_watermark = self.current_findings_projection_watermark(&store);
         match store.list_findings_filtered(&filter) {
             Ok(report) => self.replace_findings_from_store(
                 &store,
@@ -45,7 +56,7 @@ impl ShellApp {
             }
         };
         self.refresh_journey_ledger_counts(&store);
-        let read_watermark = self.current_findings_projection_watermark();
+        let read_watermark = self.current_findings_projection_watermark(&store);
         match store.list_findings_filtered(&filter) {
             Ok(report) => {
                 match self.filter_findings_by_provenance(report.findings, report.count, &filter) {
@@ -160,14 +171,8 @@ impl ShellApp {
         );
     }
 
-    fn current_findings_projection_watermark(&mut self) -> Option<u64> {
-        let workspace = match self.current_workspace() {
-            Ok(workspace) => workspace,
-            Err(_) => return None,
-        };
-        match kuzushi_core::storage_v3::ProjectionDb::open(workspace.findings_db_path())
-            .and_then(|db| db.meta())
-        {
+    fn current_findings_projection_watermark(&mut self, store: &FindingStore) -> Option<u64> {
+        match store.projection_meta() {
             Ok(meta) => Some(meta.applied_seq),
             Err(error) => {
                 self.log(
@@ -242,22 +247,99 @@ fn review_decisions_for_findings(
     store: &FindingStore,
     findings: &[Finding],
 ) -> Result<Vec<kuzushi_core::findings::ReviewDecisionRecord>> {
-    let mut seen = BTreeSet::new();
-    let mut decisions = Vec::new();
-    for finding in findings {
-        let Some(finding_id) = finding.id else {
-            continue;
-        };
-        for decision in store.list_review_decisions_for_finding_identity(finding_id)? {
-            if seen.insert(decision.id) {
-                decisions.push(decision);
-            }
+    store.list_review_decisions_for_findings(findings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::{Severity, V2Config};
+
+    fn filtered_workspace() -> (tempfile::TempDir, WorkspaceTarget) {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("scan-1", workspace.root(), "completed")
+            .unwrap();
+        for (rule, severity) in [("demo.high", Severity::High), ("demo.low", Severity::Low)] {
+            store
+                .insert_finding(
+                    "scan-1",
+                    &Finding::new_semgrep(rule, "src/app.rs", 1, None, severity, rule),
+                )
+                .unwrap();
         }
+        (temp, workspace)
     }
-    decisions.sort_by(|left, right| {
-        left.created_at
-            .cmp(&right.created_at)
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    Ok(decisions)
+
+    #[test]
+    fn external_refresh_preserves_active_filter_and_projection() {
+        let (_temp, workspace) = filtered_workspace();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.refresh_findings_filtered("rank:high");
+
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_finding(
+                "scan-1",
+                &Finding::new_semgrep(
+                    "demo.high.second",
+                    "src/app.rs",
+                    2,
+                    None,
+                    Severity::High,
+                    "second high finding",
+                ),
+            )
+            .unwrap();
+
+        let relative_db = workspace
+            .findings_db_path()
+            .strip_prefix(workspace.root())
+            .unwrap()
+            .to_path_buf();
+        let effects = app.apply_external_workspace_state_change(&[relative_db]);
+
+        assert!(matches!(
+            effects.as_slice(),
+            [ShellEffect::RefreshFindings(FindingsRefresh {
+                filter: Some(expression),
+                ..
+            })] if expression == "rank:high"
+        ));
+        EffectRuntime::execute(&mut app, effects);
+        assert_eq!(app.active_findings_filter().as_deref(), Some("rank:high"));
+        assert_eq!(app.findings().len(), 2);
+        assert_eq!(crate::ui_view_models::visible_findings_len(&app), 2);
+    }
+
+    #[test]
+    fn unchanged_sqlite_sidecar_event_does_not_reload_findings() {
+        let (_temp, workspace) = filtered_workspace();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.refresh_findings(false);
+
+        let effects = app.apply_external_workspace_state_change(&[PathBuf::from(
+            ".kuzushi/v3/index.sqlite3-shm",
+        )]);
+
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn findings_command_explicitly_clears_active_filter() {
+        let (_temp, workspace) = filtered_workspace();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.refresh_findings_filtered("rank:high");
+
+        let effects = app
+            .reduce_command_effects(&ShellCommand::Findings)
+            .expect("findings effects");
+        EffectRuntime::execute(&mut app, effects);
+
+        assert!(app.active_findings_filter().is_none());
+        assert_eq!(app.findings().len(), 2);
+        assert_eq!(crate::ui_view_models::visible_findings_len(&app), 2);
+    }
 }

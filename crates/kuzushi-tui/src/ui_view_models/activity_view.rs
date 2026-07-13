@@ -3,10 +3,14 @@ use super::activity_empty_state::{activity_empty_state_model, ActivityEmptyState
 use super::activity_feed_rows::ActivityFeedPaneRow;
 use super::activity_footer::{activity_footer_model, ActivityFooterModel};
 use super::activity_header::{
-    activity_header_model, ActivityHeaderModel, ActivityLiveTool, ActivityRunOutcome,
+    activity_header_model_with_queue, ActivityHeaderModel, ActivityLiveTool, ActivityRunOutcome,
 };
 use super::activity_layout::{
     activity_frame_layout, activity_plain_pane_widths, ActivityFrameLayout, ActivityPaneWidths,
+};
+use super::activity_observability::{
+    activity_heartbeat_model, activity_phase_strip_model, ActivityHeartbeatModel,
+    ActivityPhaseStripModel,
 };
 use super::activity_pane_chrome::{
     activity_pane_chrome_model, activity_plain_pane_header_model, ActivityPaneChromeModel,
@@ -129,22 +133,45 @@ fn activity_run_summary_outcome(summary: RunSummary) -> Option<ActivityRunOutcom
 /// strip no longer carries them.
 fn activity_context_line(app: &ShellApp) -> String {
     let model = super::context_strip_model(app);
+    let execution_model = activity_execution_model_label(app)
+        .unwrap_or_else(|| format!("configured {}", model.model));
     [
         format!("target:{}", model.target),
         model.context_state_segment(),
-        format!("model:{}", model.model),
+        format!("execution:{execution_model}"),
         model.findings.clone(),
     ]
     .join("  ·  ")
 }
 
+pub(crate) fn activity_execution_model_label(app: &ShellApp) -> Option<String> {
+    let session = app.activity()?;
+    if let Some(summary) = activity_run_summary(app, session) {
+        return Some(
+            summary
+                .model
+                .as_deref()
+                .map(crate::app::display_model_selector)
+                .unwrap_or_else(|| "none · runtime-free".to_string()),
+        );
+    }
+    let selected = app
+        .active_model_override()
+        .or(app.config().model.as_deref())
+        .map(crate::app::display_model_selector)
+        .unwrap_or_else(|| "none".to_string());
+    Some(format!("{selected} · receipt pending"))
+}
+
 impl<'a> ActiveActivityViewModel<'a> {
     pub(crate) fn header(&self) -> ActivityHeaderModel {
-        activity_header_model(
+        let live_tool = self.live_tool();
+        activity_header_model_with_queue(
             self.session,
             self.route,
             activity_run_outcome(self.app, self.session),
-            self.live_tool().as_ref(),
+            live_tool.as_ref(),
+            self.app.steer_queue().len(),
         )
     }
 
@@ -164,6 +191,19 @@ impl<'a> ActiveActivityViewModel<'a> {
 
     pub(crate) fn context_line(&self) -> &str {
         &self.context_line
+    }
+
+    pub(crate) fn phase_strip(&self) -> Option<ActivityPhaseStripModel> {
+        activity_phase_strip_model(self.session, self.app.running_tool_name())
+    }
+
+    pub(crate) fn heartbeat(&self, now: Instant) -> ActivityHeartbeatModel {
+        activity_heartbeat_model(
+            self.session,
+            self.app.running_tool_name(),
+            activity_session_still_running(self.app, self.session),
+            now,
+        )
     }
 
     pub(crate) fn abort_banner(&self) -> Option<String> {
@@ -203,8 +243,13 @@ impl<'a> ActiveActivityViewModel<'a> {
         widths: ActivityPaneWidths,
         now: Instant,
     ) -> Vec<ActivityPlainPaneRow> {
-        let output_rows =
-            activity_deck_plain_extra_rows(self.app, self.session, self.route, widths.feed);
+        let output_rows = activity_deck_plain_extra_rows(
+            self.app,
+            self.session,
+            self.route,
+            widths.feed,
+            self.app.running_tool_name(),
+        );
         activity_plain_pane_rows(
             self.session,
             self.route,
@@ -259,6 +304,7 @@ impl<'a> ActiveActivityViewModel<'a> {
             width,
             self.app.running_tool_name(),
             activity_abort_pending(self.app),
+            self.app.input_mode(),
         )
     }
 }
@@ -322,6 +368,7 @@ mod tests {
             DagTaskRow::queued("context:build".into(), "context".into(), Vec::new()),
         );
         app.set_activity(Some(session));
+        app.set_input_mode(crate::InputMode::Navigate);
 
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {
             panic!("expected active activity model");
@@ -334,7 +381,7 @@ mod tests {
         );
         assert_eq!(model.pane_chrome().dag.block_title, "── TASKS ──");
         assert!(!model.plain_pane_rows(widths, Instant::now()).is_empty());
-        assert!(model.footer(80).body.contains("hover [j/k]"));
+        assert!(model.footer(80).body.contains("[j/k] select"));
     }
 
     #[test]
@@ -354,6 +401,7 @@ mod tests {
         )
         .unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
         app.set_activity(Some(ActivitySession::new("run-finished")));
 
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {
@@ -371,6 +419,37 @@ mod tests {
     }
 
     #[test]
+    fn scanner_only_activity_labels_execution_as_runtime_free() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        kuzushi_core::write_run_summary(
+            workspace.root(),
+            &RunSummary::running(
+                "run-static",
+                "scan",
+                Some("sast:scan".to_string()),
+                workspace.root().display().to_string(),
+            )
+            .complete(),
+        )
+        .unwrap();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-5.5".to_string());
+        let mut app = ShellApp::new(config, Some(&workspace));
+        app.hydrate_all_view_data_for_test();
+        app.set_activity(Some(ActivitySession::new("run-static")));
+
+        let ActivityViewModel::Active(model) = activity_view_model(&app) else {
+            panic!("expected active activity model");
+        };
+
+        assert!(model
+            .context_line()
+            .contains("execution:none · runtime-free"));
+        assert!(!model.context_line().contains("execution:openai"));
+    }
+
+    #[test]
     fn activity_header_uses_partial_run_reason_from_summary() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
@@ -385,6 +464,7 @@ mod tests {
         summary.error = Some("triage stage did not complete".to_string());
         kuzushi_core::write_run_summary(workspace.root(), &summary).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
         app.set_activity(Some(ActivitySession::new("run-partial")));
 
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {

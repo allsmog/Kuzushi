@@ -1,5 +1,5 @@
-use super::*;
 use super::normalize_systems_hunt_candidate::*;
+use super::*;
 
 pub(crate) fn normalize_systems_hunt_findings(
     raw: Value,
@@ -19,7 +19,11 @@ pub(crate) fn normalize_systems_hunt_findings(
             continue;
         };
         if candidate.is_under_evidenced() {
-            artifacts.push(write_rejected_candidate(target, artifact_root, candidate.object)?);
+            artifacts.push(write_rejected_candidate(
+                target,
+                artifact_root,
+                candidate.object,
+            )?);
             continue;
         }
 

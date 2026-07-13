@@ -76,6 +76,7 @@ fn sample_drawer() -> DrawerContent {
 fn sample_model() -> WorkbenchModel {
     WorkbenchModel {
         findings: sample_findings(),
+        has_selected_finding: true,
         selected: 0,
         flow_title: Some("CWE-89 · high".to_string()),
         legs: sample_legs(),
@@ -136,6 +137,7 @@ fn plain_projection_shows_finding_depth_text() {
 fn empty_model_renders_guidance_not_a_panic() {
     let model = WorkbenchModel {
         findings: vec![],
+        has_selected_finding: false,
         selected: 0,
         flow_title: None,
         legs: vec![],

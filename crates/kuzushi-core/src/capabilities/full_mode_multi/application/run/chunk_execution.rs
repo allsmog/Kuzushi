@@ -4,15 +4,19 @@ use crate::capabilities::full_mode_multi::application::chunk_prompt::{
 };
 use crate::capabilities::full_mode_multi::domain::{ChunkPlan, FullModeConfig};
 use crate::findings::Finding;
-use crate::runtime::AgentQueryRequest;
+use crate::runtime::{AgentQueryRequest, RuntimeCostReport};
 use crate::spend::{Operation, SpendLimiter, SpendTicket};
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
+use crate::structured_output::{
+    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
+    StructuredOutputError,
+};
 use anyhow::{Context, Result};
 
 pub(super) struct FullModeChunkResult {
     pub(super) succeeded: bool,
     pub(super) findings: Vec<Finding>,
-    pub(super) cost_usd: f64,
+    pub(super) cost_usd: Option<f64>,
+    pub(super) observed_cost_usd: f64,
     /// Full anyhow chain string for a failed chunk. `None` for successes.
     /// The dispatcher keeps the first one and surfaces it to the operator
     /// so we don't repeat the "27 chunks failed, no diagnostic info" trap.
@@ -27,11 +31,12 @@ pub(super) fn run_full_mode_chunk(
     model: &str,
     system_prompt: &str,
 ) -> Result<FullModeChunkResult> {
+    let prompt = render_chunk_prompt(&cfg.workspace_root, chunk)?;
     let ticket = reserve_full_mode_chunk_budget(spend, cfg.deposit_usd_per_chunk)?;
-    let result = query_full_mode_chunk(runtime, cfg, chunk, model, system_prompt);
-    let actual_cost = successful_chunk_cost(&result, cfg.deposit_usd_per_chunk);
-    refund_full_mode_chunk_budget(spend, ticket, actual_cost)?;
-    Ok(chunk_result_from_query(result, actual_cost))
+    let result = query_full_mode_chunk(runtime, cfg, model, system_prompt, prompt);
+    let cost = chunk_cost_report(&result)?;
+    settle_full_mode_chunk_budget(spend, ticket, cost.exact_usd())?;
+    Ok(chunk_result_from_query(result, cost))
 }
 
 fn reserve_full_mode_chunk_budget(
@@ -50,30 +55,10 @@ fn reserve_full_mode_chunk_budget(
 fn query_full_mode_chunk(
     runtime: &RoutedRuntime<'_>,
     cfg: &FullModeConfig,
-    chunk: &ChunkPlan,
-    model: &str,
-    system_prompt: &str,
-) -> Result<Vec<Finding>> {
-    let prompt = render_chunk_prompt(&cfg.workspace_root, chunk)?;
-    if let Ok(findings) =
-        query_full_mode_chunk_with_prompt(runtime, cfg, model, system_prompt, prompt.clone())
-    {
-        return Ok(findings);
-    }
-    let repair_prompt = format!(
-        "{prompt}\n\nIMPORTANT: return strict JSON only that matches FullModeFindingArray. \
-         No prose, no markdown fences, no commentary."
-    );
-    query_full_mode_chunk_with_prompt(runtime, cfg, model, system_prompt, repair_prompt)
-}
-
-fn query_full_mode_chunk_with_prompt(
-    runtime: &RoutedRuntime<'_>,
-    cfg: &FullModeConfig,
     model: &str,
     system_prompt: &str,
     prompt: String,
-) -> Result<Vec<Finding>> {
+) -> Result<CostedStructuredJson<Vec<Finding>>> {
     let request = AgentQueryRequest::new(
         model.to_string(),
         cfg.workspace_root.clone(),
@@ -81,7 +66,7 @@ fn query_full_mode_chunk_with_prompt(
         prompt,
     );
 
-    query_required_structured_json(
+    query_required_structured_json_with_cost(
         runtime,
         request,
         StructuredJsonContract::new(
@@ -93,37 +78,46 @@ fn query_full_mode_chunk_with_prompt(
     )
 }
 
-fn successful_chunk_cost(result: &Result<Vec<Finding>>, deposit_usd: f64) -> f64 {
-    if result.is_ok() {
-        deposit_usd
-    } else {
-        0.0
+fn chunk_cost_report(
+    result: &Result<CostedStructuredJson<Vec<Finding>>>,
+) -> Result<RuntimeCostReport> {
+    match result {
+        Ok(costed) => costed.cost_report(),
+        Err(error) => Ok(error
+            .downcast_ref::<StructuredOutputError>()
+            .map(StructuredOutputError::cost_report)
+            .unwrap_or(RuntimeCostReport::INCOMPLETE_ZERO)),
     }
 }
 
-fn refund_full_mode_chunk_budget(
+fn settle_full_mode_chunk_budget(
     spend: Option<&SpendLimiter>,
     ticket: Option<SpendTicket>,
-    actual_cost: f64,
+    actual_cost: Option<f64>,
 ) -> Result<()> {
-    if let (Some(limiter), Some(ticket)) = (spend, ticket) {
+    if let (Some(limiter), Some(ticket), Some(actual_cost)) = (spend, ticket, actual_cost) {
         limiter.refund(ticket, actual_cost)?;
     }
     Ok(())
 }
 
-fn chunk_result_from_query(result: Result<Vec<Finding>>, actual_cost: f64) -> FullModeChunkResult {
+fn chunk_result_from_query(
+    result: Result<CostedStructuredJson<Vec<Finding>>>,
+    cost: RuntimeCostReport,
+) -> FullModeChunkResult {
     match result {
-        Ok(findings) => FullModeChunkResult {
+        Ok(costed) => FullModeChunkResult {
             succeeded: true,
-            findings,
-            cost_usd: actual_cost,
+            findings: costed.value,
+            cost_usd: cost.exact_usd(),
+            observed_cost_usd: cost.observed_usd(),
             error: None,
         },
         Err(error) => FullModeChunkResult {
             succeeded: false,
             findings: Vec::new(),
-            cost_usd: 0.0,
+            cost_usd: cost.exact_usd(),
+            observed_cost_usd: cost.observed_usd(),
             // `{:#}` walks the full anyhow chain so the dispatcher's
             // operator-facing summary keeps the bridge / provider cause
             // (e.g. "Anthropic API 429" or "Cannot find package

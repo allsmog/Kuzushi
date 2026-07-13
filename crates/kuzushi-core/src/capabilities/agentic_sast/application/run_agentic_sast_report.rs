@@ -1,6 +1,7 @@
 use super::*;
 
-const AGENTIC_SAST_HEADER: &str = "You are Kuzushi's agentic SAST scanner. You find concrete application-security \
+const AGENTIC_SAST_HEADER: &str =
+    "You are Kuzushi's agentic SAST scanner. You find concrete application-security \
 vulnerabilities in local repositories using only source-grounded evidence.";
 
 const AGENTIC_SAST_STATIC_RULES: &str = "Static-only rules:
@@ -55,6 +56,7 @@ pub(crate) fn run_agentic_sast_report(
         result.value,
         persisted,
         result.cost_usd,
+        result.cost_usd_exact,
     ))
 }
 
@@ -66,9 +68,13 @@ fn collect_agentic_sast_findings(
 ) -> Result<CostedStructuredJson<Vec<Finding>>> {
     let mut result = query_agentic_sast_with_scope(runtime, run, ctx, parent_step)?;
     emit_agentic_sast_validation_count(ctx, parent_step, result.value.len());
+    let initial_cost = result.cost_report()?;
     let review = review_agentic_sast_with_scope(runtime, run, result.value, ctx, parent_step)?;
+    let cost =
+        initial_cost.checked_add(review.cost_report()?, "agentic SAST hunt plus review cost")?;
     result.value = review.value;
-    result.cost_usd += review.cost_usd;
+    result.cost_usd = cost.observed_usd();
+    result.cost_usd_exact = cost.is_complete();
     Ok(result)
 }
 
@@ -99,6 +105,7 @@ fn review_agentic_sast_with_scope(
         return Ok(CostedStructuredJson {
             value: findings,
             cost_usd: 0.0,
+            cost_usd_exact: true,
         });
     }
     let _validation_scope =
@@ -110,6 +117,7 @@ fn review_agentic_sast_with_scope(
     Ok(CostedStructuredJson {
         value: findings,
         cost_usd: review.cost_usd,
+        cost_usd_exact: review.cost_usd_exact,
     })
 }
 
@@ -128,6 +136,7 @@ fn agentic_sast_report(
     findings: Vec<Finding>,
     persisted: Option<AgenticSastPersistedRun>,
     cost_usd: f64,
+    cost_usd_exact: bool,
 ) -> AgenticSastReport {
     AgenticSastReport {
         target: run.target.display().to_string(),
@@ -135,6 +144,7 @@ fn agentic_sast_report(
         findings,
         persisted,
         cost_usd,
+        cost_usd_exact,
     }
 }
 
@@ -196,7 +206,10 @@ fn emit_agentic_sast_persisted(
 ) {
     if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
         let label = match persisted {
-            Some(run) => format!("persist findings: {finding_count} saved to {}", run.findings_db),
+            Some(run) => format!(
+                "persist findings: {finding_count} saved to {}",
+                run.findings_db
+            ),
             None => "persist findings: skipped without workspace store".to_string(),
         };
         let _ = trace
@@ -274,7 +287,12 @@ fn agentic_sast_prompt_from_input(
     let Some(value) = optional_nonempty_string(input, "AGENTIC_SAST_PROMPT")? else {
         return Ok(agentic_sast_system_prompt(whitebox_static));
     };
-    crate::options::resolve_prompt_override_for_key(&value, target, "AGENTIC_SAST_PROMPT")
+    crate::options::resolve_prepared_prompt_override_for_key(
+        &value,
+        target,
+        "AGENTIC_SAST_PROMPT",
+        &agentic_sast_system_prompt_text(),
+    )
 }
 
 #[cfg(test)]

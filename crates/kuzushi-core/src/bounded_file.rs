@@ -182,7 +182,57 @@ fn open_no_follow(path: &Path) -> io::Result<fs::File> {
         .open(path)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn open_no_follow(path: &Path) -> io::Result<fs::File> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::MetadataExt;
+    use std::os::windows::io::FromRawHandle;
+    use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+
+    let wide_path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT;
+    let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    let handle = unsafe {
+        CreateFileW(
+            wide_path.as_ptr(),
+            GENERIC_READ,
+            share,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            flags,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let file = unsafe { fs::File::from_raw_handle(handle) };
+    reject_windows_reparse_attributes(path, file.metadata()?.file_attributes())?;
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn reject_windows_reparse_attributes(path: &Path, attributes: u32) -> io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("refusing to follow reparse point {}", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_no_follow(path: &Path) -> io::Result<fs::File> {
     fs::File::open(path)
 }
@@ -331,5 +381,39 @@ mod tests {
         symlink(&outside, &link).unwrap();
 
         assert!(read_source_text_prefix(&link, 1024).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn exact_read_does_not_follow_windows_file_symlinks() {
+        use std::os::windows::fs::symlink_file;
+        let temp = tempfile::tempdir().unwrap();
+        let outside = temp.path().join("outside.txt");
+        let link = temp.path().join("link.txt");
+        fs::write(&outside, "secret").unwrap();
+        if let Err(error) = symlink_file(&outside, &link) {
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            return;
+        }
+
+        let error = read_regular_bytes(&link, 1024).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(!error.to_string().contains("secret"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_reparse_attribute_is_rejected_deterministically() {
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+        let error = reject_windows_reparse_attributes(
+            Path::new("process-identity.json"),
+            FILE_ATTRIBUTE_REPARSE_POINT,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(reject_windows_reparse_attributes(Path::new("regular.json"), 0).is_ok());
     }
 }

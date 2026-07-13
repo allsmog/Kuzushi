@@ -89,10 +89,19 @@ impl ToolDescriptor {
                 self.name
             )
         }
+        self.validate_prompt_options("built-in tool")?;
+        Ok(())
+    }
+
+    pub(in crate::modules) fn validate_prompt_options(&self, kind: &str) -> Result<()> {
         for prompt in &self.prompts {
-            if !self.options.iter().any(|option| option.name == prompt.option_key) {
+            if !self
+                .options
+                .iter()
+                .any(|option| option.name == prompt.option_key)
+            {
                 anyhow::bail!(
-                    "built-in tool {:?} prompt {:?} refers to undeclared option {:?}",
+                    "{kind} {:?} prompt {:?} refers to undeclared option {:?}",
                     self.name,
                     prompt.role,
                     prompt.option_key

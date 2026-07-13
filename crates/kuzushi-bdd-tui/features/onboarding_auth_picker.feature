@@ -16,7 +16,7 @@ Feature: Auth-method picker
     And I see "Offline demo"
     And the status segment shows "auth-picker:anthropic"
 
-  Scenario: Esc on the auth picker defers and goes to Workbench
+  Scenario: q on the auth picker leaves setup for Workbench
     Given a fresh kuzushi workspace
     And no model is configured
     When I launch the shell
@@ -24,6 +24,6 @@ Feature: Auth-method picker
     And I press "Down"
     And I press "Down"
     And I press "Enter"
-    And I press "Esc"
+    And I press "q"
     Then I see "AIM - ATTACK SURFACE"
     And the status segment shows "workbench"

@@ -61,6 +61,7 @@ pub fn write_workspace_state_file(
     let root = root.as_ref();
     let relative = relative.as_ref();
     ensure_state_relative(relative, "writes")?;
+    initialize_workspace_state(root)?;
     write_workspace_file(root, relative, contents)
 }
 

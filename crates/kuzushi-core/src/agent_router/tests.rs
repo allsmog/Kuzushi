@@ -39,6 +39,7 @@ mod tests {
                 confidence: 0.0,
                 rationale: "test".to_string(),
                 cost_usd: 0.0,
+                cost_usd_exact: true,
             })
         }
     }

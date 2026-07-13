@@ -706,6 +706,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
                 confidence: 0.88,
                 rationale: "source and sink are linked".to_string(),
                 cost_usd: 0.01,
+                cost_usd_exact: true,
             },
         )
         .unwrap();
@@ -740,6 +741,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
             test_command: Some("pnpm test".to_string()),
             worktree_path: None,
             cost_usd: Some(0.0),
+            provider_spend_unresolved: false,
             validator_log: None,
             history: Vec::new(),
             created_at: None,

@@ -49,9 +49,19 @@ pub(crate) fn render_cost_line(input: &PrCommentInput) -> String {
         .map(|d| format!(" in {d}"))
         .unwrap_or_default();
     let phase_costs = render_phase_costs(&input.phase_costs);
+    let total_label = if input.provider_spend_unresolved {
+        "observed total"
+    } else {
+        "total"
+    };
+    let unresolved = if input.provider_spend_unresolved {
+        " · provider spend unresolved"
+    } else {
+        ""
+    };
     format!(
-        "💸 total **${:.2}**{elapsed}{phase_costs}",
-        input.cost_usd.max(0.0)
+        "💸 {total_label} **${:.2}**{elapsed}{phase_costs}{unresolved}",
+        input.cost_usd.max(0.0),
     )
 }
 

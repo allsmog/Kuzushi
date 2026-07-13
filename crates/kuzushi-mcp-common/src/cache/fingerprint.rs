@@ -2,7 +2,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use super::read_bounded_file;
 use super::sha256::sha256_hex_bytes;
+
+const MAX_GIT_CONFIG_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -15,7 +18,7 @@ pub struct RepoFingerprint {
 pub fn repo_hash(path: &Path) -> Result<RepoFingerprint> {
     let canonical = std::fs::canonicalize(path)
         .with_context(|| format!("could not canonicalize {}", path.display()))?;
-    let git_remote = read_git_remote(&canonical);
+    let git_remote = read_git_remote(&canonical)?;
     let hash = sha256_hex(&repo_hash_input(&canonical, git_remote.as_deref()));
 
     Ok(RepoFingerprint {
@@ -34,13 +37,14 @@ fn repo_hash_input(canonical: &Path, git_remote: Option<&str>) -> String {
     input
 }
 
-pub(crate) fn read_git_remote(repo: &Path) -> Option<String> {
+pub(crate) fn read_git_remote(repo: &Path) -> Result<Option<String>> {
     let head_config = repo.join(".git").join("config");
-    if !head_config.exists() {
-        return None;
-    }
-    let raw = std::fs::read_to_string(&head_config).ok()?;
-    origin_remote_url(&raw)
+    let Some(raw) = read_bounded_file(&head_config, MAX_GIT_CONFIG_BYTES)? else {
+        return Ok(None);
+    };
+    let raw = String::from_utf8(raw)
+        .with_context(|| format!("Git config is not UTF-8: {}", head_config.display()))?;
+    Ok(origin_remote_url(&raw))
 }
 
 fn origin_remote_url(raw: &str) -> Option<String> {

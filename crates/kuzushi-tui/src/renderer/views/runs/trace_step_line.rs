@@ -86,5 +86,53 @@ pub(crate) fn alias_reference_lines(app: &ShellApp, area: Rect) -> Vec<Line<'sta
     for row in model.rows {
         lines.push(detail(&row.alias, &row.detail));
     }
+    if model.overflow_count > 0 {
+        lines.push(muted(&fit(
+            &format!(
+                "  +{} more aliases · findings to view all",
+                model.overflow_count
+            ),
+            area.width as usize,
+        )));
+    }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::{Finding, Severity, V2Config};
+
+    #[test]
+    fn alias_reference_lines_disclose_overflow() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        *app.findings_mut() = (0..5)
+            .map(|index| {
+                Finding::new_semgrep(
+                    format!("demo.rule.{index}"),
+                    "src/app.rs",
+                    index + 1,
+                    None,
+                    Severity::High,
+                    format!("finding {index}"),
+                )
+            })
+            .collect();
+
+        let text = alias_reference_lines(&app, Rect::new(0, 0, 80, 12))
+            .iter()
+            .map(rendered_line_text)
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("+2 more aliases"), "{text}");
+        assert!(text.contains("findings to view all"), "{text}");
+    }
+
+    fn rendered_line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
 }

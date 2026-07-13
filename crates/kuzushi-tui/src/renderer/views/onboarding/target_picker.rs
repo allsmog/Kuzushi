@@ -5,6 +5,9 @@ pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
     let intro = target_picker_intro(area.width);
     let consent = target_consent_lines(app, area.width);
     let footer = target_picker_footer(area.width);
+    if intro.len() + consent.len() + footer.len() + 1 > area.height as usize {
+        return compact_target_picker_lines(app, area);
+    }
     let candidate_budget = (area.height as usize)
         .saturating_sub(intro.len() + consent.len() + footer.len())
         .max(1);
@@ -17,6 +20,44 @@ pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
     lines.extend(consent);
     lines.extend(footer);
     lines
+}
+
+fn compact_target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        divider("CHOOSE A TARGET", area.width),
+        muted(&fit(
+            "Pick explicitly · cwd is never assumed",
+            area.width as usize,
+        )),
+    ];
+    let consent = compact_target_consent_line(app, area.width);
+    let footer = compact_target_footer();
+    let fixed_rows = lines.len() + consent.len() + footer.len();
+    let candidate_budget = (area.height as usize).saturating_sub(fixed_rows).max(1);
+    lines.extend(target_candidate_window_lines(
+        app,
+        area.width,
+        candidate_budget,
+    ));
+    lines.extend(consent);
+    lines.extend(footer);
+    lines
+}
+
+fn compact_target_consent_line(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    app.router
+        .target_picker()
+        .selected()
+        .map(|candidate| target_identity_line("Enter selects", &candidate.path, width as usize))
+        .into_iter()
+        .collect()
+}
+
+fn compact_target_footer() -> Vec<Line<'static>> {
+    vec![
+        muted(" ↑/↓ move · Enter select · d demo"),
+        muted(" Esc browse · : command"),
+    ]
 }
 
 fn target_picker_intro(width: u16) -> Vec<Line<'static>> {

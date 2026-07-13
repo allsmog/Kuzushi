@@ -2826,13 +2826,16 @@ fn run_patch_finding_reaches_langgraph_runtime_bridge_and_persists() {
     assert_eq!(patch_results[0].status.as_str(), "SOUND");
 }
 
+#[cfg(unix)]
 #[test]
 fn run_patch_finding_without_model_fails_without_silent_fallback() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
-    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(repo.join("src")).unwrap();
     std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(repo.join("src/db.ts"), "const query = req.query.q;\n").unwrap();
+    init_git_repo(&repo);
     let finding = seed_triaged_finding(&repo);
 
     let output = kuzushi_command(&home)

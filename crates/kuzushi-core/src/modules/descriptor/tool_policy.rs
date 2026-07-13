@@ -15,13 +15,18 @@ pub enum ToolEffect {
     WorkspaceWrite,
     /// Modifies files that belong to the target repository.
     TargetWrite,
+    /// Executes repository-selected commands in an isolated validation copy.
+    RepositoryExecute,
     /// Acts on an external host or service.
     ExternalAction,
 }
 
 impl ToolEffect {
     pub const fn needs_operator_approval(self) -> bool {
-        matches!(self, Self::TargetWrite | Self::ExternalAction)
+        matches!(
+            self,
+            Self::TargetWrite | Self::RepositoryExecute | Self::ExternalAction
+        )
     }
 }
 
@@ -147,6 +152,20 @@ pub(in crate::modules) const fn target_write_policy(
     )
 }
 
+pub(in crate::modules) const fn repository_execute_policy(
+    phase: ToolPhase,
+    runtime_requirement: RuntimeRequirement,
+    finding_store_requirement: FindingStoreRequirement,
+) -> ToolPolicy {
+    ToolPolicy::new(
+        phase,
+        runtime_requirement,
+        ToolEffect::RepositoryExecute,
+        WorkspaceRequirement::Required,
+        finding_store_requirement,
+    )
+}
+
 pub(in crate::modules) const fn external_action_policy(
     phase: ToolPhase,
     runtime_requirement: RuntimeRequirement,
@@ -167,7 +186,11 @@ mod tests {
 
     #[test]
     fn mutating_effects_derive_explicit_approval() {
-        for effect in [ToolEffect::TargetWrite, ToolEffect::ExternalAction] {
+        for effect in [
+            ToolEffect::TargetWrite,
+            ToolEffect::RepositoryExecute,
+            ToolEffect::ExternalAction,
+        ] {
             let policy = ToolPolicy::new(
                 ToolPhase::Fix,
                 RuntimeRequirement::Never,

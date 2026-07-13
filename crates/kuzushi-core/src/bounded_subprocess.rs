@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
+use std::fs::File;
 use std::io::Read;
 use std::process::{Command, Output, Stdio};
 use std::thread;
@@ -60,6 +61,16 @@ pub(crate) fn output_with_control(
     controlled_output(command, label, None, cancellation, timeout)
 }
 
+pub(crate) fn output_with_limits_and_control(
+    command: &mut Command,
+    label: &str,
+    stdout_limit: usize,
+    stderr_limit: usize,
+    timeout: Duration,
+) -> Result<Output> {
+    controlled::controlled_output_with_limits(command, label, stdout_limit, stderr_limit, timeout)
+}
+
 pub(crate) fn output_with_input_and_control(
     command: &mut Command,
     label: &str,
@@ -68,6 +79,26 @@ pub(crate) fn output_with_input_and_control(
     timeout: Duration,
 ) -> Result<Output> {
     controlled_output(command, label, Some(input), cancellation, timeout)
+}
+
+pub(crate) fn output_with_input_to_file_and_control(
+    command: &mut Command,
+    label: &str,
+    input: Vec<u8>,
+    stdout: File,
+    stdout_limit: u64,
+    cancellation: Option<&crate::scan::ScanCancellation>,
+    timeout: Duration,
+) -> Result<Output> {
+    controlled::controlled_output_to_file(
+        command,
+        label,
+        Some(input),
+        stdout,
+        stdout_limit,
+        cancellation,
+        timeout,
+    )
 }
 
 pub(crate) fn timeout_from_input(
@@ -122,6 +153,7 @@ pub(crate) fn drain_bounded(mut reader: impl Read, limit: usize, stream: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Seek;
 
     #[cfg(unix)]
     #[test]
@@ -153,6 +185,25 @@ mod tests {
 
         assert!(error.contains("deadline"), "{error}");
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn controlled_output_honors_explicit_capture_limits() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "printf '123456789'"]);
+
+        let error = output_with_limits_and_control(
+            &mut command,
+            "bounded controlled fixture",
+            4,
+            4,
+            Duration::from_secs(5),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("capture limit"), "{error}");
     }
 
     #[cfg(unix)]
@@ -222,5 +273,52 @@ mod tests {
 
         assert!(zero.contains("greater than zero"));
         assert!(excessive.contains("must not exceed"));
+    }
+
+    #[test]
+    fn controlled_output_can_stream_stdout_to_an_open_file() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "cat"]);
+        let mut output = tempfile::tempfile().unwrap();
+
+        let result = output_with_input_to_file_and_control(
+            &mut command,
+            "stream fixture",
+            b"streamed output".to_vec(),
+            output.try_clone().unwrap(),
+            1024,
+            None,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        output.rewind().unwrap();
+        let mut body = String::new();
+        output.read_to_string(&mut body).unwrap();
+
+        assert!(result.status.success());
+        assert!(result.stdout.is_empty());
+        assert_eq!(body, "streamed output");
+    }
+
+    #[test]
+    fn streamed_stdout_stops_at_the_file_limit() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "cat"]);
+        let output = tempfile::tempfile().unwrap();
+
+        let error = output_with_input_to_file_and_control(
+            &mut command,
+            "bounded stream fixture",
+            b"too much output".to_vec(),
+            output.try_clone().unwrap(),
+            4,
+            None,
+            Duration::from_secs(5),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("exceeded"), "{error}");
+        assert!(output.metadata().unwrap().len() <= 4);
     }
 }

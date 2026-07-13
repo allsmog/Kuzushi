@@ -1,9 +1,14 @@
 use super::export_markdown_bundle::write_markdown_bundle;
 use super::export_metadata::{workspace_export_metadata_value, workspace_export_omitted_fields};
-use super::export_projection::workspace_finding_export_records_with_context;
+use super::export_projection::{
+    workspace_finding_export_positions, workspace_finding_export_records_at_positions,
+    WorkspaceFindingExportPosition,
+};
 use super::export_projection_model::{WorkspaceFindingExportRecord, WorkspaceRunExportContext};
 use super::export_review_context::WorkspaceFindingReviewContext;
-use super::export_sarif::findings_to_sarif;
+use super::export_sarif::{
+    findings_to_sarif, findings_to_sarif_with_benchmark_spend, SarifBenchmarkSpend,
+};
 use super::*;
 use crate::findings::ReviewDecisionRecord;
 use crate::run_artifacts::load_run_summary;
@@ -40,6 +45,31 @@ pub fn export_scan_findings_sarif(
     output_path: impl AsRef<Path>,
     run_ids: &[String],
 ) -> Result<WorkspaceFindingsExport> {
+    export_scan_findings_sarif_inner(workspace, output_path, run_ids, None)
+}
+
+/// Scan-specific SARIF export with the canonical aggregate spend receipt when
+/// the terminal summary recorded one. A missing cost stays missing so the
+/// benchmark harness can reject it instead of silently inventing zero spend.
+///
+/// `aggregate_run_id` must name the outer scan run. Its terminal `run.json`
+/// already includes child-tool spend, so child summaries are deliberately not
+/// summed here.
+pub fn export_scan_findings_sarif_with_run_summary(
+    workspace: &WorkspaceTarget,
+    output_path: impl AsRef<Path>,
+    run_ids: &[String],
+    aggregate_run_id: &str,
+) -> Result<WorkspaceFindingsExport> {
+    export_scan_findings_sarif_inner(workspace, output_path, run_ids, Some(aggregate_run_id))
+}
+
+fn export_scan_findings_sarif_inner(
+    workspace: &WorkspaceTarget,
+    output_path: impl AsRef<Path>,
+    run_ids: &[String],
+    aggregate_run_id: Option<&str>,
+) -> Result<WorkspaceFindingsExport> {
     let output_path = output_path.as_ref();
     validate_workspace_findings_output_path(output_path, WorkspaceExportFormat::Sarif)?;
     reconcile_suppressions_for_export(workspace)?;
@@ -47,20 +77,136 @@ pub fn export_scan_findings_sarif(
     let prepared = prepare_scan_findings_export(workspace, run_ids, options)?;
     ensure_empty_export_is_allowed(&prepared.records, options)?;
     ensure_workspace_export_parent(output_path)?;
-    write_workspace_findings_export(
+    let benchmark_spend = aggregate_run_id
+        .map(|run_id| benchmark_spend_for_scan(workspace, run_ids, run_id))
+        .transpose()?
+        .flatten();
+    let body = findings_to_sarif_with_benchmark_spend(
         workspace,
-        &prepared.findings,
         &prepared.records,
-        WorkspaceExportFormat::Sarif,
-        output_path,
         options,
         prepared.total_count,
+        benchmark_spend.as_ref(),
+        aggregate_run_id,
     )?;
+    fs::write(output_path, body)
+        .with_context(|| format!("Could not write {}", output_path.display()))?;
     Ok(WorkspaceFindingsExport {
         output_path: output_path.to_path_buf(),
         format: WorkspaceExportFormat::Sarif,
         count: prepared.records.len(),
     })
+}
+
+fn benchmark_spend_for_scan(
+    workspace: &WorkspaceTarget,
+    run_ids: &[String],
+    aggregate_run_id: &str,
+) -> Result<Option<SarifBenchmarkSpend>> {
+    if !run_ids.iter().any(|run_id| run_id == aggregate_run_id) {
+        anyhow::bail!(
+            "benchmark aggregate run {aggregate_run_id:?} is not part of this scan export"
+        );
+    }
+    let summary = load_run_summary(workspace.root(), aggregate_run_id)?;
+    ensure_terminal_benchmark_summary(&summary)?;
+    let Some(total_cost_usd) = summary.checked_cost_report()?.exact_usd() else {
+        return Ok(None);
+    };
+    let audit = benchmark_audit_for_runs(workspace, run_ids)?;
+    Ok(Some(SarifBenchmarkSpend {
+        run_id: aggregate_run_id.to_string(),
+        total_cost_usd,
+        models: audit.models,
+        llm_call_count: audit.llm_call_count,
+        llm_audit_complete: audit.complete,
+        config_hash: summary.config_hash.clone(),
+    }))
+}
+
+struct BenchmarkAuditEvidence {
+    models: Vec<String>,
+    llm_call_count: usize,
+    complete: bool,
+}
+
+fn benchmark_audit_for_runs(
+    workspace: &WorkspaceTarget,
+    run_ids: &[String],
+) -> Result<BenchmarkAuditEvidence> {
+    let mut seen = BTreeSet::new();
+    let mut models = BTreeSet::new();
+    let mut llm_call_count = 0usize;
+    let mut complete = true;
+    for run_id in run_ids {
+        if !seen.insert(run_id) {
+            continue;
+        }
+        let summary = load_run_summary(workspace.root(), run_id)?;
+        ensure_terminal_benchmark_summary(&summary)?;
+        complete &= summary.trace_malformed_lines.unwrap_or(0) == 0;
+        let cost = summary.checked_cost_report()?;
+        complete &= cost.is_complete() || cost.is_unavailable();
+        llm_call_count = llm_call_count
+            .checked_add(attempted_benchmark_call_count(&summary))
+            .context("benchmark model-call count overflow")?;
+        collect_benchmark_models(&summary, &mut models)?;
+    }
+    if llm_call_count > 1_000_000 || models.len() > 64 {
+        anyhow::bail!("benchmark model-call evidence exceeds the published receipt bounds");
+    }
+    Ok(BenchmarkAuditEvidence {
+        models: models.into_iter().collect(),
+        llm_call_count,
+        complete,
+    })
+}
+
+fn collect_benchmark_models(
+    summary: &crate::run_artifacts::RunSummary,
+    models: &mut BTreeSet<String>,
+) -> Result<()> {
+    for call in summary
+        .llm_calls
+        .iter()
+        .filter(|call| benchmark_call_was_attempted(call))
+    {
+        let model = call.model.trim();
+        if model.is_empty() {
+            anyhow::bail!(
+                "benchmark run {:?} has a model call without model identity",
+                summary.run_id
+            );
+        }
+        models.insert(model.to_string());
+    }
+    Ok(())
+}
+
+fn attempted_benchmark_call_count(summary: &crate::run_artifacts::RunSummary) -> usize {
+    summary
+        .llm_calls
+        .iter()
+        .filter(|call| benchmark_call_was_attempted(call))
+        .count()
+}
+
+fn benchmark_call_was_attempted(call: &crate::run_artifacts::RunLlmCallAudit) -> bool {
+    call.call_attempted != Some(false)
+}
+
+fn ensure_terminal_benchmark_summary(summary: &crate::run_artifacts::RunSummary) -> Result<()> {
+    if matches!(
+        summary.status.as_str(),
+        "completed" | "partial" | "skipped" | "failed" | "canceled" | "interrupted"
+    ) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "benchmark aggregate run {:?} is not terminal (status={})",
+        summary.run_id,
+        summary.status
+    )
 }
 
 pub fn export_workspace_findings_with_options(
@@ -146,6 +292,12 @@ struct PreparedWorkspaceFindingsExport {
     total_count: usize,
 }
 
+struct FilteredWorkspaceFindings {
+    findings: Vec<Finding>,
+    reviews: Vec<Option<WorkspaceFindingReviewContext>>,
+    positions: Vec<WorkspaceFindingExportPosition>,
+}
+
 fn prepare_workspace_findings_export(
     workspace: &WorkspaceTarget,
     options: WorkspaceExportOptions,
@@ -154,12 +306,18 @@ fn prepare_workspace_findings_export(
     let all_findings = store.list_findings(FindingListFilter::MAX_LIMIT)?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
     let total_count = all_findings.len();
-    let (findings, reviews) =
-        filter_export_findings(all_findings, all_reviews, options.completeness);
-    let run_contexts = workspace_run_export_contexts(workspace, &findings);
-    let records = workspace_finding_export_records_with_context(&findings, &reviews, &run_contexts);
+    let positions = workspace_finding_export_positions(&all_findings);
+    let filtered =
+        filter_export_findings(all_findings, all_reviews, positions, options.completeness);
+    let run_contexts = workspace_run_export_contexts(workspace, &filtered.findings);
+    let records = workspace_finding_export_records_at_positions(
+        &filtered.findings,
+        &filtered.reviews,
+        &run_contexts,
+        &filtered.positions,
+    );
     Ok(PreparedWorkspaceFindingsExport {
-        findings,
+        findings: filtered.findings,
         records,
         total_count,
     })
@@ -174,12 +332,18 @@ fn prepare_scan_findings_export(
     let all_findings = findings_for_run_ids(&store, run_ids)?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
     let total_count = all_findings.len();
-    let (findings, reviews) =
-        filter_export_findings(all_findings, all_reviews, options.completeness);
-    let run_contexts = scan_run_export_contexts(workspace, &findings, run_ids);
-    let records = workspace_finding_export_records_with_context(&findings, &reviews, &run_contexts);
+    let positions = workspace_finding_export_positions(&all_findings);
+    let filtered =
+        filter_export_findings(all_findings, all_reviews, positions, options.completeness);
+    let run_contexts = scan_run_export_contexts(workspace, &filtered.findings, run_ids);
+    let records = workspace_finding_export_records_at_positions(
+        &filtered.findings,
+        &filtered.reviews,
+        &run_contexts,
+        &filtered.positions,
+    );
     Ok(PreparedWorkspaceFindingsExport {
-        findings,
+        findings: filtered.findings,
         records,
         total_count,
     })
@@ -397,15 +561,22 @@ fn workspace_findings_to_json(
 fn filter_export_findings(
     findings: Vec<Finding>,
     reviews: Vec<Option<WorkspaceFindingReviewContext>>,
+    positions: Vec<WorkspaceFindingExportPosition>,
     completeness: WorkspaceExportCompleteness,
-) -> (Vec<Finding>, Vec<Option<WorkspaceFindingReviewContext>>) {
-    findings
-        .into_iter()
-        .zip(reviews)
-        .filter(|(finding, review)| {
-            finding_matches_export_completeness(finding, review.as_ref(), completeness)
-        })
-        .unzip()
+) -> FilteredWorkspaceFindings {
+    let mut filtered = FilteredWorkspaceFindings {
+        findings: Vec::new(),
+        reviews: Vec::new(),
+        positions: Vec::new(),
+    };
+    for ((finding, review), position) in findings.into_iter().zip(reviews).zip(positions) {
+        if finding_matches_export_completeness(&finding, review.as_ref(), completeness) {
+            filtered.findings.push(finding);
+            filtered.reviews.push(review);
+            filtered.positions.push(position);
+        }
+    }
+    filtered
 }
 
 fn effective_review_contexts(

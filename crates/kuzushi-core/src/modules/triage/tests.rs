@@ -146,8 +146,8 @@ mod tests {
             workspace: None,
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let input = TriageRunInput::from_tool_input(
@@ -297,8 +297,8 @@ authorization: Default::default(),
         let second = run_triage_stage2(&store, &runtime, &input, &config, vec![finding]).unwrap();
 
         assert_eq!(*runtime.calls.lock().unwrap(), 1);
-        assert_eq!(first.total_cost, 0.01);
-        assert_eq!(second.total_cost, 0.0);
+        assert_eq!(first.cost_report().exact_usd(), Some(0.01));
+        assert_eq!(second.cost_report().exact_usd(), Some(0.0));
         assert_eq!(second.results[0]["cached"], json!(true));
     }
 
@@ -424,7 +424,8 @@ authorization: Default::default(),
             &mut stats,
             latest,
             runtime_outcome(true_positive_outcome()),
-        );
+        )
+        .unwrap();
 
         for scan_id in ["scan-a", "scan-z"] {
             let stored = store.list_findings_for_scan_id(scan_id).unwrap();
@@ -449,15 +450,18 @@ authorization: Default::default(),
             dropped: 0,
         };
         let mut stats = TriageRunStats::default();
-        stats.record_persisted_outcome(
-            finding_with(Severity::High, "semgrep", "sql injection"),
-            TriageOutcome {
-                verdict: TriageVerdict::TruePositive,
-                confidence: 0.8,
-                rationale: "reachable sink".to_string(),
-                cost_usd: 0.01,
-            },
-        );
+        stats
+            .record_persisted_outcome(
+                finding_with(Severity::High, "semgrep", "sql injection"),
+                TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.8,
+                    rationale: "reachable sink".to_string(),
+                    cost_usd: 0.01,
+                    cost_usd_exact: true,
+                },
+            )
+            .unwrap();
 
         let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
 
@@ -467,6 +471,87 @@ authorization: Default::default(),
             json!("true_positive")
         );
         assert!(response["warnings"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn triage_response_preserves_unresolved_provider_spend() {
+        let (input, config, stage1) = one_finding_triage_context();
+        let mut stats = TriageRunStats::default();
+        stats
+            .record_persisted_outcome(
+                finding_with(Severity::High, "semgrep", "sql injection"),
+                TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.8,
+                    rationale: "reachable sink".to_string(),
+                    cost_usd: 0.0,
+                    cost_usd_exact: false,
+                },
+            )
+            .unwrap();
+
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+
+        assert!(response.get("costUsd").is_none());
+        assert_eq!(response["observedCostUsd"], json!(0.0));
+        assert_eq!(response["providerSpendUnresolved"], json!(true));
+        assert!(response["data"].get("costUsd").is_none());
+        assert_eq!(
+            response["data"]["results"][0]["observedCostUsd"],
+            json!(0.0)
+        );
+        assert_eq!(
+            response["data"]["stages"][1]["providerSpendUnresolved"],
+            json!(true)
+        );
+        assert!(triage_cost_cap_reached(Some(1.0), stats.cost_report()));
+        assert!(!triage_cost_cap_reached(None, stats.cost_report()));
+    }
+
+    #[test]
+    fn triage_response_preserves_explicit_reported_zero() {
+        let (input, config, stage1) = one_finding_triage_context();
+        let mut stats = TriageRunStats::default();
+        stats
+            .record_persisted_outcome(
+                finding_with(Severity::High, "semgrep", "sql injection"),
+                TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.8,
+                    rationale: "reachable sink".to_string(),
+                    cost_usd: 0.0,
+                    cost_usd_exact: true,
+                },
+            )
+            .unwrap();
+
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+
+        assert_eq!(response["costUsd"], json!(0.0));
+        assert_eq!(response["data"]["costUsd"], json!(0.0));
+        assert_eq!(response["data"]["results"][0]["costUsd"], json!(0.0));
+        assert_eq!(response["data"]["stages"][1]["costUsd"], json!(0.0));
+        assert!(!triage_cost_cap_reached(Some(1.0), stats.cost_report()));
+    }
+
+    fn one_finding_triage_context() -> (
+        TriageRunInput,
+        TriageExecutionConfig,
+        PrefilteredTriageFindings,
+    ) {
+        (
+            TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap(),
+            TriageExecutionConfig::new(
+                PathBuf::from("/repo"),
+                "anthropic:claude-sonnet-4-6".to_string(),
+            ),
+            PrefilteredTriageFindings {
+                total: 1,
+                kept_count: 1,
+                kept: Vec::new(),
+                dropped: 0,
+            },
+        )
     }
 
     #[test]
@@ -503,6 +588,7 @@ authorization: Default::default(),
             confidence: 0.9,
             rationale: "confirmed once".to_string(),
             cost_usd: 0.01,
+            cost_usd_exact: true,
         }
     }
 

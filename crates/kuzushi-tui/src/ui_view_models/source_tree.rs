@@ -51,11 +51,9 @@ pub(crate) enum SourceTreeComponentTier {
 pub(crate) fn source_tree_model(app: &ShellApp) -> SourceTreeModel {
     let base = target_base(app);
     build_source_tree_with_components(
-        projected_visible_findings(app)
-            .into_iter()
-            .map(|projected| {
-                relativize_location(projected.finding.file_path.clone(), base.as_deref())
-            }),
+        projected_visible_findings(app).iter().map(|projected| {
+            relativize_location(projected.finding.file_path.clone(), base.as_deref())
+        }),
         component_roots(app),
     )
 }

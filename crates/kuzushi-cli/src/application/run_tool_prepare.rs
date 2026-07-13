@@ -7,7 +7,7 @@ use kuzushi_core::run_artifacts::{
 };
 use kuzushi_core::{
     config_hash, load_config_for_target, new_run_id, AutonomyPosture, FindingStore, ModuleRegistry,
-    ToolExecutionContext, ToolOptionStore, WorkspaceTarget,
+    PreparedToolInput, ToolExecutionContext, ToolOptionStore, WorkspaceTarget,
 };
 use std::path::{Path, PathBuf};
 
@@ -17,7 +17,7 @@ pub(crate) struct PreparedCliToolRun {
     pub(crate) config: kuzushi_core::V2Config,
     pub(crate) store: Option<FindingStore>,
     pub(crate) registry: ModuleRegistry,
-    pub(crate) input: serde_json::Value,
+    pub(crate) input: PreparedToolInput,
     pub(crate) artifact_target: PathBuf,
     pub(crate) run_id: String,
 }
@@ -58,7 +58,7 @@ pub(crate) fn prepare_cli_tool_run(
     let option_store = setup.option_store(&input, &options)?;
     let input = setup.prepare_input(input, &option_store)?;
     let store = setup.finding_store(&input)?;
-    setup.start(&input)?;
+    setup.start(input.value())?;
     Ok(setup.into_prepared(input, store))
 }
 
@@ -128,6 +128,7 @@ impl CliToolRunBootstrap {
             options,
         )?;
         let artifact_target = cli_tool_run_artifact_target(workspace.as_ref())?;
+        initialize_cli_artifact_target(&artifact_target)?;
         Ok(Self {
             tool,
             workspace,
@@ -204,6 +205,11 @@ impl CliToolRunBootstrap {
     }
 }
 
+fn initialize_cli_artifact_target(target: &Path) -> Result<()> {
+    WorkspaceTarget::new(target)?.ensure_state_dir()?;
+    Ok(())
+}
+
 fn require_dynamic_invocation_workspace(
     registry: &ModuleRegistry,
     tool: &str,
@@ -258,7 +264,7 @@ impl CliToolRunSetup {
         &self,
         input: serde_json::Value,
         option_store: &ToolOptionStore,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<PreparedToolInput> {
         let ctx = ToolExecutionContext {
             config: &self.config,
             workspace: self.workspace.as_ref(),
@@ -268,18 +274,18 @@ impl CliToolRunSetup {
             authorization: Default::default(),
         };
         self.registry
-            .prepare_tool_input_for_dispatch(&self.tool, input.clone(), &ctx, Some(option_store))
+            .prepare_dispatch_input(&self.tool, input.clone(), &ctx, Some(option_store))
             .map_err(|error| {
                 let message = error.to_string();
                 error_with_persistence(error, self.record_prepare_failure(&input, &message))
             })
     }
 
-    fn finding_store(&self, input: &serde_json::Value) -> Result<Option<FindingStore>> {
+    fn finding_store(&self, input: &PreparedToolInput) -> Result<Option<FindingStore>> {
         open_cli_tool_finding_store(self.workspace.as_ref(), &self.registry, &self.tool).map_err(
             |error| {
                 let message = error.to_string();
-                error_with_persistence(error, self.record_prepare_failure(input, &message))
+                error_with_persistence(error, self.record_prepare_failure(input.value(), &message))
             },
         )
     }
@@ -288,7 +294,7 @@ impl CliToolRunSetup {
         try_record_tool_run_started_with_reproducibility(
             ToolRunRecord::new(&self.artifact_target, &self.run_id, "run", &self.tool),
             input,
-            self.config.model.clone(),
+            kuzushi_core::tool_execution_model(&self.tool, input, &self.config),
             config_hash(&self.config).ok(),
             self.registry.loaded_module_specifiers(),
         )
@@ -304,7 +310,7 @@ impl CliToolRunSetup {
 
     fn into_prepared(
         self,
-        input: serde_json::Value,
+        input: PreparedToolInput,
         store: Option<FindingStore>,
     ) -> PreparedCliToolRun {
         PreparedCliToolRun {
@@ -352,7 +358,7 @@ fn record_cli_tool_run_started(
     try_record_tool_run_started_with_reproducibility(
         ToolRunRecord::new(target, run_id, "run", tool),
         input,
-        config.model.clone(),
+        kuzushi_core::tool_execution_model(tool, input, config),
         config_hash(config).ok(),
         loaded_modules,
     )
@@ -377,6 +383,18 @@ mod resolve_cli_autonomy_tests {
         approve_dynamic_module, worker_protocol::Grant, AutonomyPosture, DynamicModuleLoadOptions,
         GuidedPhase, ModuleRegistry, V2Config,
     };
+
+    fn decode_first_repo_record(prompt: &str) -> kuzushi_core::prompts::UntrustedRecord {
+        let start = prompt
+            .find(kuzushi_core::prompts::UNTRUSTED_REPO_BEGIN)
+            .unwrap();
+        let framed = &prompt[start..];
+        let end = framed
+            .find(kuzushi_core::prompts::UNTRUSTED_REPO_END)
+            .unwrap()
+            + kuzushi_core::prompts::UNTRUSTED_REPO_END.len();
+        kuzushi_core::prompts::decode_untrusted_record(&framed[..end]).unwrap()
+    }
 
     #[test]
     fn absent_flag_keeps_the_config_default() {
@@ -507,6 +525,7 @@ export default {
         assert_eq!(run.artifact_target, canonical_target);
         assert!(run.workspace.is_some());
         assert!(run.store.is_some());
+        assert!(target.path().join(".kuzushi/.gitignore").is_file());
     }
 
     #[test]
@@ -528,7 +547,10 @@ export default {
 
         let canonical_target = explicit.path().canonicalize().unwrap();
         assert_eq!(run.artifact_target, canonical_target);
-        assert_eq!(run.input["target"], canonical_target.display().to_string());
+        assert_eq!(
+            run.input.value()["target"],
+            canonical_target.display().to_string()
+        );
     }
 
     #[test]
@@ -579,7 +601,47 @@ export default {
             run.artifact_target,
             workspace.path().canonicalize().unwrap()
         );
-        assert_eq!(run.input["target"], "10.0.0.5");
+        assert_eq!(run.input.value()["target"], "10.0.0.5");
+    }
+
+    #[test]
+    fn cli_launch_keeps_path_like_hydrated_prompt_as_prepared_input() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("review.md"), "nested.md").unwrap();
+        std::fs::write(target.path().join("nested.md"), "wrong second hydration").unwrap();
+
+        let run = prepare_cli_tool_run(
+            "triage:run".to_string(),
+            serde_json::json!({
+                "fingerprint": "receipt-test-finding",
+                "TRIAGE_PROMPT": "review.md"
+            })
+            .to_string(),
+            Vec::new(),
+            None,
+            Some(target.path().to_path_buf()),
+            Vec::new(),
+        )
+        .unwrap();
+
+        let prepared_prompt = run.input.value()["TRIAGE_PROMPT"].as_str().unwrap();
+        assert!(prepared_prompt.starts_with(kuzushi_core::runtime::DEFAULT_TRIAGE_PROMPT));
+        let record = decode_first_repo_record(prepared_prompt);
+        assert_eq!(record.label, "review.md");
+        assert_eq!(record.content, "nested.md");
+        let ctx = kuzushi_core::ToolExecutionContext {
+            config: &run.config,
+            workspace: run.workspace.as_ref(),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let second_pass = run
+            .registry
+            .prepare_dispatch_input("triage:run", run.input.value().clone(), &ctx, None)
+            .unwrap();
+        assert_eq!(second_pass.value()["TRIAGE_PROMPT"], prepared_prompt);
     }
 
     #[test]

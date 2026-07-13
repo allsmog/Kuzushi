@@ -113,8 +113,8 @@ export interface ToolOptionStore {
 // WorkspaceHandle — minimal WorkspaceManager surface
 
 // The individual store types are re-declared here as opaque object types so
-// modules can describe them without importing the concrete `better-sqlite3`-
-// backed stores. Host `WorkspaceManager` stores satisfy these structurally
+// modules can describe them without importing a concrete database driver's
+// store types. Host `WorkspaceManager` stores satisfy these structurally
 // because the parameter shapes are assignable (`object` / record-wider types)
 // and the return values are treated as opaque `unknown` on the module side.
 
@@ -160,8 +160,8 @@ export interface WorkspaceHandle {
   readonly vulns: WorkspaceVulnStore;
   readonly notes: WorkspaceNoteStore;
   /**
-   * Escape hatch — raw `better-sqlite3` handle. Typed as `unknown` in the
-   * public surface because the sqlite type isn't part of the module SDK
+   * Escape hatch — raw workspace database handle. Typed as `unknown` in the
+   * public surface because the concrete database type isn't part of the module SDK
    * contract; host code that needs it casts.
    */
   rawDb(): unknown;

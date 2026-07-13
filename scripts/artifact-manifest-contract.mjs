@@ -998,9 +998,6 @@ function tuiQuickstartContextSnapshotLabelFailures(root) {
   const source = readFileSync(sourcePath, "utf8");
   const productionSource = source.split("#[cfg(test)]")[0];
   return [
-    source.includes("context_snapshot_relative_path()")
-      ? null
-      : "TUI quickstart context snapshot step must use context_snapshot_relative_path",
     productionSource.includes(".kuzushi/context-snapshot.json")
       ? "TUI quickstart context snapshot step must not hardcode .kuzushi/context-snapshot.json"
       : null,

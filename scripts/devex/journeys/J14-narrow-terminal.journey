@@ -26,14 +26,12 @@ keys: Enter
 wait-for: 10 KUMI-KATA
 snap: narrow-planning-gate
 expect: Target confirmed
-expect: Inline action
+expect: Focused: Gather repo context
 expect: Enter:
 expect: Space check
 expect: Enter run
 expect-not: tool descriptor missing
 ask: Planning at 60x20 — are the selected tasks, exact Enter outcome, and controls all visible without internal or mid-word cropping?
-keys: Down
-wait: 0.1
 keys: Down
 wait: 0.1
 keys: Down

@@ -1,4 +1,6 @@
 use super::*;
+use crate::runtime::{RuntimeCost, RuntimeCostReport};
+use std::fmt;
 
 #[derive(Debug, Clone)]
 pub(crate) struct StructuredJsonContract {
@@ -40,9 +42,63 @@ impl StructuredJsonContract {
 #[derive(Debug, Clone)]
 pub(crate) struct CostedStructuredJson<T> {
     pub(crate) value: T,
+    /// Checked observed subtotal. Consult `cost_report` before presenting it
+    /// as the complete provider cost.
     pub(crate) cost_usd: f64,
+    pub(crate) cost_usd_exact: bool,
 }
 
+impl<T> CostedStructuredJson<T> {
+    pub(crate) fn from_cost_report(value: T, cost: RuntimeCostReport) -> Self {
+        Self {
+            value,
+            cost_usd: cost.observed_usd(),
+            cost_usd_exact: cost.is_complete(),
+        }
+    }
+
+    pub(crate) fn cost_report(&self) -> Result<RuntimeCostReport> {
+        let observed = RuntimeCost::from_usd(self.cost_usd, "structured-output observed cost")?;
+        Ok(if self.cost_usd_exact {
+            RuntimeCostReport::known(observed)
+        } else {
+            RuntimeCostReport::incomplete(observed)
+        })
+    }
+}
+
+/// Structured-output failure with the provider spend observed before the
+/// failure. `provider_spend_unresolved` is true when a paid call failed before
+/// returning usage, so callers must retain their conservative reservation.
+#[derive(Debug)]
+pub(crate) struct StructuredOutputError {
+    source: anyhow::Error,
+    cost: RuntimeCostReport,
+}
+
+impl StructuredOutputError {
+    pub(crate) fn from_source_and_cost(source: anyhow::Error, cost: RuntimeCostReport) -> Self {
+        Self { source, cost }
+    }
+
+    pub(crate) fn cost_report(&self) -> RuntimeCostReport {
+        self.cost
+    }
+}
+
+impl fmt::Display for StructuredOutputError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{:#}", self.source)
+    }
+}
+
+impl std::error::Error for StructuredOutputError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn query_required_structured_json<T>(
     runtime: &dyn AgentRuntime,
     request: AgentQueryRequest,
@@ -59,14 +115,15 @@ pub(crate) fn query_required_structured_json_with_cost<T>(
     validate: impl Fn(Value) -> Result<T>,
 ) -> Result<CostedStructuredJson<T>> {
     let request = request.with_structured_output(contract.runtime_contract());
-    let response = runtime.query_blocking(request.clone())?;
+    let response = crate::runtime::query_blocking_checked(runtime, request.clone())
+        .map_err(unknown_provider_failure)?;
     parse_or_repair_required_structured_json_with_cost(
         response,
         contract,
         validate,
         |repair_prompt, output| {
             let repair_request = repair_request_from(&request, repair_prompt, output);
-            runtime.query_blocking(repair_request)
+            crate::runtime::query_blocking_checked(runtime, repair_request)
         },
     )
 }
@@ -84,12 +141,10 @@ pub(crate) fn repair_request_from(
     )
     .with_tool_policy(request.tool_policy.clone())
     .with_structured_output(output);
-    if let Some(thinking_level) = request.thinking_level.clone() {
-        repair_request = repair_request.with_thinking_level(thinking_level);
-    }
-    if let Some(max_output_tokens) = request.max_output_tokens {
-        repair_request = repair_request.with_max_output_tokens(max_output_tokens);
-    }
+    repair_request.thinking_level = request.thinking_level.clone();
+    repair_request.max_output_tokens = request.max_output_tokens;
+    repair_request.runtime_options = request.runtime_options.clone();
+    repair_request.temperature = request.temperature;
     repair_request
 }
 
@@ -112,14 +167,13 @@ pub(crate) fn parse_or_repair_required_structured_json_with_cost<T>(
     validate: impl Fn(Value) -> Result<T>,
     repair: impl FnOnce(String, AgentStructuredOutput) -> Result<AgentQueryResponse>,
 ) -> Result<CostedStructuredJson<T>> {
-    let initial_cost = response.cost_usd;
-    match parse_and_validate(&response, &contract, &validate) {
-        Ok(value) => Ok(CostedStructuredJson {
-            value,
-            cost_usd: initial_cost,
-        }),
+    let initial_cost = checked_response_cost(&response, RuntimeCostReport::INCOMPLETE_ZERO)?;
+    let initial_material = checked_response_material(&response, initial_cost)?;
+    match parse_and_validate_measured(&response, &contract, &validate) {
+        Ok(value) => Ok(CostedStructuredJson::from_cost_report(value, initial_cost)),
         Err(initial_error) => repair_structured_json_response(
             response,
+            initial_material,
             &contract,
             &validate,
             repair,
@@ -131,26 +185,29 @@ pub(crate) fn parse_or_repair_required_structured_json_with_cost<T>(
 
 fn repair_structured_json_response<T>(
     response: AgentQueryResponse,
+    initial_material: ResponseMaterial,
     contract: &StructuredJsonContract,
     validate: &impl Fn(Value) -> Result<T>,
     repair: impl FnOnce(String, AgentStructuredOutput) -> Result<AgentQueryResponse>,
-    initial_cost: f64,
+    initial_cost: RuntimeCostReport,
     initial_error: anyhow::Error,
 ) -> Result<CostedStructuredJson<T>> {
     if response.truncated {
-        return Err(truncation_error(contract, &response, &initial_error));
+        let error = truncation_error(contract, &response, &initial_error, &initial_material)
+            .context("Could not render bounded structured-output truncation evidence")
+            .map_err(|error| observed_failure(error, initial_cost))?;
+        return Err(observed_failure(error, initial_cost));
     }
-    let raw = raw_agent_response(&response);
-    let repair_response = repair(
-        build_repair_prompt(contract, &raw, &initial_error.to_string()),
-        contract.runtime_contract(),
-    )?;
+    let repair_prompt = build_repair_prompt(contract, &initial_material, &initial_error)
+        .map_err(|error| observed_failure(error, initial_cost))?;
+    let repair_response = repair(repair_prompt, contract.runtime_contract())
+        .map_err(|error| unresolved_provider_failure(error, initial_cost))?;
     parse_repaired_response(
         contract,
         validate,
         initial_cost,
         initial_error,
-        raw,
+        initial_material,
         repair_response,
     )
 }
@@ -158,72 +215,93 @@ fn repair_structured_json_response<T>(
 fn parse_repaired_response<T>(
     contract: &StructuredJsonContract,
     validate: &impl Fn(Value) -> Result<T>,
-    initial_cost: f64,
+    initial_cost: RuntimeCostReport,
     initial_error: anyhow::Error,
-    raw: String,
+    initial_material: ResponseMaterial,
     repair_response: AgentQueryResponse,
 ) -> Result<CostedStructuredJson<T>> {
+    let repair_cost = checked_response_cost(&repair_response, initial_cost)?;
+    let total_cost = initial_cost
+        .checked_add(repair_cost, "structured-output initial plus repair cost")
+        .map_err(|error| unresolved_provider_failure(error, initial_cost))?;
+    let repair_material = checked_response_material(&repair_response, total_cost)?;
     if repair_response.truncated {
-        return Err(truncation_error(contract, &repair_response, &initial_error));
+        let error = truncation_error(contract, &repair_response, &initial_error, &repair_material)
+            .context("Could not render bounded structured-output truncation evidence")
+            .map_err(|error| observed_failure(error, total_cost))?;
+        return Err(observed_failure(error, total_cost));
     }
-    let repair_cost = repair_response.cost_usd;
-    let value = parse_and_validate(&repair_response, contract, validate).with_context(|| {
-        repair_failure_message(contract, &initial_error, &raw, &repair_response)
-    })?;
-    Ok(CostedStructuredJson {
-        value,
-        cost_usd: initial_cost + repair_cost,
-    })
+    match parse_and_validate_measured(&repair_response, contract, validate) {
+        Ok(value) => Ok(CostedStructuredJson::from_cost_report(value, total_cost)),
+        Err(repair_error) => {
+            let error = repair_failure_error(
+                contract,
+                &initial_error,
+                &initial_material,
+                &repair_error,
+                &repair_material,
+            )
+            .context("Could not render bounded structured-output repair evidence")
+            .map_err(|error| observed_failure(error, total_cost))?;
+            Err(observed_failure(error, total_cost))
+        }
+    }
 }
 
-fn repair_failure_message(
-    contract: &StructuredJsonContract,
-    initial_error: &anyhow::Error,
-    raw: &str,
-    repair_response: &AgentQueryResponse,
-) -> String {
-    let repair_raw = raw_agent_response(repair_response);
-    format!(
-        "{tool} could not satisfy structured JSON contract `{schema}` after one repair pass.\n\
-         Initial parse/validation failure: {initial_error}\n\
-         Repair parse/validation failure is above.\n\
-         Raw initial model response:\n{raw}\n\
-         Raw repair model response:\n{repair_raw}",
-        tool = contract.tool_name,
-        schema = contract.schema_name,
-    )
-}
-
-fn truncation_error(
-    contract: &StructuredJsonContract,
+fn checked_response_material(
     response: &AgentQueryResponse,
-    initial_error: &anyhow::Error,
-) -> anyhow::Error {
-    let raw = raw_agent_response(response);
-    let stop_reason = response.stop_reason.as_deref().unwrap_or("length");
-    anyhow::anyhow!(
-        "{tool} response was truncated by the per-call output-token cap \
-         (stopReason: {stop_reason:?}); the partial JSON cannot satisfy \
-         contract `{schema}`. Remediation: raise `AgentQueryRequest::max_output_tokens` \
-         (or set `maxOutputTokens` in the tool input), reduce the requested output \
-         size such as `maxFindings`, or shorten the prompt. \
-         Initial parse/validation failure: {initial_error}\n\
-         Raw partial response (truncated):\n{raw}",
-        tool = contract.tool_name,
-        schema = contract.schema_name,
-    )
+    observed_cost: RuntimeCostReport,
+) -> Result<ResponseMaterial> {
+    let material = ResponseMaterial::from_response(response)
+        .map_err(|error| observed_failure(error, observed_cost))?;
+    material
+        .ensure_within_budget()
+        .map_err(|error| observed_failure(error, observed_cost))?;
+    Ok(material)
 }
 
-pub(crate) fn parse_and_validate<T>(
+fn checked_response_cost(
+    response: &AgentQueryResponse,
+    observed_cost: RuntimeCostReport,
+) -> Result<RuntimeCostReport> {
+    response
+        .checked_cost_report()
+        .map_err(|error| unresolved_provider_failure(error, observed_cost))
+}
+
+fn unknown_provider_failure(error: anyhow::Error) -> anyhow::Error {
+    unresolved_provider_failure(error, RuntimeCostReport::INCOMPLETE_ZERO)
+}
+
+fn unresolved_provider_failure(
+    source: anyhow::Error,
+    observed_cost: RuntimeCostReport,
+) -> anyhow::Error {
+    StructuredOutputError {
+        source,
+        cost: observed_cost.mark_incomplete(),
+    }
+    .into()
+}
+
+fn observed_failure(source: anyhow::Error, observed_cost: RuntimeCostReport) -> anyhow::Error {
+    StructuredOutputError {
+        source,
+        cost: observed_cost,
+    }
+    .into()
+}
+
+fn parse_and_validate_measured<T>(
     response: &AgentQueryResponse,
     contract: &StructuredJsonContract,
     validate: &impl Fn(Value) -> Result<T>,
 ) -> Result<T> {
-    let value = structured_json_value(response, contract)?;
+    let value = structured_json_value_measured(response, contract)?;
     validate(value)
 }
 
-pub(crate) fn structured_json_value(
+fn structured_json_value_measured(
     response: &AgentQueryResponse,
     contract: &StructuredJsonContract,
 ) -> Result<Value> {

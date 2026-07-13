@@ -1,498 +1,250 @@
 #!/usr/bin/env tsx
 
-/**
- * Benchmark evaluation harness for Kuzushi.
- *
- * Usage:
- *   tsx benchmarks/harness.ts --dataset benchmarks/owasp-benchmark --sarif results.sarif
- *   tsx benchmarks/harness.ts --dataset benchmarks/owasp-benchmark --run
- *   tsx benchmarks/harness.ts --dataset benchmarks/owasp-benchmark --run --config '{"tasks":"semgrep"}'
- */
+/** Evaluate complete Kuzushi SARIF output against a ground-truth dataset. */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 import chalk from "chalk";
+import { assertDatasetCheckout } from "./benchmark-dataset-checkout.js";
+import { assertExecutionMatchesDeclaration } from "./benchmark-execution-evidence.js";
+import { withMaterializedCorpus } from "./benchmark-materialized-corpus.js";
+import {
+  assertConfigMatchesDeclaration,
+  buildResultProvenance,
+  loadProvenanceInput,
+} from "./benchmark-provenance.js";
+import { loadBenchmarkSarif } from "./benchmark-sarif.js";
+import { parseScanConfigArgument, scanConfigArgs } from "./benchmark-scan-config.js";
+import { recordedBenchmarkSpend } from "./benchmark-spend.js";
+import { loadGroundTruth } from "./ground-truth.js";
+import {
+  DEFAULT_LINE_TOLERANCE,
+  evaluateBenchmark,
+  MAX_LINE_TOLERANCE,
+  parseLineTolerance,
+} from "./scoring.js";
 import type {
   BenchmarkMetrics,
-  CweMetrics,
+  BenchmarkProvenanceInput,
+  BenchmarkScanConfig,
   GroundTruthDataset,
-  GroundTruthEntry,
-  MatchResult,
-  SarifLog,
-  SarifResult,
 } from "./types.js";
 
-const CONFIG_ARG_FLAGS = [
-  ["mode", "--mode"],
-  ["tasks", "--tasks"],
-  ["failOn", "--fail-on"],
-  ["budget", "--budget"],
-] as const;
-
-// ── CLI argument parsing ──
-
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const cliArgs = process.argv.slice(2);
+if (cliArgs[0] === "--") cliArgs.shift();
 const { values: args } = parseArgs({
+  args: cliArgs,
   options: {
     dataset: { type: "string", short: "d" },
     sarif: { type: "string", short: "s" },
     run: { type: "boolean", default: false },
     config: { type: "string", short: "c" },
     output: { type: "string", short: "o" },
-    "line-tolerance": { type: "string", default: "10" },
+    provenance: { type: "string", short: "p" },
+    "line-tolerance": { type: "string", default: String(DEFAULT_LINE_TOLERANCE) },
     help: { type: "boolean", short: "h", default: false },
   },
   strict: true,
 });
 
-if (args.help || !args.dataset) {
+if (args.help || !args.dataset || !args.provenance) {
+  printHelp();
+  process.exit(args.help ? 0 : 1);
+}
+
+function printHelp(): void {
   console.log(`
 ${chalk.bold("Kuzushi Benchmark Harness")}
 
 ${chalk.yellow("Usage:")}
-  tsx benchmarks/harness.ts --dataset <path> [--sarif <path>] [--run] [--config <json>]
+  tsx benchmarks/harness.ts --dataset <path> --provenance <path> [--sarif <path> | --run]
 
 ${chalk.yellow("Options:")}
-  -d, --dataset <path>       Path to benchmark dataset directory (must contain ground-truth.json)
-  -s, --sarif <path>         Path to existing SARIF file to evaluate
-  --run                      Run kuzushi scan first, then evaluate
-  -c, --config <json>        JSON config overrides for kuzushi scan
+  -d, --dataset <path>       Dataset directory containing ground-truth.json
+  -s, --sarif <path>         Existing deterministic-fixture SARIF to evaluate
+  --run                      Run kuzushi scan first (required for real-model mode)
+  -c, --config <json>        Exact harness scan config (required with --run)
   -o, --output <path>        Write JSON metrics to this path
-  --line-tolerance <n>       Line proximity tolerance for matching (default: 10)
+  -p, --provenance <path>    Explicit execution/model/config provenance declaration
+  --line-tolerance <n>       Match tolerance, 0..${MAX_LINE_TOLERANCE} (default: ${DEFAULT_LINE_TOLERANCE})
   -h, --help                 Show this help
 `);
-  process.exit(args.help ? 0 : 1);
 }
 
-const LINE_TOLERANCE = parseInt(args["line-tolerance"] ?? "10", 10);
-
-// ── Load ground truth ──
-
-function loadGroundTruth(datasetDir: string): GroundTruthDataset {
-  const gtPath = join(datasetDir, "ground-truth.json");
-  if (!existsSync(gtPath)) {
-    console.error(chalk.red(`Ground truth not found: ${gtPath}`));
-    console.error(
-      "Run the dataset's convert script first (e.g. tsx benchmarks/owasp-benchmark/convert-ground-truth.ts)",
-    );
-    process.exit(1);
-  }
-  return JSON.parse(readFileSync(gtPath, "utf-8")) as GroundTruthDataset;
-}
-
-// ── Load / generate SARIF ──
-
-function loadSarif(sarifPath: string): SarifLog {
-  const raw = readFileSync(sarifPath, "utf-8");
-  return JSON.parse(raw) as SarifLog;
-}
-
-function runKuzushiScan(
-  repoDir: string,
-  sarifOutputPath: string,
-  configOverrides?: string,
-): { durationMs: number } {
-  const cliPath = resolve(__dirname, "../bin/kuzushi-rs.mjs");
-  const cmdArgs = [
-    "scan",
-    repoDir,
-    "--tasks",
-    "semgrep",
-    "--sarif",
-    sarifOutputPath,
-    ...configArgs(configOverrides),
-  ];
-
-  console.log(
-    chalk.blue(`Running: ${redactCommandArgs([process.execPath, cliPath, ...cmdArgs]).join(" ")}`),
+async function main(): Promise<void> {
+  const declaration = loadProvenanceInput(args.provenance!);
+  assertExclusiveInput();
+  assertExecutionInputPolicy(declaration);
+  const datasetDir = resolve(args.dataset!);
+  const dataset = loadGroundTruth(join(datasetDir, "ground-truth.json"));
+  assertConfigMatchesDeclaration(args.config, declaration);
+  const runConfig = args.run ? parseScanConfigArgument(args.config) : declaration.scanConfig;
+  const tolerance = parseLineTolerance(args["line-tolerance"] ?? String(DEFAULT_LINE_TOLERANCE));
+  printDataset(dataset, tolerance);
+  const input = benchmarkInput(datasetDir, dataset, runConfig);
+  const sarif = loadBenchmarkSarif(input.sarifPath);
+  const spend = recordedBenchmarkSpend(sarif);
+  assertExecutionMatchesDeclaration(declaration, spend.receipt);
+  const provenance = buildResultProvenance({
+    declaration,
+    dataset,
+    durationMs: input.durationMs,
+    spend: spend.receipt,
+  });
+  const evaluation = evaluateBenchmark(
+    dataset,
+    sarif,
+    tolerance,
+    spend.costUsd,
+    spend.receipt,
+    input.durationMs,
+    provenance,
   );
-  const start = performance.now();
+  console.log(`  SARIF runs: ${sarif.runs.length}`);
+  console.log(`  Scored findings: ${evaluation.scoredFindingCount}`);
+  printMetrics(evaluation.metrics);
+  writeMetrics(datasetDir, evaluation.metrics);
+}
 
-  execFileSync(process.execPath, [cliPath, ...cmdArgs], {
+function benchmarkInput(
+  datasetDir: string,
+  dataset: GroundTruthDataset,
+  config: BenchmarkScanConfig,
+): { sarifPath: string; durationMs: number } {
+  return args.run ? executeBenchmarkScan(datasetDir, dataset, config) : existingSarifInput();
+}
+
+function assertExclusiveInput(): void {
+  if (args.run && args.sarif) throw new Error("Provide only one of --sarif or --run");
+}
+
+function assertExecutionInputPolicy(declaration: BenchmarkProvenanceInput): void {
+  if (declaration.executionMode === "real-model" && !args.run) {
+    throw new Error(
+      "real-model provenance requires --run so the harness can verify the declared dataset checkout; --sarif is deterministic-fixture-only",
+    );
+  }
+}
+
+function existingSarifInput(): { sarifPath: string; durationMs: number } {
+  if (!args.sarif) throw new Error("Provide either --sarif <path> or --run");
+  const sarifPath = resolve(args.sarif);
+  if (!existsSync(sarifPath)) throw new Error(`SARIF file not found: ${sarifPath}`);
+  console.log(chalk.blue(`Loading SARIF: ${sarifPath}`));
+  return { sarifPath, durationMs: 0 };
+}
+
+function executeBenchmarkScan(
+  datasetDir: string,
+  dataset: GroundTruthDataset,
+  config: BenchmarkScanConfig,
+): { sarifPath: string; durationMs: number } {
+  const repoDir = join(datasetDir, "repo");
+  if (!existsSync(repoDir)) throw new Error(`Repo not found at ${repoDir}. Run setup.sh first.`);
+  const revision = assertDatasetCheckout(datasetDir, dataset);
+  const resultsDir = join(datasetDir, "results");
+  mkdirSync(resultsDir, { recursive: true });
+  const sarifPath = join(resultsDir, `kuzushi-${Date.now()}.sarif`);
+  const durationMs = withMaterializedCorpus(repoDir, revision, (corpusRoot) =>
+    runKuzushiScan(corpusRoot, sarifPath, config),
+  );
+  return { sarifPath, durationMs };
+}
+
+function runKuzushiScan(repoDir: string, sarifPath: string, config: BenchmarkScanConfig): number {
+  const cliPath = resolve(__dirname, "../bin/kuzushi-rs.mjs");
+  const command = ["scan", repoDir, "--sarif", sarifPath, ...scanConfigArgs(config)];
+  console.log(chalk.blue(`Running: ${[process.execPath, cliPath, ...command].join(" ")}`));
+  const started = performance.now();
+  execFileSync(process.execPath, [cliPath, ...command], {
     stdio: "inherit",
-    encoding: "utf-8",
+    encoding: "utf8",
     timeout: 600_000,
   });
-
-  return { durationMs: performance.now() - start };
+  return performance.now() - started;
 }
 
-function configArgs(configOverrides?: string): string[] {
-  if (!configOverrides) return [];
-  const overrides = parseConfigOverrides(configOverrides);
-  return CONFIG_ARG_FLAGS.flatMap(([key, flag]) =>
-    overrides[key] === undefined ? [] : [flag, String(overrides[key])],
-  );
+function printDataset(dataset: GroundTruthDataset, tolerance: number): void {
+  console.log(chalk.bold(`Dataset: ${dataset.name}`));
+  console.log(`  Language: ${dataset.language}`);
+  console.log(`  Entries: ${dataset.entries.length}`);
+  console.log(`  Vulnerable: ${dataset.entries.filter((entry) => entry.isVulnerable).length}`);
+  console.log(`  Non-vulnerable: ${dataset.entries.filter((entry) => !entry.isVulnerable).length}`);
+  console.log(`  Line tolerance: ${tolerance}`);
 }
-
-function parseConfigOverrides(configOverrides: string): Record<string, unknown> {
-  try {
-    return JSON.parse(configOverrides) as Record<string, unknown>;
-  } catch {
-    console.error(chalk.red("Invalid --config JSON"));
-    process.exit(1);
-  }
-}
-
-function redactCommandArgs(args: string[]): string[] {
-  const redacted = [...args];
-  for (let i = 0; i < redacted.length; i += 1) {
-    if (redacted[i] === "--api-key" && i + 1 < redacted.length) {
-      redacted[i + 1] = "<redacted>";
-    }
-  }
-  return redacted;
-}
-
-// ── Finding matching ──
-
-function extractCwe(result: SarifResult, rules: Map<string, string[]>): string[] {
-  const cwes: string[] = [];
-
-  // Check rule tags
-  const ruleTags = rules.get(result.ruleId);
-  if (ruleTags) {
-    for (const tag of ruleTags) {
-      const match = tag.match(/cwe-(\d+)/i);
-      if (match) {
-        cwes.push(`CWE-${match[1]}`);
-      }
-    }
-  }
-
-  // Check ruleId for CWE pattern
-  const ruleIdMatch = result.ruleId.match(/CWE[_-]?(\d+)/i);
-  if (ruleIdMatch) {
-    cwes.push(`CWE-${ruleIdMatch[1]}`);
-  }
-
-  // Check message text
-  const msgMatch = result.message?.text?.match(/CWE[_-]?(\d+)/gi);
-  if (msgMatch) {
-    for (const m of msgMatch) {
-      const numMatch = m.match(/(\d+)/);
-      if (numMatch) {
-        cwes.push(`CWE-${numMatch[1]}`);
-      }
-    }
-  }
-
-  return [...new Set(cwes)];
-}
-
-function normalizePath(filePath: string): string {
-  return filePath
-    .replace(/\\/g, "/")
-    .replace(/^file:\/\/\//i, "/")
-    .replace(/^\/+/, "")
-    .replace(/^[A-Za-z]:\//, "")
-    .replace(/^\.\//, "")
-    .toLowerCase();
-}
-
-function normalizeCweId(cwe: string): number {
-  const match = cwe.match(/(\d+)/);
-  return match ? parseInt(match[1], 10) : -1;
-}
-
-function fingerprintResult(result: SarifResult): string {
-  const loc = result.locations?.[0]?.physicalLocation;
-  const file = loc?.artifactLocation?.uri ?? "unknown";
-  const line = loc?.region?.startLine ?? 0;
-  return `${normalizePath(file)}:${line}:${result.ruleId}`;
-}
-
-function matchFindings(
-  groundTruth: GroundTruthEntry[],
-  sarifResults: SarifResult[],
-  ruleTagMap: Map<string, string[]>,
-): MatchResult[] {
-  // Deduplicate SARIF results by (file, line, ruleId) to prevent
-  // structurally identical findings from inflating TP counts.
-  const seenFingerprints = new Set<string>();
-  const dedupedResults: SarifResult[] = [];
-  for (const result of sarifResults) {
-    const fp = fingerprintResult(result);
-    if (!seenFingerprints.has(fp)) {
-      seenFingerprints.add(fp);
-      dedupedResults.push(result);
-    }
-  }
-
-  // Index findings by normalized file path for fast lookup
-  const findingsByFile = new Map<string, SarifResult[]>();
-  for (const result of dedupedResults) {
-    const loc = result.locations?.[0]?.physicalLocation;
-    if (!loc?.artifactLocation?.uri) continue;
-    const normFile = normalizePath(loc.artifactLocation.uri);
-    const existing = findingsByFile.get(normFile) ?? [];
-    existing.push(result);
-    findingsByFile.set(normFile, existing);
-  }
-
-  const usedFindings = new Set<SarifResult>();
-
-  return groundTruth.map((gt) => {
-    const normGtFile = normalizePath(gt.file);
-    const gtCweNum = normalizeCweId(gt.cwe);
-    const candidates = findingsByFile.get(normGtFile) ?? [];
-
-    let bestMatch: SarifResult | null = null;
-    let bestDistance = Infinity;
-
-    for (const candidate of candidates) {
-      if (usedFindings.has(candidate)) continue;
-
-      const loc = candidate.locations?.[0]?.physicalLocation;
-      const candidateLine = loc?.region?.startLine ?? 0;
-      const lineDistance = Math.abs(candidateLine - gt.line);
-
-      if (lineDistance > LINE_TOLERANCE) continue;
-
-      // Check CWE overlap
-      const candidateCwes = extractCwe(candidate, ruleTagMap);
-      const cweMatch =
-        candidateCwes.length === 0 || candidateCwes.some((c) => normalizeCweId(c) === gtCweNum);
-      if (!cweMatch && candidateCwes.length > 0) continue;
-
-      if (lineDistance < bestDistance) {
-        bestDistance = lineDistance;
-        bestMatch = candidate;
-      }
-    }
-
-    if (bestMatch) {
-      usedFindings.add(bestMatch);
-    }
-
-    return {
-      groundTruth: gt,
-      finding: bestMatch,
-      matched: bestMatch !== null,
-    };
-  });
-}
-
-// ── Metrics computation ──
-
-function computeMetrics(
-  datasetName: string,
-  matchResults: MatchResult[],
-  costUsd: number,
-  durationMs: number,
-): BenchmarkMetrics {
-  let tp = 0;
-  let fp = 0;
-  let fn = 0;
-  let tn = 0;
-
-  const cweBuckets = new Map<string, { tp: number; fp: number; fn: number; tn: number }>();
-
-  for (const result of matchResults) {
-    const cwe = result.groundTruth.cwe;
-    const bucket = cweBuckets.get(cwe) ?? { tp: 0, fp: 0, fn: 0, tn: 0 };
-
-    if (result.groundTruth.isVulnerable) {
-      if (result.matched) {
-        tp++;
-        bucket.tp++;
-      } else {
-        fn++;
-        bucket.fn++;
-      }
-    } else {
-      if (result.matched) {
-        fp++;
-        bucket.fp++;
-      } else {
-        tn++;
-        bucket.tn++;
-      }
-    }
-
-    cweBuckets.set(cwe, bucket);
-  }
-
-  const precision = tp + fp > 0 ? tp / (tp + fp) : 0;
-  const recall = tp + fn > 0 ? tp / (tp + fn) : 0;
-  const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
-
-  const perCwe: Record<string, CweMetrics> = {};
-  for (const [cwe, b] of cweBuckets) {
-    const p = b.tp + b.fp > 0 ? b.tp / (b.tp + b.fp) : 0;
-    const r = b.tp + b.fn > 0 ? b.tp / (b.tp + b.fn) : 0;
-    const f = p + r > 0 ? (2 * p * r) / (p + r) : 0;
-    perCwe[cwe] = { tp: b.tp, fp: b.fp, fn: b.fn, tn: b.tn, precision: p, recall: r, f1: f };
-  }
-
-  return {
-    dataset: datasetName,
-    tp,
-    fp,
-    fn,
-    tn,
-    precision,
-    recall,
-    f1,
-    perCwe,
-    costUsd,
-    durationMs,
-  };
-}
-
-// ── Terminal output ──
 
 function printMetrics(metrics: BenchmarkMetrics): void {
   console.log();
   console.log(chalk.bold.underline(`Benchmark Results: ${metrics.dataset}`));
-  console.log();
+  printTable(["Metric", "Value"], aggregateRows(metrics));
+  printCweMetrics(metrics);
+}
 
-  // Summary table
-  const headers = ["Metric", "Value"];
-  const rows = [
+function aggregateRows(metrics: BenchmarkMetrics): string[][] {
+  return [
     ["True Positives", String(metrics.tp)],
     ["False Positives", String(metrics.fp)],
     ["False Negatives", String(metrics.fn)],
     ["True Negatives", String(metrics.tn)],
-    ["Precision", `${(metrics.precision * 100).toFixed(1)}%`],
-    ["Recall", `${(metrics.recall * 100).toFixed(1)}%`],
-    ["F1 Score", `${(metrics.f1 * 100).toFixed(1)}%`],
+    ["Precision", formatPercent(metrics.precision)],
+    ["Recall", formatPercent(metrics.recall)],
+    ["F1 Score", formatPercent(metrics.f1)],
     ["Cost (USD)", `$${metrics.costUsd.toFixed(4)}`],
+    ["Spend receipt", `${metrics.spend.source}:${metrics.spend.runId}`],
     ["Duration", `${(metrics.durationMs / 1000).toFixed(1)}s`],
   ];
+}
 
-  printTable(headers, rows);
-
-  // Per-CWE breakdown
-  const cweEntries = Object.entries(metrics.perCwe).sort(([a], [b]) => a.localeCompare(b));
-  if (cweEntries.length > 0) {
-    console.log();
-    console.log(chalk.bold("Per-CWE Breakdown:"));
-
-    const cweHeaders = ["CWE", "TP", "FP", "FN", "TN", "Precision", "Recall", "F1"];
-    const cweRows = cweEntries.map(([cwe, m]) => [
-      cwe,
-      String(m.tp),
-      String(m.fp),
-      String(m.fn),
-      String(m.tn),
-      `${(m.precision * 100).toFixed(1)}%`,
-      `${(m.recall * 100).toFixed(1)}%`,
-      `${(m.f1 * 100).toFixed(1)}%`,
-    ]);
-
-    printTable(cweHeaders, cweRows);
-  }
+function printCweMetrics(metrics: BenchmarkMetrics): void {
+  const entries = Object.entries(metrics.perCwe).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  if (entries.length === 0) return;
+  console.log();
+  console.log(chalk.bold("Per-CWE Breakdown:"));
+  const rows = entries.map(([cwe, value]) => [
+    cwe,
+    String(value.tp),
+    String(value.fp),
+    String(value.fn),
+    String(value.tn),
+    formatPercent(value.precision),
+    formatPercent(value.recall),
+    formatPercent(value.f1),
+  ]);
+  printTable(["CWE", "TP", "FP", "FN", "TN", "Precision", "Recall", "F1"], rows);
 }
 
 function printTable(headers: string[], rows: string[][]): void {
-  const colWidths = headers.map((h, i) =>
-    Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)),
+  const widths = headers.map((header, index) =>
+    Math.max(header.length, ...rows.map((row) => (row[index] ?? "").length)),
   );
-
-  const sep = colWidths.map((w) => "-".repeat(w + 2)).join("+");
-  const formatRow = (row: string[]) =>
-    row.map((cell, i) => ` ${cell.padEnd(colWidths[i])} `).join("|");
-
-  console.log(chalk.dim(sep));
-  console.log(chalk.bold(formatRow(headers)));
-  console.log(chalk.dim(sep));
-  for (const row of rows) {
-    console.log(formatRow(row));
-  }
-  console.log(chalk.dim(sep));
+  const separator = widths.map((width) => "-".repeat(width + 2)).join("+");
+  const rowText = (row: string[]) =>
+    row.map((cell, index) => ` ${cell.padEnd(widths[index])} `).join("|");
+  console.log(chalk.dim(separator));
+  console.log(chalk.bold(rowText(headers)));
+  console.log(chalk.dim(separator));
+  for (const row of rows) console.log(rowText(row));
+  console.log(chalk.dim(separator));
 }
 
-// ── Main ──
-
-async function main(): Promise<void> {
-  const datasetDir = resolve(args.dataset!);
-  const dataset = loadGroundTruth(datasetDir);
-
-  console.log(chalk.bold(`Dataset: ${dataset.name}`));
-  console.log(`  Language: ${dataset.language}`);
-  console.log(`  Entries: ${dataset.entries.length}`);
-  console.log(`  Vulnerable: ${dataset.entries.filter((e) => e.isVulnerable).length}`);
-  console.log(`  Non-vulnerable: ${dataset.entries.filter((e) => !e.isVulnerable).length}`);
-
-  let sarifPath: string;
-  let durationMs = 0;
-
-  if (args.run) {
-    // Run kuzushi scan first
-    const repoDir = join(datasetDir, "repo");
-    if (!existsSync(repoDir)) {
-      console.error(chalk.red(`Repo not found at ${repoDir}. Run the dataset's setup.sh first.`));
-      process.exit(1);
-    }
-
-    const resultsDir = join(datasetDir, "results");
-    if (!existsSync(resultsDir)) {
-      mkdirSync(resultsDir, { recursive: true });
-    }
-
-    sarifPath = join(resultsDir, `kuzushi-${Date.now()}.sarif`);
-    const timing = runKuzushiScan(repoDir, sarifPath, args.config);
-    durationMs = timing.durationMs;
-  } else if (args.sarif) {
-    sarifPath = resolve(args.sarif);
-    if (!existsSync(sarifPath)) {
-      console.error(chalk.red(`SARIF file not found: ${sarifPath}`));
-      process.exit(1);
-    }
-  } else {
-    console.error(chalk.red("Provide either --sarif <path> or --run"));
-    process.exit(1);
-  }
-
-  console.log(chalk.blue(`Loading SARIF: ${sarifPath}`));
-  const sarif = loadSarif(sarifPath);
-  const run = sarif.runs?.[0];
-  if (!run) {
-    console.error(chalk.red("No runs found in SARIF file"));
-    process.exit(1);
-  }
-
-  // Build rule -> tags map
-  const ruleTagMap = new Map<string, string[]>();
-  for (const rule of run.tool.driver.rules ?? []) {
-    if (rule.properties?.tags) {
-      ruleTagMap.set(rule.id, rule.properties.tags);
-    }
-  }
-
-  // Extract cost from SARIF properties
-  const summaryProps = run.properties?.["summary"] as Record<string, unknown> | undefined;
-  const costUsd =
-    typeof summaryProps?.["totalCostUsd"] === "number"
-      ? (summaryProps["totalCostUsd"] as number)
-      : 0;
-
-  console.log(`  SARIF results: ${run.results.length}`);
-
-  // Match findings against ground truth
-  const matchResults = matchFindings(dataset.entries, run.results, ruleTagMap);
-  const metrics = computeMetrics(dataset.name, matchResults, costUsd, durationMs);
-
-  printMetrics(metrics);
-
-  // Write JSON output
-  const outputPath = args.output ?? join(datasetDir, "results", `metrics-${Date.now()}.json`);
-  const outputDir = resolve(outputPath, "..");
-  if (!existsSync(outputDir)) {
-    mkdirSync(outputDir, { recursive: true });
-  }
-  writeFileSync(outputPath, `${JSON.stringify(metrics, null, 2)}\n`);
-  console.log(chalk.green(`\nMetrics written to: ${outputPath}`));
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
 }
 
-main().catch((err) => {
-  console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+function writeMetrics(datasetDir: string, metrics: BenchmarkMetrics): void {
+  const path = resolve(args.output ?? join(datasetDir, "results", `metrics-${Date.now()}.json`));
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(metrics, null, 2)}\n`);
+  console.log(chalk.green(`\nMetrics written to: ${path}`));
+}
+
+main().catch((error) => {
+  console.error(chalk.red(error instanceof Error ? error.message : String(error)));
   process.exit(1);
 });

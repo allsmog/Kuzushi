@@ -210,10 +210,11 @@ d_type() { # literal text, no Enter
 
 d_submit() { # literal text + Enter (the common "type a verb" case)
   ensure_session
-  # Normalize both strict shell input states to Prompt mode. F2 always enters
-  # Navigate and Esc always returns from Navigate to Prompt, so this pair is
-  # idempotent even when a previous journey step changed modes.
-  tmux send-keys -t "$SESSION" F2 Escape
+  # First Esc clears a notice/completion card or leaves Navigate mode. The
+  # following F2/Esc pair then normalizes either shell input state to Prompt.
+  # This remains idempotent when no modal is present and prevents typed audit
+  # commands from being mistaken for view hotkeys after an acknowledgement.
+  tmux send-keys -t "$SESSION" Escape F2 Escape
   devex_send_line "$SESSION" "$(expand_tokens "$1")"
   report step "submit: $1"
 }

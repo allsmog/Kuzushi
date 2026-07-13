@@ -24,6 +24,9 @@ pub(crate) struct RecommendationReport {
     pub(crate) capabilities: CapabilitySummary,
     pub(crate) recommendations: Vec<ModuleRecommendation>,
     pub(crate) components: Vec<ComponentRecommendation>,
+    pub(crate) cost_usd: f64,
+    pub(crate) cost_usd_exact: bool,
+    pub(crate) provider_spend_unresolved: bool,
     pub(crate) warnings: Vec<String>,
     pub(crate) errors: Vec<String>,
 }

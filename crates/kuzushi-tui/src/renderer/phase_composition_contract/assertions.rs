@@ -5,7 +5,8 @@ use ratatui::style::{Color, Modifier};
 impl PhaseCompositionContract {
     pub(super) fn assert_buffer(self, buffer: &Buffer, text: &str, profile: TerminalProfile) {
         let _theme = theme::scoped_theme_for_test(profile.config());
-        self.assert_semantic_content(text, self.command_for_width(buffer.area.width));
+        self.assert_semantic_content(text);
+        self.assert_navigation_controls(text);
         assert!(text.contains('▸'), "{} needs a non-color marker", self.slug);
         assert_bounded_rails(text, self.slug);
         assert_one_accent_region(buffer, profile, self.slug);
@@ -13,8 +14,15 @@ impl PhaseCompositionContract {
     }
 
     pub(super) fn assert_plain_text(self, text: &str, width: u16) {
-        self.assert_semantic_content(text, self.plain_command_for_width(width));
+        self.assert_semantic_content(text);
         let flattened = collapse_whitespace(text);
+        let command = self.plain_command_for_width(width);
+        assert!(
+            flattened.contains(command),
+            "{} plain projection clipped command {:?}:\n{text}",
+            self.slug,
+            command
+        );
         assert!(
             flattened.contains(self.plain_truth_atom()),
             "{} plain projection lost truthful state {:?}:\n{text}",
@@ -38,7 +46,7 @@ impl PhaseCompositionContract {
         );
     }
 
-    fn assert_semantic_content(self, text: &str, command: &str) {
+    fn assert_semantic_content(self, text: &str) {
         for section in self.sections {
             assert!(
                 text.contains(section),
@@ -53,14 +61,20 @@ impl PhaseCompositionContract {
                 self.slug
             );
         }
-        assert!(
-            collapse_whitespace(text).contains(command),
-            "{} clipped command {:?}:\n{text}",
-            self.slug,
-            command
-        );
         assert!(!text.contains("[object Object]"), "{text}");
         assert!(!text.contains("undefined"), "{text}");
+    }
+
+    fn assert_navigation_controls(self, text: &str) {
+        let flattened = collapse_whitespace(text);
+        for control in ["Ctrl+C request abort", "Esc prompt", "NAVIGATION MODE"] {
+            assert!(
+                flattened.contains(control),
+                "{} navigation projection lost {:?}:\n{text}",
+                self.slug,
+                control
+            );
+        }
     }
 
     fn priority_atoms(self) -> [String; 4] {

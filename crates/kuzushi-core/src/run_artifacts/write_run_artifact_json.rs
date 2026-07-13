@@ -27,8 +27,8 @@ fn parse_run_trace_lines(body: &str) -> RunTraceRead {
     };
     for line in body.lines().filter(|line| !line.trim().is_empty()) {
         match serde_json::from_str::<RunTraceStep>(line) {
-            Ok(step) => read.steps.push(step),
-            Err(_) => read.malformed_lines += 1,
+            Ok(step) if validate_trace_step_cost(&step).is_ok() => read.steps.push(step),
+            Ok(_) | Err(_) => read.malformed_lines += 1,
         }
     }
     read
@@ -76,6 +76,7 @@ pub fn append_run_trace_step(
     run_id: &str,
     step: &RunTraceStep,
 ) -> Result<PathBuf> {
+    validate_trace_step_cost(step)?;
     let target = target.as_ref();
     let _guard = super::run_ledger::acquire_run_ledger_lock(target, run_id)?;
     let path = checked_run_artifact_path(target, run_id, run_trace_spec().leaf)?;
@@ -89,6 +90,7 @@ pub fn append_run_trace_step_with_next_number(
     run_id: &str,
     step: &RunTraceStep,
 ) -> Result<PathBuf> {
+    validate_trace_step_cost(step)?;
     let target = target.as_ref();
     let _guard = super::run_ledger::acquire_run_ledger_lock(target, run_id)?;
     let path = checked_run_artifact_path(target, run_id, run_trace_spec().leaf)?;
@@ -123,9 +125,35 @@ fn next_trace_step_number_from_path(path: &Path) -> Result<usize> {
 }
 
 fn append_trace_step_locked(path: &Path, step: &RunTraceStep) -> Result<()> {
+    validate_trace_step_cost(step)?;
     let mut line = serde_json::to_string(step)?;
     line.push('\n');
     super::jsonl_append::append_jsonl_line(path, &line)
+}
+
+pub(super) fn validate_trace_step_cost(step: &RunTraceStep) -> Result<()> {
+    if let Some(cost_usd) = step.cost_usd {
+        crate::runtime::RuntimeCost::from_usd(cost_usd, "run trace step cost")?;
+    }
+    if let Some(cost_usd) = step.observed_cost_usd {
+        crate::runtime::RuntimeCost::from_usd(cost_usd, "run trace observed cost")?;
+    }
+    anyhow::ensure!(
+        step.cost_usd.is_none() || step.observed_cost_usd.is_none(),
+        "run trace step cannot claim exact and unresolved cost"
+    );
+    anyhow::ensure!(
+        step.observed_cost_usd.is_some() == step.provider_spend_unresolved,
+        "run trace unresolved cost fields must appear together"
+    );
+    anyhow::ensure!(
+        step.call_attempted != Some(false)
+            || (step.cost_usd.is_none()
+                && step.observed_cost_usd.is_none()
+                && !step.provider_spend_unresolved),
+        "run trace cannot attach spend to an explicitly unattempted call"
+    );
+    Ok(())
 }
 
 fn run_trace_spec() -> &'static CanonicalRunArtifactSpec {

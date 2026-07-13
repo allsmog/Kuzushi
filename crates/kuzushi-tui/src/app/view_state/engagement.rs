@@ -1,7 +1,8 @@
 use crate::app::{
     ExecutionAuthorization, FailedPlanningTask, PendingPatch, PendingPrereqPrompt,
     PlanningOptionOverrides, PlanningPickerRouteState, PlanningRunStep, PlanningTaskId,
-    PrereqChain, PrereqPlanAction, PrereqStep, RetryAdjustment, ThreatPatch, WorkflowPhase,
+    PrereqChain, PrereqFinalInput, PrereqPlanAction, PrereqStep, RetryAdjustment, ThreatPatch,
+    WorkflowPhase,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -64,6 +65,7 @@ impl EngagementState {
         &self.planning_skipped_phases
     }
 
+    #[cfg(test)]
     pub(crate) fn target_kind(&self) -> Option<kuzushi_core::TargetKind> {
         self.target_kind
     }
@@ -330,7 +332,12 @@ impl EngagementState {
 
     pub(crate) fn mark_final_chain_tool_dispatched(
         &mut self,
-    ) -> Option<(String, Value, Option<String>, ExecutionAuthorization)> {
+    ) -> Option<(
+        String,
+        PrereqFinalInput,
+        Option<String>,
+        ExecutionAuthorization,
+    )> {
         let chain = self.pending_chain.as_mut()?;
         if chain.final_dispatched {
             return None;

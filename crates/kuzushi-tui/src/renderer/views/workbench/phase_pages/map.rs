@@ -74,7 +74,7 @@ fn operation_line(
         .run_id
         .as_deref()
         .map(compact_run_id)
-        .unwrap_or("no run");
+        .unwrap_or_else(|| "no run".to_string());
     let elapsed = model
         .elapsed_secs
         .map(|seconds| format!(" · {seconds}s"))
@@ -99,13 +99,13 @@ fn live_style(live: bool) -> ratatui::style::Style {
     }
 }
 
-fn compact_run_id(run_id: &str) -> &str {
-    run_id
-        .char_indices()
-        .rev()
-        .nth(7)
-        .map(|(start, _)| &run_id[start..])
-        .unwrap_or(run_id)
+fn compact_run_id(run_id: &str) -> String {
+    let reference = crate::app::compact_run_reference(run_id);
+    if reference == run_id {
+        reference
+    } else {
+        format!("…{reference}")
+    }
 }
 
 fn console_row_budget(height: usize, has_artifact_metrics: bool) -> usize {
@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn run_reference_is_copyable_eight_character_suffix() {
-        assert_eq!(compact_run_id("scan-1234-abcdef12"), "abcdef12");
+        assert_eq!(compact_run_id("scan-1234-abcdef12"), "…abcdef12");
         assert_eq!(compact_run_id("short"), "short");
     }
 

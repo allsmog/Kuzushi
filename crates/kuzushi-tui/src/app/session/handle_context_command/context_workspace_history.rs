@@ -40,6 +40,8 @@ impl ShellApp {
     }
 
     fn show_unsupported_workspace_command(&mut self, raw: &str) {
+        let workspace_view = self.build_workspace_view(None);
+        self.domain_mut().set_workspace_view(workspace_view);
         self.set_shell_view(ShellView::Workspace);
         if raw.starts_with("usage: ") {
             self.log("error", raw);
@@ -127,5 +129,26 @@ mod tests {
             }
             _ => panic!("expected workspace reindex effect"),
         }
+    }
+
+    #[test]
+    fn workspace_usage_error_hydrates_the_active_target_projection() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+
+        app.reduce_workspace_command_effects(&WorkspaceCommand::Unsupported(
+            "usage: findings export <path> [format]".to_string(),
+        ));
+
+        let model = crate::ui_view_models::workspace_model(&app);
+        assert_eq!(app.shell_view(), ShellView::Workspace);
+        assert!(!model.empty);
+        assert_eq!(
+            app.domain().workspace_view().root.as_deref(),
+            Some(temp.path().canonicalize().unwrap().as_path())
+        );
+        assert_ne!(model.target_label, "none");
+        assert!(model.status.starts_with("workspace ready"));
     }
 }

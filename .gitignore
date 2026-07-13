@@ -15,7 +15,6 @@ coverage/
 .claude/worktrees/
 .DS_Store
 *.tsbuildinfo
-.kuzushi/
 .serena/
 benchmarks/*/repo/
 benchmarks/*/results/

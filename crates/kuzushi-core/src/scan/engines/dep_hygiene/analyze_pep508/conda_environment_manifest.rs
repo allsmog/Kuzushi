@@ -1,12 +1,12 @@
 use super::*;
-use serde_yaml::Value as YamlValue;
+use serde_json::Value as YamlValue;
 
 pub(in crate::scan::engines::dep_hygiene) fn analyze_conda_environment(
     file_path: &Path,
     raw: &str,
     manifest: ManifestKind,
 ) -> Vec<DepHygieneFinding> {
-    let Ok(value) = serde_yaml::from_str::<YamlValue>(raw) else {
+    let Ok(value) = crate::yaml::parse_value(raw) else {
         return Vec::new();
     };
     dependencies(&value)
@@ -107,7 +107,7 @@ fn pip_dependencies(value: &YamlValue) -> Option<&Vec<YamlValue>> {
 }
 
 fn sequence_child<'a>(value: &'a YamlValue, key: &str) -> Option<&'a Vec<YamlValue>> {
-    value.as_mapping()?.get(YamlValue::from(key))?.as_sequence()
+    value.as_object()?.get(key)?.as_array()
 }
 
 fn is_floating_dependency(constraint: &str) -> bool {

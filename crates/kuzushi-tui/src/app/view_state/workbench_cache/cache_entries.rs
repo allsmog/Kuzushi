@@ -1,3 +1,4 @@
+use crate::app::RunSummaryEntriesState;
 use kuzushi_core::workspace::ProjectModelDocument;
 use kuzushi_core::{
     LatestRunPointerState, NestedProjectScopeTree, PromptMutation, RunSummary, RunSummaryEntry,
@@ -102,6 +103,12 @@ pub(super) struct TargetBaseCache {
     pub(super) base: String,
 }
 
+#[derive(Debug)]
+pub(super) struct TargetProfileCache {
+    pub(super) target: PathBuf,
+    pub(super) profile: crate::app::TargetProfile,
+}
+
 #[cfg(test)]
 #[derive(Debug)]
 pub(super) struct RunSummaryCache {
@@ -112,7 +119,19 @@ pub(super) struct RunSummaryCache {
 #[derive(Debug)]
 pub(super) struct RunSummaryEntriesCache {
     pub(super) target: PathBuf,
-    pub(super) entries: Vec<RunSummaryEntry>,
+    pub(super) state: RunSummaryEntriesState,
+}
+
+#[derive(Debug)]
+pub(super) struct CompletionValuesCache {
+    pub(super) target: PathBuf,
+    pub(super) values: Vec<String>,
+}
+
+#[derive(Debug)]
+pub(super) struct FileCompletionValuesCache {
+    pub(super) target: PathBuf,
+    pub(super) index: crate::app::FileCompletionIndex,
 }
 
 #[derive(Debug)]

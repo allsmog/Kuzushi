@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use kuzushi_core::{
-    export_scan_findings_sarif, suppressions::run_suppression_sweep, FindingStore, Severity,
-    WorkspaceTarget,
+    export_scan_findings_sarif_with_run_summary, suppressions::run_suppression_sweep, FindingStore,
+    Severity, WorkspaceTarget,
 };
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -24,10 +24,16 @@ pub(crate) fn apply_scan_gate_policy(
     workspace: &WorkspaceTarget,
     store: &FindingStore,
     run_ids: &[String],
+    aggregate_run_id: &str,
     policy: &ScanGatePolicy,
 ) -> Result<()> {
     if let Some(path) = &policy.sarif {
-        let export = export_scan_findings_sarif(workspace, path, run_ids)?;
+        let export = export_scan_findings_sarif_with_run_summary(
+            workspace,
+            path,
+            run_ids,
+            aggregate_run_id,
+        )?;
         eprintln!(
             "sarif: wrote {} finding(s) to {}",
             export.count,
@@ -323,6 +329,29 @@ mod tests {
 
     #[test]
     fn scan_sarif_excludes_findings_from_prior_runs() {
+        let (temp, workspace, store) = scan_sarif_fixture();
+        let output = temp.path().join("current.sarif");
+        let policy = ScanGatePolicy {
+            fail_on: None,
+            sarif: Some(output.clone()),
+        };
+        write_current_scan_summary(&workspace);
+
+        apply_scan_gate_policy(
+            &workspace,
+            &store,
+            &["current-run".to_string()],
+            "current-run",
+            &policy,
+        )
+        .unwrap();
+
+        let body = std::fs::read_to_string(output).unwrap();
+        assert!(body.contains("current-rule"), "{body}");
+        assert!(!body.contains("old-rule"), "{body}");
+    }
+
+    fn scan_sarif_fixture() -> (tempfile::TempDir, WorkspaceTarget, FindingStore) {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -351,17 +380,19 @@ mod tests {
         );
         store.insert_finding("old-run", &old).unwrap();
         store.insert_finding("current-run", &current).unwrap();
-        let output = temp.path().join("current.sarif");
-        let policy = ScanGatePolicy {
-            fail_on: None,
-            sarif: Some(output.clone()),
-        };
+        (temp, workspace, store)
+    }
 
-        apply_scan_gate_policy(&workspace, &store, &["current-run".to_string()], &policy).unwrap();
-
-        let body = std::fs::read_to_string(output).unwrap();
-        assert!(body.contains("current-rule"), "{body}");
-        assert!(!body.contains("old-rule"), "{body}");
+    fn write_current_scan_summary(workspace: &WorkspaceTarget) {
+        let summary = kuzushi_core::RunSummary::running(
+            "current-run",
+            "scan",
+            Some("sast:scan".to_string()),
+            workspace.root().display().to_string(),
+        )
+        .complete()
+        .with_cost(Some(0.0));
+        kuzushi_core::write_run_summary(workspace.root(), &summary).unwrap();
     }
 
     /// Regression test for the bug where `--fail-on` only honored a
@@ -393,8 +424,14 @@ mod tests {
             fail_on: Some(Severity::High),
             sarif: None,
         };
-        apply_scan_gate_policy(&workspace, &store, &["scan-1".to_string()], &policy)
-            .expect("gate must not fail when an unexpired rule covers the re-observed finding");
+        apply_scan_gate_policy(
+            &workspace,
+            &store,
+            &["scan-1".to_string()],
+            "scan-1",
+            &policy,
+        )
+        .expect("gate must not fail when an unexpired rule covers the re-observed finding");
         assert!(
             finding_is_suppressed(&store),
             "gate-time sweep must leave the finding suppressed"

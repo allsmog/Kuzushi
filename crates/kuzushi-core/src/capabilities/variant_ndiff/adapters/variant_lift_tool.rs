@@ -16,12 +16,19 @@ pub fn run_variant_lift_pattern(
         VariantLiftSubject::Rejected(response) => return Ok(response),
     };
     let signature = query_variant_lift_signature(&input, ctx, runtime, workspace, &finding)?;
-    let object = signature
+    let object = signature.value
         .as_object()
         .context("variant:lift-pattern output parse failed: expected a JSON object")?;
     let output = variant_lift_output(&finding, object);
     emit_variant_lift_step(ctx, "done", "variant:lift-pattern complete");
-    Ok(variant_lift_response(fingerprint, signature, finding, output))
+    let cost = signature.cost_report()?;
+    Ok(variant_lift_response(
+        fingerprint,
+        signature.value,
+        finding,
+        output,
+        cost,
+    ))
 }
 
 fn variant_lift_fingerprint(input: &Value) -> Option<String> {
@@ -82,13 +89,13 @@ fn query_variant_lift_signature(
     runtime: Option<&dyn AgentRuntime>,
     workspace: &WorkspaceTarget,
     finding: &Finding,
-) -> Result<Value> {
+) -> Result<CostedStructuredJson<Value>> {
     let runtime = require_runtime("variant:lift-pattern", runtime)?;
     let model = require_model("variant:lift-pattern", input, ctx)?;
     let thinking_level = agentic_hunter_thinking_level(input);
     let prompt = build_variant_lift_prompt(finding);
     let _llm_scope = begin_variant_lift_scope(ctx);
-    query_required_structured_json(
+    query_required_structured_json_with_cost(
         runtime,
         variant_lift_request(model, workspace, prompt, thinking_level),
         StructuredJsonContract::new("variant:lift-pattern", "VariantSignature", object_schema()),
@@ -158,6 +165,7 @@ fn variant_lift_response(
     signature: Value,
     finding: Finding,
     output: String,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Value {
     let data = json!({
         "fingerprint": fingerprint,
@@ -169,7 +177,7 @@ fn variant_lift_response(
         output,
         data,
     );
-    result["costUsd"] = json!(0.0);
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
     result
 }
 

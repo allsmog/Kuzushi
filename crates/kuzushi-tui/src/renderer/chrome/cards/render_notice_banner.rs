@@ -122,6 +122,19 @@ mod tests {
     }
 
     #[test]
+    fn successful_review_receipt_uses_done_chip() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_success_notice("review", "decision saved; will carry forward");
+
+        let lines = notice_banner_lines(&app, 110, NOTICE_BANNER_MAX_LINES);
+        let text = rendered_text(&lines);
+
+        assert!(text.contains("DONE"));
+        assert!(text.contains("review · decision saved; will carry forward"));
+        assert!(text.contains("Esc dismiss"));
+    }
+
+    #[test]
     fn long_error_wraps_so_the_full_remedy_is_readable() {
         let message = "semgrep: could not find scanner binary \"semgrep\". Install Semgrep \
                        (for example `pipx install semgrep`) or block the task. Next: tasks, \

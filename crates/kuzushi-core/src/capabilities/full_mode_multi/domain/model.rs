@@ -135,7 +135,12 @@ pub struct FullModeReport {
     pub chunks_failed: u32,
     #[serde(default)]
     pub failed_chunk_errors: Vec<FailedChunkError>,
-    pub cost_usd: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    #[serde(default)]
+    pub observed_cost_usd: f64,
+    #[serde(default)]
+    pub unresolved_provider_spend: bool,
     pub dry_run: bool,
     /// Anyhow chain of the first failed chunk, if any. The dispatcher
     /// keeps only the first one — once one chunk fails, subsequent

@@ -8,6 +8,7 @@ pub(crate) struct UpdateAvailableModel {
     pub(crate) status: UpdateAvailableStatus,
     pub(crate) body_rows: Vec<String>,
     pub(crate) footer: UpdateAvailableFooter,
+    pub(crate) release_available: bool,
 }
 
 pub(crate) fn update_available_model(app: &ShellApp) -> UpdateAvailableModel {
@@ -23,6 +24,7 @@ impl From<UpdateAvailableSnapshot> for UpdateAvailableModel {
             status: snapshot.status,
             body_rows: snapshot.body_rows,
             footer: snapshot.footer,
+            release_available: true,
         }
     }
 }
@@ -32,6 +34,7 @@ fn default_update_available_model(app: &ShellApp) -> UpdateAvailableModel {
         status: default_status(app),
         body_rows: default_body_rows(),
         footer: default_footer(app),
+        release_available: false,
     }
 }
 
@@ -103,6 +106,20 @@ mod tests {
         assert_eq!(model.status.module, "update-route");
         assert_eq!(model.body_rows, vec!["route body".to_string()]);
         assert_eq!(model.footer.prompt_module.as_deref(), Some("update"));
+        assert!(model.release_available);
+    }
+
+    #[test]
+    fn default_update_status_does_not_claim_release_availability() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let model = update_available_model(&app);
+
+        assert!(!model.release_available);
+        assert!(model
+            .body_rows
+            .iter()
+            .any(|row| row.contains("release feed") && row.contains("not configured")));
     }
 
     fn snapshot() -> UpdateAvailableSnapshot {

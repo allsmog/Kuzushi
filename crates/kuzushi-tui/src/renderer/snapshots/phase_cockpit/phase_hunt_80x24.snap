@@ -16,15 +16,15 @@ KUZUSHI · target ./phase-target · view hunt · ● LIVE · cost $0.37 · ctx:�
 │  auth/  · 2                     │
 │    login.rs  · 1                │       ▸ recommend             generate
 │    session.rs  · 1              │proposals
-│REVIEW QUEUE · 6                 │FINDINGS HEATMAP
+│▸ REVIEW QUEUE · 6               │FINDINGS HEATMAP
 │▸F-0001  C rt open       SQL...  │  module           CRIT HIGH MED  LOW  INFO
-│ F-0002  H sig open              │  ──────────────────────────────────────────
-│Order...                         │▸ auth             █1   ·    █1   ·    ·
-│ F-0003  H sig open              │  api              ·    █1   █1   ·    ·
-│Templ...                         │  web              ·    █1   ·    ·    ·
-│ F-0004  M sig open              │  src              ·    ·    ·    █1   ·
-│Uploa...                         │
+│  SQL injection reaches query    │  ──────────────────────────────────────────
+│  src/auth/login.rs:17           │▸ auth             █1   ·    █1   ·    ·
+│  ▸ next:patch · Enter open      │  api              ·    █1   █1   ·    ·
+│ F-0002  H sig open              │  web              ·    █1   ·    ·    ·
+│Order...                         │  src              ·    ·    ·    █1   ·
+│ F-0003  H sig open              │
 mode:run · 作  confirm 3/4 · ⛭ 掛  fix ·...   6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
- Ctrl+C request abort   findings list   Esc back   history events
+ Ctrl+C request abort   Esc prompt
 NAVIGATION MODE — view keys active · Esc returns to prompt

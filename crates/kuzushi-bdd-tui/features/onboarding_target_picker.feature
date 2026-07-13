@@ -18,7 +18,8 @@ Feature: Launch-time target picker
     And no model is configured
     When I launch the shell without a target
     And I press "Esc"
-    Then the status segment shows "workbench"
+    Then I see "CAPABILITIES"
+    And the status segment shows "capabilities"
 
   Scenario: Skip-onboarding suppresses the target picker
     Given a fresh kuzushi workspace
@@ -47,6 +48,6 @@ Feature: Launch-time target picker
     And I press "Enter"
     Then I see "KUMI-KATA"
     And the confirmed target is visible
-    And I see "Inline action"
+    And I see "Focused: Gather repo context"
     And the Enter plan summary and controls are visible
     And I do not see "tool descriptor missing"

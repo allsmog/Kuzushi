@@ -131,7 +131,10 @@ mod tests {
 
     #[test]
     fn language_strings_map_to_groups() {
-        assert_eq!(PromptLanguage::from_language_str("c"), PromptLanguage::CorCpp);
+        assert_eq!(
+            PromptLanguage::from_language_str("c"),
+            PromptLanguage::CorCpp
+        );
         assert_eq!(
             PromptLanguage::from_language_str("TypeScript"),
             PromptLanguage::TypeScript

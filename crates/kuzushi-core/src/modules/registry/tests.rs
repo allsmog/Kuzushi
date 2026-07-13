@@ -526,7 +526,14 @@ mod tests {
             .prepare_tool_input_for_dispatch("triage:run", json!({}), &ctx, None)
             .unwrap();
 
-        assert_eq!(input["TRIAGE_PROMPT"], json!("custom triage prompt"));
+        let prompt = input["TRIAGE_PROMPT"].as_str().unwrap();
+        assert!(prompt.starts_with(crate::runtime::DEFAULT_TRIAGE_PROMPT));
+        let record = crate::prompts::boundaries::decode_composed_target_prompt_context(
+            crate::runtime::DEFAULT_TRIAGE_PROMPT,
+            prompt,
+        )
+        .unwrap();
+        assert_eq!(record.content, "custom triage prompt");
     }
 
     #[test]
@@ -940,7 +947,10 @@ export default {
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("active or retired built-in module"), "{error}");
+        assert!(
+            error.contains("active or retired built-in module"),
+            "{error}"
+        );
         assert!(registry.resolve_tool("sast:scan").is_some());
         assert!(registry.resolve_tool("sast:replacement").is_none());
     }
@@ -2318,7 +2328,7 @@ process.stdin.on("end", () => {
         let semgrep = registry.resolve_tool("semgrep:scan").unwrap();
         assert!(semgrep.options.iter().any(|option| option.name == "config"
             && option.option_type == OptionType::String
-            && option.default == Some(json!("auto"))));
+            && option.default == Some(json!(crate::scan::DEFAULT_SEMGREP_CONFIG))));
 
         let codeql = registry.resolve_tool("codeql:scan").unwrap();
         assert!(codeql.options.iter().any(|option| option.name == "language"
@@ -2891,7 +2901,7 @@ process.stdin.on("end", () => {
 
         assert_eq!(
             fingerprint,
-            "9e908adf879a6fd911d2e94077c85cfdcfadba42a6b73ab59e3a49ecd84e077d",
+            "c764fae02bf85a027893e46fe7a5a0f5bb50c760d71a814fbb0d46da7458fe1f",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
     }

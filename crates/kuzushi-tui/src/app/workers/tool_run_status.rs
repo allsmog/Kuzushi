@@ -28,13 +28,13 @@ pub(crate) fn agent_worker(
     let audit = AgentCallAudit::for_prompt(&model, ASK_SYSTEM_PROMPT, &question);
     let result = run_agent_worker(config, model, thinking_level, cwd, question, cancel);
     let event = match result {
-        Ok(answer) => AgentEvent::Answered {
+        Ok((answer, cost)) => AgentEvent::Answered {
             text: answer.text,
-            audit: audit.with_cost_usd(answer.cost_usd),
+            audit: audit.with_cost(cost),
         },
         Err(error) => AgentEvent::Failed {
-            error: error.to_string(),
-            audit,
+            error: error.error.to_string(),
+            audit: audit.with_outcome(error.cost, error.call_attempted),
         },
     };
     sink.send(ShellEvent::Agent(event));
@@ -42,7 +42,6 @@ pub(crate) fn agent_worker(
 
 pub(crate) struct AgentWorkerAnswer {
     pub(crate) text: String,
-    pub(crate) cost_usd: f64,
 }
 
 pub(crate) fn run_agent_worker(
@@ -52,26 +51,34 @@ pub(crate) fn run_agent_worker(
     cwd: PathBuf,
     question: String,
     cancel: ScanCancellation,
-) -> Result<AgentWorkerAnswer> {
-    let runtime = LangGraphRuntime::from_config(&config, &cwd)?
+) -> CostedWorkerResult<AgentWorkerAnswer> {
+    let runtime = LangGraphRuntime::from_config(&config, &cwd)
+        .map_err(CostedWorkerError::before_call)?
         .with_thinking_level(thinking_level)
         .with_cancellation(cancel);
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
-        cwd,
-        ASK_SYSTEM_PROMPT.to_string(),
-        question,
-    ))?;
+    let response = kuzushi_core::runtime::query_blocking_checked(
+        &runtime,
+        AgentQueryRequest::new(model, cwd, ASK_SYSTEM_PROMPT.to_string(), question),
+    )
+    .map_err(CostedWorkerError::unresolved)?;
+    let cost = response
+        .checked_cost_report()
+        .map_err(CostedWorkerError::unresolved)?;
     let answer = response.text.trim();
     if answer.is_empty() {
-        anyhow::bail!(
-            "agent returned an empty answer. The bridge accepted the request but produced no text — usually a credential issue (missing OAuth / API key) or a model that filtered the response. Next: `auth` to check credentials, then re-run."
-        );
+        return Err(CostedWorkerError::observed(
+            anyhow::anyhow!(
+                "agent returned an empty answer. The bridge accepted the request but produced no text — usually a credential issue (missing OAuth / API key) or a model that filtered the response. Next: `auth` to check credentials, then re-run."
+            ),
+            cost,
+        ));
     }
-    Ok(AgentWorkerAnswer {
-        text: answer.to_string(),
-        cost_usd: response.cost_usd,
-    })
+    Ok((
+        AgentWorkerAnswer {
+            text: answer.to_string(),
+        },
+        cost,
+    ))
 }
 
 pub(crate) const PLAN_SYSTEM_PROMPT: &str = r#"You are Kuzushi's planning assistant.
@@ -103,10 +110,15 @@ pub(crate) fn planner_worker(
     sink: JobEventSink,
     cancel: ScanCancellation,
 ) {
+    let audit = AgentCallAudit::for_prompt(&model, PLAN_SYSTEM_PROMPT, &goal);
     let event = match run_planner_worker(config, model, thinking_level, cwd, &goal, cancel) {
-        Ok(plan) => PlanEvent::Proposed(plan),
+        Ok((plan, cost)) => PlanEvent::Proposed {
+            plan,
+            audit: audit.with_cost(cost),
+        },
         Err(error) => PlanEvent::Failed {
-            error: error.to_string(),
+            error: error.error.to_string(),
+            audit: audit.with_outcome(error.cost, error.call_attempted),
         },
     };
     sink.send(ShellEvent::Plan(event));
@@ -119,10 +131,13 @@ pub(crate) fn run_planner_worker(
     cwd: PathBuf,
     goal: &str,
     cancel: ScanCancellation,
-) -> Result<PlanProposal> {
-    let runtime = planner_runtime(&config, &cwd, thinking_level, cancel)?;
-    let body = planner_response_text(runtime, model, cwd, goal)?;
-    parse_plan_json(goal, &body)
+) -> CostedWorkerResult<PlanProposal> {
+    let runtime = planner_runtime(&config, &cwd, thinking_level, cancel)
+        .map_err(CostedWorkerError::before_call)?;
+    let (body, cost) = planner_response_text(runtime, model, cwd, goal)?;
+    let plan =
+        parse_plan_json(goal, &body).map_err(|error| CostedWorkerError::observed(error, cost))?;
+    Ok((plan, cost))
 }
 
 fn planner_runtime(
@@ -141,14 +156,18 @@ fn planner_response_text(
     model: String,
     cwd: PathBuf,
     goal: &str,
-) -> Result<String> {
-    let response = runtime.query_blocking(AgentQueryRequest::new(
-        model,
-        cwd,
-        PLAN_SYSTEM_PROMPT.to_string(),
-        goal.to_string(),
-    ))?;
-    non_empty_planner_response(response.text.trim())
+) -> CostedWorkerResult<String> {
+    let response = kuzushi_core::runtime::query_blocking_checked(
+        &runtime,
+        AgentQueryRequest::new(model, cwd, PLAN_SYSTEM_PROMPT.to_string(), goal.to_string()),
+    )
+    .map_err(CostedWorkerError::unresolved)?;
+    let cost = response
+        .checked_cost_report()
+        .map_err(CostedWorkerError::unresolved)?;
+    let body = non_empty_planner_response(response.text.trim())
+        .map_err(|error| CostedWorkerError::observed(error, cost))?;
+    Ok((body, cost))
 }
 
 fn non_empty_planner_response(text: &str) -> Result<String> {

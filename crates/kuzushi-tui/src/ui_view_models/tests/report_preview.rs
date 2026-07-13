@@ -17,6 +17,7 @@ fn confirmed(mut finding: Finding) -> Finding {
         confidence: 0.88,
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding
 }
@@ -27,6 +28,7 @@ fn human_confirmed(mut finding: Finding, confidence: f32) -> Finding {
         confidence,
         rationale: "human reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     finding
@@ -269,6 +271,7 @@ fn report_preview_rows_include_run_summary_provenance() {
     let mut finding = human_confirmed(finding("sql-injection", Severity::High, 40), 0.87);
     finding.scan_id = Some("run-preview".to_string());
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.hydrate_all_view_data_for_test();
     *app.findings_mut() = vec![finding];
 
     let model = report_preview_model(&app, WorkspaceExportFormat::Json, ReviewQueueMode::All);

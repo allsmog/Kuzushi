@@ -37,7 +37,7 @@ impl ShellApp {
         let input =
             self.parse_and_prepare_run_input(&prepare.tool_name, prepare.input, &workspace)?;
         Some(RunToolRequest {
-            thinking_level: thinking_level_from_input(&input)
+            thinking_level: thinking_level_from_input(input.value())
                 .or_else(|| self.session_thinking_level_owned()),
             tool_name: prepare.tool_name,
             input,
@@ -53,7 +53,7 @@ impl ShellApp {
     pub(crate) fn dispatch_run_tool(
         &mut self,
         tool_name: String,
-        input: serde_json::Value,
+        input: PreparedToolInput,
         workspace: WorkspaceTarget,
         tool_thinking_level: Option<String>,
         authorization: ExecutionAuthorization,
@@ -63,7 +63,7 @@ impl ShellApp {
         }
         let prereqs = prereq_steps_for(&tool_name, workspace.root());
         if !prereqs.is_empty() {
-            return self.start_prereq_chain(
+            return self.start_prepared_prereq_chain(
                 prereqs,
                 tool_name,
                 input,
@@ -73,7 +73,7 @@ impl ShellApp {
             );
         }
         let status = tool_run_status(&tool_name);
-        self.start_authorized_background_tool(
+        self.start_authorized_prepared_background_tool(
             tool_name,
             input,
             workspace,
@@ -148,7 +148,7 @@ impl ShellApp {
         tool_name: &str,
         input: Option<String>,
         workspace: &WorkspaceTarget,
-    ) -> Option<serde_json::Value> {
+    ) -> Option<PreparedToolInput> {
         let input = self.parse_run_input_for_tool(tool_name, input)?;
         let ctx = ToolExecutionContext {
             config: self.config(),
@@ -158,7 +158,7 @@ impl ShellApp {
             cancellation: None,
             authorization: Default::default(),
         };
-        match self.registry().prepare_tool_input_for_dispatch(
+        match self.registry().prepare_dispatch_input(
             tool_name,
             input,
             &ctx,
@@ -214,13 +214,16 @@ impl ShellApp {
     fn request_run_confirmation(&mut self, request: &RunToolRequest) -> bool {
         let input_gate = confirm_gate_for_tool(
             &request.tool_name,
-            &request.input,
+            request.input.value(),
             self.engagement.confirm_allowlist(),
         );
         let descriptor_gate = || {
             self.registry()
                 .resolve_tool(&request.tool_name)
-                .and_then(|descriptor| descriptor_approval_confirm(descriptor, &request.input))
+                .and_then(|descriptor| {
+                    descriptor_approval_confirm(descriptor, request.input.value())
+                })
+                .map(|confirm| patch_validation_confirm(confirm, request))
         };
         let Some(confirm) = input_gate.or_else(descriptor_gate) else {
             return false;
@@ -238,7 +241,7 @@ impl ShellApp {
     }
 
     fn run_tool_workspace(&mut self, target: Option<&PathBuf>) -> Option<WorkspaceTarget> {
-        match workspace_for_target(target) {
+        match initialized_run_workspace(target) {
             Ok(workspace) => Some(workspace),
             Err(error) => {
                 self.log(
@@ -254,6 +257,38 @@ impl ShellApp {
     }
 }
 
+fn initialized_run_workspace(target: Option<&PathBuf>) -> anyhow::Result<WorkspaceTarget> {
+    let workspace = workspace_for_target(target)?;
+    workspace.ensure_state_dir()?;
+    Ok(workspace)
+}
+
+fn patch_validation_confirm(
+    mut confirm: PendingConfirm,
+    request: &RunToolRequest,
+) -> PendingConfirm {
+    let delegates_patch = request.tool_name == "patch:finding"
+        || (request.tool_name == "sast:scan"
+            && request
+                .input
+                .value()
+                .get("autoPatch")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false));
+    if !delegates_patch {
+        return confirm;
+    }
+    confirm.target = request.workspace.root().display().to_string();
+    confirm.rationale = Some(
+        kuzushi_core::patch::patch_validation_disclosure(
+            request.workspace.root(),
+            request.input.value(),
+        )
+        .unwrap_or_else(|error| format!("validation command disclosure failed: {error}")),
+    );
+    confirm
+}
+
 fn threat_dependent_tool(tool_name: &str) -> bool {
     matches!(
         tool_name,
@@ -264,7 +299,7 @@ fn threat_dependent_tool(tool_name: &str) -> bool {
 #[derive(Clone)]
 struct RunToolRequest {
     tool_name: String,
-    input: serde_json::Value,
+    input: PreparedToolInput,
     workspace: WorkspaceTarget,
     thinking_level: Option<String>,
 }
@@ -278,5 +313,21 @@ impl RunToolRequest {
             thinking_level: self.thinking_level,
             authorization: ExecutionAuthorization::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod workspace_initialization_tests {
+    use super::*;
+
+    #[test]
+    fn run_workspace_initializes_policy_before_request_state() {
+        let target = tempfile::tempdir().unwrap();
+        let target_path = target.path().to_path_buf();
+
+        let workspace = initialized_run_workspace(Some(&target_path)).unwrap();
+
+        assert!(workspace.root().join(".kuzushi/.gitignore").is_file());
+        assert!(workspace.state_dir().is_dir());
     }
 }

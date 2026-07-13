@@ -14,7 +14,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use kuzushi_core::{ModuleRegistry, V2Config, WorkspaceTarget};
-use ratatui::backend::CrosstermBackend;
+use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::Terminal;
 pub(crate) use refresh_terminal_redraw_state::*;
 pub(crate) use render_plain_scripted_session::*;

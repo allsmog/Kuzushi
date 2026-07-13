@@ -9,12 +9,21 @@ mod tests {
 
     struct FakeRuntime {
         queries: Mutex<Vec<AgentQueryRequest>>,
+        report_systems_cost: bool,
     }
 
     impl FakeRuntime {
         fn new() -> Self {
             Self {
                 queries: Mutex::new(Vec::new()),
+                report_systems_cost: true,
+            }
+        }
+
+        fn unpriced() -> Self {
+            Self {
+                queries: Mutex::new(Vec::new()),
+                report_systems_cost: false,
             }
         }
     }
@@ -39,7 +48,7 @@ mod tests {
                             "cheapVerifiable": true
                         }]
                     })),
-                    cost_usd: 0.01,
+                    cost_usd: if self.report_systems_cost { 0.01 } else { 0.0 },
                     ..Default::default()
                 });
             }
@@ -59,7 +68,7 @@ mod tests {
                             "rationale": "length reaches memcpy"
                         }]
                     })),
-                    cost_usd: 0.02,
+                    cost_usd: if self.report_systems_cost { 0.02 } else { 0.0 },
                     ..Default::default()
                 });
             }
@@ -448,6 +457,127 @@ mod tests {
 
         assert_eq!(output.triggers.len(), 1);
         assert_eq!(output.triggers[0].id, "trig-1");
+    }
+
+    #[test]
+    fn standalone_trigger_synth_reports_exact_provider_cost() {
+        let temp = tempdir().unwrap();
+        let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let output =
+            execute_trigger_synth(&trigger_synth_input(), &ctx, Some(&FakeRuntime::new())).unwrap();
+
+        assert_eq!(output["costUsd"], json!(0.02));
+        assert_eq!(output["data"]["costUsd"], json!(0.02));
+    }
+
+    #[test]
+    fn standalone_trigger_synth_preserves_unpriced_provider_state() {
+        let temp = tempdir().unwrap();
+        let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let output =
+            execute_trigger_synth(&trigger_synth_input(), &ctx, Some(&FakeRuntime::unpriced()))
+                .unwrap();
+
+        assert!(output.get("costUsd").is_none());
+        assert_eq!(output["observedCostUsd"], json!(0.0));
+        assert_eq!(output["providerSpendUnresolved"], json!(true));
+        assert_eq!(output["data"]["observedCostUsd"], json!(0.0));
+    }
+
+    #[test]
+    fn systems_hunt_report_uses_one_canonical_incomplete_cost_claim() {
+        let report = SystemsHuntReport {
+            target: "/repo".to_string(),
+            count: 0,
+            findings: Vec::new(),
+            persisted: None,
+            artifacts: Vec::new(),
+            cost_usd: 0.125,
+            cost_usd_exact: false,
+        };
+
+        let output = report.to_tool_json();
+
+        for value in [&output, &output["data"]] {
+            assert!(value.get("costUsd").is_none());
+            assert_eq!(value["observedCostUsd"], json!(0.125));
+            assert_eq!(value["providerSpendUnresolved"], json!(true));
+        }
+        let cost = crate::run_artifacts::tool_run_output_cost_report(&output).unwrap();
+        assert_eq!(cost.observed_usd(), 0.125);
+        assert!(!cost.is_complete());
+        assert!(!cost.is_unavailable());
+    }
+
+    #[test]
+    fn standalone_invariant_extract_reports_exact_provider_cost() {
+        let temp = tempdir().unwrap();
+        let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let input = json!({"context": ctx_with(vec![surface("src/parser.c", "unsafe-region")])});
+
+        let output = execute_systems_hunt_tool(
+            "systems-hunt:systems-invariant-extract",
+            input,
+            &ctx,
+            Some(&FakeRuntime::new()),
+        )
+        .unwrap();
+
+        assert_eq!(output["costUsd"], json!(0.01));
+        assert_eq!(output["data"]["costUsd"], json!(0.01));
+    }
+
+    fn trigger_synth_input() -> Value {
+        json!({
+            "context": ctx_with(vec![surface("src/parser.c", "unsafe-region")]),
+            "invariants": [{
+                "id": "inv-1",
+                "surfaceId": "surface",
+                "kind": "length-buffer-coupling",
+                "summary": "length must fit buffer",
+                "statement": "len is checked",
+                "rationale": "memcpy uses len",
+                "evidence": ["memcpy"],
+                "attackerControlledFields": ["len"],
+                "cheapVerifiable": true
+            }]
+        })
     }
 
     #[test]
@@ -875,6 +1005,24 @@ mod tests {
             "headBytes": 0,
         }));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn input_preserves_each_declared_system_prompt_role() {
+        let parsed = SystemsHuntInput::from_tool_input(&serde_json::json!({
+            "SYSTEMS_INVARIANT_PROMPT": "custom invariant",
+            "SYSTEMS_TRIGGER_PROMPT": "custom trigger",
+            "SYSTEMS_HUNT_PROMPT": "custom hunt",
+            "SYSTEMS_DEEP_CWE_PROMPT": "custom deep cwe",
+            "SYSTEMS_DEEP_HUNT_PROMPT": "custom deep hunt",
+        }))
+        .unwrap();
+
+        assert_eq!(parsed.invariant_system_prompt, "custom invariant");
+        assert_eq!(parsed.trigger_system_prompt, "custom trigger");
+        assert_eq!(parsed.hunt_system_prompt, "custom hunt");
+        assert_eq!(parsed.deep_semantic_cwe_system_prompt, "custom deep cwe");
+        assert_eq!(parsed.deep_semantic_hunt_system_prompt, "custom deep hunt");
     }
 
     // ----- score_with_index degradation contract --------------------

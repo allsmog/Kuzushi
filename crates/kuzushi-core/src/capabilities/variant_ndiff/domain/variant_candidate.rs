@@ -94,10 +94,3 @@ pub(crate) fn tokens_present(corpus: &str, tokens: &[String]) -> Vec<String> {
         .cloned()
         .collect()
 }
-
-pub(crate) fn collect_variant_source_files(repo_root: &Path) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-    collect_variant_source_files_inner(repo_root, repo_root, &mut files)?;
-    files.sort();
-    Ok(files)
-}

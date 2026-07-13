@@ -3,7 +3,7 @@ pub(crate) use super::run_tool_prepare::start_cli_tool_run_with_loaded_modules;
 use super::run_tool_prepare::{prepare_cli_tool_run, PreparedCliToolRun};
 use crate::tool_requirements::resolve_run_target;
 use crate::tool_run_artifacts::finish_cli_tool_run;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use kuzushi_core::run_artifacts::{
     load_run_artifacts, load_run_summary, output_with_run_fallback_context,
 };
@@ -64,6 +64,7 @@ fn prepare_failure_output(tool: &str, error: &str) -> serde_json::Value {
 }
 
 fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
+    emit_cli_repository_execution_disclosure(run)?;
     let runtime = match cli_tool_runtime(run) {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -86,15 +87,34 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
         cancellation: None,
         authorization: Default::default(),
     };
-    let result = run
-        .registry
-        .prepare_dispatch_input(&run.tool, run.input.clone(), &ctx, None)
-        .map(authorize_explicit_cli_tool)
-        .and_then(|prepared| {
-            run.registry
-                .dispatch_prepared_input_with_runtime(prepared, &ctx, runtime_ref)
-        });
+    let result = run.registry.dispatch_prepared_input_with_runtime(
+        authorize_explicit_cli_tool(run.input.clone()),
+        &ctx,
+        runtime_ref,
+    );
     handle_cli_tool_result(run, result)
+}
+
+fn emit_cli_repository_execution_disclosure(run: &PreparedCliToolRun) -> Result<()> {
+    let delegates_patch = run.input.tool_name() == "patch:finding"
+        || (run.input.tool_name() == "sast:scan"
+            && run
+                .input
+                .value()
+                .get("autoPatch")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false));
+    if !delegates_patch {
+        return Ok(());
+    }
+    let workspace = run
+        .workspace
+        .as_ref()
+        .context("patch validation disclosure requires an active workspace")?;
+    let disclosure =
+        kuzushi_core::patch::patch_validation_disclosure(workspace.root(), run.input.value())?;
+    eprintln!("kuzushi: approved repository execution — {disclosure}");
+    Ok(())
 }
 
 fn authorize_explicit_cli_tool(
@@ -115,7 +135,7 @@ fn authorize_explicit_cli_tool(
 fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<LangGraphRuntime>> {
     if run
         .registry
-        .tool_wants_runtime(&run.tool, &run.input, &run.config)
+        .tool_wants_runtime(&run.tool, run.input.value(), &run.config)
     {
         return Ok(Some(LangGraphRuntime::from_config(
             &run.config,

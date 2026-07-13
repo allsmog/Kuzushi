@@ -10,8 +10,26 @@ on:
     branches: [main]
     paths:
       - "benchmarks/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - "crates/kuzushi-core/**"
+      - "crates/kuzushi-cli/**"
+      - "crates/kuzushi-codeindex/**"
+      - "crates/kuzushi-eval/**"
+      - "crates/kuzushi-mcp-*/**"
+      - "crates/kuzushi-openai/**"
+      - "crates/kuzushi-sandbox/**"
       - "src/**"
+      - "evals/**"
+      - "assets/pashov-xray/**"
+      - "scripts/langgraph-bridge.mjs"
+      - "scripts/langgraph-bridge/**"
+      - "scripts/kuzushi-dynamic-module-host.mjs"
+      - "scripts/taint_iris_next_flows.sc"
+      - "tests/fixtures/mock-anthropic-server.mjs"
       - ".github/workflows/benchmark-regression.yml"
 
 # Scheduled + manual overlap: let both finish instead of cancelling a live
@@ -43,6 +61,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify benchmark gate contracts
+        run: node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs
+      - name: Compare the committed deterministic fixture
+        run: pnpm benchmark:regression -- --results benchmarks/fixtures/mock-govwa-metrics.json
       - name: Install semgrep (pip, cached)
         run: python -m pip install --upgrade pip && pip install -r .github/requirements-ci.txt
       - run: cargo build -p kuzushi-cli
@@ -90,24 +112,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p benchmarks/govwa/repo/.kuzushi
-          # jq builds valid JSON without quote-fragile heredoc expansion.
-          jq -n --arg baseUrl "${MOCK_BASE_URL}" '{
-            model: "anthropic:claude-sonnet-4-6",
-            agentRuntimeConfig: { baseUrl: $baseUrl, apiKey: "fake-key" },
-            scanners: ["semgrep"],
-            enabledTasks: ["context-gatherer"],
-            verify: false,
-            triageConcurrency: 1,
-            triageBatchSize: 1,
-            scanMode: "sequential",
-            auditLog: false,
-            enableContextGathering: false,
-            enableContextEnrichment: false,
-            llmRescoreEnabled: false,
-            fpFilterEnabled: false
-          }' > benchmarks/govwa/repo/.kuzushi/config.json
+          # Keep the checked-in config as the behavior contract; inject only
+          # the ephemeral mock transport address and fake credential.
+          jq --arg baseUrl "${MOCK_BASE_URL}" \
+            '. + {agentRuntimeConfig: {baseUrl: $baseUrl, apiKey: "fake-key"}}' \
+            benchmarks/mock-regression.config.json \
+            > benchmarks/govwa/repo/.kuzushi/config.json
 
-      - run: pnpm benchmark --run --dataset benchmarks/govwa --output benchmarks/govwa/results/metrics-ci.json
+      - name: Run the declared deterministic benchmark command
+        run: >-
+          pnpm benchmark --run
+          --dataset benchmarks/govwa
+          --config '{"tasks":"semgrep"}'
+          --provenance benchmarks/baseline-provenance.json
+          --output benchmarks/govwa/results/metrics-ci.json
 
       - name: Write benchmark mock-mode note
         run: |
@@ -120,7 +138,7 @@ jobs:
       - run: pnpm benchmark:regression --results benchmarks/govwa/results/metrics-ci.json
 
       - name: Render detection scoreboard
-        run: pnpm benchmark:scoreboard --results benchmarks/govwa/results/metrics-ci.json --output benchmarks/govwa/results/SCOREBOARD.md --mock
+        run: pnpm benchmark:scoreboard --results benchmarks/govwa/results/metrics-ci.json --output benchmarks/govwa/results/SCOREBOARD.md
 
       - name: Stop mock Anthropic server
         if: always()
@@ -136,3 +154,4 @@ jobs:
           path: |
             benchmarks/govwa/results
             benchmarks/baseline.json
+            benchmarks/baseline-provenance.json

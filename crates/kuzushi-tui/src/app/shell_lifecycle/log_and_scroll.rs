@@ -124,6 +124,16 @@ impl ShellApp {
                 .len()
                 .min(3)
                 .saturating_sub(1),
+            ActivityDeckPage::Recon => self
+                .domain()
+                .recon_snapshot()
+                .map(|snapshot| {
+                    crate::ui_view_models::recon_snapshot_activity_model(snapshot, usize::MAX)
+                        .rows
+                        .len()
+                })
+                .unwrap_or_default()
+                .saturating_sub(1),
         }
     }
 

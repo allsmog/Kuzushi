@@ -4,8 +4,8 @@ mod builders;
 mod tests;
 
 pub(crate) use builders::{
-    callees_of, callers_of, cpg_size_query, ffi_boundaries, method_at, reaching_def, taint_paths,
-    unsafe_blocks,
+    callees_of, callers_of, cpg_size_query, definitions, ffi_boundaries, method_at, reaching_def,
+    taint_paths, unsafe_blocks,
 };
 
 #[cfg(test)]

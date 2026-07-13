@@ -4,54 +4,11 @@ impl SpendLimiter {
     /// Open a ticket with an estimated cost. Fails with [`SpendError`] when
     /// the per-op cap or the global hard ceiling would be exceeded.
     pub fn deposit(&self, op: Operation, est_usd: f64) -> Result<SpendTicket> {
-        anyhow::ensure!(
-            est_usd.is_finite() && est_usd >= 0.0,
-            "est_usd must be a finite non-negative number, got {est_usd}"
-        );
+        crate::runtime::RuntimeCost::from_usd(est_usd, "spend deposit estimate")?;
         let state = self.lock();
-
-        // 1. Hard ceiling — checks total committed across every op.
-        if let Some(ceiling) = state.hard_ceiling {
-            let total_all = total_committed_all(&state.conn)?;
-            if total_all + est_usd > ceiling {
-                return Err(SpendError::HardCeilingExceeded {
-                    cap: ceiling,
-                    committed: total_all,
-                    request: est_usd,
-                }
-                .into());
-            }
-        }
-
-        // 2. Per-op cap.
-        if let Some(cap) = state.caps.get(&op).copied() {
-            let committed = total_committed_for(&state.conn, op)?;
-            if committed + est_usd > cap {
-                return Err(SpendError::Exceeded {
-                    op: op.as_db_str(),
-                    cap,
-                    committed,
-                    request: est_usd,
-                }
-                .into());
-            }
-        }
-
-        // 3. Insert ledger row.
-        let now = unix_seconds();
-        state.conn.execute(
-            "insert into spend_ledger(op, est_usd, actual_usd, created_at, settled_at)
-             values (?, ?, null, ?, null)",
-            params![op.as_db_str(), est_usd, now],
-        )?;
-        let id = state.conn.last_insert_rowid();
-
-        Ok(SpendTicket {
-            id,
-            op,
-            est_usd,
-            settled: false,
-        })
+        enforce_hard_ceiling(&state, est_usd)?;
+        enforce_operation_cap(&state, op, est_usd)?;
+        insert_spend_ticket(&state, op, est_usd)
     }
 
     /// Settle a ticket with the actual observed cost. Always succeeds —
@@ -99,4 +56,60 @@ impl SpendLimiter {
             .lock()
             .expect("spend ledger mutex poisoned by panic in another thread")
     }
+}
+
+fn enforce_hard_ceiling(state: &LimiterState, request: f64) -> Result<()> {
+    let Some(cap) = state.hard_ceiling else {
+        return Ok(());
+    };
+    let committed = total_committed_all(&state.conn)?;
+    if checked_commitment(committed, request, "global spend commitment")? > cap {
+        return Err(SpendError::HardCeilingExceeded {
+            cap,
+            committed,
+            request,
+        }
+        .into());
+    }
+    Ok(())
+}
+
+fn enforce_operation_cap(state: &LimiterState, op: Operation, request: f64) -> Result<()> {
+    let Some(cap) = state.caps.get(&op).copied() else {
+        return Ok(());
+    };
+    let committed = total_committed_for(&state.conn, op)?;
+    if checked_commitment(committed, request, "operation spend commitment")? > cap {
+        return Err(SpendError::Exceeded {
+            op: op.as_db_str(),
+            cap,
+            committed,
+            request,
+        }
+        .into());
+    }
+    Ok(())
+}
+
+fn checked_commitment(committed: f64, request: f64, context: &str) -> Result<f64> {
+    crate::runtime::RuntimeCost::checked_sum([committed, request], context)
+        .map(crate::runtime::RuntimeCost::usd)
+}
+
+fn insert_spend_ticket(
+    state: &LimiterState,
+    op: Operation,
+    est_usd: f64,
+) -> Result<SpendTicket> {
+    state.conn.execute(
+        "insert into spend_ledger(op, est_usd, actual_usd, created_at, settled_at)
+         values (?, ?, null, ?, null)",
+        params![op.as_db_str(), est_usd, unix_seconds()],
+    )?;
+    Ok(SpendTicket {
+        id: state.conn.last_insert_rowid(),
+        op,
+        est_usd,
+        settled: false,
+    })
 }

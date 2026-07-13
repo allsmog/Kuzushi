@@ -17,7 +17,14 @@ fn patch_finding_tool() -> ToolDescriptor {
         "Generate a patch for a finding.",
         patch_finding_options(),
     )
-    .with_policy(target_write_policy(
+    .with_prompt(editable_prompt(
+        "patch instructions",
+        "patch",
+        "finding",
+        "PATCH_PROMPT",
+        crate::remediation::patch::patch_system_prompt(),
+    ))
+    .with_policy(repository_execute_policy(
         ToolPhase::Fix,
         RuntimeRequirement::Always,
         FindingStoreRequirement::Required,
@@ -57,6 +64,27 @@ fn patch_finding_options() -> Vec<OptionSpec> {
             crate::remediation::patch::DEFAULT_PATCH_VALIDATION_TIMEOUT_MS
         ))
         .advanced(),
+        source_commit_binding_option(),
         model_option(),
+        patch_prompt_option(),
     ]
+}
+
+fn source_commit_binding_option() -> OptionSpec {
+    opt(
+        crate::remediation::patch::PATCH_SOURCE_COMMIT_INPUT_KEY,
+        OptionType::String,
+        "Internal clean-source commit binding populated and verified by the registry.",
+    )
+    .advanced()
+}
+
+fn patch_prompt_option() -> OptionSpec {
+    opt(
+        "PATCH_PROMPT",
+        OptionType::String,
+        "System prompt text or workspace-file override for patch generation.",
+    )
+    .inline_or_workspace_file()
+    .advanced()
 }

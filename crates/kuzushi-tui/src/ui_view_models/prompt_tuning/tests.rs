@@ -79,7 +79,7 @@ fn tune_model_surfaces_cached_unreadable_house_rules() {
 fn prompts_model_shapes_prompt_rows_for_focused_module() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_focused_module(Some("sast".to_string()));
-    app.router.prompts_mut().set_cursor(2);
+    app.router.prompts_mut().set_cursor(1);
 
     let model = prompts_model(&app);
 
@@ -87,13 +87,16 @@ fn prompts_model_shapes_prompt_rows_for_focused_module() {
     assert_eq!(model.rows[0].source, "no target");
     assert_eq!(
         model.rows[0].path,
-        relative_prompt_override_path("sast", "scan")
+        relative_prompt_override_path("sast", "triage")
     );
-    assert_eq!(model.rows[2].verb, "verify");
-    assert!(model.rows[2].selected);
-    assert_eq!(model.stack.verb, "verify");
-    assert_eq!(model.stack.layers[1].state, "no target");
-    assert_eq!(model.stack.layers[5].state, "base active");
+    assert_eq!(model.rows[0].role, "triage instructions");
+    assert_eq!(model.rows[1].verb, "verify");
+    assert!(model.rows[1].selected);
+    let stack = model.stack.unwrap();
+    assert_eq!(stack.verb, "verify");
+    assert_eq!(stack.layers[1].state, "no target");
+    assert_eq!(stack.layers[5].state, "base active");
+    assert_eq!(stack.layers[5].hash, stack.layers[0].hash);
 }
 
 #[test]
@@ -102,7 +105,7 @@ fn prompts_model_builds_stack_for_selected_project_override() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.router.prompts_mut().set_cursor(1);
+    app.router.prompts_mut().set_cursor(0);
     let override_path = kuzushi_core::prompt_override_path(temp.path(), "sast", "triage");
     fs::create_dir_all(override_path.parent().unwrap()).unwrap();
     fs::write(&override_path, "focus on auth bypass\n").unwrap();
@@ -111,23 +114,24 @@ fn prompts_model_builds_stack_for_selected_project_override() {
     let model = prompts_model(&app);
     let expected_hash = kuzushi_core::prompt_content_sha256("focus on auth bypass\n");
 
-    assert_eq!(model.stack.verb, "triage");
-    assert_eq!(model.rows[1].source, "file");
-    assert_eq!(model.stack.layers.len(), 6);
-    assert_eq!(model.stack.layers[0].layer, "base");
-    assert_eq!(model.stack.layers[1].layer, "project override");
-    assert_eq!(model.stack.layers[1].state, "present");
+    let stack = model.stack.unwrap();
+    assert_eq!(stack.verb, "triage");
+    assert_eq!(model.rows[0].source, "file");
+    assert_eq!(stack.layers.len(), 6);
+    assert_eq!(stack.layers[0].layer, "base");
+    assert_eq!(stack.layers[1].layer, "project override");
+    assert_eq!(stack.layers[1].state, "present");
     assert_eq!(
-        model.stack.layers[1].path,
+        stack.layers[1].path,
         relative_prompt_override_path("sast", "triage")
     );
-    assert_eq!(model.stack.layers[1].hash, expected_hash);
-    assert_eq!(model.stack.layers[3].layer, "mutation");
-    assert_eq!(model.stack.layers[3].state, "inactive");
-    assert_eq!(model.stack.layers[5].layer, "final");
-    assert_eq!(model.stack.layers[5].state, "override active");
+    assert_eq!(stack.layers[1].hash, expected_hash);
+    assert_eq!(stack.layers[3].layer, "mutation");
+    assert_eq!(stack.layers[3].state, "inactive");
+    assert_eq!(stack.layers[5].layer, "final");
+    assert_eq!(stack.layers[5].state, "override active");
     assert_eq!(
-        model.stack.layers[5].hash,
+        stack.layers[5].hash,
         kuzushi_core::prompt_content_sha256("focus on auth bypass\n")
     );
 }
@@ -139,7 +143,7 @@ fn prompts_model_blocks_final_stack_for_pending_mutation_until_approved() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.router.prompts_mut().set_cursor(1);
+    app.router.prompts_mut().set_cursor(0);
     let mutation =
         kuzushi_core::PromptMutation::new("sast", "triage", "focus authz paths", "operator");
     let expected_hash = mutation.content_hash();
@@ -148,12 +152,13 @@ fn prompts_model_blocks_final_stack_for_pending_mutation_until_approved() {
 
     let pending = prompts_model(&app);
 
-    assert_eq!(pending.stack.layers[3].layer, "mutation");
-    assert_eq!(pending.stack.layers[3].state, "pending approval");
-    assert_eq!(pending.stack.layers[3].hash, expected_hash);
-    assert_eq!(pending.stack.layers[5].layer, "final");
+    let pending_stack = pending.stack.unwrap();
+    assert_eq!(pending_stack.layers[3].layer, "mutation");
+    assert_eq!(pending_stack.layers[3].state, "pending approval");
+    assert_eq!(pending_stack.layers[3].hash, expected_hash);
+    assert_eq!(pending_stack.layers[5].layer, "final");
     assert_eq!(
-        pending.stack.layers[5].state,
+        pending_stack.layers[5].state,
         "blocked: mutation pending approval"
     );
 
@@ -171,7 +176,8 @@ fn prompts_model_blocks_final_stack_for_pending_mutation_until_approved() {
     app.hydrate_all_view_data_for_test();
     let approved = prompts_model(&app);
 
-    assert_eq!(approved.stack.layers[3].state, "approved");
-    assert_eq!(approved.stack.layers[5].state, "approved mutation active");
-    assert_eq!(approved.stack.layers[5].hash, expected_hash);
+    let approved_stack = approved.stack.unwrap();
+    assert_eq!(approved_stack.layers[3].state, "approved");
+    assert_eq!(approved_stack.layers[5].state, "approved mutation active");
+    assert_eq!(approved_stack.layers[5].hash, expected_hash);
 }

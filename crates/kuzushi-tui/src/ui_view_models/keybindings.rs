@@ -14,23 +14,100 @@ pub(crate) struct FooterKeybinding {
 }
 
 pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    if let Some(bindings) = active::active_keybindings(app) {
+    let mut bindings = active::active_keybindings(app).unwrap_or_else(|| idle_keybindings(app));
+    if view_owns_its_input_contract(app) {
         return bindings;
     }
-    let mut bindings = idle_keybindings(app);
+    bindings = input_mode_bindings(bindings, app.input_mode());
     push_input_mode_binding(&mut bindings, app);
-    // Modal pickers swallow Tab while their list/options controls own focus.
-    // Once the operator explicitly focuses the prompt with `:`, Tab is command
-    // completion again.
-    if app.input_mode() == crate::InputMode::Prompt
-        && (!app.is_picker_view() || app.picker_prompt_focused())
-    {
+    if app.input_mode() == crate::InputMode::Prompt {
         let tab = bind("Tab", "complete");
         if !bindings.contains(&tab) {
-            bindings.insert(0, tab);
+            bindings.insert(after_critical_binding(&bindings), tab);
         }
     }
     bindings
+}
+
+fn view_owns_its_input_contract(app: &ShellApp) -> bool {
+    (app.is_picker_view() && !app.picker_prompt_focused())
+        || matches!(
+            app.shell_view(),
+            crate::ShellView::FilePicker
+                | crate::ShellView::ConfirmDialog
+                | crate::ShellView::QuitConfirm
+                | crate::ShellView::Keymap
+        )
+}
+
+fn input_mode_bindings(
+    bindings: Vec<FooterKeybinding>,
+    mode: crate::InputMode,
+) -> Vec<FooterKeybinding> {
+    bindings
+        .into_iter()
+        .filter_map(|binding| binding_for_mode(binding, mode))
+        .collect()
+}
+
+fn binding_for_mode(binding: FooterKeybinding, mode: crate::InputMode) -> Option<FooterKeybinding> {
+    if is_global_chord(binding.key) {
+        return Some(binding);
+    }
+    match mode {
+        crate::InputMode::Prompt => (typed_command_key(binding.key)
+            || binding.key == "PgUp/PgDn"
+            || (binding.key == "Esc" && binding.label == "return to picker"))
+            .then_some(binding),
+        crate::InputMode::Navigate => navigation_binding_without_false_escape(binding),
+    }
+}
+
+fn navigation_binding_without_false_escape(binding: FooterKeybinding) -> Option<FooterKeybinding> {
+    if typed_command_key(binding.key) {
+        return None;
+    }
+    match binding.key {
+        "Esc/q" => Some(bind("q", binding.label)),
+        "n/Esc" => Some(bind("n", binding.label)),
+        key if key.contains("Esc") => None,
+        _ => Some(binding),
+    }
+}
+
+fn typed_command_key(key: &str) -> bool {
+    if key.starts_with('/') || key.starts_with('?') {
+        return true;
+    }
+    !looks_like_physical_key(key)
+        && key.chars().count() > 1
+        && key.chars().any(|ch| ch.is_ascii_lowercase())
+}
+
+fn looks_like_physical_key(key: &str) -> bool {
+    key.chars().count() == 1
+        || key.contains('/')
+        || key.contains('+')
+        || matches!(
+            key,
+            "Tab"
+                | "Shift+Tab"
+                | "Enter"
+                | "Esc"
+                | "Space"
+                | "Backspace"
+                | "PgUp"
+                | "PgDn"
+                | "PgUp/PgDn"
+                | "Up"
+                | "Down"
+                | "KEYS"
+                | "COMMAND"
+        )
+}
+
+fn is_global_chord(key: &str) -> bool {
+    key.starts_with("Ctrl+")
 }
 
 fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
@@ -39,19 +116,29 @@ fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp)
         crate::InputMode::Navigate => bind("Esc", "prompt"),
     };
     if !bindings.contains(&binding) {
-        bindings.insert(0, binding);
+        bindings.insert(after_critical_binding(bindings), binding);
     }
 }
 
+fn after_critical_binding(bindings: &[FooterKeybinding]) -> usize {
+    usize::from(bindings.first().is_some_and(|binding| {
+        binding.key == "Ctrl+C" && matches!(binding.label, "request abort" | "wait cleanup")
+    }))
+}
+
 fn idle_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    let mut bindings = catalog::keybindings(app)
+    let specialized = catalog::keybindings(app)
         .or_else(|| workbench::keybindings(app))
         .or_else(|| workflow::keybindings(app))
         .or_else(|| workspace::keybindings(app))
-        .or_else(|| system::keybindings(app))
-        .unwrap_or_else(default_keybindings);
+        .or_else(|| system::keybindings(app));
+    let uses_default = specialized.is_none();
+    let mut bindings = specialized.unwrap_or_else(default_keybindings);
     if matches!(app.shell_view(), crate::ShellView::PlanningPicker) {
         return bindings;
+    }
+    if uses_default && !view_owns_its_input_contract(app) {
+        push_view_keybindings(&mut bindings, app);
     }
     push_unique_binding(&mut bindings, bind("workbench", "command center"));
     bindings
@@ -82,7 +169,6 @@ fn default_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("Esc", "back"),
         bind("workbench", "command center"),
-        bind("Enter", "run command"),
         bind("Ctrl+G", "palette"),
         bind("help", "command list"),
         bind("Ctrl+C", "exit"),

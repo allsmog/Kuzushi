@@ -128,7 +128,9 @@ keeps databases, traces, locks, findings, and other runtime state local, while
 leaving `.kuzushi/scope.toml`, `.kuzushi/prompts/**`, and
 `.kuzushi/v3/config.toml` available for deliberate team versioning. Review
 those project files before committing them; never commit credentials or an
-unreviewed live state tree.
+unreviewed live state tree. Do not add a parent-level blanket `.kuzushi/`
+rule: Git will then hide the deliberately trackable exceptions before the
+child policy can re-include them. Ignore credentials by their exact path.
 
 ```bash
 # 90-second offline tour: scan a vendored vulnerable fixture with the
@@ -563,13 +565,13 @@ The old TypeScript/Ink CLI is no longer the npm runtime path:
 
 Retained TypeScript is classified as one of:
 
-- Published library/API surface: `dist/`, `kuzushi/modules`, and
-  `kuzushi/testing`.
-- Reference implementation for migration parity: legacy `src/modules/`,
-  `src/agents/`, scanner normalization, and report helpers.
-- Non-visual UI support code: `UIStore`, CI/plain-text output helpers,
-  formatting helpers, and migration/reference fixtures. There is no retained
-  TypeScript/Ink interactive TUI.
+- Published compatibility SDK source: `src/modules/`, `src/testing/`,
+  `src/agent-runtime/types.ts`, `src/bus/types.ts`, and the public root types;
+  these build the `kuzushi`, `kuzushi/modules`, and `kuzushi/testing` exports.
+- TypeScript-only benchmark, code-generation, and packaging tooling that
+  validates those exports and the native release wrapper.
+
+There is no retained TypeScript scanner runtime or interactive TUI.
 
 Do not add new runtime CLI behavior in TypeScript. New product execution paths
 belong in `crates/kuzushi-core`, `crates/kuzushi-cli`, `crates/kuzushi-tui`,

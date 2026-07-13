@@ -91,7 +91,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::modules::ModuleKind;
 use kuzushi_core::{
     AgenticSastReport, CarliniThreatHuntReport, ExecutionAuthorization, Finding, ModuleRegistry,
-    RunTraceStep, ScanCancellation, ScanProgress, ToolOptionStore, V2Config, WorkspaceTarget,
+    PreparedToolInput, RunTraceStep, ScanCancellation, ScanProgress, ToolOptionStore, V2Config,
+    WorkspaceTarget,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -163,14 +164,14 @@ pub use onboarding::{
     TargetCandidate, TargetCandidateScope, TargetProfile, ToggleOutcome, WorkflowPhase,
 };
 pub use prereq_chain::{
-    PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqPlanAction, PrereqPlanStep,
-    PrereqStep,
+    PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqFinalInput, PrereqPlanAction,
+    PrereqPlanStep, PrereqStep,
 };
 pub use runtime::{run_shell, run_shell_with_plain};
 pub(crate) use settings::{
-    api_key_model_choice_for_provider, bridge_command_status, display_model_selector,
-    model_choices, oauth_model_choice_for_provider, oauth_provider_status, runtime_backend_label,
-    validate_shell_model_id, ModelChoice,
+    api_key_model_choice_for_provider, auth_provider_label, bridge_command_status,
+    display_model_selector, model_choices, oauth_model_choice_for_provider, oauth_provider_status,
+    runtime_backend_label, validate_shell_model_id, ModelChoice,
 };
 pub use shellapp::ShellApp;
 pub(crate) use task_durations::compact_secs;

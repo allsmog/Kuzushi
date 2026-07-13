@@ -29,7 +29,7 @@ impl ShellApp {
                 days: *days,
             })],
             ReviewDecisionCommand::Unsupported(raw) => {
-                self.log(
+                self.set_warn_notice(
                     "review",
                     format!(
                         "unsupported review command `{raw}`. Next: decision <verdict> <reason> | dismiss <reason> <note>"
@@ -109,14 +109,14 @@ impl ShellApp {
         apply: SuppressionApply,
     ) -> Vec<ShellEffect> {
         let Some(target) = apply.target.as_deref() else {
-            self.log("error", "suppress needs an active target");
+            self.set_error_notice("suppress", "suppress needs an active target");
             return Vec::new();
         };
         let workspace = match WorkspaceTarget::new(target) {
             Ok(workspace) => workspace,
             Err(error) => {
-                self.log(
-                    "error",
+                self.set_error_notice(
+                    "suppress",
                     format!("could not open suppression workspace: {error}"),
                 );
                 return Vec::new();
@@ -124,7 +124,7 @@ impl ShellApp {
         };
         match self.persist_suppression(&workspace, &apply) {
             Ok((message, fingerprint)) => {
-                self.log("suppress", message);
+                self.set_success_notice("suppress", message);
                 let filter = self.active_findings_filter();
                 let mut effects = vec![ShellEffect::RefreshFindings(FindingsRefresh {
                     announce: false,
@@ -138,7 +138,7 @@ impl ShellApp {
                 effects
             }
             Err(error) => {
-                self.log("error", format!("suppression not recorded: {error}"));
+                self.set_error_notice("suppress", format!("suppression not recorded: {error}"));
                 Vec::new()
             }
         }
@@ -168,11 +168,11 @@ impl ShellApp {
         )?;
         Ok((
             format!(
-                "recorded {} for {} · decision #{} · expires {}{}",
+                "recorded {} for {} · decision #{} · expires in {} days{}",
                 result.record.id,
                 apply.reference,
                 result.decision_id,
-                expires_at_unix,
+                apply.days,
                 if result.structured_rule_written {
                     ""
                 } else {
@@ -220,7 +220,7 @@ impl ShellApp {
     fn parse_dismiss_reason_or_log(&mut self, value: &str) -> Option<DismissReason> {
         let reason = DismissReason::from_str(value);
         if reason.is_none() {
-            self.log(
+            self.set_warn_notice(
                 "review",
                 format!(
                     "unknown dismissal reason `{value}`. Next: dismiss false_positive|acceptable_risk|wont_fix|used_in_tests|no_time_to_fix <note>"
@@ -236,7 +236,7 @@ impl ShellApp {
     ) -> Option<ReviewDecisionVerdict> {
         let verdict = parse_review_decision_verdict(value);
         if verdict.is_none() {
-            self.log(
+            self.set_warn_notice(
                 "review",
                 format!(
                     "unknown review decision `{value}`. Next: decision confirmed|rejected_false_positive|suppressed|deferred|accepted_risk|needs_review <reason>"
@@ -249,7 +249,7 @@ impl ShellApp {
     fn non_empty_review_decision_reason_or_log(&mut self, value: &str) -> Option<String> {
         let reason = value.trim();
         if reason.is_empty() {
-            self.log(
+            self.set_warn_notice(
                 "review",
                 "review decision reason cannot be empty. Next: decision <verdict> <reason>",
             );
@@ -261,7 +261,7 @@ impl ShellApp {
     fn current_review_finding_or_log(&mut self) -> Option<(Option<String>, Finding)> {
         let finding = crate::ui_view_models::current_finding_for_detail(self);
         if finding.is_none() {
-            self.log(
+            self.set_warn_notice(
                 "review",
                 "no finding selected. Next: findings, move to a row, then decision <verdict> <reason>",
             );
@@ -275,7 +275,7 @@ impl ShellApp {
         verdict: ReviewDecisionVerdict,
         label: &str,
     ) {
-        self.log(
+        self.set_success_notice(
             "review",
             format!(
                 "decision saved; will carry forward as decision #{decision_id} ({} for {label})",
@@ -291,8 +291,8 @@ impl ShellApp {
     ) -> bool {
         let message = error.to_string();
         let conflicted = self.mark_review_decision_conflict_if_stale(finding, &message);
-        self.log(
-            "error",
+        self.set_error_notice(
+            "review",
             with_next_step(
                 format!("could not save review decision: {message}"),
                 "open a persisted finding, then retry decision <verdict> <reason>",
@@ -381,7 +381,12 @@ pub(crate) fn finding_stable_fp(finding: &Finding) -> &str {
 
 fn parse_review_decision_verdict(value: &str) -> Option<ReviewDecisionVerdict> {
     let normalized = value.trim().replace('-', "_");
-    ReviewDecisionVerdict::from_str(&normalized)
+    let canonical = match normalized.as_str() {
+        "false_positive" | "fp" => "rejected_false_positive",
+        "true_positive" | "valid" => "confirmed",
+        _ => normalized.as_str(),
+    };
+    ReviewDecisionVerdict::from_str(canonical)
 }
 
 pub(crate) fn review_decision_finding_label(alias: Option<&str>, finding: &Finding) -> String {

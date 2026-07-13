@@ -1,8 +1,8 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_mcp_common::tool::ToolHandler;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::Path;
 
 use crate::compile_db;
 
@@ -20,19 +20,28 @@ impl ToolHandler for HealthTool {
 #[async_trait]
 impl ToolHandler for CompileCommandsTool {
     async fn call(&self, args: Value) -> Result<Value> {
-        compile_commands_response(&args).await
+        compile_commands_response(self, &args).await
     }
 }
 
-pub(crate) async fn compile_commands_response(args: &Value) -> Result<Value> {
-    Ok(serde_json::to_value(resolve_compile_commands(args).await?)?)
+pub(crate) async fn compile_commands_response(
+    tool: &CompileCommandsTool,
+    args: &Value,
+) -> Result<Value> {
+    validate_compile_arguments(args)?;
+    let repo = tool
+        .read_capability
+        .authorize_directory(Path::new(require_str(args, "repoPath")?))?;
+    let database = compile_db::resolve(&repo).await?;
+    Ok(serde_json::to_value(database)?)
 }
 
-async fn resolve_compile_commands(args: &Value) -> Result<compile_db::CompileDb> {
-    let repo = compile_commands_repo(args)?;
-    compile_db::resolve(&repo).await
-}
-
-pub(crate) fn compile_commands_repo(args: &Value) -> Result<PathBuf> {
-    Ok(PathBuf::from(require_str(args, "repoPath")?))
+fn validate_compile_arguments(args: &Value) -> Result<()> {
+    let object = args
+        .as_object()
+        .context("clang.compile_commands arguments must be an object")?;
+    if let Some(name) = object.keys().find(|name| name.as_str() != "repoPath") {
+        anyhow::bail!("unknown clang.compile_commands argument: {name}");
+    }
+    Ok(())
 }

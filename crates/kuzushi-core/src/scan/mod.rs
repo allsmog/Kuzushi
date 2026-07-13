@@ -23,6 +23,12 @@ pub mod engines;
 pub mod infrastructure;
 mod subprocess;
 
+/// Privacy-compatible default ruleset for Semgrep-backed security scans.
+///
+/// Semgrep rejects its special `auto` selector when metrics are disabled. Kuzushi
+/// deliberately forces metrics off, so the default must name a concrete pack.
+pub(crate) const DEFAULT_SEMGREP_CONFIG: &str = "p/security-audit";
+
 #[cfg(test)]
 mod tests;
 
@@ -61,7 +67,7 @@ use subprocess::{
     capture_scanner_process_pipes, configure_scanner_subprocess_env, join_scanner_process_readers,
     wait_for_scanner_process, ProcessOutput,
 };
-pub(crate) use subprocess::{child_process_group_id, configure_scanner_process_group};
+pub(crate) use subprocess::{configure_scanner_process_group, PreparedProcessGroup};
 pub use subprocess::{RegisteredChild, ScanCancellation};
 
 pub(crate) fn completed_scan_tool_json(output: String, data: Value) -> Value {

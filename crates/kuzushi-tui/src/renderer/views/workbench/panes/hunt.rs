@@ -46,6 +46,16 @@ fn target_artifact_exists(app: &ShellApp, relative: &str) -> bool {
 }
 
 fn hunt_budget_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
+    if !app.session().cost_accounting_is_complete() {
+        let cost = crate::ui_view_models::format_runtime_cost(
+            app.session().session_cost_report(),
+            app.session().cost_accounting_error(),
+        );
+        return vec![Line::styled(
+            fit(&format!("budget  halted · {cost}"), width),
+            theme::danger(),
+        )];
+    }
     let spent = app.session().session_cost_usd().max(0.0);
     let Some(cap) = app.session().session_budget_usd().filter(|cap| *cap > 0.0) else {
         return vec![Line::styled(

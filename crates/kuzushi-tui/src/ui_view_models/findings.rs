@@ -16,6 +16,7 @@ use kuzushi_core::{
     ProofConfidence, RunSummary, RunTargetGitMetadata, StaticProofState, TriageVerdict,
 };
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const FINDINGS_PREVIEW_LIMIT: usize = 8;
@@ -269,20 +270,28 @@ fn severity_count_segments(counts: SeverityCounts) -> Vec<String> {
 
 pub(crate) fn selected_finding_detail_model(app: &ShellApp) -> Option<FindingDetailModel> {
     let (alias, finding) = current_finding_for_detail(app)?;
+    Some(finding_detail_model_for_projection(app, alias, &finding))
+}
+
+pub(crate) fn finding_detail_model_for_projection(
+    app: &ShellApp,
+    alias: Option<String>,
+    finding: &Finding,
+) -> FindingDetailModel {
     let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
         app.findings(),
         app.review_decisions(),
     );
-    let decision = review_index.effective_decision_for(&finding);
+    let decision = review_index.effective_decision_for(finding);
     let runs = run_summary_index(app);
-    let provenance = finding_run_provenance(&finding, &runs);
-    Some(FindingDetailModel::from_finding(
-        &finding,
+    let provenance = finding_run_provenance(finding, &runs);
+    FindingDetailModel::from_finding(
+        finding,
         alias,
         target_base(app).as_deref(),
         decision.as_ref(),
         provenance,
-    ))
+    )
 }
 
 pub(crate) fn current_finding_for_detail(app: &ShellApp) -> Option<(Option<String>, Finding)> {
@@ -385,7 +394,7 @@ fn finding_rows(
 pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
     app.workbench_cache()
         .borrow_mut()
-        .sorted_finding_alias_indices(app.findings())
+        .sorted_finding_alias_indices(app.findings(), app.findings_revision())
 }
 
 pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
@@ -520,22 +529,23 @@ pub(crate) fn relativize_location(location: String, base: Option<&str>) -> Strin
 
 type ProjectedFinding = VisibleFindingProjection;
 
-pub(crate) fn projected_visible_findings(app: &ShellApp) -> Vec<ProjectedFinding> {
+pub(crate) fn projected_visible_findings(app: &ShellApp) -> Arc<[ProjectedFinding]> {
     let key = visible_findings_cache_key(app);
     if let Some(cached) = app.workbench_cache().borrow().visible_findings(&key) {
         return cached;
     }
-    let projected = engagement_projected_findings(app, visible_sorted_finding_alias_indices(app));
+    let projected: Arc<[ProjectedFinding]> =
+        engagement_projected_findings(app, visible_sorted_finding_alias_indices(app)).into();
     app.workbench_cache()
         .borrow_mut()
-        .cache_visible_findings(key, projected.clone());
+        .cache_visible_findings(key, Arc::clone(&projected));
     projected
 }
 
-fn visible_findings_cache_key(app: &ShellApp) -> VisibleFindingsCacheKey {
+pub(crate) fn visible_findings_cache_key(app: &ShellApp) -> VisibleFindingsCacheKey {
     VisibleFindingsCacheKey::from_app_parts(
-        app.findings(),
-        app.review_decisions(),
+        app.findings_revision(),
+        app.review_decisions_revision(),
         target_base(app),
         active_component_rel_path(app),
         active_findings_filter_cache_value(app),
@@ -550,10 +560,11 @@ fn active_findings_filter_cache_value(app: &ShellApp) -> Option<String> {
         .map(ToString::to_string)
 }
 
+#[cfg(test)]
 pub(crate) fn projected_visible_finding_pairs(app: &ShellApp) -> Vec<(String, Finding)> {
     projected_visible_findings(app)
-        .into_iter()
-        .map(|projected| (projected.alias, projected.finding))
+        .iter()
+        .map(|projected| (projected.alias.clone(), projected.finding.clone()))
         .collect()
 }
 

@@ -19,6 +19,20 @@ fn strategy_queue_model_requires_target() {
 }
 
 #[test]
+fn strategy_queue_not_requested_does_not_claim_to_be_loading() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+
+    let model = strategy_queue_model(&app);
+
+    assert_eq!(
+        model.summary,
+        "strategy queue not generated — run `recommend`"
+    );
+}
+
+#[test]
 fn strategy_queue_model_reads_persisted_proposals() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();

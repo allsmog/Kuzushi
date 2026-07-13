@@ -143,13 +143,7 @@ pub(crate) fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     ));
     lines.push(blank());
     for step in &model.steps {
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {}. ", step.number), theme::accent()),
-            Span::styled(
-                fit(&step.text, area.width.saturating_sub(5) as usize),
-                theme::primary(),
-            ),
-        ]));
+        lines.extend(quickstart_step_lines(step, area.width as usize));
     }
     lines.push(blank());
     lines.push(muted(&fit(
@@ -163,6 +157,27 @@ pub(crate) fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
         area.width as usize,
     )));
     lines
+}
+
+fn quickstart_step_lines(
+    step: &crate::ui_view_models::QuickstartStep,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let prefix = format!("  {}. ", step.number);
+    let body_width = width.saturating_sub(prefix.chars().count()).max(16);
+    wrap_text(&step.text, body_width)
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| {
+            let marker = (index == 0)
+                .then(|| prefix.clone())
+                .unwrap_or_else(|| " ".repeat(prefix.chars().count()));
+            Line::from(vec![
+                Span::styled(marker, theme::accent()),
+                Span::styled(chunk, theme::primary()),
+            ])
+        })
+        .collect()
 }
 
 /// Full-screen scrollable transcript view (M1 §1.1). Unlike the embedded
@@ -179,12 +194,45 @@ pub(crate) fn logs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
     let model = transcript_model_from_log_index(app, 0);
     for row in model.rows {
-        lines.push(transcript_line_dated(
+        lines.extend(wrapped_log_lines(
             &row.prefix,
             &row.body,
             row.continuation,
             row.time_secs,
+            area.width as usize,
         ));
     }
     lines
+}
+
+fn wrapped_log_lines(
+    prefix: &str,
+    body: &str,
+    continuation: bool,
+    time_secs: u64,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let prefix_width = line_text(&transcript_line_dated(prefix, "", continuation, time_secs))
+        .chars()
+        .count();
+    let body_width = width.saturating_sub(prefix_width).max(8);
+    wrap_text(body, body_width)
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| {
+            transcript_line_dated(
+                prefix,
+                &chunk,
+                continuation || index > 0,
+                if index == 0 { time_secs } else { 0 },
+            )
+        })
+        .collect()
+}
+
+fn line_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
 }

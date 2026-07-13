@@ -188,7 +188,91 @@ impl ShellApp {
     }
 
     pub fn record_cost(&mut self, cost_usd: f64) {
-        self.session_mut().record_cost(cost_usd);
+        if let Err(error) = self.session_mut().record_cost(cost_usd) {
+            self.report_cost_accounting_error(error);
+            return;
+        }
+        self.maybe_trigger_budget_halt();
+    }
+
+    pub(crate) fn record_cost_report(&mut self, cost: kuzushi_core::runtime::RuntimeCostReport) {
+        if let Err(error) = self.session_mut().record_cost_report(cost) {
+            self.report_cost_accounting_error(error);
+            return;
+        }
+        self.maybe_trigger_budget_halt();
+    }
+
+    pub(crate) fn begin_run_cost_tracking(&mut self, run_id: &str, runtime_backed: bool) {
+        self.session_mut()
+            .begin_run_cost_tracking(run_id, runtime_backed);
+    }
+
+    pub(crate) fn observe_run_cost_report(
+        &mut self,
+        run_id: &str,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+    ) {
+        if let Err(error) = self.session_mut().observe_run_cost_report(run_id, cost) {
+            self.report_cost_accounting_error(error);
+            return;
+        }
+        self.maybe_trigger_budget_halt();
+    }
+
+    pub(crate) fn settle_run_cost_report(
+        &mut self,
+        run_id: &str,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+    ) {
+        let report = match self.session_mut().settle_run_cost_report(run_id, cost) {
+            Ok(report) => report,
+            Err(error) => {
+                self.report_cost_accounting_error(error);
+                return;
+            }
+        };
+        if let Some(activity) = self
+            .activity_mut()
+            .filter(|activity| activity.run_id == run_id)
+        {
+            activity.settle_runtime_cost(report);
+        }
+        self.maybe_trigger_budget_halt();
+    }
+
+    pub(crate) fn settle_active_run_cost_report(
+        &mut self,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+    ) {
+        let run_id = self.activity().map(|activity| activity.run_id.clone());
+        if let Some(run_id) = run_id {
+            self.begin_run_cost_tracking(&run_id, true);
+            self.settle_run_cost_report(&run_id, cost);
+        } else {
+            self.record_cost_report(cost);
+        }
+    }
+
+    pub(crate) fn mark_run_cost_incomplete(&mut self, run_id: &str) {
+        if let Err(error) = self.session_mut().mark_run_cost_incomplete(run_id) {
+            self.report_cost_accounting_error(error);
+            return;
+        }
+        if let Some(activity) = self
+            .activity_mut()
+            .filter(|activity| activity.run_id == run_id)
+        {
+            activity.mark_runtime_cost_incomplete();
+        }
+        self.maybe_trigger_budget_halt();
+    }
+
+    pub(crate) fn report_cost_accounting_error(&mut self, error: impl std::fmt::Display) {
+        let message = format!("runtime cost accounting failed closed: {error}");
+        self.session_mut()
+            .mark_cost_accounting_error(message.clone());
+        self.set_error_notice("cost", message);
         self.maybe_trigger_budget_halt();
     }
 }

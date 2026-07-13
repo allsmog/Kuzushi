@@ -1,46 +1,69 @@
 use super::*;
 
+const CARGO_AUDIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 impl ScanEngine for CargoAuditScanner {
     fn id(&self) -> &'static str {
         "cargo-audit"
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
-        if cancellation.is_cancelled() {
-            anyhow::bail!("cargo-audit scan cancelled");
-        }
-
-        let lockfile = target.join("Cargo.lock");
-        if !lockfile.exists() {
+        let Some(lockfile) = cargo_audit_lockfile(target, cancellation)? else {
             return Ok(Vec::new());
-        }
+        };
         ensure_cargo_audit_available()?;
-
-        let mut command = Command::new("cargo");
-        command
-            .args(["audit", "--json"])
-            .arg("--file")
-            .arg(&lockfile)
-            .current_dir(target)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let output = crate::bounded_subprocess::output(&mut command, "cargo audit")
-            .with_context(|| "cargo-audit: failed to invoke `cargo audit`")?;
-
-        // cargo-audit exits non-zero when vulnerabilities are found; that's
-        // expected. Malformed or shape-invalid output is never a clean scan.
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let findings = parse_cargo_audit_output(&stdout)?;
-        if !cargo_audit_status_is_usable(output.status.success(), output.status.code()) {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("cargo-audit failed: {}", stderr.trim());
-        }
-        anyhow::ensure!(
-            output.status.success() || !findings.is_empty(),
-            "cargo-audit reported vulnerabilities but emitted no usable advisory entries"
-        );
-        Ok(findings)
+        let output = run_cargo_audit(target, &lockfile, cancellation)?;
+        cargo_audit_findings_from_output(output)
     }
+}
+
+fn cargo_audit_lockfile(
+    target: &Path,
+    cancellation: &ScanCancellation,
+) -> Result<Option<PathBuf>> {
+    if cancellation.is_cancelled() {
+        anyhow::bail!("cargo-audit scan cancelled");
+    }
+    let lockfile = target.join("Cargo.lock");
+    Ok(lockfile.exists().then_some(lockfile))
+}
+
+fn run_cargo_audit(
+    target: &Path,
+    lockfile: &Path,
+    cancellation: &ScanCancellation,
+) -> Result<std::process::Output> {
+    let mut command = Command::new("cargo");
+    command
+        .args(["audit", "--json"])
+        .arg("--file")
+        .arg(lockfile)
+        .current_dir(target)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::bounded_subprocess::output_with_control(
+        &mut command,
+        "cargo audit",
+        Some(cancellation),
+        CARGO_AUDIT_TIMEOUT,
+    )
+    .with_context(|| "cargo-audit: failed to invoke `cargo audit`")
+}
+
+fn cargo_audit_findings_from_output(output: std::process::Output) -> Result<Vec<Finding>> {
+    // cargo-audit exits non-zero when vulnerabilities are found; that's
+    // expected. Malformed or shape-invalid output is never a clean scan.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let findings = parse_cargo_audit_output(&stdout)?;
+    if !cargo_audit_status_is_usable(output.status.success(), output.status.code()) {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("cargo-audit failed: {}", stderr.trim());
+    }
+    anyhow::ensure!(
+        output.status.success() || !findings.is_empty(),
+        "cargo-audit reported vulnerabilities but emitted no usable advisory entries"
+    );
+    Ok(findings)
 }
 
 pub fn parse_cargo_audit_output(json: &str) -> Result<Vec<Finding>> {
@@ -115,6 +138,16 @@ mod status_tests {
         assert!(cargo_audit_status_is_usable(false, Some(1)));
         assert!(!cargo_audit_status_is_usable(false, Some(2)));
         assert!(!cargo_audit_status_is_usable(false, None));
+    }
+
+    #[test]
+    fn cancelled_scan_stops_before_cargo_audit_preflight() {
+        let cancellation = ScanCancellation::default();
+        cancellation.cancel();
+
+        let error = cargo_audit_lockfile(Path::new("."), &cancellation).unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
     }
 }
 

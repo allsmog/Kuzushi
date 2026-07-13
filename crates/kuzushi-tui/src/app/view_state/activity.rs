@@ -1,4 +1,5 @@
 use kuzushi_core::modules::{BuiltinModule, DagNodeDescriptor, ModuleRegistry};
+use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
 use kuzushi_core::{RunTraceStep, WorkflowPhase};
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Instant;
@@ -34,16 +35,18 @@ pub enum ActivityDeckPage {
     Heatmap,
     AttackPath,
     ExploitChain,
+    Recon,
 }
 
 impl ActivityDeckPage {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Findings,
         Self::AttackSurface,
         Self::Dfd,
         Self::Heatmap,
         Self::AttackPath,
         Self::ExploitChain,
+        Self::Recon,
     ];
 
     pub fn label(self) -> &'static str {
@@ -54,6 +57,7 @@ impl ActivityDeckPage {
             Self::Heatmap => "heatmap",
             Self::AttackPath => "path",
             Self::ExploitChain => "chain",
+            Self::Recon => "recon",
         }
     }
 
@@ -65,6 +69,7 @@ impl ActivityDeckPage {
             Self::Heatmap => Some(crate::scene3d::VizPage::Heatmap),
             Self::AttackPath => Some(crate::scene3d::VizPage::AttackPath),
             Self::ExploitChain => Some(crate::scene3d::VizPage::ExploitChain),
+            Self::Recon => None,
         }
     }
 
@@ -220,6 +225,8 @@ pub struct ActivitySession {
     pub step_task_ids: BTreeMap<usize, String>,
     pub subsystem_aggregate: SubsystemAggregate,
     pub events: VecDeque<RecordedTraceEvent>,
+    runtime_cost: RuntimeCostReport,
+    cost_accounting_error: Option<String>,
 }
 
 struct VisibleStepTask {
@@ -296,6 +303,8 @@ impl ActivitySession {
             step_task_ids: BTreeMap::new(),
             subsystem_aggregate: SubsystemAggregate::default(),
             events: VecDeque::with_capacity(ACTIVITY_FEED_RING_CAPACITY),
+            runtime_cost: RuntimeCostReport::known(RuntimeCost::ZERO),
+            cost_accounting_error: None,
         }
     }
 
@@ -329,6 +338,22 @@ impl ActivitySession {
 
     pub fn mark_terminal(&mut self) {
         self.completed_at.get_or_insert_with(Instant::now);
+    }
+
+    pub(crate) fn runtime_cost_report(&self) -> anyhow::Result<RuntimeCostReport> {
+        if let Some(error) = &self.cost_accounting_error {
+            anyhow::bail!("{error}");
+        }
+        Ok(self.runtime_cost)
+    }
+
+    pub(crate) fn settle_runtime_cost(&mut self, report: RuntimeCostReport) {
+        self.runtime_cost = report;
+        self.cost_accounting_error = None;
+    }
+
+    pub(crate) fn mark_runtime_cost_incomplete(&mut self) {
+        self.runtime_cost = self.runtime_cost.mark_incomplete();
     }
 
     /// Apply one trace step, updating the matching DAG row (or the subsystem
@@ -422,11 +447,16 @@ impl ActivitySession {
     }
 
     pub fn apply_step(&mut self, step: RunTraceStep) {
+        self.apply_step_with_cost(step);
+    }
+
+    pub(crate) fn apply_step_with_cost(&mut self, step: RunTraceStep) -> Option<RuntimeCostReport> {
+        let call_cost = self.record_terminal_model_call_cost(&step);
         let module_id = step.module_id.as_deref().unwrap_or("").to_string();
         if !module_id.is_empty() && is_hidden_module_id(&module_id) {
             self.apply_hidden_module_step(&step);
         } else if let Some(verb) = step.verb.as_deref() {
-            self.apply_visible_module_step(&module_id, verb, &step);
+            self.apply_visible_module_step(&module_id, verb, &step, call_cost);
         }
 
         let event = RecordedTraceEvent {
@@ -434,6 +464,32 @@ impl ActivitySession {
             observed_at: Instant::now(),
         };
         self.push_recorded_event(event);
+        call_cost
+    }
+
+    fn record_terminal_model_call_cost(
+        &mut self,
+        step: &RunTraceStep,
+    ) -> Option<RuntimeCostReport> {
+        let cost = match kuzushi_core::run_artifacts::terminal_model_call_cost_report(step) {
+            Ok(cost) => cost,
+            Err(error) => {
+                self.record_cost_accounting_error(error);
+                return None;
+            }
+        };
+        if let Some(cost) = cost {
+            match self.runtime_cost.checked_add(cost, "Activity runtime cost") {
+                Ok(total) => self.runtime_cost = total,
+                Err(error) => self.record_cost_accounting_error(error),
+            }
+        }
+        cost
+    }
+
+    fn record_cost_accounting_error(&mut self, error: impl std::fmt::Display) {
+        self.cost_accounting_error
+            .get_or_insert_with(|| format!("Activity cost invalid: {error}"));
     }
 
     fn push_recorded_event(&mut self, event: RecordedTraceEvent) {
@@ -462,12 +518,22 @@ impl ActivitySession {
         sync_subsystem_aggregate(&mut self.subsystem_aggregate);
     }
 
-    fn apply_visible_module_step(&mut self, module_id: &str, verb: &str, step: &RunTraceStep) {
+    fn apply_visible_module_step(
+        &mut self,
+        module_id: &str,
+        verb: &str,
+        step: &RunTraceStep,
+        call_cost: Option<RuntimeCostReport>,
+    ) {
         let Some(target) = self.visible_step_task(module_id, verb, step) else {
             return;
         };
         if let Some(row) = self.activity_row_for_step(&target.task_id, module_id, step) {
-            apply_activity_row_step(row, step, target.rolled_up_child);
+            if let Err(error) =
+                apply_activity_row_step(row, step, target.rolled_up_child, call_cost)
+            {
+                self.record_cost_accounting_error(error);
+            }
             self.step_task_ids.insert(step.n, target.task_id);
         }
     }
@@ -939,17 +1005,28 @@ fn activity_step_mints_row(step: &RunTraceStep) -> bool {
     )
 }
 
-fn apply_activity_row_step(row: &mut DagTaskRow, step: &RunTraceStep, rolled_up_child: bool) {
+fn apply_activity_row_step(
+    row: &mut DagTaskRow,
+    step: &RunTraceStep,
+    rolled_up_child: bool,
+    call_cost: Option<RuntimeCostReport>,
+) -> anyhow::Result<()> {
     row.steps_done = row.steps_done.saturating_add(1);
     row.last_label = step.label.clone();
-    if let Some(cost) = step.cost_usd {
-        row.cost_usd += cost;
+    if let Some(cost) = call_cost {
+        row.cost_usd = RuntimeCost::from_usd(row.cost_usd, "Activity task cost")?
+            .checked_add(
+                RuntimeCost::from_usd(cost.observed_usd(), "Activity model-call cost")?,
+                "Activity task cost",
+            )?
+            .usd();
     }
     row.severity = step.severity.clone();
     record_activity_row_details(row, step);
     row.state = next_activity_row_state(row.state, step, rolled_up_child);
     finalize_activity_row_details(row);
     mark_activity_row_times(row);
+    Ok(())
 }
 
 fn record_activity_row_details(row: &mut DagTaskRow, step: &RunTraceStep) {
@@ -1131,13 +1208,21 @@ fn activity_detail_meta(step: &RunTraceStep) -> String {
     if let Some(latency) = step.latency_ms {
         parts.push(format_latency(latency));
     }
-    if let Some(cost) = step.cost_usd.filter(|cost| *cost > 0.0) {
-        parts.push(format!("${cost:.4}"));
+    if let Some(cost) = step.cost_usd.and_then(activity_detail_cost) {
+        parts.push(cost);
     }
     if parts.is_empty() {
         String::new()
     } else {
         format!(" ({})", parts.join(" · "))
+    }
+}
+
+fn activity_detail_cost(cost: f64) -> Option<String> {
+    match RuntimeCost::from_usd(cost, "Activity detail cost") {
+        Ok(cost) if cost.usd() > 0.0 => Some(format!("${:.4}", cost.usd())),
+        Ok(_) => None,
+        Err(_) => Some("cost invalid".to_string()),
     }
 }
 
@@ -1662,7 +1747,8 @@ mod tests {
                 .with_verb("query")
                 .with_parent_step(2)
                 .with_latency_ms(Some(2_400))
-                .with_cost_usd(Some(0.0123)),
+                .with_cost_usd(Some(0.0123))
+                .with_model_metadata("test:model", "test", "prompt-hash"),
         );
 
         assert!(!session.tasks.contains_key("agentic-sast:query"));

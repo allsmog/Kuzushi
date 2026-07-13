@@ -1,4 +1,4 @@
-use super::compact_target_path;
+use super::workspace_artifact_path_label;
 use crate::ShellApp;
 use kuzushi_core::{AttachmentKind, AttachmentRecord, KnownArtifact, SUPPORTED_ATTACHMENT_MODULES};
 use std::sync::OnceLock;
@@ -70,7 +70,7 @@ pub(crate) struct PlainKnowledgeBaseAttachmentRow {
 pub(crate) fn knowledge_base_model(app: &ShellApp) -> KnowledgeBaseModel {
     let view = app.domain().kb_view();
     let module_id_label = view.module_id.clone();
-    let store_label = store_label(view.store_path.as_ref());
+    let store_label = store_label(app, view.store_path.as_ref());
     let supported_label = SUPPORTED_ATTACHMENT_MODULES.join(", ");
     KnowledgeBaseModel {
         title: "KB ATTACHMENTS",
@@ -162,8 +162,8 @@ fn plain_attachment_row(row: KnowledgeBaseAttachmentRow) -> PlainKnowledgeBaseAt
     PlainKnowledgeBaseAttachmentRow { cells: row.cells }
 }
 
-fn store_label(path: Option<&std::path::PathBuf>) -> String {
-    path.map(|path| compact_target_path(&path.display().to_string()))
+fn store_label(app: &ShellApp, path: Option<&std::path::PathBuf>) -> String {
+    path.map(|path| workspace_artifact_path_label(app, path))
         .unwrap_or_else(|| attachments_store_relative_path().to_string())
 }
 

@@ -133,14 +133,58 @@ impl FindingStore {
         &self,
         findings: &mut [Finding],
     ) -> Result<()> {
+        let stable_fps = findings
+            .iter()
+            .map(|finding| {
+                finding
+                    .identity_id
+                    .clone()
+                    .unwrap_or_else(|| finding.fingerprint.clone())
+            })
+            .collect::<Vec<_>>();
+        let verifications = self.latest_verifications_for_stable_fps(&stable_fps)?;
         for finding in findings {
             let stable_fp = finding
                 .identity_id
                 .as_deref()
                 .unwrap_or(&finding.fingerprint);
-            finding.verification = self.get_latest_verification_for_stable_fp(stable_fp)?;
+            finding.verification = verifications.get(stable_fp).cloned();
         }
         Ok(())
+    }
+
+    fn latest_verifications_for_stable_fps(
+        &self,
+        stable_fps: &[String],
+    ) -> Result<std::collections::BTreeMap<String, PersistedVerification>> {
+        if stable_fps.is_empty() || self.db_path.is_none() {
+            return Ok(std::collections::BTreeMap::new());
+        }
+        let requested = serde_json::to_string(stable_fps)?;
+        let mut stmt = self.conn.prepare(
+            r#"
+            with ranked as (
+                select stable_fp, proof_level, proof_verdict, backend, language,
+                       harness_path, crash_evidence, duration_ms, cost_usd,
+                       notes_json, created_at, verification_run_id, verified_scan_id,
+                       row_number() over (partition by stable_fp order by seq desc) as event_rank
+                  from verification_events
+                 where stable_fp in (select value from json_each(?1))
+            )
+            select stable_fp, proof_level, proof_verdict, backend, language,
+                   harness_path, crash_evidence, duration_ms, cost_usd,
+                   notes_json, created_at, verification_run_id, verified_scan_id
+              from ranked
+             where event_rank = 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![requested])?;
+        let mut verifications = std::collections::BTreeMap::new();
+        while let Some(row) = rows.next()? {
+            let stable_fp: String = row.get(0)?;
+            verifications.insert(stable_fp, latest_verification_from_row_at(row, 1)?);
+        }
+        Ok(verifications)
     }
 }
 

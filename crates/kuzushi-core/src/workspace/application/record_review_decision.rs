@@ -65,6 +65,8 @@ fn review_decision_write(
         confidence_millis: (decision.confidence.clamp(0.0, 1.0) * 1000.0).round() as u16,
         read_watermark,
         updates_finding_triage: false,
+        triage_cost_usd: None,
+        triage_cost_usd_exact: true,
         dismiss_reason: decision
             .dismiss_reason
             .map(|reason| reason.as_str().to_string()),

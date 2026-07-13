@@ -34,17 +34,27 @@ pub(crate) struct TaintIrisNextCatalogReport {
     #[serde(skip)]
     pub(crate) cost_usd: f64,
     #[serde(skip)]
+    pub(crate) cost_usd_exact: bool,
+    #[serde(skip)]
     pub(crate) ok: bool,
 }
 
 impl TaintIrisNextCatalogReport {
     pub(crate) fn to_tool_json(&self) -> Value {
-        json!({
+        let mut output = json!({
             "ok": self.ok,
             "output": render_catalog_summary(self),
             "data": serde_json::to_value(self).unwrap_or(Value::Null),
-            "costUsd": self.cost_usd,
-        })
+        });
+        let observed = RuntimeCost::from_usd(self.cost_usd, "taint catalog cost")
+            .expect("catalog runtime response cost was checked");
+        let cost = if self.cost_usd_exact {
+            RuntimeCostReport::known(observed)
+        } else {
+            RuntimeCostReport::incomplete(observed)
+        };
+        crate::module_result::apply_runtime_cost_report(&mut output, cost);
+        output
     }
 }
 
@@ -109,23 +119,12 @@ pub(crate) fn run_taint_iris_next_catalog_report(
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
 
-    // Reuse the existing plan-building primitives so language detection,
-    // context loading and threat-model loading are identical to what the
-    // hunt would see — the agent gets the same view of the codebase.
-    let context = load_taint_iris_next_context(&target);
-    let threat_model = load_taint_iris_next_threat_model(&target);
-    let languages = catalog_languages(&target, context.value.as_ref())?;
-    let context_keywords = taint_iris_next_context_keywords(context.value.as_ref(), &target)?;
-    let prompt = build_catalog_prompt(
-        &target,
-        &languages,
-        &context_keywords,
-        context.value.as_ref(),
-        threat_model.value.as_ref(),
-    );
+    let (languages, prompt) = catalog_prompt_context(&target)?;
+    let system_prompt = optional_taint_next_string(input, &["TAINT_IRIS_NEXT_CATALOG_PROMPT"])?
+        .unwrap_or_else(|| TAINT_IRIS_NEXT_CATALOG_SYSTEM_PROMPT.to_string());
 
-    let response = query_catalog_agent(runtime, model, &target, prompt)?;
-    let cost_usd = response.cost_usd;
+    let response = query_catalog_agent(runtime, model, &target, system_prompt, prompt)?;
+    let cost = response.checked_cost_report()?;
     let raw_value = catalog_raw_value(&response);
     let (entries, parse_error) = parse_catalog_entries(raw_value.as_ref(), &languages);
 
@@ -140,21 +139,40 @@ pub(crate) fn run_taint_iris_next_catalog_report(
         entries,
         raw_agent_output: raw_value,
         parse_error,
-        cost_usd,
+        cost_usd: cost.observed_usd(),
+        cost_usd_exact: cost.is_complete(),
         ok,
     })
+}
+
+/// Reuse the hunt's plan inputs so catalog generation sees the same language,
+/// context, and threat-model view as the eventual analysis pass.
+fn catalog_prompt_context(target: &Path) -> Result<(Vec<String>, String)> {
+    let context = load_taint_iris_next_context(target);
+    let threat_model = load_taint_iris_next_threat_model(target);
+    let languages = catalog_languages(target, context.value.as_ref())?;
+    let keywords = taint_iris_next_context_keywords(context.value.as_ref(), target)?;
+    let prompt = build_catalog_prompt(
+        target,
+        &languages,
+        &keywords,
+        context.value.as_ref(),
+        threat_model.value.as_ref(),
+    );
+    Ok((languages, prompt))
 }
 
 fn query_catalog_agent(
     runtime: &dyn AgentRuntime,
     model: String,
     target: &Path,
+    system_prompt: String,
     prompt: String,
 ) -> Result<AgentQueryResponse> {
-    runtime.query_blocking(AgentQueryRequest::new(
+    crate::runtime::query_blocking_checked(runtime, AgentQueryRequest::new(
         model,
         target.to_path_buf(),
-        TAINT_IRIS_NEXT_CATALOG_SYSTEM_PROMPT.to_string(),
+        system_prompt,
         prompt,
     ))
 }
@@ -549,7 +567,51 @@ fn persist_target_catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use tempfile::tempdir;
+
+    struct CapturingCatalogRuntime {
+        requests: Mutex<Vec<AgentQueryRequest>>,
+    }
+
+    impl CapturingCatalogRuntime {
+        fn new() -> Self {
+            Self {
+                requests: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl AgentRuntime for CapturingCatalogRuntime {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.requests.lock().unwrap().push(request);
+            Ok(AgentQueryResponse::default())
+        }
+
+        fn triage_finding_blocking(
+            &self,
+            _request: crate::runtime::TriageRequest,
+        ) -> Result<crate::findings::TriageOutcome> {
+            anyhow::bail!("not used by catalog prompt tests")
+        }
+    }
+
+    #[test]
+    fn catalog_query_uses_declared_prompt_override() {
+        let runtime = CapturingCatalogRuntime::new();
+
+        query_catalog_agent(
+            &runtime,
+            "openai:test".to_string(),
+            std::path::Path::new("/tmp/catalog-target"),
+            "custom catalog system".to_string(),
+            "catalog input".to_string(),
+        )
+        .unwrap();
+
+        let requests = runtime.requests.lock().unwrap();
+        assert_eq!(requests[0].system_prompt, "custom catalog system");
+    }
 
     #[test]
     fn extract_catalog_array_accepts_object_or_array() {

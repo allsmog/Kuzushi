@@ -5,7 +5,7 @@ assertion_line: 33
  KUZUSHI › workbench · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
 Kuzushi · target:no target · page:confirm · o idle · modules:all modules
- type next guided workflow · type scan run scan · type options sast:scan tune scanners · type ask ask the agent
+ type next guided workflow · type scan guided plan · type options sast:scan tune scanners · type ask ask the agent
 
  -- FINDING ------------------------------------------------------------------------------------------------------------
        ∅  no finding selected

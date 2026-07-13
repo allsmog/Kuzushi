@@ -27,9 +27,10 @@ pub(in crate::modules) fn write_sast_run_metadata(
     let mut recorded_artifacts = vec![summary_artifact];
     recorded_artifacts.extend(record_pipeline_artifacts(workspace, run_id, artifacts)?);
     let seed = load_or_seed_sast_run_summary(workspace, run_id)?;
+    let cost = crate::run_artifacts::tool_run_output_cost_report(result)?.exact_usd();
     let summary = recorded_artifacts.into_iter().fold(
         seed.with_findings(Some(findings_count as u64))
-            .with_cost(crate::run_artifacts::tool_run_output_cost_usd(result)),
+            .with_cost(cost),
         crate::run_artifacts::RunSummary::with_artifact,
     );
     crate::run_artifacts::write_run_summary(workspace.root(), &summary)?;

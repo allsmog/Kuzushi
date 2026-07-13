@@ -40,7 +40,8 @@ pub(crate) struct AgentCallAudit {
     pub(crate) model: String,
     pub(crate) provider: String,
     pub(crate) prompt_hash: String,
-    pub(crate) cost_usd: Option<f64>,
+    pub(crate) cost: kuzushi_core::runtime::RuntimeCostReport,
+    pub(crate) call_attempted: bool,
 }
 
 impl AgentCallAudit {
@@ -49,27 +50,111 @@ impl AgentCallAudit {
             model: model.to_string(),
             provider: kuzushi_core::model_provider(model).to_string(),
             prompt_hash: kuzushi_core::prompt_pair_hash(system_prompt, prompt),
-            cost_usd: None,
+            cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+            call_attempted: false,
         }
     }
 
-    pub(crate) fn with_cost_usd(mut self, cost_usd: f64) -> Self {
-        self.cost_usd = (cost_usd > 0.0).then_some(cost_usd);
+    pub(crate) fn with_cost(mut self, cost: kuzushi_core::runtime::RuntimeCostReport) -> Self {
+        self.cost = cost;
+        self.call_attempted = true;
         self
+    }
+
+    pub(crate) fn with_outcome(
+        mut self,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+        call_attempted: bool,
+    ) -> Self {
+        self.cost = cost;
+        self.call_attempted = call_attempted;
+        self
+    }
+
+    pub(crate) fn settlement_cost(&self) -> kuzushi_core::runtime::RuntimeCostReport {
+        if !self.call_attempted {
+            return kuzushi_core::runtime::RuntimeCostReport::known(
+                kuzushi_core::runtime::RuntimeCost::ZERO,
+            );
+        }
+        if self.cost.is_unavailable() {
+            kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO
+        } else {
+            self.cost
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test() -> Self {
+        Self::for_prompt("test:model", "system", "prompt")
+    }
+}
+
+pub(crate) type CostedWorkerResult<T> =
+    Result<(T, kuzushi_core::runtime::RuntimeCostReport), CostedWorkerError>;
+
+#[derive(Debug)]
+pub(crate) struct CostedWorkerError {
+    pub(crate) error: anyhow::Error,
+    pub(crate) cost: kuzushi_core::runtime::RuntimeCostReport,
+    pub(crate) call_attempted: bool,
+}
+
+impl CostedWorkerError {
+    pub(crate) fn before_call(error: anyhow::Error) -> Self {
+        Self {
+            error,
+            cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+            call_attempted: false,
+        }
+    }
+
+    pub(crate) fn unresolved(error: anyhow::Error) -> Self {
+        Self {
+            error,
+            cost: kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+            call_attempted: true,
+        }
+    }
+
+    pub(crate) fn observed(
+        error: anyhow::Error,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+    ) -> Self {
+        Self {
+            error,
+            cost,
+            call_attempted: true,
+        }
     }
 }
 
 #[derive(Debug)]
 pub(crate) enum PlanEvent {
-    Proposed(PlanProposal),
-    Failed { error: String },
+    Proposed {
+        plan: PlanProposal,
+        audit: AgentCallAudit,
+    },
+    Failed {
+        error: String,
+        audit: AgentCallAudit,
+    },
 }
 
 #[derive(Debug)]
 pub(crate) enum ThreatPatchEvent {
-    Proposed(ThreatPatch),
-    Answer { text: String },
-    Failed { error: String },
+    Proposed {
+        patch: ThreatPatch,
+        audit: AgentCallAudit,
+    },
+    Answer {
+        text: String,
+        audit: AgentCallAudit,
+    },
+    Failed {
+        error: String,
+        audit: AgentCallAudit,
+    },
 }
 
 pub(crate) fn background_tool_worker(
@@ -77,7 +162,7 @@ pub(crate) fn background_tool_worker(
     config: V2Config,
     workspace: WorkspaceTarget,
     tool_name: String,
-    input: serde_json::Value,
+    input: PreparedToolInput,
     run_id: String,
     thinking_level: Option<String>,
     authorization: ExecutionAuthorization,

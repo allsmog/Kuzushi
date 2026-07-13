@@ -11,12 +11,9 @@ pub(crate) fn parse_run_input(
         optional_string(input, "model")?,
         ctx.config.model.as_deref(),
     )?;
+    let system_prompt = resolve_system_prompt(input, &target)?;
     let effort = optional_string(input, "effort")?;
-    let max_budget_usd = input
-        .get("maxBudgetUsd")
-        .or_else(|| input.get("max_budget_usd"))
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite() && *value >= 0.0);
+    let max_budget_usd = max_budget_usd(input);
     let kb_context = ctx.artifact_knowledge_context(
         &target,
         "x-ray architecture entry points invariants attack surface threat model context",
@@ -27,10 +24,35 @@ pub(crate) fn parse_run_input(
         target,
         repo_name,
         model,
+        system_prompt,
         effort,
         max_budget_usd,
         kb_context,
     })
+}
+
+fn resolve_system_prompt(input: &Value, target: &Path) -> Result<String> {
+    let default_prompt = x_ray_system_prompt();
+    let prompt = optional_string(input, "X_RAY_PROMPT")?
+        .map(|value| {
+            crate::options::resolve_prepared_prompt_override_for_key(
+                &value,
+                target,
+                "X_RAY_PROMPT",
+                &default_prompt,
+            )
+        })
+        .transpose()?
+        .unwrap_or(default_prompt);
+    Ok(prompt)
+}
+
+fn max_budget_usd(input: &Value) -> Option<f64> {
+    input
+        .get("maxBudgetUsd")
+        .or_else(|| input.get("max_budget_usd"))
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && *value >= 0.0)
 }
 
 pub(crate) fn resolve_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {

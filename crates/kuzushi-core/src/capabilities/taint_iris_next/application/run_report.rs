@@ -268,6 +268,7 @@ pub(crate) fn taint_iris_next_missing_context_report(
         selected_cwes: Vec::new(),
         persisted: None,
         cost_usd: 0.0,
+        cost_usd_exact: true,
         ok: false,
         output: output.clone(),
         data: json!({
@@ -298,6 +299,7 @@ pub(crate) fn taint_iris_next_planned_report(
         selected_cwes: Vec::new(),
         persisted: None,
         cost_usd: 0.0,
+        cost_usd_exact: true,
         ok: true,
         output: render_taint_iris_next_output(plan, evidence, None),
         data: taint_iris_next_base_data(plan, evidence, "planned", agent_prompt),

@@ -74,6 +74,9 @@ pub struct WhiteboxVariantSearchReport {
     pub patterns: Vec<WhiteboxVariantPattern>,
     pub variants: Vec<Finding>,
     pub deterministic: bool,
+    pub truncated: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub truncation_reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

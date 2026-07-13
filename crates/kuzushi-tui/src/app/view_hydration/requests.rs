@@ -34,6 +34,10 @@ pub(super) fn active_view_hydration_keys(app: &ShellApp) -> Vec<ViewHydrationKey
 
 fn common_target_keys() -> Vec<ViewHydrationKey> {
     vec![
+        ViewHydrationKey::FileCompletionValues,
+        ViewHydrationKey::FindingCompletionValues,
+        ViewHydrationKey::RunIdCompletionValues,
+        ViewHydrationKey::TargetProfile,
         ViewHydrationKey::MapArtifacts,
         ViewHydrationKey::TargetBase,
         ViewHydrationKey::GitMetadata,
@@ -148,10 +152,9 @@ fn append_prompt_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     let Some(target) = app.target() else {
         return;
     };
-    let module = app.focused_module().unwrap_or("semgrep");
-    for verb in ShellApp::PROMPT_VERB_NAMES {
+    for prompt in app.focused_prompt_specs() {
         keys.push(ViewHydrationKey::PromptOverrideHash {
-            path: kuzushi_core::prompt_override_path(target, module, verb),
+            path: kuzushi_core::prompt_override_path(target, &prompt.module_id, &prompt.verb),
         });
     }
 }
@@ -245,6 +248,7 @@ fn append_replay_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
         return;
     }
     keys.push(run_artifact_key(run_id, "run.json"));
+    keys.push(run_artifact_key(run_id, "result.json"));
     keys.push(run_artifact_key(run_id, "triage.jsonl"));
 }
 
@@ -252,7 +256,7 @@ fn append_trace_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
     if run_id.is_empty() {
         return;
     }
-    for leaf in ["trace.jsonl", "triage.jsonl", "verify.jsonl"] {
+    for leaf in ["trace.jsonl", "triage.jsonl", "verify.jsonl", "patch.jsonl"] {
         keys.push(run_artifact_key(run_id, leaf));
     }
     keys.push(ViewHydrationKey::RunTrace {

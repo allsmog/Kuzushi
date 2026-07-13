@@ -27,6 +27,16 @@ pub(crate) struct PhaseCockpitModel {
     pub(crate) body: PhaseCockpitBody,
 }
 
+impl PhaseCockpitModel {
+    pub(crate) fn selected_finding_detail(&self) -> Option<&FindingDetailModel> {
+        match &self.body {
+            PhaseCockpitBody::Confirm(model) => model.finding.as_ref(),
+            PhaseCockpitBody::Fix(model) => model.finding.as_ref(),
+            PhaseCockpitBody::Map(_) | PhaseCockpitBody::Hunt(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PhaseCockpitBody {
     Map(MapPhaseModel),
@@ -44,8 +54,11 @@ pub(crate) struct EngagementHeaderModel {
     pub(crate) model: String,
     pub(crate) module: String,
     pub(crate) cost_usd: f64,
+    pub(crate) cost_complete: bool,
+    pub(crate) cost_invalid: bool,
     pub(crate) budget_usd: Option<f64>,
     pub(crate) live: bool,
+    pub(crate) finding_filter: Option<String>,
     pub(crate) phase_rail: Vec<JourneyPhaseStatus>,
     pub(crate) next_action: String,
     pub(crate) next_tools: String,
@@ -56,6 +69,8 @@ pub(crate) struct MapPhaseModel {
     pub(crate) run_id: Option<String>,
     pub(crate) elapsed_secs: Option<u64>,
     pub(crate) run_cost_usd: f64,
+    pub(crate) run_cost_complete: bool,
+    pub(crate) run_cost_invalid: bool,
     pub(crate) task_counts: ActivityTaskCountModel,
     pub(crate) console: Vec<MapConsoleRow>,
     pub(crate) hidden_console_rows: usize,
@@ -93,6 +108,7 @@ pub(crate) struct MapConsoleRow {
     pub(crate) severity: Option<String>,
     pub(crate) latency_ms: Option<u64>,
     pub(crate) cost_usd: Option<f64>,
+    pub(crate) cost_invalid: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -152,6 +168,7 @@ pub(crate) struct FixPhaseModel {
     pub(crate) export_command: String,
 }
 
+#[cfg(test)]
 pub(crate) fn phase_cockpit_model(app: &ShellApp) -> Option<PhaseCockpitModel> {
     let phase = phase_for_cockpit(app)?;
     Some(phase_cockpit_model_for_phase(app, phase))
@@ -168,6 +185,14 @@ pub(crate) fn phase_cockpit_model_for_phase(
     }
 }
 
+pub(crate) fn phase_cockpit_header_model_for_phase(
+    app: &ShellApp,
+    phase: WorkflowPhase,
+) -> EngagementHeaderModel {
+    engagement_header_model(app, phase)
+}
+
+#[cfg(test)]
 fn phase_for_cockpit(app: &ShellApp) -> Option<WorkflowPhase> {
     if app.shell_view() == ShellView::Activity {
         return app.activity().and_then(|activity| activity.origin_phase);
@@ -179,18 +204,35 @@ fn engagement_header_model(app: &ShellApp, phase: WorkflowPhase) -> EngagementHe
     let context = context_strip_model(app);
     let context_state = context.context_state_segment();
     let guidance = phase_guidance(app);
+    let model = if app.shell_view() == ShellView::Activity {
+        super::activity_execution_model_label(app)
+            .unwrap_or_else(|| configured_model_label(&context.model))
+    } else {
+        configured_model_label(&context.model)
+    };
     EngagementHeaderModel {
         phase,
         target: context.target,
         context: context_state,
-        model: context.model,
+        model,
         module: active_module_label(app),
         cost_usd: app.session().session_cost_usd(),
+        cost_complete: app.session().cost_accounting_is_complete(),
+        cost_invalid: app.session().cost_accounting_error().is_some(),
         budget_usd: app.session().session_budget_usd(),
         live: app.has_running_work(),
+        finding_filter: app.active_findings_filter().clone(),
         phase_rail: guidance.phase_rail,
         next_action: guidance.next_action,
         next_tools: guidance.next_tools,
+    }
+}
+
+fn configured_model_label(model: &str) -> String {
+    if model == "unconfigured" {
+        model.to_string()
+    } else {
+        format!("configured {model}")
     }
 }
 

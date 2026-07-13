@@ -1,6 +1,6 @@
 use crate::workspace::{
-    ensure_workspace_output_dir, read_optional_workspace_text, remove_workspace_state_file,
-    write_workspace_state_file, WorkspaceTarget, KUZUSHI_STATE_DIR, WORKSPACE_STATE_VERSION_DIR,
+    read_optional_workspace_text, remove_workspace_state_file, write_workspace_state_file,
+    WorkspaceTarget, KUZUSHI_STATE_DIR, WORKSPACE_STATE_VERSION_DIR,
 };
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
@@ -26,10 +26,7 @@ pub(super) fn strategy_state_path(workspace: &WorkspaceTarget, file_name: &str) 
 pub(crate) fn acquire_strategy_ledger_lock(
     workspace: &WorkspaceTarget,
 ) -> Result<crate::file_lock::ExclusiveFileLock> {
-    let state_dir = ensure_workspace_output_dir(
-        workspace.root(),
-        Path::new(KUZUSHI_STATE_DIR).join(WORKSPACE_STATE_VERSION_DIR),
-    )?;
+    let state_dir = workspace.ensure_state_dir()?;
     crate::file_lock::ExclusiveFileLock::acquire(&state_dir.join(STRATEGY_LEDGER_LOCK))
 }
 

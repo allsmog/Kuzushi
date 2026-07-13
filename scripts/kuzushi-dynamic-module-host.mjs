@@ -8,7 +8,7 @@ const DYNAMIC_HOST_PROTOCOL_VERSION = 1;
 // Baked at release time and checked by scripts/check-release-contract.mjs.
 // Do not derive this from KUZUSHI_HOST_VERSION: that would let a stale host
 // simply echo the native process's expectation and defeat the ABI handshake.
-const HOST_PACKAGE_VERSION = "0.24.0-alpha.7";
+const HOST_PACKAGE_VERSION = "0.24.0-alpha.8";
 const OPTION_TYPES_BY_JSON_SCHEMA_TYPE = {
   string: "string",
   boolean: "bool",
@@ -1076,9 +1076,13 @@ function normalizePhase(phase, effect, name) {
 }
 
 function normalizeEffect(effect, name) {
-  if (!["read", "workspace-write", "target-write", "external-action"].includes(effect)) {
+  if (
+    !["read", "workspace-write", "target-write", "repository-execute", "external-action"].includes(
+      effect,
+    )
+  ) {
     throw new Error(
-      `${name}.effect must be read, workspace-write, target-write, or external-action`,
+      `${name}.effect must be read, workspace-write, target-write, repository-execute, or external-action`,
     );
   }
   return effect;
@@ -1088,7 +1092,10 @@ function normalizeApproval(approval, effect, name) {
   if (!["none", "explicit"].includes(approval)) {
     throw new Error(`${name}.approval must be none or explicit`);
   }
-  if (["target-write", "external-action"].includes(effect) && approval !== "explicit") {
+  if (
+    ["target-write", "repository-execute", "external-action"].includes(effect) &&
+    approval !== "explicit"
+  ) {
     throw new Error(`${name}.effect=${effect} requires approval=explicit`);
   }
   return approval;

@@ -8,13 +8,18 @@ impl ShellApp {
     }
 
     pub(crate) fn dispatch_threat_worker(&mut self, start: ThreatWorkerStart) {
+        if self.reject_runtime_launch_while_budget_halted(true, "threat model") {
+            return;
+        }
         let Some(ticket) = self.try_start_exclusive_job(JobKind::Threat, "threat model") else {
             return;
         };
         let generation = ticket.generation();
         let watchdog_cancel = ticket.cancel.clone();
+        let run_id = kuzushi_core::new_run_id("threat");
+        self.begin_run_cost_tracking(&run_id, true);
         self.set_activity(Some(ActivitySession::for_optional_phase(
-            kuzushi_core::new_run_id("threat"),
+            run_id,
             start.origin_phase,
         )));
         let runtime = self.start_threat_worker_runtime(&start, watchdog_cancel.clone());

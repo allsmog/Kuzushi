@@ -9,6 +9,7 @@ pub(super) fn shinsa_response(
     artifacts: artifacts::ShinsaArtifacts,
     findings: Vec<Finding>,
     persisted: Option<GenericPersistedRun>,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Value {
     let output = format!(
         "{tool_name} complete\n  Mode:     {mode}\n  Output:   {}/\n  Artifacts: shinsa-state.json compliance-report.md\n  Findings: {}",
@@ -33,6 +34,6 @@ pub(super) fn shinsa_response(
         { "label": "state", "path": artifacts.state_path.display().to_string() },
         { "label": "report", "path": artifacts.report_path.display().to_string() },
     ]);
-    result["costUsd"] = json!(0.0);
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
     result
 }

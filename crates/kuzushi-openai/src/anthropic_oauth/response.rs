@@ -23,21 +23,21 @@ pub(crate) fn anthropic_response_usage(parsed: &ApiResponse) -> (u32, u32) {
         .unwrap_or((0, 0))
 }
 
-pub(crate) fn estimate_cost_usd(model: &str, input_tokens: u32, output_tokens: u32) -> f64 {
+pub(crate) fn estimate_cost_usd(model: &str, input_tokens: u32, output_tokens: u32) -> Option<f64> {
     let model = model.to_ascii_lowercase();
-    let (in_per_1k, out_per_1k) = token_prices_per_1k(&model);
-    (input_tokens as f64) / 1000.0 * in_per_1k + (output_tokens as f64) / 1000.0 * out_per_1k
+    let (in_per_1k, out_per_1k) = token_prices_per_1k(&model)?;
+    Some((input_tokens as f64) / 1000.0 * in_per_1k + (output_tokens as f64) / 1000.0 * out_per_1k)
 }
 
-fn token_prices_per_1k(model: &str) -> (f64, f64) {
+fn token_prices_per_1k(model: &str) -> Option<(f64, f64)> {
     if model.contains("opus") {
-        (15.0e-3, 75.0e-3)
+        Some((15.0e-3, 75.0e-3))
     } else if model.contains("sonnet") {
-        (3.0e-3, 15.0e-3)
+        Some((3.0e-3, 15.0e-3))
     } else if model.contains("haiku") {
-        (0.8e-3, 4.0e-3)
+        Some((0.8e-3, 4.0e-3))
     } else {
-        (3.0e-3, 15.0e-3)
+        None
     }
 }
 

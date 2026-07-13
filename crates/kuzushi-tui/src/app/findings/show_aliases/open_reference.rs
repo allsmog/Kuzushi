@@ -9,7 +9,7 @@ impl ShellApp {
             return vec![
                 ShellEffect::RefreshFindings(FindingsRefresh {
                     announce: false,
-                    filter: None,
+                    filter: self.active_findings_filter().clone(),
                 }),
                 open,
             ];
@@ -94,6 +94,9 @@ impl ShellApp {
         self.set_shell_view(ShellView::Workbench);
         self.router
             .workbench_mut()
+            .set_page(Some(crate::app::WorkbenchPage::Review));
+        self.router
+            .workbench_mut()
             .set_focus(crate::app::WorkbenchPane::Details);
         self.router
             .workbench_mut()
@@ -165,5 +168,96 @@ impl ShellApp {
 
     fn log_open_finding_error(&mut self, error: String) {
         self.log("error", with_next_step(error, "findings or scan <target>"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::{Severity, V2Config};
+
+    fn finding() -> Finding {
+        Finding::new_semgrep(
+            "demo.rule",
+            "src/app.rs",
+            7,
+            None,
+            Severity::High,
+            "selected finding",
+        )
+    }
+
+    #[test]
+    fn alias_refresh_carries_the_active_filter() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_active_findings_filter(Some("rank:high".to_string()));
+
+        let effects = app.open_finding_effects("F-0001");
+
+        assert!(matches!(
+            effects.as_slice(),
+            [
+                ShellEffect::RefreshFindings(FindingsRefresh {
+                    filter: Some(expression),
+                    ..
+                }),
+                ShellEffect::OpenFinding(_)
+            ] if expression == "rank:high"
+        ));
+    }
+
+    #[test]
+    fn successful_open_switches_from_hunt_to_confirm_details() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(crate::app::WorkbenchPage::Coverage));
+        app.router
+            .workbench_mut()
+            .set_focus(crate::app::WorkbenchPane::Findings);
+
+        app.finalize_open_finding_effect(OpenFindingFinalize {
+            reference: "F-0001".to_string(),
+            outcome: OpenFindingOutcome::Found(finding()),
+        });
+
+        assert_eq!(
+            app.router.workbench().page(),
+            Some(crate::app::WorkbenchPage::Review)
+        );
+        assert_eq!(
+            app.router.workbench().focus(),
+            crate::app::WorkbenchPane::Details
+        );
+        let model = crate::ui_view_models::phase_cockpit_model_for_phase(
+            &app,
+            crate::app::WorkflowPhase::Confirm,
+        );
+        let crate::ui_view_models::PhaseCockpitBody::Confirm(confirm) = model.body else {
+            panic!("open must render the Confirm composition");
+        };
+        assert_eq!(
+            confirm.finding.as_ref().map(|detail| detail.title.as_str()),
+            Some("selected finding")
+        );
+    }
+
+    #[test]
+    fn missing_alias_from_workbench_surfaces_actionable_notice() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+
+        app.finalize_open_finding_effect(OpenFindingFinalize {
+            reference: "F-9999".to_string(),
+            outcome: OpenFindingOutcome::MissingFindingAlias {
+                alias: "F-9999".to_string(),
+            },
+        });
+
+        let notice = app.advisory().notice.as_ref().expect("visible notice");
+        assert_eq!(notice.severity, NoticeSeverity::Error);
+        assert!(notice.message.contains("no finding alias F-9999"));
+        assert!(notice.message.contains("Next: findings"));
     }
 }

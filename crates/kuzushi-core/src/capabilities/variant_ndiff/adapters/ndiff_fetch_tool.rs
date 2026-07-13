@@ -74,7 +74,8 @@ pub fn run_ndiff_extract_fix_pattern(
         NdiffFixPatternSourceResolution::Rejected(response) => return Ok(response),
     };
     let pattern = query_ndiff_fix_pattern(&input, ctx, runtime, &source)?;
-    let response = ndiff_fix_pattern_response(source, pattern);
+    let cost = pattern.cost_report()?;
+    let response = ndiff_fix_pattern_response(source, pattern.value, cost);
     emit_ndiff_extract_step(ctx, "done", "ndiff:extract-fix-pattern complete");
     response
 }
@@ -84,14 +85,14 @@ fn query_ndiff_fix_pattern(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
     source: &NdiffFixPatternSource,
-) -> Result<Value> {
+) -> Result<CostedStructuredJson<Value>> {
     let runtime = require_runtime("ndiff:extract-fix-pattern", runtime)?;
     let model = require_model("ndiff:extract-fix-pattern", input, ctx)?;
     let target = resolve_tool_target(input, ctx)?;
     let thinking_level = agentic_hunter_thinking_level(input);
     let prompt = build_ndiff_fix_pattern_prompt(source.record.as_ref(), &source.patch_text);
     let _llm_scope = begin_ndiff_extract_scope(ctx);
-    query_required_structured_json(
+    query_required_structured_json_with_cost(
         runtime,
         ndiff_fix_pattern_request(model, target, prompt, thinking_level),
         StructuredJsonContract::new(

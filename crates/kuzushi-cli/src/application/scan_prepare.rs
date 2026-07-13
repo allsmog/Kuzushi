@@ -95,6 +95,7 @@ impl ScanCommandBootstrap {
         let registry = ModuleRegistry::with_v2_builtins();
         let run_id = new_run_id("scan");
         let workspace = WorkspaceTarget::new(target)?;
+        workspace.ensure_state_dir()?;
         Ok(Self {
             workspace,
             registry,
@@ -263,7 +264,7 @@ fn record_scan_prepare_failure(
     try_record_tool_run_started_with_reproducibility(
         record,
         input,
-        config.model.clone(),
+        kuzushi_core::tool_execution_model(SCAN_TOOL, input, config),
         config_hash(config).ok(),
         registry.loaded_module_specifiers(),
     )?;
@@ -319,6 +320,7 @@ mod tests {
         .unwrap();
         drop(prepared);
 
+        assert!(tmp.path().join(".kuzushi/.gitignore").is_file());
         let log =
             kuzushi_core::event_log::EventLog::open(tmp.path().join(".kuzushi/v3/log")).unwrap();
         let events = log.read_all().unwrap();

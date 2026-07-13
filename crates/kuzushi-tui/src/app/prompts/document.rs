@@ -2,6 +2,7 @@ use super::*;
 use crate::app::state_transitions::InputUpdate;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::modules::{PromptSpec, RuntimeRequirement};
+use std::collections::BTreeSet;
 
 mod buffer_edit;
 
@@ -9,20 +10,54 @@ const PROMPT_DOCUMENT_LIMIT: usize = 1024 * 1024;
 const PAGE_ROWS: usize = 20;
 
 impl ShellApp {
-    pub(crate) fn prompt_spec_for_tool(&self, tool_name: &str) -> Option<PromptSpec> {
+    pub(crate) fn prompt_specs_for_tool(&self, tool_name: &str) -> Vec<PromptSpec> {
         self.registry()
             .resolve_tool(tool_name)
             .filter(|tool| tool.runtime_requirement != RuntimeRequirement::Never)
-            .and_then(|tool| tool.prompts.first())
+            .map(|tool| tool.prompts.clone())
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prompt_spec_for_tool(&self, tool_name: &str) -> Option<PromptSpec> {
+        self.prompt_specs_for_tool(tool_name).into_iter().next()
+    }
+
+    pub(crate) fn prompt_specs_for_module(&self, module_id: &str) -> Vec<PromptSpec> {
+        let Some(module) = self
+            .registry()
+            .all_modules()
+            .find(|module| module.metadata().id == module_id)
+        else {
+            return Vec::new();
+        };
+        let mut seen = BTreeSet::new();
+        module
+            .tools()
+            .iter()
+            .filter(|tool| tool.runtime_requirement != RuntimeRequirement::Never)
+            .flat_map(|tool| tool.prompts.iter())
+            .filter(|prompt| {
+                seen.insert((
+                    prompt.module_id.clone(),
+                    prompt.verb.clone(),
+                    prompt.option_key.clone(),
+                ))
+            })
             .cloned()
+            .collect()
+    }
+
+    pub(crate) fn focused_prompt_specs(&self) -> Vec<PromptSpec> {
+        self.prompt_specs_for_module(self.focused_module().unwrap_or("semgrep"))
     }
 
     pub(crate) fn planning_prompt_review_available(&self) -> bool {
-        self.selected_planning_prompt().is_some()
+        self.selected_planning_prompts().is_some()
     }
 
     pub(crate) fn review_planning_prompt(&mut self) -> Vec<ShellEffect> {
-        let Some(prompt) = self.selected_planning_prompt() else {
+        let Some(prompts) = self.selected_planning_prompts() else {
             self.log(
                 "prompt",
                 "select a model-backed step with an editable prompt before reviewing",
@@ -30,25 +65,19 @@ impl ShellApp {
             return Vec::new();
         };
         vec![ShellEffect::OpenPromptDocument(PromptDocumentOpen {
-            prompt,
+            prompts,
+            prompt_index: 0,
             origin: ShellView::PlanningPicker,
         })]
     }
 
-    fn selected_planning_prompt(&self) -> Option<PromptSpec> {
+    fn selected_planning_prompts(&self) -> Option<Vec<PromptSpec>> {
         let picker = self.engagement.planning_picker();
-        let current = picker
+        picker
             .current_row()
-            .filter(|row| picker.selected().contains(&row.id));
-        current
-            .and_then(|row| self.prompt_spec_for_tool(row.tool_name))
-            .or_else(|| {
-                picker
-                    .tasks()
-                    .iter()
-                    .filter(|row| picker.selected().contains(&row.id))
-                    .find_map(|row| self.prompt_spec_for_tool(row.tool_name))
-            })
+            .filter(|row| picker.selected().contains(&row.id))
+            .map(|row| self.prompt_specs_for_tool(row.tool_name))
+            .filter(|prompts| !prompts.is_empty())
     }
 
     pub(crate) fn open_prompt_document_effect(&mut self, open: PromptDocumentOpen) {
@@ -59,13 +88,14 @@ impl ShellApp {
             );
             return;
         };
-        let document = match load_prompt_document(&target, open.prompt, open.origin) {
-            Ok(document) => document,
-            Err(error) => {
-                self.log("prompt", format!("could not open prompt review: {error}"));
-                return;
-            }
-        };
+        let document =
+            match load_prompt_document(&target, open.prompts, open.prompt_index, open.origin) {
+                Ok(document) => document,
+                Err(error) => {
+                    self.log("prompt", format!("could not open prompt review: {error}"));
+                    return;
+                }
+            };
         self.router.prompts_mut().open_document(document);
         self.set_shell_view(ShellView::PromptsEditor);
     }
@@ -99,6 +129,8 @@ impl ShellApp {
             KeyCode::Char(':') if !ctrl => self.begin_prompt_document_command(),
             KeyCode::Down | KeyCode::Char('j') if !ctrl => self.move_prompt_document_row(1),
             KeyCode::Up | KeyCode::Char('k') if !ctrl => self.move_prompt_document_row(-1),
+            KeyCode::Left | KeyCode::Char('h') if !ctrl => self.move_prompt_document_col(-1),
+            KeyCode::Right | KeyCode::Char('l') if !ctrl => self.move_prompt_document_col(1),
             KeyCode::PageDown | KeyCode::Char('f') if ctrl => {
                 self.move_prompt_document_row(PAGE_ROWS as isize)
             }
@@ -107,6 +139,8 @@ impl ShellApp {
             }
             KeyCode::Char('G') if !ctrl => self.move_prompt_document_to_end(),
             KeyCode::Char('g') if !ctrl => self.handle_prompt_document_g(),
+            KeyCode::Char(']') if !ctrl => return self.switch_prompt_document(1),
+            KeyCode::Char('[') if !ctrl => return self.switch_prompt_document(-1),
             KeyCode::Esc => self.request_prompt_document_close(),
             _ => self.clear_prompt_pending_g(),
         }
@@ -187,6 +221,19 @@ impl ShellApp {
     }
 
     fn save_prompt_document(&mut self, exit_after_save: bool) -> InputUpdate {
+        let prompt_is_empty = self
+            .router
+            .prompts()
+            .document()
+            .is_some_and(|document| document.text().trim().is_empty());
+        if prompt_is_empty {
+            self.cancel_prompt_document_command();
+            self.log(
+                "prompt",
+                "prompt overrides cannot be empty because empty files use the built-in default",
+            );
+            return InputUpdate::handled();
+        }
         let Some(document) = self.router.prompts_mut().document_mut() else {
             return InputUpdate::handled();
         };
@@ -197,6 +244,31 @@ impl ShellApp {
             PromptOverrideWrite {
                 path: document.path.clone(),
                 value: document.text(),
+            },
+        )])
+    }
+
+    fn switch_prompt_document(&mut self, delta: isize) -> InputUpdate {
+        let Some(document) = self.router.prompts().document() else {
+            return InputUpdate::handled();
+        };
+        if document.dirty {
+            self.log(
+                "prompt",
+                "save or discard changes before switching prompt roles",
+            );
+            return InputUpdate::handled();
+        }
+        if document.prompt_specs.len() < 2 {
+            return InputUpdate::handled();
+        }
+        let len = document.prompt_specs.len() as isize;
+        let prompt_index = (document.prompt_index as isize + delta).rem_euclid(len) as usize;
+        InputUpdate::handled_with_effects(vec![ShellEffect::OpenPromptDocument(
+            PromptDocumentOpen {
+                prompts: document.prompt_specs.clone(),
+                prompt_index,
+                origin: document.origin,
             },
         )])
     }
@@ -275,21 +347,20 @@ impl ShellApp {
 
 fn load_prompt_document(
     target: &std::path::Path,
-    prompt: PromptSpec,
+    prompts: Vec<PromptSpec>,
+    prompt_index: usize,
     origin: ShellView,
 ) -> anyhow::Result<PromptDocumentState> {
+    let prompt = prompts
+        .get(prompt_index)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("prompt role selection is empty or out of range"))?;
     let path = kuzushi_core::prompt_override_path(target, &prompt.module_id, &prompt.verb);
-    let override_text = kuzushi_core::workspace::read_optional_workspace_text(
-        target,
-        &path,
-        PROMPT_DOCUMENT_LIMIT,
-    )?;
-    let (text, source) = match override_text {
-        Some(text) if !text.trim().is_empty() => (text, "repo override"),
-        _ => (prompt.default_content, "built-in"),
-    };
+    let (text, source) = load_prompt_text(target, &path, prompt.default_content)?;
     let trailing_newline = text.ends_with('\n');
     Ok(PromptDocumentState {
+        prompt_specs: prompts,
+        prompt_index,
         role: prompt.role,
         path,
         source: source.to_string(),
@@ -306,6 +377,19 @@ fn load_prompt_document(
         exit_after_save: false,
         pending_g: false,
         origin,
+    })
+}
+
+fn load_prompt_text(
+    target: &std::path::Path,
+    path: &std::path::Path,
+    default_content: String,
+) -> anyhow::Result<(String, &'static str)> {
+    let override_text =
+        kuzushi_core::workspace::read_optional_workspace_text(target, path, PROMPT_DOCUMENT_LIMIT)?;
+    Ok(match override_text {
+        Some(text) if !text.trim().is_empty() => (text, "repo override"),
+        _ => (default_content, "built-in"),
     })
 }
 

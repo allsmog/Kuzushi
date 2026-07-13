@@ -2,6 +2,7 @@ use super::requests::active_view_hydration_keys;
 use super::runtime::MAX_VIEW_HYDRATION_WORKERS;
 use super::*;
 use crate::renderer::render_app;
+use crate::ui_view_models::{jobs_registry_model, JobHistoryState};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -13,6 +14,20 @@ struct CountingReader {
     reads: AtomicUsize,
 }
 
+#[derive(Debug, Default)]
+struct FailingRunHistoryReader;
+
+impl ViewArtifactReader for FailingRunHistoryReader {
+    fn read(&self, _target: &Path, key: &ViewHydrationKey) -> ViewHydrationValue {
+        if key == &ViewHydrationKey::RunSummaryEntries {
+            return ViewHydrationValue::RunSummaryEntries(RunSummaryEntriesState::Failed(
+                "fixture run-history failure".to_string(),
+            ));
+        }
+        missing_value(key)
+    }
+}
+
 impl ViewArtifactReader for CountingReader {
     fn read(&self, _target: &Path, key: &ViewHydrationKey) -> ViewHydrationValue {
         self.reads.fetch_add(1, Ordering::SeqCst);
@@ -22,10 +37,21 @@ impl ViewArtifactReader for CountingReader {
 
 fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
     match key {
+        ViewHydrationKey::FileCompletionValues => {
+            ViewHydrationValue::FileCompletionValues(FileCompletionIndex::default())
+        }
+        ViewHydrationKey::FindingCompletionValues => {
+            ViewHydrationValue::FindingCompletionValues(Vec::new())
+        }
+        ViewHydrationKey::RunIdCompletionValues => {
+            ViewHydrationValue::RunIdCompletionValues(Vec::new())
+        }
         ViewHydrationKey::LatestRunPointer => {
             ViewHydrationValue::LatestRunPointer(LatestRunPointerState::Missing)
         }
-        ViewHydrationKey::RunSummaryEntries => ViewHydrationValue::RunSummaryEntries(Vec::new()),
+        ViewHydrationKey::RunSummaryEntries => {
+            ViewHydrationValue::RunSummaryEntries(RunSummaryEntriesState::Ready(Vec::new()))
+        }
         ViewHydrationKey::RunArtifactText { run_id, leaf } => {
             ViewHydrationValue::RunArtifactText(kuzushi_core::RunArtifactRead::Missing {
                 path: PathBuf::from(run_id).join(leaf),
@@ -65,6 +91,9 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
                 credential_set: false,
                 configured_joern_cpg: None,
             })
+        }
+        ViewHydrationKey::TargetProfile => {
+            ViewHydrationValue::TargetProfile(TargetProfile::conservative())
         }
         ViewHydrationKey::MapArtifacts => ViewHydrationValue::MapArtifacts(false),
         ViewHydrationKey::TargetBase => ViewHydrationValue::TargetBase("target".to_string()),
@@ -151,6 +180,69 @@ fn workbench_hydrates_the_map_artifact_state() {
     assert!(active_view_hydration_keys(&app).contains(&ViewHydrationKey::MapArtifacts));
 }
 
+#[test]
+fn jobs_requests_the_bounded_run_history_page() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_shell_view(ShellView::Jobs);
+
+    assert!(active_view_hydration_keys(&app).contains(&ViewHydrationKey::RunSummaryEntries));
+}
+
+#[test]
+fn jobs_surfaces_a_run_history_reader_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_view_artifact_reader_for_test(Arc::new(FailingRunHistoryReader));
+    app.set_shell_view(ShellView::Jobs);
+    let target = app.target_owned().expect("jobs fixture target");
+    app.hydrate_view_keys_blocking(&target, vec![ViewHydrationKey::RunSummaryEntries]);
+
+    let model = jobs_registry_model(&app, 20);
+    assert_eq!(
+        model.history_state,
+        JobHistoryState::Failed("fixture run-history failure".to_string())
+    );
+    let mut terminal = Terminal::new(TestBackend::new(100, 36)).unwrap();
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(
+        rendered.contains("recent run history unavailable"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("fixture run-history failure"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("no jobs yet"), "{rendered}");
+}
+
+#[test]
+fn jobs_keeps_live_rows_when_run_history_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_view_artifact_reader_for_test(Arc::new(FailingRunHistoryReader));
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run context:build".to_string(),
+        summary: "run context:build".to_string(),
+    });
+    let target = app.target_owned().expect("jobs fixture target");
+    app.hydrate_view_keys_blocking(&target, vec![ViewHydrationKey::RunSummaryEntries]);
+
+    let model = jobs_registry_model(&app, 20);
+
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(
+        model.rows[0].status,
+        crate::ui_view_models::JobRunStatus::Queued
+    );
+    assert!(matches!(model.history_state, JobHistoryState::Failed(_)));
+}
+
 #[derive(Debug, Default)]
 struct BlockingReader {
     state: Arc<(Mutex<BlockingState>, Condvar)>,
@@ -183,6 +275,27 @@ fn target_generation_discards_a_stale_result() {
     let mut runtime = ViewHydrationRuntime::default();
     runtime.set_reader(reader.clone());
     schedule_latest(&mut runtime, first.path());
+    wait_for_reader_start(&reader);
+
+    runtime.schedule(second.path().to_path_buf(), Vec::new(), None);
+    release_reader(&reader);
+    wait_until(|| runtime.workers_finished());
+
+    assert!(runtime.drain_current().results.is_empty());
+}
+
+#[test]
+fn stale_target_generation_discards_a_target_profile_result() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let reader = Arc::new(BlockingReader::default());
+    let mut runtime = ViewHydrationRuntime::default();
+    runtime.set_reader(reader.clone());
+    runtime.schedule(
+        first.path().to_path_buf(),
+        vec![ViewHydrationKey::TargetProfile],
+        None,
+    );
     wait_for_reader_start(&reader);
 
     runtime.schedule(second.path().to_path_buf(), Vec::new(), None);
@@ -243,6 +356,62 @@ fn rapid_target_generations_keep_worker_count_bounded() {
     assert!(refused.is_empty());
     assert_eq!(runtime.worker_count(), MAX_VIEW_HYDRATION_WORKERS);
     release_reader(&reader);
+}
+
+#[derive(Debug, Default)]
+struct CancellationAwareReader {
+    started: AtomicUsize,
+    exited: AtomicUsize,
+}
+
+impl ViewArtifactReader for CancellationAwareReader {
+    fn read(&self, _target: &Path, key: &ViewHydrationKey) -> ViewHydrationValue {
+        missing_value(key)
+    }
+
+    fn read_cancellable(
+        &self,
+        _target: &Path,
+        _key: &ViewHydrationKey,
+        cancellation: &ViewHydrationCancellation,
+    ) -> Option<ViewHydrationValue> {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        while !cancellation.is_canceled() {
+            std::thread::yield_now();
+        }
+        self.exited.fetch_add(1, Ordering::SeqCst);
+        None
+    }
+}
+
+#[test]
+fn invalidation_cancels_stale_hydration_and_releases_its_worker_slot() {
+    let temp = tempfile::tempdir().unwrap();
+    let reader = Arc::new(CancellationAwareReader::default());
+    let mut runtime = ViewHydrationRuntime::default();
+    runtime.set_reader(reader.clone());
+    assert_eq!(
+        runtime
+            .schedule(
+                temp.path().to_path_buf(),
+                vec![ViewHydrationKey::FileCompletionValues],
+                None,
+            )
+            .len(),
+        1
+    );
+    wait_until(|| reader.started.load(Ordering::SeqCst) == 1);
+
+    runtime.invalidate();
+    wait_until(|| reader.exited.load(Ordering::SeqCst) == 1);
+    wait_until(|| runtime.workers_finished());
+    assert!(runtime.drain_current().results.is_empty());
+    assert_eq!(runtime.worker_count(), 0);
+
+    let replacement = Arc::new(CountingReader::default());
+    runtime.set_reader(replacement.clone());
+    assert_eq!(schedule_latest(&mut runtime, temp.path()).len(), 1);
+    wait_until(|| replacement.reads.load(Ordering::SeqCst) == 1);
 }
 
 #[test]

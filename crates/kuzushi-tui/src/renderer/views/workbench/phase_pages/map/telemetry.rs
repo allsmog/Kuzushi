@@ -45,6 +45,21 @@ fn budget_line(
     width: usize,
 ) -> Line<'static> {
     let spent = model.run_cost_usd.max(header.cost_usd);
+    if model.run_cost_invalid || header.cost_invalid {
+        return Line::styled(
+            fit("budget    halted · cost invalid", width),
+            theme::danger(),
+        );
+    }
+    if !model.run_cost_complete || !header.cost_complete {
+        return Line::styled(
+            fit(
+                &format!("budget    halted · cost >=${spent:.4} incomplete"),
+                width,
+            ),
+            theme::danger(),
+        );
+    }
     let Some(cap) = header.budget_usd.filter(|cap| *cap > 0.0) else {
         return Line::styled(
             fit(&format!("budget    ${spent:.4} · no session cap"), width),

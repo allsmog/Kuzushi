@@ -50,7 +50,7 @@ rusqlite.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml = "0.9"
+serde-saphyr = { version = "0.0.29", default-features = false, features = ["deserialize"] }
 sha2 = "0.10"
 tempfile.workspace = true
 thiserror.workspace = true

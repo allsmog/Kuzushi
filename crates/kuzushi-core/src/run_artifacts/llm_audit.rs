@@ -56,12 +56,11 @@ fn trace_audit_from_jsonl(body: &str) -> RunTraceAudit {
     }
 }
 
-fn trace_step_from_line(line: &str) -> Result<RunTraceStep, serde_json::Error> {
+fn trace_step_from_line(line: &str) -> anyhow::Result<RunTraceStep> {
     let value = serde_json::from_str::<Value>(line)?;
-    if !value.is_object() {
-        return serde_json::from_value(value);
-    }
-    serde_json::from_value(value)
+    let step = serde_json::from_value(value)?;
+    super::write_run_artifact_json::validate_trace_step_cost(&step)?;
+    Ok(step)
 }
 
 fn audit_call_from_trace_step(step: RunTraceStep) -> Option<RunLlmCallAudit> {
@@ -77,9 +76,19 @@ fn audit_call_from_trace_step(step: RunTraceStep) -> Option<RunLlmCallAudit> {
         prompt_hash: step.prompt_hash?,
         latency_ms: step.latency_ms,
         cost_usd: step.cost_usd,
+        observed_cost_usd: step.observed_cost_usd,
+        provider_spend_unresolved: step.provider_spend_unresolved,
+        call_attempted: step.call_attempted,
     })
 }
 
 fn is_llm_audit_step(step: &RunTraceStep) -> bool {
-    step.kind == "reasoning" || step.latency_ms.is_some() || step.cost_usd.is_some()
+    if step.call_attempted == Some(false) {
+        return false;
+    }
+    step.kind == "reasoning"
+        || step.latency_ms.is_some()
+        || step.cost_usd.is_some()
+        || step.observed_cost_usd.is_some()
+        || step.call_attempted == Some(true)
 }

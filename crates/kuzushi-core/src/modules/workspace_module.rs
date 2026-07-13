@@ -96,6 +96,20 @@ fn sast_scan_tool() -> ToolDescriptor {
         "Run the full SAST pipeline for the current target.",
         sast_scan_options(),
     )
+    .with_prompt(editable_prompt(
+        "triage instructions",
+        "sast",
+        "triage",
+        "TRIAGE_PROMPT",
+        crate::runtime::DEFAULT_TRIAGE_PROMPT.to_string(),
+    ))
+    .with_prompt(editable_prompt(
+        "verification instructions",
+        "sast",
+        "verify",
+        "VERIFY_PROMPT",
+        crate::verification::DEFAULT_VERIFY_PROMPT.to_string(),
+    ))
 }
 
 fn sast_scan_options() -> Vec<OptionSpec> {

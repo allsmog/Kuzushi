@@ -1,20 +1,26 @@
 use super::{ConfirmPhaseModel, ProofReplayModel};
 use crate::ui_view_models::{
-    current_finding_for_detail, selected_finding_detail_model, selected_taint_flow_path,
+    current_finding_for_detail, finding_detail_model_for_projection, taint_flow_path_for_finding,
 };
 use crate::{ShellApp, ViewDataState};
 use kuzushi_core::{PersistedVerification, RunArtifactRead};
 
 pub(super) fn confirm_phase_model(app: &ShellApp) -> ConfirmPhaseModel {
     let selected = current_finding_for_detail(app);
+    let finding = selected
+        .as_ref()
+        .map(|(alias, finding)| finding_detail_model_for_projection(app, alias.clone(), finding));
     let proof = selected.as_ref().and_then(|(alias, finding)| {
         finding.verification.as_ref().map(|verification| {
             proof_replay_model(app, alias.clone(), finding.scan_id.as_deref(), verification)
         })
     });
     ConfirmPhaseModel {
-        finding: selected_finding_detail_model(app),
-        attack_path: selected_taint_flow_path(app),
+        finding,
+        attack_path: taint_flow_path_for_finding(
+            app,
+            selected.as_ref().map(|(_, finding)| finding),
+        ),
         proof,
         empty_hint: selected
             .is_none()

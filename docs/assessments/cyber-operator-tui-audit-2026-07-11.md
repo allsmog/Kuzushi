@@ -1,9 +1,59 @@
 # Cyber operator TUI experience audit — 2026-07-11
 
-Observation-only audit of the real Rust Ratatui shell. The only repository file
-written by this pass is this report.
+## Remediation update — 2026-07-11
 
-## Verdict
+**Current verdict: the UI/UX findings in this audit are cleared.** The original
+screen-level evidence remains below as a historical record of the pre-fix
+state; its `Hold for operator use` verdict is no longer the verdict for the
+current working tree.
+
+The remediation stayed on the shared Rust descriptor, execution, persistence,
+and presentation boundaries instead of adding mode-specific exceptions:
+
+| Finding | Resolution |
+|---|---|
+| F01 | Semgrep's metrics-off default now uses the explicit `p/security-audit` pack in descriptors, scan defaults, and prepared input. |
+| F02 | Global reads fold by durable finding identity, merge corroborating sources, and preserve stable aliases/priorities across filtered exports. |
+| F03 | Scanner-only Activity uses the execution receipt (`execution:none · runtime-free`) instead of presenting a configured cloud model as the runtime. |
+| F04 | Unix scanners and descendants join a guard-owned process group with a parent-death lifeline; abrupt Kuzushi loss kills the whole group. Windows retains kill-on-close Job Object behavior. |
+| F05 | Review supports arrows and `j/k`, retains filters across refresh, opens aliases on the Review/Confirm surface, and puts the durable human decision before verbose evidence. |
+| F06 | Confirmation dispatch accepts real shifted uppercase confirmation keys; the quit modal now advertises only actions it implements. |
+| F07 | Health renders one hydrated summary and distinguishes pending context from a live snapshot. |
+| F08 | Boot preserves the identifying tail of long target paths instead of hard-clipping them into a different plausible path. |
+| F09 | Esc from target consent opens targetless Capabilities with visible `target <path>` and `demo` recovery actions. |
+| F10 | Compact Confirm preserves alias, title, location, and proof action; CLI demo copy points to persisted evidence without claiming rows were printed. |
+| F11 | Non-empty recon results get a structured Activity Recon page, `o` opens full detail, and Replay rehydrates the same host/service/note evidence from `result.json`. |
+| F12 | `permissions` has a dedicated scrollable policy view that separates enforced dispatch boundaries from shell pre-dispatch checks and explicitly disclaims OS sandbox status. |
+| F13 | Planning keeps selection/launch controls visible at the common wide breakpoint as well as compact sizes. |
+| F14 | Workspace derives one persisted-finding truth and retains `.kuzushi/v3` context in displayed state paths. |
+| F15 | Footer bindings are input-mode aware: Prompt shows command actions; Navigate shows physical view keys. |
+| F16 | Workbench command failures surface through a visible notice instead of only the hidden transcript. |
+| F17 | A settled, unrequested strategy queue says it was not generated; terminal tool receipts distinguish an unrecorded run count from an unknown result. |
+| F18 | Historical phase pages retain reality-derived global guidance and no longer tell an advanced workspace to restart an empty Map run. |
+| F19 | Replay prefixes artifact state (`MISSING`, `INVALID`, and related states), reports omitted aliases, and Knowledge Base names the v3 store. |
+| F20 | Activity and shared footers no longer advertise mutually exclusive Prompt and Navigate actions together. |
+| F21 | Compact layouts reserve finding identity/location/action before secondary panels, clip list rows coherently, and emit one footer overflow pointer. |
+| F22 | Update uses a neutral unchecked state until a release check has actually established availability. |
+
+Post-fix verification on the integrated tree:
+
+- `cargo test -p kuzushi-tui --lib --quiet`: **1,748 passed**.
+- `cargo test -p kuzushi-core --lib --quiet`: **2,817 passed**.
+- `pnpm quality:crap-risk`: **passed for 142 changed production files**.
+- `cargo fmt --all -- --check` and `git diff --check`: **passed**.
+- Live tmux replays at 100×30 and 60×20 verified Permissions, HTTPX import
+  evidence in Activity and Replay, compact scrolling/footer behavior, and the
+  corrected demo handoff.
+- A real CLI fault replay sent `SIGKILL` to Kuzushi while a fake Semgrep wrapper
+  and `sleep` descendant were active; the guard and complete scanner group
+  exited. The CodeQL cancellation race regression also passed 50 consecutive
+  repetitions.
+
+The original pass below was an observation-only audit of the real Rust Ratatui
+shell. The only repository file written by that observation pass was this
+report.
+
+## Original verdict (pre-remediation)
 
 **Hold for operator use.** The phase cockpit is visually strong and several
 control surfaces are genuinely trustworthy, but the full experience does not

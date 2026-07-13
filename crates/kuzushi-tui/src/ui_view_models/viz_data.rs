@@ -86,7 +86,7 @@ pub(crate) fn risk_by_module(findings: &[Finding]) -> RiskByModule {
 }
 
 pub(crate) fn cached_risk_by_module(app: &ShellApp) -> RiskByModule {
-    let key = RiskByModuleCacheKey::from_findings(app.findings());
+    let key = RiskByModuleCacheKey::from_findings_revision(app.findings_revision());
     if let Some(cached) = app.workbench_cache().borrow().risk_by_module(&key) {
         return cached;
     }
@@ -233,7 +233,14 @@ pub(crate) fn taint_flow_path(app: &ShellApp) -> TaintFlowPath {
 
 pub(crate) fn selected_taint_flow_path(app: &ShellApp) -> TaintFlowPath {
     let selected = super::current_finding_for_detail(app).map(|(_, finding)| finding);
-    let Some(selected) = selected.as_ref() else {
+    taint_flow_path_for_finding(app, selected.as_ref())
+}
+
+pub(crate) fn taint_flow_path_for_finding(
+    app: &ShellApp,
+    selected: Option<&kuzushi_core::Finding>,
+) -> TaintFlowPath {
+    let Some(selected) = selected else {
         return taint_flow_path(app);
     };
     let Some(flow) = app.domain().taint_flow_for_finding(selected) else {

@@ -36,6 +36,10 @@ fn render_empty(
     model: &ConfirmPhaseModel,
     state: PhaseRenderState,
 ) {
+    if area.width < REFERENCE_LAYOUT_MIN_WIDTH {
+        render_empty_finding(frame, area, model, state);
+        return;
+    }
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -146,8 +150,8 @@ fn render_reference(
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3.min(area.height)),
-            Constraint::Length(8.min(area.height.saturating_sub(3))),
+            Constraint::Length(4.min(area.height)),
+            Constraint::Length(8.min(area.height.saturating_sub(4))),
             Constraint::Min(0),
         ])
         .split(area);
@@ -168,19 +172,90 @@ fn render_compact(
     finding: &FindingDetailModel,
     state: PhaseRenderState,
 ) {
+    if model.attack_path.stages.is_empty() {
+        render_compact_without_path(frame, area, model, finding, state);
+        return;
+    }
+    let heights = compact_panel_heights(area.height);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(18),
-            Constraint::Percentage(27),
-            Constraint::Percentage(32),
-            Constraint::Percentage(23),
+            Constraint::Length(heights.finding),
+            Constraint::Length(heights.attack_path),
+            Constraint::Length(heights.ladder),
+            Constraint::Min(0),
         ])
         .split(area);
     render_finding_header(frame, rows[0], finding, state);
     render_attack_path(frame, rows[1], model, state);
     render_ladder(frame, rows[2], model, state);
     render_proof(frame, rows[3], model, finding, state);
+}
+
+fn render_compact_without_path(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ConfirmPhaseModel,
+    finding: &FindingDetailModel,
+    state: PhaseRenderState,
+) {
+    let proof_rows = area.height.min(4);
+    let remaining = area.height.saturating_sub(proof_rows);
+    let path_rows = u16::from(remaining > 2);
+    let finding_rows = remaining.saturating_sub(path_rows);
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(finding_rows),
+            Constraint::Length(path_rows),
+            Constraint::Length(proof_rows),
+        ])
+        .split(area);
+    render_finding_header(frame, rows[0], finding, state);
+    render_missing_path_summary(frame, rows[1], model, state);
+    render_proof(frame, rows[2], model, finding, state);
+}
+
+fn render_missing_path_summary(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ConfirmPhaseModel,
+    state: PhaseRenderState,
+) {
+    let hint = model
+        .attack_path
+        .empty_hint
+        .as_deref()
+        .unwrap_or("not generated — run `taint-iris:hunt`");
+    render_lines_pane(
+        frame,
+        area,
+        "ATTACK PATH",
+        vec![Line::styled(
+            fit(hint, area.width.saturating_sub(2) as usize),
+            theme::muted(),
+        )],
+        WorkbenchPane::Center,
+        state,
+    );
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CompactPanelHeights {
+    finding: u16,
+    attack_path: u16,
+    ladder: u16,
+}
+
+fn compact_panel_heights(height: u16) -> CompactPanelHeights {
+    let finding = height.min(4);
+    let proof_reserve = height.saturating_sub(finding).min(5);
+    let diagram_rows = height.saturating_sub(finding + proof_reserve);
+    CompactPanelHeights {
+        finding,
+        attack_path: diagram_rows.div_ceil(2),
+        ladder: diagram_rows / 2,
+    }
 }
 
 fn render_zoomed(
@@ -279,4 +354,84 @@ fn render_proof(
         WorkbenchPane::Details,
         state,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui_view_models::SeverityTone;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[test]
+    fn compact_layout_reserves_identity_and_proof_before_diagrams() {
+        let heights = compact_panel_heights(12);
+
+        assert_eq!(heights.finding, 4);
+        assert_eq!(heights.attack_path + heights.ladder, 3);
+        assert_eq!(
+            12 - heights.finding - heights.attack_path - heights.ladder,
+            5
+        );
+    }
+
+    #[test]
+    fn compact_empty_path_keeps_finding_identity_location_and_proof_action() {
+        let model = compact_confirm_model();
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal
+            .draw(|frame| render(frame, frame.area(), &model, PhaseRenderState::activity()))
+            .unwrap();
+
+        let rendered = buffer_text(terminal.backend().buffer());
+        assert!(rendered.contains("F-0001"), "{rendered}");
+        assert!(rendered.contains("Hardcoded credential"), "{rendered}");
+        assert!(rendered.contains("src/config.rs:42"), "{rendered}");
+        assert!(
+            rendered.contains("decision: rejected false positive"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("verify F-0001"), "{rendered}");
+        assert!(!rendered.contains("DATA-FLOW LADDER"), "{rendered}");
+    }
+
+    fn compact_confirm_model() -> ConfirmPhaseModel {
+        let finding = FindingDetailModel {
+            alias: Some("F-0001".to_string()),
+            severity_tone: SeverityTone::High,
+            severity_label: "high".to_string(),
+            title: "Hardcoded credential".to_string(),
+            location: "src/config.rs:42".to_string(),
+            proof_marker: "?",
+            proof_label: "signal-only".to_string(),
+            lifecycle_status: "candidate".to_string(),
+            static_proof_label: "signal-only".to_string(),
+            runtime_explanation: "runtime verification has not run".to_string(),
+            next_command: Some("verify F-0001".to_string()),
+            decision: "rejected_false_positive".to_string(),
+            ..FindingDetailModel::default()
+        };
+        ConfirmPhaseModel {
+            finding: Some(finding),
+            attack_path: crate::ui_view_models::TaintFlowPath {
+                empty_hint: Some("not generated — run `taint-iris:hunt`".to_string()),
+                ..Default::default()
+            },
+            proof: None,
+            empty_hint: None,
+        }
+    }
+
+    fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {
+        (buffer.area.y..buffer.area.bottom())
+            .map(|y| {
+                (buffer.area.x..buffer.area.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }

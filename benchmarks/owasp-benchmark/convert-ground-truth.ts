@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+
 /**
  * Convert OWASP BenchmarkJava's `expectedresults-*.csv` to our `ground-truth.json` format.
  *
@@ -9,6 +10,7 @@
  * (run setup.sh first).
  */
 
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -97,6 +99,9 @@ const dataset: GroundTruthDataset = {
   name: "OWASP BenchmarkJava",
   language: "java",
   repoUrl: "https://github.com/OWASP-Benchmark/BenchmarkJava",
+  repoRef: execFileSync("git", ["-C", REPO_DIR, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim(),
   entries,
 };
 

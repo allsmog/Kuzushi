@@ -26,7 +26,7 @@ impl ShellApp {
                 agent.error = None;
             }
         }
-        self.record_agent_cost(audit.cost_usd);
+        self.record_agent_cost(&audit, state.run_id.as_deref());
         if state.abort_requested {
             self.log(
                 "agent",
@@ -56,7 +56,7 @@ impl ShellApp {
             agent.answer = None;
             agent.error = Some(agent_failure_message(&error, state.abort_requested));
         }
-        self.record_agent_cost(audit.cost_usd);
+        self.record_agent_cost(&audit, state.run_id.as_deref());
         if state.abort_requested {
             self.log(
                 "agent",
@@ -74,9 +74,13 @@ impl ShellApp {
         self.agent_failure_record(error, audit, state)
     }
 
-    fn record_agent_cost(&mut self, cost_usd: Option<f64>) {
-        if let Some(cost_usd) = cost_usd {
-            self.record_cost(cost_usd);
+    fn record_agent_cost(&mut self, audit: &AgentCallAudit, run_id: Option<&str>) {
+        let cost = audit.settlement_cost();
+        if let Some(run_id) = run_id {
+            self.begin_run_cost_tracking(run_id, true);
+            self.settle_run_cost_report(run_id, cost);
+        } else {
+            self.record_cost_report(cost);
         }
     }
 
@@ -191,7 +195,7 @@ fn record_agent_trace_success(record: &AgentRunRecord, answer_chars: usize) -> a
         &record.run_id,
         answer_chars,
         record.latency_ms,
-        record.audit.cost_usd,
+        &record.audit,
     );
     trace.and(terminal)
 }
@@ -209,7 +213,7 @@ fn record_agent_trace_failure(record: &AgentRunRecord, error: &str) -> anyhow::R
         record.target.as_deref(),
         &record.run_id,
         error,
-        record.audit.cost_usd,
+        &record.audit,
     );
     trace.and(terminal)
 }
@@ -227,7 +231,7 @@ fn record_agent_trace_canceled(record: &AgentRunRecord, reason: &str) -> anyhow:
         record.target.as_deref(),
         &record.run_id,
         reason,
-        record.audit.cost_usd,
+        &record.audit,
     );
     trace.and(terminal)
 }

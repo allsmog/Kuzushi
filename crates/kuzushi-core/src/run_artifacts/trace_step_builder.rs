@@ -8,6 +8,9 @@ impl RunTraceStep {
             label: label.into(),
             latency_ms: None,
             cost_usd: None,
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
+            call_attempted: None,
             module_id: None,
             verb: None,
             parent_step: None,
@@ -26,6 +29,24 @@ impl RunTraceStep {
 
     pub fn with_cost_usd(mut self, cost_usd: Option<f64>) -> Self {
         self.cost_usd = cost_usd;
+        self.observed_cost_usd = None;
+        self.provider_spend_unresolved = false;
+        self
+    }
+
+    pub fn with_cost_report(mut self, report: crate::runtime::RuntimeCostReport) -> Self {
+        self.cost_usd = report.exact_usd();
+        self.observed_cost_usd = if report.is_complete() || report.is_unavailable() {
+            None
+        } else {
+            Some(report.observed_usd())
+        };
+        self.provider_spend_unresolved = self.observed_cost_usd.is_some();
+        self
+    }
+
+    pub fn with_call_attempted(mut self, attempted: bool) -> Self {
+        self.call_attempted = Some(attempted);
         self
     }
 

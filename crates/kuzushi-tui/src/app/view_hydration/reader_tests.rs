@@ -106,6 +106,25 @@ fn source_hydration_rejects_oversized_files() {
     assert!(result.is_err());
 }
 
+#[test]
+fn shell_construction_leaves_run_history_for_async_hydration() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::workspace::WorkspaceTarget::new(target.path()).unwrap();
+    kuzushi_core::write_run_summary(
+        target.path(),
+        &kuzushi_core::RunSummary::running("run-async", "tool", None, "target").complete(),
+    )
+    .unwrap();
+
+    let app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+    let state = app
+        .workbench_cache()
+        .borrow()
+        .cached_run_summary_entries(Some(target.path()));
+
+    assert_eq!(state, ViewDataState::NotRequested);
+}
+
 #[cfg(unix)]
 #[test]
 fn directory_hydration_rejects_symlinked_prompt_roots() {

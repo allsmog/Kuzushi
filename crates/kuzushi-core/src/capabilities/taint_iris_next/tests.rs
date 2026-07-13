@@ -164,6 +164,8 @@ mod tests {
             self.queries.lock().unwrap().push(request);
             Ok(AgentQueryResponse {
                 cost_usd: TAINT_NEXT_TEST_CALL_COST_USD,
+                cost_usd_reported: true,
+                estimated_cost_usd: None,
                 input_tokens: 500,
                 output_tokens: 120,
                 truncated: false,
@@ -343,6 +345,7 @@ mod tests {
             target: PathBuf::from("."),
             scan_root: PathBuf::from("."),
             repo_root: PathBuf::from("."),
+            source_paths: std::sync::Arc::from([]),
             mode: TaintIrisNextMode::Hunt,
             caps: TaintIrisNextCaps {
                 max_catalog_entries: 1,
@@ -380,6 +383,7 @@ mod tests {
             },
             max_budget_usd: None,
             allow_deterministic_fallback,
+            system_prompt: taint_iris_next_system_prompt(),
             cwe_focus: Vec::new(),
             discovered_signals: DiscoveredSignals::default(),
         }
@@ -432,7 +436,7 @@ mod tests {
             &evidence,
             anyhow::anyhow!("bad json"),
             1,
-            0.25,
+            RuntimeCostReport::known(RuntimeCost::from_usd(0.25, "test cost").unwrap()),
             None,
         );
 
@@ -455,7 +459,7 @@ mod tests {
             &evidence,
             anyhow::anyhow!("bad json"),
             1,
-            0.25,
+            RuntimeCostReport::known(RuntimeCost::from_usd(0.25, "test cost").unwrap()),
             None,
         );
 
@@ -831,6 +835,16 @@ authorization: Default::default(),
             .any(|r| r.contains("operator-supplied")));
     }
 
+    #[test]
+    fn input_preserves_declared_taint_review_prompt() {
+        let parsed = TaintIrisNextInput::from_tool_input(&json!({
+            "TAINT_IRIS_NEXT_PROMPT": "custom taint review"
+        }))
+        .unwrap();
+
+        assert_eq!(parsed.system_prompt, "custom taint review");
+    }
+
     /// rg-backed structural matcher must produce the *same* deterministic
     /// candidate ids as the in-process matcher on the same fixture. This
     /// catches drift between the alias table in `taint_iris_next_line_matches`
@@ -910,6 +924,8 @@ authorization: Default::default(),
             self.queries.lock().unwrap().push(request);
             Ok(AgentQueryResponse {
                 cost_usd: TAINT_NEXT_TEST_CALL_COST_USD,
+                cost_usd_reported: true,
+                estimated_cost_usd: None,
                 input_tokens: 800,
                 output_tokens: 200,
                 truncated: false,
@@ -1192,6 +1208,8 @@ authorization: Default::default(),
         fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             Ok(AgentQueryResponse {
                 cost_usd: TAINT_NEXT_TEST_CALL_COST_USD,
+                cost_usd_reported: true,
+                estimated_cost_usd: None,
                 input_tokens: 800,
                 output_tokens: 200,
                 truncated: false,

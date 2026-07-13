@@ -24,6 +24,15 @@ mod tests {
     }
 
     #[test]
+    fn definitions_are_typed_and_resist_quote_injection() {
+        let q = definitions(r#"foo"; cpg.all.l;//"#);
+        assert!(q.contains("nameExact"));
+        assert!(q.contains("\"location\""));
+        assert!(q.contains(r#"foo\""#));
+        assert!(!q.contains("; cpg.all.l;//\").l"));
+    }
+
+    #[test]
     fn taint_paths_includes_max_count() {
         let q = taint_paths("argv", "system", 50, None);
         assert!(q.contains("take(50)"));

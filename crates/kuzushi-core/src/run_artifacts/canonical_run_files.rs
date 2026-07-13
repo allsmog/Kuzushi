@@ -12,6 +12,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn ensure_canonical_run_files(target: &Path, run_id: &str, status: &str) -> Result<()> {
+    restore_canonical_run_file_placeholders(target, run_id, status)?;
+    record_canonical_run_artifacts(target, run_id)?;
+    Ok(())
+}
+
+pub(crate) fn restore_canonical_run_file_placeholders(
+    target: &Path,
+    run_id: &str,
+    status: &str,
+) -> Result<()> {
     let dir = ensure_run_dir(target, run_id)?;
     write_empty_failures_marker(
         target,
@@ -31,7 +41,6 @@ pub(crate) fn ensure_canonical_run_files(target: &Path, run_id: &str, status: &s
         required_artifact_spec("report.md").leaf,
         status,
     )?;
-    record_canonical_run_artifacts(target, run_id)?;
     Ok(())
 }
 

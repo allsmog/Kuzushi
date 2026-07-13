@@ -49,6 +49,7 @@ impl CinematicProfile {
         self.scanline
     }
 
+    #[cfg(test)]
     pub(crate) const fn watermark(self) -> Option<Color> {
         self.watermark
     }

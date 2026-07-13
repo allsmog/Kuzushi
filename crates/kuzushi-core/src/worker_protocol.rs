@@ -5,6 +5,38 @@
 //! host-mediated MCP composition, fuzz execution delegation, audit records,
 //! JSON-RPC message shapes, and supervisor/executor seams.
 
+mod audit_writer;
+mod bounded_capture;
+mod bus_writer;
+mod cost_ledger;
+mod deadline;
+mod directory;
+mod jsonl;
+mod net;
+mod policy;
+mod stderr;
+
+use self::audit_writer::{KwpAuditReservation, KwpAuditWriterLease};
+use self::bounded_capture::{BoundedCapture, FUZZ_STDERR_LIMIT, FUZZ_STDOUT_LIMIT};
+use self::bus_writer::append_bounded_bus_event;
+use self::cost_ledger::{RunCostLedgerLease, RuntimeCostReservation};
+use self::deadline::{broker_timeout_before, milliseconds, seconds};
+use self::directory::{read_bounded_directory, FS_LIST_MAX_BYTES, FS_LIST_MAX_ENTRIES};
+use self::jsonl::{
+    read_bounded_jsonl, serialize_bounded_jsonl, MissingFile, AUDIT_JSONL_LIMITS, BUS_JSONL_LIMITS,
+};
+#[cfg(test)]
+use self::net::{effective_net_response_limit, read_net_response_body};
+use self::net::{PinnedHttpClientPool, DEFAULT_NET_TIMEOUT};
+use self::policy::{
+    audit_decision, authorize_artifact_grant, authorize_bus_topic, authorize_findings_grant,
+    authorize_fs_grant, authorize_fuzz_grant, authorize_mcp_grant, authorize_runtime_grant,
+    reserve_fuzz_job as reserve_fuzz_job_in_meter, reserve_mcp_call as reserve_mcp_call_in_meter,
+    reserve_mcp_result as reserve_mcp_result_in_meter, validate_bus_topic, validate_fs_path,
+    FsPolicyAction,
+};
+use self::stderr::{escape_child_diagnostic, SupervisedStderr};
+
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
@@ -17,7 +49,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex as StdMutex, OnceLock};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -41,6 +73,7 @@ pub const METHOD_BUS_PUBLISH: &str = "kuzushi/bus/publish";
 
 const KWP_CANCEL_GRACE: Duration = Duration::from_millis(250);
 const KWP_CANCEL_POLL: Duration = Duration::from_millis(50);
+const KWP_AUDIT_SETTLEMENT_GRACE: Duration = Duration::from_millis(250);
 const KWP_DEFAULT_MCP_TIMEOUT: Duration = Duration::from_secs(30);
 const KWP_MAX_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
 const KWP_MAX_FS_READ_BYTES: u64 = 64 * 1024 * 1024;
@@ -49,7 +82,6 @@ const KWP_MAX_NETWORK_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
 const KWP_MAX_RUNTIME_OUTPUT_TOKENS: u32 = 65_536;
 const KWP_WORKER_EPOCH: u64 = 1;
 const KWP_AUDIT_ANCHOR_FILE: &str = "kwp-audit.anchor.json";
-static KWP_AUDIT_LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ModuleId(pub String);
@@ -457,6 +489,7 @@ pub struct InvocationAuthority {
     active: Arc<AtomicBool>,
     grant: Arc<Grant>,
     meter: Arc<Mutex<InvocationMeter>>,
+    cost_ledger: RunCostLedgerLease,
 }
 
 impl InvocationAuthority {
@@ -467,6 +500,48 @@ impl InvocationAuthority {
         invocation_id: InvocationId,
         current_epoch: Arc<AtomicU64>,
         grant: Arc<Grant>,
+    ) -> Self {
+        let cost_ledger = RunCostLedgerLease::acquire_legacy(&run_id);
+        Self::with_cost_ledger(
+            module_id,
+            digest,
+            run_id,
+            invocation_id,
+            current_epoch,
+            grant,
+            cost_ledger,
+        )
+    }
+
+    pub fn new_targeted(
+        module_id: ModuleId,
+        digest: Digest,
+        run_id: RunId,
+        invocation_id: InvocationId,
+        current_epoch: Arc<AtomicU64>,
+        grant: Arc<Grant>,
+        target: impl AsRef<Path>,
+    ) -> Result<Self, KwpError> {
+        let cost_ledger = RunCostLedgerLease::acquire(target.as_ref(), &run_id)?;
+        Ok(Self::with_cost_ledger(
+            module_id,
+            digest,
+            run_id,
+            invocation_id,
+            current_epoch,
+            grant,
+            cost_ledger,
+        ))
+    }
+
+    fn with_cost_ledger(
+        module_id: ModuleId,
+        digest: Digest,
+        run_id: RunId,
+        invocation_id: InvocationId,
+        current_epoch: Arc<AtomicU64>,
+        grant: Arc<Grant>,
+        cost_ledger: RunCostLedgerLease,
     ) -> Self {
         let epoch = current_epoch.load(Ordering::Acquire);
         Self {
@@ -479,6 +554,7 @@ impl InvocationAuthority {
             active: Arc::new(AtomicBool::new(true)),
             grant,
             meter: Arc::new(Mutex::new(InvocationMeter::default())),
+            cost_ledger,
         }
     }
 
@@ -532,11 +608,24 @@ impl InvocationAuthority {
     }
 
     pub async fn computed_cost_usd(&self) -> f64 {
-        self.meter.lock().await.runtime_cost_usd
+        self.cost_ledger
+            .invocation_cost(&self.invocation_id)
+            .unwrap_or(f64::INFINITY)
     }
 
-    async fn add_runtime_cost(&self, cost: f64) {
-        self.meter.lock().await.runtime_cost_usd += cost;
+    pub async fn computed_run_cost_usd(&self) -> f64 {
+        self.cost_ledger.run_cost().unwrap_or(f64::INFINITY)
+    }
+
+    fn reserve_runtime_cost(
+        &self,
+        grant: &RuntimeGrant,
+    ) -> Result<RuntimeCostReservation, KwpError> {
+        self.cost_ledger.reserve(
+            &self.invocation_id,
+            grant.max_cost_usd_per_invocation,
+            grant.max_cost_usd_per_run,
+        )
     }
 
     async fn reserve_fs_access(
@@ -574,22 +663,10 @@ impl InvocationAuthority {
     async fn reserve_mcp_call(
         &self,
         grant: &McpGrant,
-        limits: &McpCallLimits,
+        request: &McpCallRequest,
     ) -> Result<(), KwpError> {
         let mut meter = self.meter.lock().await;
-        meter.mcp_calls += 1;
-        check_count(meter.mcp_calls, grant.max_calls_per_invocation, "mcp.calls")?;
-        check_u64(
-            limits.cpu_seconds,
-            grant.max_cpu_seconds_per_invocation,
-            "mcp.cpu_seconds",
-        )?;
-        check_u64(
-            limits.artifact_bytes,
-            grant.max_artifacts_bytes_per_invocation,
-            "mcp.artifact_bytes",
-        )?;
-        Ok(())
+        reserve_mcp_call_in_meter(&mut meter.mcp_calls, grant, request)
     }
 
     async fn reserve_mcp_result(
@@ -597,19 +674,8 @@ impl InvocationAuthority {
         grant: &McpGrant,
         result: &McpCallResult,
     ) -> Result<(), KwpError> {
-        let bytes = serde_json::to_vec(result)
-            .map_err(|error| KwpError::Internal(error.to_string()))?
-            .len() as u64;
         let mut meter = self.meter.lock().await;
-        meter.mcp_bytes = meter
-            .mcp_bytes
-            .checked_add(bytes)
-            .ok_or_else(|| KwpError::quota("mcp.bytes"))?;
-        check_u64(
-            Some(meter.mcp_bytes),
-            grant.max_bytes_per_invocation,
-            "mcp.bytes",
-        )
+        reserve_mcp_result_in_meter(&mut meter.mcp_bytes, grant, result)
     }
 
     async fn reserve_fuzz_job(
@@ -618,29 +684,16 @@ impl InvocationAuthority {
         request: &FuzzRunRequest,
     ) -> Result<(), KwpError> {
         let mut meter = self.meter.lock().await;
-        meter.fuzz_jobs += 1;
-        check_count(meter.fuzz_jobs, grant.max_jobs_per_invocation, "fuzz.jobs")?;
-        check_u64(
-            request.limits.cpu_seconds,
-            grant.max_cpu_seconds_per_invocation,
-            "fuzz.cpu_seconds",
-        )?;
-        check_u64(
-            request.limits.artifact_bytes,
-            grant.max_artifacts_bytes_per_invocation,
-            "fuzz.artifact_bytes",
-        )?;
-        Ok(())
+        reserve_fuzz_job_in_meter(&mut meter.fuzz_jobs, grant, request)
     }
 }
 
 #[derive(Default)]
 struct InvocationMeter {
-    runtime_cost_usd: f64,
     fs: FsAccessMeter,
     net: NetAccessMeter,
-    mcp_calls: u32,
-    mcp_bytes: u64,
+    mcp_calls: BTreeMap<String, u32>,
+    mcp_bytes: BTreeMap<String, u64>,
     fuzz_jobs: u32,
 }
 
@@ -1541,7 +1594,8 @@ pub struct RuntimeQueryRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeQueryResult {
     pub completion: Value,
-    pub cost_usd: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
 }
 
 #[async_trait]
@@ -1705,6 +1759,29 @@ impl HostMcpBroker {
         mount.call(session, request)
     }
 
+    fn call_blocking_before(
+        &self,
+        session: McpSessionKey,
+        request: McpCallRequest,
+        worker_deadline: Instant,
+        cancellation: Option<&crate::scan::ScanCancellation>,
+    ) -> Result<McpCallResult, KwpError> {
+        let mount = self
+            .mounts
+            .get(&request.alias)
+            .ok_or_else(|| KwpError::denied("mcp.mount"))?;
+        let timeout = broker_timeout_before(
+            worker_deadline,
+            KWP_DEFAULT_MCP_TIMEOUT,
+            &[
+                milliseconds(mount.timeout_ms),
+                milliseconds(request.limits.deadline_ms),
+                seconds(request.limits.cpu_seconds),
+            ],
+        )?;
+        mount.call_with_timeout(session, request, timeout, cancellation)
+    }
+
     fn insert_mount(
         &mut self,
         config: &crate::config::McpMountConfig,
@@ -1766,7 +1843,17 @@ impl StdioMcpMount {
         request: McpCallRequest,
     ) -> Result<McpCallResult, KwpError> {
         let timeout = mcp_call_timeout(self.timeout_ms, request.limits.deadline_ms);
-        let mut client = McpStdioClient::spawn(self, &session, timeout)?;
+        self.call_with_timeout(session, request, timeout, None)
+    }
+
+    fn call_with_timeout(
+        &self,
+        session: McpSessionKey,
+        request: McpCallRequest,
+        timeout: Duration,
+        cancellation: Option<&crate::scan::ScanCancellation>,
+    ) -> Result<McpCallResult, KwpError> {
+        let mut client = McpStdioClient::spawn(self, &session, timeout, cancellation)?;
         let tools = client.list_tools()?;
         ensure_mcp_descriptor_matches(&self.descriptor_hash, &tools)?;
         client.call_tool(&request.tool, request.arguments)
@@ -1830,11 +1917,21 @@ pub fn mcp_descriptor_hash_from_tools(
 
 struct McpStdioClient {
     alias: String,
-    child: Child,
+    child: crate::scan::RegisteredChild,
     stdin: std::process::ChildStdin,
     stdout: mpsc::Receiver<Result<Option<Vec<u8>>, KwpError>>,
+    stderr: Option<SupervisedStderr>,
+    cancellation: crate::scan::ScanCancellation,
     next_id: u64,
     deadline: Instant,
+}
+
+struct SupervisedMcpProcess {
+    child: crate::scan::RegisteredChild,
+    stdin: std::process::ChildStdin,
+    stdout: mpsc::Receiver<Result<Option<Vec<u8>>, KwpError>>,
+    stderr: Option<SupervisedStderr>,
+    cancellation: crate::scan::ScanCancellation,
 }
 
 impl McpStdioClient {
@@ -1842,26 +1939,18 @@ impl McpStdioClient {
         mount: &StdioMcpMount,
         session: &McpSessionKey,
         timeout: Duration,
+        cancellation: Option<&crate::scan::ScanCancellation>,
     ) -> Result<Self, KwpError> {
-        let mut child = spawn_mcp_process(mount, session)?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| KwpError::Internal("MCP server stdin unavailable".to_string()))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| KwpError::Internal("MCP server stdout unavailable".to_string()))?;
-        tag_mcp_stderr(&mut child, &mount.alias);
+        let process = spawn_supervised_mcp_process(mount, session, cancellation)?;
         let mut client = Self {
             alias: mount.alias.clone(),
-            child,
-            stdin,
-            stdout: spawn_mcp_stdout_reader(stdout, &mount.alias),
+            child: process.child,
+            stdin: process.stdin,
+            stdout: process.stdout,
+            stderr: process.stderr,
+            cancellation: process.cancellation,
             next_id: 1,
-            deadline: Instant::now()
-                .checked_add(timeout)
-                .unwrap_or_else(|| Instant::now() + KWP_DEFAULT_MCP_TIMEOUT),
+            deadline: mcp_deadline(timeout),
         };
         client.initialize()?;
         Ok(client)
@@ -1912,28 +2001,102 @@ impl McpStdioClient {
     }
 
     fn recv_stdout_line(&self) -> Result<Vec<u8>, KwpError> {
-        let timeout = remaining_mcp_time(self.deadline)?;
-        match self.stdout.recv_timeout(timeout) {
-            Ok(Ok(Some(line))) => Ok(line),
-            Ok(Ok(None)) => Err(KwpError::Internal(format!(
-                "MCP {} closed stdout",
-                self.alias
-            ))),
-            Ok(Err(error)) => Err(error),
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(KwpError::Deadline),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(KwpError::Internal(format!(
-                "MCP {} stdout reader disconnected",
-                self.alias
-            ))),
+        loop {
+            if self.cancellation.is_cancelled() {
+                return Err(KwpError::NoActiveInvocation);
+            }
+            let remaining = remaining_mcp_time(self.deadline)?;
+            match self.stdout.recv_timeout(remaining.min(KWP_CANCEL_POLL)) {
+                Ok(Ok(Some(line))) => return Ok(line),
+                Ok(Ok(None)) => return Err(self.child_exit_error("closed stdout")),
+                Ok(Err(error)) => return Err(error),
+                Err(mpsc::RecvTimeoutError::Timeout) if remaining > KWP_CANCEL_POLL => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => return Err(KwpError::Deadline),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(self.child_exit_error("stdout reader disconnected"))
+                }
+            }
         }
     }
+
+    fn child_exit_error(&self, detail: &str) -> KwpError {
+        if self.cancellation.is_cancelled() {
+            KwpError::NoActiveInvocation
+        } else {
+            KwpError::Internal(format!("MCP {} {detail}", self.alias))
+        }
+    }
+}
+
+fn spawn_supervised_mcp_process(
+    mount: &StdioMcpMount,
+    session: &McpSessionKey,
+    cancellation: Option<&crate::scan::ScanCancellation>,
+) -> Result<SupervisedMcpProcess, KwpError> {
+    let mut child = spawn_mcp_process(mount, session)?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| KwpError::Internal("MCP server stdin unavailable".to_string()))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| KwpError::Internal("MCP server stdout unavailable".to_string()))?;
+    let stderr = supervise_mcp_stderr(&mut child, &mount.alias);
+    let process_group_id = kwp_child_process_group_id(&child);
+    let cancellation = cancellation.cloned().unwrap_or_default();
+    let (child, stderr) = register_mcp_child(child, process_group_id, &cancellation, stderr)?;
+    Ok(SupervisedMcpProcess {
+        child,
+        stdin,
+        stdout: spawn_mcp_stdout_reader(stdout, &mount.alias),
+        stderr,
+        cancellation,
+    })
+}
+
+fn register_mcp_child(
+    child: Child,
+    process_group_id: Option<u32>,
+    cancellation: &crate::scan::ScanCancellation,
+    stderr: Option<SupervisedStderr>,
+) -> Result<(crate::scan::RegisteredChild, Option<SupervisedStderr>), KwpError> {
+    match cancellation.register_child(child, process_group_id) {
+        Ok(child) => Ok((child, stderr)),
+        Err(error) => {
+            let _ = join_supervised_stderr(stderr);
+            Err(KwpError::Internal(format!(
+                "could not supervise MCP child: {error}"
+            )))
+        }
+    }
+}
+
+fn mcp_deadline(timeout: Duration) -> Instant {
+    Instant::now()
+        .checked_add(timeout)
+        .unwrap_or_else(|| Instant::now() + KWP_DEFAULT_MCP_TIMEOUT)
 }
 
 impl Drop for McpStdioClient {
     fn drop(&mut self) {
         let _ = write_mcp_rpc(&mut self.stdin, 999_999, "shutdown", Value::Null);
-        kill_kwp_child_process(&mut self.child);
-        let _ = self.child.wait();
+        match self.child.kill_and_wait() {
+            Ok(()) => {
+                if let Some(stderr) = self.stderr.take() {
+                    if let Err(error) = stderr.join() {
+                        eprintln!("[kwp:mcp:{}:stderr] {error}", self.alias);
+                    }
+                }
+            }
+            Err(error) => {
+                drop(self.stderr.take());
+                eprintln!(
+                    "[kwp:mcp:{}:stderr] detached drain after wait failure: {error}",
+                    self.alias
+                );
+            }
+        }
     }
 }
 
@@ -2015,17 +2178,11 @@ fn mcp_session_id(session: &McpSessionKey) -> String {
     .replace([':', '/', '\\'], "_")
 }
 
-fn tag_mcp_stderr(child: &mut Child, alias: &str) {
-    let Some(stderr) = child.stderr.take() else {
-        return;
-    };
-    let alias = alias.to_string();
-    thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            eprintln!("[kwp:mcp:{alias}:stderr] {line}");
-        }
-    });
+fn supervise_mcp_stderr(child: &mut Child, alias: &str) -> Option<SupervisedStderr> {
+    child
+        .stderr
+        .take()
+        .map(|stderr| SupervisedStderr::spawn(stderr, format!("[kwp:mcp:{alias}:stderr]")))
 }
 
 fn write_mcp_rpc(
@@ -2336,6 +2493,36 @@ impl HostFuzzExecutor {
             .ok_or_else(|| KwpError::denied("workspace"))?;
         mount.run(workspace_root, origin, request)
     }
+
+    fn run_blocking_before(
+        &self,
+        origin: EventOrigin,
+        request: FuzzRunRequest,
+        worker_deadline: Instant,
+        grant_cpu_seconds: Option<u64>,
+        cancellation: Option<&crate::scan::ScanCancellation>,
+    ) -> Result<FuzzRunResult, KwpError> {
+        let mount = self
+            .executors
+            .iter()
+            .find(|executor| executor.engine == request.engine)
+            .ok_or_else(|| KwpError::denied("fuzz.executor"))?;
+        let workspace_root = self
+            .workspace_root
+            .as_ref()
+            .ok_or_else(|| KwpError::denied("workspace"))?;
+        let timeout = broker_timeout_before(
+            worker_deadline,
+            Duration::from_secs(60),
+            &[
+                milliseconds(mount.timeout_ms),
+                milliseconds(request.limits.deadline_ms),
+                seconds(request.limits.cpu_seconds),
+                seconds(grant_cpu_seconds),
+            ],
+        )?;
+        mount.run_with_timeout(workspace_root, origin, request, timeout, cancellation)
+    }
 }
 
 #[async_trait]
@@ -2371,26 +2558,83 @@ impl FuzzExecutorMount {
         origin: EventOrigin,
         request: FuzzRunRequest,
     ) -> Result<FuzzRunResult, KwpError> {
+        let timeout = fuzz_timeout(self, &request);
+        self.run_with_timeout(workspace_root, origin, request, timeout, None)
+    }
+
+    fn run_with_timeout(
+        &self,
+        workspace_root: &Path,
+        origin: EventOrigin,
+        request: FuzzRunRequest,
+        timeout: Duration,
+        cancellation: Option<&crate::scan::ScanCancellation>,
+    ) -> Result<FuzzRunResult, KwpError> {
         let payload = fuzz_executor_payload(workspace_root, &origin, &request)?;
-        let stdout = tempfile::NamedTempFile::new()
-            .map_err(|error| KwpError::Internal(error.to_string()))?;
-        let stderr = tempfile::NamedTempFile::new()
-            .map_err(|error| KwpError::Internal(error.to_string()))?;
-        let mut child = spawn_fuzz_process(self, workspace_root, &origin, &stdout, &stderr)?;
-        write_fuzz_stdin(&mut child, &payload)?;
-        let completed = wait_for_fuzz_process(&mut child, fuzz_timeout(self, &request))?;
-        let stderr = fs::read_to_string(stderr.path()).unwrap_or_default();
-        if !completed {
-            return Ok(FuzzRunResult {
-                status: "timeout".to_string(),
-                artifacts: Vec::new(),
-                crashes: Vec::new(),
-            });
+        let payload = serialize_fuzz_stdin(&payload)?;
+        let process =
+            spawn_supervised_fuzz_process(self, workspace_root, &origin, payload, cancellation)?;
+        let wait_result = wait_for_fuzz_process(&process, timeout);
+        if wait_result.is_err() {
+            let _ = reap_fuzz_process(&process.child);
         }
-        let output = fs::read_to_string(stdout.path())
-            .map_err(|error| KwpError::Internal(error.to_string()))?;
+        let (stdout, stderr) = process.finish(wait_result)?;
+        let output = String::from_utf8(stdout)
+            .map_err(|error| KwpError::Internal(format!("fuzz stdout is not UTF-8: {error}")))?;
+        let stderr = escape_child_diagnostic(&stderr);
         parse_fuzz_output(output, stderr)
     }
+}
+
+struct SupervisedFuzzProcess {
+    child: crate::scan::RegisteredChild,
+    cancellation: crate::scan::ScanCancellation,
+    input: thread::JoinHandle<std::io::Result<()>>,
+    stdout: BoundedCapture,
+    stderr: BoundedCapture,
+}
+
+impl SupervisedFuzzProcess {
+    fn finish(self, wait_result: Result<(), KwpError>) -> Result<(Vec<u8>, Vec<u8>), KwpError> {
+        let input_result = self
+            .input
+            .join()
+            .map_err(|_| KwpError::Internal("fuzz stdin writer panicked".to_string()))?
+            .map_err(|error| KwpError::Internal(format!("fuzz stdin write failed: {error}")));
+        let stdout_result = self.stdout.finish();
+        let stderr_result = self.stderr.finish();
+        wait_result?;
+        input_result?;
+        Ok((stdout_result?, stderr_result?))
+    }
+}
+
+fn spawn_supervised_fuzz_process(
+    mount: &FuzzExecutorMount,
+    workspace_root: &Path,
+    origin: &EventOrigin,
+    payload: Vec<u8>,
+    cancellation: Option<&crate::scan::ScanCancellation>,
+) -> Result<SupervisedFuzzProcess, KwpError> {
+    let mut child = spawn_fuzz_process(mount, workspace_root, origin)?;
+    let stdin = take_fuzz_stdin(&mut child)?;
+    let stdout = take_fuzz_stdout(&mut child)?;
+    let stderr = take_fuzz_stderr(&mut child)?;
+    let process_group_id = kwp_child_process_group_id(&child);
+    let cancellation = cancellation.cloned().unwrap_or_default();
+    let child = cancellation
+        .register_child(child, process_group_id)
+        .map_err(|error| KwpError::Internal(format!("could not supervise fuzz child: {error}")))?;
+    let stdout = BoundedCapture::spawn(stdout, FUZZ_STDOUT_LIMIT, "fuzz.stdout.bytes");
+    let stderr = BoundedCapture::spawn(stderr, FUZZ_STDERR_LIMIT, "fuzz.stderr.bytes");
+    let input = thread::spawn(move || write_fuzz_stdin(stdin, &payload));
+    Ok(SupervisedFuzzProcess {
+        child,
+        cancellation,
+        input,
+        stdout,
+        stderr,
+    })
 }
 
 fn fuzz_executor_payload(
@@ -2414,8 +2658,6 @@ fn spawn_fuzz_process(
     mount: &FuzzExecutorMount,
     workspace_root: &Path,
     origin: &EventOrigin,
-    stdout: &tempfile::NamedTempFile,
-    stderr: &tempfile::NamedTempFile,
 ) -> Result<Child, KwpError> {
     let Some((program, args)) = mount.command.split_first() else {
         return Err(KwpError::BadRequest(
@@ -2425,16 +2667,8 @@ fn spawn_fuzz_process(
     let mut command = Command::new(program);
     command.args(args).current_dir(workspace_root);
     command.stdin(Stdio::piped());
-    command.stdout(
-        stdout
-            .reopen()
-            .map_err(|error| KwpError::Internal(error.to_string()))?,
-    );
-    command.stderr(
-        stderr
-            .reopen()
-            .map_err(|error| KwpError::Internal(error.to_string()))?,
-    );
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
     sanitize_fuzz_environment(&mut command, origin);
     configure_kwp_process_group(&mut command);
     command
@@ -2456,16 +2690,39 @@ fn sanitize_fuzz_environment(command: &mut Command, origin: &EventOrigin) {
     command.env("KUZUSHI_KWP_MODULE_DIGEST", &origin.digest.0);
 }
 
-fn write_fuzz_stdin(child: &mut Child, payload: &Value) -> Result<(), KwpError> {
-    let mut stdin = child
+fn take_fuzz_stdin(child: &mut Child) -> Result<std::process::ChildStdin, KwpError> {
+    child
         .stdin
         .take()
-        .ok_or_else(|| KwpError::Internal("fuzz executor stdin unavailable".to_string()))?;
-    serde_json::to_writer(&mut stdin, payload)
-        .map_err(|error| KwpError::Internal(error.to_string()))?;
-    stdin
-        .write_all(b"\n")
-        .map_err(|error| KwpError::Internal(error.to_string()))
+        .ok_or_else(|| KwpError::Internal("fuzz executor stdin unavailable".to_string()))
+}
+
+fn take_fuzz_stdout(child: &mut Child) -> Result<std::process::ChildStdout, KwpError> {
+    child
+        .stdout
+        .take()
+        .ok_or_else(|| KwpError::Internal("fuzz executor stdout unavailable".to_string()))
+}
+
+fn take_fuzz_stderr(child: &mut Child) -> Result<std::process::ChildStderr, KwpError> {
+    child
+        .stderr
+        .take()
+        .ok_or_else(|| KwpError::Internal("fuzz executor stderr unavailable".to_string()))
+}
+
+fn serialize_fuzz_stdin(payload: &Value) -> Result<Vec<u8>, KwpError> {
+    let mut bytes = serde_json::to_vec(payload)
+        .map_err(|error| KwpError::Internal(format!("could not serialize fuzz input: {error}")))?;
+    bytes.push(b'\n');
+    if bytes.len() > KWP_MAX_MESSAGE_BYTES {
+        return Err(KwpError::quota("fuzz.stdin.bytes"));
+    }
+    Ok(bytes)
+}
+
+fn write_fuzz_stdin(mut stdin: std::process::ChildStdin, payload: &[u8]) -> std::io::Result<()> {
+    stdin.write_all(payload)
 }
 
 fn fuzz_timeout(mount: &FuzzExecutorMount, request: &FuzzRunRequest) -> Duration {
@@ -2481,23 +2738,59 @@ fn fuzz_timeout(mount: &FuzzExecutorMount, request: &FuzzRunRequest) -> Duration
     Duration::from_millis(timeout_ms.max(1))
 }
 
-fn wait_for_fuzz_process(child: &mut Child, timeout: Duration) -> Result<bool, KwpError> {
+fn wait_for_fuzz_process(
+    process: &SupervisedFuzzProcess,
+    timeout: Duration,
+) -> Result<(), KwpError> {
     let start = Instant::now();
     loop {
-        if child
-            .try_wait()
-            .map_err(|error| KwpError::Internal(error.to_string()))?
-            .is_some()
-        {
-            return Ok(true);
-        }
-        if start.elapsed() >= timeout {
-            kill_kwp_child_process(child);
-            let _ = child.wait();
-            return Ok(false);
+        if poll_fuzz_process(process, start, timeout)? {
+            return Ok(());
         }
         thread::sleep(Duration::from_millis(25));
     }
+}
+
+fn poll_fuzz_process(
+    process: &SupervisedFuzzProcess,
+    started: Instant,
+    timeout: Duration,
+) -> Result<bool, KwpError> {
+    if let Some(error) = fuzz_process_limit(process) {
+        reap_fuzz_process(&process.child)?;
+        return Err(error);
+    }
+    if process
+        .child
+        .try_wait()
+        .map_err(|error| KwpError::Internal(error.to_string()))?
+        .is_some()
+    {
+        return Ok(true);
+    }
+    if started.elapsed() >= timeout {
+        reap_fuzz_process(&process.child)?;
+        return Err(KwpError::Deadline);
+    }
+    Ok(false)
+}
+
+fn fuzz_process_limit(process: &SupervisedFuzzProcess) -> Option<KwpError> {
+    if process.cancellation.is_cancelled() {
+        Some(KwpError::NoActiveInvocation)
+    } else if process.stdout.overflowed() {
+        Some(KwpError::quota("fuzz.stdout.bytes"))
+    } else if process.stderr.overflowed() {
+        Some(KwpError::quota("fuzz.stderr.bytes"))
+    } else {
+        None
+    }
+}
+
+fn reap_fuzz_process(child: &crate::scan::RegisteredChild) -> Result<(), KwpError> {
+    child
+        .kill_and_wait()
+        .map_err(|error| KwpError::Internal(error.to_string()))
 }
 
 fn parse_fuzz_output(stdout: String, stderr: String) -> Result<FuzzRunResult, KwpError> {
@@ -2703,23 +2996,7 @@ pub fn read_kwp_bus_log(
 ) -> Result<Vec<KwpBusEvent>, KwpError> {
     let target = target.as_ref();
     let path = checked_kwp_run_artifact_path(target, run_id, "kwp-bus.jsonl")?;
-    let text = fs::read_to_string(&path).map_err(|error| {
-        KwpError::Internal(format!(
-            "could not read KWP bus log {}: {error}",
-            path.display()
-        ))
-    })?;
-    text.lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            serde_json::from_str(line).map_err(|error| {
-                KwpError::Internal(format!(
-                    "could not parse KWP bus log {}: {error}",
-                    path.display()
-                ))
-            })
-        })
-        .collect()
+    read_bounded_jsonl(&path, BUS_JSONL_LIMITS, MissingFile::Error)
 }
 
 pub fn kwp_audit_log_integrity(
@@ -2748,26 +3025,7 @@ pub fn kwp_audit_log_integrity(
 }
 
 pub fn read_kwp_audit_log_path(path: &Path) -> Result<Vec<KwpAuditLogRecord>, KwpError> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let body = fs::read_to_string(path).map_err(|error| {
-        KwpError::Internal(format!(
-            "could not read KWP audit log {}: {error}",
-            path.display()
-        ))
-    })?;
-    body.lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| {
-            serde_json::from_str(line).map_err(|error| {
-                KwpError::Internal(format!(
-                    "could not parse KWP audit log {}: {error}",
-                    path.display()
-                ))
-            })
-        })
-        .collect()
+    read_bounded_jsonl(path, AUDIT_JSONL_LIMITS, MissingFile::Empty)
 }
 
 fn read_anchored_kwp_audit_log(
@@ -2822,12 +3080,24 @@ fn read_kwp_audit_anchor(path: &Path) -> Result<KwpAuditAnchor, KwpError> {
     if metadata.len() > KWP_MAX_MESSAGE_BYTES as u64 {
         return Err(KwpError::quota("audit.anchor.bytes"));
     }
-    let body = fs::read(path).map_err(|error| {
+    let file = open_fs_read_no_follow(path).map_err(|error| {
         KwpError::Internal(format!(
-            "could not read KWP audit anchor {}: {error}",
+            "could not open KWP audit anchor {}: {error}",
             path.display()
         ))
     })?;
+    let mut body = Vec::new();
+    file.take(KWP_MAX_MESSAGE_BYTES as u64 + 1)
+        .read_to_end(&mut body)
+        .map_err(|error| {
+            KwpError::Internal(format!(
+                "could not read KWP audit anchor {}: {error}",
+                path.display()
+            ))
+        })?;
+    if body.len() > KWP_MAX_MESSAGE_BYTES {
+        return Err(KwpError::quota("audit.anchor.bytes"));
+    }
     serde_json::from_slice(&body).map_err(|error| {
         KwpError::Internal(format!(
             "could not parse KWP audit anchor {}: {error}",
@@ -2920,6 +3190,7 @@ fn kwp_audit_integrity_error(
     }
 }
 
+#[cfg(test)]
 fn append_kwp_audit_log_record(
     path: &Path,
     body: KwpAuditLogBody,
@@ -2929,7 +3200,8 @@ fn append_kwp_audit_log_record(
     ensure_kwp_audit_parent(path)?;
     ensure_jsonl_append_target(path, "audit.log")?;
     let line = serialize_kwp_audit_record(&record)?;
-    append_and_sync_kwp_audit_line(path, &line)?;
+    let current_records = read_kwp_audit_log_path(path)?.len();
+    append_and_sync_kwp_audit_line(path, &line, current_records)?;
     Ok(record)
 }
 
@@ -2945,25 +3217,43 @@ fn ensure_kwp_audit_parent(path: &Path) -> Result<(), KwpError> {
     Ok(())
 }
 
-fn serialize_kwp_audit_record(record: &KwpAuditLogRecord) -> Result<String, KwpError> {
-    serde_json::to_string(record).map_err(|error| {
-        KwpError::Internal(format!("could not serialize KWP audit record: {error}"))
-    })
+fn serialize_kwp_audit_record(record: &KwpAuditLogRecord) -> Result<Vec<u8>, KwpError> {
+    serialize_bounded_jsonl(record, AUDIT_JSONL_LIMITS)
 }
 
-fn append_and_sync_kwp_audit_line(path: &Path, line: &str) -> Result<(), KwpError> {
+#[cfg(test)]
+fn append_and_sync_kwp_audit_line(
+    path: &Path,
+    line: &[u8],
+    current_records: usize,
+) -> Result<(), KwpError> {
     let mut file = open_jsonl_append(path).map_err(|error| {
         KwpError::Internal(format!(
             "could not open KWP audit log {}: {error}",
             path.display()
         ))
     })?;
-    writeln!(file, "{line}").map_err(|error| {
+    let current_bytes = file
+        .metadata()
+        .map_err(|error| KwpError::Internal(error.to_string()))?
+        .len();
+    self::jsonl::ensure_jsonl_append_growth(
+        current_bytes,
+        current_records,
+        line.len(),
+        AUDIT_JSONL_LIMITS,
+    )?;
+    self::audit_writer::append_line(&mut file, line).map_err(|error| {
         KwpError::Internal(format!(
             "could not append KWP audit log {}: {error}",
             path.display()
         ))
     })?;
+    sync_test_audit_file(path, &file)
+}
+
+#[cfg(test)]
+fn sync_test_audit_file(path: &Path, file: &fs::File) -> Result<(), KwpError> {
     file.sync_all().map_err(|error| {
         KwpError::Internal(format!(
             "could not sync KWP audit log {}: {error}",
@@ -2979,42 +3269,7 @@ fn append_and_sync_kwp_audit_line(path: &Path, line: &str) -> Result<(), KwpErro
 }
 
 fn append_kwp_bus_event(path: &Path, event: KwpBusEvent) -> Result<(), KwpError> {
-    ensure_jsonl_append_target(path, "bus.log")?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
-            KwpError::Internal(format!(
-                "could not create KWP bus dir {}: {error}",
-                parent.display()
-            ))
-        })?;
-    }
-    let mut file = open_jsonl_append(path).map_err(|error| {
-        KwpError::Internal(format!(
-            "could not open KWP bus log {}: {error}",
-            path.display()
-        ))
-    })?;
-    let line = serde_json::to_string(&event).map_err(|error| {
-        KwpError::Internal(format!("could not serialize KWP bus event: {error}"))
-    })?;
-    writeln!(file, "{line}").map_err(|error| {
-        KwpError::Internal(format!(
-            "could not append KWP bus log {}: {error}",
-            path.display()
-        ))
-    })?;
-    file.sync_all().map_err(|error| {
-        KwpError::Internal(format!(
-            "could not sync KWP bus log {}: {error}",
-            path.display()
-        ))
-    })?;
-    crate::fs_atomic::sync_parent_dir(path).map_err(|error| {
-        KwpError::Internal(format!(
-            "could not sync KWP bus dir {}: {error}",
-            path.display()
-        ))
-    })
+    append_bounded_bus_event(path, &event)
 }
 
 #[cfg(unix)]
@@ -3151,12 +3406,10 @@ impl CapabilityBroker {
             .require(
                 inv,
                 "fs.read",
-                inv.grant()
-                    .fs_scope(scope)
-                    .ok_or_else(|| KwpError::denied("fs")),
+                authorize_fs_grant(inv.grant(), scope, FsPolicyAction::Read),
             )
             .await?;
-        self.require(inv, "fs.read", validate_broker_fs_path(scope, path))
+        self.require(inv, "fs.read", validate_fs_path(scope, path))
             .await?;
         let remaining = inv.remaining_fs_bytes(grant).await;
         self.require(
@@ -3185,18 +3438,15 @@ impl CapabilityBroker {
         data: Vec<u8>,
     ) -> Result<u64, KwpError> {
         self.ensure_live(inv, "fs.write").await?;
-        let Some(grant) = inv
-            .grant()
-            .fs_scope(scope)
-            .filter(|grant| grant.mode == FsMode::Rw && scope != FsScope::Input)
-        else {
-            return self
-                .deny(inv, "fs.write", KwpError::denied("fs.write"))
-                .await;
-        };
-        if let Err(error) = validate_broker_fs_path(scope, path) {
-            return self.deny(inv, "fs.write", error).await;
-        }
+        let grant = self
+            .require(
+                inv,
+                "fs.write",
+                authorize_fs_grant(inv.grant(), scope, FsPolicyAction::Write),
+            )
+            .await?;
+        self.require(inv, "fs.write", validate_fs_path(scope, path))
+            .await?;
         if let Err(error) = inv.reserve_fs_access(grant, path, data.len() as u64).await {
             return self.deny(inv, "fs.write", error).await;
         }
@@ -3237,28 +3487,25 @@ impl CapabilityBroker {
         request: RuntimeQueryRequest,
     ) -> Result<RuntimeQueryResult, KwpError> {
         self.ensure_live(inv, "runtime.query").await?;
-        let Some(grant) = inv.grant().runtime.as_ref() else {
-            return self
-                .deny(inv, "runtime.query", KwpError::denied("runtime"))
-                .await;
-        };
-        if inv.computed_cost_usd().await >= grant.max_cost_usd_per_invocation
-            || kwp_run_cost(inv.run_id())? >= grant.max_cost_usd_per_run
-        {
-            return self
-                .deny(inv, "runtime.query", KwpError::RuntimeBudget)
-                .await;
-        }
-        let mut result = self.runtime.query(with_provenance(inv, request)).await;
-        if let Some(cost_usd) = result.as_ref().ok().map(|result| result.cost_usd) {
-            let run_cost = record_kwp_run_cost(inv.run_id(), cost_usd)?;
-            inv.add_runtime_cost(cost_usd).await;
-            if inv.computed_cost_usd().await > grant.max_cost_usd_per_invocation
-                || run_cost > grant.max_cost_usd_per_run
-            {
-                result = Err(KwpError::RuntimeBudget);
+        let grant = self
+            .require(inv, "runtime.query", authorize_runtime_grant(inv.grant()))
+            .await?;
+        self.require(
+            inv,
+            "runtime.query",
+            validate_runtime_output_tokens(Some(request.max_tokens)),
+        )
+        .await?;
+        let reservation = self
+            .require(inv, "runtime.query", inv.reserve_runtime_cost(grant))
+            .await?;
+        let result = match self.runtime.query(with_provenance(inv, request)).await {
+            Ok(response) => settle_broker_runtime_response(reservation, response),
+            Err(error) => {
+                reservation.retain_unresolved();
+                Err(error)
             }
-        }
+        };
         self.record(inv, "runtime.query", &result).await;
         result
     }
@@ -3270,17 +3517,8 @@ impl CapabilityBroker {
         payload: Value,
     ) -> Result<(), KwpError> {
         self.ensure_live(inv, "bus.publish").await?;
-        if !inv
-            .grant()
-            .bus
-            .produce
-            .iter()
-            .any(|pattern| pattern.matches(&topic))
-        {
-            return self
-                .deny(inv, "bus.publish", KwpError::denied("bus.produce"))
-                .await;
-        }
+        self.require(inv, "bus.publish", authorize_bus_topic(inv.grant(), &topic))
+            .await?;
         let result = self.bus.publish(origin(inv), topic, payload).await;
         self.record(inv, "bus.publish", &result).await;
         result
@@ -3292,18 +3530,12 @@ impl CapabilityBroker {
         findings: Vec<Value>,
     ) -> Result<FindingsCreateResult, KwpError> {
         self.ensure_live(inv, "findings.create").await?;
-        let Some(grant) = inv.grant().findings.as_ref().filter(|grant| grant.create) else {
-            return self
-                .deny(inv, "findings.create", KwpError::denied("findings.create"))
-                .await;
-        };
-        if let Some(max) = grant.max_per_invocation {
-            if findings.len() > max as usize {
-                return self
-                    .deny(inv, "findings.create", KwpError::quota("findings.count"))
-                    .await;
-            }
-        }
+        self.require(
+            inv,
+            "findings.create",
+            authorize_findings_grant(inv.grant(), findings.len()),
+        )
+        .await?;
         let result = self.findings.create(origin(inv), findings).await;
         self.record(inv, "findings.create", &result).await;
         result
@@ -3315,17 +3547,12 @@ impl CapabilityBroker {
         artifacts: Vec<ArtifactRef>,
     ) -> Result<Vec<ArtifactRef>, KwpError> {
         self.ensure_live(inv, "artifacts.record").await?;
-        if inv
-            .grant()
-            .artifacts
-            .as_ref()
-            .filter(|grant| grant.write)
-            .is_none()
-        {
-            return self
-                .deny(inv, "artifacts.record", KwpError::denied("artifacts.write"))
-                .await;
-        }
+        self.require(
+            inv,
+            "artifacts.record",
+            authorize_artifact_grant(inv.grant()),
+        )
+        .await?;
         if let Err(error) = validate_artifact_refs(&artifacts) {
             return self.deny(inv, "artifacts.record", error).await;
         }
@@ -3373,34 +3600,15 @@ impl CapabilityBroker {
         inv: &'a InvocationAuthority,
         request: &mut McpCallRequest,
     ) -> Result<&'a McpGrant, KwpError> {
-        self.require(
-            inv,
-            "mcp.call",
-            inv.ensure_invocation_id(&request.invocation_id),
-        )
-        .await?;
         let grant = self
             .require(
                 inv,
                 "mcp.call",
-                inv.grant()
-                    .mcp_grant(&request.alias)
-                    .ok_or_else(|| KwpError::denied("mcp")),
+                authorize_mcp_grant(inv.grant(), &self.mcp_catalog, inv.invocation_id(), request),
             )
             .await?;
-        self.require(
-            inv,
-            "mcp.call",
-            validate_mcp_request(grant, request, &self.mcp_catalog),
-        )
-        .await?;
-        apply_mcp_grant_limits(grant, &mut request.limits);
-        self.require(
-            inv,
-            "mcp.call",
-            inv.reserve_mcp_call(grant, &request.limits).await,
-        )
-        .await?;
+        self.require(inv, "mcp.call", inv.reserve_mcp_call(grant, request).await)
+            .await?;
         Ok(grant)
     }
 
@@ -3409,28 +3617,13 @@ impl CapabilityBroker {
         inv: &InvocationAuthority,
         request: &FuzzRunRequest,
     ) -> Result<(), KwpError> {
-        self.require(
-            inv,
-            "fuzz.run",
-            inv.ensure_invocation_id(&request.invocation_id),
-        )
-        .await?;
         let grant = self
             .require(
                 inv,
                 "fuzz.run",
-                inv.grant()
-                    .fuzz
-                    .as_ref()
-                    .ok_or_else(|| KwpError::denied("fuzz")),
+                authorize_fuzz_grant(inv.grant(), inv.invocation_id(), request),
             )
             .await?;
-        self.require(
-            inv,
-            "fuzz.run",
-            validate_authorized_fuzz_request(inv.grant(), grant, request),
-        )
-        .await?;
         self.require(inv, "fuzz.run", inv.reserve_fuzz_job(grant, request).await)
             .await
     }
@@ -3496,13 +3689,7 @@ impl CapabilityBroker {
         event: &str,
         result: &Result<T, KwpError>,
     ) {
-        let (decision, detail) = match result {
-            Ok(_) => (AuditDecision::Allow, Value::Null),
-            Err(error) => (
-                AuditDecision::Deny,
-                serde_json::json!({ "errorCode": error.code(), "error": error.to_string() }),
-            ),
-        };
+        let (decision, detail) = audit_decision(result);
         self.audit
             .record(AuditRecord {
                 event: event.to_string(),
@@ -3568,6 +3755,48 @@ fn with_provenance(
         None => preamble,
     });
     request
+}
+
+fn commit_runtime_result<T>(
+    reservation: RuntimeCostReservation,
+    actual_cost: f64,
+    result: T,
+) -> Result<T, KwpError> {
+    let commit = reservation.commit(actual_cost)?;
+    if commit.exceeded_reservation {
+        Err(KwpError::RuntimeBudget)
+    } else {
+        Ok(result)
+    }
+}
+
+fn settle_worker_runtime_response(
+    reservation: RuntimeCostReservation,
+    response: crate::runtime::AgentQueryResponse,
+) -> Result<crate::runtime::AgentQueryResponse, KwpError> {
+    let cost = match response.checked_cost_report() {
+        Ok(cost) => cost,
+        Err(error) => {
+            reservation.retain_unresolved();
+            return Err(KwpError::Internal(error.to_string()));
+        }
+    };
+    let Some(exact_cost) = cost.exact_usd() else {
+        reservation.retain_unresolved();
+        return Ok(response);
+    };
+    commit_runtime_result(reservation, exact_cost, response)
+}
+
+fn settle_broker_runtime_response(
+    reservation: RuntimeCostReservation,
+    response: RuntimeQueryResult,
+) -> Result<RuntimeQueryResult, KwpError> {
+    let Some(exact_cost) = response.cost_usd else {
+        reservation.retain_unresolved();
+        return Ok(response);
+    };
+    commit_runtime_result(reservation, exact_cost, response)
 }
 
 #[derive(Debug)]
@@ -4018,15 +4247,21 @@ pub fn run_node_worker_tool_blocking(mut run: NodeWorkerRun<'_>) -> Result<Value
     let context = run.context;
     ensure_tool_execution_active(context)?;
     let (invocation_id, run_id) = worker_invocation_ids(context);
+    let audit_writer = worker_audit_writer(context, &run_id)?;
+    let cost_ledger = worker_cost_ledger(run.module, context, &run_id)?;
     let mut child = spawn_node_worker(&mut run.command, run.module)?;
     let mut stdin = take_worker_stdin(&mut child)?;
     let stdout = take_worker_stdout(&mut child)?;
-    tag_worker_stderr(&mut child, run.module, run.tool_name);
+    let stderr = supervise_worker_stderr(&mut child, run.module, run.tool_name);
     let process_group_id = kwp_child_process_group_id(&child);
     let cancellation = context.cancellation.cloned().unwrap_or_default();
-    let child = cancellation
-        .register_child(child, process_group_id)
-        .map_err(|error| cancellation_error(context, error))?;
+    let child = match cancellation.register_child(child, process_group_id) {
+        Ok(child) => child,
+        Err(error) => {
+            log_stderr_cleanup_error(stderr);
+            return Err(cancellation_error(context, error));
+        }
+    };
     let mut session = new_worker_host_session(
         run.module,
         run.tool_name,
@@ -4034,14 +4269,17 @@ pub fn run_node_worker_tool_blocking(mut run: NodeWorkerRun<'_>) -> Result<Value
         run.runtime,
         invocation_id,
         run_id,
+        audit_writer,
+        cost_ledger,
     );
     let receiver = spawn_worker_stdout_reader(stdout);
     let result = session
         .record_invocation_start()
         .and_then(|_| initialize_then_call_worker(&receiver, &mut stdin, run, &mut session));
     let audit_result = finalize_worker_invocation(&mut session, &result, context);
-    let _ = child.kill_and_wait();
+    let cleanup_result = finish_worker_stderr(child.kill_and_wait(), stderr);
     audit_result?;
+    cleanup_result?;
     result
 }
 
@@ -4062,6 +4300,8 @@ fn new_worker_host_session<'a>(
     runtime: Option<&'a dyn crate::runtime::AgentRuntime>,
     invocation_id: InvocationId,
     run_id: RunId,
+    audit_writer: Option<KwpAuditWriterLease>,
+    cost_ledger: RunCostLedgerLease,
 ) -> WorkerHostSession<'a> {
     WorkerHostSession {
         module,
@@ -4070,9 +4310,9 @@ fn new_worker_host_session<'a>(
         run_id,
         context,
         runtime,
-        runtime_cost_usd: 0.0,
         fs_access: FsAccessMeter::default(),
         net_access: NetAccessMeter::default(),
+        net_clients: PinnedHttpClientPool::default(),
         mcp_calls: BTreeMap::new(),
         mcp_bytes: BTreeMap::new(),
         mcp_host: HostMcpBroker::from_config(context.config, context.workspace),
@@ -4081,12 +4321,38 @@ fn new_worker_host_session<'a>(
         recorded_artifacts: Vec::new(),
         artifact_bytes: 0,
         created_findings: 0,
+        audit_writer,
+        cost_ledger: Some(cost_ledger),
         deadline: worker_deadline(context.config),
         epoch: KWP_WORKER_EPOCH,
         initializing: true,
         cancel_recorded: false,
         settled: false,
     }
+}
+
+fn worker_cost_ledger(
+    module: &VerifiedModule,
+    context: &crate::modules::ToolExecutionContext<'_>,
+    run_id: &RunId,
+) -> Result<RunCostLedgerLease, KwpError> {
+    let target = context
+        .workspace
+        .map(|workspace| workspace.root())
+        .unwrap_or(module.module_root.as_path());
+    RunCostLedgerLease::acquire(target, run_id)
+}
+
+fn worker_audit_writer(
+    context: &crate::modules::ToolExecutionContext<'_>,
+    run_id: &RunId,
+) -> Result<Option<KwpAuditWriterLease>, KwpError> {
+    let Some(target) = context.workspace.map(|workspace| workspace.root()) else {
+        return Ok(None);
+    };
+    let log_path = writable_kwp_run_artifact_path(target, &run_id.0, "kwp-audit.jsonl")?;
+    let anchor_path = writable_kwp_run_artifact_path(target, &run_id.0, KWP_AUDIT_ANCHOR_FILE)?;
+    KwpAuditWriterLease::acquire(target, &run_id.0, log_path, anchor_path).map(Some)
 }
 
 fn finalize_worker_invocation(
@@ -4098,7 +4364,10 @@ fn finalize_worker_invocation(
         .map(|reason| session.record_invocation_cancel(reason))
         .unwrap_or(Ok(()));
     session.settled = true;
-    cancel_result.and_then(|_| session.record_invocation_end(result))
+    let audit_result = cancel_result.and_then(|_| session.record_invocation_end(result));
+    session.audit_writer.take();
+    session.cost_ledger.take();
+    audit_result
 }
 
 fn ensure_tool_execution_active(
@@ -4178,17 +4447,6 @@ fn configure_kwp_process_group(command: &mut Command) {
     }
 }
 
-fn kill_kwp_child_process(child: &mut Child) {
-    #[cfg(unix)]
-    unsafe {
-        libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = child.kill();
-    }
-}
-
 fn take_worker_stdin(child: &mut Child) -> Result<std::process::ChildStdin, KwpError> {
     child
         .stdin
@@ -4203,19 +4461,43 @@ fn take_worker_stdout(child: &mut Child) -> Result<std::process::ChildStdout, Kw
         .ok_or_else(|| KwpError::Internal("KWP worker stdout unavailable".to_string()))
 }
 
-fn tag_worker_stderr(child: &mut Child, module: &VerifiedModule, tool_name: &str) {
-    let Some(stderr) = child.stderr.take() else {
-        return;
-    };
-    let module_id = module.module_id.0.clone();
-    let digest = module.digest.0.clone();
-    let tool = tool_name.to_string();
-    thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            eprintln!("[kwp:{module_id}:{digest}:{tool}:stderr] {line}");
+fn supervise_worker_stderr(
+    child: &mut Child,
+    module: &VerifiedModule,
+    tool_name: &str,
+) -> Option<SupervisedStderr> {
+    child.stderr.take().map(|stderr| {
+        let prefix = format!(
+            "[kwp:{}:{}:{tool_name}:stderr]",
+            module.module_id.0, module.digest.0
+        );
+        SupervisedStderr::spawn(stderr, prefix)
+    })
+}
+
+fn join_supervised_stderr(stderr: Option<SupervisedStderr>) -> Result<(), KwpError> {
+    stderr.map(SupervisedStderr::join).unwrap_or(Ok(()))
+}
+
+fn log_stderr_cleanup_error(stderr: Option<SupervisedStderr>) {
+    if let Err(error) = join_supervised_stderr(stderr) {
+        eprintln!("[kwp:stderr] cleanup diagnostic: {error}");
+    }
+}
+
+fn finish_worker_stderr(
+    termination: anyhow::Result<()>,
+    stderr: Option<SupervisedStderr>,
+) -> Result<(), KwpError> {
+    match termination {
+        Ok(()) => join_supervised_stderr(stderr),
+        Err(error) => {
+            drop(stderr);
+            Err(KwpError::Internal(format!(
+                "could not terminate KWP worker before joining stderr: {error}"
+            )))
         }
-    });
+    }
 }
 
 fn initialize_then_call_worker(
@@ -4493,7 +4775,7 @@ fn handle_worker_success(
     }
     ensure_worker_response_timely(receiver, stdin, request_id, session, attach_metrics)?;
     let result = if attach_metrics {
-        session.attach_host_metrics(result)
+        session.attach_host_metrics(result)?
     } else {
         result
     };
@@ -4839,31 +5121,6 @@ struct PreparedWorkerRuntimeRequest {
     response_shape: WorkerRuntimeResponseShape,
 }
 
-static KWP_RUN_COSTS: OnceLock<StdMutex<BTreeMap<RunId, f64>>> = OnceLock::new();
-
-fn kwp_run_cost(run_id: &RunId) -> Result<f64, KwpError> {
-    let costs = KWP_RUN_COSTS
-        .get_or_init(|| StdMutex::new(BTreeMap::new()))
-        .lock()
-        .map_err(|_| KwpError::Internal("KWP run-cost ledger was poisoned".to_string()))?;
-    Ok(costs.get(run_id).copied().unwrap_or(0.0))
-}
-
-fn record_kwp_run_cost(run_id: &RunId, cost: f64) -> Result<f64, KwpError> {
-    if !cost.is_finite() || cost < 0.0 {
-        return Err(KwpError::Internal(
-            "runtime returned an invalid cost".to_string(),
-        ));
-    }
-    let mut costs = KWP_RUN_COSTS
-        .get_or_init(|| StdMutex::new(BTreeMap::new()))
-        .lock()
-        .map_err(|_| KwpError::Internal("KWP run-cost ledger was poisoned".to_string()))?;
-    let total = costs.entry(run_id.clone()).or_default();
-    *total += cost;
-    Ok(*total)
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorkerAgentRuntimeRequest {
@@ -5070,9 +5327,9 @@ struct WorkerHostSession<'a> {
     run_id: RunId,
     context: &'a crate::modules::ToolExecutionContext<'a>,
     runtime: Option<&'a dyn crate::runtime::AgentRuntime>,
-    runtime_cost_usd: f64,
     fs_access: FsAccessMeter,
     net_access: NetAccessMeter,
+    net_clients: PinnedHttpClientPool,
     mcp_calls: BTreeMap<String, u32>,
     mcp_bytes: BTreeMap<String, u64>,
     mcp_host: HostMcpBroker,
@@ -5081,6 +5338,8 @@ struct WorkerHostSession<'a> {
     recorded_artifacts: Vec<ArtifactRef>,
     artifact_bytes: u64,
     created_findings: usize,
+    audit_writer: Option<KwpAuditWriterLease>,
+    cost_ledger: Option<RunCostLedgerLease>,
     deadline: Instant,
     epoch: u64,
     initializing: bool,
@@ -5091,9 +5350,29 @@ struct WorkerHostSession<'a> {
 impl WorkerHostSession<'_> {
     fn handle_worker_request(&mut self, method: String, params: Value) -> Result<Value, KwpError> {
         let event = broker_audit_event(&method);
+        let reservation = self.reserve_broker_audit(&event)?;
         let result = self.handle_worker_request_inner(method, params);
-        self.record_broker_decision(&event, &result)?;
+        self.record_reserved_broker_decision(reservation, &event, &result)?;
         result
+    }
+
+    fn reserve_broker_audit(&self, event: &str) -> Result<Option<KwpAuditReservation>, KwpError> {
+        let Some(writer) = self.audit_writer.as_ref() else {
+            return Ok(None);
+        };
+        let fallback = self.audit_body(
+            event,
+            AuditDecision::Deny,
+            serde_json::json!({
+                "status": "unknown-outcome",
+                "reason": "broker request interrupted before terminal audit decision"
+            }),
+        );
+        writer
+            .reserve_until(fallback, self.deadline, || {
+                tool_execution_cancelled(self.context)
+            })
+            .map(Some)
     }
 
     fn handle_worker_request_inner(
@@ -5154,10 +5433,9 @@ impl WorkerHostSession<'_> {
     fn handle_fs_read(&mut self, params: Value) -> Result<Value, KwpError> {
         let request: WorkerFsReadRequest = serde_json::from_value(params)
             .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-        validate_broker_fs_path(request.scope, &request.path)?;
-        let Some(grant) = self.module.grant.fs_scope(request.scope).cloned() else {
-            return Err(KwpError::denied("fs"));
-        };
+        validate_fs_path(request.scope, &request.path)?;
+        let grant =
+            authorize_fs_grant(&self.module.grant, request.scope, FsPolicyAction::Read)?.clone();
         let root = self.scope_root(request.scope)?;
         let path = resolve_read_path(&root, &request.path)?;
         let remaining = remaining_fs_bytes(&self.fs_access, &grant);
@@ -5177,16 +5455,9 @@ impl WorkerHostSession<'_> {
     fn handle_fs_write(&mut self, params: Value) -> Result<Value, KwpError> {
         let request: WorkerFsWriteRequest = serde_json::from_value(params)
             .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-        validate_broker_fs_path(request.scope, &request.path)?;
-        let Some(grant) = self
-            .module
-            .grant
-            .fs_scope(request.scope)
-            .filter(|grant| grant.mode == FsMode::Rw && request.scope != FsScope::Input)
-            .cloned()
-        else {
-            return Err(KwpError::denied("fs.write"));
-        };
+        validate_fs_path(request.scope, &request.path)?;
+        let grant =
+            authorize_fs_grant(&self.module.grant, request.scope, FsPolicyAction::Write)?.clone();
         let root = self.scope_root(request.scope)?;
         let path = resolve_write_path(&root, &request.path)?;
         let data = BASE64
@@ -5203,29 +5474,30 @@ impl WorkerHostSession<'_> {
     fn handle_fs_list(&mut self, params: Value) -> Result<Value, KwpError> {
         let request: WorkerFsPathRequest = serde_json::from_value(params)
             .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-        validate_broker_fs_path(request.scope, &request.path)?;
-        let Some(grant) = self.module.grant.fs_scope(request.scope).cloned() else {
-            return Err(KwpError::denied("fs"));
-        };
+        validate_fs_path(request.scope, &request.path)?;
+        let grant =
+            authorize_fs_grant(&self.module.grant, request.scope, FsPolicyAction::Read)?.clone();
         self.reserve_fs_access(&grant, &request.path, 0)?;
         let root = self.scope_root(request.scope)?;
         let path = resolve_read_path(&root, &request.path)?;
-        let entries = fs::read_dir(&path)
-            .map_err(|error| KwpError::Internal(error.to_string()))?
-            .map(|entry| {
-                fs_list_entry(entry.map_err(|error| KwpError::Internal(error.to_string()))?)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(serde_json::json!({ "entries": entries }))
+        let remaining = remaining_fs_bytes(&self.fs_access, &grant);
+        let byte_resource = fs_list_byte_resource(remaining);
+        let listing = read_bounded_directory(
+            &path,
+            FS_LIST_MAX_ENTRIES,
+            remaining.min(FS_LIST_MAX_BYTES),
+            byte_resource,
+        )?;
+        self.reserve_fs_access(&grant, &request.path, listing.response_bytes)?;
+        Ok(serde_json::json!({ "entries": listing.entries }))
     }
 
     fn handle_fs_stat(&mut self, params: Value) -> Result<Value, KwpError> {
         let request: WorkerFsPathRequest = serde_json::from_value(params)
             .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-        validate_broker_fs_path(request.scope, &request.path)?;
-        let Some(grant) = self.module.grant.fs_scope(request.scope).cloned() else {
-            return Err(KwpError::denied("fs"));
-        };
+        validate_fs_path(request.scope, &request.path)?;
+        let grant =
+            authorize_fs_grant(&self.module.grant, request.scope, FsPolicyAction::Read)?.clone();
         self.reserve_fs_access(&grant, &request.path, 0)?;
         let root = self.scope_root(request.scope)?;
         let path = resolve_read_path(&root, &request.path)?;
@@ -5237,16 +5509,9 @@ impl WorkerHostSession<'_> {
     fn handle_fs_remove(&mut self, params: Value) -> Result<Value, KwpError> {
         let request: WorkerFsPathRequest = serde_json::from_value(params)
             .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-        validate_broker_fs_path(request.scope, &request.path)?;
-        let Some(grant) = self
-            .module
-            .grant
-            .fs_scope(request.scope)
-            .filter(|grant| grant.mode == FsMode::Rw && request.scope != FsScope::Input)
-            .cloned()
-        else {
-            return Err(KwpError::denied("fs.remove"));
-        };
+        validate_fs_path(request.scope, &request.path)?;
+        let grant =
+            authorize_fs_grant(&self.module.grant, request.scope, FsPolicyAction::Remove)?.clone();
         self.reserve_fs_access(&grant, &request.path, 0)?;
         let root = self.scope_root(request.scope)?;
         let path = resolve_remove_path(&root, &request.path)?;
@@ -5270,24 +5535,14 @@ impl WorkerHostSession<'_> {
     }
 
     fn handle_runtime_query(&mut self, params: Value) -> Result<Value, KwpError> {
-        let Some(grant) = self.module.grant.runtime.as_ref() else {
-            return Err(KwpError::denied("runtime"));
-        };
-        let run_cost_usd = kwp_run_cost(&self.run_id)?;
-        if grant.max_cost_usd_per_invocation <= 0.0
-            || grant.max_cost_usd_per_run <= 0.0
-            || self.runtime_cost_usd >= grant.max_cost_usd_per_invocation
-            || run_cost_usd >= grant.max_cost_usd_per_run
-        {
-            return Err(KwpError::RuntimeBudget);
-        }
+        let grant = authorize_runtime_grant(&self.module.grant)?.clone();
         let Some(runtime) = self.runtime else {
             return Err(KwpError::denied("runtime.unavailable"));
         };
         let cwd = worker_runtime_cwd(self.module, self.context);
         let prepared = prepare_worker_runtime_request(
             &params,
-            grant,
+            &grant,
             self.context.config.model.as_deref(),
             &cwd,
         )?;
@@ -5295,45 +5550,50 @@ impl WorkerHostSession<'_> {
             self.context.cancellation.cloned(),
             Some(self.deadline),
         );
-        let response = runtime
-            .query_blocking_controlled(prepared.query, control.clone())
+        control
+            .ensure_active()
             .map_err(|error| controlled_runtime_error(&control, error))?;
-        let run_cost_usd = record_kwp_run_cost(&self.run_id, response.cost_usd)?;
-        self.runtime_cost_usd += response.cost_usd;
-        if self.runtime_cost_usd > grant.max_cost_usd_per_invocation
-            || run_cost_usd > grant.max_cost_usd_per_run
-        {
-            return Err(KwpError::RuntimeBudget);
-        }
+        let reservation = self.runtime_cost_ledger()?.reserve(
+            &self.invocation_id,
+            grant.max_cost_usd_per_invocation,
+            grant.max_cost_usd_per_run,
+        )?;
+        let response = match runtime.query_blocking_controlled(prepared.query, control.clone()) {
+            Ok(response) => response,
+            Err(error) => {
+                reservation.retain_unresolved();
+                return Err(controlled_runtime_error(&control, error));
+            }
+        };
+        let response = settle_worker_runtime_response(reservation, response)?;
         worker_runtime_response(response, prepared.response_shape)
     }
 
-    fn handle_artifacts_record(&mut self, params: Value) -> Result<Value, KwpError> {
-        let Some(grant) = self
-            .module
-            .grant
-            .artifacts
+    fn runtime_cost_ledger(&self) -> Result<&RunCostLedgerLease, KwpError> {
+        self.cost_ledger
             .as_ref()
-            .filter(|grant| grant.write)
-        else {
-            return Err(KwpError::denied("artifacts.write"));
-        };
+            .ok_or_else(|| KwpError::Internal("KWP runtime cost ledger is unavailable".to_string()))
+    }
+
+    fn runtime_cost_report(&self) -> Result<cost_ledger::LedgerCostReport, KwpError> {
+        self.runtime_cost_ledger()?
+            .invocation_cost_report(&self.invocation_id)
+    }
+
+    fn runtime_run_cost_report(&self) -> Result<cost_ledger::LedgerCostReport, KwpError> {
+        self.runtime_cost_ledger()?.run_cost_report()
+    }
+
+    fn handle_artifacts_record(&mut self, params: Value) -> Result<Value, KwpError> {
+        let grant = authorize_artifact_grant(&self.module.grant)?.clone();
         let artifacts = artifacts_from_params(&params)?;
-        let artifacts = self.verified_artifacts(grant, artifacts)?;
+        let artifacts = self.verified_artifacts(&grant, artifacts)?;
         self.recorded_artifacts.extend(artifacts.iter().cloned());
         Ok(serde_json::json!({ "artifacts": artifacts }))
     }
 
     fn handle_findings_create(&mut self, params: Value) -> Result<Value, KwpError> {
-        let Some(grant) = self
-            .module
-            .grant
-            .findings
-            .as_ref()
-            .filter(|grant| grant.create)
-        else {
-            return Err(KwpError::denied("findings.create"));
-        };
+        let grant = authorize_findings_grant(&self.module.grant, 0)?;
         let Some(store) = self.context.findings_store else {
             return Err(KwpError::denied("findings.unavailable"));
         };
@@ -5346,12 +5606,7 @@ impl WorkerHostSession<'_> {
             .created_findings
             .checked_add(findings.len())
             .ok_or_else(|| KwpError::quota("findings.count"))?;
-        if grant
-            .max_per_invocation
-            .is_some_and(|max| next_finding_count > max as usize)
-        {
-            return Err(KwpError::quota("findings.count"));
-        }
+        authorize_findings_grant(&self.module.grant, next_finding_count)?;
         ensure_finding_severities_allowed(grant, &findings)?;
         self.record_findings_run(store)?;
         for finding in &findings {
@@ -5366,23 +5621,21 @@ impl WorkerHostSession<'_> {
     fn handle_mcp_call(&mut self, params: Value) -> Result<Value, KwpError> {
         let mut request: McpCallRequest = serde_json::from_value(params)
             .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-        let Some(grant) = self.module.grant.mcp_grant(&request.alias).cloned() else {
-            return Err(KwpError::denied("mcp"));
-        };
-        ensure_supported_mcp_grant(&grant)?;
-        if !grant.allows_tool(&request.tool) {
-            return Err(KwpError::denied("mcp.tool"));
-        }
-        apply_mcp_grant_limits(&grant, &mut request.limits);
+        let grant = authorize_mcp_grant(
+            &self.module.grant,
+            self.mcp_host.catalog(),
+            &self.invocation_id,
+            &mut request,
+        )?
+        .clone();
         self.reserve_mcp_call(&grant, &request)?;
-        let Some(entry) = self.mcp_host.catalog().get(&request.alias) else {
-            return Err(KwpError::denied("mcp.mount"));
-        };
-        if !entry.tools.contains_key(&request.tool) {
-            return Err(KwpError::denied("mcp.catalog.tool"));
-        }
         let session = self.mcp_session(&request.alias);
-        let result = self.mcp_host.call_blocking(session, request)?;
+        let result = self.mcp_host.call_blocking_before(
+            session,
+            request,
+            self.deadline,
+            self.context.cancellation,
+        )?;
         self.reserve_mcp_result(&grant, &result)?;
         let result = self.verified_mcp_result(&grant, result)?;
         self.recorded_artifacts
@@ -5393,21 +5646,17 @@ impl WorkerHostSession<'_> {
     fn handle_fuzz_run(&mut self, params: Value) -> Result<Value, KwpError> {
         let request: FuzzRunRequest = serde_json::from_value(params)
             .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-        if request.invocation_id != self.invocation_id {
-            return Err(KwpError::NoActiveInvocation);
-        }
-        let Some(grant) = self.module.grant.fuzz.clone() else {
-            return Err(KwpError::denied("fuzz"));
-        };
-        if !grant.allows_engine(request.engine) {
-            return Err(KwpError::denied("fuzz.engine"));
-        }
-        validate_fuzz_execution_request(&request)?;
-        self.ensure_fuzz_artifacts_granted()?;
-        validate_fuzz_request_paths(&request)?;
+        let grant =
+            authorize_fuzz_grant(&self.module.grant, &self.invocation_id, &request)?.clone();
         self.reserve_fuzz_job(&grant, &request)?;
         let limits = request.limits.clone();
-        let result = self.fuzz_host.run_blocking(self.event_origin(), request)?;
+        let result = self.fuzz_host.run_blocking_before(
+            self.event_origin(),
+            request,
+            self.deadline,
+            grant.max_cpu_seconds_per_invocation,
+            self.context.cancellation,
+        )?;
         let result = self.verified_fuzz_result(&grant, &limits, result)?;
         self.recorded_artifacts
             .extend(result.artifacts.iter().cloned());
@@ -5425,9 +5674,14 @@ impl WorkerHostSession<'_> {
             self.ensure_artifacts_granted()?;
         }
         let mut checked = validate_net_fetch_request(grant, request)?;
+        let timeout = broker_timeout_before(
+            self.deadline,
+            DEFAULT_NET_TIMEOUT,
+            &[milliseconds(checked.request.timeout_ms)],
+        )?;
         checked.response_byte_limit =
             reserve_net_request_in_meter(&mut self.net_access, grant, &checked.request)?;
-        let mut result = fetch_net_blocking(checked)?;
+        let mut result = self.net_clients.fetch(checked, timeout)?;
         reserve_net_response_in_meter(&mut self.net_access, grant, &result)?;
         if let Some(response_artifact) = response_artifact {
             let body = result
@@ -5453,19 +5707,8 @@ impl WorkerHostSession<'_> {
             .get("topic")
             .and_then(Value::as_str)
             .ok_or_else(|| KwpError::BadRequest("bus topic omitted".to_string()))?;
-        if topic.trim().is_empty() {
-            return Err(KwpError::BadRequest("bus topic omitted".to_string()));
-        }
-        if !self
-            .module
-            .grant
-            .bus
-            .produce
-            .iter()
-            .any(|pattern| pattern.matches(topic))
-        {
-            return Err(KwpError::denied("bus.produce"));
-        }
+        validate_bus_topic(topic)?;
+        authorize_bus_topic(&self.module.grant, topic)?;
         let payload = params.get("payload").cloned().unwrap_or(Value::Null);
         self.record_bus_event(topic.to_string(), payload)?;
         Ok(serde_json::json!({ "published": true }))
@@ -5539,21 +5782,12 @@ impl WorkerHostSession<'_> {
         })
     }
 
-    fn ensure_fuzz_artifacts_granted(&self) -> Result<(), KwpError> {
-        self.ensure_artifacts_granted()
-    }
-
     fn ensure_artifacts_granted(&self) -> Result<(), KwpError> {
         self.required_artifact_grant().map(|_| ())
     }
 
     fn required_artifact_grant(&self) -> Result<&ArtifactsGrant, KwpError> {
-        self.module
-            .grant
-            .artifacts
-            .as_ref()
-            .filter(|grant| grant.write)
-            .ok_or_else(|| KwpError::denied("artifacts.write"))
+        authorize_artifact_grant(&self.module.grant)
     }
 
     fn spill_net_response_artifact(
@@ -5579,19 +5813,7 @@ impl WorkerHostSession<'_> {
         grant: &McpGrant,
         request: &McpCallRequest,
     ) -> Result<(), KwpError> {
-        let used = self.mcp_calls.entry(request.alias.clone()).or_default();
-        *used = used.saturating_add(1);
-        check_count(*used, grant.max_calls_per_invocation, "mcp.calls")?;
-        check_u64(
-            request.limits.cpu_seconds,
-            grant.max_cpu_seconds_per_invocation,
-            "mcp.cpu_seconds",
-        )?;
-        check_u64(
-            request.limits.artifact_bytes,
-            grant.max_artifacts_bytes_per_invocation,
-            "mcp.artifact_bytes",
-        )
+        reserve_mcp_call_in_meter(&mut self.mcp_calls, grant, request)
     }
 
     fn reserve_mcp_result(
@@ -5599,14 +5821,7 @@ impl WorkerHostSession<'_> {
         grant: &McpGrant,
         result: &McpCallResult,
     ) -> Result<(), KwpError> {
-        let bytes = serde_json::to_vec(result)
-            .map_err(|error| KwpError::Internal(error.to_string()))?
-            .len() as u64;
-        let used = self.mcp_bytes.entry(grant.alias.clone()).or_default();
-        *used = used
-            .checked_add(bytes)
-            .ok_or_else(|| KwpError::quota("mcp.bytes"))?;
-        check_u64(Some(*used), grant.max_bytes_per_invocation, "mcp.bytes")
+        reserve_mcp_result_in_meter(&mut self.mcp_bytes, grant, result)
     }
 
     fn reserve_fuzz_job(
@@ -5614,18 +5829,7 @@ impl WorkerHostSession<'_> {
         grant: &FuzzGrant,
         request: &FuzzRunRequest,
     ) -> Result<(), KwpError> {
-        self.fuzz_jobs = self.fuzz_jobs.saturating_add(1);
-        check_count(self.fuzz_jobs, grant.max_jobs_per_invocation, "fuzz.jobs")?;
-        check_u64(
-            request.limits.cpu_seconds,
-            grant.max_cpu_seconds_per_invocation,
-            "fuzz.cpu_seconds",
-        )?;
-        check_u64(
-            request.limits.artifact_bytes,
-            grant.max_artifacts_bytes_per_invocation,
-            "fuzz.artifact_bytes",
-        )
+        reserve_fuzz_job_in_meter(&mut self.fuzz_jobs, grant, request)
     }
 
     fn mcp_session(&self, alias: &str) -> McpSessionKey {
@@ -5673,32 +5877,21 @@ impl WorkerHostSession<'_> {
     }
 
     fn record_invocation_end(&self, result: &Result<Value, KwpError>) -> Result<(), KwpError> {
+        let runtime_cost = self.runtime_cost_report()?;
+        let run_cost = self.runtime_run_cost_report()?;
         let (decision, detail) = match result {
-            Ok(_) => (
-                AuditDecision::Allow,
-                serde_json::json!({
-                    "tool": self.tool_name,
-                    "runtimeCostUsd": self.runtime_cost_usd
-                }),
-            ),
-            Err(error) => (
-                AuditDecision::Deny,
-                serde_json::json!({
-                    "tool": self.tool_name,
-                    "errorCode": error.code(),
-                    "error": error.to_string(),
-                    "runtimeCostUsd": self.runtime_cost_usd
-                }),
-            ),
+            Ok(_) => (AuditDecision::Allow, None),
+            Err(error) => (AuditDecision::Deny, Some(error)),
         };
-        self.record_audit("invocation.end", decision, detail)
+        let detail = worker_cost_audit_detail(self.tool_name, runtime_cost, run_cost, detail);
+        self.record_settlement_audit("invocation.end", decision, detail)
     }
 
     fn record_invocation_cancel(&mut self, reason: &str) -> Result<(), KwpError> {
         if self.cancel_recorded {
             return Ok(());
         }
-        self.record_audit(
+        self.record_settlement_audit(
             "invocation.cancel",
             AuditDecision::Deny,
             serde_json::json!({
@@ -5710,19 +5903,17 @@ impl WorkerHostSession<'_> {
         Ok(())
     }
 
-    fn record_broker_decision(
+    fn record_reserved_broker_decision(
         &self,
+        reservation: Option<KwpAuditReservation>,
         event: &str,
         result: &Result<Value, KwpError>,
     ) -> Result<(), KwpError> {
-        let (decision, detail) = match result {
-            Ok(_) => (AuditDecision::Allow, Value::Null),
-            Err(error) => (
-                AuditDecision::Deny,
-                serde_json::json!({ "errorCode": error.code(), "error": error.to_string() }),
-            ),
+        let Some(reservation) = reservation else {
+            return Ok(());
         };
-        self.record_audit(event, decision, detail)
+        let (decision, detail) = audit_decision(result);
+        reservation.commit(self.audit_body(event, decision, detail))
     }
 
     fn record_audit(
@@ -5731,33 +5922,47 @@ impl WorkerHostSession<'_> {
         decision: AuditDecision,
         detail: Value,
     ) -> Result<(), KwpError> {
-        let Some(target) = self.context.workspace.map(|workspace| workspace.root()) else {
+        let Some(writer) = self.audit_writer.as_ref() else {
             return Ok(());
         };
-        let _guard = KWP_AUDIT_LOCK
-            .get_or_init(|| StdMutex::new(()))
-            .lock()
-            .map_err(|_| KwpError::Internal("KWP audit lock was poisoned".to_string()))?;
-        let path = writable_kwp_run_artifact_path(target, &self.run_id.0, "kwp-audit.jsonl")?;
-        let anchor_path =
-            writable_kwp_run_artifact_path(target, &self.run_id.0, KWP_AUDIT_ANCHOR_FILE)?;
-        let records = read_anchored_kwp_audit_log(&path, &anchor_path)?;
-        let prev = records.last().map(|record| record.hash.clone());
-        let record = append_kwp_audit_log_record(
-            &path,
-            KwpAuditLogBody {
-                ts_ms: now_unix_ms(),
-                run_id: self.run_id.clone(),
-                invocation_id: self.invocation_id.clone(),
-                module_id: self.module.module_id.clone(),
-                digest: self.module.digest.clone(),
-                event: event.to_string(),
-                decision,
-                detail,
-                prev,
-            },
-        )?;
-        write_kwp_audit_anchor(&anchor_path, records.len() + 1, record.hash)
+        writer.append_until(
+            self.audit_body(event, decision, detail),
+            self.deadline,
+            || tool_execution_cancelled(self.context),
+        )
+    }
+
+    fn record_settlement_audit(
+        &self,
+        event: &str,
+        decision: AuditDecision,
+        detail: Value,
+    ) -> Result<(), KwpError> {
+        let Some(writer) = self.audit_writer.as_ref() else {
+            return Ok(());
+        };
+        let deadline = Instant::now()
+            .checked_add(KWP_AUDIT_SETTLEMENT_GRACE)
+            .unwrap_or_else(|| Instant::now() + KWP_AUDIT_SETTLEMENT_GRACE);
+        writer.append_until(
+            self.audit_body(event, decision, detail),
+            deadline,
+            || false,
+        )
+    }
+
+    fn audit_body(&self, event: &str, decision: AuditDecision, detail: Value) -> KwpAuditLogBody {
+        KwpAuditLogBody {
+            ts_ms: now_unix_ms(),
+            run_id: self.run_id.clone(),
+            invocation_id: self.invocation_id.clone(),
+            module_id: self.module.module_id.clone(),
+            digest: self.module.digest.clone(),
+            event: event.to_string(),
+            decision,
+            detail,
+            prev: None,
+        }
     }
 
     fn record_bus_event(&self, topic: String, payload: Value) -> Result<(), KwpError> {
@@ -5779,38 +5984,124 @@ impl WorkerHostSession<'_> {
         )
     }
 
-    fn attach_host_metrics(&self, mut result: Value) -> Value {
-        sanitize_worker_result_value(&mut result);
-        let Value::Object(ref mut object) = result else {
-            return result;
-        };
-        let data = object
-            .entry("data")
-            .or_insert_with(|| Value::Object(serde_json::Map::new()));
-        if !data.is_object() {
-            *data = Value::Object(serde_json::Map::new());
-        }
-        let Some(data) = data.as_object_mut() else {
-            return result;
-        };
+    fn attach_host_metrics(&self, result: Value) -> Result<Value, KwpError> {
+        let mut result = normalize_worker_result_envelope(result);
+        let runtime_cost = self.runtime_cost_report()?;
+        let run_cost = self.runtime_run_cost_report()?;
+        let data = normalized_worker_result_data(&mut result);
         if !self.recorded_artifacts.is_empty() {
             data.insert(
                 "artifacts".to_string(),
                 serde_json::to_value(&self.recorded_artifacts).unwrap_or(Value::Array(Vec::new())),
             );
         }
-        data.insert(
-            "kwp".to_string(),
-            serde_json::json!({
-                "runtimeCostUsd": self.runtime_cost_usd,
-                "invocationId": self.invocation_id.0,
-                "runId": self.run_id.0,
-                "moduleDigest": self.module.digest.0,
-                "createdFindings": self.created_findings,
-            }),
+        let metrics = worker_session_metrics(self, runtime_cost, run_cost);
+        data.insert("kwp".to_string(), Value::Object(metrics));
+        crate::module_result::apply_runtime_cost_report(
+            &mut result,
+            runtime_cost.runtime_report()?,
         );
-        result
+        Ok(result)
     }
+}
+
+fn normalized_worker_result_data(result: &mut Value) -> &mut serde_json::Map<String, Value> {
+    let object = result
+        .as_object_mut()
+        .expect("worker result normalization always returns an object");
+    let data = object
+        .entry("data")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()));
+    if !data.is_object() {
+        *data = Value::Object(serde_json::Map::new());
+    }
+    data.as_object_mut()
+        .expect("normalized worker result data is an object")
+}
+
+fn worker_session_metrics(
+    session: &WorkerHostSession<'_>,
+    invocation: cost_ledger::LedgerCostReport,
+    run: cost_ledger::LedgerCostReport,
+) -> serde_json::Map<String, Value> {
+    let mut metrics = worker_cost_metrics(invocation, run);
+    metrics.insert(
+        "invocationId".to_string(),
+        serde_json::json!(session.invocation_id.0),
+    );
+    metrics.insert("runId".to_string(), serde_json::json!(session.run_id.0));
+    metrics.insert(
+        "moduleDigest".to_string(),
+        serde_json::json!(session.module.digest.0),
+    );
+    metrics.insert(
+        "createdFindings".to_string(),
+        serde_json::json!(session.created_findings),
+    );
+    metrics
+}
+
+fn normalize_worker_result_envelope(mut result: Value) -> Value {
+    sanitize_worker_result_value(&mut result);
+    if result.is_object() {
+        return result;
+    }
+    serde_json::json!({
+        "ok": true,
+        "status": "completed",
+        "data": { "result": result },
+    })
+}
+
+fn worker_cost_metrics(
+    invocation: cost_ledger::LedgerCostReport,
+    run: cost_ledger::LedgerCostReport,
+) -> serde_json::Map<String, Value> {
+    let mut metrics = serde_json::Map::new();
+    insert_cost_report_metrics(&mut metrics, "runtime", invocation);
+    insert_cost_report_metrics(&mut metrics, "run", run);
+    metrics
+}
+
+fn insert_cost_report_metrics(
+    metrics: &mut serde_json::Map<String, Value>,
+    prefix: &str,
+    report: cost_ledger::LedgerCostReport,
+) {
+    metrics.insert(
+        format!("{prefix}ObservedCostUsd"),
+        serde_json::json!(report.observed_usd()),
+    );
+    metrics.insert(
+        format!("{prefix}CostUsdExact"),
+        serde_json::json!(report.is_complete()),
+    );
+    metrics.insert(
+        format!("{prefix}UnresolvedReservedUsd"),
+        serde_json::json!(report.unresolved_reserved_usd()),
+    );
+    metrics.insert(
+        format!("{prefix}BudgetChargedUsd"),
+        serde_json::json!(report.charged_usd()),
+    );
+    if let Some(exact) = report.exact_usd() {
+        metrics.insert(format!("{prefix}CostUsd"), serde_json::json!(exact));
+    }
+}
+
+fn worker_cost_audit_detail(
+    tool: &str,
+    invocation: cost_ledger::LedgerCostReport,
+    run: cost_ledger::LedgerCostReport,
+    error: Option<&KwpError>,
+) -> Value {
+    let mut detail = worker_cost_metrics(invocation, run);
+    detail.insert("tool".to_string(), serde_json::json!(tool));
+    if let Some(error) = error {
+        detail.insert("errorCode".to_string(), serde_json::json!(error.code()));
+        detail.insert("error".to_string(), serde_json::json!(error.to_string()));
+    }
+    Value::Object(detail)
 }
 
 fn controlled_runtime_error(
@@ -6071,6 +6362,14 @@ fn metadata_modified_ms(metadata: &fs::Metadata) -> u128 {
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|duration| duration.as_millis())
         .unwrap_or(0)
+}
+
+fn fs_list_byte_resource(remaining_grant_bytes: u64) -> &'static str {
+    if remaining_grant_bytes < FS_LIST_MAX_BYTES {
+        "fs.bytes"
+    } else {
+        "fs.list.bytes"
+    }
 }
 
 fn read_fs_range(
@@ -6376,107 +6675,6 @@ fn severity_allowed(grant: &FindingsGrant, severity: crate::findings::Severity) 
         .any(|allowed| allowed.eq_ignore_ascii_case(severity.as_str()))
 }
 
-fn fetch_net_blocking(checked: ValidatedNetFetch) -> Result<NetFetchResult, KwpError> {
-    let client = build_net_client(&checked)?;
-    let request = build_net_request(&client, &checked.request)?;
-    let response = request
-        .send()
-        .map_err(|error| KwpError::Internal(error.to_string()))?;
-    net_fetch_result(response, checked.response_byte_limit)
-}
-
-fn build_net_client(checked: &ValidatedNetFetch) -> Result<reqwest::blocking::Client, KwpError> {
-    let timeout = checked
-        .request
-        .timeout_ms
-        .map(Duration::from_millis)
-        .unwrap_or_else(|| Duration::from_secs(30));
-    reqwest::blocking::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(timeout)
-        .resolve(&checked.endpoint.host, checked.pinned_addr)
-        .build()
-        .map_err(|error| KwpError::Internal(error.to_string()))
-}
-
-fn build_net_request(
-    client: &reqwest::blocking::Client,
-    input: &NetFetchRequest,
-) -> Result<reqwest::blocking::RequestBuilder, KwpError> {
-    let method = reqwest::Method::from_bytes(input.method.as_bytes())
-        .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-    let mut request = client.request(method, &input.url);
-    for (name, value) in &input.headers {
-        let header_name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
-            .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-        let header_value = reqwest::header::HeaderValue::from_str(value)
-            .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-        request = request.header(header_name, header_value);
-    }
-    if let Some(body) = input.body_base64.as_ref() {
-        let body = BASE64
-            .decode(body.as_bytes())
-            .map_err(|error| KwpError::BadRequest(error.to_string()))?;
-        request = request.body(body);
-    }
-    Ok(request)
-}
-
-fn net_fetch_result(
-    response: reqwest::blocking::Response,
-    grant_limit: Option<u64>,
-) -> Result<NetFetchResult, KwpError> {
-    let status = response.status().as_u16();
-    let headers = response_headers(response.headers());
-    let response_byte_limit = effective_net_response_limit(grant_limit);
-    check_u64(
-        response.content_length(),
-        Some(response_byte_limit),
-        "net.bytes",
-    )?;
-    let body = read_net_response_body(response, Some(response_byte_limit))?;
-    Ok(NetFetchResult {
-        status,
-        headers,
-        body_base64: Some(BASE64.encode(body)),
-        artifact: None,
-    })
-}
-
-fn effective_net_response_limit(grant_limit: Option<u64>) -> u64 {
-    grant_limit
-        .unwrap_or(KWP_MAX_NETWORK_RESPONSE_BYTES)
-        .min(KWP_MAX_NETWORK_RESPONSE_BYTES)
-}
-
-fn read_net_response_body<R: Read>(mut reader: R, limit: Option<u64>) -> Result<Vec<u8>, KwpError> {
-    let mut body = Vec::new();
-    if let Some(limit) = limit {
-        let mut limited = reader.by_ref().take(limit.saturating_add(1));
-        limited
-            .read_to_end(&mut body)
-            .map_err(|error| KwpError::Internal(error.to_string()))?;
-        check_u64(Some(body.len() as u64), Some(limit), "net.bytes")?;
-        return Ok(body);
-    }
-    reader
-        .read_to_end(&mut body)
-        .map_err(|error| KwpError::Internal(error.to_string()))?;
-    Ok(body)
-}
-
-fn response_headers(headers: &reqwest::header::HeaderMap) -> BTreeMap<String, String> {
-    headers
-        .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_string(), value.to_string()))
-        })
-        .collect()
-}
-
 pub struct WorkerSupervisor {
     trust: Arc<LockfileTrustVerifier>,
     executors: BTreeMap<ExecutorTier, Arc<dyn WorkerExecutor>>,
@@ -6538,6 +6736,60 @@ mod tests {
         audit: Mutex<Vec<AuditRecord>>,
     }
 
+    struct FixedCostAgentRuntime {
+        cost_usd: f64,
+        cost_usd_reported: bool,
+        provider_error: bool,
+    }
+
+    #[derive(Clone)]
+    enum BrokerRuntimeOutcome {
+        Cost(Option<f64>),
+        Error(KwpError),
+    }
+
+    struct OutcomeRuntimeBackend(BrokerRuntimeOutcome);
+
+    #[async_trait]
+    impl RuntimeBackend for OutcomeRuntimeBackend {
+        async fn query(
+            &self,
+            _request: RuntimeQueryRequest,
+        ) -> Result<RuntimeQueryResult, KwpError> {
+            match &self.0 {
+                BrokerRuntimeOutcome::Cost(cost_usd) => Ok(RuntimeQueryResult {
+                    completion: json!({"ok": true}),
+                    cost_usd: *cost_usd,
+                }),
+                BrokerRuntimeOutcome::Error(error) => Err(error.clone()),
+            }
+        }
+    }
+
+    impl crate::runtime::AgentRuntime for FixedCostAgentRuntime {
+        fn query_blocking(
+            &self,
+            _request: crate::runtime::AgentQueryRequest,
+        ) -> anyhow::Result<crate::runtime::AgentQueryResponse> {
+            if self.provider_error {
+                anyhow::bail!("provider transport failed after dispatch");
+            }
+            Ok(crate::runtime::AgentQueryResponse {
+                text: "ok".to_string(),
+                cost_usd: self.cost_usd,
+                cost_usd_reported: self.cost_usd_reported,
+                ..crate::runtime::AgentQueryResponse::default()
+            })
+        }
+
+        fn triage_finding_blocking(
+            &self,
+            _request: crate::runtime::TriageRequest,
+        ) -> anyhow::Result<crate::findings::TriageOutcome> {
+            anyhow::bail!("triage is not used by worker cost tests")
+        }
+    }
+
     #[async_trait]
     impl FsBackend for Effects {
         async fn read(
@@ -6584,7 +6836,7 @@ mod tests {
         ) -> Result<RuntimeQueryResult, KwpError> {
             Ok(RuntimeQueryResult {
                 completion: json!({}),
-                cost_usd: 0.01,
+                cost_usd: Some(0.01),
             })
         }
     }
@@ -6693,6 +6945,794 @@ mod tests {
             mcp_catalog: Arc::new(catalog),
             audit: effects,
         }
+    }
+
+    fn broker_with_runtime(outcome: BrokerRuntimeOutcome) -> CapabilityBroker {
+        let mut broker = broker(Arc::new(Effects::default()));
+        broker.runtime = Arc::new(OutcomeRuntimeBackend(outcome));
+        broker
+    }
+
+    fn worker_request_params(invocation_id: &InvocationId, mut params: Value) -> Value {
+        let object = params.as_object_mut().expect("worker request is an object");
+        object.insert("invocationId".to_string(), json!(invocation_id.0));
+        object.insert("epoch".to_string(), json!(KWP_WORKER_EPOCH));
+        params
+    }
+
+    type DeniedWorkerRequest = (&'static str, Value, KwpError);
+
+    fn denied_worker_requests(invocation_id: &InvocationId) -> Vec<DeniedWorkerRequest> {
+        let mut requests = denied_fs_worker_requests();
+        requests.extend(denied_service_worker_requests(invocation_id));
+        requests
+            .into_iter()
+            .map(|(method, params, error)| {
+                (method, worker_request_params(invocation_id, params), error)
+            })
+            .collect()
+    }
+
+    fn denied_fs_worker_requests() -> Vec<DeniedWorkerRequest> {
+        vec![
+            (
+                METHOD_FS_READ,
+                json!({ "scope": "workspace", "path": "src/lib.rs" }),
+                KwpError::denied("fs"),
+            ),
+            (
+                METHOD_FS_WRITE,
+                json!({ "scope": "workspace", "path": "out", "dataBase64": "" }),
+                KwpError::denied("fs.write"),
+            ),
+            (
+                METHOD_FS_LIST,
+                json!({ "scope": "workspace", "path": "src" }),
+                KwpError::denied("fs"),
+            ),
+            (
+                METHOD_FS_STAT,
+                json!({ "scope": "workspace", "path": "src/lib.rs" }),
+                KwpError::denied("fs"),
+            ),
+            (
+                METHOD_FS_REMOVE,
+                json!({ "scope": "workspace", "path": "out" }),
+                KwpError::denied("fs.remove"),
+            ),
+        ]
+    }
+
+    fn denied_service_worker_requests(invocation_id: &InvocationId) -> Vec<DeniedWorkerRequest> {
+        vec![
+            (METHOD_RUNTIME_QUERY, json!({}), KwpError::denied("runtime")),
+            (
+                METHOD_ARTIFACTS_RECORD,
+                json!({ "artifacts": [] }),
+                KwpError::denied("artifacts.write"),
+            ),
+            (
+                METHOD_FINDINGS_CREATE,
+                json!({ "findings": [] }),
+                KwpError::denied("findings.create"),
+            ),
+            (
+                METHOD_MCP_CALL,
+                denied_mcp_request(invocation_id),
+                KwpError::denied("mcp"),
+            ),
+            (
+                METHOD_FUZZ_RUN,
+                denied_fuzz_request(invocation_id),
+                KwpError::denied("fuzz"),
+            ),
+            (METHOD_NET_FETCH, json!({}), KwpError::denied("net")),
+            (
+                METHOD_BUS_PUBLISH,
+                json!({ "topic": "events.test" }),
+                KwpError::denied("bus.produce"),
+            ),
+        ]
+    }
+
+    fn denied_mcp_request(invocation_id: &InvocationId) -> Value {
+        serde_json::to_value(McpCallRequest {
+            invocation_id: invocation_id.clone(),
+            alias: "missing".to_string(),
+            tool: "call".to_string(),
+            arguments: Value::Null,
+            limits: McpCallLimits::default(),
+        })
+        .unwrap()
+    }
+
+    fn denied_fuzz_request(invocation_id: &InvocationId) -> Value {
+        serde_json::to_value(FuzzRunRequest {
+            invocation_id: invocation_id.clone(),
+            engine: FuzzEngine::CargoFuzz,
+            target: FuzzTarget {
+                language: "rust".to_string(),
+                project_path: ".".to_string(),
+                harness_path: "fuzz/fuzz_targets/main.rs".to_string(),
+            },
+            inputs: BTreeMap::new(),
+            limits: FuzzLimits::default(),
+            sandbox: FuzzSandbox::default(),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn live_worker_privileged_denials_emit_the_characterized_errors_and_audit_events() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = crate::workspace::WorkspaceTarget::new(target.path()).unwrap();
+        let config = crate::config::V2Config::default();
+        let context = crate::modules::ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: crate::modules::ExecutionAuthorization::default(),
+        };
+        let module = worker_policy_module(target.path());
+        let invocation_id = InvocationId("inv-worker-policy".to_string());
+        let run_id = RunId("run-worker-policy".to_string());
+        let audit_writer = worker_audit_writer(&context, &run_id).unwrap();
+        let cost_ledger = worker_cost_ledger(&module, &context, &run_id).unwrap();
+        let mut session = new_worker_host_session(
+            &module,
+            "worker-policy:run",
+            &context,
+            None,
+            invocation_id.clone(),
+            run_id.clone(),
+            audit_writer,
+            cost_ledger,
+        );
+        session.initializing = false;
+        let requests = denied_worker_requests(&invocation_id);
+        assert_live_worker_denials(&mut session, &requests);
+        assert_worker_denial_audit(target.path(), &run_id, requests);
+    }
+
+    fn worker_policy_module(target: &Path) -> VerifiedModule {
+        VerifiedModule {
+            module_id: ModuleId("worker-policy".to_string()),
+            digest: Digest("sha256:worker-policy".to_string()),
+            descriptor_hash: "sha256:descriptor".to_string(),
+            module_root: target.to_path_buf(),
+            entry: "worker.mjs".to_string(),
+            tier: ExecutorTier::Node,
+            grant: Arc::new(Grant::default()),
+        }
+    }
+
+    fn assert_live_worker_denials(
+        session: &mut WorkerHostSession<'_>,
+        requests: &[DeniedWorkerRequest],
+    ) {
+        for (method, params, expected) in requests {
+            assert_eq!(
+                session
+                    .handle_worker_request((*method).to_string(), params.clone())
+                    .unwrap_err(),
+                *expected,
+                "unexpected live policy result for {method}"
+            );
+        }
+    }
+
+    fn assert_worker_denial_audit(
+        target: &Path,
+        run_id: &RunId,
+        requests: Vec<DeniedWorkerRequest>,
+    ) {
+        let records = read_kwp_audit_log(target, &run_id.0).unwrap();
+        assert_eq!(records.len(), requests.len());
+        for (record, (method, _, expected)) in records.iter().zip(requests) {
+            assert_eq!(record.event, broker_audit_event(method));
+            assert_eq!(record.decision, AuditDecision::Deny);
+            assert_eq!(record.detail["errorCode"], json!(expected.code()));
+        }
+    }
+
+    #[tokio::test]
+    async fn broker_unknown_or_invalid_provider_outcomes_retain_reservation() {
+        for (label, outcome, succeeds) in [
+            (
+                "provider-error",
+                BrokerRuntimeOutcome::Error(KwpError::Internal("transport failed".to_string())),
+                false,
+            ),
+            (
+                "invalid-cost",
+                BrokerRuntimeOutcome::Cost(Some(f64::NAN)),
+                false,
+            ),
+            ("missing-cost", BrokerRuntimeOutcome::Cost(None), true),
+        ] {
+            let target = tempfile::tempdir().unwrap();
+            let run_id = RunId(format!("broker-{label}"));
+            let invocation =
+                targeted_invocation(label, &run_id, runtime_cost_grant(0.25), target.path());
+            let result = broker_with_runtime(outcome)
+                .runtime_query(&invocation, broker_runtime_request())
+                .await;
+
+            assert_eq!(result.is_ok(), succeeds, "unexpected {label} result");
+            assert_eq!(invocation.computed_run_cost_usd().await, 0.25);
+        }
+    }
+
+    #[tokio::test]
+    async fn broker_exact_cost_commits_actual_and_overrun_is_charged_before_denial() {
+        for (label, limit, actual, expected_error) in [
+            ("exact", 0.25, 0.1, None),
+            ("overrun", 0.25, 0.5, Some(KwpError::RuntimeBudget)),
+        ] {
+            let target = tempfile::tempdir().unwrap();
+            let run_id = RunId(format!("broker-{label}"));
+            let invocation =
+                targeted_invocation(label, &run_id, runtime_cost_grant(limit), target.path());
+            let result = broker_with_runtime(BrokerRuntimeOutcome::Cost(Some(actual)))
+                .runtime_query(&invocation, broker_runtime_request())
+                .await;
+
+            assert_eq!(result.err(), expected_error);
+            assert_eq!(invocation.computed_run_cost_usd().await, actual);
+        }
+    }
+
+    #[tokio::test]
+    async fn broker_invalid_request_fails_before_reservation() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = RunId("broker-invalid-request".to_string());
+        let invocation = targeted_invocation(
+            "invalid-request",
+            &run_id,
+            runtime_cost_grant(0.25),
+            target.path(),
+        );
+        let broker = broker_with_runtime(BrokerRuntimeOutcome::Cost(Some(0.1)));
+        let mut request = broker_runtime_request();
+        request.max_tokens = 0;
+
+        assert!(matches!(
+            broker.runtime_query(&invocation, request).await,
+            Err(KwpError::QuotaExceeded(_))
+        ));
+        assert_eq!(invocation.computed_run_cost_usd().await, 0.0);
+        broker
+            .runtime_query(&invocation, broker_runtime_request())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn broker_runtime_budget_is_atomic_within_a_target_and_isolated_across_targets() {
+        let left = tempfile::tempdir().unwrap();
+        let right = tempfile::tempdir().unwrap();
+        let effects = Arc::new(Effects::default());
+        let broker = broker(effects);
+        let grant = Arc::new(Grant {
+            runtime: Some(RuntimeGrant {
+                max_cost_usd_per_invocation: 0.01,
+                max_cost_usd_per_run: 0.01,
+                models: None,
+            }),
+            ..Grant::default()
+        });
+        let run_id = RunId("shared-runtime-run".to_string());
+        let first = targeted_invocation("first", &run_id, Arc::clone(&grant), left.path());
+        let second = targeted_invocation("second", &run_id, Arc::clone(&grant), left.path());
+        let isolated = targeted_invocation("isolated", &run_id, grant, right.path());
+        let request = RuntimeQueryRequest {
+            messages: json!([]),
+            system_prompt: None,
+            max_tokens: 1,
+            model_preferences: None,
+        };
+
+        broker.runtime_query(&first, request.clone()).await.unwrap();
+        assert_eq!(
+            broker
+                .runtime_query(&second, request.clone())
+                .await
+                .unwrap_err(),
+            KwpError::RuntimeBudget
+        );
+        broker.runtime_query(&isolated, request).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn broker_runtime_budget_survives_sequential_authority_drop() {
+        let target = tempfile::tempdir().unwrap();
+        let broker = broker(Arc::new(Effects::default()));
+        let grant = runtime_cost_grant(0.01);
+        let run_id = RunId("sequential-broker-run".to_string());
+        let request = broker_runtime_request();
+
+        {
+            let first = targeted_invocation("first", &run_id, Arc::clone(&grant), target.path());
+            broker.runtime_query(&first, request.clone()).await.unwrap();
+        }
+        let second = targeted_invocation("second", &run_id, grant, target.path());
+
+        assert_eq!(
+            broker.runtime_query(&second, request).await.unwrap_err(),
+            KwpError::RuntimeBudget
+        );
+        assert_eq!(second.computed_run_cost_usd().await, 0.01);
+    }
+
+    #[test]
+    fn live_worker_runtime_budget_survives_sequential_session_drop() {
+        let fixture = LiveWorkerCostFixture::new("sequential-worker-run", 0.01);
+
+        {
+            let invocation = InvocationId("first-worker-invocation".to_string());
+            fixture.with_session(invocation.clone(), |session| {
+                session
+                    .handle_worker_request(
+                        METHOD_RUNTIME_QUERY.to_string(),
+                        worker_runtime_request(&invocation),
+                    )
+                    .unwrap();
+            });
+        }
+        let invocation = InvocationId("second-worker-invocation".to_string());
+        fixture.with_session(invocation.clone(), |session| {
+            assert_eq!(
+                session
+                    .handle_worker_request(
+                        METHOD_RUNTIME_QUERY.to_string(),
+                        worker_runtime_request(&invocation),
+                    )
+                    .unwrap_err(),
+                KwpError::RuntimeBudget
+            );
+        });
+    }
+
+    #[test]
+    fn unpriced_worker_success_stays_conservatively_charged_after_restart() {
+        let fixture = LiveWorkerCostFixture::with_limit_and_cost("unpriced-worker-run", 0.25, 0.0);
+        let first = InvocationId("unpriced-first".to_string());
+        fixture.with_session(first.clone(), |session| {
+            let response = session
+                .handle_worker_request(
+                    METHOD_RUNTIME_QUERY.to_string(),
+                    worker_runtime_request(&first),
+                )
+                .unwrap();
+            assert!(response.get("costUsd").is_none());
+            assert!(response.get("costUsdReported").is_none());
+            let output = session.attach_host_metrics(json!({"ok": true})).unwrap();
+            assert_incomplete_worker_cost_output(&output, 0.0, 0.25);
+        });
+
+        let reopened = RunCostLedgerLease::acquire(fixture.target.path(), &fixture.run_id).unwrap();
+        assert_eq!(reopened.run_cost().unwrap(), 0.25);
+        drop(reopened);
+        let second = InvocationId("unpriced-second".to_string());
+        fixture.with_session(second.clone(), |session| {
+            assert_eq!(
+                session
+                    .handle_worker_request(
+                        METHOD_RUNTIME_QUERY.to_string(),
+                        worker_runtime_request(&second),
+                    )
+                    .unwrap_err(),
+                KwpError::RuntimeBudget
+            );
+        });
+    }
+
+    #[test]
+    fn worker_provider_error_and_invalid_cost_retain_conservative_charge() {
+        for (label, cost, reported, provider_error) in [
+            ("provider-error", 0.0, false, true),
+            ("invalid-cost", f64::NAN, true, false),
+        ] {
+            let fixture = LiveWorkerCostFixture::with_runtime_outcome(
+                &format!("worker-{label}"),
+                0.25,
+                cost,
+                reported,
+                provider_error,
+            );
+            let invocation = InvocationId(format!("{label}-invocation"));
+
+            fixture.with_session(invocation.clone(), |session| {
+                let result = session.handle_worker_request(
+                    METHOD_RUNTIME_QUERY.to_string(),
+                    worker_runtime_request(&invocation),
+                );
+                assert!(result.is_err());
+                let output = session.attach_host_metrics(json!({"ok": false})).unwrap();
+                assert_incomplete_worker_cost_output(&output, 0.0, 0.25);
+                session.record_invocation_end(&result).unwrap();
+            });
+            assert_incomplete_worker_cost_audit(fixture.target.path(), &fixture.run_id, 0.0, 0.25);
+            let reopened =
+                RunCostLedgerLease::acquire(fixture.target.path(), &fixture.run_id).unwrap();
+            assert_eq!(reopened.run_cost().unwrap(), 0.25);
+        }
+    }
+
+    #[test]
+    fn worker_provider_overrun_is_charged_before_budget_denial() {
+        let fixture =
+            LiveWorkerCostFixture::with_runtime_outcome("worker-overrun", 0.25, 0.5, true, false);
+        let invocation = InvocationId("overrun-invocation".to_string());
+
+        fixture.with_session(invocation.clone(), |session| {
+            assert_eq!(
+                session
+                    .handle_worker_request(
+                        METHOD_RUNTIME_QUERY.to_string(),
+                        worker_runtime_request(&invocation),
+                    )
+                    .unwrap_err(),
+                KwpError::RuntimeBudget
+            );
+        });
+        let reopened = RunCostLedgerLease::acquire(fixture.target.path(), &fixture.run_id).unwrap();
+        assert_eq!(reopened.run_cost().unwrap(), 0.5);
+    }
+
+    #[test]
+    fn worker_reported_zero_is_exact_and_sequential_output_is_invocation_scoped() {
+        let zero = LiveWorkerCostFixture::with_runtime_outcome(
+            "worker-exact-zero",
+            0.25,
+            0.0,
+            true,
+            false,
+        );
+        let zero_invocation = InvocationId("exact-zero".to_string());
+        let zero_output = zero.run_and_record_invocation(&zero_invocation);
+        assert_worker_cost_output(&zero_output, 0.0);
+
+        let sequential = LiveWorkerCostFixture::with_runtime_outcome(
+            "worker-sequential-output",
+            0.3,
+            0.1,
+            true,
+            false,
+        );
+        let first = sequential.run_and_record_invocation(&InvocationId("first".to_string()));
+        let second = sequential.run_and_record_invocation(&InvocationId("second".to_string()));
+
+        assert_eq!(first.pointer("/data/costUsd"), Some(&json!(0.1)));
+        assert_eq!(second.pointer("/data/costUsd"), Some(&json!(0.1)));
+        assert_eq!(second.pointer("/data/kwp/runCostUsd"), Some(&json!(0.2)));
+    }
+
+    #[test]
+    fn paid_scalar_worker_result_is_normalized_before_cost_attachment() {
+        let fixture = LiveWorkerCostFixture::new("worker-scalar-output", 0.25);
+        let invocation = InvocationId("scalar-output".to_string());
+
+        let output = fixture.with_session(invocation.clone(), |session| {
+            session
+                .handle_worker_request(
+                    METHOD_RUNTIME_QUERY.to_string(),
+                    worker_runtime_request(&invocation),
+                )
+                .unwrap();
+            session.attach_host_metrics(json!("worker value")).unwrap()
+        });
+
+        assert_eq!(output.pointer("/data/result"), Some(&json!("worker value")));
+        assert_eq!(output.get("ok"), Some(&json!(true)));
+        assert_eq!(output.get("status"), Some(&json!("completed")));
+        assert_worker_cost_output(&output, 0.25);
+    }
+
+    #[test]
+    fn invalid_worker_request_fails_before_cost_reservation() {
+        let fixture = LiveWorkerCostFixture::new("worker-invalid-request", 0.25);
+        let invocation = InvocationId("invalid-request-invocation".to_string());
+        let params = worker_request_params(
+            &invocation,
+            json!({ "request": { "prompt": "inspect", "maxOutputTokens": 0 } }),
+        );
+
+        fixture.with_session(invocation.clone(), |session| {
+            assert!(matches!(
+                session.handle_worker_request(METHOD_RUNTIME_QUERY.to_string(), params),
+                Err(KwpError::QuotaExceeded(_))
+            ));
+        });
+        fixture.with_runtime_session(invocation.clone(), None, |session| {
+            assert_eq!(
+                session
+                    .handle_worker_request(
+                        METHOD_RUNTIME_QUERY.to_string(),
+                        worker_runtime_request(&invocation),
+                    )
+                    .unwrap_err(),
+                KwpError::denied("runtime.unavailable")
+            );
+        });
+        let ledger = RunCostLedgerLease::acquire(fixture.target.path(), &fixture.run_id).unwrap();
+        assert_eq!(ledger.run_cost().unwrap(), 0.0);
+    }
+
+    #[test]
+    fn worker_cost_receipt_drives_audit_and_run_summary_without_double_counting() {
+        let fixture = LiveWorkerCostFixture::new("worker-cost-receipt", 0.25);
+        let record = crate::run_artifacts::ToolRunRecord::new(
+            fixture.target.path(),
+            &fixture.run_id.0,
+            "tool",
+            "worker-policy:run",
+        );
+        crate::run_artifacts::try_record_tool_run_started_with_reproducibility(
+            record,
+            &json!({}),
+            None,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+        let invocation = InvocationId("receipt-invocation".to_string());
+        let output = fixture.run_and_record_invocation(&invocation);
+
+        crate::run_artifacts::try_record_tool_run_complete(record, &output).unwrap();
+
+        assert_worker_cost_output(&output, 0.25);
+        assert_worker_cost_audit(fixture.target.path(), &fixture.run_id, 0.25);
+        let summary =
+            crate::run_artifacts::load_run_summary(fixture.target.path(), &fixture.run_id.0)
+                .unwrap();
+        assert_eq!(summary.cost_usd, Some(0.25));
+        let reopened = RunCostLedgerLease::acquire(fixture.target.path(), &fixture.run_id).unwrap();
+        assert_eq!(reopened.run_cost().unwrap(), 0.25);
+    }
+
+    struct LiveWorkerCostFixture {
+        target: tempfile::TempDir,
+        workspace: crate::workspace::WorkspaceTarget,
+        config: crate::config::V2Config,
+        module: VerifiedModule,
+        runtime: FixedCostAgentRuntime,
+        run_id: RunId,
+    }
+
+    impl LiveWorkerCostFixture {
+        fn new(run_id: &str, cost_usd: f64) -> Self {
+            Self::with_limit_and_cost(run_id, cost_usd, cost_usd)
+        }
+
+        fn with_limit_and_cost(run_id: &str, limit: f64, cost_usd: f64) -> Self {
+            Self::with_runtime_outcome(run_id, limit, cost_usd, cost_usd != 0.0, false)
+        }
+
+        fn with_runtime_outcome(
+            run_id: &str,
+            limit: f64,
+            cost_usd: f64,
+            cost_usd_reported: bool,
+            provider_error: bool,
+        ) -> Self {
+            let target = tempfile::tempdir().unwrap();
+            let workspace = crate::workspace::WorkspaceTarget::new(target.path()).unwrap();
+            let mut config = crate::config::V2Config::default();
+            config.model = Some("test:fixed-cost".to_string());
+            let module = worker_runtime_module(target.path(), limit);
+            Self {
+                target,
+                workspace,
+                config,
+                module,
+                runtime: FixedCostAgentRuntime {
+                    cost_usd,
+                    cost_usd_reported,
+                    provider_error,
+                },
+                run_id: RunId(run_id.to_string()),
+            }
+        }
+
+        fn with_session<T>(
+            &self,
+            invocation_id: InvocationId,
+            operation: impl FnOnce(&mut WorkerHostSession<'_>) -> T,
+        ) -> T {
+            self.with_runtime_session(invocation_id, Some(&self.runtime), operation)
+        }
+
+        fn with_runtime_session<T>(
+            &self,
+            invocation_id: InvocationId,
+            runtime: Option<&dyn crate::runtime::AgentRuntime>,
+            operation: impl FnOnce(&mut WorkerHostSession<'_>) -> T,
+        ) -> T {
+            let context = crate::modules::ToolExecutionContext {
+                config: &self.config,
+                workspace: Some(&self.workspace),
+                findings_store: None,
+                trace: None,
+                cancellation: None,
+                authorization: crate::modules::ExecutionAuthorization::default(),
+            };
+            let audit_writer = worker_audit_writer(&context, &self.run_id).unwrap();
+            let cost_ledger = worker_cost_ledger(&self.module, &context, &self.run_id).unwrap();
+            let mut session = new_worker_host_session(
+                &self.module,
+                "worker-policy:run",
+                &context,
+                runtime,
+                invocation_id,
+                self.run_id.clone(),
+                audit_writer,
+                cost_ledger,
+            );
+            session.initializing = false;
+            operation(&mut session)
+        }
+
+        fn run_and_record_invocation(&self, invocation: &InvocationId) -> Value {
+            self.with_session(invocation.clone(), |session| {
+                session
+                    .handle_worker_request(
+                        METHOD_RUNTIME_QUERY.to_string(),
+                        worker_runtime_request(invocation),
+                    )
+                    .unwrap();
+                let output = session
+                    .attach_host_metrics(json!({
+                        "ok": true,
+                        "status": "completed",
+                        "costUsd": 999.0,
+                        "data": { "costUsd": 999.0 }
+                    }))
+                    .unwrap();
+                session.record_invocation_end(&Ok(output.clone())).unwrap();
+                output
+            })
+        }
+    }
+
+    fn worker_runtime_module(target: &Path, limit: f64) -> VerifiedModule {
+        let mut module = worker_policy_module(target);
+        module.grant = runtime_cost_grant(limit);
+        module
+    }
+
+    fn runtime_cost_grant(limit: f64) -> Arc<Grant> {
+        Arc::new(Grant {
+            runtime: Some(RuntimeGrant {
+                max_cost_usd_per_invocation: limit,
+                max_cost_usd_per_run: limit,
+                models: Some(vec!["test:fixed-cost".to_string()]),
+            }),
+            ..Grant::default()
+        })
+    }
+
+    fn worker_runtime_request(invocation: &InvocationId) -> Value {
+        worker_request_params(
+            invocation,
+            json!({ "request": { "prompt": "inspect this" } }),
+        )
+    }
+
+    fn broker_runtime_request() -> RuntimeQueryRequest {
+        RuntimeQueryRequest {
+            messages: json!([]),
+            system_prompt: None,
+            max_tokens: 1,
+            model_preferences: None,
+        }
+    }
+
+    fn assert_worker_cost_output(output: &Value, expected: f64) {
+        assert_eq!(output.get("costUsd"), Some(&json!(expected)));
+        assert_eq!(output.pointer("/data/costUsd"), Some(&json!(expected)));
+        assert_eq!(
+            output.pointer("/data/kwp/runtimeCostUsd"),
+            Some(&json!(expected))
+        );
+        assert_eq!(
+            output.pointer("/data/kwp/runtimeObservedCostUsd"),
+            Some(&json!(expected))
+        );
+        assert_eq!(
+            output.pointer("/data/kwp/runtimeCostUsdExact"),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            output.pointer("/data/kwp/runtimeUnresolvedReservedUsd"),
+            Some(&json!(0.0))
+        );
+        assert_eq!(
+            output.pointer("/data/kwp/runtimeBudgetChargedUsd"),
+            Some(&json!(expected))
+        );
+        assert_eq!(
+            output.pointer("/data/kwp/runCostUsd"),
+            Some(&json!(expected))
+        );
+    }
+
+    fn assert_incomplete_worker_cost_output(output: &Value, observed: f64, charged: f64) {
+        assert!(output.pointer("/data/costUsd").is_none());
+        assert_eq!(
+            output.pointer("/data/observedCostUsd"),
+            Some(&json!(observed))
+        );
+        assert_eq!(
+            output.pointer("/data/providerSpendUnresolved"),
+            Some(&json!(true))
+        );
+        assert_eq!(output.get("observedCostUsd"), Some(&json!(observed)));
+        assert_eq!(output.get("providerSpendUnresolved"), Some(&json!(true)));
+        assert_eq!(
+            output.pointer("/data/kwp/runtimeBudgetChargedUsd"),
+            Some(&json!(charged))
+        );
+        assert!(output.pointer("/data/kwp/runtimeCostUsd").is_none());
+    }
+
+    fn assert_worker_cost_audit(target: &Path, run_id: &RunId, expected: f64) {
+        let records = read_kwp_audit_log(target, &run_id.0).unwrap();
+        let end = records
+            .iter()
+            .find(|record| record.event == "invocation.end")
+            .unwrap();
+        assert_eq!(end.detail["runtimeCostUsd"], json!(expected));
+        assert_eq!(end.detail["runCostUsd"], json!(expected));
+        assert_eq!(end.detail["runtimeObservedCostUsd"], json!(expected));
+        assert_eq!(end.detail["runtimeCostUsdExact"], json!(true));
+        assert_eq!(end.detail["runtimeUnresolvedReservedUsd"], json!(0.0));
+        assert_eq!(end.detail["runtimeBudgetChargedUsd"], json!(expected));
+        assert_eq!(end.detail["runObservedCostUsd"], json!(expected));
+        assert_eq!(end.detail["runCostUsdExact"], json!(true));
+        assert_eq!(end.detail["runUnresolvedReservedUsd"], json!(0.0));
+        assert_eq!(end.detail["runBudgetChargedUsd"], json!(expected));
+    }
+
+    fn assert_incomplete_worker_cost_audit(
+        target: &Path,
+        run_id: &RunId,
+        observed: f64,
+        charged: f64,
+    ) {
+        let records = read_kwp_audit_log(target, &run_id.0).unwrap();
+        let end = records
+            .iter()
+            .find(|record| record.event == "invocation.end")
+            .unwrap();
+        assert_eq!(end.detail["runtimeObservedCostUsd"], json!(observed));
+        assert_eq!(end.detail["runtimeCostUsdExact"], json!(false));
+        assert_eq!(
+            end.detail["runtimeUnresolvedReservedUsd"],
+            json!(charged - observed)
+        );
+        assert_eq!(end.detail["runtimeBudgetChargedUsd"], json!(charged));
+        assert!(end.detail.get("runtimeCostUsd").is_none());
+    }
+
+    fn targeted_invocation(
+        module: &str,
+        run_id: &RunId,
+        grant: Arc<Grant>,
+        target: &Path,
+    ) -> InvocationAuthority {
+        InvocationAuthority::new_targeted(
+            ModuleId(module.to_string()),
+            Digest(format!("sha256:{module}")),
+            run_id.clone(),
+            InvocationId(format!("inv-{module}")),
+            Arc::new(AtomicU64::new(0)),
+            grant,
+            target,
+        )
+        .unwrap()
     }
 
     fn mcp_tool(name: &str) -> McpToolDescriptor {
@@ -7181,6 +8221,78 @@ mod tests {
         assert!(
             matches!(error, KwpError::Internal(message) if message.contains("target is not a file"))
         );
+    }
+
+    #[test]
+    fn concurrent_bus_appends_are_complete_and_run_isolated() {
+        let tmp = tempfile::tempdir().unwrap();
+        let same_path = Arc::new(kwp_bus_log_path(tmp.path(), "run-bus"));
+        let writers = (0..4)
+            .map(|writer| {
+                let path = Arc::clone(&same_path);
+                thread::spawn(move || {
+                    for event in 0..10 {
+                        append_kwp_bus_event(
+                            &path,
+                            bus_event(&format!("topic.{writer}.{event}"), Value::Null),
+                        )
+                        .unwrap();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+
+        let events = read_kwp_bus_log(tmp.path(), "run-bus").unwrap();
+        assert_eq!(events.len(), 40);
+        assert!(events.iter().all(|event| event.run_id.0 == "run-bus"));
+
+        let other_path = kwp_bus_log_path(tmp.path(), "run-other");
+        let mut other = bus_event("topic.other", Value::Null);
+        other.run_id = RunId("run-other".to_string());
+        append_kwp_bus_event(&other_path, other).unwrap();
+        assert_eq!(read_kwp_bus_log(tmp.path(), "run-other").unwrap().len(), 1);
+        assert_eq!(read_kwp_bus_log(tmp.path(), "run-bus").unwrap().len(), 40);
+    }
+
+    #[test]
+    fn oversized_audit_and_bus_files_fail_from_metadata_with_stable_quotas() {
+        let tmp = tempfile::tempdir().unwrap();
+        let audit = tmp.path().join("audit.jsonl");
+        fs::File::create(&audit)
+            .unwrap()
+            .set_len(32 * 1024 * 1024 + 1)
+            .unwrap();
+        assert_eq!(
+            read_kwp_audit_log_path(&audit).unwrap_err(),
+            KwpError::quota("audit.log.bytes")
+        );
+
+        let bus = writable_kwp_run_artifact_path(tmp.path(), "run-bus", "kwp-bus.jsonl").unwrap();
+        fs::File::create(&bus)
+            .unwrap()
+            .set_len(32 * 1024 * 1024 + 1)
+            .unwrap();
+        assert_eq!(
+            read_kwp_bus_log(tmp.path(), "run-bus").unwrap_err(),
+            KwpError::quota("bus.log.bytes")
+        );
+    }
+
+    #[test]
+    fn oversized_audit_record_is_refused_before_append() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("kwp-audit.jsonl");
+        let mut body = audit_body(None, "oversized");
+        body.detail = Value::String("x".repeat(64 * 1024));
+
+        assert_eq!(
+            append_kwp_audit_log_record(&path, body).unwrap_err(),
+            KwpError::quota("audit.log.line.bytes")
+        );
+        assert!(!path.exists());
     }
 
     fn bus_event(topic: &str, payload: Value) -> KwpBusEvent {
@@ -7779,16 +8891,6 @@ mod tests {
     }
 
     #[test]
-    fn run_cost_ledger_is_shared_by_run_id() {
-        let run_id = RunId(format!("ledger-{}", uuid::Uuid::new_v4()));
-
-        assert_eq!(kwp_run_cost(&run_id).unwrap(), 0.0);
-        assert_eq!(record_kwp_run_cost(&run_id, 0.25).unwrap(), 0.25);
-        assert_eq!(record_kwp_run_cost(&run_id, 0.5).unwrap(), 0.75);
-        assert_eq!(kwp_run_cost(&run_id).unwrap(), 0.75);
-    }
-
-    #[test]
     fn worker_result_sanitizer_removes_forged_host_metrics_recursively() {
         let mut value = json!({
             "ok": true,
@@ -7914,13 +9016,40 @@ mod tests {
         let timeout = mcp_call_timeout(mount.timeout_ms, Some(100));
         let started = Instant::now();
 
-        let error = McpStdioClient::spawn(&mount, &session, timeout)
+        let error = McpStdioClient::spawn(&mount, &session, timeout, None)
             .err()
             .unwrap();
 
         assert_eq!(timeout, Duration::from_millis(100));
         assert_eq!(error, KwpError::Deadline);
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn termination_failure_detaches_stderr_instead_of_waiting_forever() {
+        let (release, receiver) = mpsc::channel();
+        let stderr =
+            SupervisedStderr::spawn(BlockingReader(receiver), "[kwp:test:stderr]".to_string());
+        let started = Instant::now();
+
+        let error = finish_worker_stderr(
+            Err(anyhow::anyhow!("scan cancellation registry was poisoned")),
+            Some(stderr),
+        )
+        .unwrap_err();
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(error.to_string().contains("could not terminate KWP worker"));
+        release.send(()).unwrap();
+    }
+
+    struct BlockingReader(mpsc::Receiver<()>);
+
+    impl Read for BlockingReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+            let _ = self.0.recv();
+            Ok(0)
+        }
     }
 
     #[tokio::test]
@@ -7994,6 +9123,108 @@ mod tests {
             validate_fuzz_execution_request(&request).unwrap_err(),
             KwpError::denied("fuzz.memory_limit")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn infinite_fuzz_stdout_hits_quota_and_reaps_the_process_group() {
+        let temp = tempfile::tempdir().unwrap();
+        let pid_path = temp.path().join("stdout.pid");
+        let mount = shell_fuzz_mount(
+            "echo $$ > \"$1\"; while :; do printf '0123456789abcdef'; done",
+            &pid_path,
+        );
+        let (origin, request) = fuzz_executor_fixture(temp.path());
+
+        let error = mount
+            .run_with_timeout(temp.path(), origin, request, Duration::from_secs(5), None)
+            .unwrap_err();
+
+        assert_eq!(error, KwpError::quota("fuzz.stdout.bytes"));
+        assert_pid_file_is_reaped(&pid_path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn infinite_fuzz_stderr_hits_quota_and_reaps_the_process_group() {
+        let temp = tempfile::tempdir().unwrap();
+        let pid_path = temp.path().join("stderr.pid");
+        let mount = shell_fuzz_mount(
+            "echo $$ > \"$1\"; while :; do printf '0123456789abcdef' >&2; done",
+            &pid_path,
+        );
+        let (origin, request) = fuzz_executor_fixture(temp.path());
+
+        let error = mount
+            .run_with_timeout(temp.path(), origin, request, Duration::from_secs(5), None)
+            .unwrap_err();
+
+        assert_eq!(error, KwpError::quota("fuzz.stderr.bytes"));
+        assert_pid_file_is_reaped(&pid_path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fuzz_deadline_is_an_error_and_reaps_the_process_group() {
+        let temp = tempfile::tempdir().unwrap();
+        let pid_path = temp.path().join("deadline.pid");
+        let mount = shell_fuzz_mount("echo $$ > \"$1\"; sleep 60", &pid_path);
+        let (origin, request) = fuzz_executor_fixture(temp.path());
+
+        let error = mount
+            .run_with_timeout(
+                temp.path(),
+                origin,
+                request,
+                Duration::from_millis(100),
+                None,
+            )
+            .unwrap_err();
+
+        assert_eq!(error, KwpError::Deadline);
+        assert_pid_file_is_reaped(&pid_path);
+    }
+
+    #[cfg(unix)]
+    fn shell_fuzz_mount(script: &str, pid_path: &Path) -> FuzzExecutorMount {
+        FuzzExecutorMount {
+            engine: FuzzEngine::CargoFuzz,
+            command: vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                script.to_string(),
+                "kuzushi-fuzz".to_string(),
+                pid_path.display().to_string(),
+            ],
+            timeout_ms: None,
+        }
+    }
+
+    #[cfg(unix)]
+    fn fuzz_executor_fixture(root: &Path) -> (EventOrigin, FuzzRunRequest) {
+        fs::create_dir_all(root.join("src")).unwrap();
+        let harness = root.join("agentic-fuzz/harnesses/parser.rs");
+        fs::create_dir_all(harness.parent().unwrap()).unwrap();
+        fs::write(harness, "fn main() {}\n").unwrap();
+        let request = fuzz_request(FuzzEngine::CargoFuzz);
+        let origin = EventOrigin {
+            module_id: ModuleId("agentic-fuzz".to_string()),
+            digest: Digest("sha256:test".to_string()),
+            invocation_id: request.invocation_id.clone(),
+        };
+        (origin, request)
+    }
+
+    #[cfg(unix)]
+    fn assert_pid_file_is_reaped(path: &Path) {
+        let pid = fs::read_to_string(path)
+            .unwrap()
+            .trim()
+            .parse::<libc::pid_t>()
+            .unwrap();
+        let alive = unsafe { libc::kill(pid, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+        assert!(!alive, "fuzz executor PID {pid} survived host settlement");
     }
 
     fn fuzz_request(engine: FuzzEngine) -> FuzzRunRequest {

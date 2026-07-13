@@ -311,6 +311,7 @@ fn execute_carlini_threat_hunt_run(
         threat_focused_inventory_count(&run.inventory, &run.capped),
         findings,
         outcome.cost_usd,
+        outcome.cost_usd_exact,
     )
 }
 

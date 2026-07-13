@@ -34,9 +34,10 @@ fn file_tool(name: &'static str, description: &'static str) -> Tool {
         input_schema: json!({
             "type": "object",
             "required": ["repoPath", "file"],
+            "additionalProperties": false,
             "properties": {
-                "repoPath": {"type": "string"},
-                "file": {"type": "string"}
+                "repoPath": {"type": "string", "minLength": 1, "maxLength": 16384},
+                "file": {"type": "string", "minLength": 1, "maxLength": 16384, "description": "Relative child path; absolute paths and parent traversal are rejected."}
             }
         }),
     }

@@ -2,6 +2,35 @@ use super::*;
 use rusqlite::types::Type;
 use std::collections::BTreeMap;
 
+const LATEST_FINDING_PROJECTION_SQL: &str = r#"
+with observations as (
+    select finding_json,
+           coalesce(nullif(json_extract(finding_json, '$.identityId'), ''),
+                    json_extract(finding_json, '$.fingerprint')) as stable_key,
+           created_seq
+      from finding_observations
+     where finding_json is not null
+), ranked_observations as (
+    select finding_json, stable_key,
+           row_number() over (
+               partition by stable_key
+               order by created_seq desc
+           ) as observation_rank
+      from observations
+), merged_sources as (
+    select observations.stable_key,
+           json_group_array(json(source.value)) as sources_json
+      from observations
+      join json_each(observations.finding_json, '$.sources') as source
+     group by observations.stable_key
+)
+select latest.finding_json,
+       coalesce(merged_sources.sources_json, '[]') as sources_json
+  from ranked_observations as latest
+  left join merged_sources on merged_sources.stable_key = latest.stable_key
+ where latest.observation_rank = 1
+"#;
+
 impl FindingStore {
     pub(crate) fn v3_findings_for_scan_id(&self, scan_id: &str) -> Result<Vec<Finding>> {
         let mut stmt = self.conn.prepare(
@@ -20,45 +49,12 @@ impl FindingStore {
         self.hydrate_v3_findings(dedupe_latest_by_projected_id(findings))
     }
 
-    /// Projected machine lifecycle for a finding (`stable_findings.current_status`).
-    /// Missing rows default to `Open` — the attention-preserving default.
-    pub(crate) fn stable_lifecycle_status_for_finding(
-        &self,
-        finding: &Finding,
-    ) -> Result<StableLifecycleStatus> {
-        let stable_fp = finding
-            .identity_id
-            .clone()
-            .unwrap_or_else(|| finding.fingerprint.clone());
-        let status: Option<String> = self
-            .conn
-            .query_row(
-                "select current_status from stable_findings where stable_fp = ?1",
-                params![stable_fp],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("Could not load stable finding lifecycle status")?;
-        Ok(status
-            .as_deref()
-            .map(StableLifecycleStatus::from_current_status)
-            .unwrap_or(StableLifecycleStatus::Open))
-    }
-
     pub(crate) fn v3_all_findings(&self) -> Result<Vec<Finding>> {
-        let mut stmt = self.conn.prepare(
-            r#"
-            select finding_json
-              from finding_observations
-             where finding_json is not null
-             order by created_seq asc
-            "#,
-        )?;
-        let rows = stmt.query_map([], row_to_v3_finding)?;
+        let mut stmt = self.conn.prepare(LATEST_FINDING_PROJECTION_SQL)?;
+        let rows = stmt.query_map([], row_to_v3_projected_finding)?;
         let mut findings = rows
             .collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not list v3 findings")?;
-        findings = dedupe_latest_by_projected_id(findings);
         findings.sort_by(finding_list_order);
         self.hydrate_v3_findings(findings)
     }
@@ -104,14 +100,24 @@ impl FindingStore {
     }
 
     pub(crate) fn v3_reference_prefix_matches(&self, reference: &str) -> Result<Vec<Finding>> {
-        let like_pattern = format!("{reference}%");
+        let like_pattern = format!("{}%", escape_like_prefix(reference));
         let mut stmt = self.conn.prepare(
             r#"
-            select finding_json
-              from finding_observations
-             where finding_json is not null
-               and json_extract(finding_json, '$.fingerprint') like ?1
-             order by created_seq desc
+            with latest_matches as (
+                select json_extract(finding_json, '$.fingerprint') as fingerprint,
+                       max(created_seq) as created_seq
+                  from finding_observations
+                 where finding_json is not null
+                   and json_extract(finding_json, '$.fingerprint') like ?1 escape '\'
+                 group by fingerprint
+                 order by created_seq desc
+                 limit 2
+            )
+            select observations.finding_json
+              from latest_matches
+              join finding_observations as observations
+                on observations.created_seq = latest_matches.created_seq
+             order by observations.created_seq desc
              limit 2
             "#,
         )?;
@@ -156,6 +162,13 @@ impl FindingStore {
     }
 }
 
+fn escape_like_prefix(reference: &str) -> String {
+    reference
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 /// Stable projection key: identity id when present, else fingerprint.
 fn finding_stable_fp(finding: &Finding) -> String {
     finding
@@ -170,13 +183,36 @@ fn row_to_v3_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
         .map_err(|err| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(err)))
 }
 
+fn row_to_v3_projected_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
+    let mut finding = row_to_v3_finding(row)?;
+    let raw_sources: String = row.get(1)?;
+    let sources = serde_json::from_str::<Vec<FindingSource>>(&raw_sources)
+        .map_err(|err| rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(err)))?;
+    finding.sources = super::finding_sources::merged_finding_sources(&[], &sources);
+    if !finding.sources.is_empty() {
+        finding.corroboration_count = finding.sources.len() as u32;
+    }
+    Ok(finding)
+}
+
 fn dedupe_latest_by_projected_id(findings: Vec<Finding>) -> Vec<Finding> {
+    dedupe_latest_by(findings, projected_finding_key, keep_latest_observation)
+}
+
+fn dedupe_latest_by(
+    findings: Vec<Finding>,
+    key_for: impl Fn(&Finding) -> String,
+    merge_with_previous: impl Fn(&Finding, Finding) -> Finding,
+) -> Vec<Finding> {
     let mut order = Vec::<String>::new();
     let mut by_key = BTreeMap::<String, Finding>::new();
-    for finding in findings {
-        let key = projected_finding_key(&finding);
+    for mut finding in findings {
+        let key = key_for(&finding);
         if !by_key.contains_key(&key) {
             order.push(key.clone());
+        }
+        if let Some(previous) = by_key.get(&key) {
+            finding = merge_with_previous(previous, finding);
         }
         by_key.insert(key, finding);
     }
@@ -184,6 +220,10 @@ fn dedupe_latest_by_projected_id(findings: Vec<Finding>) -> Vec<Finding> {
         .into_iter()
         .filter_map(|key| by_key.remove(&key))
         .collect()
+}
+
+fn keep_latest_observation(_: &Finding, latest: Finding) -> Finding {
+    latest
 }
 
 fn projected_finding_key(finding: &Finding) -> String {
@@ -217,5 +257,26 @@ fn severity_rank(severity: Severity) -> u8 {
         Severity::Low => 3,
         Severity::Info => 4,
         Severity::Unknown => 5,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_projection_query_does_not_rescan_history_per_finding() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let sql = format!("explain query plan {LATEST_FINDING_PROJECTION_SQL}");
+        let mut statement = store.conn.prepare(&sql).unwrap();
+        let details = statement
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+
+        assert!(details
+            .iter()
+            .all(|detail| !detail.contains("CORRELATED SCALAR SUBQUERY")));
     }
 }

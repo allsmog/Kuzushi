@@ -76,11 +76,13 @@ fn plans_source_and_policy_changes_differently() {
 
 #[test]
 fn full_snapshot_excludes_git_and_kuzushi_owned_state() {
+    if Command::new("git").arg("--version").output().is_err() {
+        return;
+    }
     let temp = tempfile::tempdir().unwrap();
     fs::create_dir_all(temp.path().join("src")).unwrap();
     fs::write(temp.path().join("src/lib.rs"), "pub fn live() {}\n").unwrap();
-    fs::create_dir_all(temp.path().join(".git/objects")).unwrap();
-    fs::write(temp.path().join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+    git(temp.path(), &["init", "-q"]);
     let codeql = temp.path().join(".kuzushi/codeql-db/db-cpp/default/cache");
     fs::create_dir_all(codeql.parent().unwrap()).unwrap();
     fs::File::create(&codeql)

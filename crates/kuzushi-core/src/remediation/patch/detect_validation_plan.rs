@@ -8,6 +8,88 @@ pub(crate) fn detect_validation_plan(repo_root: &Path) -> PatchValidationPlan {
         .unwrap_or_else(empty_validation_plan)
 }
 
+/// Resolve repository-derived validation commands during canonical input
+/// preparation so approval and execution are bound to the same plan.
+pub(crate) fn bind_patch_validation_plan(repo_root: &Path, input: &mut Value) -> Result<()> {
+    let detected = detect_validation_plan(repo_root);
+    let build = optional_string_alias(input, &["buildCmd", "buildCommand", "build_cmd"])?
+        .or(detected.build);
+    let test =
+        optional_string_alias(input, &["testCmd", "testCommand", "test_cmd"])?.or(detected.test);
+    let object = input
+        .as_object_mut()
+        .context("patch:finding input must be an object")?;
+    bind_optional_command(object, "buildCmd", build);
+    bind_optional_command(object, "testCmd", test);
+    Ok(())
+}
+
+fn bind_optional_command(object: &mut Map<String, Value>, key: &str, command: Option<String>) {
+    if let Some(command) = command {
+        object.insert(key.to_string(), Value::String(command));
+    } else {
+        object.remove(key);
+    }
+}
+
+/// Operator-facing disclosure for the repository-owned commands that
+/// `patch:finding` will execute after synthesizing a candidate diff.
+pub fn patch_validation_disclosure(_repo_root: &Path, input: &Value) -> Result<String> {
+    let build = optional_string_alias(input, &["buildCmd", "buildCommand", "build_cmd"])?;
+    let test = optional_string_alias(input, &["testCmd", "testCommand", "test_cmd"])?;
+    let source_commit = patch_source_commit(input)?;
+    Ok(validation_plan_disclosure(
+        &PatchValidationPlan { build, test },
+        &source_commit,
+    ))
+}
+
+#[cfg(test)]
+mod binding_tests {
+    use super::*;
+
+    #[test]
+    fn repository_plan_is_bound_once_before_markers_change() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::write(repo.path().join("Cargo.toml"), "[package]\nname='demo'\n").unwrap();
+        let source_commit = "0123456789012345678901234567890123456789";
+        let mut input = json!({
+            "fingerprint": "abc",
+            (PATCH_SOURCE_COMMIT_INPUT_KEY): source_commit,
+        });
+
+        bind_patch_validation_plan(repo.path(), &mut input).unwrap();
+        std::fs::remove_file(repo.path().join("Cargo.toml")).unwrap();
+        std::fs::write(repo.path().join("package.json"), "{}").unwrap();
+
+        assert_eq!(input["buildCmd"], "cargo build");
+        assert_eq!(input["testCmd"], "cargo test");
+        let disclosure = patch_validation_disclosure(repo.path(), &input).unwrap();
+        assert!(disclosure.contains(source_commit));
+        assert!(disclosure.contains("cargo build ; cargo test"));
+        assert!(!disclosure.contains("npm"));
+    }
+}
+
+pub(crate) fn validation_plan_disclosure(
+    plan: &PatchValidationPlan,
+    source_commit: &str,
+) -> String {
+    let commands = [plan.build.as_deref(), plan.test.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    let commands = if commands.is_empty() {
+        "git apply --check only".to_string()
+    } else {
+        commands.join(" ; ")
+    };
+    format!(
+        "source commit: {source_commit}; repository validation commands: {commands}; disposable worktree; {}; minimal environment",
+        crate::remediation::patch_process_adapter::patch_network_isolation_disclosure()
+    )
+}
+
 struct ValidationPlanRule {
     markers: &'static [&'static str],
     build: Option<&'static str>,

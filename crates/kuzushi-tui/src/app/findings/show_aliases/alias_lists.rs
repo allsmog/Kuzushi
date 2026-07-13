@@ -1,6 +1,17 @@
 use super::*;
 
 impl ShellApp {
+    pub(crate) fn prepare_findings_list_view(&mut self) {
+        *self.selected_finding_mut() = None;
+        self.router
+            .workbench_mut()
+            .set_page(Some(crate::app::WorkbenchPage::Coverage));
+        self.set_shell_view(ShellView::Workbench);
+        self.router
+            .workbench_mut()
+            .set_focus(crate::app::WorkbenchPane::Findings);
+    }
+
     pub fn show_aliases(&mut self, prefix: Option<&str>) {
         self.set_shell_view(ShellView::Workbench);
         self.router
@@ -35,7 +46,12 @@ impl ShellApp {
     /// store read happens in the effect runtime.
     pub(crate) fn open_workbench(&mut self, pane: crate::app::WorkbenchPane) {
         self.begin_workbench_open(pane);
-        self.refresh_findings(true);
+        self.refresh_findings_preserving_active_filter(true);
+        self.finalize_workbench_open_effect(WorkbenchOpenFinalize { pane });
+    }
+
+    pub(crate) fn open_cached_workbench(&mut self, pane: crate::app::WorkbenchPane) {
+        self.begin_workbench_open(pane);
         self.finalize_workbench_open_effect(WorkbenchOpenFinalize { pane });
     }
 

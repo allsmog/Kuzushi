@@ -4,20 +4,20 @@ sha256: fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545
 phase: hunt
 size: 160x40
 ---
-KUZUSHI · target ./phase-target · view hunt · ● LIVE · cost $0.37 · ctx:✓ built · model openai:gpt-5.4 · module context
+KUZUSHI · target ./phase-target · view hunt · ● LIVE · cost $0.37 · ctx:✓ built · model configured openai:gpt-5.4 [auth missing] · module context
  組  map ✓ · 崩  hunt ✓ · 作  confirm ● · 掛  fix ·
  ▸ NEXT triage & verify — 6 of 6 findings need review
  strategy proposal queue · recommend generate proposals · scan fire hunt · ask steer focus · findings export report.sarif sarif export SARIF
-│SOURCE · 6                        │HUNT                                                     │REVIEW QUEUE · 6
+│SOURCE · 6                        │HUNT                                                     │▸ REVIEW QUEUE · 6
 │src/  · 6                         │no queued strategy proposals                             │▸F-0001  C rt open       SQL injection reaches query
-│  api/  · 2                       │       ∅  no hunt proposals                              │ F-0002  H sig open       Order identifier crosses trust...
-│    orders.rs  · 1                │       run `recommend` to rank detectors and hunts       │ F-0003  H sig open       Template input reaches renderer
-│    upload.rs  · 1                │                                                         │ F-0004  M sig open       Upload type is trusted
-│  auth/  · 2                      │       ▸ recommend             generate proposals        │ F-0005  M sig open       Session cookie lacks rotation
-│    login.rs  · 1                 │       ▸ scan                  start the hunt            │ F-0006  L sig open       Debug endpoint remains enabled
-│    session.rs  · 1               │                                                         │
-│  config.rs  · 1                  │                                                         │
-│  web/  · 1                       │                                                         │
+│  api/  · 2                       │       ∅  no hunt proposals                              │  SQL injection reaches query
+│    orders.rs  · 1                │       run `recommend` to rank detectors and hunts       │  src/auth/login.rs:17
+│    upload.rs  · 1                │                                                         │  ▸ next:patch · Enter open
+│  auth/  · 2                      │       ▸ recommend             generate proposals        │ F-0002  H sig open       Order identifier crosses trust...
+│    login.rs  · 1                 │       ▸ scan                  start the hunt            │ F-0003  H sig open       Template input reaches renderer
+│    session.rs  · 1               │                                                         │ F-0004  M sig open       Upload type is trusted
+│  config.rs  · 1                  │                                                         │ F-0005  M sig open       Session cookie lacks rotation
+│  web/  · 1                       │                                                         │ F-0006  L sig open       Debug endpoint remains enabled
 │    template.rs  · 1              │                                                         │
 │                                  │                                                         │
 │                                  │                                                         │
@@ -42,5 +42,5 @@ KUZUSHI · target ./phase-target · view hunt · ● LIVE · cost $0.37 · ctx:�
 │
 mode:run · 作  confirm 3/4 · ⛭ 掛  fix · workbench · openai:gpt-5.4 · ⠋ context:build · 42s · 1/2                             6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Ctrl+C request abort   findings list   Esc back   history events
+ Ctrl+C request abort   Esc prompt
 NAVIGATION MODE — view keys active · Esc returns to prompt

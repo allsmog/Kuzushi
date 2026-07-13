@@ -28,8 +28,8 @@ impl ShellApp {
     }
 
     pub(crate) fn show_prompt_override_effect(&mut self, show: PromptOverrideShow) {
-        if self.selected_prompt_spec().is_some() {
-            self.open_selected_prompt_document(show.path);
+        if let Some((prompts, prompt_index)) = self.declared_prompts_for_path(&show.path) {
+            self.open_prompt_document_set(prompts, prompt_index);
             return;
         }
         let Some(target) = self.target_path_buf().cloned() else {
@@ -46,14 +46,8 @@ impl ShellApp {
         }
     }
 
-    fn selected_prompt_spec(&self) -> Option<kuzushi_core::modules::PromptSpec> {
-        let module = self.focused_module()?;
-        let verb = self.current_prompt_verb_name()?;
-        self.prompt_spec_for_tool(&format!("{module}:{verb}"))
-    }
-
     fn open_selected_prompt_document(&mut self, path: std::path::PathBuf) {
-        let Some(prompt) = self.selected_prompt_spec() else {
+        let Some((prompts, prompt_index)) = self.declared_prompts_for_path(&path) else {
             self.log(
                 "prompt",
                 format!(
@@ -63,8 +57,32 @@ impl ShellApp {
             );
             return;
         };
+        self.open_prompt_document_set(prompts, prompt_index);
+    }
+
+    fn declared_prompts_for_path(
+        &self,
+        path: &std::path::Path,
+    ) -> Option<(Vec<kuzushi_core::modules::PromptSpec>, usize)> {
+        let target = self.target_path_buf()?;
+        let prompts = self.focused_prompt_specs();
+        let prompt_index = prompts.iter().position(|prompt| {
+            kuzushi_core::prompt_override_path(target, &prompt.module_id, &prompt.verb) == path
+        })?;
+        Some((prompts, prompt_index))
+    }
+
+    fn open_prompt_document_set(
+        &mut self,
+        prompts: Vec<kuzushi_core::modules::PromptSpec>,
+        prompt_index: usize,
+    ) {
         let origin = self.shell_view();
-        self.open_prompt_document_effect(PromptDocumentOpen { prompt, origin });
+        self.open_prompt_document_effect(PromptDocumentOpen {
+            prompts,
+            prompt_index,
+            origin,
+        });
     }
 
     fn log_missing_prompt_override(&mut self, path: &std::path::Path) {

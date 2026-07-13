@@ -382,6 +382,84 @@ mod tests {
     }
 
     #[test]
+    fn whitebox_variant_search_is_deterministic_and_marks_result_cap() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/source.ts"),
+            "const q = req.query.q;\nreturn db.query(q);\n",
+        )
+        .unwrap();
+        for name in ["a.ts", "b.ts"] {
+            fs::write(
+                temp.path().join("src").join(name),
+                "const q = req.query.q;\nreturn db.query(q);\n",
+            )
+            .unwrap();
+        }
+        let confirmed = Finding::new_tool(
+            "agentic-sast",
+            "js/sql-injection",
+            "src/source.ts",
+            2,
+            Some(2),
+            Severity::High,
+            "req.query reaches db.query",
+        )
+        .with_static_proof_state(StaticProofState::StaticallyConfirmed);
+
+        let first = hunt_whitebox_static_variants(temp.path(), &[confirmed.clone()], None, 1)
+            .unwrap();
+        let second = hunt_whitebox_static_variants(temp.path(), &[confirmed], None, 1).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(first.count, 1);
+        assert!(first.truncated);
+        assert_eq!(first.truncation_reasons, vec!["variant_limit"]);
+    }
+
+    #[test]
+    fn whitebox_variant_search_reports_inventory_and_byte_caps() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/a.ts"), "req.query; db.query(q);\n").unwrap();
+        fs::write(temp.path().join("src/b.ts"), "req.query; db.query(q);\n").unwrap();
+        let confirmed = Finding::new_tool(
+            "agentic-sast",
+            "js/sql-injection",
+            "src/original.ts",
+            1,
+            Some(1),
+            Severity::High,
+            "req.query reaches db.query",
+        )
+        .with_static_proof_state(StaticProofState::StaticallyConfirmed);
+        let limits = VariantSearchLimits {
+            max_source_files: 1,
+            max_walk_entries: 10,
+            max_file_bytes: 1024,
+            max_total_bytes: 1,
+        };
+
+        let report = hunt_whitebox_static_variants_with_limits(
+            temp.path(),
+            &[confirmed],
+            None,
+            10,
+            limits,
+        )
+        .unwrap();
+
+        assert!(report.truncated);
+        assert!(report
+            .truncation_reasons
+            .contains(&"source_file_limit".to_string()));
+        assert!(report
+            .truncation_reasons
+            .contains(&"total_byte_limit".to_string()));
+    }
+
+    #[test]
     fn registry_dispatches_variant_lift_and_hunt_through_runtime() {
         let (_temp, workspace, store, fingerprint) = seeded_workspace();
         let mut config = V2Config::default();

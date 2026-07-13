@@ -132,6 +132,7 @@ fn finish_uaf_hunt_run(
         steps_used: outcome.steps_used,
         truncated: outcome.truncated,
         cost_usd: outcome.cost_usd,
+        cost_usd_exact: outcome.cost_usd_exact,
     })
 }
 

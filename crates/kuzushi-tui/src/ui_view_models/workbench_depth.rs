@@ -6,8 +6,8 @@
 //! always reflect the authoritative findings route state.
 
 use super::{
-    findings_model, selected_finding_detail_model, FindingDetailModel, FindingEvidenceRow,
-    FindingListRow, SeverityTone,
+    current_finding_for_detail, finding_detail_model_for_projection, findings_model,
+    FindingDetailModel, FindingEvidenceRow, FindingListRow, SeverityTone,
 };
 use crate::app::{DrawerTab, NavBounds, ShellApp, WorkbenchNav};
 
@@ -15,6 +15,7 @@ use crate::app::{DrawerTab, NavBounds, ShellApp, WorkbenchNav};
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WorkbenchModel {
     pub(crate) findings: Vec<FindingRow>,
+    pub(crate) has_selected_finding: bool,
     /// Index of the cursored finding within `findings` (the app selection).
     pub(crate) selected: usize,
     /// `CWE · severity` header for the data-flow ladder, when a flow exists.
@@ -99,26 +100,35 @@ impl DrawerContent {
 /// `findings_model` projection (finding *selection* is clamped app-side, so the
 /// reducer only needs leg/drawer counts). Called once per keystroke.
 pub(crate) fn workbench_depth_bounds(app: &ShellApp, nav: &WorkbenchNav) -> NavBounds {
-    let legs = current_taint_flow(app)
+    let selected = current_finding_for_detail(app);
+    let detail = selected
+        .as_ref()
+        .map(|(alias, finding)| finding_detail_model_for_projection(app, alias.clone(), finding));
+    let legs = current_taint_flow(app, selected.as_ref().map(|(_, finding)| finding))
         .map(|flow| flow.stages.len().saturating_sub(1))
         .unwrap_or(0);
     NavBounds {
         legs,
-        drawer_rows: drawer_content(app).rows(nav.tab),
+        drawer_rows: drawer_content(detail.as_ref()).rows(nav.tab),
     }
 }
 
 pub(crate) fn workbench_depth_model(app: &ShellApp) -> WorkbenchModel {
+    let selected_finding = current_finding_for_detail(app);
+    let detail = selected_finding
+        .as_ref()
+        .map(|(alias, finding)| finding_detail_model_for_projection(app, alias.clone(), finding));
     let findings = findings_model(app);
     let selected = findings.cursor.min(findings.rows.len().saturating_sub(1));
     let rows = findings.rows.iter().map(finding_row).collect();
-    let (flow_title, legs) = flow_legs(app);
+    let (flow_title, legs) = flow_legs(app, selected_finding.as_ref().map(|(_, finding)| finding));
     WorkbenchModel {
         findings: rows,
+        has_selected_finding: detail.is_some(),
         selected,
         flow_title,
         legs,
-        drawer: drawer_content(app),
+        drawer: drawer_content(detail.as_ref()),
     }
 }
 
@@ -136,8 +146,11 @@ fn finding_row(row: &FindingListRow) -> FindingRow {
     }
 }
 
-fn flow_legs(app: &ShellApp) -> (Option<String>, Vec<TraceLeg>) {
-    let Some(flow) = current_taint_flow(app) else {
+fn flow_legs(
+    app: &ShellApp,
+    selected: Option<&kuzushi_core::Finding>,
+) -> (Option<String>, Vec<TraceLeg>) {
+    let Some(flow) = current_taint_flow(app, selected) else {
         return (None, Vec::new());
     };
     let stage_count = flow.stages.len();
@@ -166,9 +179,12 @@ fn flow_legs(app: &ShellApp) -> (Option<String>, Vec<TraceLeg>) {
     (Some(format!("{} · {}", flow.cwe, flow.severity)), legs)
 }
 
-fn current_taint_flow(app: &ShellApp) -> Option<&crate::TaintFlowSnapshot> {
-    match super::current_finding_for_detail(app) {
-        Some((_, finding)) => app.domain().taint_flow_for_finding(&finding),
+fn current_taint_flow<'a>(
+    app: &'a ShellApp,
+    selected: Option<&kuzushi_core::Finding>,
+) -> Option<&'a crate::TaintFlowSnapshot> {
+    match selected {
+        Some(finding) => app.domain().taint_flow_for_finding(finding),
         None => app.domain().taint_flow(),
     }
 }
@@ -191,8 +207,8 @@ fn leg_kind(index: usize, stage_count: usize) -> LegKind {
     }
 }
 
-fn drawer_content(app: &ShellApp) -> DrawerContent {
-    let Some(detail) = selected_finding_detail_model(app) else {
+fn drawer_content(detail: Option<&FindingDetailModel>) -> DrawerContent {
+    let Some(detail) = detail else {
         return DrawerContent::default();
     };
     DrawerContent {

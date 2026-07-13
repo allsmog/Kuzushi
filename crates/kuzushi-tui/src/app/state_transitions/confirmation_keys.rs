@@ -55,3 +55,11 @@ const CONFIRM_KEY_ACTIONS: &[(char, ConfirmKeyAction)] = &[
 pub(super) fn confirm_key_is_consumed_without_action(code: KeyCode) -> bool {
     code == KeyCode::Enter
 }
+
+pub(super) fn confirm_key_modifiers_allowed(key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char('Y') => HotkeyTrigger::Char('Y').matches(key),
+        KeyCode::Char('N') => HotkeyTrigger::Char('N').matches(key),
+        _ => key.modifiers.is_empty(),
+    }
+}

@@ -6,9 +6,10 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         ShellView::History => Some(history_keybindings(app)),
         ShellView::Story => Some(story_keybindings(app)),
         ShellView::Help => Some(help_keybindings(app)),
+        ShellView::Permissions => Some(permission_policy_keybindings(app)),
         ShellView::Health => Some(health_keybindings(app)),
         ShellView::BootSplash => Some(boot_splash_keybindings()),
-        ShellView::QuitConfirm => Some(quit_confirm_keybindings()),
+        ShellView::QuitConfirm => Some(quit_confirm_keybindings(app.has_running_work())),
         ShellView::ConfirmDialog => Some(confirm_dialog_keybindings()),
         ShellView::ThemePicker => Some(theme_picker_keybindings()),
         ShellView::Keymap => Some(keymap_keybindings()),
@@ -28,7 +29,24 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     }
 }
 
+fn permission_policy_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    bindings.push(bind("doctor", "preflight"));
+    bindings.push(bind("config", "model/runtime"));
+    bindings.push(bind("runs", "execution evidence"));
+    bindings
+}
+
 fn planning_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    if app.engagement.planning_picker().option_edit().is_some() {
+        return vec![
+            bind("type", "edit value"),
+            bind("Backspace", "delete"),
+            bind("Enter", "save"),
+            bind("Esc", "cancel"),
+        ];
+    }
     match app.engagement.planning_picker().focus() {
         crate::app::PickerFocus::Prompt => picker_prompt_keybindings(),
         crate::app::PickerFocus::OptionsPane => vec![
@@ -41,20 +59,53 @@ fn planning_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
             bind("Esc/q", "steps"),
             bind("COMMAND", ": type"),
         ],
-        crate::app::PickerFocus::List => vec![
-            bind("KEYS", "j/k move"),
-            bind("h/l ←/→", "phase"),
-            bind("1-4", "jump phase"),
-            bind("Tab/Shift+Tab/o", "focus pane"),
-            bind("Space", "check"),
-            bind("a/n", "all/none"),
-            bind("g", "rebuild cached"),
-            bind("Enter", "run checked"),
-            bind("s", "skip phase"),
-            bind("Esc/q", "workbench"),
-            bind("COMMAND", ": type"),
-        ],
+        crate::app::PickerFocus::List => planning_picker_list_keybindings(app),
     }
+}
+
+fn planning_picker_list_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let inline_selected = planning_inline_action_selected(app);
+    let mut bindings = vec![
+        bind("KEYS", "j/k move"),
+        bind("h/l ←/→", "phase"),
+        bind("1-4", "jump phase"),
+    ];
+    match inline_selected {
+        Some(true) => {
+            bindings.push(bind("Space", "uncheck attach"));
+            bindings.push(bind("Enter", "attach file"));
+        }
+        Some(false) => {
+            bindings.push(bind("Space", "select attach"));
+            bindings.push(bind("Enter", "run checked"));
+        }
+        None => {
+            bindings.push(bind("Tab/Shift+Tab/o", "focus pane"));
+            bindings.push(bind("Space", "check"));
+            bindings.push(bind("Enter", "run checked"));
+        }
+    }
+    bindings.extend([
+        bind("a/n", "all/none"),
+        bind("g", "rebuild cached"),
+        bind("s", "skip phase"),
+        bind("Esc/q", "workbench"),
+        bind("COMMAND", ": type"),
+    ]);
+    bindings
+}
+
+fn planning_inline_action_selected(app: &ShellApp) -> Option<bool> {
+    app.engagement
+        .planning_picker()
+        .current_row()
+        .filter(|row| row.id.is_inline_action())
+        .map(|row| {
+            app.engagement
+                .planning_picker()
+                .selected()
+                .contains(&row.id)
+        })
 }
 
 fn choice_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
@@ -112,13 +163,13 @@ fn boot_splash_keybindings() -> Vec<FooterKeybinding> {
     ]
 }
 
-fn quit_confirm_keybindings() -> Vec<FooterKeybinding> {
-    vec![
-        bind("Y", "checkpoint+story+quit"),
-        bind("y", "checkpoint+quit"),
-        bind("p", "detach"),
-        bind("n/Esc", "cancel"),
-    ]
+fn quit_confirm_keybindings(has_running_work: bool) -> Vec<FooterKeybinding> {
+    let exit_label = if has_running_work {
+        "cancel if needed + exit"
+    } else {
+        "exit"
+    };
+    vec![bind("y/Y", exit_label), bind("n/N/Esc", "stay")]
 }
 
 fn confirm_dialog_keybindings() -> Vec<FooterKeybinding> {
@@ -134,7 +185,11 @@ fn theme_picker_keybindings() -> Vec<FooterKeybinding> {
 }
 
 fn keymap_keybindings() -> Vec<FooterKeybinding> {
-    vec![bind("j/k", "row"), bind("Esc", "close")]
+    vec![
+        bind("j/k/g/G", "scroll"),
+        bind("PgUp/PgDn", "scroll"),
+        bind("Esc/q", "close"),
+    ]
 }
 
 fn update_available_keybindings() -> Vec<FooterKeybinding> {
@@ -228,4 +283,24 @@ fn health_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     bindings.push(bind("config", "model/runtime"));
     bindings.push(bind("tools semgrep", "filter"));
     bindings
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quit_confirm_keybindings_match_idle_and_active_exit_behavior() {
+        assert_eq!(
+            quit_confirm_keybindings(false),
+            vec![bind("y/Y", "exit"), bind("n/N/Esc", "stay")]
+        );
+        assert_eq!(
+            quit_confirm_keybindings(true),
+            vec![
+                bind("y/Y", "cancel if needed + exit"),
+                bind("n/N/Esc", "stay"),
+            ]
+        );
+    }
 }

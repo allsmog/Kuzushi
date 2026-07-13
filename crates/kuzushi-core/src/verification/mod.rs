@@ -77,6 +77,7 @@ pub use parse_rust_signature::*;
 mod tests;
 
 pub use classification::classify_run_result;
+pub(crate) use adapters::DEFAULT_VERIFY_PROMPT;
 pub(crate) use infer_language::infer_language;
 pub(crate) use infer_language::Lang;
 pub(crate) use rust_source_appears_self_contained::RustSignature;

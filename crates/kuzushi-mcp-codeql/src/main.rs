@@ -8,7 +8,7 @@ const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[tokio::main]
 async fn main() -> Result<()> {
     let info = ServerInfo::new("kuzushi-mcp-codeql", PKG_VERSION);
-    let registry = tools::build_registry();
+    let registry = tools::build_registry()?;
     // Background pack-cache pre-warm. KUZUSHI_CODEQL_PREWARM=1 enables it;
     // by default we leave it off so the MCP server starts instantly. A
     // detached tokio task runs `codeql query compile` for the common CWE

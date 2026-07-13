@@ -9,7 +9,7 @@ status: no active workspace. Next: scan <target> or start shell with --target .
 target: none
 state: .kuzushi/v3
 findings db: .kuzushi/v3/index.sqlite3
-findings: none yet (run scan first)
+findings: unavailable (select a target)
 last export: none
 
 Next: workspace status, workspace scope init, workspace export findings <path> [format] [--completeness open|complete]

@@ -1,8 +1,8 @@
 use crate::app::{
-    auth_method_row_kinds, AuthMethodRowKind, PickerFocus, PlanningOptionEdit, PlanningTaskId,
-    PlanningTaskRow,
+    auth_method_row_kinds, AuthMethodRowKind, PickerFocus, PlanningArtifactState,
+    PlanningOptionEdit, PlanningTaskId, PlanningTaskRow, WorkflowPhase,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelPickerRouteState {
@@ -186,10 +186,15 @@ impl TargetPickerRouteState {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PlanningPickerRouteState {
+    phase: Option<WorkflowPhase>,
     cursor: usize,
     selected: BTreeSet<PlanningTaskId>,
+    default_selected: BTreeSet<PlanningTaskId>,
+    draft_selected: BTreeMap<WorkflowPhase, BTreeSet<PlanningTaskId>>,
+    draft_rebuild: BTreeMap<WorkflowPhase, BTreeSet<PlanningTaskId>>,
     tasks: Vec<PlanningTaskRow>,
     rebuild: BTreeSet<PlanningTaskId>,
+    profile_pending: bool,
     focus: PickerFocus,
     option_cursor: usize,
     option_edit: Option<PlanningOptionEdit>,
@@ -197,15 +202,95 @@ pub struct PlanningPickerRouteState {
 }
 
 impl PlanningPickerRouteState {
+    #[cfg(test)]
     pub(crate) fn open(&mut self, tasks: Vec<PlanningTaskRow>, selected: BTreeSet<PlanningTaskId>) {
+        self.open_profiled(tasks, selected, false);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_profiled(
+        &mut self,
+        tasks: Vec<PlanningTaskRow>,
+        selected: BTreeSet<PlanningTaskId>,
+        profile_pending: bool,
+    ) {
+        self.phase = None;
         self.tasks = tasks;
+        self.default_selected = selected.clone();
         self.selected = selected;
         self.rebuild.clear();
-        self.cursor = 0;
+        self.profile_pending = profile_pending;
+        self.cursor = first_selected_planning_row(&self.tasks, &self.selected);
         self.focus = PickerFocus::List;
         self.option_cursor = 0;
         self.option_edit = None;
         self.option_error = None;
+    }
+
+    pub(crate) fn open_phase_profiled(
+        &mut self,
+        phase: WorkflowPhase,
+        tasks: Vec<PlanningTaskRow>,
+        defaults: BTreeSet<PlanningTaskId>,
+        profile_pending: bool,
+    ) {
+        self.save_phase_draft();
+        let selected = self
+            .draft_selected
+            .get(&phase)
+            .map(|draft| available_tasks(draft, &tasks))
+            .unwrap_or_else(|| defaults.clone());
+        let rebuild = self
+            .draft_rebuild
+            .get(&phase)
+            .map(|draft| available_tasks(draft, &tasks))
+            .unwrap_or_default();
+        self.phase = Some(phase);
+        self.tasks = tasks;
+        self.default_selected = defaults;
+        self.selected = selected;
+        self.rebuild = rebuild;
+        self.profile_pending = profile_pending;
+        self.reset_open_state();
+    }
+
+    fn save_phase_draft(&mut self) {
+        let Some(phase) = self.phase else {
+            return;
+        };
+        self.draft_selected.insert(phase, self.selected.clone());
+        self.draft_rebuild.insert(phase, self.rebuild.clone());
+    }
+
+    fn reset_open_state(&mut self) {
+        self.cursor = first_selected_planning_row(&self.tasks, &self.selected);
+        self.focus = PickerFocus::List;
+        self.option_cursor = 0;
+        self.option_edit = None;
+        self.option_error = None;
+    }
+
+    pub(crate) fn refresh_profiled(
+        &mut self,
+        tasks: Vec<PlanningTaskRow>,
+        defaults: BTreeSet<PlanningTaskId>,
+    ) {
+        let focused = self.current_row().map(|row| row.id);
+        self.selected =
+            refreshed_profile_selection(&self.selected, &self.default_selected, &defaults, &tasks);
+        self.default_selected = defaults;
+        self.rebuild
+            .retain(|task| tasks.iter().any(|row| row.id == *task));
+        self.tasks = tasks;
+        self.cursor = refreshed_profile_cursor(focused, &self.tasks, &self.selected);
+        self.profile_pending = false;
+        self.option_cursor = 0;
+        self.option_edit = None;
+        self.option_error = None;
+    }
+
+    pub(crate) fn profile_pending(&self) -> bool {
+        self.profile_pending
     }
 
     pub(crate) fn tasks(&self) -> &[PlanningTaskRow] {
@@ -310,10 +395,151 @@ impl PlanningPickerRouteState {
     }
 }
 
+fn first_selected_planning_row(
+    tasks: &[PlanningTaskRow],
+    selected: &BTreeSet<PlanningTaskId>,
+) -> usize {
+    tasks
+        .iter()
+        .position(|row| selected_runnable_row(row, selected))
+        .or_else(|| tasks.iter().position(|row| selected.contains(&row.id)))
+        .unwrap_or(0)
+}
+
+fn available_tasks(
+    selected: &BTreeSet<PlanningTaskId>,
+    tasks: &[PlanningTaskRow],
+) -> BTreeSet<PlanningTaskId> {
+    let available = tasks.iter().map(|row| row.id).collect::<BTreeSet<_>>();
+    selected.intersection(&available).copied().collect()
+}
+
+fn refreshed_profile_selection(
+    selected: &BTreeSet<PlanningTaskId>,
+    previous_defaults: &BTreeSet<PlanningTaskId>,
+    defaults: &BTreeSet<PlanningTaskId>,
+    tasks: &[PlanningTaskRow],
+) -> BTreeSet<PlanningTaskId> {
+    let available = tasks.iter().map(|row| row.id).collect::<BTreeSet<_>>();
+    let added = selected.difference(previous_defaults);
+    let removed = previous_defaults.difference(selected);
+    let mut refreshed: BTreeSet<PlanningTaskId> =
+        defaults.intersection(&available).copied().collect();
+    refreshed.extend(added.filter(|task| available.contains(task)).copied());
+    for task in removed {
+        refreshed.remove(task);
+    }
+    refreshed
+}
+
+fn refreshed_profile_cursor(
+    focused: Option<PlanningTaskId>,
+    tasks: &[PlanningTaskRow],
+    selected: &BTreeSet<PlanningTaskId>,
+) -> usize {
+    focused
+        .and_then(|task| tasks.iter().position(|row| row.id == task))
+        .unwrap_or_else(|| first_selected_planning_row(tasks, selected))
+}
+
+fn selected_runnable_row(row: &PlanningTaskRow, selected: &BTreeSet<PlanningTaskId>) -> bool {
+    selected.contains(&row.id)
+        && row.cli_available
+        && !row.id.is_inline_action()
+        && !matches!(row.artifact_state, PlanningArtifactState::Cached)
+}
+
 fn wrapped_cursor(cursor: usize, delta: isize, len: usize) -> usize {
     if len == 0 {
         return 0;
     }
     let current = cursor.min(len - 1) as isize;
     (current + delta).rem_euclid(len as isize) as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn phase_reopen_preserves_selection_and_rebuild_draft() {
+        let mut route = PlanningPickerRouteState::default();
+        let rows = rows_for(&[
+            PlanningTaskId::GatherRepoContext,
+            PlanningTaskId::MapEntryPoints,
+        ]);
+        route.open_phase_profiled(
+            WorkflowPhase::Map,
+            rows.clone(),
+            BTreeSet::from([
+                PlanningTaskId::GatherRepoContext,
+                PlanningTaskId::MapEntryPoints,
+            ]),
+            false,
+        );
+        route.selected_mut().remove(&PlanningTaskId::MapEntryPoints);
+        route.toggle_rebuild(PlanningTaskId::GatherRepoContext);
+
+        route.open_phase_profiled(
+            WorkflowPhase::Map,
+            rows,
+            BTreeSet::from([PlanningTaskId::MapEntryPoints]),
+            false,
+        );
+
+        assert_eq!(
+            route.selected(),
+            &BTreeSet::from([PlanningTaskId::GatherRepoContext])
+        );
+        assert_eq!(
+            route.rebuild(),
+            &BTreeSet::from([PlanningTaskId::GatherRepoContext])
+        );
+    }
+
+    #[test]
+    fn phase_drafts_remain_independent() {
+        let mut route = PlanningPickerRouteState::default();
+        route.open_phase_profiled(
+            WorkflowPhase::Map,
+            rows_for(&[PlanningTaskId::GatherRepoContext]),
+            BTreeSet::from([PlanningTaskId::GatherRepoContext]),
+            false,
+        );
+        route.selected_mut().clear();
+        route.open_phase_profiled(
+            WorkflowPhase::Hunt,
+            rows_for(&[PlanningTaskId::ScanSecrets]),
+            BTreeSet::from([PlanningTaskId::ScanSecrets]),
+            false,
+        );
+        route.open_phase_profiled(
+            WorkflowPhase::Map,
+            rows_for(&[PlanningTaskId::GatherRepoContext]),
+            BTreeSet::from([PlanningTaskId::GatherRepoContext]),
+            false,
+        );
+
+        assert!(route.selected().is_empty());
+    }
+
+    fn rows_for(tasks: &[PlanningTaskId]) -> Vec<PlanningTaskRow> {
+        tasks.iter().copied().map(test_row).collect()
+    }
+
+    fn test_row(id: PlanningTaskId) -> PlanningTaskRow {
+        PlanningTaskRow {
+            id,
+            label: id.label(),
+            tool_name: id.tool_name(),
+            artifact_path: PathBuf::from("/tmp/artifact"),
+            artifact_state: PlanningArtifactState::Missing,
+            artifact_modified: None,
+            model_backed: id.is_model_backed(),
+            required_cli: None,
+            cli_available: true,
+            blocker: None,
+        }
+    }
 }

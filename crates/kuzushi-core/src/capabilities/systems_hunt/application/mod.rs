@@ -33,4 +33,6 @@ mod run_systems_trigger_synth;
 pub(crate) use query_systems_invariants::score_with_index;
 pub use query_systems_invariants::try_augment_with_index;
 pub use run_report::run_systems_hunt_report;
+#[cfg(test)]
 pub(crate) use run_report::run_systems_invariant_extract;
+pub(crate) use run_report::run_systems_invariant_extract_with_cost;

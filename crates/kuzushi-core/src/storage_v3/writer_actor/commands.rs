@@ -28,7 +28,7 @@ pub enum ControlCommand {
     Shutdown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DecisionCommand {
     ReviewDecision(DecisionWrite),
     RecordVerification(VerificationWrite),
@@ -52,7 +52,7 @@ pub enum WatcherCommand {
     ObservationBatch { payload: Value },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum WriterCommand {
     Control(ControlCommand),
     Decision(DecisionCommand),

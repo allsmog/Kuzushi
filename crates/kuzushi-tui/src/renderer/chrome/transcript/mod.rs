@@ -5,7 +5,20 @@ pub(crate) fn render_transcript(frame: &mut Frame<'_>, area: Rect, app: &ShellAp
     if area.height == 0 {
         return;
     }
-    render_lines(frame, area, transcript_lines(app, area.height as usize));
+    let lines = transcript_model(app, area.height as usize)
+        .rows
+        .into_iter()
+        .map(|row| {
+            transcript_line_dated_fitted(
+                &row.prefix,
+                &row.body,
+                row.continuation,
+                row.time_secs,
+                area.width as usize,
+            )
+        })
+        .collect();
+    render_lines(frame, area, lines);
 }
 
 pub(crate) fn transcript_lines(app: &ShellApp, visible: usize) -> Vec<Line<'static>> {
@@ -50,6 +63,22 @@ pub(crate) fn transcript_line_dated(
         transcript_body_style(prefix),
     ));
     Line::from(spans)
+}
+
+fn transcript_line_dated_fitted(
+    prefix: &str,
+    body: &str,
+    continuation: bool,
+    time_secs: u64,
+    width: usize,
+) -> Line<'static> {
+    let prefix_width = transcript_line_dated(prefix, "", continuation, time_secs)
+        .spans
+        .iter()
+        .map(|span| span.content.chars().count())
+        .sum::<usize>();
+    let fitted = fit(body, width.saturating_sub(prefix_width));
+    transcript_line_dated(prefix, &fitted, continuation, time_secs)
 }
 
 /// Format wall-clock seconds-since-epoch as `HH:MM:SS` (UTC).  Used by

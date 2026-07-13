@@ -1,5 +1,7 @@
 use super::*;
 
+pub(crate) const DEFAULT_THREAT_MODEL_GUIDANCE: &str = "Build a source-grounded threat model. Prioritize concrete trust boundaries, attacker-controlled entry points, security-sensitive data flows, and mitigations supported by repository evidence. Do not invent architecture or findings.";
+
 pub(crate) const MAX_SOURCE_BYTES: usize = 2 * 1024 * 1024;
 
 pub(crate) const VALID_STAGES: &[&str] = &["s1", "s2", "s3", "s4"];

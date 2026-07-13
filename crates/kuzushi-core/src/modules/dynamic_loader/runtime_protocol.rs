@@ -315,7 +315,7 @@ fn handle_dynamic_runtime_query(
         .context("runtime.query omitted request")?;
     let request: AgentQueryRequest =
         serde_json::from_value(request_value).context("runtime.query request is invalid")?;
-    match runtime.query_blocking_controlled(request, control.clone()) {
+    match crate::runtime::query_blocking_controlled_checked(runtime, request, control.clone()) {
         Ok(response) => write_dynamic_runtime_response(stdin, id, response),
         Err(error) => write_dynamic_runtime_error(stdin, id, &error.to_string()),
     }
@@ -373,6 +373,8 @@ mod tests {
 
     struct DeadlineLatchRuntime;
 
+    struct InvalidCostRuntime(f64);
+
     #[async_trait::async_trait]
     impl AgentRuntime for DeadlineLatchRuntime {
         fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
@@ -389,6 +391,22 @@ mod tests {
             }
             control.ensure_active()?;
             unreachable!()
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!("unused")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AgentRuntime for InvalidCostRuntime {
+        fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            Ok(AgentQueryResponse {
+                text: "invalid".to_string(),
+                cost_usd: self.0,
+                cost_usd_reported: true,
+                ..AgentQueryResponse::default()
+            })
         }
 
         fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
@@ -418,5 +436,34 @@ mod tests {
         let response = String::from_utf8(response).unwrap();
         assert!(response.contains("runtime.error"), "{response}");
         assert!(response.contains("deadline exceeded"), "{response}");
+    }
+
+    #[test]
+    fn runtime_callback_rejects_invalid_cost_before_serialization() {
+        let message = json!({
+            "type": "runtime.query",
+            "id": 8,
+            "request": {
+                "model": "openai:gpt-5.5",
+                "cwd": ".",
+                "system_prompt": "system",
+                "prompt": "prompt"
+            }
+        });
+        for invalid in [f64::NAN, -0.01, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut response = Vec::new();
+            handle_dynamic_runtime_query(
+                &message,
+                &mut response,
+                &InvalidCostRuntime(invalid),
+                &AgentQueryControl::default(),
+            )
+            .unwrap();
+
+            let response = String::from_utf8(response).unwrap();
+            assert!(response.contains("runtime.error"), "{response}");
+            assert!(response.contains("finite non-negative"), "{response}");
+            assert!(!response.contains("runtime.response"), "{response}");
+        }
     }
 }

@@ -10,7 +10,7 @@ fn catalog_collapsed_model_steers_context_then_findings() {
     assert!(model.collapsed.next_hint.contains("context build"));
     assert_eq!(
         model.collapsed.target_warning,
-        Some("[!] no target selected; run `target .`, then `next`")
+        Some("[!] target required; Enter opens picker · `target <path>` · `demo` offline")
     );
     assert_eq!(model.collapsed.scan_command, "target .; next");
 

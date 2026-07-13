@@ -16,6 +16,7 @@ pub(crate) struct TaintIrisNextAgentResult {
     pub(crate) result_text_excerpt: Option<String>,
     pub(crate) warnings: Vec<String>,
     pub(crate) cost_usd: f64,
+    pub(crate) cost_usd_exact: bool,
 }
 
 pub(crate) const TAINT_IRIS_NEXT_ANY: &[&str] = &["any"];

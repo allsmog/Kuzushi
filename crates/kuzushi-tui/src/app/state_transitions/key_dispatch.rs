@@ -1,5 +1,6 @@
 use super::confirmation_keys::{
-    confirm_key_action, confirm_key_is_consumed_without_action, ConfirmKeyAction,
+    confirm_key_action, confirm_key_is_consumed_without_action, confirm_key_modifiers_allowed,
+    ConfirmKeyAction,
 };
 use super::control_keys::control_key_action;
 use super::*;
@@ -14,6 +15,10 @@ impl ShellApp {
     }
 
     fn reduce_key_without_recording(&mut self, key: KeyEvent) -> InputUpdate {
+        let budget_update = self.handle_budget_key(key);
+        if budget_update.handled {
+            return budget_update;
+        }
         if let Some(update) = self.reduce_modal_key(key) {
             return update;
         }
@@ -169,7 +174,7 @@ impl ShellApp {
     }
 
     fn handle_shared_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
-        let update = self.handle_confirm_or_budget_key(key);
+        let update = self.handle_confirm_key(key);
         if update.handled {
             return update;
         }
@@ -178,14 +183,6 @@ impl ShellApp {
             return update;
         }
         InputUpdate::handled_if(self.handle_notice_dismiss_key(key))
-    }
-
-    fn handle_confirm_or_budget_key(&mut self, key: KeyEvent) -> InputUpdate {
-        let update = self.handle_confirm_key(key);
-        if update.handled {
-            return update;
-        }
-        self.handle_budget_key(key)
     }
 
     fn handle_deferred_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -219,33 +216,40 @@ impl ShellApp {
     fn handle_system_overlay_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
         match self.shell_view() {
             ShellView::QuitConfirm => self.handle_quit_confirm_key(key),
+            ShellView::Keymap => self.handle_keymap_overlay_key(key),
             _ => InputUpdate::ignored(),
         }
     }
 
-    fn handle_quit_confirm_key(&mut self, key: KeyEvent) -> InputUpdate {
-        if !key.modifiers.is_empty() {
+    fn handle_keymap_overlay_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if !KeyModifierState::new(key).no_modifiers {
             return InputUpdate::ignored();
         }
         match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                InputUpdate::handled_with_effects(vec![ShellEffect::Quit])
-            }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                self.go_back();
-                InputUpdate::handled()
-            }
-            KeyCode::Char('p') | KeyCode::Char('P') => {
-                self.log(
-                    "quit",
-                    "detach from quit-confirm is not available in this shell",
-                );
-                self.go_back();
-                InputUpdate::handled()
-            }
-            KeyCode::Enter => InputUpdate::handled(),
-            _ => InputUpdate::handled(),
+            KeyCode::Esc | KeyCode::Char('q') => self.go_back(),
+            KeyCode::Char('j') => self.scroll_current_view_down(1),
+            KeyCode::Char('k') => self.scroll_current_view_up(1),
+            KeyCode::Char('g') => self.scroll_current_view_to_top(),
+            KeyCode::Char('G') => self.scroll_current_view_to_bottom(),
+            KeyCode::PageDown => self.page_down_current_view(),
+            KeyCode::PageUp => self.page_up_current_view(),
+            _ => return InputUpdate::handled(),
         }
+        InputUpdate::handled()
+    }
+
+    fn handle_quit_confirm_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if quit_choice_matches(key, 'y', 'Y') {
+            return InputUpdate::handled_with_effects(vec![ShellEffect::Quit]);
+        }
+        if quit_choice_matches(key, 'n', 'N') || HotkeyTrigger::Esc.matches(key) {
+            self.go_back();
+            return InputUpdate::handled();
+        }
+        if key.modifiers.is_empty() {
+            return InputUpdate::handled();
+        }
+        InputUpdate::ignored()
     }
 
     /// The end-of-engagement retry gate: `y`/Enter retries the failed tasks
@@ -288,7 +292,7 @@ impl ShellApp {
     }
 
     fn confirm_key_ready(&self, key: KeyEvent) -> bool {
-        self.advisory().pending_confirm.is_some() && key.modifiers.is_empty()
+        self.advisory().pending_confirm.is_some() && confirm_key_modifiers_allowed(key)
     }
 
     fn apply_confirm_key_action(&mut self, action: ConfirmKeyAction) -> InputUpdate {
@@ -321,18 +325,21 @@ impl ShellApp {
     }
 
     pub(super) fn handle_budget_key(&mut self, key: KeyEvent) -> InputUpdate {
-        if !self.is_budget_halted() || !key.modifiers.is_empty() {
+        if !self.is_budget_halted() {
             return InputUpdate::ignored();
         }
-        let KeyCode::Char(ch) = key.code else {
-            return InputUpdate::ignored();
+        let effect = match (key.code, key.modifiers.is_empty()) {
+            (KeyCode::Char(ch), true) if ch.eq_ignore_ascii_case(&'c') => {
+                Some(ShellEffect::ContinuePastBudget)
+            }
+            (KeyCode::Char(ch), true) if ch.eq_ignore_ascii_case(&'a') => {
+                Some(ShellEffect::AbortForBudget)
+            }
+            _ => None,
         };
-        let effect = match ch.to_ascii_lowercase() {
-            'c' => ShellEffect::ContinuePastBudget,
-            'a' => ShellEffect::AbortForBudget,
-            _ => return InputUpdate::ignored(),
-        };
-        InputUpdate::handled_with_effects(vec![effect])
+        effect.map_or_else(InputUpdate::handled, |effect| {
+            InputUpdate::handled_with_effects(vec![effect])
+        })
     }
 
     pub(super) fn update_quit_chord_arm(&mut self, key: KeyEvent) {
@@ -450,6 +457,10 @@ impl ShellApp {
     }
 }
 
+fn quit_choice_matches(key: KeyEvent, lowercase: char, uppercase: char) -> bool {
+    HotkeyTrigger::Char(lowercase).matches(key) || HotkeyTrigger::Char(uppercase).matches(key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +472,38 @@ mod tests {
 
     fn ctrl_key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::CONTROL)
+    }
+
+    fn pending_network_confirm() -> PendingConfirm {
+        PendingConfirm {
+            kind: ConfirmKind::NetworkEgress,
+            tool: "sandbox:run".to_string(),
+            target: "https://refund.acme/api".to_string(),
+            rationale: None,
+            allowlist: None,
+            actor: None,
+            remembered: false,
+        }
+    }
+
+    #[test]
+    fn keymap_owns_scroll_and_close_keys_in_prompt_mode() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+        app.sync_view_change();
+        app.set_shell_view(ShellView::Keymap);
+        app.sync_view_change();
+        app.set_input_mode(InputMode::Prompt);
+
+        app.reduce_key(plain_key(KeyCode::Char('j')));
+        assert_eq!(app.router.default_scroll().offset(), 1);
+        assert!(app.input().is_empty());
+
+        app.reduce_key(plain_key(KeyCode::Char('x')));
+        assert!(app.input().is_empty());
+
+        app.reduce_key(plain_key(KeyCode::Esc));
+        assert_eq!(app.shell_view(), ShellView::Workbench);
     }
 
     #[test]
@@ -513,5 +556,81 @@ mod tests {
         assert!(update.handled);
         assert!(update.effects.is_empty());
         assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn quit_confirm_shift_y_emits_quit_and_shift_n_stays() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::QuitConfirm);
+
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::SHIFT));
+        assert!(matches!(update.effects.as_slice(), [ShellEffect::Quit]));
+
+        app.set_shell_view(ShellView::QuitConfirm);
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT));
+        assert!(update.handled);
+        assert!(update.effects.is_empty());
+    }
+
+    #[test]
+    fn quit_confirm_p_has_no_detach_action() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::QuitConfirm);
+
+        let update = app.reduce_key(plain_key(KeyCode::Char('p')));
+
+        assert!(update.handled);
+        assert!(update.effects.is_empty());
+        assert_eq!(app.shell_view(), ShellView::QuitConfirm);
+        assert!(app
+            .log_lines()
+            .iter()
+            .all(|line| !line.body.to_ascii_lowercase().contains("detach")));
+    }
+
+    #[test]
+    fn pending_confirm_shift_y_remembers_allow() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory_mut().pending_confirm = Some(pending_network_confirm());
+
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::SHIFT));
+
+        assert!(update.handled);
+        assert!(app.advisory().pending_confirm.is_none());
+        assert!(app
+            .engagement
+            .confirm_allowlist()
+            .contains("sandbox:run https://refund.acme/api"));
+    }
+
+    #[test]
+    fn pending_confirm_shift_n_remembers_denial() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory_mut().pending_confirm = Some(pending_network_confirm());
+
+        let update = app.reduce_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT));
+
+        assert!(update.handled);
+        assert!(app.advisory().pending_confirm.is_none());
+        assert!(app
+            .engagement
+            .confirm_denylist()
+            .contains("sandbox:run https://refund.acme/api"));
+    }
+
+    #[test]
+    fn pending_confirm_rejects_ctrl_modified_uppercase_choices() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory_mut().pending_confirm = Some(pending_network_confirm());
+
+        let update = app.handle_confirm_key(KeyEvent::new(
+            KeyCode::Char('Y'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ));
+
+        assert!(!update.handled);
+        assert!(app.advisory().pending_confirm.is_some());
+        assert!(app.engagement.confirm_allowlist().is_empty());
+        assert!(app.engagement.confirm_denylist().is_empty());
     }
 }

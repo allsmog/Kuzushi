@@ -15,11 +15,11 @@ use super::tool_types::{DefinitionTool, ReferencesTool};
 impl ToolHandler for DefinitionTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let request = PositionRequest::from_args(&args)?;
+        let request = PositionRequest::from_args(&args, &self.handle)?;
         let client = request.client(&self.handle).await?;
-        open_document(&client, &request.file.file).await?;
+        open_document(&client, &request.file.file, &request.file.source_text).await?;
         let raw = client
-            .request("textDocument/definition", request.params())
+            .request("textDocument/definition", request.params()?)
             .await?;
         Ok(json!({ "locations": position_locations(&raw) }))
     }
@@ -29,10 +29,10 @@ impl ToolHandler for DefinitionTool {
 impl ToolHandler for ReferencesTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let request = PositionRequest::from_args(&args)?;
+        let request = PositionRequest::from_args(&args, &self.handle)?;
         let client = request.client(&self.handle).await?;
-        open_document(&client, &request.file.file).await?;
-        let mut params = request.params();
+        open_document(&client, &request.file.file, &request.file.source_text).await?;
+        let mut params = request.params()?;
         params["context"] = json!({ "includeDeclaration": true });
         let raw = client.request("textDocument/references", params).await?;
         Ok(json!({ "locations": range_locations(&raw) }))

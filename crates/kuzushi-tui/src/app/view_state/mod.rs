@@ -121,8 +121,9 @@ pub use theme_picker::{
 pub use update_available::{UpdateAvailableFooter, UpdateAvailableSnapshot, UpdateAvailableStatus};
 pub(crate) use workbench_cache::{
     harness_file_path, DfdModelCacheKey, DirectoryListingState, JsonFileState, PathState,
-    ProjectScopeTreeState, PromptMutationsState, RiskByModuleCacheKey, RunTraceCacheState,
-    StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey, WorkbenchCache,
+    ProjectScopeTreeState, PromptMutationsState, ReviewQueueCacheKey, RiskByModuleCacheKey,
+    RunTraceCacheState, StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey,
+    WorkbenchCache,
 };
 pub use workbench_nav::BoundedScroll;
 pub use workbench_nav::DrawerTab;

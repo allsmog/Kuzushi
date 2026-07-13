@@ -5,11 +5,12 @@ assertion_line: 164
  KUZUSHI › workbench · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
 Kuzushi · target:no target · page:confirm · o idle · modules:all modules
- type next guided workflow · type scan run scan · type options sast:scan tune scanners · type ask ask the agent
+ type decision confirmed|false-positive|suppressed <reason> review · type dismiss false_positive <note> dismiss
 
  -- FINDING ------------------------------------------------------------------------------------------------------------
 F-0001  CRITICAL  ? signal-only  candidate
 sql injection via order_id concatenation
+apps/api/orders.rs:142
  -- ATTACK PATH --------------------------------------------------------------------------------------------------------
        ∅  no taint flow
        no finding-keyed taint flow for this finding — run `taint-iris:hunt`
@@ -36,6 +37,14 @@ lifecycle status: candidate
 evidence state: source-linked
   proof summary: ? signal-only
 
+-- DECISION --
+  current decision: confirmed
+  decision source: selected finding
+  decision history: latest loaded decision from selected finding
+  review decision: confirmed · confidence 91% · by auto · source selected finding
+  legacy triage verdict: true_positive
+  automated/model-generated review reasoning: concatenated input
+
 -- NEXT --
   validate: `verify F-0001`
   collect runtime proof or stronger source evidence before patching
@@ -55,14 +64,6 @@ alias: F-0001
 rule: demo.sqli
 location: apps/api/orders.rs:142
 producing tool: semgrep
-
--- DECISION --
-  current decision: confirmed
-  decision source: selected finding
-  decision history: latest loaded decision from selected finding
-  review decision: confirmed · confidence 91% · by auto · source selected finding
-  legacy triage verdict: true_positive
-  automated/model-generated review reasoning: concatenated input
 
 -- SCANNER MESSAGE --
   sql injection via order_id concatenation

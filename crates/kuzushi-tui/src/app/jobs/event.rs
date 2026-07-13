@@ -36,9 +36,9 @@ impl ShellEvent {
                 ToolEvent::Finished { .. } | ToolEvent::Failed { .. } | ToolEvent::Refused { .. },
             ) => true,
             Self::Agent(AgentEvent::Answered { .. } | AgentEvent::Failed { .. }) => true,
-            Self::Plan(PlanEvent::Proposed(_) | PlanEvent::Failed { .. }) => true,
+            Self::Plan(PlanEvent::Proposed { .. } | PlanEvent::Failed { .. }) => true,
             Self::Threat(
-                ThreatPatchEvent::Proposed(_)
+                ThreatPatchEvent::Proposed { .. }
                 | ThreatPatchEvent::Answer { .. }
                 | ThreatPatchEvent::Failed { .. },
             ) => true,
@@ -56,8 +56,14 @@ impl ShellEvent {
                 error,
                 audit: disconnected_job_audit(),
             }),
-            JobKind::Plan => Self::Plan(PlanEvent::Failed { error }),
-            JobKind::Threat => Self::Threat(ThreatPatchEvent::Failed { error }),
+            JobKind::Plan => Self::Plan(PlanEvent::Failed {
+                error,
+                audit: disconnected_job_audit(),
+            }),
+            JobKind::Threat => Self::Threat(ThreatPatchEvent::Failed {
+                error,
+                audit: disconnected_job_audit(),
+            }),
         }
     }
 }
@@ -67,6 +73,7 @@ fn disconnected_job_audit() -> AgentCallAudit {
         model: "unknown".to_string(),
         provider: "unknown".to_string(),
         prompt_hash: "jobhub-panic-guard".to_string(),
-        cost_usd: None,
+        cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+        call_attempted: true,
     }
 }

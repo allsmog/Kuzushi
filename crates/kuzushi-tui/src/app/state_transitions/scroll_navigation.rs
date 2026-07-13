@@ -10,13 +10,49 @@ impl ShellApp {
             return false;
         }
         match key.code {
-            KeyCode::Char('j') => self.scroll_down(1),
-            KeyCode::Char('k') => self.scroll_up(1),
-            KeyCode::Char('g') => self.scroll_to_top(),
-            KeyCode::Char('G') => self.scroll_to_bottom(),
+            KeyCode::Char('j') => self.scroll_current_view_down(1),
+            KeyCode::Char('k') => self.scroll_current_view_up(1),
+            KeyCode::Char('g') => self.scroll_current_view_to_top(),
+            KeyCode::Char('G') => self.scroll_current_view_to_bottom(),
             _ => return false,
         }
         true
+    }
+
+    pub(super) fn scroll_current_view_down(&mut self, amount: usize) {
+        if let Some(kind) = self.current_page_scroll_kind() {
+            self.add_page_scroll(kind, amount);
+        } else {
+            self.scroll_down(amount.min(u16::MAX as usize) as u16);
+        }
+    }
+
+    pub(super) fn scroll_current_view_up(&mut self, amount: usize) {
+        if let Some(kind) = self.current_page_scroll_kind() {
+            self.subtract_page_scroll(kind, amount);
+        } else {
+            self.scroll_up(amount.min(u16::MAX as usize) as u16);
+        }
+    }
+
+    pub(super) fn scroll_current_view_to_top(&mut self) {
+        if let Some(kind) = self.current_page_scroll_kind() {
+            *self.page_scroll_mut(kind) = 0;
+        } else {
+            self.scroll_to_top();
+        }
+    }
+
+    pub(super) fn scroll_current_view_to_bottom(&mut self) {
+        if let Some(kind) = self.current_page_scroll_kind() {
+            *self.page_scroll_mut(kind) = usize::MAX;
+        } else {
+            self.scroll_to_bottom();
+        }
+    }
+
+    fn current_page_scroll_kind(&self) -> Option<PageScrollKind> {
+        page_scroll_kind(&self.shell_view(), self.router.catalog().is_expanded())
     }
 
     fn handle_catalog_row_hotkey(&mut self, key: KeyEvent) -> bool {
@@ -37,7 +73,7 @@ impl ShellApp {
     }
 
     pub(super) fn page_down_current_view(&mut self) {
-        let step = VIEWPORT_PAGE_LINES;
+        let step = self.current_page_step();
         if self.page_findings_down() {
             return;
         }
@@ -53,7 +89,7 @@ impl ShellApp {
     }
 
     pub(super) fn page_up_current_view(&mut self) {
-        let step = VIEWPORT_PAGE_LINES;
+        let step = self.current_page_step();
         if self.page_findings_up() {
             return;
         }
@@ -66,6 +102,13 @@ impl ShellApp {
         if self.is_scrollable_view() {
             self.scroll_up(step as u16);
         }
+    }
+
+    fn current_page_step(&self) -> usize {
+        if self.shell_view() == ShellView::Keymap {
+            return usize::from(self.viewport().rows.saturating_sub(11)).max(1);
+        }
+        VIEWPORT_PAGE_LINES
     }
 
     fn page_findings_down(&mut self) -> bool {
@@ -118,11 +161,18 @@ impl ShellApp {
     }
 
     pub(super) fn is_scrollable_view(&self) -> bool {
-        match &self.shell_view() {
+        self.is_view_scrollable(self.shell_view())
+    }
+
+    pub(super) fn is_view_scrollable(&self, view: ShellView) -> bool {
+        match view {
             ShellView::Catalog => true,
             ShellView::Help
+            | ShellView::Module
             | ShellView::Quickstart
             | ShellView::Logs
+            | ShellView::Config
+            | ShellView::Permissions
             | ShellView::Health
             | ShellView::Keymap
             | ShellView::Tools

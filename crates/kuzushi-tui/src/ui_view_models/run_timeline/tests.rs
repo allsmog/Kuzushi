@@ -83,7 +83,10 @@ fn run_timeline_model_filters_active_scan_from_past_runs() {
     let model = run_timeline_model(&app, 20);
 
     assert_eq!(model.rows.len(), 1);
-    assert_eq!(model.rows[0].cells[0], "r-2026…T14-31");
+    assert_eq!(
+        model.rows[0].cells[0],
+        crate::app::compact_run_reference("r-2026-05-06T14-31")
+    );
     assert_eq!(model.rows[0].tone, PastRunStatus::Running);
     assert_eq!(model.rows[0].cells[2], "3");
     assert_eq!(model.rows[0].cells[3], "rev:unknown");
@@ -183,7 +186,10 @@ fn run_timeline_model_surfaces_malformed_run_metadata() {
     let model = run_timeline_model(&app, 20);
 
     assert_eq!(model.rows.len(), 1);
-    assert_eq!(model.rows[0].cells[0], "r-bad-run-json");
+    assert_eq!(
+        model.rows[0].cells[0],
+        crate::app::compact_run_reference("r-bad-run-json")
+    );
     assert_eq!(model.rows[0].cells[1], "malformed");
     assert_eq!(model.rows[0].cells[2], "\u{2014}");
     assert_eq!(model.rows[0].cells[3], "rev:unknown");
@@ -208,7 +214,10 @@ fn run_timeline_model_surfaces_non_object_run_metadata() {
     let model = run_timeline_model(&app, 20);
 
     assert_eq!(model.rows.len(), 1);
-    assert_eq!(model.rows[0].cells[0], "r-array-run-json");
+    assert_eq!(
+        model.rows[0].cells[0],
+        crate::app::compact_run_reference("r-array-run-json")
+    );
     assert_eq!(model.rows[0].cells[1], "malformed");
     assert_eq!(model.rows[0].cells[3], "rev:unknown");
     assert_eq!(
@@ -232,7 +241,10 @@ fn run_timeline_model_surfaces_non_file_run_metadata() {
     let model = run_timeline_model(&app, 20);
 
     assert_eq!(model.rows.len(), 1);
-    assert_eq!(model.rows[0].cells[0], "r-unre…n-json");
+    assert_eq!(
+        model.rows[0].cells[0],
+        crate::app::compact_run_reference("r-unreadable-run-json")
+    );
     assert_eq!(model.rows[0].cells[1], "malformed");
     assert_eq!(model.rows[0].cells[3], "rev:unknown");
     assert_eq!(
@@ -255,7 +267,10 @@ fn run_timeline_model_surfaces_missing_run_metadata() {
     let model = run_timeline_model(&app, 20);
 
     assert_eq!(model.rows.len(), 1);
-    assert_eq!(model.rows[0].cells[0], "r-miss…n-json");
+    assert_eq!(
+        model.rows[0].cells[0],
+        crate::app::compact_run_reference("r-missing-run-json")
+    );
     assert_eq!(model.rows[0].cells[1], "—");
     assert_eq!(model.rows[0].cells[2], "\u{2014}");
     assert_eq!(model.rows[0].cells[3], "rev:unknown");
@@ -275,6 +290,26 @@ fn completed_summary(run_id: &str, findings: u64) -> RunSummary {
         .complete()
 }
 
+#[test]
+fn timeline_run_reference_is_copyable_and_resolvable() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_id = "scan-1783894713-68385f526477";
+    write_status_run(temp.path(), run_id, "completed", 7);
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
+
+    let model = run_timeline_model(&app, 20);
+    let displayed = model.rows[0].cells[0].as_str();
+
+    assert!(!displayed.contains('…'));
+    assert_eq!(
+        crate::app::resolve_run_reference(displayed, [run_id]),
+        crate::app::RunReferenceResolution::Resolved(run_id.to_string())
+    );
+}
+
 fn assert_status_row(
     model: &RunTimelineModel,
     run_id: &str,
@@ -282,10 +317,11 @@ fn assert_status_row(
     tone: PastRunStatus,
     findings: &str,
 ) {
+    let reference = crate::app::compact_run_reference(run_id);
     let row = model
         .rows
         .iter()
-        .find(|row| row.cells[0] == run_id)
+        .find(|row| row.cells[0] == reference)
         .unwrap_or_else(|| panic!("missing row for {run_id}"));
     assert_eq!(row.cells[1], status);
     assert_eq!(row.cells[2], findings);

@@ -111,12 +111,8 @@ jobs:
 
   # ── Rust lint: clippy as a hard gate ─────────────────────────────────────
   # clippy is hard-blocking via the workspace `[workspace.lints.clippy]`
-  # baseline in Cargo.toml. `cargo fmt --check` is intentionally NOT a hard
-  # gate yet: the tree carries pre-existing rustfmt drift, and a workspace-wide
-  # `cargo fmt` would churn dozens of files and re-touch pre-existing
-  # over-complexity functions, tripping the CRAP-risk gate on the diff. The
-  # check runs for visibility but does not fail the build; promote it to hard
-  # once a dedicated formatting-only PR lands and the drift is zero.
+  # baseline in Cargo.toml. Formatting is also hard-blocking: the workspace is
+  # rustfmt-clean, so new drift must fail where it is introduced.
   rust-lint:
     name: rust-lint
     runs-on: ubuntu-latest
@@ -127,8 +123,7 @@ jobs:
         with:
           inherit-toolchain: true
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: rustfmt drift (informational)
-        continue-on-error: true
+      - name: rustfmt
         run: cargo fmt --all --check
 
   # ── Dependency advisories, license policy, duplicate bans ────────────────
@@ -140,7 +135,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          command: check advisories licenses sources
+          command: check advisories licenses bans sources
 
   # ── Rust CLI build + tests ───────────────────────────────────────────────
   rust-cli:
@@ -165,6 +160,33 @@ jobs:
           path: native/
           if-no-files-found: error
           retention-days: 7
+
+  # The published package supports Node 22+, while the primary jobs exercise
+  # the forward-compatibility lane on Node 26. Keep the declared minimum honest
+  # before a release tag by running the complete package contract on Node 22.
+  node22-compat:
+    name: node22-compat
+    needs: rust-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.11.0"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Download native artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: native-linux-x64
+          path: native/
+      - run: chmod -R +x native/
+      - run: pnpm check:types
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm verify:pack
 
   # ── Tests with coverage inline (parallel after install) ──────────────────
   # `test:coverage` is a superset of `test` — we do not run both.

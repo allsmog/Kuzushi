@@ -12,17 +12,15 @@ pub(in crate::modules) fn build_context_snapshot(
     let options = context_build_options(&input)?;
 
     emit_context_build_start(ctx, workspace.root());
-    emit_context_build_step(ctx, "scanning repository files".to_string());
+    emit_context_build_stage(ctx, ContextBuildStage::ScanFiles, None);
     let file_sample = collect_context_file_sample(workspace.root(), options.sample_limit)?;
-    emit_context_build_step(
-        ctx,
-        format!(
-            "indexed {} files · building snapshot",
-            file_sample.files_indexed
-        ),
-    );
-    let snapshot = context_snapshot_value(workspace.root(), &options, &file_sample)?;
-    emit_context_build_step(ctx, "writing snapshot".to_string());
+    let snapshot =
+        context_snapshot_value_with_progress(workspace.root(), &options, &file_sample, |stage| {
+            let detail = (stage == ContextBuildStage::InferRepository)
+                .then(|| format!("{} files indexed", file_sample.files_indexed));
+            emit_context_build_stage(ctx, stage, detail);
+        })?;
+    emit_context_build_stage(ctx, ContextBuildStage::WriteSnapshot, None);
     let snapshot_path = save_context_snapshot(workspace.root(), &snapshot)?;
     emit_context_build_done(ctx, file_sample.files_indexed);
     let state_dir = workspace.state_dir();
@@ -150,8 +148,20 @@ fn context_snapshot_value(
     options: &ContextBuildOptions,
     file_sample: &ContextFileSample,
 ) -> Result<Value> {
+    context_snapshot_value_with_progress(root, options, file_sample, |_| {})
+}
+
+fn context_snapshot_value_with_progress(
+    root: &Path,
+    options: &ContextBuildOptions,
+    file_sample: &ContextFileSample,
+    mut progress: impl FnMut(ContextBuildStage),
+) -> Result<Value> {
+    progress(ContextBuildStage::InferRepository);
     let repo_context = infer_repo_context(root, &file_sample.files_sample)?;
+    progress(ContextBuildStage::BuildInventory);
     let repository_inventory = crate::repository_inventory::build_repository_inventory(root)?;
+    progress(ContextBuildStage::MapAttackSurface);
     let attack_surface_map = crate::attack_surface::build_attack_surface_map_from_inventory(
         root,
         &repository_inventory,
@@ -174,6 +184,37 @@ fn context_snapshot_value(
         "filesIndexed": file_sample.files_indexed,
         "filesSample": file_sample.files_sample,
     }))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContextBuildStage {
+    ScanFiles,
+    InferRepository,
+    BuildInventory,
+    MapAttackSurface,
+    WriteSnapshot,
+}
+
+impl ContextBuildStage {
+    fn position(self) -> usize {
+        match self {
+            Self::ScanFiles => 1,
+            Self::InferRepository => 2,
+            Self::BuildInventory => 3,
+            Self::MapAttackSurface => 4,
+            Self::WriteSnapshot => 5,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::ScanFiles => "scanning repository files",
+            Self::InferRepository => "inferring repository context",
+            Self::BuildInventory => "building repository inventory",
+            Self::MapAttackSurface => "mapping attack surface",
+            Self::WriteSnapshot => "writing context snapshot",
+        }
+    }
 }
 
 fn file_index(file_sample: &ContextFileSample) -> Value {
@@ -228,11 +269,18 @@ fn emit_context_build_start(ctx: &ToolExecutionContext<'_>, root: &Path) {
     }
 }
 
-/// Emit an in-progress sub-step so the Activity view shows what context:build
-/// is doing during its otherwise-silent (multi-second) file scan, and so the
-/// task row reflects the current phase instead of just spinning.
-fn emit_context_build_step(ctx: &ToolExecutionContext<'_>, label: String) {
+/// Emit each in-progress assembly stage so Activity can show the current work
+/// and the age of the last real progress signal instead of only spinning.
+fn emit_context_build_stage(
+    ctx: &ToolExecutionContext<'_>,
+    stage: ContextBuildStage,
+    detail: Option<String>,
+) {
     if let Some(trace) = ctx.trace {
+        let detail = detail
+            .map(|value| format!(" · {value}"))
+            .unwrap_or_default();
+        let label = format!("stage {}/5 · {}{}", stage.position(), stage.label(), detail);
         let _ = trace.step("tool-progress", "build", label).emit();
     }
 }
@@ -281,5 +329,42 @@ fn plural_suffix(count: usize) -> &'static str {
         ""
     } else {
         "s"
+    }
+}
+
+#[cfg(test)]
+mod stage_tests {
+    use super::*;
+
+    #[test]
+    fn context_snapshot_reports_each_expensive_assembly_stage_in_order() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
+        let sample = ContextFileSample {
+            files_indexed: 1,
+            files_sample: vec!["src/lib.rs".to_string()],
+        };
+        let options = ContextBuildOptions {
+            sample_limit: 10,
+            discovery: "auto".to_string(),
+            enrichment: false,
+            scope: "all".to_string(),
+        };
+        let mut stages = Vec::new();
+
+        context_snapshot_value_with_progress(temp.path(), &options, &sample, |stage| {
+            stages.push(stage)
+        })
+        .unwrap();
+
+        assert_eq!(
+            stages,
+            vec![
+                ContextBuildStage::InferRepository,
+                ContextBuildStage::BuildInventory,
+                ContextBuildStage::MapAttackSurface,
+            ]
+        );
     }
 }

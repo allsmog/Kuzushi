@@ -259,15 +259,15 @@ fn discover_pnpm_workspace_members(root: &Path) -> Vec<String> {
     let Some(body) = read_workspace_manifest(root, "pnpm-workspace.yaml") else {
         return Vec::new();
     };
-    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&body) else {
+    let Ok(value) = crate::yaml::parse_value(&body) else {
         return Vec::new();
     };
     let members = value
         .get("packages")
-        .and_then(serde_yaml::Value::as_sequence)
+        .and_then(serde_json::Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(serde_yaml::Value::as_str)
+        .filter_map(serde_json::Value::as_str)
         .flat_map(|pattern| expand_workspace_member_pattern(root, pattern))
         .collect::<Vec<_>>();
     existing_member_paths(root, members)

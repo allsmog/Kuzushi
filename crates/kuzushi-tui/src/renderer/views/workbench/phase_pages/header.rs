@@ -12,11 +12,27 @@ pub(in crate::renderer::views) fn phase_header_lines(
     if let Some(rail) = phase_rail_line(&header.phase_rail, width) {
         lines.push(rail);
     }
+    if let Some(filter) = header.finding_filter.as_deref() {
+        lines.push(finding_filter_line(filter, width));
+    }
     lines.extend(next_lines(header, width));
     if width >= 80 && !hints.is_empty() {
         lines.push(command_hint_line(hints, width));
     }
     lines
+}
+
+fn finding_filter_line(filter: &str, width: usize) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(" FILTER ", theme::warn()),
+        Span::styled(
+            fit(
+                &format!("{filter} · clear: findings filter clear"),
+                width.saturating_sub(8),
+            ),
+            theme::primary(),
+        ),
+    ])
 }
 
 fn identity_line(header: &EngagementHeaderModel, width: usize) -> Line<'static> {
@@ -35,7 +51,14 @@ fn identity_atoms(header: &EngagementHeaderModel) -> Vec<(String, ratatui::style
         (format!("view {}", header.phase.word()), theme::label()),
         live_atom(header.live),
     ];
-    if header.cost_usd > 0.0 {
+    if header.cost_invalid {
+        atoms.push(("cost invalid".to_string(), theme::danger()));
+    } else if !header.cost_complete {
+        atoms.push((
+            format!("cost >=${:.2} incomplete", header.cost_usd),
+            theme::warn(),
+        ));
+    } else if header.cost_usd > 0.0 {
         atoms.push((format!("cost ${:.2}", header.cost_usd), theme::primary()));
     }
     atoms.extend([
@@ -178,6 +201,22 @@ mod tests {
     use super::*;
     use kuzushi_core::V2Config;
     use std::time::{Duration, Instant};
+
+    fn line_text(line: Line<'static>) -> String {
+        line.spans
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn compact_filter_line_names_the_active_filter_and_reset_command() {
+        let text = line_text(finding_filter_line("severity:high", 60));
+
+        assert!(text.contains("FILTER"), "{text}");
+        assert!(text.contains("severity:high"), "{text}");
+        assert!(text.contains("findings filter clear"), "{text}");
+    }
 
     #[test]
     fn reduced_motion_freezes_live_pulse_but_keeps_elapsed_redraws_due() {

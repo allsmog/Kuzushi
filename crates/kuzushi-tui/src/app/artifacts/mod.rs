@@ -106,9 +106,10 @@ pub fn record_agent_run_completed(
     run_id: &str,
     answer_chars: usize,
     latency_ms: Option<u64>,
-    cost_usd: Option<f64>,
+    audit: &AgentCallAudit,
 ) -> anyhow::Result<()> {
     let Some(target) = target else { return Ok(()) };
+    let cost = audit.settlement_cost();
     let result = serde_json::json!({
         "ok": true,
         "status": "completed",
@@ -117,10 +118,13 @@ pub fn record_agent_run_completed(
         "artifacts": [],
         "warnings": [],
         "errors": [],
-        "costUsd": cost_usd,
+        "costUsd": cost.exact_usd(),
+        "observedCostUsd": incomplete_observed_cost(cost),
+        "providerSpendUnresolved": !cost.is_complete(),
         "data": {
             "answerChars": answer_chars,
             "latencyMs": latency_ms,
+            "callAttempted": audit.call_attempted,
         },
     });
     kuzushi_core::run_artifacts::try_record_tool_run_complete(
@@ -133,28 +137,28 @@ pub fn record_agent_run_failed(
     target: Option<&std::path::Path>,
     run_id: &str,
     error: &str,
-    cost_usd: Option<f64>,
+    audit: &AgentCallAudit,
 ) -> anyhow::Result<()> {
     let Some(target) = target else { return Ok(()) };
     kuzushi_core::run_artifacts::try_record_tool_run_failed(
         agent_run_record(target, run_id),
         error,
     )?;
-    update_recorded_run_cost(target, run_id, cost_usd)
+    update_recorded_run_cost(target, run_id, audit.settlement_cost())
 }
 
 pub fn record_agent_run_canceled(
     target: Option<&std::path::Path>,
     run_id: &str,
     reason: &str,
-    cost_usd: Option<f64>,
+    audit: &AgentCallAudit,
 ) -> anyhow::Result<()> {
     let Some(target) = target else { return Ok(()) };
     kuzushi_core::run_artifacts::try_record_tool_run_canceled(
         agent_run_record(target, run_id),
         reason,
     )?;
-    update_recorded_run_cost(target, run_id, cost_usd)
+    update_recorded_run_cost(target, run_id, audit.settlement_cost())
 }
 
 fn agent_run_record<'a>(
@@ -167,13 +171,14 @@ fn agent_run_record<'a>(
 fn update_recorded_run_cost(
     target: &std::path::Path,
     run_id: &str,
-    cost_usd: Option<f64>,
+    cost: kuzushi_core::runtime::RuntimeCostReport,
 ) -> anyhow::Result<()> {
-    let Some(cost_usd) = cost_usd else {
-        return Ok(());
-    };
     let summary = kuzushi_core::load_run_summary(target, run_id)?;
-    kuzushi_core::write_run_summary(target, &summary.with_cost(Some(cost_usd))).map(|_| ())
+    kuzushi_core::write_run_summary(target, &summary.with_cost_report(cost)).map(|_| ())
+}
+
+fn incomplete_observed_cost(cost: kuzushi_core::runtime::RuntimeCostReport) -> Option<f64> {
+    (!cost.is_complete() && !cost.is_unavailable()).then_some(cost.observed_usd())
 }
 
 pub fn write_run_failure_handoff(
@@ -291,10 +296,13 @@ pub fn append_llm_trace_step(
     audit: &AgentCallAudit,
 ) -> anyhow::Result<()> {
     let Some(target) = target else { return Ok(()) };
-    let step = kuzushi_core::RunTraceStep::new(0, kind.to_string(), label.to_string())
+    let mut step = kuzushi_core::RunTraceStep::new(0, kind.to_string(), label.to_string())
         .with_latency_ms(latency_ms)
-        .with_cost_usd(audit.cost_usd)
+        .with_call_attempted(audit.call_attempted)
         .with_model_metadata(&audit.model, &audit.provider, &audit.prompt_hash);
+    if audit.call_attempted {
+        step = step.with_cost_report(audit.settlement_cost());
+    }
     kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step)
         .map(|_| ())
 }

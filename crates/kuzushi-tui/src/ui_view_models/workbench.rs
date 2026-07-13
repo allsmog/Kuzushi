@@ -110,6 +110,14 @@ pub(crate) struct WorkbenchViewModel {
     pub(crate) zoom: Option<WorkbenchPane>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WorkbenchChromeModel {
+    pub(crate) page: WorkbenchPage,
+    pub(crate) top_bar: WorkbenchTopBar,
+    pub(crate) command_bar_hints: Vec<WorkbenchHint>,
+    pub(crate) zoom: Option<WorkbenchPane>,
+}
+
 pub(crate) const WORKBENCH_REPORT_COMMAND: &str = "findings export report.sarif sarif";
 
 const REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
@@ -119,7 +127,7 @@ const REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     },
     WorkbenchHint {
         verb: Cow::Borrowed("scan"),
-        label: "run scan",
+        label: "guided plan",
     },
     WorkbenchHint {
         verb: Cow::Borrowed("options sast:scan"),
@@ -201,18 +209,67 @@ pub(crate) fn workbench_view_model(app: &ShellApp) -> WorkbenchViewModel {
     let review_queue = review_queue_model(app, review_mode);
     let report_cta = report_cta(state, right_list.total, review_mode);
     let right_detail = selected_finding_detail_model(app);
+    let chrome = chrome_model(
+        app,
+        page,
+        report_cta.clone(),
+        right_detail.is_some(),
+        right_detail
+            .as_ref()
+            .map(|detail| detail.fingerprint.as_str()),
+    );
     WorkbenchViewModel {
         page,
-        top_bar: top_bar_model(app, page),
+        top_bar: chrome.top_bar,
         left: source_tree_model(app),
-        center: center_model(app),
+        center: center_model(app, right_detail.as_ref()),
         right_list,
         review_queue,
-        command_bar_hints: command_bar_hints(page, report_cta.clone(), right_detail.as_ref()),
+        command_bar_hints: chrome.command_bar_hints,
         right_detail,
         report_cta,
         state,
         focus: app.router.workbench().focus(),
+        zoom: chrome.zoom,
+    }
+}
+
+pub(crate) fn workbench_chrome_model(
+    app: &ShellApp,
+    page: WorkbenchPage,
+    detail: Option<&FindingDetailModel>,
+) -> WorkbenchChromeModel {
+    workbench_chrome_model_for_selection(
+        app,
+        page,
+        detail.is_some(),
+        detail.map(|detail| detail.fingerprint.as_str()),
+    )
+}
+
+pub(crate) fn workbench_chrome_model_for_selection(
+    app: &ShellApp,
+    page: WorkbenchPage,
+    has_detail: bool,
+    fingerprint: Option<&str>,
+) -> WorkbenchChromeModel {
+    let state = workbench_state(app);
+    let mode = active_review_queue_mode(app);
+    let report_cta = report_cta(state, super::visible_findings_len(app), mode);
+    chrome_model(app, page, report_cta, has_detail, fingerprint)
+}
+
+fn chrome_model(
+    app: &ShellApp,
+    page: WorkbenchPage,
+    report_cta: Option<WorkbenchHint>,
+    has_detail: bool,
+    fingerprint: Option<&str>,
+) -> WorkbenchChromeModel {
+    WorkbenchChromeModel {
+        page,
+        top_bar: top_bar_model(app, page),
+        command_bar_hints: command_bar_hints(page, report_cta, has_detail, fingerprint),
         zoom: app.router.workbench().zoom().pane(),
     }
 }
@@ -268,25 +325,55 @@ pub(crate) fn active_workbench_page(app: &ShellApp) -> WorkbenchPage {
 fn command_bar_hints(
     page: WorkbenchPage,
     report_cta: Option<WorkbenchHint>,
-    detail: Option<&FindingDetailModel>,
+    has_detail: bool,
+    fingerprint: Option<&str>,
 ) -> Vec<WorkbenchHint> {
+    if page == WorkbenchPage::Review && has_detail {
+        return review_decision_hints(report_cta);
+    }
     let mut hints = page_command_bar_hints(page);
-    if page == WorkbenchPage::Ship {
-        replace_patch_hint(&mut hints, detail);
-    }
-    if let Some(report_cta) = report_cta.as_ref() {
-        replace_report_hint(&mut hints, report_cta);
-    }
-    if let Some(report_cta) =
-        report_cta.filter(|cta| !hints.iter().any(|hint| hint.verb == cta.verb))
-    {
-        hints.push(report_cta);
-    }
+    customize_page_hints(&mut hints, page, fingerprint);
+    append_report_hint(&mut hints, report_cta);
     hints
 }
 
-fn replace_patch_hint(hints: &mut [WorkbenchHint], detail: Option<&FindingDetailModel>) {
-    let Some(detail) = detail else {
+fn review_decision_hints(report_cta: Option<WorkbenchHint>) -> Vec<WorkbenchHint> {
+    let mut hints = vec![
+        WorkbenchHint {
+            verb: Cow::Borrowed("decision confirmed|false-positive|suppressed <reason>"),
+            label: "review",
+        },
+        WorkbenchHint {
+            verb: Cow::Borrowed("dismiss false_positive <note>"),
+            label: "dismiss",
+        },
+    ];
+    hints.extend(report_cta);
+    hints
+}
+
+fn customize_page_hints(
+    hints: &mut [WorkbenchHint],
+    page: WorkbenchPage,
+    fingerprint: Option<&str>,
+) {
+    if page == WorkbenchPage::Ship {
+        replace_patch_hint(hints, fingerprint);
+    }
+}
+
+fn append_report_hint(hints: &mut Vec<WorkbenchHint>, report_cta: Option<WorkbenchHint>) {
+    let Some(report_cta) = report_cta else {
+        return;
+    };
+    replace_report_hint(hints, &report_cta);
+    if !hints.iter().any(|hint| hint.verb == report_cta.verb) {
+        hints.push(report_cta);
+    }
+}
+
+fn replace_patch_hint(hints: &mut [WorkbenchHint], fingerprint: Option<&str>) {
+    let Some(fingerprint) = fingerprint else {
         return;
     };
     let Some(hint) = hints.iter_mut().find(|hint| hint.label == "patch selected") else {
@@ -294,7 +381,7 @@ fn replace_patch_hint(hints: &mut [WorkbenchHint], detail: Option<&FindingDetail
     };
     hint.verb = Cow::Owned(format!(
         "run patch:finding {{\"fingerprint\":\"{}\"}}",
-        detail.fingerprint
+        fingerprint
     ));
 }
 
@@ -364,10 +451,10 @@ fn target_label(app: &ShellApp) -> String {
         .unwrap_or_else(|| "all modules".to_string())
 }
 
-fn center_model(app: &ShellApp) -> WorkbenchCenter {
+fn center_model(app: &ShellApp, detail: Option<&FindingDetailModel>) -> WorkbenchCenter {
     let code = selected_finding_code_model(app);
     let active_mode = app.router.workbench().center_mode();
-    let context = center_context(app);
+    let context = center_context(detail);
     let tabs = center_tabs(app, code.as_ref(), active_mode);
     let body = center_body(app, code, active_mode);
     WorkbenchCenter {
@@ -437,8 +524,8 @@ fn center_tab_empty(
     }
 }
 
-fn center_context(app: &ShellApp) -> Option<String> {
-    let detail = selected_finding_detail_model(app)?;
+fn center_context(detail: Option<&FindingDetailModel>) -> Option<String> {
+    let detail = detail?;
     Some(format!(
         "{} · {}",
         detail.alias.as_deref().unwrap_or("selected"),
@@ -800,6 +887,13 @@ mod tests {
         assert_eq!(model.state, WorkbenchState::FindingDetail);
         assert!(model.right_detail.is_some());
         assert!(matches!(model.center.body, WorkbenchCenterBody::Code(_)));
+        assert!(model.command_bar_hints.iter().any(|hint| {
+            hint.verb.contains("false-positive") && hint.verb.contains("suppressed")
+        }));
+        assert!(model
+            .command_bar_hints
+            .iter()
+            .any(|hint| hint.verb.starts_with("dismiss ")));
     }
 
     #[test]
@@ -903,7 +997,10 @@ mod tests {
         let model = workbench_view_model(&app);
 
         assert_eq!(model.review_queue.completeness_mode, "open");
-        assert_eq!(model.review_queue.filter_label, "completeness:open");
+        assert_eq!(
+            model.review_queue.filter_label,
+            "decision:needs_review completeness:open"
+        );
         assert_eq!(model.review_queue.visible_count, 1);
     }
 
@@ -916,7 +1013,10 @@ mod tests {
         let model = workbench_view_model(&app);
 
         assert_eq!(model.review_queue.completeness_mode, "all");
-        assert_eq!(model.review_queue.filter_label, "completeness:all");
+        assert_eq!(
+            model.review_queue.filter_label,
+            "completeness:open completeness:complete"
+        );
     }
 
     #[test]

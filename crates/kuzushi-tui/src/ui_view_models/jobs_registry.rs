@@ -1,7 +1,7 @@
 use super::ui_runs_root_relative_path;
 use crate::app::JobKind;
-use crate::{ActivitySession, DagTaskState, ShellApp};
-use kuzushi_core::list_run_summaries;
+use crate::{ActivitySession, DagTaskState, RunSummaryEntriesState, ShellApp, ViewDataState};
+use kuzushi_core::{RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue};
 use std::collections::HashSet;
 
 /// Lifecycle state of a registry row. The registry can only ever show **one**
@@ -23,6 +23,7 @@ pub(crate) enum JobRunStatus {
     Interrupted,
     Partial,
     Skipped,
+    Malformed,
     Unknown,
 }
 
@@ -38,6 +39,7 @@ impl JobRunStatus {
             JobRunStatus::Interrupted => "interrupted",
             JobRunStatus::Partial => "partial",
             JobRunStatus::Skipped => "skipped",
+            JobRunStatus::Malformed => "malformed",
             JobRunStatus::Unknown => "—",
         }
     }
@@ -87,21 +89,32 @@ pub(crate) struct JobRow {
 pub(crate) struct JobsRegistryModel {
     pub(crate) rows: Vec<JobRow>,
     pub(crate) live_count: usize,
+    pub(crate) history_state: JobHistoryState,
     pub(crate) runs_root_hint: &'static str,
 }
 
-/// Pure builder. The only side effect is the on-disk read of recent run
-/// summaries (same pattern as `run_timeline_model`). Live rows come first
-/// (Running, then Queued), then recent disk rows de-duped by `run_id` so a
-/// live run's still-`running` on-disk twin never appears twice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum JobHistoryState {
+    NoTarget,
+    NotRequested,
+    Loading,
+    Ready,
+    Failed(String),
+}
+
+/// Pure projection over live state and the asynchronously hydrated run-history
+/// page. Live rows come first (Running, then Queued), then recent disk rows
+/// de-duped by `run_id` so a live run's still-`running` disk twin never appears
+/// twice. This function never reads or repairs run artifacts.
 pub(crate) fn jobs_registry_model(app: &ShellApp, disk_limit: usize) -> JobsRegistryModel {
     let live = live_job_rows(app);
     let live_ids: HashSet<String> = live.iter().map(|row| row.run_id.clone()).collect();
     let live_count = live.len();
+    let (disk_rows, history_state) = hydrated_disk_job_rows(app, disk_limit);
 
     let mut rows = live;
     rows.extend(
-        disk_job_rows(app, disk_limit)
+        disk_rows
             .into_iter()
             .filter(|row| !live_ids.contains(&row.run_id)),
     );
@@ -109,6 +122,7 @@ pub(crate) fn jobs_registry_model(app: &ShellApp, disk_limit: usize) -> JobsRegi
     JobsRegistryModel {
         rows,
         live_count,
+        history_state,
         runs_root_hint: ui_runs_root_relative_path(),
     }
 }
@@ -219,21 +233,62 @@ fn queued_job_rows(app: &ShellApp) -> Vec<JobRow> {
         .collect()
 }
 
-fn disk_job_rows(app: &ShellApp, disk_limit: usize) -> Vec<JobRow> {
+fn hydrated_disk_job_rows(app: &ShellApp, disk_limit: usize) -> (Vec<JobRow>, JobHistoryState) {
     let Some(target) = app.target() else {
-        return Vec::new();
+        return (Vec::new(), JobHistoryState::NoTarget);
     };
-    let Ok(summaries) = list_run_summaries(target) else {
-        return Vec::new();
-    };
-    summaries
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_run_summary_entries(Some(target))
+    {
+        ViewDataState::Ready(RunSummaryEntriesState::Ready(entries)) => {
+            (disk_job_rows(entries, disk_limit), JobHistoryState::Ready)
+        }
+        ViewDataState::Ready(RunSummaryEntriesState::Failed(error)) => {
+            (Vec::new(), JobHistoryState::Failed(error))
+        }
+        ViewDataState::Loading => (Vec::new(), JobHistoryState::Loading),
+        ViewDataState::NotRequested => (Vec::new(), JobHistoryState::NotRequested),
+    }
+}
+
+fn disk_job_rows(entries: Vec<RunSummaryEntry>, disk_limit: usize) -> Vec<JobRow> {
+    entries
         .into_iter()
         .take(disk_limit)
-        .map(disk_job_row)
+        .map(disk_job_row_from_entry)
         .collect()
 }
 
-fn disk_job_row(summary: kuzushi_core::RunSummary) -> JobRow {
+fn disk_job_row_from_entry(entry: RunSummaryEntry) -> JobRow {
+    let RunSummaryEntry {
+        run_id,
+        path,
+        state,
+    } = entry;
+    match state {
+        RunSummaryEntryState::Ready(summary) => disk_summary_job_row(summary),
+        RunSummaryEntryState::Issue(issue) => disk_issue_job_row(run_id, path, issue),
+    }
+}
+
+fn disk_issue_job_row(run_id: String, path: std::path::PathBuf, issue: RunSummaryIssue) -> JobRow {
+    JobRow {
+        run_id,
+        kind: "history".to_string(),
+        label: format!("run history issue: {issue:?}"),
+        status: JobRunStatus::Malformed,
+        elapsed_secs: None,
+        phase: None,
+        findings: None,
+        target: path.display().to_string(),
+        source: JobSource::Disk,
+        cancelable: false,
+    }
+}
+
+fn disk_summary_job_row(summary: kuzushi_core::RunSummary) -> JobRow {
     let elapsed_secs = summary
         .completed_at_unix
         .map(|completed| completed.saturating_sub(summary.started_at_unix));

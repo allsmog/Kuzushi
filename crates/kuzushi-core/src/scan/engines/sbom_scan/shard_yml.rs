@@ -1,8 +1,10 @@
 use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use serde_yaml::{Mapping, Value};
+use serde_json::Value;
 use std::path::Path;
+
+type Mapping = serde_json::Map<String, Value>;
 
 const DEPENDENCY_SCOPES: &[&str] = &["dependencies", "development_dependencies"];
 
@@ -17,7 +19,7 @@ pub(super) fn shard_components(
     path: &Path,
     text: &str,
 ) -> Result<Vec<SbomComponent>> {
-    let value: Value = serde_yaml::from_str(text).context("sbom-scan: parse shard.yml")?;
+    let value = crate::yaml::parse_value(text).context("sbom-scan: parse shard.yml")?;
     Ok(dependencies(&value)
         .map(|dependency| {
             component(
@@ -35,7 +37,7 @@ pub(super) fn shard_components(
 pub(super) fn shard_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_yaml::from_str(&text).context("sbom-scan: parse shard.yml")?;
+    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse shard.yml")?;
     let source = relative_display(target, path);
     Ok(dependencies(&value)
         .map(|dependency| SbomDependencyEdge {
@@ -59,14 +61,12 @@ fn dependencies(value: &Value) -> impl Iterator<Item = ShardDependency<'_>> {
 }
 
 fn dependency_table<'a>(value: &'a Value, scope: &str) -> Option<&'a Mapping> {
-    value.get(scope).and_then(Value::as_mapping)
+    value.get(scope).and_then(Value::as_object)
 }
 
-fn dependency_name<'a>(scope: &'a str, key: &'a Value) -> Option<ShardDependency<'a>> {
-    key.as_str()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(|name| ShardDependency { scope, name })
+fn dependency_name<'a>(scope: &'a str, key: &'a str) -> Option<ShardDependency<'a>> {
+    let name = key.trim();
+    (!name.is_empty()).then_some(ShardDependency { scope, name })
 }
 
 struct ShardDependency<'a> {

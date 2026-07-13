@@ -17,6 +17,6 @@ async fn main() -> Result<()> {
     }
 
     let info = ServerInfo::new("kuzushi-mcp-joern", PKG_VERSION);
-    let registry = tools::build_registry();
+    let registry = tools::build_registry()?;
     serve_stdio(info, registry).await
 }

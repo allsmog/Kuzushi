@@ -1,4 +1,5 @@
 use super::pr_comment::{load_pr_comment_input, pr_comment_chains_from_value};
+use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
 use kuzushi_core::{
     run_dir, write_run_summary, PrCommentPhaseCost, RunLlmCallAudit, RunSummary, WorkspaceTarget,
 };
@@ -24,6 +25,7 @@ fn load_pr_comment_input_reads_run_metadata_footer_fields() {
     let input = pr_comment_input_for_run(&workspace, "run-pr", None, None);
 
     assert_eq!(input.cost_usd, 1.25);
+    assert!(!input.provider_spend_unresolved);
     assert_eq!(input.elapsed, Some(Duration::from_secs(5)));
     assert_eq!(input.kuzushi_version.as_deref(), Some("0.24.0-test"));
     assert_eq!(input.model.as_deref(), Some("openai:gpt-test"));
@@ -31,6 +33,40 @@ fn load_pr_comment_input_reads_run_metadata_footer_fields() {
     assert_eq!(input.phase_costs, expected_phase_costs());
     assert_eq!(input.chains.len(), 1);
     assert_eq!(input.chains[0].id, "chain-1");
+}
+
+#[test]
+fn load_pr_comment_input_does_not_turn_missing_run_cost_into_exact_zero() {
+    let summary = RunSummary::running(
+        "run-unpriced",
+        "scan",
+        Some("triage:run".to_string()),
+        "/repo",
+    );
+    let (_tmp, workspace) = workspace_with_summary(&summary);
+
+    let input = pr_comment_input_for_run(&workspace, "run-unpriced", None, None);
+
+    assert_eq!(input.cost_usd, 0.0);
+    assert!(input.provider_spend_unresolved);
+}
+
+#[test]
+fn load_pr_comment_input_preserves_incomplete_observed_run_cost() {
+    let observed = RuntimeCost::from_usd(0.25, "test PR run cost").unwrap();
+    let summary = RunSummary::running(
+        "run-incomplete",
+        "scan",
+        Some("triage:run".to_string()),
+        "/repo",
+    )
+    .with_cost_report(RuntimeCostReport::incomplete(observed));
+    let (_tmp, workspace) = workspace_with_summary(&summary);
+
+    let input = pr_comment_input_for_run(&workspace, "run-incomplete", None, None);
+
+    assert_eq!(input.cost_usd, 0.25);
+    assert!(input.provider_spend_unresolved);
 }
 
 #[test]
@@ -125,6 +161,9 @@ fn llm_call(n: usize, verb: Option<&str>, cost_usd: f64) -> RunLlmCallAudit {
         prompt_hash: format!("sha256:{n}"),
         latency_ms: None,
         cost_usd: Some(cost_usd),
+        observed_cost_usd: None,
+        provider_spend_unresolved: false,
+        call_attempted: Some(true),
     }
 }
 

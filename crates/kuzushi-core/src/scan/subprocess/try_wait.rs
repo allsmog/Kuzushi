@@ -38,16 +38,24 @@ impl RegisteredChild {
 pub(in crate::scan) struct ManagedChild {
     pub(in crate::scan) child: Child,
     pub(in crate::scan) process_group_id: Option<u32>,
+    #[cfg(unix)]
+    pub(in crate::scan) parent_death_guard: Option<ParentDeathGuard>,
     #[cfg(windows)]
     pub(in crate::scan) job_handle: Option<isize>,
 }
 
-#[cfg(windows)]
 impl Drop for ManagedChild {
     fn drop(&mut self) {
-        if let Some(job_handle) = self.job_handle.take() {
-            unsafe {
-                windows_sys::Win32::Foundation::CloseHandle(job_handle as _);
+        #[cfg(unix)]
+        if let Some(mut guard) = self.parent_death_guard.take() {
+            guard.finish();
+        }
+        #[cfg(windows)]
+        {
+            if let Some(job_handle) = self.job_handle.take() {
+                unsafe {
+                    windows_sys::Win32::Foundation::CloseHandle(job_handle as _);
+                }
             }
         }
     }
@@ -59,6 +67,9 @@ pub(in crate::scan) fn kill_managed_child(child: &mut ManagedChild) {
         if let Some(process_group_id) = child.process_group_id {
             unsafe {
                 libc::killpg(process_group_id as libc::pid_t, libc::SIGKILL);
+            }
+            if let Some(mut guard) = child.parent_death_guard.take() {
+                guard.finish();
             }
             return;
         }
@@ -112,34 +123,10 @@ pub(in crate::scan) fn create_kill_on_close_job(child: &Child) -> Result<isize> 
     Ok(job as isize)
 }
 
-pub(crate) fn child_process_group_id(child: &Child) -> Option<u32> {
-    #[cfg(unix)]
-    {
-        Some(child.id())
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = child;
-        None
-    }
-}
-
-pub(crate) fn configure_scanner_process_group(command: &mut Command) {
-    #[cfg(unix)]
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setpgid(0, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-
-    #[cfg(not(unix))]
-    {
-        let _ = command;
-    }
+pub(crate) fn configure_scanner_process_group(
+    command: &mut Command,
+) -> Result<PreparedProcessGroup> {
+    PreparedProcessGroup::configure(command)
 }
 
 pub(in crate::scan) const SCANNER_ENV_ALLOWLIST: &[&str] = &[

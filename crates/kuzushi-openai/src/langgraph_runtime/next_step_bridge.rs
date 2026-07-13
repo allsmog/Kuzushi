@@ -139,7 +139,7 @@ fn ensure_next_step_preflight_ok(response: NextStepBridgeResponse) -> Result<()>
 }
 
 fn step_from_bridge_response(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {
-    match response.step.as_deref() {
+    let step = match response.step.as_deref() {
         Some("tool_call") => tool_call_step(response),
         Some("final") => Ok(AgentLoopStep::Final {
             text: response
@@ -152,7 +152,8 @@ fn step_from_bridge_response(response: NextStepBridgeResponse) -> Result<AgentLo
             "next-step bridge returned unexpected step: {:?}",
             other.unwrap_or("(missing)")
         ),
-    }
+    }?;
+    step.validate_cost()
 }
 
 fn tool_call_step(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {

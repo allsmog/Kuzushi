@@ -159,22 +159,20 @@ fn maven_pom_license(text: &str) -> Result<ManifestLicense> {
 }
 
 fn pubspec_yaml_license(text: &str) -> Result<ManifestLicense> {
-    let value: serde_yaml::Value =
-        serde_yaml::from_str(text).context("license-scan: parse pubspec.yaml")?;
+    let value = crate::yaml::parse_value(text).context("license-scan: parse pubspec.yaml")?;
     Ok(yaml_license_value(&value))
 }
 
 fn shard_yaml_license(text: &str) -> Result<ManifestLicense> {
-    let value: serde_yaml::Value =
-        serde_yaml::from_str(text).context("license-scan: parse shard.yml")?;
+    let value = crate::yaml::parse_value(text).context("license-scan: parse shard.yml")?;
     Ok(yaml_license_value(&value))
 }
 
-fn yaml_license_value(value: &serde_yaml::Value) -> ManifestLicense {
+fn yaml_license_value(value: &serde_json::Value) -> ManifestLicense {
     license_value(
         value
             .get("license")
-            .and_then(serde_yaml::Value::as_str)
+            .and_then(serde_json::Value::as_str)
             .and_then(nonempty_license),
     )
 }

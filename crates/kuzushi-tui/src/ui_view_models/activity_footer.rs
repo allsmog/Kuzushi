@@ -1,4 +1,4 @@
-use crate::{ActivityRouteState, ActivitySession};
+use crate::{ActivityRouteState, ActivitySession, InputMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityFooterModel {
@@ -29,7 +29,7 @@ macro_rules! footer_hint {
     };
 }
 
-const FULL_HINTS: &[ActivityFooterHint] = &[
+const NAV_FULL_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("j/k/g/G", "scroll"),
     footer_hint!("Tab", "pane"),
     footer_hint!("[/]", "views"),
@@ -40,13 +40,13 @@ const FULL_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("x", "reset view"),
     footer_hint!("Enter", "focus"),
     footer_hint!("b", "background"),
-    footer_hint!("Esc", "leave"),
+    footer_hint!("Esc", "prompt"),
 ];
 
 /// Taskless (single-tool) runs collapse the TASKS pane, which pins focus to
 /// OUTPUT: `Tab` (pane toggle) and `Enter` (focus a task) have no task target,
 /// so the footer must not advertise them.
-const TASKLESS_HINTS: &[ActivityFooterHint] = &[
+const NAV_TASKLESS_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("j/k/g/G", "scroll"),
     footer_hint!("[/]", "views"),
     footer_hint!("f", "findings"),
@@ -55,7 +55,23 @@ const TASKLESS_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("Space", "pause"),
     footer_hint!("x", "reset view"),
     footer_hint!("b", "background"),
-    footer_hint!("Esc", "leave"),
+    footer_hint!("Esc", "prompt"),
+];
+
+const NAV_CONTEXT_BUILD_HINTS: &[ActivityFooterHint] = &[
+    footer_hint!("j/k/g/G", "tasks"),
+    footer_hint!("Tab", "pane"),
+    footer_hint!("V", "verbose"),
+    footer_hint!("Space", "pause"),
+    footer_hint!("b", "background"),
+    footer_hint!("Esc", "prompt"),
+];
+
+const PROMPT_HINTS: &[ActivityFooterHint] = &[
+    footer_hint!("F2", "controls"),
+    footer_hint!("findings", "list"),
+    footer_hint!("back", "workbench"),
+    footer_hint!("Ctrl+C", "stop / exit"),
 ];
 
 pub(crate) fn activity_footer_model(
@@ -64,9 +80,10 @@ pub(crate) fn activity_footer_model(
     width: u16,
     running_tool: Option<&str>,
     abort_pending: bool,
+    input_mode: InputMode,
 ) -> ActivityFooterModel {
-    let hints = footer_hints(session);
-    let body = focus_body(session, route, running_tool, abort_pending);
+    let hints = footer_hints(session, input_mode, running_tool);
+    let body = focus_body(session, route, running_tool, abort_pending, input_mode);
     ActivityFooterModel {
         body_line: fit(&body, width as usize),
         body,
@@ -105,20 +122,40 @@ fn focus_body(
     route: &ActivityRouteState,
     running_tool: Option<&str>,
     abort_pending: bool,
+    input_mode: InputMode,
 ) -> String {
     if abort_pending {
         return " ⚠ ABORT REQUESTED  waiting for cleanup · Ctrl+C stays here".to_string();
     }
-    // Taskless (single-tool) runs have nothing to focus — "hover to
+    if input_mode == InputMode::Prompt {
+        return prompt_body(running_tool);
+    }
+    // Taskless (single-tool) runs have nothing to focus — "select a task to
     // inspect a task" would point at a pane that isn't on screen.
     if session.tasks.is_empty() {
         return taskless_body(running_tool);
     }
-    tasked_body(session, route)
+    tasked_body(session, route, running_tool)
 }
 
-fn tasked_body(session: &ActivitySession, route: &ActivityRouteState) -> String {
+fn prompt_body(running_tool: Option<&str>) -> String {
+    match running_tool {
+        Some(tool) => {
+            format!(" ● RUNNING  {tool} — output streams above · F2 controls · Ctrl+C aborts")
+        }
+        None => " ● PROMPT  type a command · F2 enables Activity controls".to_string(),
+    }
+}
+
+fn tasked_body(
+    session: &ActivitySession,
+    route: &ActivityRouteState,
+    running_tool: Option<&str>,
+) -> String {
     if route.effective_pane_focus(session) == crate::PaneFocus::Right {
+        if running_tool == Some("context:build") {
+            return " ● OUTPUT  build trace · Tab tasks · b background · Ctrl+C aborts".to_string();
+        }
         return format!(
             " ● OUTPUT  {} · j/k item · f findings · o open",
             route.deck_page.label()
@@ -126,7 +163,7 @@ fn tasked_body(session: &ActivitySession, route: &ActivityRouteState) -> String 
     }
     match route.focus_task.as_ref() {
         Some(task_id) => focused_task_body(session, task_id),
-        None => " ● FOCUS  hover [j/k] to inspect a task".to_string(),
+        None => " ● FOCUS  [j/k] select a task to inspect".to_string(),
     }
 }
 
@@ -158,11 +195,21 @@ fn focused_task_row_body(row: &crate::DagTaskRow) -> String {
 /// Hint selection follows what the keys can actually do (narrow widths are
 /// handled by `wrap_hints`, which keeps every key visible): with no DAG tasks
 /// the pane-focus keys are inert and disappear from the hints.
-fn footer_hints(session: &ActivitySession) -> &'static [ActivityFooterHint] {
-    if session.tasks.is_empty() {
-        return TASKLESS_HINTS;
+fn footer_hints(
+    session: &ActivitySession,
+    input_mode: InputMode,
+    running_tool: Option<&str>,
+) -> &'static [ActivityFooterHint] {
+    if input_mode == InputMode::Prompt {
+        return PROMPT_HINTS;
     }
-    FULL_HINTS
+    if running_tool == Some("context:build") && !session.tasks.is_empty() {
+        return NAV_CONTEXT_BUILD_HINTS;
+    }
+    if session.tasks.is_empty() {
+        return NAV_TASKLESS_HINTS;
+    }
+    NAV_FULL_HINTS
 }
 
 fn fit(value: &str, width: usize) -> String {
@@ -193,7 +240,7 @@ mod tests {
         route.focus_task = Some(row.task_id.clone());
         session.tasks.insert(row.task_id.clone(), row);
 
-        let model = activity_footer_model(&session, &route, 120, None, false);
+        let model = activity_footer_model(&session, &route, 120, None, false, InputMode::Navigate);
 
         assert_eq!(
             model.body,
@@ -218,10 +265,10 @@ mod tests {
     fn hints_wrap_to_extra_rows_on_narrow_terminals_without_losing_keys() {
         let session = ActivitySession::new("r-1");
         let route = ActivityRouteState::default();
-        let wide = activity_footer_model(&session, &route, 160, None, false);
+        let wide = activity_footer_model(&session, &route, 160, None, false, InputMode::Navigate);
         assert_eq!(wide.hint_rows.len(), 1, "wide terminals keep one row");
 
-        let narrow = activity_footer_model(&session, &route, 40, None, false);
+        let narrow = activity_footer_model(&session, &route, 40, None, false, InputMode::Navigate);
         assert!(narrow.hint_rows.len() > 1, "narrow terminals wrap");
         let total: usize = narrow.hint_rows.iter().map(Vec::len).sum();
         assert_eq!(total, narrow.hints.len(), "every key survives the wrap");
@@ -233,7 +280,14 @@ mod tests {
         // OUTPUT — Tab and Enter are task controls, so they must not appear.
         let taskless = ActivitySession::new("r-1");
         let route = ActivityRouteState::default();
-        let keys = plain_keys(&activity_footer_model(&taskless, &route, 120, None, false));
+        let keys = plain_keys(&activity_footer_model(
+            &taskless,
+            &route,
+            120,
+            None,
+            false,
+            InputMode::Navigate,
+        ));
         assert!(!keys.contains(&"Tab"), "{keys:?}");
         assert!(!keys.contains(&"Enter"), "{keys:?}");
 
@@ -248,6 +302,7 @@ mod tests {
             120,
             None,
             false,
+            InputMode::Navigate,
         ));
         assert!(keys.contains(&"Tab"), "{keys:?}");
         assert!(keys.contains(&"Enter"), "{keys:?}");
@@ -259,11 +314,19 @@ mod tests {
         let session = ActivitySession::new("r-1");
         let route = ActivityRouteState::default();
         assert_eq!(
-            activity_footer_model(&session, &route, 80, Some("threat-model:build"), false).body,
+            activity_footer_model(
+                &session,
+                &route,
+                80,
+                Some("threat-model:build"),
+                false,
+                InputMode::Navigate,
+            )
+            .body,
             " ● RUNNING  threat-model:build — output streams above · Ctrl+C aborts"
         );
         assert_eq!(
-            activity_footer_model(&session, &route, 80, None, false).body,
+            activity_footer_model(&session, &route, 80, None, false, InputMode::Navigate).body,
             " ● FOCUS  no task rows this run"
         );
     }
@@ -277,7 +340,14 @@ mod tests {
             DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
         );
 
-        let model = activity_footer_model(&session, &route, 80, Some("triage:run"), true);
+        let model = activity_footer_model(
+            &session,
+            &route,
+            80,
+            Some("triage:run"),
+            true,
+            InputMode::Navigate,
+        );
 
         assert!(model.body.contains("ABORT REQUESTED"));
         assert!(model.body.contains("Ctrl+C stays here"));
@@ -299,9 +369,35 @@ mod tests {
         route.pane_focus = PaneFocus::Right;
 
         assert_eq!(
-            activity_footer_model(&session, &route, 100, None, false).body,
+            activity_footer_model(&session, &route, 100, None, false, InputMode::Navigate).body,
             " ● OUTPUT  dfd · j/k item · f findings · o open"
         );
+    }
+
+    #[test]
+    fn context_build_footer_does_not_advertise_empty_artifact_navigation() {
+        let mut session = ActivitySession::new("context-run");
+        let mut route = ActivityRouteState::default();
+        session.tasks.insert(
+            "context:build".to_string(),
+            DagTaskRow::queued("context:build".into(), "context".into(), Vec::new()),
+        );
+        route.pane_focus = PaneFocus::Right;
+
+        let model = activity_footer_model(
+            &session,
+            &route,
+            120,
+            Some("context:build"),
+            false,
+            InputMode::Navigate,
+        );
+
+        assert!(model.body.contains("OUTPUT  build trace"), "{}", model.body);
+        let keys = plain_keys(&model);
+        assert!(!keys.contains(&"[/]"), "{keys:?}");
+        assert!(!keys.contains(&"f"), "{keys:?}");
+        assert!(!keys.contains(&"o"), "{keys:?}");
     }
 
     #[test]
@@ -314,21 +410,28 @@ mod tests {
             DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
         );
         assert_eq!(
-            activity_footer_model(&session, &route, 80, None, false).body,
-            " ● FOCUS  hover [j/k] to inspect a task"
+            activity_footer_model(&session, &route, 80, None, false, InputMode::Navigate).body,
+            " ● FOCUS  [j/k] select a task to inspect"
         );
         assert_eq!(
-            activity_footer_model(&session, &route, 18, None, false).body_line,
-            " ● FOCUS  hover […"
+            activity_footer_model(&session, &route, 18, None, false, InputMode::Navigate).body_line,
+            " ● FOCUS  [j/k] s…"
         );
 
         route.focus_task = Some("patch:finding".to_string());
         assert_eq!(
-            activity_footer_model(&session, &route, 80, None, false).body,
+            activity_footer_model(&session, &route, 80, None, false, InputMode::Navigate).body,
             " ● FOCUS  patch:finding  (not yet recorded)"
         );
         assert_eq!(
-            plain_keys(&activity_footer_model(&session, &route, 80, None, false)),
+            plain_keys(&activity_footer_model(
+                &session,
+                &route,
+                80,
+                None,
+                false,
+                InputMode::Navigate,
+            )),
             vec!["j/k/g/G", "Tab", "[/]", "f", "o", "V", "Space", "x", "Enter", "b", "Esc"]
         );
     }
@@ -343,7 +446,14 @@ mod tests {
         );
 
         assert_eq!(
-            plain_pairs(&activity_footer_model(&session, &route, 80, None, false)),
+            plain_pairs(&activity_footer_model(
+                &session,
+                &route,
+                80,
+                None,
+                false,
+                InputMode::Navigate,
+            )),
             vec![
                 ("j/k/g/G", "scroll"),
                 ("Tab", "pane"),
@@ -355,9 +465,45 @@ mod tests {
                 ("x", "reset view"),
                 ("Enter", "focus"),
                 ("b", "background"),
-                ("Esc", "leave"),
+                ("Esc", "prompt"),
             ]
         );
+    }
+
+    #[test]
+    fn prompt_mode_only_advertises_prompt_reachable_activity_actions() {
+        let mut session = ActivitySession::new("r-1");
+        session.tasks.insert(
+            "triage:run".to_string(),
+            DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
+        );
+        let route = ActivityRouteState::default();
+
+        let model = activity_footer_model(&session, &route, 120, None, false, InputMode::Prompt);
+        let pairs = plain_pairs(&model);
+
+        assert_eq!(
+            pairs,
+            vec![
+                ("F2", "controls"),
+                ("findings", "list"),
+                ("back", "workbench"),
+                ("Ctrl+C", "stop / exit"),
+            ]
+        );
+        assert!(model.body.contains("F2 enables Activity controls"));
+
+        let running = activity_footer_model(
+            &session,
+            &route,
+            120,
+            Some("threat-model:build"),
+            false,
+            InputMode::Prompt,
+        );
+        assert!(running.body.contains("● RUNNING  threat-model:build"));
+        assert!(running.body.contains("F2 controls"));
+        assert!(running.body.contains("Ctrl+C aborts"));
     }
 
     fn plain_keys(model: &ActivityFooterModel) -> Vec<&'static str> {

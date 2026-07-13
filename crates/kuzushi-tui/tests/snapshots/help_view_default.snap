@@ -8,7 +8,7 @@ assertion_line: 162
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
 Glossary: TP=true positive; FP=false positive; DFD=data-flow diagram; taint-iris=source-to-sink hunt; x-ray=architecture
 review; randori=threat model; tob/shinsa=plugin adapters.
-Examples: demo  ·  next  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  model 1
+Examples: demo  ·  next  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  findings export report.sarif sarif
 
 NAVIGATION — browse modules and tools
 home - open the current phase cockpit
@@ -128,10 +128,11 @@ workspace - show target and state status
   aliases / examples: /workspace, workspace status
 workspace reindex - refresh the v3 content-addressed workspace index
   aliases / examples: /workspace reindex, workspace index
-workspace export findings <path> [format] [--completeness open|complete] [--allow-empty] - export findings; choose
+findings export <path> [format] [--completeness open|complete] [--allow-empty] - export findings; choose
 all/open/complete and pass --allow-empty for metadata-only exports
-aliases / examples: /workspace export findings <path> [format] [--completeness open|complete] [--allow-empty], findings
-export <path> [format] [--completeness open|complete] [--allow-empty], export <path> [format] [--completeness
+aliases / examples: findings export report.sarif sarif, /findings export <path> [format] [--completeness open|complete]
+[--allow-empty], /workspace export findings <path> [format] [--completeness open|complete] [--allow-empty], workspace
+export findings <path> [format] [--completeness open|complete] [--allow-empty], export <path> [format] [--completeness
 open|complete] [--allow-empty]
 workspace scope init - write an editable .kuzushi/scope.toml scaffold
   aliases / examples: /workspace scope init
@@ -139,9 +140,9 @@ workspace scope init - write an editable .kuzushi/scope.toml scaffold
 FINDINGS / EVIDENCE — browse findings, evidence, and report output
 findings - open persisted findings
   aliases / examples: /f, f, /findings
-findings filter <expr> - filter findings by severity, confidence (proof), review decision, or completeness
+findings filter <expr> - filter findings by severity, confidence, decision, or completeness; use clear to reset
 aliases / examples: findings filter state:new rank:high, findings filter decision:confirmed completeness:open, findings
-filter confidence:confirmed, /findings filter <expr>
+filter confidence:confirmed, findings filter clear, /findings filter <expr>
 component <scope|path|all> - focus Workbench findings on a detected component
   aliases / examples: component web/app, component entrypoint-cmd-proxy, component all
 open <id> - open a finding alias or fingerprint

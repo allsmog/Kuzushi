@@ -2,7 +2,7 @@
   "name": "OWASP Juice Shop",
   "language": "TypeScript",
   "repoUrl": "https://github.com/juice-shop/juice-shop",
-  "repoRef": "v17.1.1",
+  "repoRef": "39b46860612990ae18d499a20472172839fe8c77",
   "entries": [
     {
       "id": "juice-sqli-login",

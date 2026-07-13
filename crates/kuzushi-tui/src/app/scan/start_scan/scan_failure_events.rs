@@ -14,6 +14,7 @@ impl ShellApp {
             "tasks, task block semgrep, or run semgrep:scan {\"binary\":\"/path/to/semgrep\"}",
         );
         let run_id = self.mark_scan_failed(&actionable);
+        self.settle_unreported_scan_cost(run_id.as_deref());
         self.mark_scan_activity_failed(&actionable);
         let effects = self.scan_failure_artifact_effect(run_id, &actionable);
         self.log_structured_scan_error(&actionable);
@@ -43,6 +44,7 @@ impl ShellApp {
             .and_then(|run_id| self.count_store_findings(run_id));
         let summary_line = scan_canceled_summary(retained);
         let run_id = self.mark_scan_canceled(retained).or(run_id);
+        self.settle_unreported_scan_cost(run_id.as_deref());
         self.mark_scan_activity_canceled(&summary_line);
         self.log("scan", format!("ended after abort request: {error}"));
         self.log("scan", summary_line);
@@ -68,6 +70,7 @@ impl ShellApp {
 
     fn apply_scan_interrupted(&mut self, error: &str, reason: AbortReason) -> Vec<ShellEffect> {
         let run_id = self.mark_scan_interrupted(error);
+        self.settle_unreported_scan_cost(run_id.as_deref());
         self.mark_scan_activity_failed(error);
         self.set_error_notice(
             "scan",
@@ -133,7 +136,7 @@ impl ShellApp {
     /// can report how many partial findings survived the abort.
     fn count_store_findings(&mut self, run_id: &str) -> Option<usize> {
         let target = self.scan_target_owned()?;
-        let (_, store) = open_finding_store_for_target(Some(&target)).ok()?;
+        let (_, store) = open_finding_store_for_target_read_only(Some(&target)).ok()?;
         let filter = kuzushi_core::FindingListFilter {
             run_id: vec![run_id.to_string()],
             limit: 0,
@@ -190,6 +193,17 @@ impl ShellApp {
             })
             .into_iter()
             .collect()
+    }
+
+    fn settle_unreported_scan_cost(&mut self, run_id: Option<&str>) {
+        let Some(run_id) = run_id else { return };
+        match self.checked_scan_terminal_cost(
+            run_id,
+            kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+        ) {
+            Ok(cost) => self.settle_run_cost_report(run_id, cost),
+            Err(error) => self.report_cost_accounting_error(error),
+        }
     }
 
     fn log_structured_scan_error(&mut self, error: &str) {
@@ -369,6 +383,66 @@ mod tests {
         assert!(effects
             .iter()
             .any(|effect| matches!(effect, ShellEffect::RecordScanRun(_))));
+    }
+
+    #[test]
+    fn failed_scan_reconciles_exact_trace_cost_before_terminalizing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "scan-failed-cost";
+        seed_scan_run_cost(tmp.path(), run_id, 0.27);
+        let mut app = running_cost_scan_app(tmp.path(), run_id);
+
+        let effects = app.apply_scan_failed("provider failed".to_string());
+
+        assert_eq!(app.session().session_cost_usd(), 0.27);
+        assert_eq!(
+            app.activity()
+                .unwrap()
+                .runtime_cost_report()
+                .unwrap()
+                .exact_usd(),
+            Some(0.27)
+        );
+        EffectRuntime::execute(&mut app, effects);
+        assert_eq!(
+            kuzushi_core::load_run_summary(tmp.path(), run_id)
+                .unwrap()
+                .cost_usd,
+            Some(0.27)
+        );
+    }
+
+    fn seed_scan_run_cost(target: &std::path::Path, run_id: &str, cost: f64) {
+        kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
+            kuzushi_core::run_artifacts::ToolRunRecord::new(target, run_id, "scan", "sast:scan"),
+            &serde_json::json!({}),
+            None,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+        let step = kuzushi_core::RunTraceStep::new(0, "refused", "provider failed")
+            .with_call_attempted(true)
+            .with_cost_usd(Some(cost))
+            .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:scan");
+        kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step)
+            .unwrap();
+    }
+
+    fn running_cost_scan_app(target: &std::path::Path, run_id: &str) -> ShellApp {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_scan_panel(Some(ScanPanelState {
+            run_id: Some(run_id.to_string()),
+            target: target.to_path_buf(),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        }));
+        app.set_activity(Some(ActivitySession::new(run_id)));
+        app.begin_run_cost_tracking(run_id, true);
+        app
     }
 
     #[test]

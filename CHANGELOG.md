@@ -5,6 +5,41 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+## v0.24.0-alpha.8 — bounded runtime, truthful benchmarks, responsive shell
+
+**Additive:**
+
+- The benchmark system now carries corpus manifests, immutable provenance,
+  exact scoring and matching contracts, spend evidence, SARIF ingestion, and
+  real-model/regression workflows suitable for reproducible release gates.
+- The operator shell gains richer activity, permission, keymap, onboarding,
+  completion, run-history, and phase-cockpit projections backed by explicit
+  application/view-model boundaries and asynchronous hydration.
+- Native MCP and testing surfaces expand with additional structural-analysis,
+  process, run-artifact, mock-runtime, and cross-platform contract coverage.
+
+**Security and reliability:**
+
+- File, subprocess, prompt, model-usage, run-ledger, and patch-snapshot paths
+  are bounded and validated at their owning adapters, with explicit failure,
+  cancellation, provenance, and cost states instead of silent fallback.
+- Workbench finding/review projections are revision-cached, background event
+  work is time-sliced and wake-coalesced, and Jobs history no longer performs
+  filesystem recovery on the terminal paint path.
+- Process identity, atomic artifact commits, worker deadlines, and untrusted
+  structured-output repair now have executable quality and platform tests.
+
+**Fixed:**
+
+- Keystroke-to-paint latency for the 391-finding Workbench case drops from
+  63.5 ms to 35.1 ms p95 in the pinned 60-sample black-box profile.
+- Completion, compact-terminal, activity, keybinding, review-queue, and
+  provenance views preserve truthful selection, loading, malformed, and empty
+  states without rebuilding unrelated presentation data.
+- TypeScript project discovery, bootstrap/pack verification, documentation
+  drift checks, and CI benchmark contracts now fail explicitly on incomplete
+  or contradictory inputs.
+
 ## v0.24.0-alpha.7 — native control plane, hardened execution, phase cockpit
 
 **Additive:**

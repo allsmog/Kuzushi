@@ -343,7 +343,8 @@ export const PatchResultSchema = z.object({
   buildCommand: z.string().nullable().optional(),
   testCommand: z.string().nullable().optional(),
   worktreePath: z.string().nullable().optional(),
-  costUsd: z.number().optional(),
+  costUsd: z.number().finite().nonnegative().optional(),
+  providerSpendUnresolved: z.boolean().optional(),
   validatorLog: z.string().optional(),
   history: z.array(
     z.object({

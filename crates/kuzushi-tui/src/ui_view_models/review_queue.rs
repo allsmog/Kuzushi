@@ -1,5 +1,6 @@
 use super::findings::{
-    finding_identity_label, projected_visible_finding_pairs, relativize_location, target_base,
+    finding_identity_label, projected_visible_findings, relativize_location, target_base,
+    visible_findings_cache_key,
 };
 use super::review_conflicts::effective_review_decision_conflict_label;
 use super::review_state::{
@@ -8,10 +9,11 @@ use super::review_state::{
     lifecycle_status_label, EffectiveReviewDecision, EffectiveReviewStateIndex,
 };
 use super::SeverityTone;
-use crate::ShellApp;
+use crate::{ReviewQueueCacheKey, ShellApp};
 use kuzushi_core::{
     finding_next_action, project_finding, Finding, FindingNextAction, ProofConfidence,
 };
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReviewQueueMode {
@@ -38,10 +40,19 @@ impl ReviewQueueMode {
             Self::All => "all",
         }
     }
+
+    fn cache_key(self) -> u8 {
+        match self {
+            Self::Open => 0,
+            Self::Complete => 1,
+            Self::All => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReviewQueueModel {
+    pub(crate) navigation_active: bool,
     pub(crate) total_count: usize,
     pub(crate) visible_count: usize,
     pub(crate) open_count: usize,
@@ -50,7 +61,20 @@ pub(crate) struct ReviewQueueModel {
     pub(crate) completeness_mode: &'static str,
     pub(crate) header: String,
     pub(crate) empty_reason: Option<String>,
-    pub(crate) rows: Vec<ReviewQueueRow>,
+    pub(crate) rows: Arc<[ReviewQueueRow]>,
+    pub(crate) selected_row: Option<usize>,
+}
+
+impl ReviewQueueModel {
+    #[cfg(test)]
+    pub(crate) fn row_is_selected(&self, index: usize) -> bool {
+        self.selected_row == Some(index)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn selected(&self) -> Option<&ReviewQueueRow> {
+        self.selected_row.and_then(|index| self.rows.get(index))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,11 +99,42 @@ pub(crate) struct ReviewQueueRow {
     pub(crate) proof_label: String,
     pub(crate) evidence_state: String,
     pub(crate) next_action: String,
+    pub(crate) projection_index: usize,
+    /// Renderer fixtures may set this directly. Production selection lives on
+    /// `ReviewQueueModel::selected_row` so cached rows survive cursor moves.
     pub(crate) selected: bool,
     pub(crate) workflow_group: ReviewWorkflowGroup,
 }
 
 pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> ReviewQueueModel {
+    let (rows, open_count, complete_count) = cached_review_queue_rows(app, mode);
+    let total_count = open_count + complete_count;
+    let visible_count = rows.len();
+    let cursor = app.router.findings().cursor();
+    let selected_row = rows.iter().position(|row| row.projection_index == cursor);
+    ReviewQueueModel {
+        navigation_active: app.input_mode() == crate::InputMode::Navigate,
+        total_count,
+        visible_count,
+        open_count,
+        complete_count,
+        filter_label: review_queue_filter_label(app, mode),
+        completeness_mode: mode.label(),
+        header: review_queue_header(visible_count, total_count, open_count, complete_count),
+        empty_reason: review_queue_empty_reason(total_count, visible_count, mode),
+        rows,
+        selected_row,
+    }
+}
+
+fn cached_review_queue_rows(
+    app: &ShellApp,
+    mode: ReviewQueueMode,
+) -> (Arc<[ReviewQueueRow]>, usize, usize) {
+    let key = ReviewQueueCacheKey::new(visible_findings_cache_key(app), mode.cache_key());
+    if let Some(cached) = app.workbench_cache().borrow().review_queue(&key) {
+        return cached;
+    }
     let base = target_base(app);
     let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
         app.findings(),
@@ -88,20 +143,23 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
     let all_rows = projected_review_queue_rows(app, &review_index, base.as_deref());
     let open_count = all_rows.iter().filter(|row| !row.review_complete()).count();
     let complete_count = all_rows.len().saturating_sub(open_count);
-    let rows = filter_review_rows(all_rows, mode);
-    let total_count = open_count + complete_count;
-    let visible_count = rows.len();
-    ReviewQueueModel {
-        total_count,
-        visible_count,
+    let rows = Arc::from(filter_review_rows(all_rows, mode));
+    app.workbench_cache().borrow_mut().cache_review_queue(
+        key,
+        Arc::clone(&rows),
         open_count,
         complete_count,
-        filter_label: format!("completeness:{}", mode.label()),
-        completeness_mode: mode.label(),
-        header: review_queue_header(visible_count, total_count, open_count, complete_count),
-        empty_reason: review_queue_empty_reason(total_count, visible_count, mode),
-        rows,
-    }
+    );
+    (rows, open_count, complete_count)
+}
+
+fn review_queue_filter_label(app: &ShellApp, mode: ReviewQueueMode) -> String {
+    app.active_findings_filter()
+        .as_deref()
+        .map(str::trim)
+        .filter(|filter| !filter.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("completeness:{}", mode.label()))
 }
 
 fn projected_review_queue_rows(
@@ -109,16 +167,15 @@ fn projected_review_queue_rows(
     review_index: &EffectiveReviewStateIndex,
     base: Option<&str>,
 ) -> Vec<ReviewQueueRow> {
-    projected_visible_finding_pairs(app)
-        .into_iter()
+    projected_visible_findings(app)
+        .iter()
         .enumerate()
-        .map(|(index, (alias, finding))| {
-            let decision = review_index.effective_decision_for(&finding);
+        .map(|(index, projected)| {
+            let decision = review_index.effective_decision_for(&projected.finding);
             ReviewQueueRow::from_finding(
                 index,
-                app.router.findings().cursor(),
-                alias,
-                &finding,
+                projected.alias.clone(),
+                &projected.finding,
                 decision.as_ref(),
                 base,
             )
@@ -170,7 +227,6 @@ fn review_queue_empty_reason(
 impl ReviewQueueRow {
     fn from_finding(
         index: usize,
-        cursor: usize,
         alias: String,
         finding: &Finding,
         decision: Option<&EffectiveReviewDecision>,
@@ -201,11 +257,8 @@ impl ReviewQueueRow {
             proof_label: projection.proof_state,
             evidence_state: evidence_state_label(finding),
             next_action: review_next_action_label(finding, decision),
-            // The cursor indexes `projected_visible_finding_pairs`, the same
-            // projection used by Enter, detail, verify, suppress, and patch.
-            // A previously opened finding must not steal the highlight after
-            // the operator moves the cursor to another projected identity.
-            selected: index == cursor,
+            projection_index: index,
+            selected: false,
             workflow_group,
         }
     }
@@ -235,7 +288,7 @@ fn review_next_action_label(
         review_verdict(finding, decision),
         finding_next_action(finding, None),
     ) {
-        (decision, _) if decision.is_terminal() => "decision_complete".to_string(),
+        (decision, _) if decision.is_terminal() => "review complete".to_string(),
         (_, FindingNextAction::Validate) => "validate".to_string(),
         (_, FindingNextAction::Patch) => "patch".to_string(),
         (_, FindingNextAction::Suppress) => "review_rejection".to_string(),

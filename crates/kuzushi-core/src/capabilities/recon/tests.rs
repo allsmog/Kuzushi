@@ -417,6 +417,37 @@ authorization: Default::default(),
     }
 
     #[test]
+    fn import_httpx_derives_common_fields_from_a_url_only_record() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("httpx-url-only.jsonl");
+        fs::write(
+            &dump,
+            "{\"url\":\"https://example.com\",\"status-code\":200,\"title\":\"Example\"}\n",
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("httpx", &dump), &ctx)
+            .expect("url-only httpx import succeeds");
+
+        let hosts = result["data"]["hosts"].as_array().unwrap();
+        let services = result["data"]["services"].as_array().unwrap();
+        let notes = result["data"]["notes"].as_array().unwrap();
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0]["address"], "example.com");
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0]["port"], 443);
+        assert!(notes
+            .iter()
+            .any(|note| note["data"]["status_code"] == 200));
+        assert!(notes
+            .iter()
+            .any(|note| note["data"]["imported"] == 1));
+    }
+
+    #[test]
     fn import_nuclei_jsonl_creates_notes_with_severity() {
         let workspace_dir = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();

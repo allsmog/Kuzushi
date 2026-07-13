@@ -28,13 +28,31 @@ pub fn which(binary: &str) -> Option<PathBuf> {
     let path_env = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path_env) {
         let candidate = dir.join(binary);
-        if candidate.exists() {
+        if is_regular_executable(&candidate) {
             return Some(candidate);
         }
         // On Windows, PATHEXT extensions; we don't currently support
         // those — Kuzushi targets Unix-style hosts.
     }
     None
+}
+
+fn is_regular_executable(path: &std::path::Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// Probe a binary by running `bin <args>` and capturing the first line of

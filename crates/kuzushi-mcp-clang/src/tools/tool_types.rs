@@ -1,9 +1,12 @@
+use kuzushi_mcp_common::ReadRootCapability;
 use std::sync::Arc;
 
 use super::health_handle::ClangdHandle;
 
 pub(crate) struct HealthTool;
-pub(crate) struct CompileCommandsTool;
+pub(crate) struct CompileCommandsTool {
+    pub(crate) read_capability: ReadRootCapability,
+}
 
 pub(crate) struct DefinitionTool {
     pub(crate) handle: Arc<ClangdHandle>,

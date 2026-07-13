@@ -7,24 +7,24 @@ size: 80x24
 KUZUSHI · target ./phase-target · view confirm · ● LIVE · cost $0.37 · ctx:✓ built
  組  map ✓ · 崩  hunt ✓ · 作  confirm ● · 掛  fix ·
  ▸ NEXT triage & verify
- next guided workflow · scan run scan · options sast:scan tune scanners
+ decision confirmed|false-positive|suppressed <reason> review
 │FINDING
 │F-0001  CRITICAL  ✓ verified L4  runtime_verified
 │SQL injection reaches query
-│ATTACK PATH
+│src/auth/login.rs:17
+│▸ ATTACK PATH
 │  taint flow   CWE-89 · high
 │
 │  ╭──────────────────────────────╮   ╭──────────────────────────────╮
 │DATA-FLOW LADDER
 │DATA-FLOW LADDER  CWE-89 · HIGH · 2 stages
 │ ◇ HTTP query parameter
-│   │ login.rs:12
-│   │ let user = request.query("user")
 │PROOF · REPLAY
 │exploited  L4 · podman
+│decision: needs review
 │▸ verify F-0001  recheck
 │▸ replay verify-phase-run  open trace
 mode:run · 作  confirm 3/4 · ⛭ 掛  fix ·...   6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
- Ctrl+C request abort   findings list   Esc back   history events
+ Ctrl+C request abort   Esc prompt
 NAVIGATION MODE — view keys active · Esc returns to prompt

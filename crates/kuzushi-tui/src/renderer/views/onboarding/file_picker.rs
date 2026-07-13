@@ -39,7 +39,11 @@ fn file_picker_query_line(app: &ShellApp, width: u16) -> Line<'static> {
 fn file_picker_count_line(app: &ShellApp, width: u16) -> Line<'static> {
     let matches = app.filtered_file_picker_paths().len();
     let route = app.router.file_picker();
-    let suffix = if route.truncated() { " · capped" } else { "" };
+    let suffix = if route.truncated() {
+        " · partial index · paste exact path if missing"
+    } else {
+        ""
+    };
     Line::styled(
         fit(
             &format!(

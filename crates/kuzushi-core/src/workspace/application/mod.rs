@@ -31,7 +31,8 @@ pub use export_projection_model::{
 };
 pub use export_review_context::WorkspaceFindingReviewContext;
 pub use export_workspace_findings::{
-    export_scan_findings_sarif, export_workspace_findings, export_workspace_findings_with_options,
+    export_scan_findings_sarif, export_scan_findings_sarif_with_run_summary,
+    export_workspace_findings, export_workspace_findings_with_options,
     preview_workspace_findings_export, WorkspaceFindingsExportPreview,
 };
 pub use load_program_scope::{load_program_scope, write_program_scope_scaffold};

@@ -1,6 +1,7 @@
 use super::*;
 use crate::app::{Msg, ShellEffect, TermEvent, WorkbenchPage, WorkbenchPane};
 use crate::commands::ReviewDecisionCommand;
+use crate::ui_view_models::findings::projected_visible_finding_pairs;
 use crate::ui_view_models::{
     current_finding_for_detail, phase_cockpit_model_for_phase, PhaseCockpitBody,
 };
@@ -24,6 +25,7 @@ fn confirmed(mut finding: Finding) -> Finding {
         confidence: 0.93,
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding
 }
@@ -34,6 +36,7 @@ fn human_confirmed(mut finding: Finding, confidence: f32) -> Finding {
         confidence,
         rationale: "human reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     finding
@@ -81,14 +84,25 @@ fn review_queue_model_separates_open_and_terminal_decisions() {
     assert_eq!(open_model.rows[0].confidence_label, "-");
     assert_eq!(open_model.rows[0].lifecycle_status, "statically_supported");
     assert_eq!(open_model.rows[0].evidence_state, "evidence:1");
-    assert!(open_model.rows[0].selected);
+    assert!(open_model.row_is_selected(0));
 
     let complete_model = review_queue_model(&app, ReviewQueueMode::Complete);
     assert_eq!(complete_model.visible_count, 1);
     assert_eq!(complete_model.rows[0].decision, "confirmed");
     assert!(complete_model.rows[0].decision_complete);
     assert_eq!(complete_model.rows[0].confidence_label, "93%");
-    assert_eq!(complete_model.rows[0].next_action, "decision_complete");
+    assert_eq!(complete_model.rows[0].next_action, "review complete");
+}
+
+#[test]
+fn review_queue_model_names_the_active_findings_filter() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![finding("path-traversal", Severity::High, 20)];
+    app.set_active_findings_filter(Some("severity:high".to_string()));
+
+    let model = review_queue_model(&app, ReviewQueueMode::Open);
+
+    assert_eq!(model.filter_label, "severity:high");
 }
 
 #[test]
@@ -118,8 +132,28 @@ fn review_queue_model_marks_cursor_row_when_no_finding_is_pinned() {
 
     let model = review_queue_model(&app, ReviewQueueMode::All);
 
-    assert!(!model.rows[0].selected);
-    assert!(model.rows[1].selected);
+    assert!(!model.row_is_selected(0));
+    assert!(model.row_is_selected(1));
+}
+
+#[test]
+fn review_queue_rows_are_reused_across_cursor_only_navigation() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_findings(
+        (0..400)
+            .map(|index| finding(&format!("rule-{index:04}"), Severity::High, index + 1))
+            .collect(),
+    );
+
+    let first = review_queue_model(&app, ReviewQueueMode::All);
+    app.router.findings_mut().set_cursor(1);
+    let navigated = review_queue_model(&app, ReviewQueueMode::All);
+
+    assert!(std::sync::Arc::ptr_eq(&first.rows, &navigated.rows));
+    assert!(navigated.row_is_selected(1));
+    app.findings_mut()[0].severity = Severity::Critical;
+    let refreshed = review_queue_model(&app, ReviewQueueMode::All);
+    assert!(!std::sync::Arc::ptr_eq(&navigated.rows, &refreshed.rows));
 }
 
 #[test]
@@ -135,11 +169,7 @@ fn review_queue_cursor_identity_wins_over_a_stale_pinned_finding() {
     app.router.findings_mut().set_cursor(1);
 
     let model = review_queue_model(&app, ReviewQueueMode::All);
-    let selected = model
-        .rows
-        .iter()
-        .find(|row| row.selected)
-        .expect("cursor row selected");
+    let selected = model.selected().expect("cursor row selected");
     let detail = crate::ui_view_models::current_finding_for_detail(&app).expect("cursor detail");
 
     assert_eq!(selected.alias, projected[1].0);
@@ -162,6 +192,7 @@ fn repeated_j_crosses_workflow_group_boundary_without_identity_drift() {
         confidence: 0.99,
         rationale: "runtime confirmed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     confirmed.verification = Some(PersistedVerification {
         proof_level: 3,
@@ -204,7 +235,7 @@ fn repeated_j_crosses_workflow_group_boundary_without_identity_drift() {
     press_workbench_key(&mut app, crossterm::event::KeyCode::Char('j'));
     let model = review_queue_model(&app, ReviewQueueMode::All);
     assert_eq!(model.rows[1].rule, "needs-high");
-    assert!(model.rows[1].selected);
+    assert!(model.row_is_selected(1));
 
     press_workbench_key(&mut app, crossterm::event::KeyCode::Char('j'));
     let model = review_queue_model(&app, ReviewQueueMode::All);
@@ -213,7 +244,7 @@ fn repeated_j_crosses_workflow_group_boundary_without_identity_drift() {
         model.rows[2].workflow_group,
         ReviewWorkflowGroup::NeedsReview
     );
-    assert!(model.rows[2].selected);
+    assert!(model.row_is_selected(2));
     let detail = crate::ui_view_models::current_finding_for_detail(&app).expect("cursor detail");
     assert_eq!(detail.1.fingerprint, needs_low_fingerprint);
 
@@ -258,7 +289,7 @@ fn canonical_projection_keeps_workflow_groups_as_metadata_only() {
 
     let groups = review_queue_model(&app, ReviewQueueMode::All)
         .rows
-        .into_iter()
+        .iter()
         .map(|row| row.workflow_group)
         .collect::<Vec<_>>();
     assert_eq!(
@@ -310,7 +341,7 @@ fn decision_group_change_preserves_confidence_order_and_cockpit_identity() {
 
 fn assert_projected_identity_across_phase_models(app: &ShellApp, selected: &Finding, alias: &str) {
     let review = review_queue_model(app, ReviewQueueMode::All);
-    let selected_row = review.rows.iter().find(|row| row.selected).unwrap();
+    let selected_row = review.selected().unwrap();
     assert_eq!(selected_row.alias, alias);
     assert_eq!(selected_row.workflow_group, ReviewWorkflowGroup::Deferred);
     assert_eq!(
@@ -323,15 +354,7 @@ fn assert_projected_identity_across_phase_models(app: &ShellApp, selected: &Find
         panic!("expected Hunt cockpit");
     };
     assert_eq!(hunt.heatmap.selected_module.as_deref(), Some("auth"));
-    assert_eq!(
-        hunt.review
-            .rows
-            .iter()
-            .find(|row| row.selected)
-            .unwrap()
-            .alias,
-        alias
-    );
+    assert_eq!(hunt.review.selected().unwrap().alias, alias);
 
     let PhaseCockpitBody::Confirm(confirm) =
         phase_cockpit_model_for_phase(app, WorkflowPhase::Confirm).body
@@ -344,18 +367,13 @@ fn assert_projected_identity_across_phase_models(app: &ShellApp, selected: &Find
 fn assert_projected_identity_across_actions(app: &mut ShellApp, selected: &Finding, alias: &str) {
     prepare_hunt_navigation(app);
     let verify = press_without_running_effects(app, KeyCode::Char('v'));
-    let prepare = verify.effects.iter().find_map(|effect| match effect {
-        ShellEffect::PrepareRunTool(prepare) => Some(prepare),
-        _ => None,
-    });
-    let prepare = prepare.expect("verify hotkey preparation");
-    assert_eq!(prepare.tool_name, "verify:exploit");
-    assert!(prepare
-        .input
-        .as_deref()
-        .unwrap()
-        .contains(&selected.fingerprint));
+    assert!(verify.effects.is_empty());
+    assert!(app.input().starts_with("run verify:exploit {"));
+    assert!(app.input().contains(&selected.fingerprint));
+    assert_eq!(app.input_mode(), InputMode::Prompt);
 
+    app.set_input("");
+    prepare_hunt_navigation(app);
     press_without_running_effects(app, KeyCode::Char('x'));
     assert_eq!(app.input(), format!("suppress {alias} --reason "));
     prepare_hunt_navigation(app);
@@ -396,7 +414,7 @@ fn prepare_hunt_navigation(app: &mut ShellApp) {
     app.set_shell_view(crate::ShellView::Workbench);
     app.router
         .workbench_mut()
-        .set_page(Some(WorkbenchPage::Coverage));
+        .set_page(Some(WorkbenchPage::Review));
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);
@@ -603,6 +621,7 @@ fn human_rejected(mut finding: Finding) -> Finding {
         confidence: 0.91,
         rationale: "operator rejected prior occurrence".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     finding

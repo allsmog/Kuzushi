@@ -1,4 +1,6 @@
 use super::*;
+use std::cell::{Ref, RefCell};
+use std::path::{Path, PathBuf};
 
 mod history;
 
@@ -7,6 +9,22 @@ pub(crate) enum EditorClearResult {
     Ignored,
     CompletionRestored,
     DraftCleared,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompletionPreviewKey {
+    pub(crate) editor_revision: u64,
+    pub(crate) cursor: usize,
+    pub(crate) input_mode: InputMode,
+    pub(crate) cache_generation: u64,
+    pub(crate) command_provider_generation: u64,
+}
+
+#[derive(Debug, Clone)]
+struct CompletionPreviewMemo {
+    key: CompletionPreviewKey,
+    target: Option<PathBuf>,
+    preview: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +38,10 @@ pub(crate) struct EditorState {
     completion_cycle: Option<CompletionCycle>,
     input_mode: InputMode,
     history_search: Option<HistorySearch>,
+    revision: u64,
+    completion_preview: RefCell<Option<CompletionPreviewMemo>>,
+    #[cfg(test)]
+    completion_preview_recomputations: std::cell::Cell<usize>,
 }
 
 impl Default for EditorState {
@@ -34,6 +56,10 @@ impl Default for EditorState {
             completion_cycle: None,
             input_mode: InputMode::Prompt,
             history_search: None,
+            revision: 0,
+            completion_preview: RefCell::new(None),
+            #[cfg(test)]
+            completion_preview_recomputations: std::cell::Cell::new(0),
         }
     }
 }
@@ -66,7 +92,11 @@ impl EditorState {
     }
 
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
-        self.cursor = cursor.min(self.char_count());
+        let cursor = cursor.min(self.char_count());
+        if self.cursor != cursor {
+            self.cursor = cursor;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn input_mode(&self) -> InputMode {
@@ -74,7 +104,10 @@ impl EditorState {
     }
 
     pub(crate) fn set_input_mode(&mut self, mode: InputMode) {
-        self.input_mode = mode;
+        if self.input_mode != mode {
+            self.input_mode = mode;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn history_search(&self) -> Option<&HistorySearch> {
@@ -95,21 +128,36 @@ impl EditorState {
     }
 
     pub(crate) fn set_input(&mut self, value: impl Into<String>) {
-        self.input = value.into();
-        self.cursor = self.char_count();
+        let value = value.into();
+        let cursor = value.chars().count();
+        if self.input == value && self.cursor == cursor {
+            return;
+        }
+        self.input = value;
+        self.cursor = cursor;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn clear_input(&mut self) {
+        if self.input.is_empty() && self.cursor == 0 {
+            return;
+        }
         self.input.clear();
         self.cursor = 0;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn take_input(&mut self) -> String {
+        let changed = !self.input.is_empty() || self.cursor != 0;
         self.cursor = 0;
         self.history_index = None;
-        std::mem::take(&mut self.input)
+        let input = std::mem::take(&mut self.input);
+        if changed {
+            self.touch_completion_preview();
+        }
+        input
     }
 
     pub(crate) fn snapshot_input(&self) -> (String, usize) {
@@ -117,9 +165,14 @@ impl EditorState {
     }
 
     pub(crate) fn restore_input_snapshot(&mut self, input: String, cursor: usize) {
+        let cursor = cursor.min(input.chars().count());
+        if self.input == input && self.cursor == cursor {
+            return;
+        }
         self.input = input;
-        self.cursor = cursor.min(self.char_count());
+        self.cursor = cursor;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn esc_clear_input_or_completion(&mut self) -> EditorClearResult {
@@ -139,6 +192,7 @@ impl EditorState {
         self.last_cleared_input = Some(std::mem::take(&mut self.input));
         self.cursor = 0;
         self.history_index = None;
+        self.touch_completion_preview();
         true
     }
 
@@ -147,6 +201,7 @@ impl EditorState {
             self.input = stashed;
             self.cursor = self.char_count();
             self.history_index = None;
+            self.touch_completion_preview();
         }
     }
 
@@ -178,6 +233,7 @@ impl EditorState {
         self.input.insert_str(byte, s);
         self.cursor += s.chars().count();
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn insert_char_at_cursor(&mut self, ch: char) {
@@ -185,6 +241,7 @@ impl EditorState {
         self.input.insert(byte, ch);
         self.cursor += 1;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn backspace(&mut self) {
@@ -201,6 +258,7 @@ impl EditorState {
         self.input.drain(start..end);
         self.cursor = new_cursor;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn delete_forward(&mut self) {
@@ -212,11 +270,13 @@ impl EditorState {
         let end = char_index_to_byte(&self.input, self.cursor + 1);
         self.input.drain(start..end);
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn move_cursor_left(&mut self) {
         if self.cursor > 0 {
             self.cursor -= 1;
+            self.touch_completion_preview();
         }
     }
 
@@ -224,15 +284,23 @@ impl EditorState {
         let count = self.char_count();
         if self.cursor < count {
             self.cursor += 1;
+            self.touch_completion_preview();
         }
     }
 
     pub(crate) fn move_cursor_home(&mut self) {
-        self.cursor = 0;
+        if self.cursor != 0 {
+            self.cursor = 0;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn move_cursor_end(&mut self) {
-        self.cursor = self.char_count();
+        let end = self.char_count();
+        if self.cursor != end {
+            self.cursor = end;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn word_boundary_left(&self) -> usize {
@@ -270,14 +338,23 @@ impl EditorState {
         self.input.drain(start..end);
         self.cursor = target;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn move_cursor_word_left(&mut self) {
-        self.cursor = self.word_boundary_left();
+        let target = self.word_boundary_left();
+        if self.cursor != target {
+            self.cursor = target;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn move_cursor_word_right(&mut self) {
-        self.cursor = self.word_boundary_right();
+        let target = self.word_boundary_right();
+        if self.cursor != target {
+            self.cursor = target;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn kill_to_start(&mut self) {
@@ -288,12 +365,17 @@ impl EditorState {
         self.input.drain(..end);
         self.cursor = 0;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn kill_to_end(&mut self) {
         let start = char_index_to_byte(&self.input, self.cursor);
+        if start == self.input.len() {
+            return;
+        }
         self.input.truncate(start);
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     fn restore_completion_prefix(&mut self) -> bool {
@@ -306,6 +388,59 @@ impl EditorState {
         self.input = cycle.prefix;
         self.cursor = self.char_count();
         self.history_index = None;
+        self.touch_completion_preview();
         true
+    }
+
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(crate) fn completion_preview_matches(
+        &self,
+        key: CompletionPreviewKey,
+        target: Option<&Path>,
+    ) -> bool {
+        self.completion_preview
+            .borrow()
+            .as_ref()
+            .is_some_and(|memo| memo.key == key && memo.target.as_deref() == target)
+    }
+
+    pub(crate) fn store_completion_preview(
+        &self,
+        key: CompletionPreviewKey,
+        target: Option<&Path>,
+        preview: Option<String>,
+    ) {
+        *self.completion_preview.borrow_mut() = Some(CompletionPreviewMemo {
+            key,
+            target: target.map(Path::to_path_buf),
+            preview,
+        });
+        #[cfg(test)]
+        self.completion_preview_recomputations
+            .set(self.completion_preview_recomputations.get() + 1);
+    }
+
+    pub(crate) fn completion_preview(&self) -> Option<Ref<'_, str>> {
+        Ref::filter_map(self.completion_preview.borrow(), |memo| {
+            memo.as_ref()?.preview.as_deref()
+        })
+        .ok()
+    }
+
+    pub(crate) fn invalidate_completion_preview(&mut self) {
+        self.completion_preview.get_mut().take();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn completion_preview_recomputations(&self) -> usize {
+        self.completion_preview_recomputations.get()
+    }
+
+    fn touch_completion_preview(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+        self.invalidate_completion_preview();
     }
 }

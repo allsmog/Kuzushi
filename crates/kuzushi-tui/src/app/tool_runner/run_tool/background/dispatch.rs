@@ -10,7 +10,7 @@ pub(super) struct BackgroundToolRun {
 
 pub(super) struct BackgroundToolRunSeed {
     target: PathBuf,
-    run_id: String,
+    pub(super) run_id: String,
     target_label: String,
 }
 
@@ -28,7 +28,7 @@ pub(super) struct BackgroundToolWorkerLaunch {
     ticket: JobTicket,
     workspace: WorkspaceTarget,
     tool_name: String,
-    input: serde_json::Value,
+    input: PreparedToolInput,
     thinking_level: Option<String>,
     authorization: ExecutionAuthorization,
 }
@@ -38,7 +38,7 @@ impl BackgroundToolWorkerLaunch {
         dispatch: BackgroundToolDispatch,
         workspace: WorkspaceTarget,
         tool_name: String,
-        input: serde_json::Value,
+        input: PreparedToolInput,
         thinking_level: Option<String>,
         authorization: ExecutionAuthorization,
     ) -> Self {
@@ -112,7 +112,7 @@ struct BackgroundToolWorkerStart {
     ticket: JobTicket,
     workspace: WorkspaceTarget,
     tool_name: String,
-    input: serde_json::Value,
+    input: PreparedToolInput,
     thinking_level: Option<String>,
     authorization: ExecutionAuthorization,
 }
@@ -181,7 +181,7 @@ pub(super) fn persist_background_tool_run_start(
     kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
         record,
         input,
-        config.model.clone(),
+        kuzushi_core::tool_execution_model(tool_name, input, config),
         config_hash(config).ok(),
         registry.loaded_module_specifiers(),
     )?;
@@ -217,4 +217,42 @@ fn background_tool_trace_handle(
         Arc::new(StampedTraceSink::new(inner_sink, sink, trace_budget));
     let initial_step_number = next_run_trace_step_number(target, run_id).saturating_sub(1);
     TraceHandle::with_initial_step_number(broadcast_sink, initial_step_number)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_run_receipt_records_the_execution_model_not_the_profile_model() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-5.5".to_string());
+
+        let runtime_free = persist_background_tool_run_start(
+            &registry,
+            &config,
+            &workspace,
+            "recon:import",
+            &serde_json::json!({"tool": "httpx", "path": "recon.jsonl"}),
+        )
+        .unwrap();
+        let runtime_backed = persist_background_tool_run_start(
+            &registry,
+            &config,
+            &workspace,
+            "deep-audit:run",
+            &serde_json::json!({}),
+        )
+        .unwrap();
+
+        let free_summary =
+            kuzushi_core::load_run_summary(workspace.root(), &runtime_free.run_id).unwrap();
+        let backed_summary =
+            kuzushi_core::load_run_summary(workspace.root(), &runtime_backed.run_id).unwrap();
+        assert_eq!(free_summary.model, None);
+        assert_eq!(backed_summary.model.as_deref(), Some("openai:gpt-5.5"));
+    }
 }

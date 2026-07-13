@@ -1,12 +1,13 @@
 use super::{ActivityTaskCountModel, MapArtifactMetric, MapConsoleRow, MapPhaseModel};
 use crate::{ActivitySession, DagTaskState, RecordedTraceEvent, ShellApp};
+use kuzushi_core::WorkflowPhase;
 
 const MAP_CONSOLE_ROW_LIMIT: usize = 200;
 
 pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
     let artifact_metrics = artifact_metrics(app);
     let Some(session) = app.activity() else {
-        return empty_map_phase_model(artifact_metrics);
+        return empty_map_phase_model(app, artifact_metrics);
     };
     let skip = session.events.len().saturating_sub(MAP_CONSOLE_ROW_LIMIT);
     let console = session
@@ -15,31 +16,50 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
         .skip(skip)
         .map(map_console_row)
         .collect();
+    let run_cost = session.runtime_cost_report();
     MapPhaseModel {
         run_id: Some(session.run_id.clone()),
         elapsed_secs: Some(session.elapsed_secs()),
-        run_cost_usd: session.tasks.values().map(|row| row.cost_usd).sum(),
+        run_cost_usd: run_cost.as_ref().map_or(0.0, |cost| cost.observed_usd()),
+        run_cost_complete: run_cost.as_ref().is_ok_and(|cost| cost.is_complete()),
+        run_cost_invalid: run_cost.is_err(),
         task_counts: activity_task_counts(session),
         console,
         hidden_console_rows: skip,
         artifact_metrics,
-        empty_hint: session
-            .events
-            .is_empty()
-            .then_some("activity is live; waiting for the first trace event"),
+        empty_hint: map_console_empty_hint(session),
     }
 }
 
-fn empty_map_phase_model(artifact_metrics: Vec<MapArtifactMetric>) -> MapPhaseModel {
+fn map_console_empty_hint(session: &ActivitySession) -> Option<&'static str> {
+    if !session.events.is_empty() {
+        return None;
+    }
+    if session.completed_at.is_some() {
+        return Some("activity completed without trace events");
+    }
+    Some("activity is live; waiting for the first trace event")
+}
+
+fn empty_map_phase_model(
+    app: &ShellApp,
+    artifact_metrics: Vec<MapArtifactMetric>,
+) -> MapPhaseModel {
+    let empty_hint = match super::journey_model(app).map(|journey| journey.current) {
+        Some(WorkflowPhase::Map) | None => "no map activity yet — use `next` to start",
+        Some(_) => "no map activity was recorded for this workspace",
+    };
     MapPhaseModel {
         run_id: None,
         elapsed_secs: None,
         run_cost_usd: 0.0,
+        run_cost_complete: true,
+        run_cost_invalid: false,
         task_counts: ActivityTaskCountModel::default(),
         console: Vec::new(),
         hidden_console_rows: 0,
         artifact_metrics,
-        empty_hint: Some("no map activity yet — use `next` to start"),
+        empty_hint: Some(empty_hint),
     }
 }
 
@@ -77,6 +97,11 @@ fn push_nonzero(metrics: &mut Vec<MapArtifactMetric>, label: &'static str, value
 }
 
 fn map_console_row(event: &RecordedTraceEvent) -> MapConsoleRow {
+    let cost = event.step.cost_usd.and_then(|cost| {
+        kuzushi_core::runtime::RuntimeCost::from_usd(cost, "map console cost")
+            .ok()
+            .map(kuzushi_core::runtime::RuntimeCost::usd)
+    });
     MapConsoleRow {
         sequence: event.step.n,
         started_at_ms: event.step.started_at_ms,
@@ -86,7 +111,8 @@ fn map_console_row(event: &RecordedTraceEvent) -> MapConsoleRow {
         verb: event.step.verb.clone(),
         severity: event.step.severity.clone(),
         latency_ms: event.step.latency_ms,
-        cost_usd: event.step.cost_usd,
+        cost_usd: cost,
+        cost_invalid: event.step.cost_usd.is_some() && cost.is_none(),
     }
 }
 

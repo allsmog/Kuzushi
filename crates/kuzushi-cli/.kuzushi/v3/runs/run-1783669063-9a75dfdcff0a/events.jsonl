@@ -1,0 +1,2 @@
+{"n":1,"kind":"run","status":"started","message":"secret-scan:scan started","atUnix":1783669064,"tool":"secret-scan:scan","artifact":{"label":"tool input","path":"/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-9a75dfdcff0a/input.json","kind":"json"}}
+{"n":2,"kind":"run","status":"failed","message":"tool failed","atUnix":1783669065,"tool":"secret-scan:scan"}

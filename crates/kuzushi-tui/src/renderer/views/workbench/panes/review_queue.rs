@@ -31,30 +31,129 @@ fn review_queue_empty_lines(model: &ReviewQueueModel, width: usize) -> Vec<Line<
 }
 
 fn populated_review_queue_pane_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    if inner.width >= 72 {
-        lines.push(Line::styled(
-            fit(
-                &review_queue_reconciliation_line(model),
-                inner.width as usize,
-            ),
-            theme::muted(),
-        ));
-    }
-    let chrome_rows = lines.len();
-    let visible = (inner.height as usize).saturating_sub(chrome_rows).max(1);
-    let cursor = model.rows.iter().position(|row| row.selected).unwrap_or(0);
-    let start = viewport_start_for_cursor(model.rows.len(), visible, cursor);
     let width = inner.width as usize;
-    lines.extend(
-        model
-            .rows
-            .iter()
-            .skip(start)
-            .take(visible)
-            .map(|row| review_queue_row_line(row, width)),
-    );
+    let mut lines = review_queue_chrome_lines(model, width);
+    let viewport = review_queue_viewport(model, inner, lines.len());
+    for (index, row) in model
+        .rows
+        .iter()
+        .enumerate()
+        .skip(viewport.start)
+        .take(viewport.visible_findings)
+    {
+        let is_selected = Some(index) == viewport.selected;
+        lines.push(review_queue_row_line_with_selection(
+            row,
+            width,
+            is_selected,
+        ));
+        if is_selected {
+            lines.extend(compact_selected_detail_lines(
+                row,
+                width,
+                viewport.detail_rows,
+                model.navigation_active,
+            ));
+        }
+    }
     lines
+}
+
+struct ReviewQueueViewport {
+    selected: Option<usize>,
+    detail_rows: usize,
+    visible_findings: usize,
+    start: usize,
+}
+
+fn review_queue_chrome_lines(model: &ReviewQueueModel, width: usize) -> Vec<Line<'static>> {
+    if !should_show_reconciliation(model, width) {
+        return Vec::new();
+    }
+    vec![Line::styled(
+        fit(&responsive_reconciliation_line(model, width), width),
+        theme::muted(),
+    )]
+}
+
+fn review_queue_viewport(
+    model: &ReviewQueueModel,
+    inner: Rect,
+    chrome_rows: usize,
+) -> ReviewQueueViewport {
+    let width = inner.width as usize;
+    let visible = (inner.height as usize).saturating_sub(chrome_rows).max(1);
+    let selected = model
+        .selected_row
+        .or_else(|| model.rows.iter().position(|row| row.selected));
+    let detail_rows = compact_selected_detail_budget(width, visible, selected.is_some());
+    let visible_findings = visible.saturating_sub(detail_rows).max(1);
+    let cursor = selected.unwrap_or(0);
+    ReviewQueueViewport {
+        selected,
+        detail_rows,
+        visible_findings,
+        start: viewport_start_for_cursor(model.rows.len(), visible_findings, cursor),
+    }
+}
+
+fn should_show_reconciliation(model: &ReviewQueueModel, width: usize) -> bool {
+    width >= 72 || model.filter_label != format!("completeness:{}", model.completeness_mode)
+}
+
+fn responsive_reconciliation_line(model: &ReviewQueueModel, width: usize) -> String {
+    if width >= 72 {
+        return review_queue_reconciliation_line(model);
+    }
+    format!(
+        "filter:{} · {}/{} shown",
+        model.filter_label, model.visible_count, model.total_count
+    )
+}
+
+fn compact_selected_detail_budget(width: usize, visible: usize, has_selection: bool) -> usize {
+    if width >= 72 || !has_selection {
+        return 0;
+    }
+    visible.saturating_sub(1).min(3)
+}
+
+fn compact_selected_detail_lines(
+    row: &ReviewQueueRow,
+    width: usize,
+    budget: usize,
+    navigation_active: bool,
+) -> Vec<Line<'static>> {
+    let open_hint = if navigation_active {
+        "Enter open"
+    } else {
+        "F2 nav, then Enter open"
+    };
+    let action = Line::styled(
+        fit(
+            &format!("  ▸ next:{} · {open_hint}", row.next_action),
+            width,
+        ),
+        theme::warn(),
+    );
+    if budget == 0 {
+        return Vec::new();
+    }
+    if budget == 1 {
+        return vec![action];
+    }
+    let location = Line::styled(
+        format!("  {}", fit_path(&row.location, width.saturating_sub(2))),
+        theme::muted(),
+    );
+    if budget == 2 {
+        return vec![location, action];
+    }
+    vec![
+        Line::styled(fit(&format!("  {}", row.title), width), theme::primary()),
+        location,
+        action,
+    ]
 }
 
 fn review_queue_reconciliation_line(model: &ReviewQueueModel) -> String {
@@ -64,39 +163,48 @@ fn review_queue_reconciliation_line(model: &ReviewQueueModel) -> String {
     )
 }
 
+#[cfg(test)]
 fn review_queue_row_line(row: &ReviewQueueRow, width: usize) -> Line<'static> {
+    review_queue_row_line_with_selection(row, width, row.selected)
+}
+
+fn review_queue_row_line_with_selection(
+    row: &ReviewQueueRow,
+    width: usize,
+    selected: bool,
+) -> Line<'static> {
     let signals = review_queue_signal_text(row, width);
     let signals_width = review_queue_signal_width(width);
     let chip = review_queue_confidence_chip(row, width);
     let title_budget = review_queue_title_budget(width, signals_width, chip.chars().count());
-    if row.selected {
+    if selected {
         return selected_review_queue_row(row, width, &signals, signals_width, &chip, title_budget);
     }
     Line::from(vec![
         Span::styled(" ", theme::muted()),
         Span::styled(
             pad(&row.alias, 7),
-            review_queue_row_style(row, theme::label()),
+            review_queue_row_style(theme::label(), selected),
         ),
         Span::raw(" "),
         Span::styled(
             severity_glyph(row.severity_tone),
-            review_queue_row_style(row, theme::severity_tone(row.severity_tone)),
+            review_queue_row_style(theme::severity_tone(row.severity_tone), selected),
         ),
         Span::raw(" "),
         Span::styled(
             chip,
-            review_queue_row_style(row, theme::proof_confidence_tone(row.proof_confidence)),
+            review_queue_row_style(theme::proof_confidence_tone(row.proof_confidence), selected),
         ),
         Span::raw(" "),
         Span::styled(
             pad(&signals, signals_width),
-            review_queue_row_style(row, review_queue_decision_style(row)),
+            review_queue_row_style(review_queue_decision_style(row), selected),
         ),
         Span::raw(" "),
         Span::styled(
             fit(&review_queue_title_text(row, width), title_budget),
-            review_queue_row_style(row, theme::primary()),
+            review_queue_row_style(theme::primary(), selected),
         ),
     ])
 }
@@ -226,10 +334,10 @@ fn review_queue_decision_style(row: &ReviewQueueRow) -> ratatui::style::Style {
 }
 
 fn review_queue_row_style(
-    row: &ReviewQueueRow,
     fallback: ratatui::style::Style,
+    selected: bool,
 ) -> ratatui::style::Style {
-    if row.selected {
+    if selected {
         theme::selection()
     } else {
         fallback
@@ -274,6 +382,7 @@ mod tests {
             proof_label: "source_sink_linked".to_string(),
             evidence_state: "evidence:1".to_string(),
             next_action: "validate".to_string(),
+            projection_index: 0,
             selected: true,
             workflow_group: ReviewWorkflowGroup::NeedsReview,
         }
@@ -288,7 +397,9 @@ mod tests {
     }
 
     fn review_model(rows: Vec<ReviewQueueRow>) -> ReviewQueueModel {
+        let selected_row = rows.iter().position(|row| row.selected);
         ReviewQueueModel {
+            navigation_active: true,
             total_count: rows.len(),
             visible_count: rows.len(),
             open_count: rows.len(),
@@ -297,7 +408,8 @@ mod tests {
             completeness_mode: "all",
             header: format!("REVIEW QUEUE - showing {} of {}", rows.len(), rows.len()),
             empty_reason: None,
-            rows,
+            rows: rows.into(),
+            selected_row,
         }
     }
 
@@ -416,8 +528,62 @@ mod tests {
     }
 
     #[test]
+    fn compact_viewport_keeps_moved_selection_details_and_action_visible() {
+        for selected_index in [3, 7] {
+            let rows = (0..8)
+                .map(|index| {
+                    grouped_row(
+                        &format!("F-{:04}", index + 1),
+                        ReviewWorkflowGroup::NeedsReview,
+                        index == selected_index,
+                    )
+                })
+                .collect();
+            let text = lines_text(populated_review_queue_pane_lines(
+                &review_model(rows),
+                Rect::new(0, 0, 33, 6),
+            ));
+            let alias = format!("F-{:04}", selected_index + 1);
+
+            assert!(text.contains(&format!("▸{alias}")), "{text}");
+            assert!(text.contains("request reaches sink"), "{text}");
+            assert!(text.contains("example.rs:42"), "{text}");
+            assert!(text.contains("▸ next:validate"), "{text}");
+            assert!(text.contains("Enter open"), "{text}");
+            assert!(text.lines().count() <= 6, "{text}");
+        }
+    }
+
+    #[test]
+    fn compact_viewport_keeps_active_filter_visible() {
+        let mut model = review_model(vec![review_row()]);
+        model.filter_label = "severity:high".to_string();
+
+        let text = lines_text(populated_review_queue_pane_lines(
+            &model,
+            Rect::new(0, 0, 33, 6),
+        ));
+
+        assert!(text.contains("filter:severity:high"), "{text}");
+    }
+
+    #[test]
+    fn compact_prompt_mode_does_not_claim_enter_is_immediately_active() {
+        let mut model = review_model(vec![review_row()]);
+        model.navigation_active = false;
+
+        let text = lines_text(populated_review_queue_pane_lines(
+            &model,
+            Rect::new(0, 0, 48, 6),
+        ));
+
+        assert!(text.contains("F2 nav, then Enter open"), "{text}");
+    }
+
+    #[test]
     fn empty_state_says_only_queue_is_empty() {
         let model = ReviewQueueModel {
+            navigation_active: true,
             total_count: 2,
             visible_count: 0,
             open_count: 0,
@@ -426,7 +592,8 @@ mod tests {
             completeness_mode: "open",
             header: "REVIEW QUEUE - showing 0 of 2 - 0 open - 2 complete".to_string(),
             empty_reason: Some("all visible findings have terminal decisions".to_string()),
-            rows: Vec::new(),
+            rows: Vec::new().into(),
+            selected_row: None,
         };
 
         let text = lines_text(review_queue_empty_lines(&model, 80));

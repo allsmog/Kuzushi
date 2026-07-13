@@ -121,14 +121,16 @@ pub(crate) fn parse_anthropic_messages_response(
     let text = super::response::anthropic_response_text(&parsed);
     let structured = maybe_parse_json(&text);
     let (input_tokens, output_tokens) = super::response::anthropic_response_usage(&parsed);
-    let cost_usd = estimate_cost_usd(model, input_tokens, output_tokens);
+    let estimated_cost_usd = estimate_cost_usd(model, input_tokens, output_tokens);
     let stop_reason = parsed.stop_reason.clone();
     let truncated = stop_reason.as_deref() == Some("max_tokens");
 
     Ok(AgentQueryResponse {
         text,
         structured,
-        cost_usd,
+        cost_usd: 0.0,
+        cost_usd_reported: false,
+        estimated_cost_usd,
         input_tokens,
         output_tokens,
         truncated,

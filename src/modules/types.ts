@@ -9,7 +9,6 @@
  * They work identically across all three execution modes (pipeline, shell, run).
  */
 
-import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { MessageBus } from "../bus/types.js";
 import type { KuzushiConfig, SecurityProfile } from "../public-types.js";
@@ -202,9 +201,27 @@ export interface DagContext {
   gitRoot?: string;
   repoName: string;
   /** Optional findings DB for regression detection + historical lookups. */
-  db?: Database.Database;
+  db?: DagDatabase;
   /** Outputs from completed dependency nodes, keyed by qualified tool name. */
   upstreamOutputs: ReadonlyMap<string, unknown>;
+}
+
+/**
+ * Minimal prepared-statement surface exposed to DAG tools.
+ *
+ * The SDK deliberately owns this structural contract instead of exporting a
+ * concrete SQLite driver's types. Database implementations such as
+ * `better-sqlite3` remain assignable when they provide this common subset.
+ */
+export interface DagDatabaseStatement {
+  run(...parameters: unknown[]): unknown;
+  get(...parameters: unknown[]): unknown;
+  all(...parameters: unknown[]): unknown[];
+}
+
+/** Minimal structural database handle accepted by `DagContext.db`. */
+export interface DagDatabase {
+  prepare(source: string): DagDatabaseStatement;
 }
 
 // Module tool types
@@ -219,6 +236,10 @@ export interface ToolResult {
   data?: unknown;
   /** Optional cost in USD for this tool invocation. */
   costUsd?: number;
+  /** Provider-observed subtotal when the complete charge is unavailable. */
+  observedCostUsd?: number;
+  /** True when at least one paid provider call did not return trustworthy usage. */
+  providerSpendUnresolved?: boolean;
 }
 
 /** Context provided to every tool execution. */
@@ -494,7 +515,12 @@ export interface ModuleTool {
   /** Journey/catalog grouping metadata consumed by native and SDK hosts. */
   readonly phase?: "map" | "hunt" | "confirm" | "fix" | "operate";
   /** Native dispatch side-effect contract. Required when loaded through `--load`. */
-  readonly effect?: "read" | "workspace-write" | "target-write" | "external-action";
+  readonly effect?:
+    | "read"
+    | "workspace-write"
+    | "target-write"
+    | "repository-execute"
+    | "external-action";
   /** Native approval contract. Required when loaded through `--load`. */
   readonly approval?: "none" | "explicit";
   /** Active-workspace capability requirement. Required when loaded through `--load`. */

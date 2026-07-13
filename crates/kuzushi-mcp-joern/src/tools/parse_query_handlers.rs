@@ -8,7 +8,7 @@ use crate::server::{parse_repo, run_query};
 
 use super::availability::{ensure_joern_available, parse_raw_json_or_string, require_str};
 use super::health::extended_health;
-use super::tool_types::{CallersOfTool, HealthTool, ParseTool, QueryTool};
+use super::tool_types::{CallersOfTool, DefinitionsTool, HealthTool, ParseTool};
 
 #[async_trait]
 impl ToolHandler for HealthTool {
@@ -20,22 +20,24 @@ impl ToolHandler for HealthTool {
 #[async_trait]
 impl ToolHandler for ParseTool {
     async fn call(&self, args: Value) -> Result<Value> {
-        parse_tool_response(args).await
+        parse_tool_response(&self.read_capability, args).await
     }
 }
 
-pub(crate) async fn parse_tool_response(args: Value) -> Result<Value> {
+pub(crate) async fn parse_tool_response(
+    read_capability: &kuzushi_mcp_common::ReadRootCapability,
+    args: Value,
+) -> Result<Value> {
+    let repo = parse_repo_path(read_capability, &args)?;
     ensure_joern_available()?;
-    parse_repo_response(&args).await
-}
-
-pub(crate) async fn parse_repo_response(args: &Value) -> Result<Value> {
-    let repo = parse_repo_path(args)?;
     parse_repo_handle_value(&repo).await
 }
 
-pub(crate) fn parse_repo_path(args: &Value) -> Result<std::path::PathBuf> {
-    Ok(std::path::PathBuf::from(require_str(args, "repoPath")?))
+pub(crate) fn parse_repo_path(
+    read_capability: &kuzushi_mcp_common::ReadRootCapability,
+    args: &Value,
+) -> Result<std::path::PathBuf> {
+    read_capability.resolve(std::path::Path::new(require_str(args, "repoPath")?))
 }
 
 pub(crate) async fn parse_repo_handle_value(repo: &std::path::Path) -> Result<Value> {
@@ -44,27 +46,17 @@ pub(crate) async fn parse_repo_handle_value(repo: &std::path::Path) -> Result<Va
 }
 
 #[async_trait]
-impl ToolHandler for QueryTool {
-    async fn call(&self, args: Value) -> Result<Value> {
-        query_tool_response(args).await
-    }
-}
-
-pub(crate) async fn query_tool_response(args: Value) -> Result<Value> {
-    ensure_joern_available()?;
-    query_response(&args).await
-}
-
-pub(crate) async fn query_response(args: &Value) -> Result<Value> {
-    let scala = require_str(args, "scala")?.to_string();
-    let raw = run_query(&scala).await?;
-    Ok(json!({ "result": parse_raw_json_or_string(raw) }))
-}
-
-#[async_trait]
 impl ToolHandler for CallersOfTool {
     async fn call(&self, args: Value) -> Result<Value> {
         callers_of_response(args).await
+    }
+}
+
+#[async_trait]
+impl ToolHandler for DefinitionsTool {
+    async fn call(&self, args: Value) -> Result<Value> {
+        ensure_joern_available()?;
+        function_query_response(&args, queries::definitions, "matches").await
     }
 }
 

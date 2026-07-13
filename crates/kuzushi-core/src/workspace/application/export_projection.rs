@@ -27,6 +27,12 @@ struct WorkspaceReviewExportSummary {
     triage_verdict: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct WorkspaceFindingExportPosition {
+    pub alias: String,
+    pub priority_index: usize,
+}
+
 pub fn workspace_finding_export_records_with_reviews(
     findings: &[Finding],
     reviews: &[Option<WorkspaceFindingReviewContext>],
@@ -39,19 +45,60 @@ pub fn workspace_finding_export_records_with_context(
     reviews: &[Option<WorkspaceFindingReviewContext>],
     run_contexts: &HashMap<String, WorkspaceRunExportContext>,
 ) -> Vec<WorkspaceFindingExportRecord> {
-    crate::findings::sorted_finding_alias_indices(findings)
+    let positions = workspace_finding_export_positions(findings);
+    workspace_finding_export_records_at_positions(findings, reviews, run_contexts, &positions)
+}
+
+pub(super) fn workspace_finding_export_positions(
+    findings: &[Finding],
+) -> Vec<WorkspaceFindingExportPosition> {
+    let mut positions = vec![None; findings.len()];
+    for (priority_index, (alias, finding_index)) in
+        crate::findings::sorted_finding_alias_indices(findings)
+            .into_iter()
+            .enumerate()
+    {
+        positions[finding_index] = Some(WorkspaceFindingExportPosition {
+            alias,
+            priority_index,
+        });
+    }
+    positions
         .into_iter()
+        .map(|position| position.expect("alias projection covers every finding"))
+        .collect()
+}
+
+pub(super) fn workspace_finding_export_records_at_positions(
+    findings: &[Finding],
+    reviews: &[Option<WorkspaceFindingReviewContext>],
+    run_contexts: &HashMap<String, WorkspaceRunExportContext>,
+    positions: &[WorkspaceFindingExportPosition],
+) -> Vec<WorkspaceFindingExportRecord> {
+    let mut records = findings
+        .iter()
+        .zip(positions)
         .enumerate()
-        .map(|(index, (alias, finding_index))| {
-            let finding = findings[finding_index].clone();
+        .map(|(finding_index, (finding, position))| {
             let review = reviews.get(finding_index).and_then(Option::as_ref);
             let run_context = finding
                 .scan_id
                 .as_ref()
                 .and_then(|run_id| run_contexts.get(run_id));
-            export_record(index, alias, finding, review, run_context)
+            (
+                position.priority_index,
+                export_record(
+                    position.priority_index,
+                    position.alias.clone(),
+                    finding.clone(),
+                    review,
+                    run_context,
+                ),
+            )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    records.sort_by_key(|(priority_index, _)| *priority_index);
+    records.into_iter().map(|(_, record)| record).collect()
 }
 
 fn export_record(
@@ -84,6 +131,7 @@ fn base_export_record(
         kind: "scanner_finding".to_string(),
         rule_id: finding.rule_id.clone(),
         title: finding.title.clone(),
+        cwe: crate::findings::extract_cwe(&finding.rule_id, &finding.title, &finding.message),
         location: finding_location(&finding),
         severity: finding.severity.as_str().to_string(),
         confidence: None,

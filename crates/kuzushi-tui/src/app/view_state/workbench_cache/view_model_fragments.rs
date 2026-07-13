@@ -1,12 +1,13 @@
-use crate::ui_view_models::{DfdModel, RiskByModule};
-use kuzushi_core::findings::ReviewDecisionRecord;
+use crate::ui_view_models::{DfdModel, ReviewQueueRow, RiskByModule};
 use kuzushi_core::Finding;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 #[derive(Debug, Default)]
 pub(super) struct ViewModelFragmentCache {
     visible_findings: Option<CachedVisibleFindings>,
+    review_queue: Option<CachedReviewQueue>,
     risk_by_module: Option<CachedRiskByModule>,
     dfd_model: Option<CachedDfdModel>,
 }
@@ -15,19 +16,55 @@ impl ViewModelFragmentCache {
     pub(super) fn visible_findings(
         &self,
         key: &VisibleFindingsCacheKey,
-    ) -> Option<Vec<VisibleFindingProjection>> {
+    ) -> Option<Arc<[VisibleFindingProjection]>> {
         self.visible_findings
             .as_ref()
             .filter(|cache| &cache.key == key)
-            .map(|cache| cache.projected.clone())
+            .map(|cache| Arc::clone(&cache.projected))
     }
 
     pub(super) fn cache_visible_findings(
         &mut self,
         key: VisibleFindingsCacheKey,
-        projected: Vec<VisibleFindingProjection>,
+        projected: Arc<[VisibleFindingProjection]>,
     ) {
         self.visible_findings = Some(CachedVisibleFindings { key, projected });
+    }
+
+    pub(super) fn invalidate_visible_findings(&mut self) {
+        self.visible_findings = None;
+        self.review_queue = None;
+    }
+
+    pub(super) fn review_queue(
+        &self,
+        key: &ReviewQueueCacheKey,
+    ) -> Option<(Arc<[ReviewQueueRow]>, usize, usize)> {
+        self.review_queue
+            .as_ref()
+            .filter(|cache| &cache.key == key)
+            .map(|cache| {
+                (
+                    Arc::clone(&cache.rows),
+                    cache.open_count,
+                    cache.complete_count,
+                )
+            })
+    }
+
+    pub(super) fn cache_review_queue(
+        &mut self,
+        key: ReviewQueueCacheKey,
+        rows: Arc<[ReviewQueueRow]>,
+        open_count: usize,
+        complete_count: usize,
+    ) {
+        self.review_queue = Some(CachedReviewQueue {
+            key,
+            rows,
+            open_count,
+            complete_count,
+        });
     }
 
     pub(super) fn risk_by_module(&self, key: &RiskByModuleCacheKey) -> Option<RiskByModule> {
@@ -70,15 +107,15 @@ pub(crate) struct VisibleFindingsCacheKey {
 
 impl VisibleFindingsCacheKey {
     pub(crate) fn from_app_parts(
-        findings: &[Finding],
-        review_decisions: &[ReviewDecisionRecord],
+        findings_revision: u64,
+        review_decisions_revision: u64,
         target_base: Option<String>,
         active_component: Option<String>,
         active_filter: Option<String>,
     ) -> Self {
         Self {
-            findings: ViewModelVersion::from_findings(findings),
-            review_decisions: ViewModelVersion::from_review_decisions(review_decisions),
+            findings: ViewModelVersion(findings_revision),
+            review_decisions: ViewModelVersion(review_decisions_revision),
             target_base,
             active_component,
             active_filter,
@@ -91,10 +128,25 @@ pub(crate) struct RiskByModuleCacheKey {
     findings: ViewModelVersion,
 }
 
-impl RiskByModuleCacheKey {
-    pub(crate) fn from_findings(findings: &[Finding]) -> Self {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewQueueCacheKey {
+    visible_findings: VisibleFindingsCacheKey,
+    mode: u8,
+}
+
+impl ReviewQueueCacheKey {
+    pub(crate) fn new(visible_findings: VisibleFindingsCacheKey, mode: u8) -> Self {
         Self {
-            findings: ViewModelVersion::from_risk_findings(findings),
+            visible_findings,
+            mode,
+        }
+    }
+}
+
+impl RiskByModuleCacheKey {
+    pub(crate) fn from_findings_revision(findings_revision: u64) -> Self {
+        Self {
+            findings: ViewModelVersion(findings_revision),
         }
     }
 }
@@ -115,7 +167,15 @@ impl DfdModelCacheKey {
 #[derive(Debug)]
 struct CachedVisibleFindings {
     key: VisibleFindingsCacheKey,
-    projected: Vec<VisibleFindingProjection>,
+    projected: Arc<[VisibleFindingProjection]>,
+}
+
+#[derive(Debug)]
+struct CachedReviewQueue {
+    key: ReviewQueueCacheKey,
+    rows: Arc<[ReviewQueueRow]>,
+    open_count: usize,
+    complete_count: usize,
 }
 
 #[derive(Debug)]
@@ -134,18 +194,6 @@ struct CachedDfdModel {
 struct ViewModelVersion(u64);
 
 impl ViewModelVersion {
-    fn from_findings(findings: &[Finding]) -> Self {
-        version_from(|hasher| hash_findings(findings, hasher))
-    }
-
-    fn from_risk_findings(findings: &[Finding]) -> Self {
-        version_from(|hasher| hash_risk_findings(findings, hasher))
-    }
-
-    fn from_review_decisions(decisions: &[ReviewDecisionRecord]) -> Self {
-        version_from(|hasher| hash_review_decisions(decisions, hasher))
-    }
-
     fn from_threat_doc(doc: Option<&serde_json::Value>) -> Self {
         version_from(|hasher| hash_threat_doc(doc, hasher))
     }
@@ -155,53 +203,6 @@ fn version_from(hash: impl FnOnce(&mut DefaultHasher)) -> ViewModelVersion {
     let mut hasher = DefaultHasher::new();
     hash(&mut hasher);
     ViewModelVersion(hasher.finish())
-}
-
-fn hash_findings(findings: &[Finding], hasher: &mut DefaultHasher) {
-    findings.len().hash(hasher);
-    for finding in findings {
-        hash_finding_projection_fields(finding, hasher);
-    }
-}
-
-fn hash_risk_findings(findings: &[Finding], hasher: &mut DefaultHasher) {
-    findings.len().hash(hasher);
-    for finding in findings {
-        finding.file_path.hash(hasher);
-        finding.severity.as_str().hash(hasher);
-    }
-}
-
-fn hash_finding_projection_fields(finding: &Finding, hasher: &mut DefaultHasher) {
-    finding.id.hash(hasher);
-    finding.identity_id.hash(hasher);
-    finding.created_at.hash(hasher);
-    finding.fingerprint.hash(hasher);
-    finding.dedup_key.hash(hasher);
-    finding.file_path.hash(hasher);
-    finding.scan_id.hash(hasher);
-    finding.severity.as_str().hash(hasher);
-    finding.corroboration_count.hash(hasher);
-    hash_debug(&finding.static_proof_state, hasher);
-    hash_debug(&finding.triage, hasher);
-    hash_debug(&finding.verification, hasher);
-    hash_debug(&finding.vuln_source, hasher);
-    hash_debug(&finding.sources, hasher);
-}
-
-fn hash_review_decisions(decisions: &[ReviewDecisionRecord], hasher: &mut DefaultHasher) {
-    decisions.len().hash(hasher);
-    for record in decisions {
-        record.id.hash(hasher);
-        record.finding_id.hash(hasher);
-        record.identity_id.hash(hasher);
-        record.decision.verdict.as_str().hash(hasher);
-        record.decision.confidence.to_bits().hash(hasher);
-        record.decision.rationale.hash(hasher);
-        hash_debug(&record.decision.author, hasher);
-        hash_debug(&record.triage_verdict, hasher);
-        record.created_at.hash(hasher);
-    }
 }
 
 fn hash_threat_doc(doc: Option<&serde_json::Value>, hasher: &mut DefaultHasher) {
@@ -214,10 +215,6 @@ fn hash_threat_doc(doc: Option<&serde_json::Value>, hasher: &mut DefaultHasher) 
         }
         None => false.hash(hasher),
     }
-}
-
-fn hash_debug(value: &impl std::fmt::Debug, hasher: &mut DefaultHasher) {
-    format!("{value:?}").hash(hasher);
 }
 
 #[cfg(test)]
@@ -233,69 +230,53 @@ mod tests {
     }
 
     #[test]
-    fn visible_findings_cache_key_changes_when_projection_fields_change() {
-        let mut findings = vec![finding("src/a.rs", Severity::High)];
-        let original = VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
-
-        findings[0].severity = Severity::Critical;
-        let changed = VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
+    fn visible_findings_cache_key_tracks_findings_revision() {
+        let original = VisibleFindingsCacheKey::from_app_parts(7, 3, None, None, None);
+        let changed = VisibleFindingsCacheKey::from_app_parts(8, 3, None, None, None);
 
         assert_ne!(original, changed);
     }
 
     #[test]
-    fn visible_findings_cache_key_tracks_review_binding_fields() {
-        let mut findings = vec![finding("src/a.rs", Severity::High)];
-        let original = VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
+    fn visible_findings_cache_key_tracks_review_revision() {
+        let original = VisibleFindingsCacheKey::from_app_parts(7, 3, None, None, None);
+        let changed = VisibleFindingsCacheKey::from_app_parts(7, 4, None, None, None);
 
-        findings[0].id = Some(41);
-        let with_id = VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
-        assert_ne!(original, with_id);
-
-        findings[0].identity_id = Some("fi_review_identity".to_string());
-        let with_identity =
-            VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
-        assert_ne!(with_id, with_identity);
-
-        findings[0].created_at = "2026-07-10T00:00:00Z".to_string();
-        let with_timestamp =
-            VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
-        assert_ne!(with_identity, with_timestamp);
+        assert_ne!(original, changed);
     }
 
     #[test]
-    fn risk_cache_key_ignores_unrelated_finding_text() {
-        let mut findings = vec![finding("src/a.rs", Severity::High)];
-        let original = RiskByModuleCacheKey::from_findings(&findings);
+    fn risk_cache_key_tracks_findings_revision() {
+        let original = RiskByModuleCacheKey::from_findings_revision(11);
+        let changed = RiskByModuleCacheKey::from_findings_revision(12);
 
-        findings[0].message = "new wording".to_string();
-        let unchanged = RiskByModuleCacheKey::from_findings(&findings);
-
-        assert_eq!(original, unchanged);
+        assert_ne!(original, changed);
     }
 
     #[test]
     fn visible_findings_cache_reuses_only_matching_version() {
         let mut cache = ViewModelFragmentCache::default();
-        let mut findings = vec![finding("src/a.rs", Severity::High)];
-        let key = VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
-        let projected = vec![VisibleFindingProjection {
+        let finding = finding("src/a.rs", Severity::High);
+        let key = VisibleFindingsCacheKey::from_app_parts(1, 1, None, None, None);
+        let projected: Arc<[VisibleFindingProjection]> = vec![VisibleFindingProjection {
             alias: "F-0001".to_string(),
-            finding: findings[0].clone(),
-        }];
-        cache.cache_visible_findings(key.clone(), projected.clone());
+            finding,
+        }]
+        .into();
+        cache.cache_visible_findings(key.clone(), Arc::clone(&projected));
 
-        assert_eq!(cache.visible_findings(&key), Some(projected));
-        findings[0].severity = Severity::Critical;
-        let stale_key = VisibleFindingsCacheKey::from_app_parts(&findings, &[], None, None, None);
+        let first_hit = cache.visible_findings(&key).expect("cached projection");
+        let second_hit = cache.visible_findings(&key).expect("cached projection");
+        assert!(Arc::ptr_eq(&projected, &first_hit));
+        assert!(Arc::ptr_eq(&first_hit, &second_hit));
+        let stale_key = VisibleFindingsCacheKey::from_app_parts(2, 1, None, None, None);
         assert!(cache.visible_findings(&stale_key).is_none());
     }
 
     #[test]
     fn risk_by_module_cache_reuses_only_matching_version() {
         let mut cache = ViewModelFragmentCache::default();
-        let mut findings = vec![finding("src/a.rs", Severity::High)];
-        let key = RiskByModuleCacheKey::from_findings(&findings);
+        let key = RiskByModuleCacheKey::from_findings_revision(1);
         let risk = RiskByModule {
             modules: vec![ModuleRisk {
                 module: "src".to_string(),
@@ -306,8 +287,7 @@ mod tests {
         cache.cache_risk_by_module(key.clone(), risk.clone());
 
         assert_eq!(cache.risk_by_module(&key), Some(risk));
-        findings[0].severity = Severity::Critical;
-        let stale_key = RiskByModuleCacheKey::from_findings(&findings);
+        let stale_key = RiskByModuleCacheKey::from_findings_revision(2);
         assert!(cache.risk_by_module(&stale_key).is_none());
     }
 

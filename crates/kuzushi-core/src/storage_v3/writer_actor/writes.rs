@@ -16,6 +16,10 @@ pub struct DecisionWrite {
     pub confidence_millis: u16,
     pub read_watermark: u64,
     pub updates_finding_triage: bool,
+    /// Provider-observed triage cost. Absent for non-triage decisions.
+    pub triage_cost_usd: Option<serde_json::Number>,
+    /// Whether `triage_cost_usd` is the complete provider charge.
+    pub triage_cost_usd_exact: bool,
     /// SARIF-ecosystem dismissal reason (`used_in_tests`, ...) when this
     /// decision dismisses the finding. `None` for ordinary triage decisions.
     pub dismiss_reason: Option<String>,
@@ -43,6 +47,8 @@ impl DecisionWrite {
             "confidenceMillis": self.confidence_millis,
             "readWatermark": self.read_watermark,
             "updatesFindingTriage": self.updates_finding_triage,
+            "triageCostUsd": self.triage_cost_usd,
+            "triageCostUsdExact": self.triage_cost_usd_exact,
             "dismissReason": self.dismiss_reason,
             "dismissedBy": self.dismissed_by,
         })
@@ -111,7 +117,7 @@ impl VerificationWrite {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PatchAttemptWrite {
     pub stable_fp: String,
     pub fingerprint: String,
@@ -124,7 +130,12 @@ pub struct PatchAttemptWrite {
     pub build_command: Option<String>,
     pub test_command: Option<String>,
     pub worktree_path: Option<String>,
+    /// Exact provider-reported value. SQLite REAL and serde_json both retain
+    /// the original finite f64; micros remains replay compatibility for older
+    /// patch-attempt events.
+    pub cost_usd: Option<f64>,
     pub cost_usd_micros: Option<i64>,
+    pub provider_spend_unresolved: bool,
     pub validator_log: Option<String>,
     pub history_json: String,
     pub actor: String,
@@ -144,7 +155,9 @@ impl PatchAttemptWrite {
             "buildCommand": self.build_command,
             "testCommand": self.test_command,
             "worktreePath": self.worktree_path,
+            "costUsd": self.cost_usd,
             "costUsdMicros": self.cost_usd_micros,
+            "providerSpendUnresolved": self.provider_spend_unresolved,
             "validatorLog": self.validator_log,
             "historyJson": self.history_json,
         })

@@ -58,21 +58,21 @@ pub(crate) fn model_choices() -> &'static [ModelChoice] {
 }
 
 pub(crate) fn oauth_model_choice_for_provider(provider: &str) -> Option<&'static ModelChoice> {
-    match provider {
-        "openai" | "openai-codex" => MODEL_CHOICES
-            .iter()
-            .find(|choice| choice.provider == "openai-codex"),
-        _ => None,
+    if AuthProvider::from_scene_provider(provider) != Some(AuthProvider::OpenAi) {
+        return None;
     }
+    MODEL_CHOICES
+        .iter()
+        .find(|choice| choice.provider == AuthProvider::OpenAi.oauth_model_provider())
 }
 
 pub(crate) fn api_key_model_choice_for_provider(provider: &str) -> Option<&'static ModelChoice> {
-    match provider {
-        "openai" | "openai-codex" => MODEL_CHOICES
-            .iter()
-            .find(|choice| choice.provider == "openai"),
-        _ => None,
+    if AuthProvider::from_scene_provider(provider) != Some(AuthProvider::OpenAi) {
+        return None;
     }
+    MODEL_CHOICES
+        .iter()
+        .find(|choice| choice.provider == AuthProvider::OpenAi.api_key_provider())
 }
 
 pub(crate) fn visible_model_choice_indexes(configured_model: Option<&str>) -> Vec<usize> {
@@ -107,10 +107,7 @@ pub(crate) fn display_model_selector(model: &str) -> String {
 }
 
 pub(crate) fn display_model_provider(provider: &str) -> &str {
-    match provider {
-        "openai-codex" => "openai",
-        _ => provider,
-    }
+    auth_provider_label(provider)
 }
 
 pub(crate) fn model_choice_display_selector(choice: &ModelChoice) -> String {

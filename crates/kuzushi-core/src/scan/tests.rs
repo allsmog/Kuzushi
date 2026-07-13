@@ -427,6 +427,17 @@ mod tests {
     }
 
     #[test]
+    fn semgrep_default_names_a_metrics_compatible_security_pack() {
+        let scanner = SemgrepScanner::default();
+
+        assert_eq!(scanner.config, [DEFAULT_SEMGREP_CONFIG]);
+        assert_ne!(scanner.config, ["auto"]);
+
+        let from_blank = SemgrepScanner::from_tool_input(&json!({ "config": "" })).unwrap();
+        assert_eq!(from_blank.config, [DEFAULT_SEMGREP_CONFIG]);
+    }
+
+    #[test]
     fn scanner_env_helper_filters_credential_shaped_variables() {
         use super::super::subprocess::is_safe_scanner_env_key;
 

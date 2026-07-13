@@ -312,6 +312,9 @@ authorization: Default::default(),
         assert!(requests[0].prompt.contains("DREAD-style"));
         assert!(requests[0]
             .prompt
+            .contains(DEFAULT_THREAT_MODEL_GUIDANCE));
+        assert!(requests[0]
+            .prompt
             .contains(r#"<untrusted-source label="context""#));
         assert_eq!(
             result
@@ -660,7 +663,9 @@ authorization: Default::default(),
             .structured_output
             .as_ref()
             .is_some_and(|contract| contract.name == "ThreatModelDocument")));
-        assert!(requests[1].prompt.contains("Raw invalid model response"));
+        assert!(requests[1]
+            .prompt
+            .contains("Invalid model response (bounded evidence"));
         assert!(requests[1]
             .prompt
             .contains("I found threats but not as JSON"));
@@ -688,8 +693,14 @@ authorization: Default::default(),
 
         assert!(err.contains("randori:pasta"), "{err}");
         assert!(err.contains("ThreatModelDocument"), "{err}");
-        assert!(err.contains("Initial parse/validation failure"), "{err}");
-        assert!(err.contains("Raw initial model response"), "{err}");
+        assert!(
+            err.contains("Initial parse/validation failure (bounded evidence)"),
+            "{err}"
+        );
+        assert!(
+            err.contains("Initial model response (bounded evidence)"),
+            "{err}"
+        );
         assert!(err.contains("not json"), "{err}");
         assert!(err.contains("still not json"), "{err}");
         let requests = runtime.requests();

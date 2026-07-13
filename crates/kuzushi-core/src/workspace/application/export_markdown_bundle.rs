@@ -8,7 +8,7 @@ use super::export_evidence_origin::finding_evidence_origin_label;
 use super::export_metadata::workspace_export_metadata_value;
 use super::export_projection_model::WorkspaceFindingExportRecord;
 use super::*;
-use crate::findings::{sorted_finding_aliases, FindingEvidence};
+use crate::findings::FindingEvidence;
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,9 +37,8 @@ pub(crate) fn write_markdown_bundle(
     fs::create_dir_all(&findings_dir)
         .with_context(|| format!("Could not create {}", findings_dir.display()))?;
 
-    let aliased = sorted_finding_aliases(findings);
     let readme_file = write_bundle_readme(workspace, records, output_dir, options, total_count)?;
-    let finding_files = write_bundle_finding_files(&aliased, records, &findings_dir)?;
+    let finding_files = write_bundle_finding_files(findings, records, &findings_dir)?;
     write_bundle_manifest(
         workspace,
         records,
@@ -176,16 +175,17 @@ fn markdown_table_cell(value: &str) -> String {
 }
 
 fn write_bundle_finding_files(
-    aliased: &[(String, Finding)],
+    findings: &[Finding],
     records: &[WorkspaceFindingExportRecord],
     findings_dir: &Path,
 ) -> Result<Vec<BundleFindingFile>> {
-    let records_by_alias = records_by_alias(records);
+    let findings_by_fingerprint = findings_by_fingerprint(findings);
     let mut files = Vec::new();
-    for (alias, finding) in aliased {
-        let record = records_by_alias
-            .get(alias.as_str())
-            .with_context(|| format!("missing export projection for finding {alias}"))?;
+    for record in records {
+        let alias = &record.alias;
+        let finding = findings_by_fingerprint
+            .get(record.fingerprint.as_str())
+            .with_context(|| format!("missing finding source for {alias}"))?;
         let body = render_bundle_finding_markdown(record, finding);
         let relative_path = format!("findings/{alias}.md");
         let file = write_bundle_text_file(
@@ -201,12 +201,10 @@ fn write_bundle_finding_files(
     Ok(files)
 }
 
-fn records_by_alias(
-    records: &[WorkspaceFindingExportRecord],
-) -> HashMap<&str, &WorkspaceFindingExportRecord> {
-    records
+fn findings_by_fingerprint(findings: &[Finding]) -> HashMap<&str, &Finding> {
+    findings
         .iter()
-        .map(|record| (record.alias.as_str(), record))
+        .map(|finding| (finding.fingerprint.as_str(), finding))
         .collect()
 }
 

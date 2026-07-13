@@ -9,11 +9,17 @@ pub(crate) fn threat_regen_worker(
     sink: JobEventSink,
     cancel: ScanCancellation,
 ) {
+    let prompt = threat_regen_prompt(&existing);
+    let audit = AgentCallAudit::for_prompt(&model, THREAT_PATCH_SYSTEM_PROMPT, &prompt);
     let event = match run_threat_regen_worker(config, model, thinking_level, cwd, existing, cancel)
     {
-        Ok(patch) => ThreatPatchEvent::Proposed(patch),
+        Ok((patch, cost)) => ThreatPatchEvent::Proposed {
+            patch,
+            audit: audit.with_cost(cost),
+        },
         Err(error) => ThreatPatchEvent::Failed {
-            error: error.to_string(),
+            error: error.error.to_string(),
+            audit: audit.with_outcome(error.cost, error.call_attempted),
         },
     };
     sink.send(ShellEvent::Threat(event));
@@ -26,10 +32,11 @@ pub(crate) fn run_threat_regen_worker(
     cwd: PathBuf,
     existing: serde_json::Value,
     cancel: ScanCancellation,
-) -> Result<ThreatPatch> {
-    let runtime = worker_runtime(&config, &cwd, thinking_level, cancel)?;
+) -> CostedWorkerResult<ThreatPatch> {
+    let runtime = worker_runtime(&config, &cwd, thinking_level, cancel)
+        .map_err(CostedWorkerError::before_call)?;
     let prompt = threat_regen_prompt(&existing);
-    let body = worker_response_text(
+    let (body, cost) = worker_response_text(
         runtime,
         model,
         cwd,
@@ -37,7 +44,9 @@ pub(crate) fn run_threat_regen_worker(
         prompt,
         "threat regen returned no content",
     )?;
-    parse_threat_patch_json(THREAT_REGEN_PROMPT, &body)
+    let patch = parse_threat_patch_json(THREAT_REGEN_PROMPT, &body)
+        .map_err(|error| CostedWorkerError::observed(error, cost))?;
+    Ok((patch, cost))
 }
 
 fn threat_regen_prompt(existing: &serde_json::Value) -> String {
@@ -58,6 +67,8 @@ pub(crate) fn threat_ask_worker(
     sink: JobEventSink,
     cancel: ScanCancellation,
 ) {
+    let prompt = threat_ask_prompt(&question, &existing);
+    let audit = AgentCallAudit::for_prompt(&model, ASK_SYSTEM_PROMPT, &prompt);
     let event = match run_threat_ask_worker(
         config,
         model,
@@ -67,9 +78,13 @@ pub(crate) fn threat_ask_worker(
         &question,
         cancel,
     ) {
-        Ok(answer) => ThreatPatchEvent::Answer { text: answer },
+        Ok((answer, cost)) => ThreatPatchEvent::Answer {
+            text: answer,
+            audit: audit.with_cost(cost),
+        },
         Err(error) => ThreatPatchEvent::Failed {
-            error: error.to_string(),
+            error: error.error.to_string(),
+            audit: audit.with_outcome(error.cost, error.call_attempted),
         },
     };
     sink.send(ShellEvent::Threat(event));
@@ -83,8 +98,9 @@ pub(crate) fn run_threat_ask_worker(
     existing: serde_json::Value,
     question: &str,
     cancel: ScanCancellation,
-) -> Result<String> {
-    let runtime = worker_runtime(&config, &cwd, thinking_level, cancel)?;
+) -> CostedWorkerResult<String> {
+    let runtime = worker_runtime(&config, &cwd, thinking_level, cancel)
+        .map_err(CostedWorkerError::before_call)?;
     let prompt = threat_ask_prompt(question, &existing);
     let answer = worker_response_text(
         runtime,
@@ -94,7 +110,7 @@ pub(crate) fn run_threat_ask_worker(
         prompt,
         "threat-ask returned no content",
     )?;
-    Ok(answer.to_string())
+    Ok((answer.0.to_string(), answer.1))
 }
 
 fn threat_ask_prompt(question: &str, existing: &serde_json::Value) -> String {
@@ -126,10 +142,18 @@ fn worker_response_text(
     system_prompt: String,
     prompt: String,
     empty_message: &str,
-) -> Result<String> {
-    let response =
-        runtime.query_blocking(AgentQueryRequest::new(model, cwd, system_prompt, prompt))?;
-    non_empty_worker_response(response.text.trim(), empty_message)
+) -> CostedWorkerResult<String> {
+    let response = kuzushi_core::runtime::query_blocking_checked(
+        &runtime,
+        AgentQueryRequest::new(model, cwd, system_prompt, prompt),
+    )
+    .map_err(CostedWorkerError::unresolved)?;
+    let cost = response
+        .checked_cost_report()
+        .map_err(CostedWorkerError::unresolved)?;
+    let body = non_empty_worker_response(response.text.trim(), empty_message)
+        .map_err(|error| CostedWorkerError::observed(error, cost))?;
+    Ok((body, cost))
 }
 
 fn non_empty_worker_response(text: &str, empty_message: &str) -> Result<String> {

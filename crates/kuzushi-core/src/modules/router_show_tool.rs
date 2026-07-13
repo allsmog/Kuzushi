@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) fn router_show_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let paths = tool_context_config_paths(ctx, None)?;
-    let router = load_router_for_paths(&paths);
+    let router = load_router_for_paths(&paths)?;
     let options = persistent_tool_options_for_paths(&paths)?;
     let roles = router_role_rows(&input, ctx, &router, &options);
     Ok(router_show_response(
@@ -12,8 +12,15 @@ pub(crate) fn router_show_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> 
     ))
 }
 
-fn load_router_for_paths(paths: &crate::config::ConfigPaths) -> crate::agent_router::AgentRouter {
-    crate::agent_router::AgentRouter::load(paths).unwrap_or_default()
+fn load_router_for_paths(
+    paths: &crate::config::ConfigPaths,
+) -> Result<crate::agent_router::AgentRouter> {
+    crate::agent_router::AgentRouter::load(paths).with_context(|| {
+        format!(
+            "router:show could not load operator model routing from {}",
+            crate::agent_router::AgentRouter::operator_models_path(paths).display()
+        )
+    })
 }
 
 fn router_role_rows(
@@ -90,6 +97,7 @@ fn router_stored_option_override(
 #[cfg(test)]
 mod router_show_tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn router_option_override_reads_global_setg_value() {
@@ -126,6 +134,39 @@ mod router_show_tests {
             .as_deref(),
             Some("anthropic:input-model")
         );
+    }
+
+    #[test]
+    fn malformed_models_file_is_reported_with_its_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let models = crate::workspace::workspace_models_path(temp.path());
+        fs::create_dir_all(models.parent().unwrap()).unwrap();
+        fs::write(&models, "[roles.deep_auditor\nprimary = nope").unwrap();
+        let paths = crate::config::ConfigPaths {
+            home_dir: temp.path().to_path_buf(),
+            target_dir: None,
+        };
+
+        let error = load_router_for_paths(&paths).unwrap_err().to_string();
+
+        assert!(error.contains("router:show"), "{error}");
+        assert!(error.contains(&models.display().to_string()), "{error}");
+    }
+
+    #[test]
+    fn unreadable_models_path_is_reported_instead_of_defaulting() {
+        let temp = tempfile::tempdir().unwrap();
+        let models = crate::workspace::workspace_models_path(temp.path());
+        fs::create_dir_all(&models).unwrap();
+        let paths = crate::config::ConfigPaths {
+            home_dir: temp.path().to_path_buf(),
+            target_dir: None,
+        };
+
+        let error = load_router_for_paths(&paths).unwrap_err().to_string();
+
+        assert!(error.contains("router:show"), "{error}");
+        assert!(error.contains(&models.display().to_string()), "{error}");
     }
 }
 
@@ -225,12 +266,12 @@ fn run_live_full_mode_report(
     ctx: &ToolExecutionContext<'_>,
     runtime_context: &FullModeRuntimeContext<'_>,
 ) -> Result<crate::capabilities::full_mode_multi::FullModeReport> {
-    let report = crate::capabilities::full_mode_multi::run(
+    let mut report = crate::capabilities::full_mode_multi::run(
         &runtime_context.routed,
         runtime_context.limiter.as_ref(),
         cfg,
     )?;
-    persist_full_mode_report(ctx, &report)?;
+    persist_full_mode_report(ctx, &mut report)?;
     Ok(report)
 }
 
@@ -249,7 +290,23 @@ fn apply_full_mode_auto_triage(
     // the chunk pass used. The verdict is saved back into the findings
     // store so a later `findings --triage` query reflects it.
     let extra = auto_triage_full_mode_findings(cfg, ctx, &runtime_context.routed, report)?;
-    report.cost_usd += extra;
+    report.observed_cost_usd = crate::runtime::RuntimeCost::checked_sum(
+        [report.observed_cost_usd, extra.observed_usd()],
+        "full-mode scan plus auto-triage cost",
+    )?
+    .usd();
+    if let (Some(cost_usd), Some(extra_cost_usd)) = (report.cost_usd, extra.exact_usd()) {
+        report.cost_usd = Some(
+            crate::runtime::RuntimeCost::checked_sum(
+                [cost_usd, extra_cost_usd],
+                "full-mode exact scan plus auto-triage cost",
+            )?
+            .usd(),
+        );
+    } else if !extra.is_complete() {
+        report.cost_usd = None;
+        report.unresolved_provider_spend = true;
+    }
     Ok(())
 }
 
@@ -258,38 +315,44 @@ fn auto_triage_full_mode_findings(
     ctx: &ToolExecutionContext<'_>,
     routed: &crate::agent_router::RoutedRuntime<'_>,
     report: &crate::capabilities::full_mode_multi::FullModeReport,
-) -> Result<f64> {
+) -> Result<crate::runtime::RuntimeCostReport> {
     use crate::spend::SpendLimiter;
 
-    let Some((workspace, store)) = auto_triage_resources(ctx)? else {
-        return Ok(0.0);
-    };
+    let (workspace, store) = auto_triage_resources(ctx)?;
     let spend = SpendLimiter::open(workspace.findings_db_path())?;
     let audit_cfg = auto_triage_config(cfg, workspace.root());
 
-    Ok(report
-        .findings
-        .iter()
-        .map(|finding| {
-            auto_triage_candidate_cost(finding, routed, Some(&spend), &audit_cfg, store)
-        })
-        .sum())
+    report.findings.iter().try_fold(
+        crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        |cost, finding| {
+            cost.checked_add(
+                auto_triage_candidate_cost(
+                    finding,
+                    routed,
+                    Some(&spend),
+                    &audit_cfg,
+                    &store,
+                )?,
+                "full-mode auto-triage fan-out cost",
+            )
+        },
+    )
 }
 
 fn auto_triage_resources<'a>(
     ctx: &'a ToolExecutionContext<'a>,
-) -> Result<
-    Option<(
-        &'a crate::workspace::WorkspaceTarget,
-        &'a crate::findings::FindingStore,
-    )>,
-> {
+) -> Result<(
+    &'a crate::workspace::WorkspaceTarget,
+    crate::findings::FindingStore,
+)> {
     let workspace = ctx.workspace.ok_or_else(|| {
         anyhow::anyhow!(crate::workspace::active_workspace_required_message(
             "autoTriage"
         ))
     })?;
-    Ok(ctx.findings_store.map(|store| (workspace, store)))
+    let store = crate::findings::FindingStore::open(workspace.findings_db_path())
+        .context("autoTriage could not open the persisted findings store")?;
+    Ok((workspace, store))
 }
 
 fn auto_triage_config(
@@ -320,32 +383,94 @@ fn auto_triage_candidate_cost(
     spend: Option<&crate::spend::SpendLimiter>,
     audit_cfg: &crate::capabilities::deep_auditor::DeepAuditConfig,
     store: &crate::findings::FindingStore,
-) -> f64 {
+) -> Result<crate::runtime::RuntimeCostReport> {
     use crate::capabilities::deep_auditor::run_deep_auditor;
 
-    if !matches!(
-        finding.severity,
-        crate::findings::Severity::High | crate::findings::Severity::Critical
-    ) {
-        return 0.0;
+    if !auto_triage_severity(finding.severity) {
+        return Ok(crate::runtime::RuntimeCostReport::known(
+            crate::runtime::RuntimeCost::ZERO,
+        ));
     }
-    run_deep_auditor(routed, spend, audit_cfg, finding)
-        .map(|outcome| {
-            persist_auto_triage_outcome(finding, store, &outcome);
-            outcome.cost_usd
-        })
-        .unwrap_or(0.0)
+    let finding_id = persisted_auto_triage_finding_id(finding)?;
+    let outcome = run_deep_auditor(routed, spend, audit_cfg, finding).with_context(|| {
+        format!(
+            "autoTriage deep audit failed for finding {}",
+            finding.fingerprint
+        )
+    })?;
+    persist_auto_triage_outcome(finding_id, store, &outcome).with_context(|| {
+        format!(
+            "autoTriage could not persist outcome for finding {}",
+            finding.fingerprint
+        )
+    })?;
+    deep_audit_cost_report(&outcome)
+}
+
+fn auto_triage_severity(severity: crate::findings::Severity) -> bool {
+    matches!(
+        severity,
+        crate::findings::Severity::High | crate::findings::Severity::Critical
+    )
+}
+
+fn persisted_auto_triage_finding_id(finding: &crate::findings::Finding) -> Result<i64> {
+    finding.id.ok_or_else(|| {
+        anyhow::anyhow!(
+            "autoTriage finding {} was not assigned a persisted id",
+            finding.fingerprint
+        )
+    })
+}
+
+fn deep_audit_cost_report(
+    outcome: &crate::capabilities::deep_auditor::DeepAuditOutcome,
+) -> Result<crate::runtime::RuntimeCostReport> {
+    let observed = crate::runtime::RuntimeCost::from_usd(
+        outcome.cost_usd,
+        "full-mode auto-triage observed cost",
+    )?;
+    Ok(if outcome.cost_usd_exact {
+        crate::runtime::RuntimeCostReport::known(observed)
+    } else {
+        crate::runtime::RuntimeCostReport::incomplete(observed)
+    })
 }
 
 fn persist_auto_triage_outcome(
-    finding: &crate::findings::Finding,
+    finding_id: i64,
     store: &crate::findings::FindingStore,
     outcome: &crate::capabilities::deep_auditor::DeepAuditOutcome,
-) {
+) -> Result<()> {
     use crate::capabilities::deep_auditor::record_evidence;
 
-    if let Some(id) = finding.id {
-        let _ = store.record_auto_triage(id, &outcome.triage);
-        let _ = record_evidence(store, id, &outcome.evidence);
+    store.record_auto_triage(finding_id, &outcome.triage)?;
+    record_evidence(store, finding_id, &outcome.evidence)
+}
+
+#[cfg(test)]
+mod auto_triage_persistence_tests {
+    use super::*;
+
+    #[test]
+    fn auto_triage_persistence_reports_a_missing_finding_id() {
+        let store = crate::findings::FindingStore::open_in_memory().unwrap();
+        let outcome = crate::capabilities::deep_auditor::DeepAuditOutcome {
+            triage: crate::findings::TriageOutcome::default(),
+            evidence: Vec::new(),
+            cost_usd: 0.0,
+            cost_usd_exact: true,
+            steps_used: 1,
+            truncated: false,
+        };
+
+        let error = persist_auto_triage_outcome(42, &store, &outcome)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("missing projected finding id 42"),
+            "unexpected error: {error}"
+        );
     }
 }

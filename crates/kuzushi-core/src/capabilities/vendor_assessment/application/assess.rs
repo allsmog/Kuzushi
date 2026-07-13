@@ -7,7 +7,9 @@ use super::storage::{
 use crate::capabilities::vendor_assessment::adapters::render_report_markdown;
 use crate::capabilities::vendor_assessment::domain::{unix_millis, ScopeUpdate};
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
+use crate::structured_output::{
+    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
+};
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
@@ -36,8 +38,16 @@ pub(crate) fn assess(
                 resolve_model,
             )
             .and_then(|report| {
-                write_assessment_artifacts(root, &run_root, &scope, &report).map(|artifacts| {
-                    assessment_response(run_id, report, scope, artifacts, prompts_dir)
+                write_assessment_artifacts(root, &run_root, &scope, &report.value).and_then(|artifacts| {
+                    let cost = report.cost_report()?;
+                    Ok(assessment_response(
+                        run_id,
+                        report.value,
+                        scope,
+                        artifacts,
+                        prompts_dir,
+                        cost,
+                    ))
                 })
             })
         })
@@ -89,15 +99,23 @@ fn build_assessment_report(
     prompts: &[(String, String)],
     runtime: Option<&dyn AgentRuntime>,
     resolve_model: impl FnOnce() -> Result<String>,
-) -> Result<Value> {
+) -> Result<CostedStructuredJson<Value>> {
     let has_text = scope_has_text(&scope);
     let mut report = build_fallback_report(&run_id, &scope, &run_root, has_text);
     if !has_text {
-        return Ok(report);
+        return Ok(CostedStructuredJson {
+            value: report,
+            cost_usd: 0.0,
+            cost_usd_exact: true,
+        });
     }
     query_assessment_object(root, prompts, runtime, resolve_model).map(|object| {
-        merge_report_object(&mut report, object);
-        report
+        merge_report_object(&mut report, object.value);
+        CostedStructuredJson {
+            value: report,
+            cost_usd: object.cost_usd,
+            cost_usd_exact: object.cost_usd_exact,
+        }
     })
 }
 
@@ -106,10 +124,10 @@ fn query_assessment_object(
     prompts: &[(String, String)],
     runtime: Option<&dyn AgentRuntime>,
     resolve_model: impl FnOnce() -> Result<String>,
-) -> Result<Map<String, Value>> {
+) -> Result<CostedStructuredJson<Map<String, Value>>> {
     required_runtime(runtime).and_then(|runtime| {
         resolve_model().and_then(|model| {
-            query_required_structured_json(
+            query_required_structured_json_with_cost(
                 runtime,
                 AgentQueryRequest::new(
                     model,
@@ -124,7 +142,11 @@ fn query_assessment_object(
                 ),
                 require_json_object,
             )
-            .map(required_object)
+            .map(|raw| CostedStructuredJson {
+                value: required_object(raw.value),
+                cost_usd: raw.cost_usd,
+                cost_usd_exact: raw.cost_usd_exact,
+            })
         })
     })
 }
@@ -208,6 +230,7 @@ fn assessment_response(
     scope: Value,
     artifacts: AssessmentArtifacts,
     prompts_dir: PathBuf,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Value {
     let summary = assessment_response_summary(&report, &artifacts, &prompts_dir);
     let artifact_data = assessment_artifact_data(&artifacts, &prompts_dir);
@@ -222,7 +245,7 @@ fn assessment_response(
         }),
     );
     result["artifacts"] = assessment_artifact_rows(&artifacts, &prompts_dir);
-    result["costUsd"] = json!(0.0);
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
     result
 }
 

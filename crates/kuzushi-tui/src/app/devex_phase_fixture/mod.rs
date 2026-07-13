@@ -83,7 +83,7 @@ impl ShellApp {
 }
 
 fn is_offline_demo_target(target: &Path) -> bool {
-    let expected = std::env::temp_dir().join("kuzushi-demo");
+    let expected = kuzushi_core::demo_fixture_path();
     let safe_directory = std::fs::symlink_metadata(&expected)
         .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink());
     safe_directory

@@ -43,16 +43,16 @@ fn default_quit_confirm_model(app: &ShellApp) -> QuitConfirmModel {
         warning_title: "CONFIRM SESSION EXIT".to_string(),
         warning_body: default_warning(active_count),
         sections: default_sections(active_count),
-        default_line: "default · n · cancel".to_string(),
+        default_line: "default · n/N/Esc · stay".to_string(),
         footer: default_footer(app, active_count),
     }
 }
 
 fn default_warning(active_count: usize) -> String {
     if active_count > 0 {
-        "active work may stop if you exit without detaching".to_string()
+        "the shell will request active-work cancellation and cleanup before exiting".to_string()
     } else {
-        "no active job is running; the session can be checkpointed before exit".to_string()
+        "no active work is running; exiting will close the shell".to_string()
     }
 }
 
@@ -83,38 +83,53 @@ fn default_cost(app: &ShellApp) -> String {
 fn default_sections(active_count: usize) -> Vec<QuitConfirmSection> {
     vec![
         QuitConfirmSection::new(
-            "IN FLIGHT · will be checkpointed if you confirm",
+            default_in_flight_title(active_count),
             default_in_flight_rows(active_count),
         ),
-        QuitConfirmSection::new(
-            "CHOOSE",
-            vec![
-                "    Y   checkpoint all + /story + quit   write a story memo first".to_string(),
-                "    y   checkpoint all + quit             resumable next session".to_string(),
-                "    p   keep running in background         detach the TUI".to_string(),
-                "    n   cancel                            stay here".to_string(),
-            ],
-        ),
+        QuitConfirmSection::new("CHOOSE", default_choice_rows(active_count)),
+    ]
+}
+
+fn default_in_flight_title(active_count: usize) -> &'static str {
+    if active_count > 0 {
+        "IN FLIGHT · cancellation requested before exit"
+    } else {
+        "IN FLIGHT"
+    }
+}
+
+fn default_choice_rows(active_count: usize) -> Vec<String> {
+    let exit_detail = if active_count > 0 {
+        "cancel active work if needed, then exit"
+    } else {
+        "close the shell"
+    };
+    vec![
+        format!("    y/Y       exit   {exit_detail}"),
+        "    n/N/Esc   stay   keep this session open".to_string(),
     ]
 }
 
 fn default_in_flight_rows(active_count: usize) -> Vec<String> {
     if active_count > 0 {
-        vec!["    ⏵   active worker   running · detach to keep it alive".to_string()]
+        vec!["    ⏵   active work   running · cancellation requested on exit".to_string()]
     } else {
-        vec!["    ·   no active module runs".to_string()]
+        vec!["    ·   no active work".to_string()]
     }
 }
 
 fn default_footer(app: &ShellApp, active_count: usize) -> QuitConfirmFooter {
+    let (stage, exit_label) = if active_count > 0 {
+        ("quit · active work running", "cancel if needed + exit")
+    } else {
+        ("quit · no active work", "exit")
+    };
     QuitConfirmFooter {
-        stage: format!("quit · {active_count} in flight"),
+        stage: stage.to_string(),
         findings: app.findings_total_count(),
         keybinds: vec![
-            ("Y".to_string(), "checkpoint+story+quit".to_string()),
-            ("y".to_string(), "checkpoint+quit".to_string()),
-            ("p".to_string(), "detach".to_string()),
-            ("n".to_string(), "cancel".to_string()),
+            ("y/Y".to_string(), exit_label.to_string()),
+            ("n/N/Esc".to_string(), "stay".to_string()),
         ],
         prompt_module: "quit".to_string(),
     }
@@ -154,5 +169,65 @@ mod tests {
         assert_eq!(model.warning_title, "ROUTE SNAPSHOT");
         assert_eq!(model.sections.len(), 1);
         assert_eq!(model.footer.prompt_module, "quit");
+    }
+
+    #[test]
+    fn idle_quit_confirm_only_offers_exit_or_stay() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let model = quit_confirm_model(&app);
+
+        assert_eq!(
+            model.warning_body,
+            "no active work is running; exiting will close the shell"
+        );
+        assert_eq!(model.sections[0].title, "IN FLIGHT");
+        assert_eq!(model.sections[1].rows, default_choice_rows(0));
+        assert_eq!(
+            model.footer.keybinds,
+            vec![
+                ("y/Y".to_string(), "exit".to_string()),
+                ("n/N/Esc".to_string(), "stay".to_string()),
+            ]
+        );
+        assert_no_unimplemented_quit_claims(&model);
+    }
+
+    #[test]
+    fn active_quit_confirm_explains_cancel_then_exit() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_running_tool_for_test("semgrep:scan");
+
+        let model = quit_confirm_model(&app);
+
+        assert!(model
+            .warning_body
+            .contains("request active-work cancellation and cleanup"));
+        assert_eq!(
+            model.sections[0].title,
+            "IN FLIGHT · cancellation requested before exit"
+        );
+        assert!(model.sections[1].rows[0].contains("cancel active work if needed, then exit"));
+        assert_eq!(
+            model.footer.keybinds,
+            vec![
+                ("y/Y".to_string(), "cancel if needed + exit".to_string()),
+                ("n/N/Esc".to_string(), "stay".to_string()),
+            ]
+        );
+        assert_no_unimplemented_quit_claims(&model);
+    }
+
+    fn assert_no_unimplemented_quit_claims(model: &QuitConfirmModel) {
+        let visible_copy = format!(
+            "{} {:?} {:?}",
+            model.warning_body, model.sections, model.footer.keybinds
+        );
+        for unsupported in ["checkpoint", "story", "detach", "resumable"] {
+            assert!(
+                !visible_copy.to_ascii_lowercase().contains(unsupported),
+                "quit confirmation must not advertise unsupported `{unsupported}` behavior"
+            );
+        }
     }
 }

@@ -5,7 +5,7 @@ pub(crate) fn run_background_tool(
     config: V2Config,
     workspace: &WorkspaceTarget,
     tool_name: &str,
-    input: serde_json::Value,
+    input: PreparedToolInput,
     run_id: &str,
     thinking_level: Option<String>,
     authorization: ExecutionAuthorization,
@@ -17,7 +17,7 @@ pub(crate) fn run_background_tool(
         &registry,
         &config,
         tool_name,
-        &input,
+        input.value(),
         thinking_level,
         &cancel,
         workspace,
@@ -35,8 +35,7 @@ pub(crate) fn run_background_tool(
         cancellation: Some(&cancel),
         authorization: Default::default(),
     };
-    let prepared = registry.prepare_dispatch_input(tool_name, input, &ctx, None)?;
-    let prepared = authorize_background_prepared_input(prepared, authorization)?;
+    let prepared = authorize_background_prepared_input(input, authorization)?;
     registry.dispatch_prepared_input_with_runtime(prepared, &ctx, runtime_ref)
 }
 
@@ -187,12 +186,30 @@ mod tests {
     fn direct_worker_cannot_forge_approval_for_external_effect() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let input = registry
+            .prepare_dispatch_input(
+                "recon:nmap",
+                serde_json::json!({"target": "127.0.0.1"}),
+                &ctx,
+                None,
+            )
+            .unwrap();
         let error = run_background_tool(
-            ModuleRegistry::with_v2_builtins(),
-            V2Config::default(),
+            registry,
+            config,
             &workspace,
             "recon:nmap",
-            serde_json::json!({"target": "127.0.0.1"}),
+            input,
             "run-test",
             None,
             ExecutionAuthorization::default(),

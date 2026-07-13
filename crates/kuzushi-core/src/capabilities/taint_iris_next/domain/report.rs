@@ -80,6 +80,7 @@ pub(crate) struct TaintIrisNextReport {
     pub(crate) selected_cwes: Vec<Value>,
     pub(crate) persisted: Option<TaintIrisNextPersistedRun>,
     pub(crate) cost_usd: f64,
+    pub(crate) cost_usd_exact: bool,
     #[serde(skip)]
     pub(crate) ok: bool,
     #[serde(skip)]
@@ -96,7 +97,14 @@ impl TaintIrisNextReport {
         } else {
             crate::module_result::failed_output_result(self.summary(), self.output.clone(), data)
         };
-        output["costUsd"] = json!(self.cost_usd);
+        let observed = RuntimeCost::from_usd(self.cost_usd, "taint-iris-next report cost")
+            .expect("taint-iris-next validates provider costs before report construction");
+        let cost = if self.cost_usd_exact {
+            RuntimeCostReport::known(observed)
+        } else {
+            RuntimeCostReport::incomplete(observed)
+        };
+        crate::module_result::apply_runtime_cost_report(&mut output, cost);
         output
     }
 

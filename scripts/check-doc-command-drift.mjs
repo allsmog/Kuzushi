@@ -6,6 +6,8 @@ const repo = process.cwd();
 
 const roots = [
   "README.md",
+  "CONTRIBUTING.md",
+  "ROADMAP.md",
   "docs",
   "examples",
   ".github",
@@ -48,6 +50,7 @@ const banned = [
 const currentGuidanceFiles = [
   "AGENTS.md",
   "CLAUDE.md",
+  "CONTRIBUTING.md",
   "docs/architecture/domain-boundaries.md",
   "docs/current-architecture.mmd",
   "docs/devex/new-contributor-map.md",
@@ -104,6 +107,12 @@ const failures = [
 ];
 
 failures.push(...currentGuidanceFiles.flatMap(checkReferencedRepoPaths));
+failures.push(...canonicalContributorFailures());
+failures.push(...canonicalReadmeFailures());
+failures.push(...canonicalRoadmapFailures());
+failures.push(...canonicalProductFlowPrdFailures());
+failures.push(...canonicalParityTestFailures());
+failures.push(...canonicalDependencyPolicyFailures());
 
 for (const file of roots.flatMap(walk)) {
   const rel = path.relative(repo, file);
@@ -257,4 +266,136 @@ function cleanReferencedPath(value) {
     .replace(/::[A-Za-z0-9_:]+$/, "")
     .replace(/(?::\d+(?:-\d+)?)$/, "")
     .replace(/[),.;\]}]+$/, "");
+}
+
+function canonicalContributorFailures() {
+  const file = "CONTRIBUTING.md";
+  const text = readFileSync(path.join(repo, file), "utf8");
+  return [
+    requiredDocTextFailure(file, text, "pnpm dev -- --target", "Rust shell development command"),
+    requiredDocTextFailure(file, text, "cargo test --workspace", "native workspace test command"),
+    requiredDocTextFailure(
+      file,
+      text,
+      "crates/kuzushi-core/src/modules/",
+      "Rust built-in module path",
+    ),
+    forbiddenDocTextFailure(file, text, "run the CLI in dev mode (tsx)", "retired TSX runtime"),
+    forbiddenDocTextFailure(file, text, "src/agents/tasks/", "retired agent-task path"),
+    forbiddenDocTextFailure(file, text, "src/agents/index.ts", "retired agent registry path"),
+  ].filter(Boolean);
+}
+
+function canonicalReadmeFailures() {
+  const file = "README.md";
+  const text = readFileSync(path.join(repo, file), "utf8");
+  return [
+    requiredDocTextFailure(file, text, "Published compatibility SDK source", "retained SDK role"),
+    forbiddenDocTextFailure(file, text, "`src/agents/`", "deleted TS agents path"),
+    forbiddenDocTextFailure(file, text, "scanner normalization", "deleted TS scanner runtime"),
+  ].filter(Boolean);
+}
+
+function canonicalRoadmapFailures() {
+  const file = "ROADMAP.md";
+  const text = readFileSync(path.join(repo, file), "utf8");
+  return [
+    requiredDocTextFailure(file, text, "--fail-on <severity>", "implemented CI severity gate"),
+    requiredDocTextFailure(file, text, "--sarif <path>", "implemented SARIF export"),
+    requiredDocTextFailure(file, text, "kuzushi demo", "implemented offline demo"),
+    forbiddenDocTextFailure(file, text, "registry = retired 0.20.0", "retired npm release claim"),
+    forbiddenDocTextFailure(file, text, "repo is 0.24.0-alpha.0", "stale repository version"),
+    forbiddenDocTextFailure(file, text, "`--ci` is output-format only", "stale CI gate claim"),
+    forbiddenDocTextFailure(file, text, "CLI-unreachable", "stale SARIF reachability claim"),
+    forbiddenDocTextFailure(file, text, "currently unstated", "stale privacy documentation claim"),
+    forbiddenDocTextFailure(file, text, "today: silent 0 findings", "stale scan output claim"),
+    forbiddenDocTextFailure(file, text, "1,529 LOC, 0 tests", "stale route-test claim"),
+    requiredDocTextFailure(
+      file,
+      text,
+      "workspace/inventory/tests.rs",
+      "route inventory integration-test path",
+    ),
+  ].filter(Boolean);
+}
+
+function canonicalProductFlowPrdFailures() {
+  const file = "docs/plans/product-flow-prd.md";
+  const text = readFileSync(path.join(repo, file), "utf8");
+  const required = productFlowRequiredText().map(([needle, label]) =>
+    requiredDocTextFailure(file, text, needle, label),
+  );
+  const forbidden = productFlowForbiddenText().map(([needle, label]) =>
+    forbiddenDocTextFailure(file, text, needle, label),
+  );
+  return [...required, ...forbidden].filter(Boolean);
+}
+
+function productFlowRequiredText() {
+  return [
+    ["Current-state reconciliation", "dated live-tree reconciliation marker"],
+    ["Persistent strategy proposals", "shipped strategy queue capability"],
+    ["Duplicate triage is fixed", "shipped triage behavior"],
+    ["The earlier headless blockers are closed", "shipped headless parity"],
+  ];
+}
+
+function productFlowForbiddenText() {
+  return [
+    ["The keyless first run is broken", "stale offline-onboarding claim"],
+    ["You can't compose or save a strategy", "stale strategy-queue claim"],
+    ["Triage re-triages duplicates with no verdict-skip", "stale triage claim"],
+    ["`recon:import` is advertised but unreachable", "stale recon import claim"],
+    ["HEAD already fails some workspace tests", "stale known-red test claim"],
+  ];
+}
+
+function canonicalParityTestFailures() {
+  const file = "crates/kuzushi-tui/tests/parity.rs";
+  const text = readFileSync(path.join(repo, file), "utf8");
+  return [
+    requiredDocTextFailure(
+      file,
+      text,
+      "cargo test -p kuzushi-tui --test parity`",
+      "live parity test selector",
+    ),
+    forbiddenDocTextFailure(file, text, "--test parity -- --ignored", "stale ignored selector"),
+  ].filter(Boolean);
+}
+
+function canonicalDependencyPolicyFailures() {
+  const contributing = readFileSync(path.join(repo, "CONTRIBUTING.md"), "utf8");
+  const workflow = readFileSync(path.join(repo, ".github/workflows/ci.yml"), "utf8");
+  const policy = readFileSync(path.join(repo, "deny.toml"), "utf8");
+  return [
+    requiredDocTextFailure(
+      "CONTRIBUTING.md",
+      contributing,
+      "cargo deny check advisories licenses bans sources",
+      "complete dependency policy command",
+    ),
+    requiredDocTextFailure(
+      ".github/workflows/ci.yml",
+      workflow,
+      "command: check advisories licenses bans sources",
+      "complete dependency policy command",
+    ),
+    requiredDocTextFailure(
+      "deny.toml",
+      policy,
+      'multiple-versions = "deny"',
+      "fail-closed duplicate policy",
+    ),
+  ].filter(Boolean);
+}
+
+function requiredDocTextFailure(file, text, needle, label) {
+  if (text.includes(needle)) return null;
+  return { file, line: 1, pattern: `missing ${label}`, text: needle };
+}
+
+function forbiddenDocTextFailure(file, text, needle, label) {
+  if (!text.includes(needle)) return null;
+  return { file, line: 1, pattern: label, text: needle };
 }

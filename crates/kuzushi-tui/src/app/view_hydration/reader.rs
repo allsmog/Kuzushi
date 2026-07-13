@@ -2,7 +2,9 @@ use super::*;
 use kuzushi_core::{CodeqlScanner, ScanEngine, SemgrepScanner};
 use kuzushi_core::{LatestRunPointerIssue, LatestRunPointerState};
 
+mod completion_io;
 mod workspace_io;
+use completion_io::*;
 use workspace_io::*;
 
 #[derive(Debug, Default)]
@@ -10,24 +12,47 @@ pub(super) struct FsViewArtifactReader;
 
 impl ViewArtifactReader for FsViewArtifactReader {
     fn read(&self, target: &Path, key: &ViewHydrationKey) -> ViewHydrationValue {
-        if let Some(value) = read_run_value(target, key) {
-            return value;
+        read_artifact_value(target, key).unwrap_or_else(|| read_environment_value(key))
+    }
+
+    fn read_cancellable(
+        &self,
+        target: &Path,
+        key: &ViewHydrationKey,
+        cancellation: &ViewHydrationCancellation,
+    ) -> Option<ViewHydrationValue> {
+        if cancellation.is_canceled() {
+            return None;
         }
-        if let Some(value) = read_project_value(target, key) {
-            return value;
+        if key == &ViewHydrationKey::TargetProfile {
+            return TargetProfile::detect_cancellable(target, || cancellation.is_canceled())
+                .map(ViewHydrationValue::TargetProfile);
         }
-        if let Some(value) = read_workspace_file_value(target, key) {
-            return value;
+        if key != &ViewHydrationKey::FileCompletionValues {
+            return Some(self.read(target, key));
         }
-        read_environment_value(key)
+        let index = crate::app::workspace_file_candidates_cancellable(
+            target,
+            crate::app::FILE_PICKER_MAX_FILES,
+            || cancellation.is_canceled(),
+        )?;
+        Some(ViewHydrationValue::FileCompletionValues(index))
     }
 }
 
+fn read_artifact_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
+    read_completion_value(target, key)
+        .or_else(|| read_run_value(target, key))
+        .or_else(|| read_project_value(target, key))
+        .or_else(|| read_workspace_file_value(target, key))
+}
+
 fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
+    const RECENT_RUN_HISTORY_LIMIT: usize = 100;
     match key {
         ViewHydrationKey::LatestRunPointer => Some(read_latest_pointer(target)),
         ViewHydrationKey::RunSummaryEntries => Some(ViewHydrationValue::RunSummaryEntries(
-            kuzushi_core::list_run_summary_entries(target).unwrap_or_default(),
+            read_recent_run_history(target, RECENT_RUN_HISTORY_LIMIT),
         )),
         ViewHydrationKey::RunArtifactText { run_id, leaf } => {
             Some(ViewHydrationValue::RunArtifactText(
@@ -38,6 +63,13 @@ fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydration
             kuzushi_core::load_run_trace(target, run_id).ok(),
         )),
         _ => None,
+    }
+}
+
+fn read_recent_run_history(target: &Path, limit: usize) -> RunSummaryEntriesState {
+    match kuzushi_core::list_recent_run_summary_entries(target, limit) {
+        Ok(entries) => RunSummaryEntriesState::Ready(entries),
+        Err(error) => RunSummaryEntriesState::Failed(error.to_string()),
     }
 }
 
@@ -65,6 +97,9 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
         }
         ViewHydrationKey::PromptMutations => Some(ViewHydrationValue::PromptMutations(
             prompt_mutations(target),
+        )),
+        ViewHydrationKey::TargetProfile => Some(ViewHydrationValue::TargetProfile(
+            TargetProfile::detect(target),
         )),
         ViewHydrationKey::MapArtifacts => Some(ViewHydrationValue::MapArtifacts(
             map_artifact_exists(target),

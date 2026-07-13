@@ -32,7 +32,7 @@ fn semgrep_config_array_entry(value: &Value) -> Result<String> {
 fn default_semgrep_configs(configs: Vec<String>) -> Vec<String> {
     let configs = non_empty_semgrep_configs(configs);
     if configs.is_empty() {
-        vec!["auto".to_string()]
+        vec![DEFAULT_SEMGREP_CONFIG.to_string()]
     } else {
         configs
     }

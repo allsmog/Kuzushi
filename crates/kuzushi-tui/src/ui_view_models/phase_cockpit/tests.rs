@@ -58,6 +58,15 @@ fn activity_session_phase_origin_is_explicit_and_transient() {
 }
 
 #[test]
+fn engagement_header_never_calls_an_unconfigured_model_configured() {
+    assert_eq!(configured_model_label("unconfigured"), "unconfigured");
+    assert_eq!(
+        configured_model_label("openai:gpt-5 [auth missing]"),
+        "configured openai:gpt-5 [auth missing]"
+    );
+}
+
+#[test]
 fn captured_activity_phase_wins_over_missing_or_advanced_journey_state() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_activity(Some(ActivitySession::for_phase(
@@ -104,6 +113,9 @@ fn map_model_projects_only_observed_trace_tasks_cost_and_budget() {
     app.session_mut().set_session_cost_usd_for_test(0.5);
     app.session_mut().set_session_budget_usd(Some(1.0));
     let mut session = ActivitySession::for_phase("run-map", WorkflowPhase::Map);
+    session.settle_runtime_cost(kuzushi_core::runtime::RuntimeCostReport::known(
+        kuzushi_core::runtime::RuntimeCost::from_usd(0.25, "prior map cost").unwrap(),
+    ));
     let mut context = DagTaskRow::queued(
         "context:build".to_string(),
         "context".to_string(),
@@ -126,6 +138,9 @@ fn map_model_projects_only_observed_trace_tasks_cost_and_budget() {
         label: "indexing routes".to_string(),
         latency_ms: Some(12),
         cost_usd: Some(0.01),
+        observed_cost_usd: None,
+        provider_spend_unresolved: false,
+        call_attempted: Some(true),
         module_id: Some("context".to_string()),
         verb: Some("build".to_string()),
         parent_step: None,
@@ -157,6 +172,35 @@ fn map_model_projects_only_observed_trace_tasks_cost_and_budget() {
 }
 
 #[test]
+fn empty_map_console_distinguishes_live_from_terminal_activity() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_activity(Some(ActivitySession::for_phase(
+        "run-empty-map",
+        WorkflowPhase::Map,
+    )));
+
+    let PhaseCockpitBody::Map(live) = phase_cockpit_model_for_phase(&app, WorkflowPhase::Map).body
+    else {
+        panic!("expected live map body");
+    };
+    assert_eq!(
+        live.empty_hint,
+        Some("activity is live; waiting for the first trace event")
+    );
+
+    app.activity_mut().expect("activity").mark_terminal();
+    let PhaseCockpitBody::Map(terminal) =
+        phase_cockpit_model_for_phase(&app, WorkflowPhase::Map).body
+    else {
+        panic!("expected terminal map body");
+    };
+    assert_eq!(
+        terminal.empty_hint,
+        Some("activity completed without trace events")
+    );
+}
+
+#[test]
 fn hunt_models_share_the_projected_selected_finding_identity() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let finding = finding();
@@ -170,7 +214,7 @@ fn hunt_models_share_the_projected_selected_finding_identity() {
 
     assert_eq!(hunt.source.finding_count, 1);
     assert_eq!(hunt.review.rows.len(), 1);
-    assert!(hunt.review.rows[0].selected);
+    assert!(hunt.review.row_is_selected(0));
     assert_eq!(hunt.heatmap.selected_module.as_deref(), Some("auth"));
 }
 
@@ -283,4 +327,16 @@ fn inspecting_another_page_does_not_forge_the_next_action() {
         model.header.next_action
     );
     assert!(!model.header.next_action.contains("establish the grip"));
+    assert!(
+        !model.header.next_tools.contains("map target"),
+        "{}",
+        model.header.next_tools
+    );
+    let PhaseCockpitBody::Map(map) = model.body else {
+        panic!("expected map body");
+    };
+    assert_eq!(
+        map.empty_hint,
+        Some("no map activity was recorded for this workspace")
+    );
 }

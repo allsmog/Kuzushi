@@ -52,16 +52,17 @@ impl ShellApp {
         self.set_shell_view(ShellView::ModelPicker);
         self.log(
             "onboarding",
-            "no model configured — pick one with ↑/↓/Enter (Esc to defer)",
+            "choose a model with ↑/↓/Enter (Esc defers onboarding)",
         );
     }
 
     pub(crate) fn open_auth_method_picker(&mut self, provider: String) {
         self.router.auth_picker_mut().open(provider.clone());
+        let label = auth_provider_label(&provider);
         self.log(
             "onboarding",
             format!(
-                "{provider} needs credentials — paste an API key, pick OAuth, or press d for the offline demo"
+                "{label} needs credentials — paste an API key, pick OAuth, or press d for the offline demo"
             ),
         );
         self.set_shell_view(ShellView::AuthMethodPicker);
@@ -130,17 +131,11 @@ impl ShellApp {
             );
             return;
         };
-        let kind = self.ensure_target_kind(&target_root);
-        let target = crate::app::TargetProfile::detect(&target_root, kind);
-        let rows: Vec<PlanningTaskRow> = crate::app::applicable_tasks_for_phase(phase, target)
-            .into_iter()
-            .map(|task| PlanningTaskRow::for_task(task, &target_root))
-            .collect();
-        let mut selected = phase_preselection(phase, target, &rows);
-        self.merge_model_recommendations(phase, &rows, &mut selected);
-        self.drop_failed_dependents(&mut selected);
-        self.drop_model_backed_without_model(&rows, &mut selected);
-        self.engagement.planning_picker_mut().open(rows, selected);
+        let (profile, pending) = self.phase_picker_target_profile(&target_root);
+        let (rows, selected) = self.phase_picker_input(phase, profile, &target_root);
+        self.engagement
+            .planning_picker_mut()
+            .open_phase_profiled(phase, rows, selected, pending);
         self.engagement.set_phase(phase);
         self.set_shell_view(ShellView::PlanningPicker);
         self.log(
@@ -202,16 +197,15 @@ impl ShellApp {
         }
     }
 
-    /// With no session model, a model-backed task can only fail — preselecting
-    /// it walks the operator straight into a guaranteed error. Leave those rows
-    /// unchecked (the picker labels them "needs model"); they stay one Space
-    /// away once a model is configured.
-    fn drop_model_backed_without_model(
+    /// A model-backed task can only fail without both a configured model and
+    /// credentials for its provider. Keep those rows visible but unchecked;
+    /// the picker explains whether the missing prerequisite is model or auth.
+    fn drop_model_backed_without_ready_auth(
         &self,
         rows: &[PlanningTaskRow],
         selected: &mut BTreeSet<PlanningTaskId>,
     ) {
-        if self.config().model.is_some() {
+        if self.configured_model_auth_ready() {
             return;
         }
         let model_backed: BTreeSet<PlanningTaskId> = rows
@@ -237,15 +231,74 @@ impl ShellApp {
         });
     }
 
-    /// Classify the target once and cache it; reused across phase pickers.
-    fn ensure_target_kind(&mut self, target_root: &std::path::Path) -> kuzushi_core::TargetKind {
-        if let Some(kind) = self.engagement.target_kind() {
-            return kind;
+    fn phase_picker_target_profile(
+        &mut self,
+        target_root: &std::path::Path,
+    ) -> (crate::app::TargetProfile, bool) {
+        self.schedule_target_profile_hydration(target_root);
+        let state = self
+            .workbench_cache()
+            .borrow()
+            .cached_target_profile(Some(target_root));
+        match state {
+            ViewDataState::Ready(profile) => (profile, false),
+            ViewDataState::NotRequested | ViewDataState::Loading => {
+                (crate::app::TargetProfile::conservative(), true)
+            }
         }
-        let kind = kuzushi_core::classify_target_kind(target_root);
-        self.engagement.set_target_kind(kind);
-        self.log("phase", format!("target looks like: {}", kind.as_str()));
-        kind
+    }
+
+    fn phase_picker_input(
+        &self,
+        phase: crate::app::WorkflowPhase,
+        profile: crate::app::TargetProfile,
+        target_root: &std::path::Path,
+    ) -> (Vec<PlanningTaskRow>, BTreeSet<PlanningTaskId>) {
+        let rows = crate::app::applicable_tasks_for_phase(phase, profile)
+            .into_iter()
+            .map(|task| PlanningTaskRow::for_task(task, target_root))
+            .collect::<Vec<_>>();
+        let mut selected = phase_preselection(phase, profile, &rows);
+        self.merge_model_recommendations(phase, &rows, &mut selected);
+        self.drop_failed_dependents(&mut selected);
+        self.drop_model_backed_without_ready_auth(&rows, &mut selected);
+        (rows, selected)
+    }
+
+    pub(crate) fn apply_ready_target_profile(&mut self) {
+        let Some(target_root) = self.target_owned() else {
+            return;
+        };
+        let state = self
+            .workbench_cache()
+            .borrow()
+            .cached_target_profile(Some(&target_root));
+        let ViewDataState::Ready(profile) = state else {
+            return;
+        };
+        self.engagement.set_target_kind(profile.kind);
+        self.log(
+            "phase",
+            format!("target looks like: {}", profile.kind.as_str()),
+        );
+        self.refresh_profile_pending_picker(profile, &target_root);
+    }
+
+    fn refresh_profile_pending_picker(
+        &mut self,
+        profile: crate::app::TargetProfile,
+        target_root: &std::path::Path,
+    ) {
+        if !self.engagement.planning_picker().profile_pending() {
+            return;
+        }
+        let Some(phase) = self.engagement.current_phase() else {
+            return;
+        };
+        let (rows, selected) = self.phase_picker_input(phase, profile, target_root);
+        self.engagement
+            .planning_picker_mut()
+            .refresh_profiled(rows, selected);
     }
 
     fn compute_initial_onboarding_phase(&self) -> InitialOnboardingPhase {
@@ -272,12 +325,22 @@ impl ShellApp {
     /// when no model is set; `auth_ready_for_provider` returns `true` for
     /// them so they never gate.
     fn provider_auth_ready(&self) -> bool {
+        self.configured_model_auth_ready()
+    }
+
+    /// Provider readiness at the application boundary. Environment/OAuth
+    /// probing stays in `auth_ready_for_provider`; session state contributes
+    /// only a non-secret marker for a key accepted during this process.
+    pub(crate) fn provider_auth_ready_for(&self, provider: &str) -> bool {
+        auth_ready_for_provider(provider) || self.session().session_api_key_ready(provider)
+    }
+
+    pub(crate) fn configured_model_auth_ready(&self) -> bool {
         self.config()
             .model
             .as_deref()
             .and_then(|model| model.split(':').next())
-            .map(auth_ready_for_provider)
-            .unwrap_or(false)
+            .is_some_and(|provider| self.provider_auth_ready_for(provider))
     }
 
     /// The launch-time onboarding phase for the interactive terminal front
@@ -400,6 +463,23 @@ fn provider_auth_ready(provider: &str, api_key_ready: bool, oauth_status: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    #[derive(Debug)]
+    struct ProfileReader {
+        reads: AtomicUsize,
+        profile: crate::app::TargetProfile,
+    }
+
+    impl ViewArtifactReader for ProfileReader {
+        fn read(&self, _target: &std::path::Path, key: &ViewHydrationKey) -> ViewHydrationValue {
+            assert_eq!(key, &ViewHydrationKey::TargetProfile);
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            ViewHydrationValue::TargetProfile(self.profile)
+        }
+    }
 
     #[test]
     fn openai_oauth_does_not_satisfy_plain_openai_api_key_auth() {
@@ -429,5 +509,78 @@ mod tests {
             .log_lines()
             .iter()
             .any(|line| line.body.contains("requires an explicit target")));
+    }
+
+    #[test]
+    fn repeated_phase_opens_reuse_one_background_target_profile() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let reader = Arc::new(ProfileReader {
+            reads: AtomicUsize::new(0),
+            profile: crate::app::TargetProfile::conservative(),
+        });
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.set_view_artifact_reader_for_test(reader.clone());
+
+        app.open_phase_picker(crate::app::WorkflowPhase::Map);
+        app.open_phase_picker(crate::app::WorkflowPhase::Map);
+        wait_for_profile_refresh(&mut app);
+        app.open_phase_picker(crate::app::WorkflowPhase::Map);
+
+        assert_eq!(reader.reads.load(Ordering::SeqCst), 1);
+        assert!(!app.engagement.planning_picker().profile_pending());
+    }
+
+    #[test]
+    fn ready_profile_refresh_preserves_operator_selection_delta() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let reader = Arc::new(ProfileReader {
+            reads: AtomicUsize::new(0),
+            profile: c_target_profile(),
+        });
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.set_view_artifact_reader_for_test(reader);
+        app.open_phase_picker(crate::app::WorkflowPhase::Hunt);
+        app.engagement
+            .planning_picker_mut()
+            .selected_mut()
+            .remove(&PlanningTaskId::ScanSecrets);
+
+        wait_for_profile_refresh(&mut app);
+
+        assert!(app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .any(|row| row.id == PlanningTaskId::HuntSystems));
+        assert!(!app
+            .engagement
+            .planning_picker()
+            .selected()
+            .contains(&PlanningTaskId::ScanSecrets));
+    }
+
+    fn c_target_profile() -> crate::app::TargetProfile {
+        crate::app::TargetProfile {
+            kind: kuzushi_core::TargetKind::Source,
+            has_c_family_source: true,
+            has_rust_source: false,
+            has_compile_commands: false,
+            has_reverse_engineering_artifact: false,
+        }
+    }
+
+    fn wait_for_profile_refresh(app: &mut ShellApp) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.engagement.planning_picker().profile_pending() && Instant::now() < deadline {
+            app.apply_view_hydration_results();
+            std::thread::yield_now();
+        }
+        assert!(
+            !app.engagement.planning_picker().profile_pending(),
+            "target profile did not refresh"
+        );
     }
 }

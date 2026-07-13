@@ -2,6 +2,8 @@ use kuzushi_core::{
     ExecutionAuthorization, ModuleRegistry, ToolExecutionContext, V2Config, WorkspaceTarget,
 };
 use serde_json::json;
+use std::path::Path;
+use std::process::Command;
 
 fn context<'a>(
     config: &'a V2Config,
@@ -16,6 +18,29 @@ fn context<'a>(
         cancellation: None,
         authorization,
     }
+}
+
+fn initialize_repo(repo: &Path) {
+    run_git(repo, &["init"]);
+    std::fs::write(repo.join("README.md"), "snapshot one\n").unwrap();
+    run_git(repo, &["add", "README.md"]);
+    run_git(repo, &["commit", "-m", "initial"]);
+}
+
+fn run_git(repo: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(["-c", "user.email=kuzushi@example.invalid"])
+        .args(["-c", "user.name=Kuzushi Test"])
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -43,6 +68,7 @@ fn prepared_input_cannot_cross_registry_instances() {
 fn interactive_request_is_not_an_authorization_grant() {
     let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
     let temp = tempfile::tempdir().unwrap();
+    initialize_repo(temp.path());
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
     let config = V2Config::default();
     let request_ctx = context(
@@ -67,6 +93,7 @@ fn interactive_request_is_not_an_authorization_grant() {
 fn prepared_operation_can_consume_one_interactive_request() {
     let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
     let temp = tempfile::tempdir().unwrap();
+    initialize_repo(temp.path());
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
     let config = V2Config::default();
     let ctx = context(&config, Some(&workspace), ExecutionAuthorization::default());
@@ -118,4 +145,36 @@ fn prepared_input_is_bound_to_workspace_identity() {
         .to_string();
 
     assert!(error.contains("input, or workspace"), "{error}");
+}
+
+#[test]
+fn operation_authorization_rejects_head_movement_after_prepare() {
+    let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+    let temp = tempfile::tempdir().unwrap();
+    initialize_repo(temp.path());
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let config = V2Config::default();
+    let ctx = context(&config, Some(&workspace), ExecutionAuthorization::default());
+    let prepared = registry
+        .prepare_dispatch_input(
+            "patch:finding",
+            json!({"fingerprint": "finding-1"}),
+            &ctx,
+            None,
+        )
+        .unwrap()
+        .authorize_explicit_headless();
+    std::fs::write(temp.path().join("README.md"), "snapshot two\n").unwrap();
+    run_git(temp.path(), &["add", "README.md"]);
+    run_git(temp.path(), &["commit", "-m", "move head"]);
+
+    let error = registry
+        .dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error.contains("source commit changed after preparation"),
+        "{error}"
+    );
 }

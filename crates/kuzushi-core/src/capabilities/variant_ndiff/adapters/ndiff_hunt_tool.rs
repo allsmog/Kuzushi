@@ -48,9 +48,10 @@ pub fn run_ndiff_hunt_variants(
         None => return Ok(missing_ndiff_hunt_pattern_response()),
     };
     let raw = query_ndiff_hunt_json(&prepared)?;
+    let cost = raw.cost_report()?;
     let repo_name = repo_name(&prepared.target);
     let findings = normalize_ndiff_findings(
-        raw,
+        raw.value,
         &repo_name,
         &prepared.advisory_id,
         &prepared.pattern,
@@ -58,7 +59,12 @@ pub fn run_ndiff_hunt_variants(
     )?;
     let persisted = persist_findings(&prepared.target, &findings, ctx)?;
     emit_ndiff_hunt_step(ctx, "done", "ndiff:hunt-variants complete", Some(findings.len()));
-    Ok(ndiff_hunt_response(&prepared, findings, persisted))
+    Ok(ndiff_hunt_response(
+        &prepared,
+        findings,
+        persisted,
+        cost,
+    ))
 }
 
 struct NdiffHuntRun<'a> {
@@ -130,10 +136,10 @@ fn ndiff_hunt_advisory_id(input: &Value) -> String {
         .to_string()
 }
 
-fn query_ndiff_hunt_json(run: &NdiffHuntRun<'_>) -> Result<Value> {
+fn query_ndiff_hunt_json(run: &NdiffHuntRun<'_>) -> Result<CostedStructuredJson<Value>> {
     let prompt =
         build_ndiff_hunt_prompt(&run.pattern, &run.advisory_id, run.include_vendored);
-    query_required_structured_json(
+    query_required_structured_json_with_cost(
         run.runtime,
         ndiff_hunt_request(run, prompt),
         StructuredJsonContract::new(
@@ -160,6 +166,7 @@ fn ndiff_hunt_response(
     run: &NdiffHuntRun<'_>,
     findings: Vec<Finding>,
     persisted: Option<PersistedRun>,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Value {
     let output = render_ndiff_hunt_output(
         &run.advisory_id,
@@ -179,7 +186,7 @@ fn ndiff_hunt_response(
         "persisted": persisted,
     });
     let mut result = crate::module_result::completed_output_result(summary, output, data);
-    result["costUsd"] = json!(0.0);
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
     result
 }
 

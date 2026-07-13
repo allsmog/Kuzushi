@@ -21,6 +21,7 @@ pub fn workspace_export_omitted_fields(format: WorkspaceExportFormat) -> Vec<&'s
     match format {
         WorkspaceExportFormat::Json | WorkspaceExportFormat::Jsonl => Vec::new(),
         WorkspaceExportFormat::Csv => vec![
+            "cwe",
             "reviewDecisionReason",
             "snoozedUntil",
             "evidence.sourceCount",
@@ -38,6 +39,7 @@ pub fn workspace_export_omitted_fields(format: WorkspaceExportFormat) -> Vec<&'s
         ],
         WorkspaceExportFormat::Sarif => vec!["references"],
         WorkspaceExportFormat::MarkdownBundle => vec![
+            "cwe",
             "identityId",
             "confidence",
             "priority",

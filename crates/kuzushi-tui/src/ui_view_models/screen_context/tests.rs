@@ -27,6 +27,7 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
         confidence: 0.75,
         rationale: "needs human review".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.static_proof_state = Some(StaticProofState::SourceSinkLinked);
     finding.verification = Some(PersistedVerification {

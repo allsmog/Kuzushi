@@ -26,6 +26,31 @@ Precedence is:
 Explicit input therefore wins over `--option`, shell `set`, and persisted
 options.
 
+### Prompt provenance
+
+Prompt options have an authority split at this same boundary:
+
+- explicit inline text from direct tool input, a shell session option, or the
+  operator-owned global option store is operator-controlled and may replace a
+  tool's editable instruction template;
+- a prompt path inside the target and an automatically discovered
+  `<target>/.kuzushi/prompts/<module>/<verb>.md` file are target-controlled,
+  so their text is wrapped as untrusted optional focus/context below the
+  descriptor's immutable built-in safety and output-contract instructions;
+- `<target>/.kuzushi/v3/options.json` may not set descriptor prompt keys, even
+  when explicit input would otherwise override them.
+
+Every raw inline prompt value and target prompt file has a 65,536-byte UTF-8
+ceiling. The canonical preparation boundary rejects larger values with the
+option name and limit before runtime dispatch; it never truncates them or
+reinterprets an oversized inline value as a path. Immutable built-in policy and
+the encoded untrusted-data envelope are added after this raw-content check.
+
+Passing a repository path does not convert its contents into operator
+authority. Use inline one-shot input, shell `set`, or home-scoped `setg` when a
+full prompt replacement is intentional. This rule applies identically to
+scan, shell, and run because all three use canonical registry preparation.
+
 Within each stored scope there is also a target axis. Values are merged in
 specificity order: `all` first, then `module:<id>`, then `tool:<module:verb>`.
 That means a tool-specific value beats a module value, and a module value beats

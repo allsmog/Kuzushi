@@ -2,6 +2,7 @@
   "name": "GoVWA",
   "language": "Go",
   "repoUrl": "https://github.com/0c34/govwa",
+  "repoRef": "4058f79f31eeb4a36d8f1e64bba1f0c899646e6f",
   "entries": [
     {
       "id": "govwa-sqli-user-login",

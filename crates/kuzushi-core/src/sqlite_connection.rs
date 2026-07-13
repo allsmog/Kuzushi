@@ -21,6 +21,44 @@ pub(crate) fn open_file(path: &Path) -> Result<Connection> {
     Ok(conn)
 }
 
+pub(crate) fn open_read_only_file(path: &Path) -> Result<Connection> {
+    let open_path = validated_read_path(path)?;
+    validate_sqlite_sidecars(&open_path)?;
+    let flags = OpenFlags::SQLITE_OPEN_READ_ONLY
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+    let conn = Connection::open_with_flags(&open_path, flags)
+        .with_context(|| format!("Could not open {} read-only", path.display()))?;
+    configure_read_only_connection(&conn)?;
+    Ok(conn)
+}
+
+fn validated_read_path(path: &Path) -> Result<std::path::PathBuf> {
+    let path = match validated_workspace_database_path(path)? {
+        Some(path) => path,
+        None => canonical_database_path(path)?,
+    };
+    validate_required_database_leaf(&path)?;
+    Ok(path)
+}
+
+fn validated_workspace_database_path(path: &Path) -> Result<Option<std::path::PathBuf>> {
+    let Some(state_root) = path
+        .ancestors()
+        .find(|ancestor| ancestor.file_name().is_some_and(|name| name == ".kuzushi"))
+    else {
+        return Ok(None);
+    };
+    let workspace_root = state_root.parent().with_context(|| {
+        format!(
+            "SQLite state path has no workspace parent: {}",
+            path.display()
+        )
+    })?;
+    let relative = path.strip_prefix(workspace_root)?;
+    crate::workspace::validated_workspace_descendant(workspace_root, relative).map(Some)
+}
+
 fn canonical_database_path(path: &Path) -> Result<std::path::PathBuf> {
     let parent = path
         .parent()
@@ -58,6 +96,7 @@ fn ensure_workspace_database_directory(path: &Path, state_root: &Path) -> Result
             workspace_root.display()
         )
     })?;
+    crate::workspace::initialize_workspace_state(workspace_root)?;
     crate::workspace::ensure_workspace_descendant_dir(workspace_root, relative)?;
     Ok(())
 }
@@ -104,6 +143,16 @@ fn validate_database_leaf(path: &Path) -> Result<()> {
     }
 }
 
+fn validate_required_database_leaf(path: &Path) -> Result<()> {
+    validate_database_leaf(path)?;
+    anyhow::ensure!(
+        path.is_file(),
+        "SQLite database does not exist: {}",
+        path.display()
+    );
+    Ok(())
+}
+
 fn validate_sqlite_sidecars(path: &Path) -> Result<()> {
     for suffix in ["-journal", "-wal", "-shm"] {
         let mut sidecar = path.as_os_str().to_os_string();
@@ -127,14 +176,30 @@ fn validate_optional_regular_file(path: &Path) -> Result<()> {
 }
 
 pub(crate) fn configure_file_connection(conn: &Connection) -> Result<()> {
-    let _journal_mode: String = conn
-        .query_row("pragma journal_mode = wal", [], |row| row.get(0))
-        .context("Could not enable sqlite WAL mode")?;
+    ensure_wal_mode(conn)?;
     conn.busy_timeout(Duration::from_millis(SQLITE_BUSY_TIMEOUT_MS))
         .context("Could not configure sqlite busy timeout")?;
     conn.execute_batch("pragma foreign_keys = on;")
         .context("Could not enable sqlite foreign keys")?;
     Ok(())
+}
+
+fn ensure_wal_mode(conn: &Connection) -> Result<()> {
+    let current: String = conn.query_row("pragma journal_mode", [], |row| row.get(0))?;
+    if current.eq_ignore_ascii_case("wal") {
+        return Ok(());
+    }
+    let _: String = conn
+        .query_row("pragma journal_mode = wal", [], |row| row.get(0))
+        .context("Could not enable sqlite WAL mode")?;
+    Ok(())
+}
+
+fn configure_read_only_connection(conn: &Connection) -> Result<()> {
+    conn.busy_timeout(Duration::from_millis(SQLITE_BUSY_TIMEOUT_MS))
+        .context("Could not configure sqlite busy timeout")?;
+    conn.execute_batch("pragma query_only = on; pragma foreign_keys = on;")
+        .context("Could not configure read-only sqlite connection")
 }
 
 #[cfg(test)]
@@ -202,5 +267,21 @@ mod tests {
         conn.execute_batch("create table proof(value text);")
             .unwrap();
         assert!(database.is_file());
+    }
+
+    #[test]
+    fn read_only_connection_rejects_writes_and_missing_databases() {
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("index.sqlite3");
+        let conn = open_file(&database).unwrap();
+        conn.execute_batch("create table proof(value text);")
+            .unwrap();
+        drop(conn);
+
+        let read_only = open_read_only_file(&database).unwrap();
+        assert!(read_only
+            .execute("insert into proof(value) values ('mutation')", [])
+            .is_err());
+        assert!(open_read_only_file(&temp.path().join("missing.sqlite3")).is_err());
     }
 }

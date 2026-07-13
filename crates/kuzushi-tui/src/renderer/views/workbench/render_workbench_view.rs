@@ -8,9 +8,11 @@ use super::*;
 use crate::app::{WorkbenchPage, WorkbenchPane};
 use crate::renderer::views::scene::{DfdDiagram, TreeDiagram};
 use crate::ui_view_models::{
-    attack_tree, dfd_model, phase_cockpit_model_for_phase, workbench_view_model,
-    JourneyPhaseStatus, PhaseCockpitModel, ReviewQueueModel, WorkbenchCenter, WorkbenchCenterTab,
-    WorkbenchHint, WorkbenchTopBar, WorkbenchViewModel,
+    active_workbench_page, attack_tree, dfd_model, phase_cockpit_header_model_for_phase,
+    phase_cockpit_model_for_phase, workbench_chrome_model, workbench_chrome_model_for_selection,
+    workbench_depth_model, workbench_view_model, EngagementHeaderModel, JourneyPhaseStatus,
+    PhaseCockpitModel, ReviewQueueModel, WorkbenchCenter, WorkbenchCenterTab, WorkbenchChromeModel,
+    WorkbenchHint, WorkbenchModel, WorkbenchTopBar, WorkbenchViewModel,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
@@ -28,21 +30,183 @@ const STACKED_MIN_BODY_HEIGHT: u16 = 21;
 /// short terminals collapse to the review path. The prompt + keybind footer are
 /// drawn by the shell chrome below `area`.
 pub(crate) fn render_workbench_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
-    let model = workbench_view_model(app);
-    let phase_model =
-        phase_cockpit_model_for_phase(app, super::phase_pages::page_phase(model.page));
-    let phase_state = super::phase_pages::PhaseRenderState::workbench(app, model.page);
+    match workbench_presentation(app) {
+        WorkbenchPresentation::Phase {
+            chrome,
+            phase,
+            phase_state,
+        } => render_phase_presentation(frame, area, app, &chrome, &phase, phase_state),
+        WorkbenchPresentation::Depth {
+            chrome,
+            phase_header,
+            depth,
+            displayed_zoom,
+        } => render_depth_presentation(
+            frame,
+            area,
+            app,
+            &chrome,
+            &phase_header,
+            &depth,
+            displayed_zoom,
+        ),
+        WorkbenchPresentation::Legacy {
+            phase_header,
+            workbench,
+        } => render_legacy_presentation(frame, area, app, &workbench, &phase_header),
+    }
+}
+
+enum WorkbenchPresentation {
+    Phase {
+        chrome: WorkbenchChromeModel,
+        phase: PhaseCockpitModel,
+        phase_state: super::phase_pages::PhaseRenderState,
+    },
+    Depth {
+        chrome: WorkbenchChromeModel,
+        phase_header: EngagementHeaderModel,
+        depth: WorkbenchModel,
+        displayed_zoom: Option<WorkbenchPane>,
+    },
+    Legacy {
+        phase_header: EngagementHeaderModel,
+        workbench: WorkbenchViewModel,
+    },
+}
+
+fn workbench_presentation(app: &ShellApp) -> WorkbenchPresentation {
+    let page = active_workbench_page(app);
+    if page == WorkbenchPage::Review && app.router.workbench().depth_stack() {
+        return depth_presentation(app, page);
+    }
+    if app.router.workbench().center_mode() == crate::app::WorkbenchCenterMode::Code {
+        return phase_presentation(app, page);
+    }
+    legacy_presentation(app, page)
+}
+
+fn displayed_zoom(
+    app: &ShellApp,
+    legacy_zoom: Option<WorkbenchPane>,
+    phase_zoom: Option<WorkbenchPane>,
+) -> Option<WorkbenchPane> {
+    if app.router.workbench().center_mode() == crate::app::WorkbenchCenterMode::Code {
+        phase_zoom
+    } else {
+        legacy_zoom
+    }
+}
+
+fn phase_presentation(app: &ShellApp, page: WorkbenchPage) -> WorkbenchPresentation {
+    let phase = phase_cockpit_model_for_phase(app, super::phase_pages::page_phase(page));
+    let chrome = workbench_chrome_model(app, page, phase.selected_finding_detail());
+    WorkbenchPresentation::Phase {
+        chrome,
+        phase,
+        phase_state: super::phase_pages::PhaseRenderState::workbench(app, page),
+    }
+}
+
+fn depth_presentation(app: &ShellApp, page: WorkbenchPage) -> WorkbenchPresentation {
+    let depth = workbench_depth_model(app);
+    let chrome = workbench_chrome_model_for_selection(app, page, depth.has_selected_finding, None);
+    let phase_state = super::phase_pages::PhaseRenderState::workbench(app, page);
+    let displayed_zoom = displayed_zoom(app, chrome.zoom, phase_state.zoom);
+    WorkbenchPresentation::Depth {
+        chrome,
+        phase_header: phase_cockpit_header_model_for_phase(
+            app,
+            super::phase_pages::page_phase(page),
+        ),
+        depth,
+        displayed_zoom,
+    }
+}
+
+fn legacy_presentation(app: &ShellApp, page: WorkbenchPage) -> WorkbenchPresentation {
+    WorkbenchPresentation::Legacy {
+        phase_header: phase_cockpit_header_model_for_phase(
+            app,
+            super::phase_pages::page_phase(page),
+        ),
+        workbench: workbench_view_model(app),
+    }
+}
+
+fn render_phase_presentation(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    chrome: &WorkbenchChromeModel,
+    phase: &PhaseCockpitModel,
+    phase_state: super::phase_pages::PhaseRenderState,
+) {
+    let top_lines = workbench_header_lines(app, chrome, &phase.header, area.width as usize);
+    let body = render_workbench_header(frame, area, chrome.page, top_lines, phase_state.zoom);
+    if !workbench_body_is_visible(body) {
+        return;
+    }
+    super::phase_pages::render_phase_cockpit_body(frame, body, app, phase, phase_state);
+}
+
+fn render_depth_presentation(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    chrome: &WorkbenchChromeModel,
+    phase_header: &EngagementHeaderModel,
+    depth: &WorkbenchModel,
+    displayed_zoom: Option<WorkbenchPane>,
+) {
+    let top_lines = workbench_header_lines(app, chrome, phase_header, area.width as usize);
+    let body = render_workbench_header(frame, area, chrome.page, top_lines, displayed_zoom);
+    if !workbench_body_is_visible(body) {
+        return;
+    }
+    super::depth_stack::render_workbench_depth(frame, body, &app.router.workbench().nav(), depth);
+}
+
+fn render_legacy_presentation(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    workbench: &WorkbenchViewModel,
+    phase_header: &EngagementHeaderModel,
+) {
+    let chrome = chrome_from_workbench(workbench);
+    let top_lines = workbench_header_lines(app, &chrome, phase_header, area.width as usize);
+    let body = render_workbench_header(frame, area, workbench.page, top_lines, workbench.zoom);
+    if !workbench_body_is_visible(body) {
+        return;
+    }
+    render_legacy_phase_body(frame, body, app, workbench);
+}
+
+fn chrome_from_workbench(workbench: &WorkbenchViewModel) -> WorkbenchChromeModel {
+    WorkbenchChromeModel {
+        page: workbench.page,
+        top_bar: workbench.top_bar.clone(),
+        command_bar_hints: workbench.command_bar_hints.clone(),
+        zoom: workbench.zoom,
+    }
+}
+
+fn workbench_body_is_visible(area: Rect) -> bool {
+    area.width >= 8 && area.height >= 3
+}
+
+fn render_workbench_header(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    page: WorkbenchPage,
+    mut top_lines: Vec<Line<'static>>,
+    displayed_zoom: Option<WorkbenchPane>,
+) -> Rect {
     paint_cinematic_background(frame.buffer_mut(), area);
     paint_cinematic_scanlines(frame.buffer_mut(), area);
-    let mut top_lines = workbench_header_lines(app, &model, &phase_model, area.width as usize);
-    let displayed_zoom =
-        if app.router.workbench().center_mode() != crate::app::WorkbenchCenterMode::Code {
-            model.zoom
-        } else {
-            phase_state.zoom
-        };
     if let Some(pane) = displayed_zoom {
-        top_lines.push(zoom_status_line(model.page, pane));
+        top_lines.push(zoom_status_line(page, pane));
     }
     let outer = Layout::default()
         .direction(Direction::Vertical)
@@ -52,22 +216,19 @@ pub(crate) fn render_workbench_view(frame: &mut Frame<'_>, area: Rect, app: &She
         ])
         .split(area);
     frame.render_widget(Paragraph::new(top_lines), outer[0]);
-    render_body(frame, outer[1], app, &model, &phase_model, phase_state);
-    if model.page == WorkbenchPage::Ship && outer[1].width >= 100 && outer[1].height >= 20 {
-        paint_fix_watermark(frame.buffer_mut(), outer[1]);
-    }
+    outer[1]
 }
 
 fn workbench_header_lines(
     app: &ShellApp,
-    model: &WorkbenchViewModel,
-    phase_model: &PhaseCockpitModel,
+    chrome: &WorkbenchChromeModel,
+    phase_header: &EngagementHeaderModel,
     width: usize,
 ) -> Vec<Line<'static>> {
     if app.target().is_none() {
-        return top_bar_lines(&model.top_bar, &model.command_bar_hints, width);
+        return top_bar_lines(&chrome.top_bar, &chrome.command_bar_hints, width);
     }
-    super::phase_pages::phase_header_lines(&phase_model.header, &model.command_bar_hints, width)
+    super::phase_pages::phase_header_lines(phase_header, &chrome.command_bar_hints, width)
 }
 
 fn zoom_status_line(page: WorkbenchPage, pane: WorkbenchPane) -> Line<'static> {
@@ -99,58 +260,6 @@ fn pane_index(pane: WorkbenchPane) -> usize {
         WorkbenchPane::Findings => 2,
         WorkbenchPane::Details => 3,
     }
-}
-
-fn render_body(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    app: &ShellApp,
-    model: &WorkbenchViewModel,
-    phase_model: &PhaseCockpitModel,
-    phase_state: super::phase_pages::PhaseRenderState,
-) {
-    if area.width < 8 || area.height < 3 {
-        return;
-    }
-    if render_depth_stack_if_active(frame, area, app, model) {
-        return;
-    }
-    if render_non_code_center_body(frame, area, app, model) {
-        return;
-    }
-    super::phase_pages::render_phase_cockpit_body(frame, area, app, phase_model, phase_state);
-}
-
-fn render_depth_stack_if_active(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    app: &ShellApp,
-    model: &WorkbenchViewModel,
-) -> bool {
-    if model.page != WorkbenchPage::Review || !app.router.workbench().depth_stack() {
-        return false;
-    }
-    let depth_model = crate::ui_view_models::workbench_depth_model(app);
-    super::depth_stack::render_workbench_depth(
-        frame,
-        area,
-        &app.router.workbench().nav(),
-        &depth_model,
-    );
-    true
-}
-
-fn render_non_code_center_body(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    app: &ShellApp,
-    model: &WorkbenchViewModel,
-) -> bool {
-    if app.router.workbench().center_mode() == crate::app::WorkbenchCenterMode::Code {
-        return false;
-    }
-    render_legacy_phase_body(frame, area, app, model);
-    true
 }
 
 fn render_legacy_phase_body(
@@ -1159,29 +1268,68 @@ fn append_phase_rail_spans(spans: &mut Vec<Span<'static>>, statuses: &[JourneyPh
 /// section dividers stand in for the bordered panes (no box-drawing dependency
 /// for the layout structure); center content reuses the same lines.
 pub(crate) fn workbench_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let model = workbench_view_model(app);
-    let phase_model =
-        phase_cockpit_model_for_phase(app, super::phase_pages::page_phase(model.page));
-    let mut lines = workbench_header_lines(app, &model, &phase_model, area.width as usize);
-    lines.push(blank());
-    if model.page == WorkbenchPage::Review && app.router.workbench().depth_stack() {
-        let depth_model = crate::ui_view_models::workbench_depth_model(app);
-        lines.extend(super::depth_stack::workbench_depth_lines(
-            &app.router.workbench().nav(),
-            &depth_model,
-            area.width,
-        ));
-    } else if app.router.workbench().center_mode() != crate::app::WorkbenchCenterMode::Code {
-        if model.page == WorkbenchPage::Review {
-            append_review_plain_lines(&mut lines, app, &model, area);
-        } else {
-            append_phase_page_plain_lines(&mut lines, app, &model, area);
+    match workbench_presentation(app) {
+        WorkbenchPresentation::Phase { chrome, phase, .. } => {
+            phase_workbench_lines(app, area, &chrome, &phase)
         }
+        WorkbenchPresentation::Depth {
+            chrome,
+            phase_header,
+            depth,
+            ..
+        } => depth_workbench_lines(app, area, &chrome, &phase_header, &depth),
+        WorkbenchPresentation::Legacy {
+            phase_header,
+            workbench,
+        } => legacy_workbench_lines(app, area, &workbench, &phase_header),
+    }
+}
+
+fn phase_workbench_lines(
+    app: &ShellApp,
+    area: Rect,
+    chrome: &WorkbenchChromeModel,
+    phase: &PhaseCockpitModel,
+) -> Vec<Line<'static>> {
+    let mut lines = workbench_header_lines(app, chrome, &phase.header, area.width as usize);
+    lines.push(blank());
+    lines.extend(super::phase_pages::phase_cockpit_plain_lines(
+        phase,
+        area.width as usize,
+    ));
+    lines
+}
+
+fn depth_workbench_lines(
+    app: &ShellApp,
+    area: Rect,
+    chrome: &WorkbenchChromeModel,
+    phase_header: &EngagementHeaderModel,
+    depth: &WorkbenchModel,
+) -> Vec<Line<'static>> {
+    let mut lines = workbench_header_lines(app, chrome, phase_header, area.width as usize);
+    lines.push(blank());
+    lines.extend(super::depth_stack::workbench_depth_lines(
+        &app.router.workbench().nav(),
+        depth,
+        area.width,
+    ));
+    lines
+}
+
+fn legacy_workbench_lines(
+    app: &ShellApp,
+    area: Rect,
+    workbench: &WorkbenchViewModel,
+    phase_header: &EngagementHeaderModel,
+) -> Vec<Line<'static>> {
+    let chrome = chrome_from_workbench(workbench);
+    let mut lines = workbench_header_lines(app, &chrome, phase_header, area.width as usize);
+    lines.push(blank());
+    if workbench.page == WorkbenchPage::Review {
+        append_review_plain_lines(&mut lines, app, workbench, area);
     } else {
-        lines.extend(super::phase_pages::phase_cockpit_plain_lines(
-            &phase_model,
-            area.width as usize,
-        ));
+        append_phase_page_plain_lines(&mut lines, app, workbench, area);
     }
     lines
 }
@@ -1276,6 +1424,44 @@ fn append_detail_plain_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::WorkbenchCenterMode;
+    use kuzushi_core::V2Config;
+
+    fn app() -> ShellApp {
+        ShellApp::new(V2Config::default(), None)
+    }
+
+    #[test]
+    fn code_center_constructs_only_the_phase_presentation() {
+        assert!(matches!(
+            workbench_presentation(&app()),
+            WorkbenchPresentation::Phase { .. }
+        ));
+    }
+
+    #[test]
+    fn alternate_center_constructs_only_the_legacy_presentation() {
+        let mut app = app();
+        app.router
+            .workbench_mut()
+            .set_center_mode(WorkbenchCenterMode::Dfd);
+
+        assert!(matches!(
+            workbench_presentation(&app),
+            WorkbenchPresentation::Legacy { .. }
+        ));
+    }
+
+    #[test]
+    fn depth_stack_constructs_only_the_depth_presentation() {
+        let mut app = app();
+        app.router.workbench_mut().set_depth_stack(true);
+
+        assert!(matches!(
+            workbench_presentation(&app),
+            WorkbenchPresentation::Depth { .. }
+        ));
+    }
 
     #[test]
     fn four_column_layout_can_fit_full_finding_meta_on_wide_terminals() {

@@ -69,6 +69,13 @@ impl ShellApp {
     }
 
     pub(crate) fn start_prepared_scan(&mut self, request: ScanStartRequest) {
+        let runtime_backed =
+            request
+                .registry
+                .tool_wants_runtime("sast:scan", &request.input, &request.config);
+        if self.reject_runtime_launch_while_budget_halted(runtime_backed, "scan") {
+            return;
+        }
         if self.scan_start_blocked() {
             return;
         }
@@ -84,6 +91,7 @@ impl ShellApp {
         );
         let cancel = ticket.cancel.clone();
 
+        self.begin_run_cost_tracking(&request.run_id, runtime_backed);
         self.begin_scan_state(&request, cancel.clone());
         self.spawn_scan_worker(request, ticket, trace_handle, cancel);
     }
@@ -130,7 +138,7 @@ impl ShellApp {
         )));
         self.set_scan_cancel(Some(cancel));
         self.set_scan_abort_reason(None);
-        self.findings_mut().clear();
+        self.set_findings(Vec::new());
         *self.selected_finding_mut() = None;
         self.engagement.set_phase(crate::app::WorkflowPhase::Hunt);
         self.set_active_model_override(active_model_override_from_input(
@@ -240,7 +248,7 @@ impl ShellApp {
     }
 
     fn scan_workspace(&mut self, target_path: &PathBuf) -> Option<WorkspaceTarget> {
-        match WorkspaceTarget::new(target_path) {
+        match initialized_scan_workspace(target_path) {
             Ok(workspace) => Some(workspace),
             Err(error) => {
                 self.log("error", error.to_string());
@@ -292,6 +300,12 @@ impl ShellApp {
     }
 }
 
+fn initialized_scan_workspace(target: &PathBuf) -> Result<WorkspaceTarget> {
+    let workspace = WorkspaceTarget::new(target)?;
+    workspace.ensure_state_dir()?;
+    Ok(workspace)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,5 +317,15 @@ mod tests {
         let session = app.pending_scan_activity("scan-origin");
 
         assert_eq!(session.origin_phase, Some(crate::app::WorkflowPhase::Hunt));
+    }
+
+    #[test]
+    fn scan_workspace_initializes_policy_before_request_state() {
+        let target = tempfile::tempdir().unwrap();
+
+        let workspace = initialized_scan_workspace(&target.path().to_path_buf()).unwrap();
+
+        assert!(workspace.root().join(".kuzushi/.gitignore").is_file());
+        assert!(workspace.state_dir().is_dir());
     }
 }

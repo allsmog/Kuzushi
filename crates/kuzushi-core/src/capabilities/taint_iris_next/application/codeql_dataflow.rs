@@ -733,28 +733,12 @@ mod tests {
             target: scan_root.clone(),
             scan_root,
             repo_root: PathBuf::from("."),
+            source_paths: std::sync::Arc::from([]),
             mode: TaintIrisNextMode::Hunt,
-            caps: TaintIrisNextCaps {
-                max_catalog_entries: 1,
-                max_candidates_per_cwe: 10,
-                max_evidence_per_cwe: 10,
-                max_files_per_query: 10,
-                max_specs_per_cwe: 10,
-                max_agent_findings: 10,
-                codeql_analyze_timeout_ms: 1000,
-                min_evidence_level: "candidate".to_string(),
-            },
+            caps: dataflow_test_caps(),
             languages: vec!["cpp".to_string()],
-            context_status: TaintIrisNextArtifactStatus {
-                ok: true,
-                path: None,
-                reason: "test".to_string(),
-            },
-            threat_model_status: TaintIrisNextArtifactStatus {
-                ok: true,
-                path: None,
-                reason: "test".to_string(),
-            },
+            context_status: test_artifact_status(),
+            threat_model_status: test_artifact_status(),
             repo_context: None,
             threat_model: None,
             catalog: vec![TaintIrisNextRankedCatalogEntry {
@@ -772,18 +756,44 @@ mod tests {
             }],
             structural_queries: Vec::new(),
             prompt_catalog: String::new(),
-            backend: TaintIrisNextBackendChoice {
-                requested: "codeql".to_string(),
-                selected: "codeql".to_string(),
-                codeql_db_path: None,
-                corroborate_with_codeql: None,
-                structural_tool: "test".to_string(),
-                warnings: Vec::new(),
-            },
+            backend: test_backend_choice(),
             max_budget_usd: None,
             allow_deterministic_fallback: false,
+            system_prompt: taint_iris_next_system_prompt(),
             cwe_focus: Vec::new(),
             discovered_signals: DiscoveredSignals::default(),
+        }
+    }
+
+    fn dataflow_test_caps() -> TaintIrisNextCaps {
+        TaintIrisNextCaps {
+            max_catalog_entries: 1,
+            max_candidates_per_cwe: 10,
+            max_evidence_per_cwe: 10,
+            max_files_per_query: 10,
+            max_specs_per_cwe: 10,
+            max_agent_findings: 10,
+            codeql_analyze_timeout_ms: 1000,
+            min_evidence_level: "candidate".to_string(),
+        }
+    }
+
+    fn test_artifact_status() -> TaintIrisNextArtifactStatus {
+        TaintIrisNextArtifactStatus {
+            ok: true,
+            path: None,
+            reason: "test".to_string(),
+        }
+    }
+
+    fn test_backend_choice() -> TaintIrisNextBackendChoice {
+        TaintIrisNextBackendChoice {
+            requested: "codeql".to_string(),
+            selected: "codeql".to_string(),
+            codeql_db_path: None,
+            corroborate_with_codeql: None,
+            structural_tool: "test".to_string(),
+            warnings: Vec::new(),
         }
     }
 

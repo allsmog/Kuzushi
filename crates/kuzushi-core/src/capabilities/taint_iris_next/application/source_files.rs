@@ -19,13 +19,6 @@ pub(crate) struct TaintIrisNextSourceFile {
     pub(crate) lines: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct TaintIrisNextSourcePath {
-    pub(crate) absolute_path: PathBuf,
-    pub(crate) relative_path: String,
-    pub(crate) language: String,
-}
-
 pub(crate) fn collect_taint_iris_next_source_files(
     root: &Path,
     max_files: Option<usize>,
@@ -51,7 +44,7 @@ fn collect_taint_iris_next_source_files_with_limits(
 ) -> Result<Vec<TaintIrisNextSourceFile>> {
     let paths =
         collect_taint_iris_next_source_paths_with_limits(root, max_files, source_cap, entry_cap)?;
-    read_taint_source_paths(paths, max_bytes_per_file, total_byte_cap)
+    read_taint_source_paths(&paths, None, max_bytes_per_file, total_byte_cap)
 }
 
 pub(crate) fn collect_taint_iris_next_source_paths(
@@ -171,7 +164,7 @@ fn source_path_record(root: &Path, path: PathBuf) -> TaintIrisNextSourcePath {
 }
 
 fn read_taint_iris_next_source_file(
-    path: TaintIrisNextSourcePath,
+    path: &TaintIrisNextSourcePath,
     max_bytes_per_file: usize,
 ) -> Result<Option<TaintIrisNextSourceFile>> {
     let Some(text) = read_source_text_prefix(&path.absolute_path, max_bytes_per_file)
@@ -180,20 +173,22 @@ fn read_taint_iris_next_source_file(
         return Ok(None);
     };
     Ok(Some(TaintIrisNextSourceFile {
-        relative_path: path.relative_path,
-        language: path.language,
+        relative_path: path.relative_path.clone(),
+        language: path.language.clone(),
         lines: text.lines().map(ToString::to_string).collect(),
     }))
 }
 
 fn read_taint_source_paths(
-    paths: Vec<TaintIrisNextSourcePath>,
+    paths: &[TaintIrisNextSourcePath],
+    max_files: Option<usize>,
     max_bytes_per_file: usize,
     total_byte_cap: usize,
 ) -> Result<Vec<TaintIrisNextSourceFile>> {
-    let mut files = Vec::with_capacity(paths.len());
+    let path_count = max_files.unwrap_or(paths.len()).min(paths.len());
+    let mut files = Vec::with_capacity(path_count);
     let mut total_bytes = 0usize;
-    for path in paths {
+    for path in paths.iter().take(path_count) {
         let Some(file) = read_taint_iris_next_source_file(path, max_bytes_per_file)? else {
             continue;
         };
@@ -212,11 +207,35 @@ fn read_taint_source_paths(
     Ok(files)
 }
 
+pub(crate) fn read_taint_iris_next_source_paths(
+    paths: &[TaintIrisNextSourcePath],
+    max_files: Option<usize>,
+    max_bytes_per_file: usize,
+) -> Result<Vec<TaintIrisNextSourceFile>> {
+    read_taint_source_paths(
+        paths,
+        max_files,
+        max_bytes_per_file,
+        MAX_TAINT_SOURCE_BYTES,
+    )
+}
+
 pub(crate) fn detect_taint_iris_next_languages(root: &Path) -> Result<Vec<String>> {
     // Language detection only needs a representative sample; capping at 600
     // files keeps the language-fingerprinting cheap on huge repos and never
     // affects taint-hunt scope (which uses the complete, hard-bounded walker below).
     Ok(collect_taint_iris_next_source_files(root, Some(600), 1024)?
+        .into_iter()
+        .map(|file| file.language)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect())
+}
+
+pub(crate) fn detect_taint_iris_next_languages_in_paths(
+    paths: &[TaintIrisNextSourcePath],
+) -> Result<Vec<String>> {
+    Ok(read_taint_iris_next_source_paths(paths, Some(600), 1024)?
         .into_iter()
         .map(|file| file.language)
         .collect::<BTreeSet<_>>()
@@ -295,5 +314,18 @@ mod coverage_limit_tests {
                 .unwrap_err();
 
         assert!(error.to_string().contains("byte coverage limit"));
+    }
+
+    #[test]
+    fn downstream_reads_reuse_the_collected_source_inventory() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("first.rs"), "fn first() {}\n").unwrap();
+        let paths = collect_taint_iris_next_source_paths(temp.path(), None).unwrap();
+        fs::write(temp.path().join("later.rs"), "fn later() {}\n").unwrap();
+
+        let files = read_taint_iris_next_source_paths(&paths, None, 1024).unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].relative_path, "first.rs");
     }
 }

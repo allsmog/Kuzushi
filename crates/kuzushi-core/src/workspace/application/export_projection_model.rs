@@ -11,6 +11,8 @@ pub struct WorkspaceFindingExportRecord {
     pub kind: String,
     pub rule_id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwe: Option<String>,
     pub location: WorkspaceFindingExportLocation,
     pub severity: String,
     #[serde(skip_serializing_if = "Option::is_none")]

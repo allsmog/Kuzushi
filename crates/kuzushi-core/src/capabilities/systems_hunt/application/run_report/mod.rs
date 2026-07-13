@@ -1,7 +1,9 @@
 use super::*;
 
 mod invariant_extract;
+#[cfg(test)]
 pub(crate) use invariant_extract::run_systems_invariant_extract;
+pub(crate) use invariant_extract::run_systems_invariant_extract_with_cost;
 
 pub fn run_systems_hunt_report(
     input: &Value,
@@ -100,6 +102,7 @@ fn systems_hunt_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<
 struct CostedSystemsHuntRaw {
     raw: Value,
     cost_usd: f64,
+    cost_usd_exact: bool,
 }
 
 fn ensure_systems_hunt_surfaces(
@@ -183,6 +186,7 @@ fn finalize_systems_hunt_report(
         persisted,
         artifacts,
         cost_usd: raw.cost_usd,
+        cost_usd_exact: raw.cost_usd_exact,
     })
 }
 
@@ -278,50 +282,126 @@ fn query_systems_hunt_findings(
     agent_tool_policy: AgentToolPolicy,
     thinking_level: &str,
 ) -> Result<CostedSystemsHuntRaw> {
-    let invariants = query_systems_invariants_with_cost(
+    SystemsHuntQuery {
         runtime,
         model,
         target,
         context,
         options,
-        agent_tool_policy.clone(),
+        agent_tool_policy,
         thinking_level,
-    )?;
-    let triggers = query_systems_triggers_with_cost(
-        runtime,
-        model,
-        target,
-        context,
-        &invariants.value,
-        options,
-        agent_tool_policy.clone(),
-        thinking_level,
-    )?;
-    let findings = query_required_structured_json_with_cost(
-        runtime,
-        AgentQueryRequest::new(
-            model.to_string(),
-            target.to_path_buf(),
-            SYSTEMS_HUNT_SYSTEM_PROMPT.to_string(),
-            build_systems_hunt_prompt(
-                target,
-                context,
-                &invariants.value,
-                &triggers.value,
-                options,
-            )?,
+    }
+    .execute()
+}
+
+struct SystemsHuntQuery<'a> {
+    runtime: &'a dyn AgentRuntime,
+    model: &'a str,
+    target: &'a Path,
+    context: &'a SystemsContextOutput,
+    options: &'a SystemsHuntInput,
+    agent_tool_policy: AgentToolPolicy,
+    thinking_level: &'a str,
+}
+
+impl SystemsHuntQuery<'_> {
+    fn execute(&self) -> Result<CostedSystemsHuntRaw> {
+        let invariants = self.query_invariants()?;
+        let triggers = self.query_triggers(&invariants.value)?;
+        let findings = query_final_systems_findings(
+            self.runtime,
+            self.model,
+            self.target,
+            self.context,
+            self.options,
+            self.agent_tool_policy.clone(),
+            self.thinking_level,
+            &invariants.value,
+            &triggers.value,
+        )?;
+        merge_systems_hunt_costs(&invariants, &triggers, findings)
+    }
+
+    fn query_invariants(&self) -> Result<CostedStructuredJson<SystemsInvariantOutput>> {
+        query_systems_invariants_with_cost(
+            self.runtime,
+            self.model,
+            self.target,
+            self.context,
+            self.options,
+            self.agent_tool_policy.clone(),
+            self.thinking_level,
         )
-        .with_tool_policy(agent_tool_policy)
-        .with_thinking_level(thinking_level.to_string()),
+    }
+
+    fn query_triggers(
+        &self,
+        invariants: &SystemsInvariantOutput,
+    ) -> Result<CostedStructuredJson<SystemsTriggerOutput>> {
+        query_systems_triggers_with_cost(
+            self.runtime,
+            self.model,
+            self.target,
+            self.context,
+            invariants,
+            self.options,
+            self.agent_tool_policy.clone(),
+            self.thinking_level,
+        )
+    }
+}
+
+fn merge_systems_hunt_costs(
+    invariants: &CostedStructuredJson<SystemsInvariantOutput>,
+    triggers: &CostedStructuredJson<SystemsTriggerOutput>,
+    findings: CostedStructuredJson<Value>,
+) -> Result<CostedSystemsHuntRaw> {
+    let total_cost = invariants
+        .cost_report()?
+        .checked_add(
+            triggers.cost_report()?,
+            "systems-hunt invariant and trigger cost",
+        )?
+        .checked_add(
+            findings.cost_report()?,
+            "systems-hunt invariant, trigger, and finding cost",
+        )?;
+    Ok(CostedSystemsHuntRaw {
+        raw: findings.value,
+        cost_usd: total_cost.observed_usd(),
+        cost_usd_exact: total_cost.is_complete(),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn query_final_systems_findings(
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    target: &Path,
+    context: &SystemsContextOutput,
+    options: &SystemsHuntInput,
+    agent_tool_policy: AgentToolPolicy,
+    thinking_level: &str,
+    invariants: &SystemsInvariantOutput,
+    triggers: &SystemsTriggerOutput,
+) -> Result<CostedStructuredJson<Value>> {
+    let prompt = build_systems_hunt_prompt(target, context, invariants, triggers, options)?;
+    let request = AgentQueryRequest::new(
+        model.to_string(),
+        target.to_path_buf(),
+        options.hunt_system_prompt.clone(),
+        prompt,
+    )
+    .with_tool_policy(agent_tool_policy)
+    .with_thinking_level(thinking_level.to_string());
+    query_required_structured_json_with_cost(
+        runtime,
+        request,
         StructuredJsonContract::new(
             "systems-hunt:systems-hunt",
             "SystemsHuntFindings",
             findings_schema(),
         ),
         require_json_object,
-    )?;
-    Ok(CostedSystemsHuntRaw {
-        raw: findings.value,
-        cost_usd: invariants.cost_usd + triggers.cost_usd + findings.cost_usd,
-    })
+    )
 }

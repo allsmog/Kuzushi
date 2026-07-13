@@ -74,10 +74,12 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
         description: "refresh the v3 content-addressed workspace index",
     },
     ShellCommandSpec {
-        command: "workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
+        command: "findings export <path> [format] [--completeness open|complete] [--allow-empty]",
         aliases: &[
+            "findings export report.sarif sarif",
+            "/findings export <path> [format] [--completeness open|complete] [--allow-empty]",
             "/workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
-            "findings export <path> [format] [--completeness open|complete] [--allow-empty]",
+            "workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
             "export <path> [format] [--completeness open|complete] [--allow-empty]",
         ],
         category: ShellCommandCategory::ContextKb,

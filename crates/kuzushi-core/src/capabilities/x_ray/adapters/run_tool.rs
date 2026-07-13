@@ -13,33 +13,34 @@ pub(crate) fn run_x_ray(
     emit_x_ray_progress(ctx, parent_step, "prompt · build repository x-ray request");
     let prompt = build_x_ray_prompt(&input);
     let _agent_scope = begin_x_ray_agent_scope(ctx, parent_step);
-    let content = query_required_structured_json(
+    let content = query_required_structured_json_with_cost(
         runtime,
         AgentQueryRequest::new(
             input.model.clone(),
             input.target.clone(),
-            x_ray_system_prompt(),
+            input.system_prompt.clone(),
             prompt,
         ),
         StructuredJsonContract::new("x-ray:run", "XRayArtifactContent", x_ray_artifact_schema()),
         XRayArtifactContent::from_value_owned,
     )?;
     drop(_agent_scope);
-    finish_x_ray_run(&input, ctx, parent_step, content)
+    let cost = content.cost_report()?;
+    finish_x_ray_run(&input, ctx, parent_step, content.value, cost)
 }
 
 pub(crate) fn read_x_ray(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let target = resolve_target(&input, ctx)?;
     let repo_name = repo_name(&target);
     let data = read_x_ray_report_artifacts(&target, Some(&repo_name), "rust", 0.0)?;
-    Ok(x_ray_response(
+    x_ray_response(
         render_x_ray_read_summary(&data),
         json!(data),
         &data,
-    ))
+    )
 }
 
-fn x_ray_response(output: String, data: Value, report: &XRayReportData) -> Value {
+fn x_ray_response(output: String, data: Value, report: &XRayReportData) -> Result<Value> {
     let mut result =
         crate::module_result::completed_output_result(output.clone(), output, data);
     result["artifacts"] = json!([
@@ -48,8 +49,14 @@ fn x_ray_response(output: String, data: Value, report: &XRayReportData) -> Value
         { "label": "invariants", "path": report.artifact_paths.invariants },
         { "label": "architecture", "path": report.artifact_paths.architecture_svg },
     ]);
-    result["costUsd"] = json!(report.cost_usd);
-    result
+    let observed = crate::runtime::RuntimeCost::from_usd(report.cost_usd, "x-ray report cost")?;
+    let cost = if report.cost_usd_exact {
+        crate::runtime::RuntimeCostReport::known(observed)
+    } else {
+        crate::runtime::RuntimeCostReport::incomplete(observed)
+    };
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
+    Ok(result)
 }
 
 fn finish_x_ray_run(
@@ -57,15 +64,22 @@ fn finish_x_ray_run(
     ctx: &ToolExecutionContext<'_>,
     parent_step: Option<usize>,
     content: XRayArtifactContent,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Result<Value> {
     emit_x_ray_progress(ctx, parent_step, "artifacts · write x-ray report");
     write_x_ray_artifacts(&input.target, content)?;
-    let data =
-        read_x_ray_report_artifacts(&input.target, Some(&input.repo_name), "LangGraph", 0.0)?;
+    let data = read_x_ray_report_artifacts(
+        &input.target,
+        Some(&input.repo_name),
+        "LangGraph",
+        cost.observed_usd(),
+    )?;
+    let mut data = data;
+    data.cost_usd_exact = cost.is_complete();
     emit_x_ray_done(ctx);
     let mut data_json = json!(data);
     data_json["kbContext"] = json!(&input.kb_context);
-    Ok(x_ray_response(render_x_ray_run_summary(&data), data_json, &data))
+    x_ray_response(render_x_ray_run_summary(&data), data_json, &data)
 }
 
 fn emit_x_ray_start(ctx: &ToolExecutionContext<'_>, input: &XRayRunInput) -> Option<usize> {

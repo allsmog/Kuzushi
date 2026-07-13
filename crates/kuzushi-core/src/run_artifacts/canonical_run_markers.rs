@@ -58,8 +58,7 @@ fn is_missing_report_marker(body: &str, run_id: &str) -> bool {
 }
 
 fn read_json(target: &Path, run_id: &str, leaf: &str) -> Result<Option<Value>> {
-    let Some(body) = read_marker_text(target, run_id, leaf, "Canonical failures marker")?
-    else {
+    let Some(body) = read_marker_text(target, run_id, leaf, "Canonical failures marker")? else {
         return Ok(None);
     };
     serde_json::from_str::<Value>(&body)

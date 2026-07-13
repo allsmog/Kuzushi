@@ -43,18 +43,124 @@ fn opening_legacy_projection_adds_verification_provenance_columns() {
     drop(ProjectionDb::open(&db_path).unwrap());
 
     let conn = Connection::open(&db_path).unwrap();
-    assert!(table_has_column(
-        &conn,
-        "verification_events",
-        "verification_run_id"
+    assert!(table_has_column(&conn, "verification_events", "verification_run_id").unwrap());
+    assert!(table_has_column(&conn, "verification_events", "verified_scan_id").unwrap());
+}
+
+#[test]
+fn opening_legacy_projection_adds_patch_provider_spend_column() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("index.sqlite3");
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        r#"
+        create table patch_attempt_events (
+          event_hash text primary key,
+          seq integer not null unique,
+          stable_fp text not null,
+          fingerprint text not null,
+          patch_run_id text not null,
+          repo text not null,
+          diff_object text,
+          diff_size_bytes integer,
+          status text not null,
+          iterations integer not null,
+          build_command text,
+          test_command text,
+          worktree_path text,
+          cost_usd real,
+          validator_log text,
+          history_json text not null,
+          actor text not null,
+          created_at text not null,
+          payload_json text not null
+        );
+        "#,
     )
-    .unwrap());
-    assert!(table_has_column(
-        &conn,
-        "verification_events",
-        "verified_scan_id"
-    )
-    .unwrap());
+    .unwrap();
+    drop(conn);
+
+    drop(ProjectionDb::open(&db_path).unwrap());
+
+    let conn = Connection::open(&db_path).unwrap();
+    assert!(table_has_column(&conn, "patch_attempt_events", "provider_spend_unresolved").unwrap());
+}
+
+#[test]
+fn legacy_patch_events_default_missing_unresolved_bit_to_false() {
+    assert!(!projected_legacy_patch_spend_state(Some(125_000)));
+    assert!(!projected_legacy_patch_spend_state(None));
+}
+
+#[test]
+fn patch_event_replay_prefers_exact_cost_over_legacy_rounded_micros() {
+    let db = ProjectionDb::open_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(tmp.path()).unwrap();
+    let event = log
+        .append(
+            EventKind::PatchAttemptRecorded,
+            "exact-patch-cost",
+            Some("patch-run".to_string()),
+            None,
+            serde_json::json!({
+                "stableFp": "fp3_patch_exact",
+                "fingerprint": "external-fp",
+                "patchRunId": "patch-run",
+                "repo": "/repo",
+                "status": "SOUND",
+                "iterations": 1,
+                "costUsd": 0.000_000_4,
+                "costUsdMicros": 0,
+                "providerSpendUnresolved": true,
+                "historyJson": "[]",
+            }),
+        )
+        .unwrap();
+
+    db.apply_event(&event).unwrap();
+
+    let projected: (f64, bool) = db
+        .conn
+        .query_row(
+            "select cost_usd, provider_spend_unresolved from patch_attempt_events",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(projected, (0.000_000_4, true));
+}
+
+fn projected_legacy_patch_spend_state(cost_usd_micros: Option<i64>) -> bool {
+    let db = ProjectionDb::open_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(tmp.path()).unwrap();
+    let event = log
+        .append(
+            EventKind::PatchAttemptRecorded,
+            "legacy-patch",
+            Some("patch-run".to_string()),
+            None,
+            serde_json::json!({
+                "stableFp": "fp3_patch",
+                "fingerprint": "external-fp",
+                "patchRunId": "patch-run",
+                "repo": "/repo",
+                "status": "SOUND",
+                "iterations": 1,
+                "costUsdMicros": cost_usd_micros,
+                "historyJson": "[]",
+            }),
+        )
+        .unwrap();
+    db.apply_event(&event).unwrap();
+    db.conn
+        .query_row(
+            "select provider_spend_unresolved from patch_attempt_events",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
 }
 
 #[test]
@@ -167,7 +273,11 @@ fn finding_observation_projects_current_finding_and_search_row() {
     assert_eq!(projected_observation_count(&db, "fp3_observed"), 1);
     assert_eq!(
         projected_current_finding(&db, "fp3_observed"),
-        ("open".to_string(), "high".to_string(), "SQL injection".to_string())
+        (
+            "open".to_string(),
+            "high".to_string(),
+            "SQL injection".to_string()
+        )
     );
     assert!(projected_search_message(&db, "fp3_observed").contains("raw query"));
 }
@@ -186,7 +296,11 @@ fn repeated_observation_updates_current_finding_without_changing_first_seen() {
     assert_eq!(stable_finding_seen_range(&db, "fp3_observed"), (1, 2));
     assert_eq!(
         projected_current_finding(&db, "fp3_observed"),
-        ("open".to_string(), "critical".to_string(), "Updated title".to_string())
+        (
+            "open".to_string(),
+            "critical".to_string(),
+            "Updated title".to_string()
+        )
     );
 }
 
@@ -216,11 +330,9 @@ fn stable_finding_reads_reject_stale_projection_when_required() {
         .list_stable_findings(ReadOptions::require_min_seq(1))
         .unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("projection watermark 0 is behind required read seq 1")
-    );
+    assert!(error
+        .to_string()
+        .contains("projection watermark 0 is behind required read seq 1"));
 }
 
 #[test]
@@ -266,11 +378,9 @@ fn stable_finding_reads_wait_timeout_is_explicit() {
         ))
         .unwrap_err();
 
-    assert!(
-        error
-            .to_string()
-            .contains("timed out waiting for projection watermark 0 to reach required read seq 1")
-    );
+    assert!(error
+        .to_string()
+        .contains("timed out waiting for projection watermark 0 to reach required read seq 1"));
 }
 
 fn append_finding_event(log: &EventLog) -> EventEnvelope {

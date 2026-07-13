@@ -3,8 +3,13 @@ use kuzushi_core::workspace::ProjectModelDocument;
 use kuzushi_core::{
     LatestRunPointerState, RunArtifactTextRead, RunSummaryEntry, RunTargetGitMetadata, RunTraceRead,
 };
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
+#[cfg(test)]
+mod completion_tests;
 mod reader;
 #[cfg(test)]
 mod reader_tests;
@@ -31,8 +36,69 @@ impl<T> ViewDataState<T> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RunSummaryEntriesState {
+    Ready(Vec<RunSummaryEntry>),
+    Failed(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum FileCompletionLimit {
+    EntryVisits,
+    RetainedResults,
+    Depth,
+    PathBytes,
+    UnreadableDirectory,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct FileCompletionIndex {
+    pub(crate) values: Vec<String>,
+    pub(crate) limits_reached: BTreeSet<FileCompletionLimit>,
+    pub(crate) entries_visited: usize,
+    pub(crate) path_bytes_observed: usize,
+}
+
+impl FileCompletionIndex {
+    #[cfg(test)]
+    pub(crate) fn complete(values: Vec<String>) -> Self {
+        Self {
+            values,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn is_truncated(&self) -> bool {
+        !self.limits_reached.is_empty()
+    }
+
+    pub(crate) fn truncation_hint(&self) -> Option<&'static str> {
+        self.is_truncated().then_some(
+            "partial index; paste an exact workspace-relative or absolute path if it is missing",
+        )
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ViewHydrationCancellation {
+    canceled: Arc<AtomicBool>,
+}
+
+impl ViewHydrationCancellation {
+    pub(crate) fn cancel(&self) {
+        self.canceled.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn is_canceled(&self) -> bool {
+        self.canceled.load(Ordering::Acquire)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum ViewHydrationKey {
+    FileCompletionValues,
+    FindingCompletionValues,
+    RunIdCompletionValues,
     LatestRunPointer,
     RunSummaryEntries,
     RunArtifactText {
@@ -69,14 +135,18 @@ pub(crate) enum ViewHydrationKey {
     HealthChecks {
         credential_env: String,
     },
+    TargetProfile,
     MapArtifacts,
     TargetBase,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum ViewHydrationValue {
+    FileCompletionValues(FileCompletionIndex),
+    FindingCompletionValues(Vec<String>),
+    RunIdCompletionValues(Vec<String>),
     LatestRunPointer(LatestRunPointerState),
-    RunSummaryEntries(Vec<RunSummaryEntry>),
+    RunSummaryEntries(RunSummaryEntriesState),
     RunArtifactText(RunArtifactTextRead),
     RunTrace(Option<RunTraceRead>),
     SourceFile(Result<String, String>),
@@ -91,6 +161,7 @@ pub(crate) enum ViewHydrationValue {
     DirectoryListing(DirectoryListingState),
     PromptOverrideHash(Result<Option<String>, String>),
     HealthChecks(ViewHealthChecks),
+    TargetProfile(TargetProfile),
     MapArtifacts(bool),
     TargetBase(String),
 }
@@ -125,6 +196,15 @@ pub(crate) struct ViewHydrationDrain {
 
 pub(crate) trait ViewArtifactReader: std::fmt::Debug + Send + Sync {
     fn read(&self, target: &Path, key: &ViewHydrationKey) -> ViewHydrationValue;
+
+    fn read_cancellable(
+        &self,
+        target: &Path,
+        key: &ViewHydrationKey,
+        cancellation: &ViewHydrationCancellation,
+    ) -> Option<ViewHydrationValue> {
+        (!cancellation.is_canceled()).then(|| self.read(target, key))
+    }
 }
 
 impl ShellApp {
@@ -133,19 +213,16 @@ impl ShellApp {
             return false;
         };
         let keys = self.pending_active_view_hydration_keys(&target);
-        if keys.is_empty() {
-            return false;
-        }
-        let scheduled = self
-            .runtime_state
-            .schedule_view_hydration(target.clone(), keys);
-        if scheduled.is_empty() {
-            return false;
-        }
-        self.workbench_cache()
-            .borrow_mut()
-            .mark_view_hydration_loading(&target, &scheduled);
-        true
+        self.schedule_view_hydration_keys(target, keys)
+    }
+
+    pub(crate) fn schedule_target_profile_hydration(&mut self, target: &Path) -> bool {
+        let key = ViewHydrationKey::TargetProfile;
+        let needed = self
+            .workbench_cache()
+            .borrow()
+            .view_hydration_needed(target, &key);
+        needed && self.schedule_view_hydration_keys(target.to_path_buf(), vec![key])
     }
 
     pub(crate) fn apply_view_hydration_results(&mut self) -> bool {
@@ -199,17 +276,39 @@ impl ShellApp {
 
     pub(crate) fn invalidate_view_hydration(&mut self) {
         self.runtime_state.invalidate_view_hydration();
+        self.editor_mut().invalidate_completion_preview();
         self.workbench_cache()
             .borrow_mut()
             .clear_view_hydration_loading();
     }
 
-    fn apply_view_hydration_drain(&self, drain: ViewHydrationDrain) {
-        let mut cache = self.workbench_cache().borrow_mut();
-        for result in drain.results {
-            cache.apply_view_hydration(result);
+    fn apply_view_hydration_drain(&mut self, drain: ViewHydrationDrain) {
+        let refresh_file_picker = drain
+            .results
+            .iter()
+            .any(|result| result.key == ViewHydrationKey::FileCompletionValues);
+        let refresh_target_profile = drain.results.iter().any(|result| {
+            matches!(
+                (&result.key, &result.value),
+                (
+                    ViewHydrationKey::TargetProfile,
+                    ViewHydrationValue::TargetProfile(_)
+                )
+            )
+        });
+        {
+            let mut cache = self.workbench_cache().borrow_mut();
+            for result in drain.results {
+                cache.apply_view_hydration(result);
+            }
+            cache.clear_failed_view_hydrations(&drain.failures);
         }
-        cache.clear_failed_view_hydrations(&drain.failures);
+        if refresh_file_picker {
+            self.refresh_open_file_picker_candidates();
+        }
+        if refresh_target_profile {
+            self.apply_ready_target_profile();
+        }
     }
 
     fn pending_active_view_hydration_keys(&self, target: &Path) -> Vec<ViewHydrationKey> {
@@ -218,6 +317,26 @@ impl ShellApp {
         keys.into_iter()
             .filter(|key| cache.view_hydration_needed(target, key))
             .collect()
+    }
+
+    fn schedule_view_hydration_keys(
+        &mut self,
+        target: PathBuf,
+        keys: Vec<ViewHydrationKey>,
+    ) -> bool {
+        if keys.is_empty() {
+            return false;
+        }
+        let scheduled = self
+            .runtime_state
+            .schedule_view_hydration(target.clone(), keys);
+        if scheduled.is_empty() {
+            return false;
+        }
+        self.workbench_cache()
+            .borrow_mut()
+            .mark_view_hydration_loading(&target, &scheduled);
+        true
     }
 
     fn active_view_hydration_scope(&self) -> Option<PathBuf> {

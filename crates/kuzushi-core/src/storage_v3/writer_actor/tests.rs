@@ -12,6 +12,8 @@ fn decision(stable_fp: &str, read_watermark: u64) -> DecisionWrite {
         confidence_millis: 1000,
         read_watermark,
         updates_finding_triage: false,
+        triage_cost_usd: None,
+        triage_cost_usd_exact: true,
         dismiss_reason: None,
         dismissed_by: None,
     }
@@ -90,7 +92,9 @@ fn patch_attempt(stable_fp: &str) -> PatchAttemptWrite {
         build_command: Some("cargo build".to_string()),
         test_command: Some("cargo test".to_string()),
         worktree_path: Some("/tmp/worktree".to_string()),
+        cost_usd: Some(0.125),
         cost_usd_micros: Some(125_000),
+        provider_spend_unresolved: false,
         validator_log: Some("tests passed".to_string()),
         history_json: "[]".to_string(),
         actor: "patch-runner".to_string(),
@@ -491,18 +495,28 @@ fn storage_writer_records_patch_attempt_event_and_projection() {
     let log = EventLog::open(tmp.path().join("log")).unwrap();
     let events = log.read_all().unwrap();
     assert_eq!(events[0].event_kind, EventKind::PatchAttemptRecorded);
+    assert_eq!(events[0].payload["costUsd"], serde_json::json!(0.125));
     let conn = rusqlite::Connection::open(db_path).unwrap();
-    let projected: (String, String, String, f64) = conn
+    let projected: (String, String, String, f64, bool) = conn
         .query_row(
-            "select stable_fp, patch_run_id, status, cost_usd from patch_attempt_events",
+            "select stable_fp, patch_run_id, status, cost_usd, provider_spend_unresolved from patch_attempt_events",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .unwrap();
     assert_eq!(projected.0, "fp3_patch");
     assert_eq!(projected.1, "patch-run-1");
     assert_eq!(projected.2, "VERIFIED");
     assert!((projected.3 - 0.125).abs() < 1e-9);
+    assert!(!projected.4);
 }
 
 #[test]

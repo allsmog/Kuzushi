@@ -14,21 +14,25 @@ impl ShellApp {
     /// the universal `Esc back` affordance. Per-view extras come first so a
     /// view that rebinds a base key (e.g. Findings `j`) wins via first-match.
     pub(crate) fn view_keybindings(&self) -> Vec<ViewKeybinding> {
-        let mut binds = self.view_specific_keybindings();
-        if self.view_uses_scroll_base() {
+        self.view_keybindings_for_view(self.shell_view())
+    }
+
+    pub(crate) fn view_keybindings_for_view(&self, view: ShellView) -> Vec<ViewKeybinding> {
+        let mut binds = self.view_specific_keybindings(view);
+        if self.view_uses_scroll_base(view) {
             binds.extend(scroll_keybindings());
         }
-        if self.view_offers_back() {
+        if self.view_offers_back(view) {
             binds.push(back_keybinding());
         }
         binds
     }
 
-    fn view_specific_keybindings(&self) -> Vec<ViewKeybinding> {
-        match self.shell_view() {
+    fn view_specific_keybindings(&self, view: ShellView) -> Vec<ViewKeybinding> {
+        match view {
             ShellView::Catalog => catalog_keybindings(),
             ShellView::Home => home_keybindings(),
-            ShellView::Workbench => workbench_keybindings(),
+            ShellView::Workbench => workbench_keybindings(self),
             ShellView::Recommend => recommend_keybindings(),
             ShellView::Threat => threat_keybindings(),
             ShellView::ModuleRun => self.module_run_keybindings(),
@@ -54,21 +58,20 @@ impl ShellApp {
     /// Generic `j/k/g/G` scrolling applies to scrollable views except those
     /// that drive a bespoke cursor (Catalog and the Workbench's pane-aware
     /// focus own their keys).
-    fn view_uses_scroll_base(&self) -> bool {
-        self.is_scrollable_view()
-            && !matches!(self.shell_view(), ShellView::Catalog | ShellView::Workbench)
+    fn view_uses_scroll_base(&self, view: ShellView) -> bool {
+        self.is_view_scrollable(view) && !matches!(view, ShellView::Catalog | ShellView::Workbench)
     }
 
     /// Esc goes back everywhere except views that already own Esc
     /// (pickers/modals intercept Esc earlier). Cleared prompt drafts are
     /// restored explicitly with Ctrl+_ / Ctrl+/ so Esc stays navigation.
-    fn view_offers_back(&self) -> bool {
-        !self.view_owns_esc()
+    fn view_offers_back(&self, view: ShellView) -> bool {
+        !self.view_owns_esc(view)
     }
 
-    fn view_owns_esc(&self) -> bool {
+    fn view_owns_esc(&self, view: ShellView) -> bool {
         matches!(
-            self.shell_view(),
+            view,
             ShellView::CommandPalette
                 | ShellView::ModelPicker
                 | ShellView::AuthMethodPicker

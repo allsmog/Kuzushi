@@ -14,13 +14,16 @@ pub mod policy;
 mod tests;
 mod traced_runtime;
 
-pub use application::run_tool_loop;
+pub use application::{
+    query_blocking_checked, query_blocking_controlled_checked, run_tool_loop,
+    spawn_subagent_blocking_checked, triage_finding_blocking_checked,
+};
 pub use domain::{
-    append_structured_output_contract, AgentLoopOutcome, AgentLoopStep, AgentQueryControl,
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
+    append_structured_output_contract, triage_cost_report, AgentLoopOutcome, AgentLoopStep,
+    AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
     AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
-    McpAttachment, ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult,
-    TriageRequest,
+    McpAttachment, ModelTier, RuntimeCost, RuntimeCostReport, SubagentRole, ToolBox, ToolCall,
+    ToolCallHandler, ToolResult, TriageRequest, DEFAULT_TRIAGE_PROMPT,
 };
 pub use mcp_probe::{
     mcp_attachment_plan_for_target, plan_contains, McpArtifactSpec, MCP_ARTIFACT_TABLE,

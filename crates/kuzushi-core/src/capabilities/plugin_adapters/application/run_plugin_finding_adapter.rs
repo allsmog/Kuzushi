@@ -8,9 +8,15 @@ pub(crate) fn run_plugin_finding_adapter(
 ) -> Result<Value> {
     let run = prepare_plugin_finding_run(spec, &input, ctx, runtime)?;
     let findings = run_plugin_finding_query(&run, &input, ctx)?;
-    let persisted = persist_plugin_adapter_findings(&run, &findings, ctx)?;
-    emit_plugin_adapter_done(ctx, &run, findings.len());
-    Ok(plugin_adapter_response(&run, findings, persisted))
+    let persisted = persist_plugin_adapter_findings(&run, &findings.value, ctx)?;
+    emit_plugin_adapter_done(ctx, &run, findings.value.len());
+    let cost = findings.cost_report()?;
+    Ok(plugin_adapter_response(
+        &run,
+        findings.value,
+        persisted,
+        cost,
+    ))
 }
 
 struct PluginFindingRun<'spec, 'runtime> {
@@ -130,16 +136,25 @@ fn run_plugin_finding_query(
     run: &PluginFindingRun<'_, '_>,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<Vec<Finding>> {
+) -> Result<CostedStructuredJson<Vec<Finding>>> {
     let raw = query_plugin_adapter(run, input, ctx)?;
-    normalize_agent_json_findings(raw, &run.target, run.spec.tool_slug, run.max_findings)
+    Ok(CostedStructuredJson {
+        value: normalize_agent_json_findings(
+            raw.value,
+            &run.target,
+            run.spec.tool_slug,
+            run.max_findings,
+        )?,
+        cost_usd: raw.cost_usd,
+        cost_usd_exact: raw.cost_usd_exact,
+    })
 }
 
 fn query_plugin_adapter(
     run: &PluginFindingRun<'_, '_>,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
+) -> Result<CostedStructuredJson<Value>> {
     // Phase scope so the plugin's LLM round-trip surfaces under
     // `skill-pick · audit-loop` (or seed-gen · attack-loop · judge for
     // prompt-armor; similar shape for shinsa) in the feed.
@@ -149,7 +164,7 @@ fn query_plugin_adapter(
             .emit();
         trace.parent_scope(phase)
     });
-    let raw = query_required_structured_json(
+    let raw = query_required_structured_json_with_cost(
         run.runtime,
         AgentQueryRequest::new(
             run.model.clone(),
@@ -211,6 +226,7 @@ fn plugin_adapter_response(
     run: &PluginFindingRun<'_, '_>,
     findings: Vec<Finding>,
     persisted: Option<GenericPersistedRun>,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Value {
     let output = render_generic_findings_output(
         run.spec.tool_name,
@@ -229,7 +245,7 @@ fn plugin_adapter_response(
             "persisted": persisted,
         }),
     );
-    result["costUsd"] = json!(0.0);
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
     result
 }
 

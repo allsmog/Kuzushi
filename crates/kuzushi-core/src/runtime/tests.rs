@@ -144,6 +144,7 @@ mod tests {
         assert_eq!(outcome.steps_used, 1);
         assert!(!outcome.truncated);
         assert_eq!(outcome.cost_usd, 0.01);
+        assert!(outcome.cost_usd_exact);
         assert_eq!(outcome.transcript.len(), 1);
         assert!(matches!(
             outcome.transcript[0],
@@ -180,6 +181,7 @@ mod tests {
         let outcome = run_tool_loop(&runtime, &req(), &mut tb).unwrap();
         assert_eq!(outcome.text, "saw foo");
         assert_eq!(outcome.steps_used, 2);
+        assert!(!outcome.cost_usd_exact);
         // Transcript: ToolCall, ToolResult, AssistantText.
         assert_eq!(outcome.transcript.len(), 3);
         assert!(matches!(
@@ -237,6 +239,39 @@ mod tests {
             "got {}",
             outcome.cost_usd
         );
+        assert!(outcome.cost_usd_exact);
+    }
+
+    #[test]
+    fn driver_keeps_observed_subtotal_but_marks_mixed_cost_unknown() {
+        let runtime = ScriptedRuntime::new(vec![
+            AgentLoopStep::ToolCall {
+                call: ToolCall {
+                    name: "read_source".to_string(),
+                    input: serde_json::Value::Null,
+                    call_id: "c1".to_string(),
+                },
+                cost_usd: None,
+            },
+            AgentLoopStep::Final {
+                text: "done".to_string(),
+                structured: None,
+                cost_usd: Some(0.03),
+            },
+        ]);
+        let mut tb = ToolBox::new();
+        tb.register("read_source", |call| {
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                output: serde_json::Value::Null,
+                is_error: false,
+            })
+        });
+
+        let outcome = run_tool_loop(&runtime, &req(), &mut tb).unwrap();
+
+        assert_eq!(outcome.cost_usd, 0.03);
+        assert!(!outcome.cost_usd_exact);
     }
 
     #[test]
@@ -278,6 +313,7 @@ mod tests {
             "got {}",
             outcome.cost_usd
         );
+        assert!(outcome.cost_usd_exact);
     }
 
     #[test]
@@ -457,6 +493,37 @@ mod tests {
         // No leading newline when base was empty.
         assert!(recorded.starts_with("You are a focused Rust FFI-boundary reasoner."));
         assert!(!recorded.contains("\n\n"));
+    }
+
+    struct InvalidAsyncSubagentCostRuntime;
+
+    impl AgentRuntime for InvalidAsyncSubagentCostRuntime {
+        fn spawn_subagent_blocking(
+            &self,
+            _role: SubagentRole,
+            _request: AgentQueryRequest,
+        ) -> Result<AgentQueryResponse> {
+            Ok(AgentQueryResponse {
+                cost_usd: f64::NAN,
+                cost_usd_reported: true,
+                ..Default::default()
+            })
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            unreachable!("not exercised in this test")
+        }
+    }
+
+    #[tokio::test]
+    async fn async_subagent_wrapper_rejects_invalid_override_cost() {
+        let error = InvalidAsyncSubagentCostRuntime
+            .spawn_subagent(SubagentRole::Generic, request("base"))
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("finite non-negative"), "{error}");
     }
 
     #[test]

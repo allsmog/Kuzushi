@@ -9,18 +9,18 @@ KUZUSHI · target ./phase-target · view confirm · ● LIVE
  ▸ NEXT triage & verify
 │FINDING
 │F-0001  CRITICAL  ✓ verified L4  runtime_verified
-│ATTACK PATH
+│SQL injection reaches query
+│src/auth/login.rs:17
+│▸ ATTACK PATH
 │  taint flow   CWE-89 · high
-│
 │DATA-FLOW LADDER
-│DATA-FLOW LADDER  CWE-89 · HIGH · 2 stages
-│ ◇ HTTP query parameter
-│   │ login.rs:12
 │PROOF · REPLAY
 │exploited  L4 · podman
+│decision: needs review
 │▸ verify F-0001  recheck
+│▸ replay verify-phase-run  open trace
 mode:run · workbench            6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────────────────────────
- Ctrl+C request abort   findings list
- Esc back   history events
+ Ctrl+C request abort
+ Esc prompt
 NAVIGATION MODE — view keys active · Esc returns to prompt

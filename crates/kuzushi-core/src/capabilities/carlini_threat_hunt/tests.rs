@@ -354,6 +354,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn saving_the_builtin_carlini_mission_preserves_the_runtime_prompt() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
+        let actor = carlini_actor("external-user", "External user");
+        let inventory = render_carlini_inventory_block(&[]);
+        let default_prompt = build_actor_prompt(
+            workspace.root(),
+            &actor,
+            &options,
+            &inventory,
+            "fingerprint",
+        );
+        let mut saved_options = options;
+        saved_options.prompt_override = Some(DEFAULT_CARLINI_MISSION.to_string());
+
+        let saved_prompt = build_actor_prompt(
+            workspace.root(),
+            &actor,
+            &saved_options,
+            &inventory,
+            "fingerprint",
+        );
+
+        assert_eq!(saved_prompt, default_prompt);
+        assert!(!saved_prompt.contains("operator-prompt-override"));
+    }
+
     struct RecordingRuntime {
         prompts: std::sync::Mutex<Vec<String>>,
     }
@@ -411,6 +449,26 @@ mod tests {
             render_calls += 1;
             render_carlini_inventory_block(&inventory)
         };
+        let mut decoded_inventory = Vec::new();
+        let mut remaining = inventory_block.as_str();
+        while let Some(start) = remaining.find(crate::prompts::UNTRUSTED_REPO_BEGIN) {
+            let frame = &remaining[start..];
+            let end = frame.find(crate::prompts::UNTRUSTED_REPO_END).unwrap()
+                + crate::prompts::UNTRUSTED_REPO_END.len();
+            decoded_inventory
+                .push(crate::prompts::decode_untrusted_record(&frame[..end]).unwrap());
+            remaining = &frame[end..];
+        }
+        assert_eq!(
+            decoded_inventory
+                .iter()
+                .map(|record| (record.label.as_str(), record.content.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("src/alpha.rs", "fn alpha_secret() {}"),
+                ("src/beta.rs", "fn beta_secret() {}"),
+            ]
+        );
 
         let actors = vec![
             carlini_actor("actor-one", "One"),
@@ -445,12 +503,11 @@ mod tests {
 
         for prompt in &prompts {
             // Correctness: each actor still receives the complete inventory
-            // block verbatim (byte-for-byte the single rendered payload).
+            // block verbatim (byte-for-byte the single canonical rendered
+            // payload). The decoded assertions above prove the framed records
+            // retain their original paths and contents without expecting raw
+            // untrusted bytes to appear outside the encoding boundary.
             assert!(prompt.contains(&inventory_block));
-            assert!(prompt.contains("src/alpha.rs"));
-            assert!(prompt.contains("fn alpha_secret"));
-            assert!(prompt.contains("src/beta.rs"));
-            assert!(prompt.contains("fn beta_secret"));
         }
     }
 

@@ -152,7 +152,7 @@ authorization: Default::default(),
 
         let output = execute_x_ray_tool(
             "x-ray:run",
-            json!({}),
+            json!({"X_RAY_PROMPT": "custom x-ray system"}),
             &context(&config, &workspace),
             Some(&runtime),
         )
@@ -168,6 +168,7 @@ authorization: Default::default(),
             .contains("x-ray:run complete"));
         assert_eq!(runtime.queries().len(), 1);
         assert_eq!(runtime.queries()[0].model, "openai:gpt-4.1");
+        assert_eq!(runtime.queries()[0].system_prompt, "custom x-ray system");
         assert!(runtime.queries()[0]
             .prompt
             .contains("missing local artifact KB"));

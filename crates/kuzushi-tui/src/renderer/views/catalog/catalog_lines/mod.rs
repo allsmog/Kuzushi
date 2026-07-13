@@ -42,9 +42,13 @@ fn append_capabilities_header(lines: &mut Vec<Line<'static>>, model: &CatalogMod
             theme::muted(),
         ),
     ]));
-    lines.push(muted(
-        "Phase-native actions first. Press e for engines and installed integrations.",
-    ));
+    if let Some(warning) = model.collapsed.target_warning {
+        lines.push(styled(warning, theme::warn()));
+    } else {
+        lines.push(muted(
+            "Phase-native actions first. Press e for engines and installed integrations.",
+        ));
+    }
     lines.push(blank());
 }
 
@@ -74,5 +78,24 @@ fn append_module_group(lines: &mut Vec<Line<'static>>, group: &CatalogModuleGrou
             module.focused,
             &widths,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn targetless_catalog_shows_target_and_demo_recovery() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let text = catalog_lines(&app, Rect::new(0, 0, 120, 40))
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains("target <path>"), "{text}");
+        assert!(text.contains("demo"), "{text}");
     }
 }

@@ -45,6 +45,13 @@ mod tests {
     }
 
     #[test]
+    fn each_login_provider_resolves_its_supported_default_method() {
+        assert_eq!(normalize_auth_method("openai-codex", None), Ok("browser"));
+        assert_eq!(normalize_auth_method("anthropic", None), Ok("browser"));
+        assert_eq!(normalize_auth_method("github-copilot", None), Ok("device"));
+    }
+
+    #[test]
     fn oauth_credentials_display_uses_shared_leaf_name() {
         assert_eq!(
             default_oauth_credentials_path_display(),

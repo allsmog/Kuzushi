@@ -281,7 +281,9 @@ impl EffectRuntime {
             }
             ShellEffect::RefreshFindings(refresh) => match refresh.filter {
                 Some(expression) => app.refresh_findings_filtered(&expression),
-                None => app.refresh_findings(refresh.announce),
+                // `None` means reload the current projection. The explicit
+                // `findings` command clears route state before issuing it.
+                None => app.refresh_findings_preserving_active_filter(refresh.announce),
             },
             ShellEffect::ReportFilteredFindingMovement(notice) => {
                 app.report_filtered_finding_movement_effect(notice)

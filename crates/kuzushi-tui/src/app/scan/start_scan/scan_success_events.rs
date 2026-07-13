@@ -65,19 +65,25 @@ impl ShellApp {
             ));
         };
         let findings_count = scan_result_findings_count(&result);
-        let cost_usd = kuzushi_core::run_artifacts::tool_run_output_cost_usd(&result);
+        let cost = match kuzushi_core::run_artifacts::tool_run_output_cost_report(&result) {
+            Ok(cost) => cost,
+            Err(error) => {
+                self.report_cost_accounting_error(error);
+                kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE
+            }
+        };
         match kuzushi_core::tool_result_status(&result) {
             kuzushi_core::ToolResultStatus::Completed => {
-                self.apply_completed_scan_result(run_id, findings_count, cost_usd, result)
+                self.apply_completed_scan_result(run_id, findings_count, cost, result)
             }
             kuzushi_core::ToolResultStatus::Partial => {
-                self.apply_partial_scan_result(run_id, findings_count, cost_usd, result)
+                self.apply_partial_scan_result(run_id, findings_count, cost, result)
             }
             kuzushi_core::ToolResultStatus::Skipped => {
-                self.apply_skipped_scan_result(run_id, findings_count, cost_usd, result)
+                self.apply_skipped_scan_result(run_id, findings_count, cost, result)
             }
             kuzushi_core::ToolResultStatus::Failed => {
-                self.apply_failed_scan_result(run_id, findings_count, cost_usd, result)
+                self.apply_failed_scan_result(run_id, findings_count, cost, result)
             }
         }
     }
@@ -86,14 +92,12 @@ impl ShellApp {
         &mut self,
         run_id: String,
         findings_count: usize,
-        cost_usd: Option<f64>,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
         result: serde_json::Value,
     ) -> Vec<ShellEffect> {
-        if let Some(cost_usd) = cost_usd {
-            self.record_cost(cost_usd);
-        }
-        self.mark_scan_panel_terminal(&run_id, findings_count, "completed", None);
         self.mark_scan_activity_run_id(&run_id);
+        self.record_scan_result_cost(&run_id, cost);
+        self.mark_scan_panel_terminal(&run_id, findings_count, "completed", None);
         self.mark_scan_tasks_terminal();
         let target_label = self.scan_target_label();
         let target = self.scan_target_owned();
@@ -109,13 +113,13 @@ impl ShellApp {
         &mut self,
         run_id: String,
         findings_count: usize,
-        cost_usd: Option<f64>,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
         result: serde_json::Value,
     ) -> Vec<ShellEffect> {
-        self.record_scan_result_cost(cost_usd);
+        self.mark_scan_activity_run_id(&run_id);
+        self.record_scan_result_cost(&run_id, cost);
         let message = scan_result_message(&result, "scan returned a partial result");
         self.mark_scan_panel_terminal(&run_id, findings_count, "partial", Some(message.clone()));
-        self.mark_scan_activity_run_id(&run_id);
         self.mark_scan_tasks_partial(&message);
         self.set_partial_activity("sast:scan", "usable partial result retained");
         self.set_warn_notice("scan", format!("sast:scan partial: {message}"));
@@ -135,13 +139,13 @@ impl ShellApp {
         &mut self,
         run_id: String,
         findings_count: usize,
-        cost_usd: Option<f64>,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
         result: serde_json::Value,
     ) -> Vec<ShellEffect> {
-        self.record_scan_result_cost(cost_usd);
+        self.mark_scan_activity_run_id(&run_id);
+        self.record_scan_result_cost(&run_id, cost);
         let message = scan_result_message(&result, "scan returned a failed result");
         self.mark_scan_panel_terminal(&run_id, findings_count, "failed", Some(message.clone()));
-        self.mark_scan_activity_run_id(&run_id);
         self.mark_scan_activity_failed(&message);
         self.set_failed_activity("sast:scan", "scan returned a failed result");
         self.set_error_notice("scan", message.clone());
@@ -157,13 +161,13 @@ impl ShellApp {
         &mut self,
         run_id: String,
         findings_count: usize,
-        cost_usd: Option<f64>,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
         result: serde_json::Value,
     ) -> Vec<ShellEffect> {
-        self.record_scan_result_cost(cost_usd);
+        self.mark_scan_activity_run_id(&run_id);
+        self.record_scan_result_cost(&run_id, cost);
         let message = scan_result_message(&result, "scan reported skipped");
         self.mark_scan_panel_terminal(&run_id, findings_count, "skipped", None);
-        self.mark_scan_activity_run_id(&run_id);
         self.mark_scan_tasks_skipped();
         self.set_skipped_activity("sast:scan", "scan reported skipped");
         self.set_info_notice("scan", format!("⊘ sast:scan skipped — {message}"));
@@ -179,9 +183,14 @@ impl ShellApp {
         self.scan().and_then(|scan| scan.run_id.clone())
     }
 
-    fn record_scan_result_cost(&mut self, cost_usd: Option<f64>) {
-        if let Some(cost_usd) = cost_usd {
-            self.record_cost(cost_usd);
+    fn record_scan_result_cost(
+        &mut self,
+        run_id: &str,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+    ) {
+        match self.checked_scan_terminal_cost(run_id, cost) {
+            Ok(cost) => self.settle_run_cost_report(run_id, cost),
+            Err(error) => self.report_cost_accounting_error(error),
         }
     }
 
@@ -256,10 +265,10 @@ impl ShellApp {
         status: &str,
         error: Option<String>,
     ) {
+        self.set_scan_run_id(run_id.to_string());
         let Some(scan) = self.scan_mut() else {
             return;
         };
-        scan.run_id = Some(run_id.to_string());
         scan.stage = status.to_string();
         scan.findings_count = findings_count;
         scan.running = false;
@@ -270,10 +279,7 @@ impl ShellApp {
     }
 
     fn mark_scan_activity_run_id(&mut self, run_id: &str) {
-        let Some(session) = self.activity_mut() else {
-            return;
-        };
-        session.run_id = run_id.to_string();
+        self.set_activity_run_id(run_id.to_string());
     }
 
     fn mark_scan_tasks_terminal(&mut self) {
@@ -350,13 +356,11 @@ impl ShellApp {
     }
 
     pub(crate) fn record_scan_run_effect(&mut self, record: ScanRunRecord) -> Vec<ShellEffect> {
-        let target = record.target.clone();
         let effects = self.record_scan_run_outcome(record);
         self.invalidate_view_hydration();
         let mut cache = self.workbench_cache().borrow_mut();
         cache.invalidate_run_summaries();
         cache.invalidate_workspace_files();
-        cache.run_summary_entries(target.as_deref());
         effects
     }
 
@@ -626,8 +630,21 @@ fn write_scan_terminal_summary(
     findings_count: Option<usize>,
 ) -> anyhow::Result<()> {
     let Some(target) = target else { return Ok(()) };
-    let seed = kuzushi_core::load_run_summary(target, run_id)
-        .unwrap_or_else(|_| kuzushi_core::RunSummary::running(run_id, "shell", None, target_label));
+    let seed = kuzushi_core::load_run_summary(target, run_id).unwrap_or_else(|_| {
+        kuzushi_core::RunSummary::running(
+            run_id,
+            "scan",
+            Some("sast:scan".to_string()),
+            target_label,
+        )
+    });
+    let prior_cost = seed.checked_cost_report()?;
+    let trace_cost = kuzushi_core::run_artifacts::trace_cost_report(target, run_id)?;
+    let cost = kuzushi_core::run_artifacts::reconcile_terminal_cost_reports(
+        prior_cost,
+        trace_cost,
+        "scan lifecycle terminal",
+    )?;
     let seed = seed.with_findings(findings_count.map(|count| count as u64));
     let summary = match status {
         "completed" => seed.complete(),
@@ -635,7 +652,8 @@ fn write_scan_terminal_summary(
         "canceled" => seed.canceled(reason.unwrap_or("scan canceled")),
         "interrupted" => seed.interrupted(reason.unwrap_or("scan interrupted")),
         _ => seed,
-    };
+    }
+    .with_cost_report(cost);
     kuzushi_core::write_run_summary(target, &summary).map(|_| ())
 }
 
@@ -699,6 +717,54 @@ mod tests {
         }
     }
 
+    #[test]
+    fn early_canceled_scan_summary_retains_scan_tool_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_id = "scan-early-cancel";
+
+        write_scan_terminal_summary(
+            Some(temp.path()),
+            run_id,
+            temp.path().to_str().unwrap(),
+            "canceled",
+            Some("operator cancel"),
+            Some(0),
+        )
+        .unwrap();
+
+        let summary = kuzushi_core::load_run_summary(temp.path(), run_id).unwrap();
+        assert_eq!(summary.status, "canceled");
+        assert_eq!(summary.kind, "scan");
+        assert_eq!(summary.tool.as_deref(), Some("sast:scan"));
+    }
+
+    #[test]
+    fn lifecycle_terminal_preserves_seed_cost_when_trace_is_unavailable() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_id = "scan-seed-cost";
+        let seed = kuzushi_core::RunSummary::running(
+            run_id,
+            "scan",
+            Some("sast:scan".to_string()),
+            temp.path().display().to_string(),
+        )
+        .with_cost(Some(0.41));
+        kuzushi_core::write_run_summary(temp.path(), &seed).unwrap();
+
+        write_scan_terminal_summary(
+            Some(temp.path()),
+            run_id,
+            temp.path().to_str().unwrap(),
+            "failed",
+            Some("scanner failed"),
+            None,
+        )
+        .unwrap();
+
+        let summary = kuzushi_core::load_run_summary(temp.path(), run_id).unwrap();
+        assert_eq!(summary.cost_usd, Some(0.41));
+    }
+
     fn result_scan_terminal_outcomes() -> [(ScanRunOutcome, &'static str); 4] {
         [
             (
@@ -755,12 +821,28 @@ mod tests {
     fn assert_outcome_refreshes_cache(outcome: ScanRunOutcome, expected_status: &str) {
         let temp = tempfile::tempdir().unwrap();
         let run_id = format!("scan-cache-{expected_status}");
+        kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
+            kuzushi_core::run_artifacts::ToolRunRecord::new(
+                temp.path(),
+                &run_id,
+                "scan",
+                "sast:scan",
+            ),
+            &serde_json::json!({}),
+            None,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+        append_test_scan_cost(temp.path(), &run_id, 0.125);
         let mut app = ShellApp::new(V2Config::default(), None);
-        assert!(app
-            .workbench_cache()
-            .borrow_mut()
-            .run_summary_index(Some(temp.path()), vec![run_id.clone()])
-            .is_empty());
+        assert_eq!(
+            app.workbench_cache()
+                .borrow_mut()
+                .run_summary_index(Some(temp.path()), vec![run_id.clone()])[&run_id]
+                .status,
+            "running"
+        );
 
         let _ = app.record_scan_run_effect(ScanRunRecord {
             target: Some(temp.path().to_path_buf()),
@@ -774,6 +856,36 @@ mod tests {
             .borrow_mut()
             .run_summary_index(Some(temp.path()), vec![run_id.clone()]);
         assert_eq!(summaries[&run_id].status, expected_status);
+        assert_eq!(summaries[&run_id].cost_usd, Some(0.125));
+    }
+
+    #[test]
+    fn completed_scan_reconciles_trace_cost_into_session_and_activity() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_id = "scan-trace-cost";
+        seed_test_scan_run(temp.path(), run_id);
+        append_test_scan_cost(temp.path(), run_id, 0.33);
+        let mut app = running_scan_app_at(run_id, temp.path());
+        app.begin_run_cost_tracking(run_id, true);
+
+        let effects = app.apply_scan_result(scan_result(run_id, "completed", true, &[]));
+
+        assert_eq!(app.session().session_cost_usd(), 0.33);
+        assert_eq!(
+            app.activity()
+                .unwrap()
+                .runtime_cost_report()
+                .unwrap()
+                .exact_usd(),
+            Some(0.33)
+        );
+        EffectRuntime::execute(&mut app, effects);
+        assert_eq!(
+            kuzushi_core::load_run_summary(temp.path(), run_id)
+                .unwrap()
+                .cost_usd,
+            Some(0.33)
+        );
     }
 
     #[test]
@@ -976,5 +1088,25 @@ mod tests {
         assert!(!effects
             .iter()
             .any(|effect| matches!(effect, ShellEffect::FinalizeScanCompletion(_))));
+    }
+
+    fn seed_test_scan_run(target: &std::path::Path, run_id: &str) {
+        kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
+            kuzushi_core::run_artifacts::ToolRunRecord::new(target, run_id, "scan", "sast:scan"),
+            &serde_json::json!({}),
+            None,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+    }
+
+    fn append_test_scan_cost(target: &std::path::Path, run_id: &str, cost: f64) {
+        let step = kuzushi_core::RunTraceStep::new(0, "reasoning", "scan model call")
+            .with_call_attempted(true)
+            .with_cost_usd(Some(cost))
+            .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:scan");
+        kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step)
+            .unwrap();
     }
 }

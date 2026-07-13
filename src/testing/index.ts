@@ -6,10 +6,10 @@
  *
  * Goals:
  *   - Let module authors exercise `ModuleTool.execute(input, ctx)` in a unit
- *     test without standing up a real AgentRuntime, MessageBus, sqlite
- *     workspace, or Ink shell.
- *   - Cover every field on `ExecutionContext` with a sensible default,
- *     overridable per-test.
+ *     test without standing up a real AgentRuntime, MessageBus, workspace
+ *     manager, or interactive shell.
+ *   - Provide a populated compatibility profile plus faithful per-handle and
+ *     headless absence modeling.
  *   - Provide recording stubs (logger, print-sink, event-scope, workspace,
  *     datastore) so tests can assert on side-effects without extra wiring.
  *
@@ -30,6 +30,7 @@ import type {
 } from "../modules/host-handles.js";
 import type { ExecutionContext } from "../modules/types.js";
 import type { KuzushiConfig } from "../public-types.js";
+import { createMockBus } from "./mocks/bus.js";
 import { createMockOptionStore } from "./mocks/datastore.js";
 import { createMockEventScope } from "./mocks/event-scope.js";
 import { createRecordingLogger } from "./mocks/logger.js";
@@ -59,6 +60,27 @@ const DEFAULT_HOST_CAPABILITIES: ReadonlySet<string> = new Set([
   "print-sink",
 ]);
 
+const HANDLE_CAPABILITIES = [
+  ["workspace", "workspace"],
+  ["uiStore", "ui-store"],
+  ["datastore", "datastore"],
+  ["events", "module-events"],
+  ["print", "print-sink"],
+  ["runArtifacts", "run-artifacts"],
+] as const satisfies ReadonlyArray<readonly [keyof ExecutionContext, string]>;
+
+const HEADLESS_ABSENT_FIELDS: ReadonlySet<keyof ExecutionContext> = new Set([
+  "runtime",
+  "logger",
+  "uiStore",
+  "datastore",
+  "workspace",
+  "events",
+  "print",
+  "reportActivity",
+  "reportOutput",
+]);
+
 /** Default `HostInfo` for tests. SDK version is `"0.0.0-test"`. */
 export function createMockHostInfo(
   overrides: Partial<{ sdkVersion: string; capabilities: Iterable<string> }> = {},
@@ -67,6 +89,37 @@ export function createMockHostInfo(
     sdkVersion: overrides.sdkVersion ?? "0.0.0-test",
     capabilities: new Set(overrides.capabilities ?? DEFAULT_HOST_CAPABILITIES),
   };
+}
+
+function createContextHost(
+  overrides: MockToolContextOverrides,
+  context: ExecutionContext,
+): HostInfo | undefined {
+  if (hasOwn(overrides, "host") && overrides.host === undefined) return undefined;
+  const inferred = inferredCapabilities(context);
+  if (overrides.host === undefined) return createMockHostInfo({ capabilities: inferred });
+  const capabilities = hasOwn(overrides.host, "capabilities")
+    ? (overrides.host.capabilities ?? [])
+    : inferred;
+  const host = createMockHostInfo({ ...overrides.host, capabilities });
+  assertCapabilitiesHaveHandles(host, context);
+  return host;
+}
+
+function inferredCapabilities(context: ExecutionContext): Set<string> {
+  const capabilities = new Set<string>();
+  for (const [field, capability] of HANDLE_CAPABILITIES) {
+    if (context[field] !== undefined) capabilities.add(capability);
+  }
+  return capabilities;
+}
+
+function assertCapabilitiesHaveHandles(host: HostInfo, context: ExecutionContext): void {
+  for (const [field, capability] of HANDLE_CAPABILITIES) {
+    if (host.capabilities.has(capability) && context[field] === undefined) {
+      throw new Error(`createMockToolContext: host capability ${capability} needs ctx.${field}`);
+    }
+  }
 }
 
 // Noop / fake runtimes
@@ -82,76 +135,99 @@ export const noopRuntime: AgentRuntime = {
   },
 } as unknown as AgentRuntime;
 
-// MessageBus mock (legacy API — unchanged shape for back-compat)
-
-/**
- * MessageBus stub that records `emit` calls and dispatches to subscribers
- * registered via `subscribe`. The `emit`/`subscribe` pair is a minimal subset
- * of the production `MessageBus.publish`/`subscribe` contract, intentionally
- * narrower — tools that need `publish<E>(envelope)` should wrap payloads
- * themselves.
- *
- * @example
- *   const bus = createMockBus();
- *   bus.subscribe("scan:done", async (p) => console.log(p));
- *   await bus.emit("scan:done", { count: 3 });
- *   expect(bus.emitted).toHaveLength(1);
- */
-export function createMockBus(): MessageBus & {
-  emitted: Array<{ eventType: string; payload: unknown }>;
-} {
-  const emitted: Array<{ eventType: string; payload: unknown }> = [];
-  const handlers = new Map<string, Array<(event: unknown) => void | Promise<void>>>();
-
-  const emit = async (eventType: string, payload: unknown): Promise<void> => {
-    emitted.push({ eventType, payload });
-    const fns = handlers.get(eventType) ?? [];
-    for (const fn of fns) await fn(payload);
-  };
-
-  const bus = {
-    emitted,
-    emit,
-    // Host `MessageBus.publish(envelope)` accepts `{ type, meta, payload }`.
-    // The mock accepts the same shape and forwards to `emit`.
-    async publish(event: { type: string; payload: unknown }) {
-      return emit(event.type, event.payload);
-    },
-    subscribe(eventType: string, handler: (event: unknown) => void | Promise<void>) {
-      const list = handlers.get(eventType) ?? [];
-      list.push(handler);
-      handlers.set(eventType, list);
-    },
-    unsubscribe(eventType: string, handler: (event: unknown) => void | Promise<void>) {
-      const list = handlers.get(eventType);
-      if (!list) return;
-      const next = list.filter((fn) => fn !== handler);
-      handlers.set(eventType, next);
-    },
-    async waitFor() {
-      throw new Error("createMockBus: waitFor is not implemented");
-    },
-    async close() {
-      handlers.clear();
-    },
-  } as unknown as MessageBus & {
-    emitted: Array<{ eventType: string; payload: unknown }>;
-    emit: (eventType: string, payload: unknown) => Promise<void>;
-  };
-
-  return bus;
-}
-
 // createMockToolContext
 
+export type MockToolContextProfile = "default" | "headless";
+
 export type MockToolContextOverrides = Omit<Partial<ExecutionContext>, "config" | "host"> & {
+  /** `headless` omits optional runtime/UI/workspace handles unless explicitly overridden. */
+  profile?: MockToolContextProfile;
   config?: Partial<KuzushiConfig>;
   host?: Partial<HostInfo>;
 };
 
+type ActivityCall = {
+  description: string;
+  meta?: { phase?: string; step?: number; total?: number };
+};
+
+function recordedActivity(description: string, meta: ActivityCall["meta"]): ActivityCall {
+  if (meta === undefined) return { description };
+  return { description, meta };
+}
+
+function buildMockToolContext(
+  overrides: MockToolContextOverrides,
+  activityCalls: ActivityCall[],
+  outputCalls: string[],
+): ExecutionContext {
+  const recordActivity: NonNullable<ExecutionContext["reportActivity"]> = (description, meta) => {
+    activityCalls.push(recordedActivity(description, meta));
+  };
+  const recordOutput: NonNullable<ExecutionContext["reportOutput"]> = (line) => {
+    outputCalls.push(line);
+  };
+  const { config: _config, host: _host, profile: _profile, ...contextOverrides } = overrides;
+  const context: ExecutionContext = {
+    ...contextOverrides,
+    cwd: overrides.cwd ?? process.cwd(),
+    runtime: contextValue(overrides, "runtime", () => noopRuntime),
+    bus: contextValue(overrides, "bus", createMockBus),
+    config: { ...DEFAULT_CONFIG, ...(overrides.config ?? {}) } as KuzushiConfig,
+    logger: contextValue(overrides, "logger", createRecordingLogger),
+    uiStore: contextValue(overrides, "uiStore", createMockUiStore),
+    datastore: contextValue(overrides, "datastore", createMockOptionStore),
+    workspace: contextValue(overrides, "workspace", createMockWorkspace),
+    events: contextValue(overrides, "events", createMockEventScope),
+    print: contextValue(overrides, "print", createRecordingPrintSink),
+    seedTaskOutputs: contextValue(overrides, "seedTaskOutputs", () => new Map<string, unknown>()),
+    reportActivity: contextValue(overrides, "reportActivity", () => recordActivity),
+    reportOutput: contextValue(overrides, "reportOutput", () => recordOutput),
+  };
+  context.host = createContextHost(overrides, context);
+  return context;
+}
+
+function contextValue<K extends keyof ExecutionContext>(
+  overrides: MockToolContextOverrides,
+  field: K,
+  fallback: () => ExecutionContext[K],
+): ExecutionContext[K] {
+  if (hasOwn(overrides, field)) return overrides[field] as ExecutionContext[K];
+  if (overrides.profile === "headless" && HEADLESS_ABSENT_FIELDS.has(field)) {
+    return undefined as ExecutionContext[K];
+  }
+  return fallback();
+}
+
+function hasOwn(value: object, field: PropertyKey): boolean {
+  return Object.hasOwn(value, field);
+}
+
+function attachRecordingBuffers(
+  ctx: ExecutionContext,
+  overrides: MockToolContextOverrides,
+  activityCalls: ActivityCall[],
+  outputCalls: string[],
+): void {
+  if (usesDefault(overrides, "reportActivity")) {
+    Object.defineProperty(ctx, "__activityCalls", { value: activityCalls, enumerable: false });
+  }
+  if (usesDefault(overrides, "reportOutput")) {
+    Object.defineProperty(ctx, "__outputCalls", { value: outputCalls, enumerable: false });
+  }
+}
+
+function usesDefault(overrides: MockToolContextOverrides, field: keyof ExecutionContext): boolean {
+  return !hasOwn(overrides, field) && overrides.profile !== "headless";
+}
+
 /**
- * Build a `ExecutionContext` for unit tests. Every field has a default;
- * override the pieces your tool actually reads. Recording stubs (logger,
+ * Build an `ExecutionContext` for unit tests. The compatibility profile
+ * populates common handles; override the pieces your tool actually reads.
+ * Pass a handle as `undefined` to model its absence, or use
+ * `profile: "headless"` to omit all optional
+ * runtime/UI/workspace handles together. Recording stubs (logger,
  * print, uiStore, workspace, datastore, events) are installed by default so
  * tests can `expect(ctx.logger!.records).toContain(...)` with no extra wiring.
  *
@@ -165,75 +241,10 @@ export type MockToolContextOverrides = Omit<Partial<ExecutionContext>, "config" 
  *   assertToolResult(result, { ok: true });
  */
 export function createMockToolContext(overrides: MockToolContextOverrides = {}): ExecutionContext {
-  const {
-    config: configOverrides,
-    host: hostOverrides,
-    runtime,
-    bus,
-    logger,
-    uiStore,
-    datastore,
-    workspace,
-    events,
-    print,
-    reportActivity,
-    reportOutput,
-    seedTaskOutputs,
-    runArtifacts,
-    ...rest
-  } = overrides;
-
-  const activityCalls: Array<{
-    description: string;
-    meta?: { phase?: string; step?: number; total?: number };
-  }> = [];
+  const activityCalls: ActivityCall[] = [];
   const outputCalls: string[] = [];
-
-  const ctx: ExecutionContext = {
-    cwd: rest.cwd ?? process.cwd(),
-    runtime: runtime ?? noopRuntime,
-    bus: bus ?? createMockBus(),
-    config: { ...DEFAULT_CONFIG, ...(configOverrides ?? {}) } as KuzushiConfig,
-    host: {
-      sdkVersion: hostOverrides?.sdkVersion ?? "0.0.0-test",
-      capabilities: new Set(hostOverrides?.capabilities ?? DEFAULT_HOST_CAPABILITIES),
-    },
-    logger: logger ?? createRecordingLogger(),
-    uiStore: uiStore ?? createMockUiStore(),
-    datastore: datastore ?? createMockOptionStore(),
-    workspace: workspace ?? createMockWorkspace(),
-    events: events ?? createMockEventScope(),
-    print: print ?? createRecordingPrintSink(),
-    seedTaskOutputs: seedTaskOutputs ?? new Map<string, unknown>(),
-    ...(runArtifacts ? { runArtifacts } : {}),
-    reportActivity:
-      reportActivity ??
-      ((description, meta) => {
-        activityCalls.push(meta !== undefined ? { description, meta } : { description });
-      }),
-    reportOutput:
-      reportOutput ??
-      ((line) => {
-        outputCalls.push(line);
-      }),
-    ...rest,
-  };
-
-  // Attach the recording buffers for default reportActivity/reportOutput onto
-  // the context (non-enumerable so they don't leak into object spreads).
-  if (!reportActivity) {
-    Object.defineProperty(ctx, "__activityCalls", {
-      value: activityCalls,
-      enumerable: false,
-    });
-  }
-  if (!reportOutput) {
-    Object.defineProperty(ctx, "__outputCalls", {
-      value: outputCalls,
-      enumerable: false,
-    });
-  }
-
+  const ctx = buildMockToolContext(overrides, activityCalls, outputCalls);
+  attachRecordingBuffers(ctx, overrides, activityCalls, outputCalls);
   return ctx;
 }
 
@@ -261,6 +272,7 @@ export function getRecordedOutput(ctx: ExecutionContext): string[] {
 // Re-exports (mocks + assertions + shape helper)
 
 export { assertToolResult, type ToolResultExpectations } from "./assertions.js";
+export { createMockBus, type MockMessageBus } from "./mocks/bus.js";
 export { createMockOptionStore, type MockToolOptionStore } from "./mocks/datastore.js";
 export { createMockEventScope, type MockEventScope } from "./mocks/event-scope.js";
 export {

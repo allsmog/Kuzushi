@@ -1,20 +1,56 @@
 use super::*;
 
+pub(super) struct StructuralCandidateCollection {
+    pub(super) candidates: Vec<TaintIrisNextCandidate>,
+    pub(super) engine: String,
+    pub(super) warning: Option<String>,
+}
+
 pub(super) fn collect_structural_candidates(
     plan: &TaintIrisNextPlan,
-) -> Result<Vec<TaintIrisNextCandidate>> {
-    if plan.backend.structural_tool == "rg" && super::rg_available() {
-        match super::rg_engine::collect_structural_candidates_via_rg(plan) {
-            Ok(candidates) => return Ok(candidates),
-            Err(_) => {
-                // rg disappeared between detection and exec, or the JSON
-                // shape drifted. Silently fall back to in-process so the
-                // pipeline still produces evidence rather than blowing up
-                // a long agentic run on a tooling hiccup.
-            }
-        }
+) -> Result<StructuralCandidateCollection> {
+    collect_structural_candidates_with(plan, super::rg_available(), |plan| {
+        super::rg_engine::collect_structural_candidates_via_rg(plan)
+    })
+}
+
+fn collect_structural_candidates_with(
+    plan: &TaintIrisNextPlan,
+    rg_is_available: bool,
+    collect_rg: impl FnOnce(&TaintIrisNextPlan) -> Result<Vec<TaintIrisNextCandidate>>,
+) -> Result<StructuralCandidateCollection> {
+    if plan.backend.structural_tool == "rg" && rg_is_available {
+        return match collect_rg(plan) {
+            Ok(candidates) => Ok(structural_collection(candidates, "rg", None)),
+            Err(error) => Ok(structural_collection(
+                collect_structural_candidates_inproc(plan)?,
+                "inproc",
+                Some(rg_fallback_warning(&error)),
+            )),
+        };
     }
-    collect_structural_candidates_inproc(plan)
+    Ok(structural_collection(
+        collect_structural_candidates_inproc(plan)?,
+        "inproc",
+        None,
+    ))
+}
+
+fn structural_collection(
+    candidates: Vec<TaintIrisNextCandidate>,
+    engine: &str,
+    warning: Option<String>,
+) -> StructuralCandidateCollection {
+    StructuralCandidateCollection {
+        candidates,
+        engine: engine.to_string(),
+        warning,
+    }
+}
+
+fn rg_fallback_warning(error: &anyhow::Error) -> String {
+    let detail = format!("{error:#}").chars().take(240).collect::<String>();
+    format!("rg structural scan failed; used in-process matcher: {detail}")
 }
 
 fn collect_structural_candidates_inproc(
@@ -25,7 +61,7 @@ fn collect_structural_candidates_inproc(
     // alphabetically and miss whole subtrees on big repos (e.g. a 7655-file
     // postgres clone hit only 31 distinct files at the old 500-file cap,
     // missing src/backend/parser/ entirely).
-    let files = collect_taint_iris_next_source_files(&plan.scan_root, None, 128 * 1024)?;
+    let files = read_taint_iris_next_source_paths(&plan.source_paths, None, 128 * 1024)?;
     let mut state = CandidateCollectionState::default();
 
     for source_file in files {
@@ -35,6 +71,93 @@ fn collect_structural_candidates_inproc(
     }
 
     Ok(state.into_candidates())
+}
+
+#[cfg(test)]
+mod fallback_tests {
+    use super::*;
+
+    fn empty_rg_plan() -> TaintIrisNextPlan {
+        TaintIrisNextPlan {
+            target: PathBuf::from("."),
+            scan_root: PathBuf::from("."),
+            repo_root: PathBuf::from("."),
+            source_paths: std::sync::Arc::from([]),
+            mode: TaintIrisNextMode::Hunt,
+            caps: TaintIrisNextCaps {
+                max_catalog_entries: 1,
+                max_candidates_per_cwe: 1,
+                max_evidence_per_cwe: 1,
+                max_files_per_query: 1,
+                max_specs_per_cwe: 1,
+                max_agent_findings: 1,
+                codeql_analyze_timeout_ms: 1_000,
+                min_evidence_level: "candidate".to_string(),
+            },
+            languages: Vec::new(),
+            context_status: empty_status(),
+            threat_model_status: empty_status(),
+            repo_context: None,
+            threat_model: None,
+            catalog: Vec::new(),
+            structural_queries: Vec::new(),
+            prompt_catalog: String::new(),
+            backend: TaintIrisNextBackendChoice {
+                requested: "structural".to_string(),
+                selected: "structural".to_string(),
+                codeql_db_path: None,
+                corroborate_with_codeql: None,
+                structural_tool: "rg".to_string(),
+                warnings: Vec::new(),
+            },
+            max_budget_usd: None,
+            allow_deterministic_fallback: true,
+            system_prompt: String::new(),
+            cwe_focus: Vec::new(),
+            discovered_signals: DiscoveredSignals::default(),
+        }
+    }
+
+    fn empty_status() -> TaintIrisNextArtifactStatus {
+        TaintIrisNextArtifactStatus {
+            ok: false,
+            path: None,
+            reason: "test".to_string(),
+        }
+    }
+
+    #[test]
+    fn rg_failure_reports_the_in_process_fallback() {
+        let result = collect_structural_candidates_with(&empty_rg_plan(), true, |_| {
+            anyhow::bail!("forced rg failure")
+        })
+        .unwrap();
+
+        assert_eq!(result.engine, "inproc");
+        assert!(result.candidates.is_empty());
+        assert!(result.warning.unwrap().contains("forced rg failure"));
+    }
+
+    #[test]
+    fn rg_success_reports_the_engine_that_produced_the_receipt() {
+        let result =
+            collect_structural_candidates_with(&empty_rg_plan(), true, |_| Ok(Vec::new()))
+                .unwrap();
+
+        assert_eq!(result.engine, "rg");
+        assert!(result.warning.is_none());
+    }
+
+    #[test]
+    fn unavailable_rg_reports_the_in_process_engine() {
+        let result = collect_structural_candidates_with(&empty_rg_plan(), false, |_| {
+            panic!("the rg collector must not run when rg is unavailable")
+        })
+        .unwrap();
+
+        assert_eq!(result.engine, "inproc");
+        assert!(result.warning.is_none());
+    }
 }
 
 /// Per-file-per-CWE candidate cap. With a global per-CWE cap of e.g.

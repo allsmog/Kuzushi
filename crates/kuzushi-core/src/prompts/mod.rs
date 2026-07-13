@@ -16,13 +16,13 @@ pub mod taxonomy;
 pub mod validator_catalogs;
 
 pub use boundaries::{
-    render_untrusted_many, render_untrusted_repo_block, UNTRUSTED_REPO_BOUNDARY_INSTRUCTION,
-    UNTRUSTED_REPO_END, UNTRUSTED_REPO_BEGIN,
+    compose_target_prompt_context, decode_untrusted_record, render_untrusted_data_section,
+    render_untrusted_derived_block, render_untrusted_many, render_untrusted_repo_block,
+    UntrustedRecord, UntrustedRecordKind, UNTRUSTED_REPO_BEGIN,
+    UNTRUSTED_REPO_BOUNDARY_INSTRUCTION, UNTRUSTED_REPO_END,
 };
 pub use prompt_render::assemble_system_prompt;
-pub use spine::{
-    ATTACKER_METHODOLOGY, CONFIDENCE_CALIBRATION, EMPTY_FINDINGS_OK, OUTPUT_CONTRACT,
-};
+pub use spine::{ATTACKER_METHODOLOGY, CONFIDENCE_CALIBRATION, EMPTY_FINDINGS_OK, OUTPUT_CONTRACT};
 pub use taxonomy::FALSE_POSITIVE_TAXONOMY;
 pub use validator_catalogs::{centralized_validator_catalog, PromptLanguage};
 

@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput, ModelTier,
-    TriageOutcome, TriageRequest,
+    runtime::RuntimeCostReport, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
+    AgentStructuredOutput, ModelTier, TriageOutcome, TriageRequest,
 };
 use serde_json::Value;
 
@@ -24,11 +24,13 @@ impl AgentRuntime for AnthropicOAuthRuntime {
             .enable_all()
             .build()
             .context("AnthropicOAuthRuntime: could not start a tokio runtime")?;
-        runtime.block_on(self.send_messages(request))
+        runtime
+            .block_on(self.send_messages(request))?
+            .validate_cost()
     }
 
     async fn query(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-        self.send_messages(request).await
+        self.send_messages(request).await?.validate_cost()
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
@@ -47,14 +49,16 @@ impl AgentRuntime for AnthropicOAuthRuntime {
                     .with_structured_output(triage_structured_output())
                     .with_temperature(0.0),
             )
-            .await?;
+            .await?
+            .validate_cost()?;
 
         triage_outcome_from_response(response)
     }
 }
 
 pub(crate) fn triage_outcome_from_response(response: AgentQueryResponse) -> Result<TriageOutcome> {
-    let call_cost = response.cost_usd;
+    let response = response.validate_cost()?;
+    let call_cost = response.checked_cost_report()?;
     if let Some(structured) = response.structured {
         return structured_triage_outcome(structured, call_cost);
     }
@@ -63,17 +67,17 @@ pub(crate) fn triage_outcome_from_response(response: AgentQueryResponse) -> Resu
 
 pub(crate) fn structured_triage_outcome(
     structured: Value,
-    call_cost: f64,
+    call_cost: RuntimeCostReport,
 ) -> Result<TriageOutcome> {
     let mut outcome = serde_json::from_value::<TriageOutcome>(structured)
         .map_err(|error| anyhow::anyhow!("Anthropic OAuth triage JSON violated schema: {error}"))?;
-    outcome.cost_usd = call_cost;
-    Ok(clamp_outcome(outcome))
+    apply_call_cost(&mut outcome, call_cost);
+    clamp_outcome(outcome).validate_cost()
 }
 
 pub(crate) fn text_triage_outcome(
     response: AgentQueryResponse,
-    call_cost: f64,
+    call_cost: RuntimeCostReport,
 ) -> Result<TriageOutcome> {
     if response.truncated {
         let stop_reason = response.stop_reason.as_deref().unwrap_or("max_tokens");
@@ -91,8 +95,13 @@ pub(crate) fn text_triage_outcome(
                 "Anthropic OAuth triage response was not valid triage JSON: {error}; raw response: {text}"
             )
         })?;
-    outcome.cost_usd = call_cost;
-    Ok(clamp_outcome(outcome))
+    apply_call_cost(&mut outcome, call_cost);
+    clamp_outcome(outcome).validate_cost()
+}
+
+fn apply_call_cost(outcome: &mut TriageOutcome, call_cost: RuntimeCostReport) {
+    outcome.cost_usd = call_cost.observed_usd();
+    outcome.cost_usd_exact = call_cost.is_complete();
 }
 
 pub(crate) fn build_triage_prompt(request: &TriageRequest) -> Result<String> {

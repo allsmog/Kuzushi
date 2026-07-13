@@ -410,6 +410,7 @@ pub(crate) enum TargetActivationSource {
     Command,
     Picker,
     ScriptedScan,
+    OfflineDemo,
 }
 
 pub(crate) struct HouseRulesWrite {
@@ -427,7 +428,8 @@ pub(crate) struct PromptOverrideWrite {
 }
 
 pub(crate) struct PromptDocumentOpen {
-    pub(crate) prompt: kuzushi_core::modules::PromptSpec,
+    pub(crate) prompts: Vec<kuzushi_core::modules::PromptSpec>,
+    pub(crate) prompt_index: usize,
     pub(crate) origin: ShellView,
 }
 
@@ -481,7 +483,7 @@ pub(crate) struct RunToolPreparation {
 #[derive(Debug, Clone)]
 pub(crate) struct RunToolLaunch {
     pub(crate) tool_name: String,
-    pub(crate) input: serde_json::Value,
+    pub(crate) input: PreparedToolInput,
     pub(crate) workspace: WorkspaceTarget,
     pub(crate) thinking_level: Option<String>,
     pub(crate) authorization: ExecutionAuthorization,
@@ -498,10 +500,11 @@ impl ShellApp {
                         demo_dir.display()
                     ),
                 );
-                self.reduce_scan_start(
-                    Some(demo_dir),
-                    Some(kuzushi_core::offline_demo_scan_input()),
-                )
+                self.request_target_activation(TargetActivation {
+                    path: demo_dir,
+                    selected_scope: None,
+                    source: TargetActivationSource::OfflineDemo,
+                })
             }
             Err(error) => {
                 self.log("error", format!("could not prepare demo fixture: {error}"));
@@ -627,8 +630,8 @@ impl ShellApp {
     }
 
     fn log_review_decision_workspace_error(&mut self, error: anyhow::Error) {
-        self.log(
-            "error",
+        self.set_error_notice(
+            "review",
             with_next_step(error.to_string(), "target <path> then findings"),
         );
     }
@@ -1007,14 +1010,20 @@ mod tests {
     }
 
     #[test]
-    fn offline_demo_fixture_effect_returns_scan_followup_without_starting_worker() {
+    fn offline_demo_fixture_effect_returns_target_activation_without_starting_worker() {
         let _fixture_lock = demo_fixture_test_lock();
         let mut app = ShellApp::new(V2Config::default(), None);
 
         let effects = app.start_offline_demo_fixture_scan_effect();
 
         assert_eq!(effects.len(), 1);
-        assert!(matches!(effects[0], ShellEffect::PrepareScan(_)));
+        assert!(matches!(
+            effects[0],
+            ShellEffect::ActivateTarget(TargetActivation {
+                source: TargetActivationSource::OfflineDemo,
+                ..
+            })
+        ));
         assert!(app.scan_is_none());
         assert!(!app.jobs().is_running(JobKind::Run));
         assert!(app

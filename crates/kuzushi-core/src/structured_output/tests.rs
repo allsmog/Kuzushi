@@ -76,6 +76,114 @@ mod tests {
     }
 
     #[test]
+    fn repair_success_reports_checked_initial_plus_repair_cost() {
+        let response = AgentQueryResponse {
+            text: "not json".to_string(),
+            cost_usd: 0.11,
+            ..Default::default()
+        };
+        let contract = StructuredJsonContract::new("test:tool", "TestSchema", Value::Null);
+
+        let result = parse_or_repair_required_structured_json_with_cost(
+            response,
+            contract,
+            Ok::<_, anyhow::Error>,
+            |_, _| {
+                Ok(AgentQueryResponse {
+                    structured: Some(serde_json::json!({"ok": true})),
+                    cost_usd: 0.22,
+                    ..Default::default()
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.value["ok"], true);
+        assert!((result.cost_usd - 0.33).abs() < 1e-9);
+    }
+
+    #[test]
+    fn explicit_zero_cost_stays_distinct_from_unreported_cost() {
+        let contract = || StructuredJsonContract::new("test:tool", "TestSchema", Value::Null);
+        let reported_zero = parse_or_repair_required_structured_json_with_cost(
+            AgentQueryResponse {
+                structured: Some(serde_json::json!({"ok": true})),
+                cost_usd_reported: true,
+                ..Default::default()
+            },
+            contract(),
+            Ok::<_, anyhow::Error>,
+            |_, _| panic!("valid JSON must not repair"),
+        )
+        .unwrap();
+        let unreported = parse_or_repair_required_structured_json_with_cost(
+            AgentQueryResponse {
+                structured: Some(serde_json::json!({"ok": true})),
+                ..Default::default()
+            },
+            contract(),
+            Ok::<_, anyhow::Error>,
+            |_, _| panic!("valid JSON must not repair"),
+        )
+        .unwrap();
+
+        assert_eq!(reported_zero.cost_report().unwrap().exact_usd(), Some(0.0));
+        assert_eq!(unreported.cost_usd, 0.0);
+        assert_eq!(unreported.cost_report().unwrap().exact_usd(), None);
+        assert!(!unreported.cost_report().unwrap().is_unavailable());
+    }
+
+    #[test]
+    fn parse_failure_preserves_observed_repair_spend() {
+        let response = AgentQueryResponse {
+            text: "not json".to_string(),
+            cost_usd: 0.11,
+            ..Default::default()
+        };
+        let contract = StructuredJsonContract::new("test:tool", "TestSchema", Value::Null);
+
+        let error = parse_or_repair_required_structured_json_with_cost(
+            response,
+            contract,
+            Ok::<_, anyhow::Error>,
+            |_, _| {
+                Ok(AgentQueryResponse {
+                    text: "still not json".to_string(),
+                    cost_usd: 0.22,
+                    ..Default::default()
+                })
+            },
+        )
+        .unwrap_err();
+        let failure = error.downcast_ref::<StructuredOutputError>().unwrap();
+
+        assert!((failure.cost_report().observed_usd() - 0.33).abs() < 1e-9);
+        assert!(failure.cost_report().is_complete());
+    }
+
+    #[test]
+    fn repair_transport_failure_marks_spend_unresolved_and_keeps_initial_cost() {
+        let response = AgentQueryResponse {
+            text: "not json".to_string(),
+            cost_usd: 0.11,
+            ..Default::default()
+        };
+        let contract = StructuredJsonContract::new("test:tool", "TestSchema", Value::Null);
+
+        let error = parse_or_repair_required_structured_json_with_cost(
+            response,
+            contract,
+            Ok::<_, anyhow::Error>,
+            |_, _| anyhow::bail!("transport disconnected"),
+        )
+        .unwrap_err();
+        let failure = error.downcast_ref::<StructuredOutputError>().unwrap();
+
+        assert_eq!(failure.cost_report().observed_usd(), 0.11);
+        assert!(!failure.cost_report().is_complete());
+    }
+
+    #[test]
     fn extracts_last_fenced_json_block_when_preceded_by_prose_with_braces() {
         // Regression for the deep-audit "verdict at the bottom of a long
         // rationale paragraph" pattern: prose contains C code with `{`,

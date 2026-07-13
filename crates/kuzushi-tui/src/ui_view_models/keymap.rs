@@ -2,6 +2,7 @@ use super::{cost_model, format_session_cost};
 use crate::{
     KeymapBindingRow, KeymapFooter, KeymapSection, KeymapSnapshot, KeymapStatus, ShellApp,
 };
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KeymapModel {
@@ -35,8 +36,8 @@ fn default_keymap_model(app: &ShellApp) -> KeymapModel {
     KeymapModel {
         status: default_status(app),
         event_time: "--:--:--".to_string(),
-        sections: default_keymap_sections(),
-        note: "every screen's footer is the contract · if a key isn't in the footer, it doesn't do anything on that screen".to_string(),
+        sections: default_keymap_sections(app),
+        note: "the footer shows primary controls · this keymap lists every active control for the originating screen".to_string(),
         footer: default_footer(app),
     }
 }
@@ -65,13 +66,13 @@ fn default_cost(app: &ShellApp) -> String {
         .unwrap_or_else(|| format_session_cost(0.0))
 }
 
-pub(crate) fn default_keymap_sections() -> Vec<KeymapSection> {
+pub(crate) fn default_keymap_sections(app: &ShellApp) -> Vec<KeymapSection> {
     vec![
         global_keymap_section(),
         navigation_keymap_section(),
         dispatch_keymap_section(),
         lifecycle_keymap_section(),
-        view_keymap_section(),
+        active_view_keymap_section(app),
     ]
 }
 
@@ -151,11 +152,29 @@ fn lifecycle_keymap_section() -> KeymapSection {
     )
 }
 
-fn view_keymap_section() -> KeymapSection {
-    section(
-        "VIEW · this screen",
-        "changes per-module · check the footer",
-        &[("/keys", "show this keymap"), ("Esc", "close this view")],
+fn active_view_keymap_section(app: &ShellApp) -> KeymapSection {
+    let origin = app
+        .router
+        .overlay_origin()
+        .unwrap_or(crate::ShellView::Keymap);
+    let mut seen = BTreeSet::new();
+    let mut rows = vec![KeymapBindingRow::new("F2", "enter navigation mode")];
+    rows.extend(
+        app.view_keybindings_for_view(origin)
+            .into_iter()
+            .filter(|binding| !(binding.hint == "Esc" && binding.label == "back"))
+            .filter(|binding| seen.insert((binding.hint, binding.label)))
+            .map(|binding| KeymapBindingRow::new(binding.hint, binding.label)),
+    );
+    rows.extend([
+        KeymapBindingRow::new("Esc", "return to prompt mode"),
+        KeymapBindingRow::new("back", "leave the originating screen"),
+        KeymapBindingRow::new("/keys", "open this complete control map"),
+    ]);
+    KeymapSection::new(
+        format!("VIEW · {origin:?}"),
+        "complete navigation controls for the screen behind this keymap",
+        rows,
     )
 }
 
@@ -175,7 +194,7 @@ fn default_footer(app: &ShellApp) -> KeymapFooter {
         findings: app.findings_total_count(),
         keybinds: vec![
             ("j/k".to_string(), "row".to_string()),
-            ("Esc".to_string(), "close".to_string()),
+            ("Esc/q".to_string(), "close".to_string()),
         ],
         prompt_module: "help".to_string(),
     }
@@ -225,6 +244,28 @@ mod tests {
                 "advertised keymap command should parse: {command}"
             );
         }
+    }
+
+    #[test]
+    fn default_keymap_lists_every_originating_workbench_control() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(crate::ShellView::Workbench);
+        app.set_shell_view(crate::ShellView::Keymap);
+
+        let model = keymap_model(&app);
+        let section = model.sections.last().expect("originating view section");
+        let keys = section
+            .rows
+            .iter()
+            .map(|row| row.keys.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(section.name, "VIEW · Workbench");
+        assert!(keys.contains(&"v"), "{keys:?}");
+        assert!(keys.contains(&"x"), "{keys:?}");
+        assert!(keys.contains(&"c"), "{keys:?}");
+        assert!(keys.contains(&"/keys"), "{keys:?}");
+        assert!(!model.note.contains("doesn't do anything"));
     }
 
     fn snapshot() -> KeymapSnapshot {

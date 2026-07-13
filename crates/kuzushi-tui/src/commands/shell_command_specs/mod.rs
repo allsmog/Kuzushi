@@ -31,7 +31,7 @@ pub(crate) const FEATURED_HELP_EXAMPLES: &[&str] = &[
     "run .",
     "findings",
     "open F-0001",
-    "model 1",
+    "findings export report.sarif sarif",
 ];
 
 pub fn shell_command_specs() -> impl Iterator<Item = &'static ShellCommandSpec> {

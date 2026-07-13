@@ -759,6 +759,12 @@ impl NavigationRouteState {
         self.history.pop()
     }
 
+    /// Accept a user-requested back destination without recording the view
+    /// they just left as a new forward step on the next redraw.
+    pub(crate) fn accept_back_transition(&mut self, view: crate::app::ShellView) {
+        self.synced_view = Some(view);
+    }
+
     #[cfg(test)]
     pub(crate) fn contains_history(&self, view: &crate::app::ShellView) -> bool {
         self.history.contains(view)
@@ -998,6 +1004,16 @@ impl FilePickerRouteState {
         self.query.clear();
         self.cursor = 0;
         self.truncated = truncated;
+    }
+
+    pub(crate) fn replace_files(&mut self, files: Vec<String>, truncated: bool) {
+        let selected = self.selected_path();
+        self.files = files;
+        self.truncated = truncated;
+        let filtered = self.filtered_paths();
+        self.cursor = selected
+            .and_then(|selected| filtered.iter().position(|path| path == &selected))
+            .unwrap_or_else(|| self.cursor.min(filtered.len().saturating_sub(1)));
     }
 
     pub(crate) fn files(&self) -> &[String] {
@@ -1332,6 +1348,8 @@ pub enum PromptDocumentMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptDocumentState {
+    pub prompt_specs: Vec<kuzushi_core::modules::PromptSpec>,
+    pub prompt_index: usize,
     pub role: String,
     pub path: PathBuf,
     pub source: String,

@@ -142,7 +142,10 @@ content-addressed bundle format lands.
 Trusted Node modules loaded with `--load` must now declare an explicit native
 policy on every tool: `effect`, `approval`, `workspaceRequirement`, and a
 concrete `phase` for effectful operations. `headless` remains mandatory.
-Target-write and external-action tools must use `approval: "explicit"`.
+Target-write, repository-execute, and external-action tools must use
+`approval: "explicit"`. `repository-execute` is for repository-selected build
+or test commands run in an isolated validation copy; it must disclose the
+resolved commands before interactive dispatch.
 Modules that omit this policy fail atomically during description, before any
 tool is registered. This is an intentional fail-closed contract change; add
 the fields described in `docs/modules.md` before upgrading an external module.

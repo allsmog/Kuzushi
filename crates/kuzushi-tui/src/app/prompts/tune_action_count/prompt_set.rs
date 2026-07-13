@@ -31,6 +31,7 @@ impl ShellApp {
         };
         match write_prompt_override(&target, &write) {
             Ok(_) => {
+                self.invalidate_prompt_view_cache();
                 self.finish_prompt_document_write(&write.path, &write.value);
                 self.log(
                     "prompt",
@@ -71,7 +72,8 @@ fn prompt_set_args(args: &str) -> Option<(&str, &str)> {
     if name.is_empty() || value.is_empty() {
         return None;
     }
-    Some((name, unquote_prompt_set_value(value)))
+    let value = unquote_prompt_set_value(value);
+    (!value.trim().is_empty()).then_some((name, value))
 }
 
 fn unquote_prompt_set_value(value: &str) -> &str {

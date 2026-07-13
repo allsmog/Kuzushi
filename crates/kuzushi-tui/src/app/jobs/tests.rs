@@ -8,7 +8,8 @@ fn shell_event_reports_kind_and_terminal_state() {
     );
     assert!(!ShellEvent::Scan(ScanEvent::Stage("running".to_string())).is_terminal());
     assert!(ShellEvent::Plan(PlanEvent::Failed {
-        error: "nope".to_string()
+        error: "nope".to_string(),
+        audit: AgentCallAudit::test(),
     })
     .is_terminal());
 }
@@ -160,7 +161,8 @@ fn job_ticket_rejects_wrong_kind_events() {
     let ticket = hub.start(JobKind::Plan, "planner");
 
     assert!(!ticket.send(ShellEvent::Threat(ThreatPatchEvent::Failed {
-        error: "wrong".to_string()
+        error: "wrong".to_string(),
+        audit: AgentCallAudit::test(),
     })));
     ticket.complete();
     assert!(hub.drain(8).is_empty());
@@ -172,6 +174,7 @@ fn job_ticket_complete_disarms_panic_guard() {
     let ticket = hub.start(JobKind::Plan, "planner");
     ticket.send(ShellEvent::Plan(PlanEvent::Failed {
         error: "planned failure".to_string(),
+        audit: AgentCallAudit::test(),
     }));
     ticket.complete();
 
@@ -179,7 +182,7 @@ fn job_ticket_complete_disarms_panic_guard() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        ShellEvent::Plan(PlanEvent::Failed { error }) if error == "planned failure"
+        ShellEvent::Plan(PlanEvent::Failed { error, .. }) if error == "planned failure"
     ));
 }
 
@@ -193,7 +196,7 @@ fn panic_guard_synthesizes_failure_when_ticket_drops_armed() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        ShellEvent::Threat(ThreatPatchEvent::Failed { error })
+        ShellEvent::Threat(ThreatPatchEvent::Failed { error, .. })
             if error.contains("threat model worker ended without reporting completion")
     ));
 }
@@ -249,7 +252,7 @@ fn spawn_job_worker_formats_non_string_panic_payloads() {
     assert!(handle.join().is_ok());
     assert!(matches!(
         hub.drain(8).pop(),
-        Some(ShellEvent::Plan(PlanEvent::Failed { error }))
+        Some(ShellEvent::Plan(PlanEvent::Failed { error, .. }))
             if error == "planner worker panicked: non-string panic payload"
     ));
 }

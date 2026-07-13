@@ -130,7 +130,7 @@ pub(crate) fn terminal_shell_loop(
     let mut watcher = WorkspaceWatcherRuntime::start(app.target(), wake.clone())?;
     while !app.should_quit() {
         reconcile_workspace_watcher(&mut watcher, app.target(), wake.clone())?;
-        terminal_shell_step(terminal, app, &mut state, &input, watcher.as_mut())?;
+        terminal_shell_step(terminal, app, &mut state, &input, &wake, watcher.as_mut())?;
     }
     app.jobs_mut().set_wake(None);
     app.set_loop_wake(None);
@@ -153,9 +153,17 @@ pub(crate) fn terminal_shell_step(
     app: &mut ShellApp,
     state: &mut TerminalLoopState,
     input: &TerminalLoopInbox,
+    wake: &TerminalLoopWake,
     watcher: Option<&mut WorkspaceWatcherRuntime>,
 ) -> Result<()> {
-    refresh_terminal_redraw_state(terminal, app, state, watcher)?;
+    let work_tail_may_remain = refresh_terminal_redraw_state(terminal, app, state, watcher)?;
+    rearm_work_tail(wake, work_tail_may_remain);
     state.needs_redraw |= wait_for_terminal_loop_event(app, input)?;
     Ok(())
+}
+
+pub(crate) fn rearm_work_tail(wake: &TerminalLoopWake, tail_may_remain: bool) {
+    if tail_may_remain {
+        wake.notify();
+    }
 }

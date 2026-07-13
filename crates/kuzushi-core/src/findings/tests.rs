@@ -553,6 +553,88 @@ mod tests {
     }
 
     #[test]
+    fn global_projection_collapses_identity_and_merges_cross_run_sources() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-global-a", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        store
+            .record_run_started("run-global-b", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+
+        let first = Finding::new_tool(
+            "semgrep",
+            "semgrep/cwe-79",
+            "src/render.ts",
+            20,
+            Some(20),
+            Severity::Medium,
+            "user input reaches the HTML sink, CWE-79",
+        );
+        let second = Finding::new_tool(
+            "codeql",
+            "codeql/cwe-79",
+            "src/render.ts",
+            24,
+            Some(24),
+            Severity::High,
+            "user input reaches the HTML sink, CWE-79",
+        );
+        let first_id = store.insert_finding("run-global-a", &first).unwrap();
+        let second_id = store.insert_finding("run-global-b", &second).unwrap();
+
+        let first_run = store.list_findings_for_scan_id("run-global-a").unwrap();
+        let second_run = store.list_findings_for_scan_id("run-global-b").unwrap();
+        assert_eq!(first_run.len(), 1);
+        assert_eq!(second_run.len(), 1);
+        assert_eq!(first_run[0].id, Some(first_id));
+        assert_eq!(second_run[0].id, Some(second_id));
+        assert_eq!(first_run[0].identity_id, second_run[0].identity_id);
+        assert_ne!(first_run[0].fingerprint, second_run[0].fingerprint);
+        assert_eq!(first_run[0].corroboration_count, 1);
+        assert_eq!(second_run[0].corroboration_count, 1);
+        assert_eq!(first_run[0].sources.len(), 1);
+        assert_eq!(second_run[0].sources.len(), 1);
+
+        let global = store.list_findings(10).unwrap();
+        assert_eq!(global.len(), 1);
+        assert_eq!(global[0].id, Some(second_id));
+        assert_eq!(global[0].severity, Severity::High);
+        assert_eq!(global[0].corroboration_count, 2);
+        let source_tools = global[0]
+            .sources
+            .iter()
+            .map(|source| source.tool.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(source_tools, vec!["codeql", "semgrep"]);
+        let semgrep_source = global[0]
+            .sources
+            .iter()
+            .find(|source| source.tool == "semgrep")
+            .unwrap();
+        assert_eq!(semgrep_source.first_scan_id, "run-global-a");
+        assert_eq!(semgrep_source.last_scan_id, "run-global-a");
+        let codeql_source = global[0]
+            .sources
+            .iter()
+            .find(|source| source.tool == "codeql")
+            .unwrap();
+        assert_eq!(codeql_source.first_scan_id, "run-global-b");
+        assert_eq!(codeql_source.last_scan_id, "run-global-b");
+        assert_eq!(
+            stable_finding_alias(&global, &global[0].fingerprint).as_deref(),
+            Some("F-0001")
+        );
+        let resolved = resolve_finding_alias(&global, "F-0001").unwrap();
+        assert_eq!(resolved.id, global[0].id);
+        assert_eq!(
+            stable_finding_alias(&global, &resolved.fingerprint).as_deref(),
+            Some("F-0001")
+        );
+        assert!(resolve_finding_alias(&global, "F-0002").is_none());
+    }
+
+    #[test]
     fn stores_and_lists_findings_with_triage() {
         let store = FindingStore::open_in_memory().unwrap();
         let run_id = "run-1";
@@ -734,11 +816,7 @@ mod tests {
         let workspace_root = workspace.path().canonicalize().unwrap();
         let outside_file = outside.path().join("requirements.txt");
         std::fs::write(&outside_file, OUTSIDE_TOKEN).unwrap();
-        std::os::unix::fs::symlink(
-            &outside_file,
-            workspace_root.join("requirements.txt"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(&outside_file, workspace_root.join("requirements.txt")).unwrap();
         let db_path = workspace_root.join(".kuzushi/v3/index.sqlite3");
         let log_path = workspace_root.join(".kuzushi/v3/log");
         std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
@@ -772,12 +850,19 @@ mod tests {
             .payload
             .get("blobHash")
             .is_none_or(serde_json::Value::is_null));
-        assert!(!serde_json::to_string(&events).unwrap().contains(OUTSIDE_TOKEN));
-        assert!(!serde_json::to_string(&store.list_findings_for_scan_id(run_id).unwrap())
+        assert!(!serde_json::to_string(&events)
             .unwrap()
             .contains(OUTSIDE_TOKEN));
+        assert!(
+            !serde_json::to_string(&store.list_findings_for_scan_id(run_id).unwrap())
+                .unwrap()
+                .contains(OUTSIDE_TOKEN)
+        );
         assert!(!crate::workspace::workspace_objects_dir(&workspace_root).exists());
-        assert_eq!(std::fs::read_to_string(outside_file).unwrap(), OUTSIDE_TOKEN);
+        assert_eq!(
+            std::fs::read_to_string(outside_file).unwrap(),
+            OUTSIDE_TOKEN
+        );
     }
 
     #[test]
@@ -893,7 +978,8 @@ mod tests {
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.95,
                     rationale: "operator confirmed source-to-sink evidence".to_string(),
-                    ..Default::default()
+                    cost_usd: 0.125,
+                    cost_usd_exact: false,
                 },
                 TriageAuthor::Human,
             )
@@ -905,6 +991,9 @@ mod tests {
             Some(TriageVerdict::TruePositive)
         );
         assert_eq!(stored[0].triaged_by, Some(TriageAuthor::Human));
+        let stored_triage = stored[0].triage.as_ref().unwrap();
+        assert_eq!(stored_triage.cost_usd, 0.125);
+        assert!(!stored_triage.cost_usd_exact);
         let latest = store
             .latest_review_decision(finding_id)
             .unwrap()
@@ -923,6 +1012,11 @@ mod tests {
         assert_eq!(
             events[2].payload["updatesFindingTriage"].as_bool(),
             Some(true)
+        );
+        assert_eq!(events[2].payload["triageCostUsd"].as_f64(), Some(0.125));
+        assert_eq!(
+            events[2].payload["triageCostUsdExact"].as_bool(),
+            Some(false)
         );
     }
 
@@ -962,7 +1056,8 @@ mod tests {
                 build_command: Some("cargo build".to_string()),
                 test_command: Some("cargo test".to_string()),
                 worktree_path: Some("/tmp/worktree".to_string()),
-                cost_usd: Some(0.25),
+                cost_usd: Some(0.000_000_4),
+                provider_spend_unresolved: true,
                 validator_log: Some("tests passed".to_string()),
                 history: vec![PatchAttempt {
                     attempt: 1,
@@ -986,19 +1081,26 @@ mod tests {
             events[2].payload["stableFp"].as_str(),
             Some(stable_fp.as_str())
         );
+        assert_eq!(events[2].payload["costUsd"], json!(0.000_000_4));
+        assert_eq!(events[2].payload["costUsdMicros"], json!(0));
+        assert_eq!(events[2].payload["providerSpendUnresolved"], json!(true));
 
         let conn = rusqlite::Connection::open(db_path).unwrap();
-        let projected: (String, String, String, i64) = conn
+        let projected: (String, String, String, i64, f64) = conn
             .query_row(
-                "select stable_fp, patch_run_id, diff_object, diff_size_bytes from patch_attempt_events",
+                "select stable_fp, patch_run_id, diff_object, diff_size_bytes, cost_usd from patch_attempt_events",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )
             .unwrap();
         assert_eq!(projected.0, stable_fp);
         assert_eq!(projected.1, "patch-run-v3");
         assert!(projected.2.len() >= 4);
-        assert_eq!(projected.3, "diff --git a/src/app.rs b/src/app.rs\n".len() as i64);
+        assert_eq!(
+            projected.3,
+            "diff --git a/src/app.rs b/src/app.rs\n".len() as i64
+        );
+        assert_eq!(projected.4, 0.000_000_4);
         let object_path = temp
             .path()
             .join(".kuzushi/v3/objects/blake3")
@@ -1011,6 +1113,8 @@ mod tests {
             .unwrap();
         assert_eq!(read_back.len(), 1);
         assert_eq!(read_back[0].status, PatchStatus::Verified);
+        assert_eq!(read_back[0].cost_usd, Some(0.000_000_4));
+        assert!(read_back[0].provider_spend_unresolved);
         assert_eq!(
             read_back[0].diff.as_deref(),
             Some("diff --git a/src/app.rs b/src/app.rs\n")
@@ -1026,7 +1130,10 @@ mod tests {
                 .get_patch_results_for_finding(&finding.fingerprint)
                 .unwrap_err()
                 .to_string();
-            assert!(error.contains("symlink") || error.contains("non-symlink"), "{error}");
+            assert!(
+                error.contains("symlink") || error.contains("non-symlink"),
+                "{error}"
+            );
             assert_eq!(std::fs::read_to_string(outside).unwrap(), "secret");
         }
         let old_table_count: i64 = conn
@@ -1482,6 +1589,10 @@ mod tests {
             store.list_findings_for_scan_id("run-decision-b").unwrap()[0].identity_id
         );
 
+        let findings = store.list_findings(10).unwrap();
+        let batched_decisions = store.list_review_decisions_for_findings(&findings).unwrap();
+        assert_eq!(batched_decisions, second_identity_decisions);
+
         let latest = store
             .latest_review_decision_for_finding_identity(second_id)
             .unwrap()
@@ -1658,6 +1769,7 @@ mod tests {
             confidence: 0.8,
             rationale: "model signal did not match reachable code".to_string(),
             cost_usd: 0.12,
+            cost_usd_exact: true,
         };
 
         let decision = ReviewDecision::from_triage(&triage, Some(TriageAuthor::Human));
@@ -1930,6 +2042,102 @@ mod tests {
     }
 
     #[test]
+    fn repeated_observations_do_not_make_a_fingerprint_prefix_ambiguous() {
+        let store = FindingStore::open_in_memory().unwrap();
+        for run_id in ["run-prefix-first", "run-prefix-latest"] {
+            store
+                .record_run_started(run_id, Path::new("/tmp/repo"), "completed")
+                .unwrap();
+        }
+        let finding = Finding::new_semgrep(
+            "demo.repeated",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "User input reaches sink",
+        );
+        store.insert_finding("run-prefix-first", &finding).unwrap();
+        let latest_id = store.insert_finding("run-prefix-latest", &finding).unwrap();
+
+        let resolved = store
+            .get_finding_by_reference(&finding.fingerprint[..8])
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resolved.id, Some(latest_id));
+        assert_eq!(resolved.fingerprint, finding.fingerprint);
+    }
+
+    #[test]
+    fn distinct_fingerprints_with_the_same_prefix_remain_ambiguous() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-prefix-collision", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        let mut first = Finding::new_semgrep(
+            "demo.first",
+            "src/first.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "First finding",
+        );
+        first.fingerprint = "shared-prefix-11111111".to_string();
+        let mut second = Finding::new_semgrep(
+            "demo.second",
+            "src/second.ts",
+            24,
+            Some(24),
+            Severity::High,
+            "Second finding",
+        );
+        second.fingerprint = "shared-prefix-22222222".to_string();
+        store
+            .insert_finding("run-prefix-collision", &first)
+            .unwrap();
+        store
+            .insert_finding("run-prefix-collision", &second)
+            .unwrap();
+
+        let error = store
+            .get_finding_by_reference("shared-prefix-")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("ambiguous"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn finding_prefix_treats_sql_like_characters_as_literals() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-literal-prefix", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        for fingerprint in ["literal%_\\prefix-one", "literalxxprefix-two"] {
+            let mut finding = Finding::new_semgrep(
+                "demo.literal-prefix",
+                "src/app.ts",
+                12,
+                Some(12),
+                Severity::High,
+                "Literal prefix",
+            );
+            finding.fingerprint = fingerprint.to_string();
+            store
+                .insert_finding("run-literal-prefix", &finding)
+                .unwrap();
+        }
+
+        let resolved = store
+            .get_finding_by_reference("literal%_\\prefix")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resolved.fingerprint, "literal%_\\prefix-one");
+    }
+
+    #[test]
     fn reference_resolution_attaches_latest_verification_for_prefix() {
         let temp = tempfile::tempdir().unwrap();
         let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
@@ -1991,6 +2199,7 @@ mod tests {
             confidence: 0.91,
             rationale: "source and sink are linked".to_string(),
             cost_usd: 0.02,
+            cost_usd_exact: true,
         });
         finding.verification = Some(PersistedVerification {
             proof_level: 4,
@@ -2189,6 +2398,7 @@ mod tests {
             confidence: 0.72,
             rationale: "source reaches sink".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: true,
         });
 
         let mut before_triage = confirmed.clone();
@@ -2243,6 +2453,7 @@ mod tests {
             confidence: 0.9,
             rationale: "reviewed source-linked evidence".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: true,
         });
         finding.triaged_by = Some(TriageAuthor::Human);
         finding.evidence.push(FindingEvidence {
@@ -2965,6 +3176,7 @@ mod tests {
             confidence: 0.5,
             rationale: "synthetic".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: true,
         };
         let result = store.record_auto_triage(stale_id, &outcome);
         let err = match result {
@@ -3005,6 +3217,7 @@ mod tests {
                     confidence: 0.7,
                     rationale: "ok".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
             )
             .expect("triage insert must succeed when finding exists");

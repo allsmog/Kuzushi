@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bootstrap.sh — Deterministic one-command setup for Kuzushi contributors.
 #
-# Verifies Node >= 22, aligns pnpm to the `packageManager` pin in package.json
+# Verifies pinned Rust and Node >= 22, aligns pnpm to the `packageManager` pin in package.json
 # via corepack, optionally probes external tools (semgrep, codeql, python3),
 # and runs `pnpm install --frozen-lockfile`.
 #
@@ -20,6 +20,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+RUST_TOOLCHAIN_FILE="${REPO_DIR}/rust-toolchain.toml"
+PINNED_RUST_VERSION="$(sed -nE 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"([^"]+)".*$/\1/p' "${RUST_TOOLCHAIN_FILE}" | head -1)"
+
+if [[ -z "${PINNED_RUST_VERSION}" ]]; then
+  echo "bootstrap: unable to read the pinned Rust channel from ${RUST_TOOLCHAIN_FILE}" >&2
+  exit 1
+fi
 
 # ─── Flags ────────────────────────────────────────────────────────────
 STRICT=0
@@ -144,6 +151,36 @@ for tool in git curl; do
   fi
 done
 
+for tool in cargo rustfmt; do
+  if command -v "$tool" >/dev/null 2>&1; then
+    ok "$tool ($("$tool" --version 2>/dev/null | head -1))"
+  else
+    err "$tool is required by rust-toolchain.toml but is not installed."
+    hint "Install Rust with rustup; the repo will select Rust ${PINNED_RUST_VERSION} automatically."
+  fi
+done
+
+if command -v rustc >/dev/null 2>&1; then
+  RUSTC_VERSION_LINE="$(rustc --version 2>/dev/null | head -1)"
+  RUSTC_ACTUAL_VERSION="$(printf '%s\n' "${RUSTC_VERSION_LINE}" | awk '{print $2}')"
+  if [[ "${RUSTC_ACTUAL_VERSION}" == "${PINNED_RUST_VERSION}" ]]; then
+    ok "rustc ${RUSTC_ACTUAL_VERSION} matches rust-toolchain.toml"
+  else
+    err "rustc ${RUSTC_ACTUAL_VERSION:-unknown} does not match pinned ${PINNED_RUST_VERSION}."
+    hint "Run 'rustup toolchain install ${PINNED_RUST_VERSION} --component rustfmt --component clippy'."
+  fi
+else
+  err "rustc is required by rust-toolchain.toml but is not installed."
+  hint "Install Rust ${PINNED_RUST_VERSION} with rustup."
+fi
+
+if command -v cargo >/dev/null 2>&1 && cargo clippy --version >/dev/null 2>&1; then
+  ok "clippy ($(cargo clippy --version 2>/dev/null | head -1))"
+else
+  err "Clippy is required but unavailable for the pinned Rust toolchain."
+  hint "Run 'rustup component add clippy --toolchain ${PINNED_RUST_VERSION}'."
+fi
+
 # ─── Optional externals ─────────────────────────────────────────────
 section "Probing optional externals"
 
@@ -180,7 +217,7 @@ fi
 if command -v sqlite3 >/dev/null 2>&1; then
   ok "sqlite3 ($(sqlite3 --version 2>/dev/null | awk '{print $1}'))"
 else
-  warn "sqlite3 CLI not installed — optional (better-sqlite3 is bundled). Used by e2e helpers."
+  warn "sqlite3 CLI not installed — optional. Used by some e2e helpers."
   hint "Install: 'apt-get install sqlite3' / 'brew install sqlite'."
 fi
 
@@ -225,6 +262,7 @@ fi
 
 section "Bootstrap complete"
 printf "%sNext:%s  pnpm doctor     # re-verify env\n" "$BOLD" "$RESET"
-printf "       pnpm typecheck   # type-check all sources\n"
-printf "       pnpm test        # run unit tests\n"
+printf "       pnpm typecheck:all   # type-check all TypeScript projects\n"
+printf "       pnpm test            # run TypeScript unit tests\n"
+printf "       cargo test --workspace  # run native Rust tests\n"
 printf "       pnpm dev -- --help  # run the native CLI in dev mode\n"

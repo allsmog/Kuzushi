@@ -6,10 +6,7 @@ use crate::event_log::{EventEnvelope, EventKind};
 use anyhow::Result;
 use rusqlite::{params, Transaction};
 
-pub(super) fn project_snapshot_indexed(
-    tx: &Transaction<'_>,
-    event: &EventEnvelope,
-) -> Result<()> {
+pub(super) fn project_snapshot_indexed(tx: &Transaction<'_>, event: &EventEnvelope) -> Result<()> {
     if event.event_kind != EventKind::SnapshotIndexed {
         return Ok(());
     }

@@ -2,6 +2,8 @@ use super::*;
 use crate::runbooks::prompt_spine::PROMPT_SPINE_UNTRUSTED_REPO;
 use crate::runbooks::untrusted::{render_untrusted_derived_block, render_untrusted_repo_blocks};
 
+pub(crate) const DEFAULT_CARLINI_MISSION: &str = "Your mission: find additional evidence for the linked threat surface, discover new attack vectors in the same surface, or identify variants the threat model missed.\nDo not re-confirm only what is already documented. Find something new or deeper.\nOnly report findings with concrete evidence of exploitability.";
+
 /// Render the shared repository inventory into its untrusted-repo block
 /// exactly once per carlini run. The inventory is identical for every actor,
 /// so this is hoisted out of the per-actor loop: the rendered block is built
@@ -85,16 +87,16 @@ fn actor_identity_lines(hunt: &ActorHunt, actor_fingerprint: &str) -> [String; 8
 fn append_actor_mission(lines: &mut Vec<String>, options: &CarliniInput) {
     lines.push(String::new());
     if let Some(override_prompt) = &options.prompt_override {
+        if override_prompt.trim() == DEFAULT_CARLINI_MISSION.trim() {
+            lines.extend(DEFAULT_CARLINI_MISSION.lines().map(str::to_string));
+            return;
+        }
         lines.push(render_untrusted_derived_block(
             "operator-prompt-override",
             override_prompt.trim(),
         ));
     } else {
-        lines.extend([
-            "Your mission: find additional evidence for the linked threat surface, discover new attack vectors in the same surface, or identify variants the threat model missed.".to_string(),
-            "Do not re-confirm only what is already documented. Find something new or deeper.".to_string(),
-            "Only report findings with concrete evidence of exploitability.".to_string(),
-        ]);
+        lines.extend(DEFAULT_CARLINI_MISSION.lines().map(str::to_string));
     }
 }
 

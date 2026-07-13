@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 mod nested_scope;
 mod program_scope;
+mod workspace_state_initialization;
 mod workspace_state_io;
 mod workspace_target;
 
@@ -21,6 +22,7 @@ pub use program_scope::{
 pub(crate) use workspace_state_io::{
     ensure_workspace_descendant_dir, validated_workspace_descendant,
 };
+pub(crate) use workspace_state_initialization::initialize_workspace_state;
 pub use workspace_state_io::{
     ensure_workspace_output_dir, prepare_workspace_output_path,
     read_optional_workspace_text, read_workspace_text, remove_workspace_state_file,

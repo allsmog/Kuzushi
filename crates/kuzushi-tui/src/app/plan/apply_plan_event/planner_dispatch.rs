@@ -8,13 +8,18 @@ impl ShellApp {
     }
 
     pub(crate) fn dispatch_planner(&mut self, start: PlannerStart) {
+        if self.reject_runtime_launch_while_budget_halted(true, "planner") {
+            return;
+        }
         let Some(ticket) = self.try_start_exclusive_job(JobKind::Plan, "planner") else {
             return;
         };
         let generation = ticket.generation();
         let cancel = ticket.cancel.clone();
+        let run_id = kuzushi_core::new_run_id("plan");
+        self.begin_run_cost_tracking(&run_id, true);
         self.set_activity(Some(ActivitySession::for_optional_phase(
-            kuzushi_core::new_run_id("plan"),
+            run_id,
             start.origin_phase,
         )));
         self.set_plan_cancel(Some(cancel.clone()));

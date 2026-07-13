@@ -7,14 +7,16 @@ Feature: Planning-stage multi-select
     Given a fresh kuzushi workspace
     And a model and auth are configured
 
-  Scenario: Default selection covers the model-cheap prereqs plus STRIDE
+  Scenario: Default selection delivers quick first value and leaves deep work opt-in
     When I launch the shell
     Then I see "KUMI-KATA"
     And the status segment shows "planning"
     And "Gather repo context" is checked
     And "Map entry points" is checked
-    And "Build STRIDE threat model" is checked
+    And "Build STRIDE threat model" is unchecked
     And "Build PASTA threat model" is unchecked
+    And "Build code property graph" is unchecked
+    And "Build CodeQL DB" is unchecked
 
   Scenario: Space toggles a row and auto-selects its dependencies
     When I launch the shell

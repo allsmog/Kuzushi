@@ -5,7 +5,12 @@ const EVENT_DRAIN_LIMIT: usize = 256;
 pub(super) const TRACE_DRAIN_LIMIT: usize = 512;
 pub(super) const JOB_DRAIN_LIMIT: usize = EVENT_DRAIN_LIMIT + TRACE_DRAIN_LIMIT;
 const JOB_DRAIN_TIME_SLICE: Duration = Duration::from_millis(3);
-const MIN_JOB_DRAIN_EVENTS_BEFORE_TIME_CHECK: usize = 32;
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct JobDrainOutcome {
+    pub(crate) changed: bool,
+    pub(crate) time_slice_exhausted: bool,
+}
 
 impl ShellApp {
     pub fn drain_background_events(&mut self) -> bool {
@@ -22,30 +27,33 @@ impl ShellApp {
     }
 
     pub(crate) fn drain_job_events(&mut self) -> bool {
-        let messages = self.drain_job_messages();
-        update_many_and_execute_effects(self, messages)
+        self.drain_job_events_with_outcome().changed
     }
 
-    pub(crate) fn drain_job_messages(&mut self) -> Vec<Msg> {
+    pub(crate) fn drain_job_events_with_outcome(&mut self) -> JobDrainOutcome {
+        self.drain_job_events_for(JOB_DRAIN_TIME_SLICE)
+    }
+
+    pub(crate) fn drain_job_events_for(&mut self, time_slice: Duration) -> JobDrainOutcome {
         let started_at = Instant::now();
-        let mut inspected = 0;
-        let mut messages = Vec::new();
-        while inspected < JOB_DRAIN_LIMIT {
+        let mut outcome = JobDrainOutcome::default();
+        for inspected in 0..JOB_DRAIN_LIMIT {
+            if inspected > 0 && started_at.elapsed() >= time_slice {
+                outcome.time_slice_exhausted = true;
+                break;
+            }
             match self.jobs_mut().drain_one() {
                 JobDrainResult::Event(event) => {
-                    messages.push(Msg::Job(event));
+                    outcome.changed |= update_and_execute_effects(self, Msg::Job(event));
                 }
                 JobDrainResult::Stale => {}
                 JobDrainResult::Empty => break,
             }
-            inspected += 1;
-            if inspected >= MIN_JOB_DRAIN_EVENTS_BEFORE_TIME_CHECK
-                && started_at.elapsed() >= JOB_DRAIN_TIME_SLICE
-            {
-                break;
-            }
+            outcome.time_slice_exhausted = inspected + 1 == JOB_DRAIN_LIMIT;
         }
-        messages
+        let dropped = self.jobs().take_dropped_live_trace_count();
+        outcome.changed |= self.degrade_dropped_live_trace_cost(dropped);
+        outcome
     }
 
     pub(crate) fn apply_job_event(&mut self, event: ShellEvent) -> Vec<ShellEffect> {
@@ -102,9 +110,39 @@ impl ShellApp {
     }
 
     fn apply_trace_step(&mut self, step: RunTraceStep) {
-        let session =
-            self.activity_or_insert_with(|| ActivitySession::new(default_activity_run_id()));
-        session.apply_step(step);
+        let (run_id, cost, error) = {
+            let session =
+                self.activity_or_insert_with(|| ActivitySession::new(default_activity_run_id()));
+            let cost = session.apply_step_with_cost(step);
+            let error = session
+                .runtime_cost_report()
+                .err()
+                .map(|error| error.to_string());
+            (session.run_id.clone(), cost, error)
+        };
+        if let Some(error) = error {
+            self.report_cost_accounting_error(error);
+        } else if let Some(cost) = cost {
+            self.observe_run_cost_report(&run_id, cost);
+        }
+    }
+
+    fn degrade_dropped_live_trace_cost(&mut self, dropped: usize) -> bool {
+        if dropped == 0 {
+            return false;
+        }
+        let Some(run_id) = self.activity().map(|activity| activity.run_id.clone()) else {
+            return false;
+        };
+        if !self.session().run_may_call_provider(&run_id) {
+            return false;
+        }
+        self.mark_run_cost_incomplete(&run_id);
+        self.log(
+            "cost",
+            format!("{dropped} live trace frame(s) dropped; run cost is incomplete until terminal reconciliation"),
+        );
+        true
     }
 
     fn clear_finished_job(&mut self, kind: JobKind) {

@@ -145,18 +145,16 @@ impl ShellApp {
                 task,
                 eligible_verify_fingerprints(self.findings()),
                 "no triaged findings ready for verification",
-                workspace,
             ),
             PlanningTaskId::PatchFindings => self.expand_finding_batch(
                 task,
                 eligible_patch_fingerprints(self.findings()),
                 "no confirmed true-positive findings ready for patching",
-                workspace,
             ),
             PlanningTaskId::ReverseEngineerBinary => {
                 self.expand_reverse_engineering_task(task, workspace)
             }
-            _ => self.expand_single_planning_task(task, workspace),
+            _ => self.expand_single_planning_task(task),
         }
     }
 
@@ -165,7 +163,6 @@ impl ShellApp {
         task: PlanningTaskId,
         fingerprints: Vec<String>,
         empty_reason: &str,
-        workspace: &WorkspaceTarget,
     ) -> Result<Vec<PlanningRunStep>> {
         if fingerprints.is_empty() {
             self.log(
@@ -177,7 +174,7 @@ impl ShellApp {
         fingerprints
             .into_iter()
             .map(|fingerprint| {
-                self.step_with_extra_input(task, json!({ "fingerprint": fingerprint }), workspace)
+                self.step_with_extra_input(task, json!({ "fingerprint": fingerprint }))
             })
             .collect()
     }
@@ -198,23 +195,13 @@ impl ShellApp {
             );
             return Ok(Vec::new());
         };
-        self.step_with_extra_input(
-            task,
-            json!({ "binary": binary.display().to_string() }),
-            workspace,
-        )
-        .map(|step| vec![step])
+        self.step_with_extra_input(task, json!({ "binary": binary.display().to_string() }))
+            .map(|step| vec![step])
     }
 
-    fn expand_single_planning_task(
-        &self,
-        task: PlanningTaskId,
-        workspace: &WorkspaceTarget,
-    ) -> Result<Vec<PlanningRunStep>> {
+    fn expand_single_planning_task(&self, task: PlanningTaskId) -> Result<Vec<PlanningRunStep>> {
         self.input_for_planning_task(task)
-            .and_then(|input| {
-                self.dispatch_input_for_planning_task(task.tool_name(), input, workspace)
-            })
+            .and_then(|input| self.validated_input_for_planning_task(task.tool_name(), input))
             .map(|input| {
                 vec![PlanningRunStep {
                     task,
@@ -224,14 +211,9 @@ impl ShellApp {
             })
     }
 
-    fn step_with_extra_input(
-        &self,
-        task: PlanningTaskId,
-        extra: Value,
-        workspace: &WorkspaceTarget,
-    ) -> Result<PlanningRunStep> {
+    fn step_with_extra_input(&self, task: PlanningTaskId, extra: Value) -> Result<PlanningRunStep> {
         let input = self.input_for_planning_task_with_extra(task, extra)?;
-        let input = self.dispatch_input_for_planning_task(task.tool_name(), input, workspace)?;
+        let input = self.validated_input_for_planning_task(task.tool_name(), input)?;
         Ok(PlanningRunStep {
             task,
             tool_name: task.tool_name().to_string(),
@@ -542,19 +524,10 @@ impl ShellApp {
 
     fn start_deterministic_recommender(&mut self, workspace: WorkspaceTarget) {
         let input = json!({ "useModelRanking": false });
-        let ctx = ToolExecutionContext {
-            config: self.config(),
-            workspace: Some(&workspace),
-            findings_store: None,
-            trace: None,
-            cancellation: None,
-            authorization: Default::default(),
-        };
-        let prepared = match self.registry().prepare_tool_input_for_dispatch(
+        let prepared = match self.prepare_background_tool_input(
             "module-recommender:recommend",
             input,
-            &ctx,
-            Some(self.option_store()),
+            &workspace,
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -564,12 +537,13 @@ impl ShellApp {
         };
         let previous_auto_open = self.ui().auto_open_activity();
         self.ui_mut().set_auto_open_activity(false);
-        self.start_background_tool(
+        self.start_authorized_prepared_background_tool(
             "module-recommender:recommend".to_string(),
             prepared,
             workspace,
             "deterministic module recommendations in flight",
             None,
+            ExecutionAuthorization::default(),
         );
         self.ui_mut().set_auto_open_activity(previous_auto_open);
     }
@@ -744,26 +718,9 @@ impl ShellApp {
         Ok(input)
     }
 
-    fn dispatch_input_for_planning_task(
-        &self,
-        tool_name: &str,
-        input: Value,
-        workspace: &WorkspaceTarget,
-    ) -> Result<Value> {
-        let ctx = ToolExecutionContext {
-            config: self.config(),
-            workspace: Some(workspace),
-            findings_store: None,
-            trace: None,
-            cancellation: None,
-            authorization: Default::default(),
-        };
-        self.registry().prepare_tool_input_for_dispatch(
-            tool_name,
-            input,
-            &ctx,
-            Some(self.option_store()),
-        )
+    fn validated_input_for_planning_task(&self, tool_name: &str, input: Value) -> Result<Value> {
+        self.registry()
+            .prepare_tool_input(tool_name, input, Some(self.option_store()))
     }
 
     /// Planning is done. Return to the Workbench cockpit and leave the module

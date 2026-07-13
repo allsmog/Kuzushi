@@ -19,17 +19,27 @@ pub(crate) struct CodeqlBuildReport {
     #[serde(skip)]
     pub(crate) cost_usd: f64,
     #[serde(skip)]
+    pub(crate) cost_usd_exact: bool,
+    #[serde(skip)]
     pub(crate) ok: bool,
 }
 
 impl CodeqlBuildReport {
     pub(crate) fn to_tool_json(&self) -> Value {
-        json!({
+        let mut output = json!({
             "ok": self.ok,
             "output": render_codeql_build_summary(self),
             "data": serde_json::to_value(self).unwrap_or(Value::Null),
-            "costUsd": self.cost_usd,
-        })
+        });
+        let observed = RuntimeCost::from_usd(self.cost_usd, "CodeQL build plan cost")
+            .expect("CodeQL build runtime response cost was checked");
+        let cost = if self.cost_usd_exact {
+            RuntimeCostReport::known(observed)
+        } else {
+            RuntimeCostReport::incomplete(observed)
+        };
+        crate::module_result::apply_runtime_cost_report(&mut output, cost);
+        output
     }
 }
 
@@ -93,9 +103,15 @@ pub(crate) fn run_codeql_build_report(
     let target = resolve_codeql_build_target(input, ctx)?;
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
+    let system_prompt = optional_taint_next_string(
+        input,
+        &["TAINT_IRIS_NEXT_CODEQL_BUILD_PROMPT"],
+    )?
+    .unwrap_or_else(|| TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT.to_string());
     let launcher = require_codeql_launcher()?;
-    let (detected_languages, response) = request_codeql_build_plan(runtime, model, &target)?;
-    let cost_usd = response.cost_usd;
+    let (detected_languages, response) =
+        request_codeql_build_plan(runtime, model, &target, system_prompt)?;
+    let cost = response.checked_cost_report()?;
     let plan = decode_codeql_build_plan(&response)?;
     let language = resolved_codeql_language(&plan, &detected_languages);
     let build_mode = resolved_codeql_build_mode(&plan, &language);
@@ -115,7 +131,7 @@ pub(crate) fn run_codeql_build_report(
         status: output.status,
     };
     Ok(codeql_build_report(
-        &target, &db_path, details, cost_usd, ok,
+        &target, &db_path, details, cost, ok,
     ))
 }
 
@@ -131,7 +147,7 @@ fn codeql_build_report(
     target: &Path,
     db_path: &Path,
     details: CodeqlBuildDetails,
-    cost_usd: f64,
+    cost: RuntimeCostReport,
     ok: bool,
 ) -> CodeqlBuildReport {
     CodeqlBuildReport {
@@ -144,7 +160,8 @@ fn codeql_build_report(
         stderr_excerpt: (!details.stderr_excerpt.trim().is_empty())
             .then_some(details.stderr_excerpt),
         parse_error: None,
-        cost_usd,
+        cost_usd: cost.observed_usd(),
+        cost_usd_exact: cost.is_complete(),
         ok,
     }
 }
@@ -153,6 +170,7 @@ fn request_codeql_build_plan(
     runtime: &dyn AgentRuntime,
     model: String,
     target: &Path,
+    system_prompt: String,
 ) -> Result<(Vec<String>, AgentQueryResponse)> {
     let languages = detect_taint_iris_next_languages(target)?;
     let prompt = build_codeql_build_prompt(
@@ -161,7 +179,7 @@ fn request_codeql_build_plan(
         &top_level_listing(target),
         &manifest_keywords(target),
     );
-    let response = query_codeql_build_plan(runtime, model, target, prompt)?;
+    let response = query_codeql_build_plan(runtime, model, target, system_prompt, prompt)?;
     Ok((languages, response))
 }
 
@@ -210,12 +228,13 @@ fn query_codeql_build_plan(
     runtime: &dyn AgentRuntime,
     model: String,
     target: &Path,
+    system_prompt: String,
     prompt: String,
 ) -> Result<AgentQueryResponse> {
-    runtime.query_blocking(AgentQueryRequest::new(
+    crate::runtime::query_blocking_checked(runtime, AgentQueryRequest::new(
         model,
         target.to_path_buf(),
-        TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT.to_string(),
+        system_prompt,
         prompt,
     ))
 }
@@ -400,7 +419,7 @@ fn codeql_build_status(ok: bool, status: std::process::ExitStatus) -> String {
     }
 }
 
-const TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT: &str =
+pub(crate) const TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT: &str =
     "You decide how kuzushi should build a CodeQL database for a target \
 codebase. Read the directory listing + manifest excerpts and pick the \
 right CodeQL language plus the single shell command that completes a \
@@ -562,6 +581,7 @@ mod tests {
     use crate::config::V2Config;
     use crate::findings::TriageOutcome;
     use crate::runtime::TriageRequest;
+    use std::sync::Mutex;
     use tempfile::tempdir;
 
     struct BuildPlanRuntime;
@@ -583,6 +603,46 @@ mod tests {
         fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
             anyhow::bail!("not used by codeql build tests")
         }
+    }
+
+    struct CapturingBuildPlanRuntime {
+        requests: Mutex<Vec<AgentQueryRequest>>,
+    }
+
+    impl CapturingBuildPlanRuntime {
+        fn new() -> Self {
+            Self {
+                requests: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl AgentRuntime for CapturingBuildPlanRuntime {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.requests.lock().unwrap().push(request);
+            Ok(AgentQueryResponse::default())
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!("not used by CodeQL prompt tests")
+        }
+    }
+
+    #[test]
+    fn codeql_build_query_uses_declared_prompt_override() {
+        let runtime = CapturingBuildPlanRuntime::new();
+
+        query_codeql_build_plan(
+            &runtime,
+            "openai:test".to_string(),
+            std::path::Path::new("/tmp/codeql-target"),
+            "custom CodeQL planner".to_string(),
+            "repository facts".to_string(),
+        )
+        .unwrap();
+
+        let requests = runtime.requests.lock().unwrap();
+        assert_eq!(requests[0].system_prompt, "custom CodeQL planner");
     }
 
     #[test]

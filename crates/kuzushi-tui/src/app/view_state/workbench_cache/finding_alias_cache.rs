@@ -6,14 +6,21 @@ pub(super) struct FindingAliasCache {
 }
 
 impl FindingAliasCache {
-    pub(super) fn sorted_indices(&mut self, findings: &[Finding]) -> Vec<(String, usize)> {
-        let key = FindingAliasCacheKey::from_findings(findings);
-        if let Some(cache) = self.cached.as_ref().filter(|cache| cache.key == key) {
+    pub(super) fn sorted_indices(
+        &mut self,
+        findings: &[Finding],
+        findings_revision: u64,
+    ) -> Vec<(String, usize)> {
+        if let Some(cache) = self
+            .cached
+            .as_ref()
+            .filter(|cache| cache.findings_revision == findings_revision)
+        {
             return cache.aliases.clone();
         }
         let aliases = sorted_finding_alias_indices(findings);
         self.cached = Some(CachedFindingAliases {
-            key,
+            findings_revision,
             aliases: aliases.clone(),
         });
         aliases
@@ -22,39 +29,8 @@ impl FindingAliasCache {
 
 #[derive(Debug)]
 struct CachedFindingAliases {
-    key: FindingAliasCacheKey,
+    findings_revision: u64,
     aliases: Vec<(String, usize)>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct FindingAliasCacheKey {
-    entries: Vec<FindingAliasCacheEntry>,
-}
-
-impl FindingAliasCacheKey {
-    fn from_findings(findings: &[Finding]) -> Self {
-        Self {
-            entries: findings
-                .iter()
-                .map(FindingAliasCacheEntry::from_finding)
-                .collect(),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct FindingAliasCacheEntry {
-    fingerprint: String,
-    severity: Severity,
-}
-
-impl FindingAliasCacheEntry {
-    fn from_finding(finding: &Finding) -> Self {
-        Self {
-            fingerprint: finding.fingerprint.clone(),
-            severity: finding.severity,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -70,9 +46,9 @@ mod tests {
         second.fingerprint = "a".to_string();
         let mut findings = vec![first, second];
 
-        let aliases = cache.sorted_indices(&findings);
+        let aliases = cache.sorted_indices(&findings, 1);
         findings[1].severity = Severity::Critical;
-        let refreshed = cache.sorted_indices(&findings);
+        let refreshed = cache.sorted_indices(&findings, 2);
 
         assert_eq!(aliases[0], ("F-0001".to_string(), 0));
         assert_eq!(refreshed[0], ("F-0001".to_string(), 1));
@@ -87,14 +63,15 @@ mod tests {
         later.fingerprint = "zzzz".to_string();
         let mut findings = vec![guessed, later];
 
-        let aliases = cache.sorted_indices(&findings);
+        let aliases = cache.sorted_indices(&findings, 1);
         findings[1].triage = Some(kuzushi_core::TriageOutcome {
             verdict: kuzushi_core::TriageVerdict::TruePositive,
             confidence: 0.9,
             rationale: "confirmed".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: true,
         });
-        let refreshed = cache.sorted_indices(&findings);
+        let refreshed = cache.sorted_indices(&findings, 2);
 
         assert_eq!(aliases[0], ("F-0001".to_string(), 0));
         assert_eq!(refreshed[0], ("F-0001".to_string(), 0));

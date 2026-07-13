@@ -18,10 +18,8 @@ impl ShellApp {
         TuneAction::ORDER.get(self.tune_cursor_clamped()).copied()
     }
 
-    pub const PROMPT_VERB_NAMES: &'static [&'static str] = &["scan", "triage", "verify", "summary"];
-
     pub fn prompts_cursor_clamped(&self) -> usize {
-        let total = Self::PROMPT_VERB_NAMES.len();
+        let total = self.focused_prompt_specs().len();
         if total == 0 {
             0
         } else {
@@ -29,26 +27,30 @@ impl ShellApp {
         }
     }
 
-    pub fn current_prompt_verb_name(&self) -> Option<&'static str> {
-        Self::PROMPT_VERB_NAMES
+    pub fn current_prompt_spec(&self) -> Option<kuzushi_core::modules::PromptSpec> {
+        self.focused_prompt_specs()
             .get(self.prompts_cursor_clamped())
-            .copied()
+            .cloned()
+    }
+
+    pub fn current_prompt_verb_name(&self) -> Option<String> {
+        self.current_prompt_spec().map(|prompt| prompt.verb)
     }
 
     pub fn move_prompts_cursor(&mut self, delta: i32) {
-        let total = Self::PROMPT_VERB_NAMES.len();
+        let total = self.focused_prompt_specs().len();
         self.router.prompts_mut().move_cursor(delta, total);
     }
 
     pub(crate) fn activate_prompts_action(&mut self, action: PromptsAction) -> Vec<ShellEffect> {
-        let Some(name) = self.current_prompt_verb_name() else {
+        let Some(prompt) = self.current_prompt_spec() else {
             return Vec::new();
         };
         if action == PromptsAction::Set {
-            self.prefill_prompt_set_action(name);
+            self.prefill_prompt_set_action(&prompt.verb);
             return Vec::new();
         }
-        if let Some(command) = prompt_action_command(action, name) {
+        if let Some(command) = prompt_action_command(action, &prompt.verb) {
             return self.handle_prompt_verb(&command);
         }
         Vec::new()

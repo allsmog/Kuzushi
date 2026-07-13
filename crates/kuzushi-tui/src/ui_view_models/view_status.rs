@@ -19,7 +19,7 @@ fn primary_view_status(app: &ShellApp) -> Option<String> {
         ShellView::TargetPicker => Some("target-picker".to_string()),
         ShellView::AuthMethodPicker => Some(format!(
             "auth-picker:{}",
-            app.router.auth_picker().provider()
+            crate::app::auth_provider_label(app.router.auth_picker().provider())
         )),
         ShellView::PlanningPicker => Some("planning".to_string()),
         _ => None,
@@ -63,6 +63,7 @@ fn system_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Quickstart => Some("quickstart".to_string()),
         ShellView::Logs => Some("logs".to_string()),
         ShellView::Config => Some("config".to_string()),
+        ShellView::Permissions => Some("permissions".to_string()),
         ShellView::Health => Some("health".to_string()),
         ShellView::Tools => Some("tools".to_string()),
         ShellView::BootSplash => Some("boot".to_string()),
@@ -75,6 +76,7 @@ fn system_view_status(app: &ShellApp) -> Option<String> {
             "blocked:{}",
             interruption_slug(app.router.interruption().view())
         )),
+        ShellView::CommandPalette => Some("palette".to_string()),
         ShellView::Options => Some(format!("options[{}]", app.router.options().tool_name)),
         ShellView::SastTasks => Some("tasks".to_string()),
         _ => None,

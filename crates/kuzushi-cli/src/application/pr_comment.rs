@@ -1,4 +1,5 @@
 use anyhow::Result;
+use kuzushi_core::runtime::RuntimeCost;
 use kuzushi_core::{
     build_pr_comment, load_run_summary, read_run_artifact_text, tool_result_artifact_spec,
     FindingListFilter, FindingStore, PrCommentChain, PrCommentChainStep, PrCommentInput,
@@ -56,6 +57,7 @@ pub(crate) fn load_pr_comment_input(
         }),
         findings: report.findings,
         cost_usd: metadata.cost_usd.unwrap_or(0.0),
+        provider_spend_unresolved: metadata.provider_spend_unresolved,
         phase_costs: metadata.phase_costs,
         elapsed: metadata.elapsed,
         chains,
@@ -74,6 +76,7 @@ pub(crate) fn load_pr_comment_input(
 #[derive(Default)]
 struct PrCommentRunMetadata {
     cost_usd: Option<f64>,
+    provider_spend_unresolved: bool,
     elapsed: Option<Duration>,
     phase_costs: Vec<PrCommentPhaseCost>,
     kuzushi_version: Option<String>,
@@ -90,42 +93,68 @@ fn load_pr_comment_run_metadata(
     };
     load_run_summary(workspace.root(), run_id)
         .map(|summary| pr_comment_run_metadata(&summary))
-        .unwrap_or_default()
+        .unwrap_or_else(|_| PrCommentRunMetadata {
+            provider_spend_unresolved: true,
+            ..Default::default()
+        })
 }
 
 fn pr_comment_run_metadata(summary: &RunSummary) -> PrCommentRunMetadata {
+    let cost_report = summary.checked_cost_report();
+    let total_cost = cost_report
+        .as_ref()
+        .ok()
+        .and_then(|cost| cost.observed_usd_if_available());
+    let phase_costs = phase_costs_from_llm_calls(&summary.llm_calls);
+    let provider_spend_unresolved = match cost_report.as_ref() {
+        Ok(cost) => !cost.is_complete(),
+        Err(_) => true,
+    } || phase_costs.is_err();
     PrCommentRunMetadata {
-        cost_usd: summary.cost_usd,
+        cost_usd: total_cost,
+        provider_spend_unresolved,
         elapsed: summary_elapsed(summary),
-        phase_costs: phase_costs_from_llm_calls(&summary.llm_calls),
+        phase_costs: phase_costs.unwrap_or_default(),
         kuzushi_version: summary.kuzushi_version.clone(),
         model: summary.model.clone(),
         git_sha: summary.git_sha.clone(),
     }
 }
 
-fn phase_costs_from_llm_calls(calls: &[RunLlmCallAudit]) -> Vec<PrCommentPhaseCost> {
-    let mut by_phase = BTreeMap::<String, f64>::new();
+fn phase_costs_from_llm_calls(calls: &[RunLlmCallAudit]) -> Result<Vec<PrCommentPhaseCost>> {
+    let mut by_phase = BTreeMap::<String, RuntimeCost>::new();
     for call in calls {
-        add_phase_cost(&mut by_phase, call);
+        add_phase_cost(&mut by_phase, call)?;
     }
-    by_phase
+    Ok(by_phase
         .into_iter()
-        .map(|(label, cost_usd)| PrCommentPhaseCost { label, cost_usd })
-        .collect()
+        .map(|(label, cost)| PrCommentPhaseCost {
+            label,
+            cost_usd: cost.usd(),
+        })
+        .collect())
 }
 
-fn add_phase_cost(by_phase: &mut BTreeMap<String, f64>, call: &RunLlmCallAudit) {
-    let Some(cost) = call.cost_usd.filter(|cost| cost.is_finite() && *cost > 0.0) else {
-        return;
+fn add_phase_cost(
+    by_phase: &mut BTreeMap<String, RuntimeCost>,
+    call: &RunLlmCallAudit,
+) -> Result<()> {
+    let Some(cost) = call.cost_usd else {
+        return Ok(());
     };
+    let cost = RuntimeCost::from_usd(cost, "PR comment phase cost")?;
+    if cost == RuntimeCost::ZERO {
+        return Ok(());
+    }
     let phase = call
         .verb
         .as_deref()
         .filter(|verb| !verb.trim().is_empty())
         .unwrap_or(&call.kind)
         .to_string();
-    *by_phase.entry(phase).or_insert(0.0) += cost;
+    let previous = by_phase.get(&phase).copied().unwrap_or(RuntimeCost::ZERO);
+    by_phase.insert(phase, previous.checked_add(cost, "PR comment phase cost")?);
+    Ok(())
 }
 
 fn summary_elapsed(summary: &RunSummary) -> Option<Duration> {
@@ -210,4 +239,49 @@ fn chain_step_from_value(value: &Value) -> Option<PrCommentChainStep> {
 
 fn string_field(value: &Value, field: &str) -> Option<String> {
     value.get(field).and_then(Value::as_str).map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phase_costs_use_checked_aggregation() {
+        let costs = phase_costs_from_llm_calls(&[
+            llm_call("triage", Some(0.1)),
+            llm_call("triage", Some(0.2)),
+        ])
+        .unwrap();
+
+        assert_eq!(costs.len(), 1);
+        assert!((costs[0].cost_usd - 0.3).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn phase_costs_reject_invalid_values_and_overflow() {
+        for invalid in [f64::NAN, -1.0, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(phase_costs_from_llm_calls(&[llm_call("triage", Some(invalid))]).is_err());
+        }
+        assert!(phase_costs_from_llm_calls(&[
+            llm_call("triage", Some(f64::MAX)),
+            llm_call("triage", Some(f64::MAX)),
+        ])
+        .is_err());
+    }
+
+    fn llm_call(kind: &str, cost_usd: Option<f64>) -> RunLlmCallAudit {
+        RunLlmCallAudit {
+            n: 1,
+            kind: kind.to_string(),
+            verb: None,
+            model: "test:model".to_string(),
+            provider: "test".to_string(),
+            prompt_hash: "sha256:test".to_string(),
+            latency_ms: Some(1),
+            cost_usd,
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
+            call_attempted: Some(true),
+        }
+    }
 }

@@ -64,7 +64,7 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
     let source = RecommendationSource::from_app(app);
     let artifact = source.artifact_json(app, recommendations_artifact_leaf());
     let report = read_recommendations(artifact.clone());
-    let source_detail = artifact_detail_label(&source.path, &artifact);
+    let source_detail = artifact_detail_label(&source.path, source.target.as_deref(), &artifact);
     let components = report
         .as_ref()
         .map(|view| view.components.clone())
@@ -202,8 +202,11 @@ fn missing_recommendation_empty_state() -> RecommendationEmptyState {
     }
 }
 
-fn artifact_detail_label(path: &Path, artifact: &JsonFileState) -> String {
-    let display = path.display().to_string();
+fn artifact_detail_label(path: &Path, target: Option<&Path>, artifact: &JsonFileState) -> String {
+    let display_path = target
+        .and_then(|root| path.strip_prefix(root).ok())
+        .unwrap_or(path);
+    let display = display_path.display().to_string();
     match artifact {
         JsonFileState::Present(_) | JsonFileState::Malformed => display,
         JsonFileState::Missing => format!("{display} (missing)"),
@@ -698,6 +701,10 @@ mod tests {
         let model = recommendation_model(&app);
 
         assert_eq!(model.summary.as_deref(), Some("1 recommendation for /repo"));
+        assert_eq!(
+            model.detail_rows[0].cells[1],
+            ".kuzushi/v3/runs/run-rec/recommendations.json"
+        );
         assert_eq!(model.detail_rows[1].cells[1], "run-rec");
         assert_eq!(model.rows.len(), 1);
         assert_eq!(model.rows[0].cells[1], "threat-model:build");

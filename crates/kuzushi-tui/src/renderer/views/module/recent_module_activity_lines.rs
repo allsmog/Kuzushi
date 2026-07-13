@@ -12,6 +12,15 @@ pub(crate) fn recent_module_activity_lines(
     module_activity_lines(recent_module_activity_model(app, module_id, take))
 }
 
+pub(crate) fn recon_snapshot_activity_lines(
+    snapshot: &crate::ReconSnapshot,
+    take: usize,
+) -> Vec<Line<'static>> {
+    module_activity_lines(crate::ui_view_models::recon_snapshot_activity_model(
+        snapshot, take,
+    ))
+}
+
 fn module_activity_lines(model: ModuleActivityModel) -> Vec<Line<'static>> {
     model.rows.into_iter().map(module_activity_line).collect()
 }
@@ -34,6 +43,14 @@ fn module_activity_line(row: ModuleActivityRow) -> Line<'static> {
             Span::styled(first, theme::primary()),
             Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
             Span::styled(second, theme::muted()),
+        ]),
+        ModuleActivityKind::ReconNote => Line::from(vec![
+            Span::styled(" ▸ note ", theme::warn()),
+            Span::styled(first, theme::accent()),
+            Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
+            Span::styled(second, theme::muted()),
+            Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
+            Span::styled(third, theme::primary()),
         ]),
         ModuleActivityKind::Finding => {
             module_activity_finding_line(row.tone, &first, &second, &third)

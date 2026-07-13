@@ -15,7 +15,8 @@ mod tests;
 pub use application::{
     active_workspace_required_message, build_project_model_document,
     discover_and_save_nested_project_scopes, discover_nested_project_scopes,
-    export_scan_findings_sarif, export_workspace_findings, export_workspace_findings_with_options,
+    export_scan_findings_sarif, export_scan_findings_sarif_with_run_summary,
+    export_workspace_findings, export_workspace_findings_with_options,
     findings_since_filter_expression, load_nested_project_scopes, load_program_scope,
     load_project_model_document, preview_workspace_findings_export, project_model_scope_path,
     record_user_review_decision_for_finding, record_user_review_decision_for_finding_at_watermark,
@@ -35,7 +36,9 @@ pub use artifacts::{
 };
 pub use attack_surface::*;
 pub use diff_scope::*;
-pub(crate) use domain::{ensure_workspace_descendant_dir, validated_workspace_descendant};
+pub(crate) use domain::{
+    ensure_workspace_descendant_dir, initialize_workspace_state, validated_workspace_descendant,
+};
 pub use domain::{
     ensure_workspace_output_dir, legacy_codeql_db_path, prepare_workspace_output_path,
     project_model_dir, project_model_scopes_path, read_optional_workspace_text,

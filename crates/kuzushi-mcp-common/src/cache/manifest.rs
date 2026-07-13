@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use super::fingerprint::RepoFingerprint;
+use super::io::{read_bounded_file, write_atomic_file};
 use super::paths::manifest_path;
+
+const MAX_MANIFEST_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,13 +56,13 @@ pub(crate) fn load_manifest_path(path: &Path) -> Result<CacheManifest> {
 }
 
 pub(crate) fn read_manifest_path(path: &Path) -> Result<CacheManifest> {
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("could not read manifest at {}", path.display()))?;
-    Ok(serde_json::from_str(&raw).unwrap_or_default())
+    let raw = read_bounded_file(path, MAX_MANIFEST_BYTES)?
+        .with_context(|| format!("manifest disappeared at {}", path.display()))?;
+    serde_json::from_slice(&raw)
+        .with_context(|| format!("cache manifest is malformed at {}", path.display()))
 }
 
 pub(crate) fn write_manifest_path(path: &Path, raw: String) -> Result<()> {
-    std::fs::write(path, raw)
-        .with_context(|| format!("could not write manifest to {}", path.display()))?;
-    Ok(())
+    write_atomic_file(path, raw.as_bytes(), MAX_MANIFEST_BYTES)
+        .with_context(|| format!("could not write manifest to {}", path.display()))
 }

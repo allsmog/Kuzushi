@@ -1049,16 +1049,7 @@ fn validate_dynamic_tool_policy(tool: &ToolDescriptor) -> Result<()> {
             tool.name
         );
     }
-    for prompt in &tool.prompts {
-        if !tool.options.iter().any(|option| option.name == prompt.option_key) {
-            anyhow::bail!(
-                "dynamic tool {:?} prompt {:?} refers to undeclared option {:?}",
-                tool.name,
-                prompt.role,
-                prompt.option_key
-            );
-        }
-    }
+    tool.validate_prompt_options("dynamic tool")?;
     Ok(())
 }
 

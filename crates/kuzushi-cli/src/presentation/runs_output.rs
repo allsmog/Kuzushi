@@ -178,6 +178,14 @@ fn push_run_summary_findings(lines: &mut Vec<String>, summary: &RunSummary) {
 fn push_run_summary_cost(lines: &mut Vec<String>, summary: &RunSummary) {
     if let Some(cost) = summary.cost_usd {
         lines.push(format!("Cost USD: {cost:.4}"));
+    } else if let Some(observed) = summary
+        .provider_spend_unresolved
+        .then_some(summary.observed_cost_usd)
+        .flatten()
+    {
+        lines.push(format!(
+            "Observed cost USD: {observed:.4} (provider spend unresolved)"
+        ));
     }
 }
 

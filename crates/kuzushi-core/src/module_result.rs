@@ -7,6 +7,94 @@ pub(crate) use envelope::{
     completed_output_result, failed_output_result, partial_output_result, skipped_output_result,
 };
 
+/// Attach checked runtime spend without turning an unavailable cost into an
+/// exact zero. Mirror the fields into object-shaped `data` for consumers that
+/// read either the envelope or its payload.
+pub(crate) fn apply_runtime_cost_report(
+    result: &mut Value,
+    cost: crate::runtime::RuntimeCostReport,
+) {
+    apply_cost_fields(result, cost);
+    if let Some(data) = result.get_mut("data") {
+        apply_cost_fields(data, cost);
+    }
+}
+
+fn apply_cost_fields(value: &mut Value, cost: crate::runtime::RuntimeCostReport) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    if cost.is_unavailable() {
+        object.remove("costUsd");
+        object.remove("observedCostUsd");
+        object.remove("providerSpendUnresolved");
+        return;
+    }
+    if let Some(exact) = cost.exact_usd() {
+        object.insert("costUsd".to_string(), json!(exact));
+        object.remove("observedCostUsd");
+        object.remove("providerSpendUnresolved");
+    } else {
+        object.remove("costUsd");
+        object.insert("observedCostUsd".to_string(), json!(cost.observed_usd()));
+        object.insert("providerSpendUnresolved".to_string(), json!(true));
+    }
+}
+
+#[cfg(test)]
+mod runtime_cost_tests {
+    use super::*;
+    use crate::runtime::{RuntimeCost, RuntimeCostReport};
+
+    #[test]
+    fn unavailable_cost_removes_all_monetary_claims() {
+        let mut result = json!({
+            "costUsd": 1.0,
+            "observedCostUsd": 1.0,
+            "providerSpendUnresolved": true,
+            "data": {
+                "costUsd": 1.0,
+                "observedCostUsd": 1.0,
+                "providerSpendUnresolved": true
+            }
+        });
+
+        apply_runtime_cost_report(&mut result, RuntimeCostReport::UNAVAILABLE);
+
+        for value in [&result, &result["data"]] {
+            assert!(value.get("costUsd").is_none());
+            assert!(value.get("observedCostUsd").is_none());
+            assert!(value.get("providerSpendUnresolved").is_none());
+        }
+    }
+
+    #[test]
+    fn incomplete_zero_is_presented_as_observed_unresolved_spend() {
+        let mut result = json!({"data": {}});
+
+        apply_runtime_cost_report(&mut result, RuntimeCostReport::INCOMPLETE_ZERO);
+
+        for value in [&result, &result["data"]] {
+            assert_eq!(value["observedCostUsd"], json!(0.0));
+            assert_eq!(value["providerSpendUnresolved"], json!(true));
+            assert!(value.get("costUsd").is_none());
+        }
+    }
+
+    #[test]
+    fn exact_zero_is_presented_as_an_exact_cost() {
+        let mut result = json!({"data": {}});
+
+        apply_runtime_cost_report(&mut result, RuntimeCostReport::known(RuntimeCost::ZERO));
+
+        for value in [&result, &result["data"]] {
+            assert_eq!(value["costUsd"], json!(0.0));
+            assert!(value.get("observedCostUsd").is_none());
+            assert!(value.get("providerSpendUnresolved").is_none());
+        }
+    }
+}
+
 #[cfg(test)]
 mod subprocess_failure_summary_tests;
 

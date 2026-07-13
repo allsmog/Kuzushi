@@ -30,6 +30,7 @@ pub(crate) fn unprioritized_actor_hunt(actor: DfdNode) -> ActorHunt {
 pub(crate) struct CarliniActorHuntsOutcome {
     pub(crate) findings: Vec<Finding>,
     pub(crate) cost_usd: f64,
+    pub(crate) cost_usd_exact: bool,
 }
 
 pub(crate) fn run_carlini_actor_hunts(
@@ -58,16 +59,27 @@ pub(crate) fn run_carlini_actor_hunts(
     }
     Ok(CarliniActorHuntsOutcome {
         findings: state.findings,
-        cost_usd: state.cost_usd,
+        cost_usd: state.cost.observed_usd(),
+        cost_usd_exact: state.cost.is_complete(),
     })
 }
 
-#[derive(Default)]
 pub(crate) struct CarliniActorRunState {
     pub(crate) findings: Vec<Finding>,
     pub(crate) seen: BTreeSet<String>,
     pub(crate) run_index: usize,
-    pub(crate) cost_usd: f64,
+    pub(crate) cost: RuntimeCostReport,
+}
+
+impl Default for CarliniActorRunState {
+    fn default() -> Self {
+        Self {
+            findings: Vec::new(),
+            seen: BTreeSet::new(),
+            run_index: 0,
+            cost: RuntimeCostReport::known(RuntimeCost::ZERO),
+        }
+    }
 }
 
 pub(crate) fn run_carlini_actor_hunt(
@@ -120,7 +132,9 @@ pub(crate) fn run_carlini_actor_iteration(
         &actor_fingerprint,
         debug_artifacts,
     )?;
-    state.cost_usd += query.cost_usd;
+    state.cost = state
+        .cost
+        .checked_add(query.cost, "Carlini actor fan-out cost")?;
     let normalized = normalize_findings(query.value, target, options.max_findings, &actor_fingerprint)?;
     record_unique_carlini_findings(state, normalized);
     state.run_index += 1;

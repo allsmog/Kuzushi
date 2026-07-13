@@ -13,14 +13,15 @@ use super::tool_types::{CalleesTool, CallersTool};
 pub(crate) async fn prepare_call_hierarchy(
     client: &ClangdClient,
     file: &std::path::Path,
+    source_text: &str,
     line: u32,
     column: u32,
 ) -> Result<Value> {
-    open_document(client, file).await?;
+    open_document(client, file, source_text).await?;
     client
         .request(
             "textDocument/prepareCallHierarchy",
-            position_arg(file, line, column),
+            position_arg(file, line, column)?,
         )
         .await
 }
@@ -57,14 +58,14 @@ pub(crate) async fn call_hierarchy_response(
     method: &str,
     field_name: &str,
 ) -> Result<Value> {
-    let request = checked_call_hierarchy_request(args)?;
+    let request = checked_call_hierarchy_request(args, handle)?;
     let client = request.client(handle).await?;
     call_hierarchy_response_for_client(&client, &request, method, field_name).await
 }
 
-fn checked_call_hierarchy_request(args: &Value) -> Result<PositionRequest> {
+fn checked_call_hierarchy_request(args: &Value, handle: &ClangdHandle) -> Result<PositionRequest> {
     ensure_clangd()?;
-    PositionRequest::from_args(args)
+    PositionRequest::from_args(args, handle)
 }
 
 pub(crate) async fn call_hierarchy_response_for_client(
@@ -73,8 +74,14 @@ pub(crate) async fn call_hierarchy_response_for_client(
     method: &str,
     field_name: &str,
 ) -> Result<Value> {
-    let items =
-        prepare_call_hierarchy(client, &request.file.file, request.line, request.column).await?;
+    let items = prepare_call_hierarchy(
+        client,
+        &request.file.file,
+        &request.file.source_text,
+        request.line,
+        request.column,
+    )
+    .await?;
     Ok(json!({ field_name: collect_call_hierarchy_calls(client, method, &items).await? }))
 }
 

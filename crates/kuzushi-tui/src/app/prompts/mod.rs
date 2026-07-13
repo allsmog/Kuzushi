@@ -10,3 +10,12 @@ mod document;
 mod tests;
 mod tune_action_count;
 mod unquote_tune_value;
+
+impl ShellApp {
+    fn invalidate_prompt_view_cache(&mut self) {
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_prompt_overrides();
+        self.invalidate_view_hydration();
+    }
+}

@@ -19,8 +19,10 @@ use super::play::PlayOutcome;
 use super::play_context::PlayContext;
 use super::spec::PlaySpec;
 use super::transport::PlayTransport;
-use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
+use crate::runtime::{AgentQueryRequest, AgentRuntime, RuntimeCost, RuntimeCostReport};
+use crate::structured_output::{
+    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
+};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -59,6 +61,7 @@ struct PlannedLoop<'a> {
     steps: Vec<PlayOutcome>,
     observations: Vec<String>,
     stopped_by_planner: bool,
+    cost: RuntimeCostReport,
 }
 
 impl PlannedLoop<'_> {
@@ -71,7 +74,11 @@ impl PlannedLoop<'_> {
             self.model,
             self.workspace_root,
         )?;
-        let Some(spec) = proposed_play(decision, &mut self.stopped_by_planner) else {
+        self.cost = self.cost.checked_add(
+            decision.cost_report()?,
+            "offense planner accumulated cost",
+        )?;
+        let Some(spec) = proposed_play(decision.value, &mut self.stopped_by_planner) else {
             return Ok(false);
         };
         let outcome = execute_planned_step(&spec, self.ctx, self.transport)?;
@@ -83,7 +90,13 @@ impl PlannedLoop<'_> {
     }
 
     fn finish(self, chain_name: &str) -> ChainOutcome {
-        finish_planned_chain(chain_name, self.ctx, self.steps, self.stopped_by_planner)
+        finish_planned_chain(
+            chain_name,
+            self.ctx,
+            self.steps,
+            self.stopped_by_planner,
+            self.cost,
+        )
     }
 }
 
@@ -114,6 +127,7 @@ pub fn run_planned_chain(
         steps: Vec::new(),
         observations: Vec::new(),
         stopped_by_planner: false,
+        cost: RuntimeCostReport::known(RuntimeCost::ZERO),
     };
     for _ in 0..budget.max_steps.max(1) {
         if !planned.run_next()? {
@@ -139,9 +153,9 @@ fn plan_next_step(
     runtime: &dyn AgentRuntime,
     model: &str,
     workspace_root: &std::path::Path,
-) -> Result<PlannerStep> {
+) -> Result<CostedStructuredJson<PlannerStep>> {
     let prompt = planner_prompt(goal, observations);
-    query_required_structured_json(
+    query_required_structured_json_with_cost(
         runtime,
         AgentQueryRequest::new(
             model,
@@ -194,6 +208,7 @@ fn finish_planned_chain(
     ctx: &PlayContext,
     steps: Vec<PlayOutcome>,
     stopped_by_planner: bool,
+    cost: RuntimeCostReport,
 ) -> ChainOutcome {
     let landed = steps.iter().filter(|s| s.exploited).count();
     // A planned chain "completed" when the planner stopped on its own terms
@@ -215,6 +230,8 @@ fn finish_planned_chain(
         steps,
         completed,
         summary,
+        cost_usd: cost.observed_usd(),
+        cost_usd_exact: cost.is_complete(),
     }
 }
 

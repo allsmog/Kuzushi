@@ -1,0 +1,74 @@
+{
+  "runId": "run-1783669063-d318bfd79f95",
+  "artifacts": [
+    {
+      "label": "tool input",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/input.json",
+      "kind": "json"
+    },
+    {
+      "label": "run metadata",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/run.json",
+      "kind": "json"
+    },
+    {
+      "label": "run events",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/events.jsonl",
+      "kind": "jsonl"
+    },
+    {
+      "label": "runtime trace",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/trace.jsonl",
+      "kind": "jsonl"
+    },
+    {
+      "label": "failure handoff",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/failures.json",
+      "kind": "json"
+    },
+    {
+      "label": "report",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/report.md",
+      "kind": "markdown"
+    },
+    {
+      "label": "artifact manifest",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/artifacts.json",
+      "kind": "json"
+    },
+    {
+      "label": "tool result",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/result.json",
+      "kind": "json"
+    }
+  ],
+  "objects": [
+    {
+      "label": "tool input",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/input.json",
+      "objectRef": {
+        "kind": "blob",
+        "hash": "1ab443b3214f63c25abf0122ba5cd3a918535e06f6cba3534305f2386602628b",
+        "sizeBytes": 39
+      }
+    },
+    {
+      "label": "failure handoff",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/failures.json",
+      "objectRef": {
+        "kind": "diagnostic-bundle",
+        "hash": "51534a3629be2a2e801684e1e2ab4da72928deed84e1b91dfe2ad35781273f8e",
+        "sizeBytes": 4155
+      }
+    },
+    {
+      "label": "tool result",
+      "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783669063-d318bfd79f95/result.json",
+      "objectRef": {
+        "kind": "blob",
+        "hash": "ff93ed66614e172b98079f000b5916b08e00b6ae4b8375c87ad5eedfb580a55a",
+        "sizeBytes": 4832
+      }
+    }
+  ]
+}

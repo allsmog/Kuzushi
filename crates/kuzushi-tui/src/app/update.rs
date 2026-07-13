@@ -49,17 +49,6 @@ pub(crate) fn update_and_execute_effects(app: &mut ShellApp, msg: Msg) -> bool {
     changed
 }
 
-pub(crate) fn update_many_and_execute_effects(
-    app: &mut ShellApp,
-    messages: impl IntoIterator<Item = Msg>,
-) -> bool {
-    let mut changed = false;
-    for msg in messages {
-        changed |= update_and_execute_effects(app, msg);
-    }
-    changed
-}
-
 impl UpdateResult {
     fn changed(changed: bool) -> Self {
         Self {
@@ -252,6 +241,7 @@ mod tests {
         config.model = Some("openai:gpt-5.5".to_string());
         let mut app = ShellApp::new(config, None);
         app.set_target(Some(target.path().to_path_buf()));
+        app.session_mut().mark_session_api_key_ready("openai");
         app.set_pending_plan(PlanProposal {
             goal: "g".to_string(),
             summary: "s".to_string(),

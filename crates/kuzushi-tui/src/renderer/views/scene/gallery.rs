@@ -273,6 +273,10 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
     let mut spans = vec![Span::styled("pages  ".to_string(), theme::muted())];
     append_page_tabs(&mut spans, app, page);
     spans.push(Span::styled("  ·  Tab cycles".to_string(), theme::muted()));
+    spans.push(Span::styled(
+        "  ·  Esc/q return".to_string(),
+        theme::muted(),
+    ));
     if page.is_3d() {
         let motion = if app.router.scene().paused() {
             "paused"
@@ -286,10 +290,6 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
             theme::muted(),
         ));
     }
-    spans.push(Span::styled(
-        "  ·  Esc/q return".to_string(),
-        theme::muted(),
-    ));
     spans
 }
 

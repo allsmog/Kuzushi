@@ -21,13 +21,97 @@ pub struct PatchResult {
     pub build_command: Option<String>,
     pub test_command: Option<String>,
     pub worktree_path: Option<String>,
+    /// Provider-observed patch synthesis subtotal. `None` is unavailable,
+    /// never an inferred exact zero.
     pub cost_usd: Option<f64>,
+    /// True when at least one paid synthesis call did not return trustworthy
+    /// provider usage. Legacy results with a cost and no bit remain exact;
+    /// legacy results with no cost remain unavailable.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub provider_spend_unresolved: bool,
     pub validator_log: Option<String>,
     pub history: Vec<PatchAttempt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+}
+
+impl PatchResult {
+    pub fn validated_cost_usd(&self) -> Result<Option<f64>> {
+        if let Some(cost_usd) = self.cost_usd {
+            anyhow::ensure!(
+                cost_usd.is_finite() && cost_usd >= 0.0,
+                "patch result cost must be a finite non-negative USD amount, got {cost_usd}"
+            );
+        }
+        anyhow::ensure!(
+            !self.provider_spend_unresolved || self.cost_usd.is_some(),
+            "patch result unresolved provider spend requires an observed cost subtotal"
+        );
+        Ok(self.cost_usd)
+    }
+}
+
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+#[cfg(test)]
+mod patch_cost_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_patch_cost_accepts_a_cost_or_an_unavailable_receipt() {
+        let with_cost = patch_result_from_json(Some(0.0));
+        let without_cost = patch_result_from_json(None);
+
+        assert_eq!(with_cost.validated_cost_usd().unwrap(), Some(0.0));
+        assert_eq!(without_cost.validated_cost_usd().unwrap(), None);
+    }
+
+    #[test]
+    fn unresolved_patch_cost_bit_round_trips() {
+        let mut result = patch_result_from_json(Some(0.25));
+        result.provider_spend_unresolved = true;
+
+        let encoded = serde_json::to_value(&result).unwrap();
+        let decoded: PatchResult = serde_json::from_value(encoded).unwrap();
+
+        assert_eq!(decoded.cost_usd, Some(0.25));
+        assert!(decoded.provider_spend_unresolved);
+        assert_eq!(decoded.validated_cost_usd().unwrap(), Some(0.25));
+    }
+
+    #[test]
+    fn rejects_invalid_or_unbacked_patch_cost_state() {
+        for invalid in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut result = patch_result_from_json(Some(0.0));
+            result.cost_usd = Some(invalid);
+            assert!(result.validated_cost_usd().is_err());
+        }
+        let mut unresolved_without_observation = patch_result_from_json(None);
+        unresolved_without_observation.provider_spend_unresolved = true;
+        assert!(unresolved_without_observation.validated_cost_usd().is_err());
+    }
+
+    fn patch_result_from_json(cost_usd: Option<f64>) -> PatchResult {
+        serde_json::from_value(serde_json::json!({
+            "patchRunId": "patch-legacy",
+            "fingerprint": "fp",
+            "repo": "/repo",
+            "diff": null,
+            "status": "UNKNOWN",
+            "iterations": 0,
+            "buildCommand": null,
+            "testCommand": null,
+            "worktreePath": null,
+            "costUsd": cost_usd,
+            "validatorLog": null,
+            "history": [],
+        }))
+        .unwrap()
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

@@ -1,15 +1,29 @@
 use super::*;
 
-#[derive(Default)]
 pub(in crate::modules) struct TriageRunStats {
     pub(in crate::modules) tp: usize,
     pub(in crate::modules) fp: usize,
     pub(in crate::modules) needs_review: usize,
     pub(in crate::modules) by_design: usize,
-    pub(in crate::modules) total_cost: f64,
+    cost: crate::runtime::RuntimeCostReport,
     pub(in crate::modules) cost_cap_hit: bool,
     pub(in crate::modules) pending_after_cap: usize,
     pub(in crate::modules) results: Vec<Value>,
+}
+
+impl Default for TriageRunStats {
+    fn default() -> Self {
+        Self {
+            tp: 0,
+            fp: 0,
+            needs_review: 0,
+            by_design: 0,
+            cost: crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+            cost_cap_hit: false,
+            pending_after_cap: 0,
+            results: Vec::new(),
+        }
+    }
 }
 
 impl TriageRunStats {
@@ -22,6 +36,10 @@ impl TriageRunStats {
 
     pub(in crate::modules) fn triaged(&self) -> usize {
         self.results.len()
+    }
+
+    pub(in crate::modules) fn cost_report(&self) -> crate::runtime::RuntimeCostReport {
+        self.cost
     }
 
     pub(in crate::modules) fn high_confidence_false_positive_count(&self) -> usize {
@@ -41,45 +59,60 @@ impl TriageRunStats {
         finding: Finding,
         error: anyhow::Error,
     ) {
+        self.cost = self.cost.mark_incomplete();
         self.needs_review += 1;
-        self.results.push(json!({
+        let mut result = json!({
             "fingerprint": finding.fingerprint,
             "stage": "haiku",
             "verdict": "needs_review",
             "confidence": 0.0,
             "rationale": format!("triage call failed: {error}"),
-        }));
+        });
+        crate::module_result::apply_runtime_cost_report(
+            &mut result,
+            crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+        );
+        self.results.push(result);
     }
 
     pub(in crate::modules) fn record_unpersisted_outcome(
         &mut self,
         finding: Finding,
         outcome: TriageOutcome,
-    ) {
-        self.results.push(json!({
+    ) -> Result<()> {
+        let cost = crate::runtime::triage_cost_report(&outcome)?;
+        self.record_provider_cost(cost)?;
+        self.record_verdict(outcome.verdict);
+        let mut result = json!({
             "fingerprint": finding.fingerprint,
             "stage": "haiku",
             "verdict": outcome.verdict.as_str(),
             "confidence": outcome.confidence,
             "rationale": "finding lacked SQLite id; verdict not persisted",
-        }));
+        });
+        crate::module_result::apply_runtime_cost_report(&mut result, cost);
+        self.results.push(result);
+        Ok(())
     }
 
     pub(in crate::modules) fn record_persisted_outcome(
         &mut self,
         finding: Finding,
         outcome: TriageOutcome,
-    ) {
-        self.total_cost += outcome.cost_usd;
+    ) -> Result<()> {
+        let cost = crate::runtime::triage_cost_report(&outcome)?;
+        self.record_provider_cost(cost)?;
         self.record_verdict(outcome.verdict);
-        self.results.push(json!({
+        let mut result = json!({
             "fingerprint": finding.fingerprint,
             "stage": "haiku",
             "verdict": outcome.verdict.as_str(),
             "confidence": outcome.confidence,
             "rationale": outcome.rationale,
-            "costUsd": outcome.cost_usd,
-        }));
+        });
+        crate::module_result::apply_runtime_cost_report(&mut result, cost);
+        self.results.push(result);
+        Ok(())
     }
 
     pub(in crate::modules) fn record_cached_outcome(
@@ -88,15 +121,24 @@ impl TriageRunStats {
         outcome: TriageOutcome,
     ) {
         self.record_verdict(outcome.verdict);
-        self.results.push(json!({
+        let mut result = json!({
             "fingerprint": finding.fingerprint,
             "stage": "haiku",
             "verdict": outcome.verdict.as_str(),
             "confidence": outcome.confidence,
             "rationale": outcome.rationale,
-            "costUsd": 0.0,
             "cached": true,
-        }));
+        });
+        crate::module_result::apply_runtime_cost_report(
+            &mut result,
+            crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        );
+        self.results.push(result);
+    }
+
+    fn record_provider_cost(&mut self, cost: crate::runtime::RuntimeCostReport) -> Result<()> {
+        self.cost = self.cost.checked_add(cost, "triage accumulated cost")?;
+        Ok(())
     }
 
     pub(in crate::modules) fn record_verdict(&mut self, verdict: TriageVerdict) {
@@ -131,7 +173,7 @@ pub(in crate::modules) fn triage_one_finding(
     stats: &mut TriageRunStats,
     finding: Finding,
 ) -> Result<()> {
-    if triage_cost_cap_reached(input.cost_cap_usd, stats.total_cost) {
+    if triage_cost_cap_reached(input.cost_cap_usd, stats.cost_report()) {
         stats.record_cost_cap_pending();
         return Ok(());
     }
@@ -146,7 +188,7 @@ pub(in crate::modules) fn triage_one_finding(
             return Ok(());
         }
     };
-    persist_triage_outcome(store, stats, finding, runtime_outcome);
+    persist_triage_outcome(store, stats, finding, runtime_outcome)?;
     Ok(())
 }
 

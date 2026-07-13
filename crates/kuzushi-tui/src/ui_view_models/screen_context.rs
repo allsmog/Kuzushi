@@ -94,6 +94,7 @@ fn system_shell_view_label(view: &ShellView) -> Option<&'static str> {
         ShellView::Quickstart => Some("Quickstart"),
         ShellView::Logs => Some("Logs"),
         ShellView::Config => Some("Config"),
+        ShellView::Permissions => Some("Permissions"),
         ShellView::Health => Some("Health"),
         ShellView::Tools => Some("Tools"),
         ShellView::Options => Some("Options"),
@@ -314,8 +315,8 @@ fn finding_summary(app: &ShellApp) -> Option<ScreenFindingSummary> {
         return None;
     }
     let findings = projected_visible_findings(app)
-        .into_iter()
-        .map(|projected| projected.finding)
+        .iter()
+        .map(|projected| projected.finding.clone())
         .collect::<Vec<_>>();
     if findings.is_empty() {
         return None;

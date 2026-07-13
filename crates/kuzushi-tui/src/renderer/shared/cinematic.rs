@@ -1,8 +1,9 @@
 use super::*;
 use crate::theme::CinematicProfile;
-use ratatui::buffer::{Buffer, Cell};
+use ratatui::buffer::{Buffer, Cell, CellDiffOption};
 use ratatui::style::{Color, Modifier};
 
+#[cfg(test)]
 const FIX_KANJI: &str = "掛";
 
 /// Apply the phase backdrop without replacing semantic cell backgrounds.
@@ -43,16 +44,8 @@ pub(crate) fn paint_cinematic_scanlines_for_profile(
     });
 }
 
-/// Draw a faint Fix motif only in unused cells with non-semantic backgrounds.
-pub(crate) fn paint_fix_watermark(buffer: &mut Buffer, area: Rect) {
-    paint_fix_watermark_for_profile(buffer, area, crate::theme::cinematic_profile());
-}
-
-pub(crate) fn paint_fix_watermark_for_profile(
-    buffer: &mut Buffer,
-    area: Rect,
-    profile: CinematicProfile,
-) {
+#[cfg(test)]
+fn paint_fix_watermark_for_profile(buffer: &mut Buffer, area: Rect, profile: CinematicProfile) {
     let Some(color) = profile.watermark() else {
         return;
     };
@@ -81,9 +74,10 @@ fn tint_owned_background(cell: &mut Cell, profile: CinematicProfile, color: Colo
 }
 
 fn is_safe_backdrop_cell(cell: &Cell) -> bool {
-    !cell.skip && !cell.modifier.intersects(Modifier::REVERSED)
+    cell.diff_option != CellDiffOption::Skip && !cell.modifier.intersects(Modifier::REVERSED)
 }
 
+#[cfg(test)]
 fn centered_origin(area: Rect, width: u16, height: u16) -> (u16, u16) {
     (
         area.x + area.width.saturating_sub(width) / 2,
@@ -91,6 +85,7 @@ fn centered_origin(area: Rect, width: u16, height: u16) -> (u16, u16) {
     )
 }
 
+#[cfg(test)]
 fn nearest_unused_span(
     buffer: &Buffer,
     area: Rect,
@@ -107,11 +102,13 @@ fn nearest_unused_span(
         .min_by_key(|position| motif_distance(*position, center))
 }
 
+#[cfg(test)]
 fn motif_positions(area: Rect, width: u16) -> impl Iterator<Item = (u16, u16)> {
     let rightmost = area.right().saturating_sub(width);
     (area.top()..area.bottom()).flat_map(move |y| (area.left()..=rightmost).map(move |x| (x, y)))
 }
 
+#[cfg(test)]
 fn motif_distance(position: (u16, u16), center: (u16, u16)) -> (u16, u16, u16, u16) {
     let horizontal = position.0.abs_diff(center.0);
     let vertical = position.1.abs_diff(center.1);
@@ -123,6 +120,7 @@ fn motif_distance(position: (u16, u16), center: (u16, u16)) -> (u16, u16, u16, u
     )
 }
 
+#[cfg(test)]
 fn paint_unused_kanji(
     buffer: &mut Buffer,
     area: Rect,
@@ -154,6 +152,7 @@ fn paint_unused_kanji(
     }
 }
 
+#[cfg(test)]
 fn motif_span_is_unused(
     buffer: &Buffer,
     area: Rect,
@@ -169,6 +168,7 @@ fn motif_span_is_unused(
     })
 }
 
+#[cfg(test)]
 fn motif_cell_is_unused(cell: &Cell, profile: CinematicProfile) -> bool {
     cell.symbol().trim().is_empty()
         && is_safe_backdrop_cell(cell)

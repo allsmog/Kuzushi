@@ -10,16 +10,20 @@ impl ShellApp {
             return Vec::new();
         };
         let prior = self.agent_chat().cloned().unwrap_or_default();
+        let Some(target) = self.agent_target_for_question(&prior, &operator_question) else {
+            return Vec::new();
+        };
         let Some(model) = self.agent_model_for_question(&prior, &operator_question) else {
             return Vec::new();
         };
-        let Some(dispatch) = self.start_agent_dispatch(prior, operator_question, model) else {
-            return Vec::new();
-        };
+        let dispatch = self.build_agent_dispatch(prior, operator_question, model, target);
         vec![ShellEffect::DispatchAgent(dispatch)]
     }
 
     pub(crate) fn dispatch_agent(&mut self, dispatch: AgentDispatch) {
+        if self.reject_runtime_launch_while_budget_halted(true, "agent") {
+            return;
+        }
         if self.has_running_work() {
             self.log(
                 "agent",
@@ -37,6 +41,7 @@ impl ShellApp {
         };
         let generation = ticket.generation();
         let watchdog_cancel = ticket.cancel.clone();
+        self.begin_run_cost_tracking(&dispatch.run_id, true);
         self.set_activity(Some(ActivitySession::for_optional_phase(
             dispatch.run_id.clone(),
             dispatch.origin_phase,
@@ -82,6 +87,13 @@ impl ShellApp {
             self.show_agent_question_error(prior, question, message);
             return None;
         }
+        let provider = model.split(':').next().unwrap_or("configured provider");
+        if !self.provider_auth_ready_for(provider) {
+            let message = format!("ask needs credentials for {provider}. Next: auth");
+            self.set_error_notice("ask", message.clone());
+            self.show_agent_question_error(prior, question, message);
+            return None;
+        }
         Some(model)
     }
 
@@ -100,13 +112,13 @@ impl ShellApp {
         self.log("error", message);
     }
 
-    fn start_agent_dispatch(
+    fn build_agent_dispatch(
         &mut self,
         prior: AgentChatView,
         operator_question: String,
         model: String,
-    ) -> Option<AgentDispatch> {
-        let target = self.agent_target_for_question(&prior, &operator_question)?;
+        target: PathBuf,
+    ) -> AgentDispatch {
         let screen_context = screen_context_model(self);
         let failure_context = self.take_pending_failure_context();
         let (run_id, started_secs) = next_agent_run_id();
@@ -115,7 +127,7 @@ impl ShellApp {
             failure_context.as_ref(),
             Some(&screen_context),
         );
-        Some(self.agent_dispatch(
+        self.agent_dispatch(
             prior,
             operator_question,
             model,
@@ -125,7 +137,7 @@ impl ShellApp {
             started_secs,
             screen_context.scope_chip(),
             failure_context,
-        ))
+        )
     }
 
     fn agent_target_for_question(
@@ -307,13 +319,13 @@ mod tests {
     }
 
     fn seed_agent_run(app: &mut ShellApp, model: &str) -> String {
-        let dispatch = app
-            .start_agent_dispatch(
-                AgentChatView::default(),
-                "what changed?".to_string(),
-                model.to_string(),
-            )
-            .expect("explicit target should produce dispatch");
+        let target = app.target_owned().expect("explicit target");
+        let dispatch = app.build_agent_dispatch(
+            AgentChatView::default(),
+            "what changed?".to_string(),
+            model.to_string(),
+            target,
+        );
         let run_id = dispatch.run_id.clone();
         app.install_agent_dispatch_state(&dispatch, ScanCancellation::default());
         app.write_agent_dispatch_artifacts(&dispatch).unwrap();
@@ -369,23 +381,21 @@ mod tests {
         let model = test_agent_model();
         let mut app = agent_test_app(target.path(), &model);
 
-        let manual = app
-            .start_agent_dispatch(
-                AgentChatView::default(),
-                "explain this target".to_string(),
-                model.clone(),
-            )
-            .expect("explicit target should produce dispatch");
+        let manual = app.build_agent_dispatch(
+            AgentChatView::default(),
+            "explain this target".to_string(),
+            model.clone(),
+            target.path().to_path_buf(),
+        );
         assert_eq!(manual.origin_phase, None);
 
         app.engagement.set_phase(WorkflowPhase::Hunt);
-        let guided = app
-            .start_agent_dispatch(
-                AgentChatView::default(),
-                "steer the hunt".to_string(),
-                model,
-            )
-            .expect("explicit target should produce dispatch");
+        let guided = app.build_agent_dispatch(
+            AgentChatView::default(),
+            "steer the hunt".to_string(),
+            model,
+            target.path().to_path_buf(),
+        );
         assert_eq!(guided.origin_phase, Some(WorkflowPhase::Hunt));
     }
 
@@ -448,9 +458,12 @@ mod tests {
         let runs_root = kuzushi_core::runs_root(target.path());
         std::fs::create_dir_all(runs_root.parent().unwrap()).unwrap();
         std::fs::write(&runs_root, "path collision").unwrap();
-        let dispatch = app
-            .start_agent_dispatch(AgentChatView::default(), "what changed?".to_string(), model)
-            .expect("explicit target should produce dispatch");
+        let dispatch = app.build_agent_dispatch(
+            AgentChatView::default(),
+            "what changed?".to_string(),
+            model,
+            target.path().to_path_buf(),
+        );
 
         app.dispatch_agent(dispatch);
 

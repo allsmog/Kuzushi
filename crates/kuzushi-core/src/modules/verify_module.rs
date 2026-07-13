@@ -12,6 +12,13 @@ pub(crate) fn verify_module() -> BuiltinModule {
                 "Verify whether a finding is exploitable (LLM-driven; consults runtime for PoC reasoning).",
                 verify_finding_options(),
             )
+            .with_prompt(editable_prompt(
+                "verification instructions",
+                "verify",
+                "finding",
+                "VERIFY_PROMPT",
+                crate::verification::DEFAULT_VERIFY_PROMPT.to_string(),
+            ))
             .with_policy(workspace_policy(
                 ToolPhase::Confirm,
                 RuntimeRequirement::Always,

@@ -28,7 +28,11 @@ fn primary_shell_view_lines(
         ShellView::Home => home_lines(app, area),
         ShellView::Catalog => catalog_view_lines(app, area),
         ShellView::Recommend => recommend_lines(app, area),
-        ShellView::Module => module_lines(app, area),
+        ShellView::Module => viewport_lines(
+            module_lines(app, area),
+            area.height,
+            default_scroll_offset(app),
+        ),
         ShellView::ModuleRun => module_run_lines(app, area),
         ShellView::Workbench => workbench_lines(app, area),
         ShellView::Pwn => viewport_lines(
@@ -53,35 +57,39 @@ fn threat_run_shell_view_lines(
 ) -> Option<Vec<Line<'static>>> {
     Some(match view {
         ShellView::Tune => tune_lines(app, area),
-        ShellView::Threat => viewport_lines(
+        ShellView::Threat => default_scrolled_lines(
+            app,
+            area,
             threat_lines(app, area, app.router.threat().view()),
-            area.height,
-            default_scroll_offset(app),
         ),
         ShellView::ThreatEditor => threat_editor_lines(app, area),
         ShellView::PromptsEditor => prompts_lines(app, area),
         ShellView::ActorDetail => actor_detail_lines(app, area, app.router.actor_detail().index()),
-        ShellView::Runs => runs_lines(app, area),
-        ShellView::Jobs => viewport_lines(
-            jobs_lines(app, area),
-            area.height,
-            default_scroll_offset(app),
+        ShellView::Runs => default_scrolled_lines(app, area, runs_lines(app, area)),
+        ShellView::Jobs => default_scrolled_lines(app, area, jobs_lines(app, area)),
+        ShellView::RunDiff => run_diff_view_lines(app, area),
+        ShellView::Replay => default_scrolled_lines(
+            app,
+            area,
+            replay_lines(app, area, app.router.replay().run_id()),
         ),
-        ShellView::RunDiff => viewport_lines(
-            run_diff_lines(
-                app,
-                area,
-                app.router.run_diff().left(),
-                app.router.run_diff().right(),
-            ),
-            area.height,
-            default_scroll_offset(app),
+        ShellView::Trace => default_scrolled_lines(
+            app,
+            area,
+            trace_lines(app, area, app.router.trace().run_id()),
         ),
-        ShellView::Replay => replay_lines(app, area, app.router.replay().run_id()),
-        ShellView::Trace => trace_lines(app, area, app.router.trace().run_id()),
         ShellView::Patch => patch_lines(app, area, app.router.patch().alias()),
         _ => return None,
     })
+}
+
+fn run_diff_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let route = app.router.run_diff();
+    default_scrolled_lines(
+        app,
+        area,
+        run_diff_lines(app, area, route.left(), route.right()),
+    )
 }
 
 fn system_shell_view_lines(
@@ -100,10 +108,11 @@ fn system_document_shell_view_lines(
     view: ShellView,
 ) -> Option<Vec<Line<'static>>> {
     Some(match view {
-        ShellView::Help => viewport_lines(
+        ShellView::Help => pinned_document_viewport_lines(
             help_lines(app, area),
             area.height,
             app.router.help().scroll(),
+            3,
         ),
         ShellView::Quickstart => viewport_lines(
             quickstart_lines(app, area),
@@ -115,21 +124,23 @@ fn system_document_shell_view_lines(
             area.height,
             app.router.logs().scroll(),
         ),
-        ShellView::Config => config_lines(app, area),
-        ShellView::Health => viewport_lines(
-            health_lines(app, area),
-            area.height,
-            default_scroll_offset(app),
-        ),
-        ShellView::Tools => viewport_lines(
+        ShellView::Config => default_scrolled_lines(app, area, config_lines(app, area)),
+        ShellView::Permissions => permission_policy_view_lines(app, area),
+        ShellView::Health => default_scrolled_lines(app, area, health_lines(app, area)),
+        ShellView::Tools => pinned_document_viewport_lines(
             tools_lines(app, area),
             area.height,
             app.router.tools().scroll(),
+            3,
         ),
         ShellView::Auth => auth_lines(app, area),
         ShellView::Cost => cost_lines(app, area),
         _ => return None,
     })
+}
+
+fn permission_policy_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    default_scrolled_lines(app, area, permission_policy_lines(app, area))
 }
 
 fn system_overlay_shell_view_lines(
@@ -173,25 +184,31 @@ fn workspace_session_shell_view_lines(
     view: ShellView,
 ) -> Option<Vec<Line<'static>>> {
     Some(match view {
-        ShellView::Options => options_lines(app, area, app.router.options()),
-        ShellView::SastTasks => sast_tasks_lines(app, area),
-        ShellView::Context => context_lines(app, area),
-        ShellView::ProjectModel => project_model_lines(app, area),
-        ShellView::StrategyQueue => strategy_queue_lines(app, area),
-        ShellView::Workspace => workspace_lines(app, area),
+        ShellView::Options => {
+            default_scrolled_lines(app, area, options_lines(app, area, app.router.options()))
+        }
+        ShellView::SastTasks => default_scrolled_lines(app, area, sast_tasks_lines(app, area)),
+        ShellView::Context => default_scrolled_lines(app, area, context_lines(app, area)),
+        ShellView::ProjectModel => {
+            default_scrolled_lines(app, area, project_model_lines(app, area))
+        }
+        ShellView::StrategyQueue => {
+            default_scrolled_lines(app, area, strategy_queue_lines(app, area))
+        }
+        ShellView::Workspace => default_scrolled_lines(app, area, workspace_lines(app, area)),
         ShellView::KnowledgeBase => viewport_lines(
             knowledge_base_lines(app, area),
             area.height,
             app.router.kb().scroll(),
         ),
         ShellView::FailureHandoff => failure_handoff_lines(app, area),
-        ShellView::AgentChat => agent_chat_lines(app, area),
+        ShellView::AgentChat => default_scrolled_lines(app, area, agent_chat_lines(app, area)),
         ShellView::History => viewport_lines(
             history_lines(app, area),
             area.height,
             app.router.history().scroll(),
         ),
-        ShellView::Story => story_lines(app, area),
+        ShellView::Story => default_scrolled_lines(app, area, story_lines(app, area)),
         _ => return None,
     })
 }
@@ -200,10 +217,56 @@ fn default_scroll_offset(app: &ShellApp) -> usize {
     app.router.default_scroll().offset() as usize
 }
 
+fn default_scrolled_lines(
+    app: &ShellApp,
+    area: Rect,
+    lines: Vec<Line<'static>>,
+) -> Vec<Line<'static>> {
+    viewport_lines(lines, area.height, default_scroll_offset(app))
+}
+
 fn catalog_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let lines = catalog_lines(app, area);
     if app.router.catalog().is_expanded() {
         return viewport_lines(lines, area.height, app.router.modules().scroll());
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn default_scroll_reaches_the_tail_of_every_document_view_that_advertises_it() {
+        let area = Rect::new(0, 0, 60, 4);
+        for view in [
+            ShellView::Runs,
+            ShellView::Context,
+            ShellView::ProjectModel,
+            ShellView::StrategyQueue,
+            ShellView::Workspace,
+            ShellView::AgentChat,
+            ShellView::Story,
+        ] {
+            let mut app = ShellApp::new(V2Config::default(), None);
+            let top = rendered_text(shell_view_lines_for(&app, area, view));
+
+            app.router.default_scroll_mut().tail();
+            let tail_lines = shell_view_lines_for(&app, area, view);
+            let tail = rendered_text(tail_lines.clone());
+
+            assert_ne!(top, tail, "{view:?} ignored the default scroll offset");
+            assert_eq!(tail_lines.len(), area.height as usize, "{view:?}");
+        }
+    }
+
+    fn rendered_text(lines: Vec<Line<'static>>) -> String {
+        lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }

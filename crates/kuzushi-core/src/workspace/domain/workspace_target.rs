@@ -16,9 +16,6 @@ pub const WORKSPACE_SUPPRESSIONS_FILE: &str = "suppressions.toml";
 pub const WORKSPACE_CODEQL_DB_DIR: &str = "codeql-db";
 pub const LEGACY_CODEQL_STATE_DIR: &str = ".codeql";
 pub const LEGACY_CODEQL_DB_DIR: &str = "db";
-const WORKSPACE_STATE_IGNORE_FILE: &str = ".gitignore";
-const WORKSPACE_STATE_IGNORE_CONTENT: &str =
-    "*\n!scope.toml\n!prompts/\n!prompts/**\n!v3/\nv3/*\n!v3/config.toml\n";
 
 pub fn workspace_state_root(root: impl AsRef<Path>) -> PathBuf {
     root.as_ref().join(KUZUSHI_STATE_DIR)
@@ -140,31 +137,8 @@ impl WorkspaceTarget {
     }
 
     pub fn ensure_state_dir(&self) -> Result<PathBuf> {
-        let state_dir = ensure_workspace_descendant_dir(
-            &self.root,
-            Path::new(KUZUSHI_STATE_DIR).join(WORKSPACE_STATE_VERSION_DIR),
-        )?;
-        ensure_workspace_state_is_ignored(&self.root)?;
-        Ok(state_dir)
+        initialize_workspace_state(&self.root)
     }
-}
-
-fn ensure_workspace_state_is_ignored(root: &Path) -> Result<()> {
-    let ignore_path = workspace_state_root(root).join(WORKSPACE_STATE_IGNORE_FILE);
-    let mut file = match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&ignore_path)
-    {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("Could not create {}", ignore_path.display()))
-        }
-    };
-    std::io::Write::write_all(&mut file, WORKSPACE_STATE_IGNORE_CONTENT.as_bytes())
-        .with_context(|| format!("Could not write {}", ignore_path.display()))
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

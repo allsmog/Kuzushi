@@ -33,35 +33,119 @@ impl<'a> TracedRuntime<'a> {
         result: &Result<AgentQueryResponse>,
         elapsed_ms: u64,
     ) {
-        let provider = model_provider(model);
         match result {
-            Ok(response) => {
-                let preview = preview_text(&response.text);
-                let label = if preview.is_empty() {
-                    format!("{verb} · {prompt_len} chars in")
-                } else {
-                    format!("{verb} · {preview}")
-                };
-                let mut step = self
-                    .trace
-                    .step("reasoning", verb, label)
-                    .with_latency_ms(elapsed_ms)
-                    .with_model_metadata(model, provider, prompt_hash);
-                if response.cost_usd > 0.0 {
-                    step = step.with_cost_usd(response.cost_usd);
-                }
-                let _ = step.emit();
-            }
-            Err(error) => {
-                let _ = self
-                    .trace
-                    .step("refused", verb, format!("{verb} failed: {error}"))
-                    .with_latency_ms(elapsed_ms)
-                    .with_model_metadata(model, provider, prompt_hash)
-                    .with_severity("danger")
-                    .emit();
-            }
+            Ok(response) => self.record_successful_query(
+                verb,
+                prompt_len,
+                model,
+                prompt_hash,
+                response,
+                elapsed_ms,
+            ),
+            Err(error) => self.record_failed_query(verb, model, prompt_hash, error, elapsed_ms),
         }
+    }
+
+    fn record_successful_query(
+        &self,
+        verb: &str,
+        prompt_len: usize,
+        model: &str,
+        prompt_hash: &str,
+        response: &AgentQueryResponse,
+        elapsed_ms: u64,
+    ) {
+        let preview = preview_text(&response.text);
+        let label = if preview.is_empty() {
+            format!("{verb} · {prompt_len} chars in")
+        } else {
+            format!("{verb} · {preview}")
+        };
+        let mut step = self
+            .trace
+            .step("reasoning", verb, label)
+            .with_latency_ms(elapsed_ms)
+            .with_model_metadata(model, model_provider(model), prompt_hash)
+            .with_call_attempted(true);
+        if let Ok(cost) = response.checked_cost_report() {
+            step = step.with_cost_report(cost);
+        }
+        let _ = step.emit();
+    }
+
+    fn record_failed_query(
+        &self,
+        verb: &str,
+        model: &str,
+        prompt_hash: &str,
+        error: &anyhow::Error,
+        elapsed_ms: u64,
+    ) {
+        let _ = self
+            .trace
+            .step("refused", verb, format!("{verb} failed: {error}"))
+            .with_latency_ms(elapsed_ms)
+            .with_model_metadata(model, model_provider(model), prompt_hash)
+            .with_call_attempted(true)
+            .with_severity("danger")
+            .emit();
+    }
+
+    fn record_triage_result(
+        &self,
+        result: &Result<TriageOutcome>,
+        title: &str,
+        model: &str,
+        prompt_hash: &str,
+        elapsed_ms: u64,
+    ) {
+        match result {
+            Ok(outcome) => {
+                self.record_successful_triage(outcome, title, model, prompt_hash, elapsed_ms)
+            }
+            Err(error) => self.record_failed_triage(error, model, prompt_hash, elapsed_ms),
+        }
+    }
+
+    fn record_successful_triage(
+        &self,
+        outcome: &TriageOutcome,
+        title: &str,
+        model: &str,
+        prompt_hash: &str,
+        elapsed_ms: u64,
+    ) {
+        let mut step = self
+            .trace
+            .step(
+                "reasoning",
+                "triage",
+                format!("triage · {}", preview_str(title)),
+            )
+            .with_latency_ms(elapsed_ms)
+            .with_model_metadata(model, model_provider(model), prompt_hash)
+            .with_call_attempted(true);
+        if let Ok(cost) = crate::runtime::triage_cost_report(outcome) {
+            step = step.with_cost_report(cost);
+        }
+        let _ = step.emit();
+    }
+
+    fn record_failed_triage(
+        &self,
+        error: &anyhow::Error,
+        model: &str,
+        prompt_hash: &str,
+        elapsed_ms: u64,
+    ) {
+        let _ = self
+            .trace
+            .step("refused", "triage", format!("triage failed: {error}"))
+            .with_latency_ms(elapsed_ms)
+            .with_model_metadata(model, model_provider(model), prompt_hash)
+            .with_call_attempted(true)
+            .with_severity("danger")
+            .emit();
     }
 
     fn record_step(
@@ -116,8 +200,9 @@ impl<'a> TracedRuntime<'a> {
                 tool_call_label(call, history_len),
             )
             .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, provider, prompt_hash);
-        if let Some(cost) = cost_usd.filter(|cost| *cost > 0.0) {
+            .with_model_metadata(model, provider, prompt_hash)
+            .with_call_attempted(true);
+        if let Some(cost) = cost_usd {
             step = step.with_cost_usd(cost);
         }
         let _ = step.emit();
@@ -137,8 +222,9 @@ impl<'a> TracedRuntime<'a> {
             .trace
             .step("done", "next-step", final_label(text, history_len))
             .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, provider, prompt_hash);
-        if let Some(cost) = cost_usd.filter(|cost| *cost > 0.0) {
+            .with_model_metadata(model, provider, prompt_hash)
+            .with_call_attempted(true);
+        if let Some(cost) = cost_usd {
             step = step.with_cost_usd(cost);
         }
         let _ = step.emit();
@@ -157,6 +243,7 @@ impl<'a> TracedRuntime<'a> {
             .step("refused", "next-step", format!("step failed: {error}"))
             .with_latency_ms(elapsed_ms)
             .with_model_metadata(model, provider, prompt_hash)
+            .with_call_attempted(true)
             .with_severity("danger")
             .emit();
     }
@@ -175,7 +262,10 @@ impl AgentRuntime for TracedRuntime<'_> {
             &model,
             &prompt_hash,
         );
-        let result = self.inner.query_blocking(request);
+        let result = self
+            .inner
+            .query_blocking(request)
+            .and_then(AgentQueryResponse::validate_cost);
         self.record_query(
             "query",
             prompt_len,
@@ -202,7 +292,10 @@ impl AgentRuntime for TracedRuntime<'_> {
             &model,
             &prompt_hash,
         );
-        let result = self.inner.query_blocking_controlled(request, control);
+        let result = self
+            .inner
+            .query_blocking_controlled(request, control)
+            .and_then(AgentQueryResponse::validate_cost);
         self.record_query(
             "query",
             prompt_len,
@@ -225,32 +318,17 @@ impl AgentRuntime for TracedRuntime<'_> {
             &model,
             &prompt_hash,
         );
-        let result = self.inner.triage_finding_blocking(request);
-        let elapsed_ms = start.elapsed().as_millis() as u64;
-        let provider = model_provider(&model);
-        match &result {
-            Ok(_) => {
-                let _ = self
-                    .trace
-                    .step(
-                        "reasoning",
-                        "triage",
-                        format!("triage · {}", preview_str(&title)),
-                    )
-                    .with_latency_ms(elapsed_ms)
-                    .with_model_metadata(&model, provider, &prompt_hash)
-                    .emit();
-            }
-            Err(error) => {
-                let _ = self
-                    .trace
-                    .step("refused", "triage", format!("triage failed: {error}"))
-                    .with_latency_ms(elapsed_ms)
-                    .with_model_metadata(&model, provider, &prompt_hash)
-                    .with_severity("danger")
-                    .emit();
-            }
-        }
+        let result = self
+            .inner
+            .triage_finding_blocking(request)
+            .and_then(TriageOutcome::validate_cost);
+        self.record_triage_result(
+            &result,
+            &title,
+            &model,
+            &prompt_hash,
+            start.elapsed().as_millis() as u64,
+        );
         result
     }
 
@@ -272,7 +350,10 @@ impl AgentRuntime for TracedRuntime<'_> {
             &model,
             &prompt_hash,
         );
-        let result = self.inner.next_step_blocking(request, history);
+        let result = self
+            .inner
+            .next_step_blocking(request, history)
+            .and_then(AgentLoopStep::validate_cost);
         self.record_step(
             &result,
             start.elapsed().as_millis() as u64,
@@ -336,7 +417,10 @@ impl AgentRuntime for TracedRuntime<'_> {
             &model,
             &prompt_hash,
         );
-        let result = self.inner.spawn_subagent_blocking(role, request);
+        let result = self
+            .inner
+            .spawn_subagent_blocking(role, request)
+            .and_then(AgentQueryResponse::validate_cost);
         self.record_query(
             verb,
             prompt_len,

@@ -31,7 +31,7 @@ fn semgrep_options() -> Vec<OptionSpec> {
         static_proof_state_option(),
         opt("config", OptionType::String, "Semgrep config name or path.")
             .aliases(&["configFlag", "config_flag"])
-            .default(json!("auto")),
+            .default(json!(crate::scan::DEFAULT_SEMGREP_CONFIG)),
     ]
 }
 

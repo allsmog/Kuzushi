@@ -1,6 +1,6 @@
 # cargo-deny policy for the Kuzushi Rust workspace.
-# CI runs `cargo deny check advisories licenses sources` (see ci.yml).
-# Run locally with: cargo deny check
+# CI and contributors run the same explicit policy set:
+# `cargo deny check advisories licenses bans sources`.
 
 [graph]
 all-features = true
@@ -9,13 +9,9 @@ all-features = true
 version = 2
 yanked = "deny"
 # Add entries here (with a link and rationale) only when a fix is genuinely
-# unavailable upstream.
-ignore = [
-  # `paste` is archived/unmaintained; it is a proc-macro-only dependency of
-  # ratatui 0.29 with no safe upgrade published. Re-evaluate when ratatui
-  # drops it. https://rustsec.org/advisories/RUSTSEC-2024-0436
-  "RUSTSEC-2024-0436",
-]
+# unavailable upstream. Ratatui 0.30 removed the archived `paste` dependency,
+# so the former RUSTSEC-2024-0436 exception is intentionally gone.
+ignore = []
 
 [licenses]
 version = 2
@@ -39,6 +35,48 @@ allow = [
   "CC0-1.0",
 ]
 confidence-threshold = 0.8
+
+[bans]
+# New duplicate major versions must be reviewed. Existing splits are documented
+# below at the older/infrastructure root that cannot yet converge.
+multiple-versions = "deny"
+# Workspace members intentionally use versionless relative paths. Cargo itself
+# rejects those if a package is published, so the duplicate-version policy is
+# the useful supply-chain gate here.
+wildcards = "allow"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+skip = [
+  # `sha2`/`ring` still use the 0.2 API while `blake3` has moved to 0.3.
+  { crate = "cpufeatures@0.2.17", reason = "sha2 and ring have not converged on cpufeatures 0.3" },
+  # The BDD-only cucumber stack has not adopted derive_more 2 used by crossterm.
+  { crate = "derive_more@0.99.20", reason = "cucumber 0.21 pins the pre-1.0 derive_more API" },
+  # Wasmtime/Cranelift's hashbrown 0.15 and the current Ratatui/SQLite graph use
+  # different foldhash/hashbrown APIs.
+  { crate = "foldhash@0.1.5", reason = "Wasmtime 36 pins hashbrown 0.15 and foldhash 0.1" },
+  { crate = "hashbrown@0.15.5", reason = "Wasmtime 36 and Cranelift pin hashbrown 0.15" },
+  { crate = "hashbrown@0.16.1", reason = "Ratatui and sqlite-wasm pin hashbrown 0.16" },
+  # ring, serde-saphyr, and uuid/tempfile require three incompatible getrandom
+  # major APIs. The associated target-support crates follow those APIs.
+  { crate = "getrandom@0.2.17", reason = "ring 0.17 pins getrandom 0.2" },
+  { crate = "getrandom@0.3.4", reason = "serde-saphyr pins getrandom 0.3" },
+  { crate = "r-efi@5.3.0", reason = "getrandom 0.3 pins r-efi 5 on UEFI targets" },
+  { crate = "wit-bindgen@0.51.0", reason = "getrandom 0.4's WASI 0.3 support pins wit-bindgen 0.51" },
+  # The BDD-only cucumber/gherkin stack still exposes its older macro and text
+  # processing APIs while the product graph is on their current majors.
+  { crate = "heck@0.4.1", reason = "cucumber 0.21 and gherkin 0.14 pin heck 0.4" },
+  { crate = "itertools@0.13.0", reason = "cucumber 0.21 pins itertools 0.13" },
+  { crate = "regex-syntax@0.7.5", reason = "cucumber-expressions 0.3 pins regex-syntax 0.7" },
+  { crate = "thiserror@1.0.69", reason = "gherkin 0.14 pins thiserror 1" },
+  { crate = "thiserror-impl@1.0.69", reason = "thiserror 1 requires its matching proc macro" },
+]
+skip-tree = [
+  # windows-sys releases an ABI binding family whose version follows each
+  # upstream consumer. Treat that platform family as one reviewed exception;
+  # every non-Windows duplicate remains denied above.
+  { crate = "windows-sys", reason = "transitive Windows ABI consumers cannot share one windows-sys generation" },
+]
 
 [sources]
 unknown-registry = "deny"

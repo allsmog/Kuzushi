@@ -3,6 +3,8 @@ use super::task_row::{ArtifactState, PlanningTaskRow};
 use kuzushi_core::V2Config;
 use std::path::Path;
 
+use crate::app::settings::AuthProvider;
+
 /// Distinct phases of the first-run onboarding sequence. The shell
 /// transitions through them in this order — Target → Model → Credentials →
 /// Planning — but may short-circuit when a phase is already satisfied.
@@ -88,7 +90,10 @@ fn auth_phase(inputs: &OnboardingInputs<'_>) -> Option<InitialOnboardingPhase> {
 /// The providers whose credentials are gated by the onboarding flow. Anything
 /// else (`local:`, unknown) needs no credentials and returns `None`.
 pub fn credentialed_provider(provider: &str) -> Option<&str> {
-    matches!(provider, "anthropic" | "openai" | "openai-codex").then_some(provider)
+    match AuthProvider::from_scene_provider(provider) {
+        Some(AuthProvider::OpenAi | AuthProvider::Anthropic) => Some(provider),
+        Some(AuthProvider::GitHubCopilot) | None => None,
+    }
 }
 
 /// Convenience wrapper that builds `OnboardingInputs` from live config +

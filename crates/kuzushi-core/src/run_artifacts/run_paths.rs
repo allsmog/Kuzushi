@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::ffi::OsString;
 use std::path::Component;
 use std::path::{Path, PathBuf};
@@ -78,11 +78,65 @@ pub(crate) fn checked_runs_root(target: impl AsRef<Path>) -> Result<PathBuf> {
 }
 
 pub(crate) fn ensure_run_dir(target: impl AsRef<Path>, run_id: &str) -> Result<PathBuf> {
+    let target = target.as_ref();
     let run_id = RunId::parse(run_id)?;
-    crate::workspace::ensure_workspace_descendant_dir(
+    crate::workspace::initialize_workspace_state(target)?;
+    let relative = run_state_relative_path("runs").join(run_id.as_str());
+    let candidate = crate::workspace::validated_workspace_descendant(target, &relative)?;
+    let is_new = matches!(
+        std::fs::symlink_metadata(&candidate),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    );
+    if !is_new {
+        return crate::workspace::ensure_workspace_descendant_dir(target, relative);
+    }
+    create_indexed_run_dir(target, relative, &candidate, run_id.as_str())
+}
+
+fn create_indexed_run_dir(
+    target: &Path,
+    relative: PathBuf,
+    candidate: &Path,
+    run_id: &str,
+) -> Result<PathBuf> {
+    let history_guard = prepared_history_guard_for_new_run(target, candidate);
+    if candidate.exists() {
+        return crate::workspace::ensure_workspace_descendant_dir(target, relative);
+    }
+    crate::workspace::ensure_workspace_descendant_dir(target, run_state_relative_path("runs"))?;
+    let created = create_run_directory(candidate)?;
+    if !created {
+        let _ = super::run_history_index::mark_run_history_dirty_best_effort(target);
+        return crate::workspace::ensure_workspace_descendant_dir(target, relative);
+    }
+    super::run_history_index::record_run_directory_best_effort(
         target,
-        run_state_relative_path("runs").join(run_id.as_str()),
-    )
+        run_id,
+        history_guard.as_ref(),
+    );
+    Ok(candidate.to_path_buf())
+}
+
+fn prepared_history_guard_for_new_run(
+    target: &Path,
+    candidate: &Path,
+) -> Option<crate::file_lock::ExclusiveFileLock> {
+    let guard = super::run_ledger::acquire_run_history_index_lock(target).ok()?;
+    if candidate.exists() {
+        return Some(guard);
+    }
+    super::run_history_index::prepare_run_history_update_under_lock(target, &guard).ok()?;
+    Some(guard)
+}
+
+fn create_run_directory(path: &Path) -> Result<bool> {
+    match std::fs::create_dir(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => {
+            Err(error).with_context(|| format!("Could not create run directory {}", path.display()))
+        }
+    }
 }
 
 pub(crate) fn checked_run_artifact_path(
@@ -105,8 +159,10 @@ pub(crate) fn ensure_run_artifact_parent(
     run_id: &str,
     artifact: impl AsRef<Path>,
 ) -> Result<PathBuf> {
+    let target = target.as_ref();
     let run_id = RunId::parse(run_id)?;
     let artifact = ArtifactPath::parse(artifact)?;
+    ensure_run_dir(target, run_id.as_str())?;
     let parent = artifact.as_path().parent().unwrap_or_else(|| Path::new(""));
     let relative = run_state_relative_path("runs")
         .join(run_id.as_str())
@@ -116,6 +172,27 @@ pub(crate) fn ensure_run_artifact_parent(
 
 pub(crate) fn checked_latest_run_path(target: impl AsRef<Path>) -> Result<PathBuf> {
     crate::workspace::validated_workspace_descendant(target, run_state_relative_path("latest"))
+}
+
+pub(crate) fn checked_run_history_index_path(target: impl AsRef<Path>) -> Result<PathBuf> {
+    crate::workspace::validated_workspace_descendant(
+        target,
+        run_state_relative_path("run-history.index.sqlite3"),
+    )
+}
+
+pub(crate) fn checked_legacy_run_history_index_path(target: impl AsRef<Path>) -> Result<PathBuf> {
+    crate::workspace::validated_workspace_descendant(
+        target,
+        run_state_relative_path("run-history.index.jsonl"),
+    )
+}
+
+pub(crate) fn checked_run_history_dirty_path(target: impl AsRef<Path>) -> Result<PathBuf> {
+    crate::workspace::validated_workspace_descendant(
+        target,
+        run_state_relative_path("run-history.index.dirty"),
+    )
 }
 
 fn run_state_relative_path(leaf: impl Into<OsString>) -> PathBuf {

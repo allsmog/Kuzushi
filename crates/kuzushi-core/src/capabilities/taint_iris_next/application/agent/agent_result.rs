@@ -5,11 +5,11 @@ pub(in crate::capabilities::taint_iris_next) fn normalized_taint_iris_next_agent
     evidence: &TaintIrisNextEvidenceResult,
     raw: Value,
     retry_count: usize,
-    cost_usd: f64,
+    cost: RuntimeCostReport,
 ) -> Result<TaintIrisNextAgentResult> {
     let object = required_agent_object(&raw)?;
     let payload = normalize_valid_agent_payload(plan, evidence, object)?;
-    Ok(payload.into_result(raw, retry_count, cost_usd))
+    Ok(payload.into_result(raw, retry_count, cost))
 }
 
 struct NormalizedAgentPayload {
@@ -22,7 +22,12 @@ struct NormalizedAgentPayload {
 }
 
 impl NormalizedAgentPayload {
-    fn into_result(self, raw: Value, retry_count: usize, cost_usd: f64) -> TaintIrisNextAgentResult {
+    fn into_result(
+        self,
+        raw: Value,
+        retry_count: usize,
+        cost: RuntimeCostReport,
+    ) -> TaintIrisNextAgentResult {
         TaintIrisNextAgentResult {
             agent_status: self.agent_status,
             selected_cwes: self.selected_cwes,
@@ -37,7 +42,8 @@ impl NormalizedAgentPayload {
             parse_error: None,
             result_text_excerpt: None,
             warnings: self.warnings,
-            cost_usd,
+            cost_usd: cost.observed_usd(),
+            cost_usd_exact: cost.is_complete(),
         }
     }
 }

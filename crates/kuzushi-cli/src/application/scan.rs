@@ -245,7 +245,13 @@ fn finish_completed_scan(
         finish.started,
         elapsed,
     )?;
-    apply_scan_gate_policy(finish.workspace, finish.store, &run_ids, finish.gate)
+    apply_scan_gate_policy(
+        finish.workspace,
+        finish.store,
+        &run_ids,
+        finish.fallback_run_id,
+        finish.gate,
+    )
 }
 
 fn finish_semantic_scan_failure(
@@ -276,6 +282,7 @@ fn finish_semantic_scan_failure(
         finish.workspace,
         finish.store,
         &run_ids,
+        finish.fallback_run_id,
         &ScanGatePolicy {
             fail_on: None,
             sarif: finish.gate.sarif.clone(),
@@ -360,7 +367,7 @@ fn record_scan_execution_started(
     try_record_tool_run_started_with_reproducibility(
         ToolRunRecord::new(workspace.root(), run_id, "scan", SCAN_TOOL),
         input,
-        config.model.clone(),
+        kuzushi_core::tool_execution_model(SCAN_TOOL, input, config),
         config_hash(config).ok(),
         registry.loaded_module_specifiers(),
     )
@@ -384,8 +391,9 @@ fn execute_scan_tool(execution: ScanToolExecution<'_>) -> Result<serde_json::Val
     let result = execution
         .registry
         .prepare_dispatch_input(SCAN_TOOL, execution.input, execution.ctx, None)
-        .map(authorize_headless_scan)
         .and_then(|prepared| {
+            emit_scan_patch_validation_disclosure(execution.workspace, prepared.value())?;
+            let prepared = authorize_headless_scan(prepared);
             execution.registry.dispatch_prepared_input_with_runtime(
                 prepared,
                 execution.ctx,
@@ -412,6 +420,22 @@ fn execute_scan_tool(execution: ScanToolExecution<'_>) -> Result<serde_json::Val
             Err(dispatch_error)
         }
     }
+}
+
+fn emit_scan_patch_validation_disclosure(
+    workspace: &WorkspaceTarget,
+    input: &serde_json::Value,
+) -> Result<()> {
+    if !input
+        .get("autoPatch")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let disclosure = kuzushi_core::patch::patch_validation_disclosure(workspace.root(), input)?;
+    eprintln!("kuzushi: approved auto-patch repository execution — {disclosure}");
+    Ok(())
 }
 
 fn authorize_headless_scan(prepared: PreparedToolInput) -> PreparedToolInput {
@@ -448,7 +472,7 @@ fn record_failed_scan_execution(
         try_record_tool_run_started_with_reproducibility(
             tool_run,
             record.input,
-            record.config.model.clone(),
+            kuzushi_core::tool_execution_model(SCAN_TOOL, record.input, record.config),
             config_hash(record.config).ok(),
             record.registry.loaded_module_specifiers(),
         )?;
@@ -651,7 +675,7 @@ fn record_apk_scan_started(
     try_record_tool_run_started_with_reproducibility(
         record,
         input,
-        config.model.clone(),
+        kuzushi_core::tool_execution_model("android-apk:scan", input, config),
         config_hash(config).ok(),
         registry.loaded_module_specifiers(),
     )
@@ -721,13 +745,31 @@ pub(crate) fn scan_runtime(
 #[cfg(test)]
 mod tests {
     use super::{
-        record_apk_scan_result, scan_gate_ids, scan_scope_body, scan_semantic_error,
-        write_scan_scope_file,
+        emit_scan_patch_validation_disclosure, record_apk_scan_result, scan_gate_ids,
+        scan_scope_body, scan_semantic_error, write_scan_scope_file,
     };
     use kuzushi_core::run_artifacts::{
         try_record_tool_run_started_with_reproducibility, ToolRunRecord,
     };
     use std::path::PathBuf;
+
+    fn init_clean_git_fixture(root: &std::path::Path) {
+        std::fs::write(root.join("README.md"), "fixture\n").unwrap();
+        for args in [
+            &["init", "-q"][..],
+            &["config", "user.email", "tests@example.com"][..],
+            &["config", "user.name", "Kuzushi Tests"][..],
+            &["add", "."][..],
+            &["commit", "-qm", "fixture"][..],
+        ] {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(root)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?} failed");
+        }
+    }
 
     #[test]
     fn scope_body_drops_paths_with_embedded_newline() {
@@ -836,5 +878,37 @@ mod tests {
         let summary = kuzushi_core::load_run_summary(target.path(), "apk-partial").unwrap();
         assert_eq!(summary.status, "partial");
         assert_eq!(summary.error.as_deref(), Some("code-scan: failed"));
+    }
+
+    #[test]
+    fn dedicated_auto_patch_scan_emits_bound_validation_preflight() {
+        let target = tempfile::tempdir().unwrap();
+        init_clean_git_fixture(target.path());
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let input = serde_json::json!({
+            "autoPatch": true,
+            "buildCmd": "cargo build",
+            "testCmd": "cargo test"
+        });
+        let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
+        let config = kuzushi_core::V2Config::default();
+        let ctx = kuzushi_core::ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let prepared = registry
+            .prepare_dispatch_input("sast:scan", input, &ctx, None)
+            .unwrap();
+
+        emit_scan_patch_validation_disclosure(&workspace, prepared.value()).unwrap();
+        let disclosure =
+            kuzushi_core::patch::patch_validation_disclosure(workspace.root(), prepared.value())
+                .unwrap();
+        assert!(disclosure.contains("cargo build ; cargo test"));
+        assert!(disclosure.contains("source commit:"));
     }
 }

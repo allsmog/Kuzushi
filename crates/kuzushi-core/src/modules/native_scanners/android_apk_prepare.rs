@@ -2,8 +2,6 @@ use super::*;
 use crate::scan::{RegisteredChild, ScanCancellation};
 
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -484,7 +482,7 @@ fn spawn_apk_command(
     configured_path: &str,
     cancellation: &ScanCancellation,
 ) -> Result<(RegisteredChild, ApkOutputReaders)> {
-    configure_apk_process_group(&mut command);
+    let process_group = crate::scan::configure_scanner_process_group(&mut command)?;
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -514,8 +512,7 @@ fn spawn_apk_command(
             "android-apk stderr",
         )
     });
-    let process_group_id = apk_process_group_id(&child);
-    let child = cancellation.register_child(child, process_group_id)?;
+    let child = cancellation.register_prepared_child(child, process_group)?;
     Ok((child, ApkOutputReaders { stdout, stderr }))
 }
 
@@ -608,31 +605,6 @@ fn join_apk_output_reader(
     reader
         .join()
         .map_err(|_| anyhow::anyhow!("android-apk:{tool_name} output reader panicked"))?
-}
-
-#[cfg(unix)]
-fn configure_apk_process_group(command: &mut Command) {
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setpgid(0, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-}
-
-#[cfg(not(unix))]
-fn configure_apk_process_group(_command: &mut Command) {}
-
-#[cfg(unix)]
-fn apk_process_group_id(child: &std::process::Child) -> Option<u32> {
-    Some(child.id())
-}
-
-#[cfg(not(unix))]
-fn apk_process_group_id(_child: &std::process::Child) -> Option<u32> {
-    None
 }
 
 fn publish_staged_directory(

@@ -85,6 +85,7 @@ struct TraceHandleInner {
     sink: Arc<dyn TraceSink>,
     counter: Arc<AtomicUsize>,
     emit_lock: Arc<Mutex<()>>,
+    rejected_invalid_steps: AtomicU64,
 }
 
 impl TraceHandle {
@@ -114,6 +115,7 @@ impl TraceHandle {
                 sink,
                 counter,
                 emit_lock,
+                rejected_invalid_steps: AtomicU64::new(0),
             }),
             module_id: None,
             parent_step: None,
@@ -201,7 +203,25 @@ impl TraceHandle {
         self.inner.sink.run_artifact_location()
     }
 
+    /// Invalid provider-cost metadata is rejected before it can reach any
+    /// durable or live sink. The counter makes that diagnostic loss visible
+    /// without panicking a product workflow for an auxiliary trace failure.
+    pub fn rejected_invalid_steps(&self) -> u64 {
+        self.inner.rejected_invalid_steps.load(Ordering::Relaxed)
+    }
+
     fn record_step(&self, mut step: RunTraceStep) -> usize {
+        if let Err(error) = super::write_run_artifact_json::validate_trace_step_cost(&step) {
+            let rejected = self
+                .inner
+                .rejected_invalid_steps
+                .fetch_add(1, Ordering::Relaxed)
+                + 1;
+            eprintln!(
+                "kuzushi: rejected invalid trace step #{rejected} before sink dispatch: {error:#}"
+            );
+            return 0;
+        }
         let _guard = self
             .inner
             .emit_lock
@@ -230,6 +250,22 @@ impl TraceStepBuilder<'_> {
     pub fn with_cost_usd(mut self, cost: f64) -> Self {
         if let Some(step) = self.step.as_mut() {
             step.cost_usd = Some(cost);
+            step.observed_cost_usd = None;
+            step.provider_spend_unresolved = false;
+        }
+        self
+    }
+
+    pub fn with_cost_report(mut self, report: crate::runtime::RuntimeCostReport) -> Self {
+        if let Some(step) = self.step.take() {
+            self.step = Some(step.with_cost_report(report));
+        }
+        self
+    }
+
+    pub fn with_call_attempted(mut self, attempted: bool) -> Self {
+        if let Some(step) = self.step.as_mut() {
+            step.call_attempted = Some(attempted);
         }
         self
     }
@@ -351,6 +387,7 @@ pub struct BroadcastSink {
     inner: Arc<dyn TraceSink>,
     tx: Sender<RunTraceStep>,
     dropped_live_sends: AtomicU64,
+    rejected_invalid_steps: AtomicU64,
 }
 
 impl BroadcastSink {
@@ -359,16 +396,28 @@ impl BroadcastSink {
             inner,
             tx,
             dropped_live_sends: AtomicU64::new(0),
+            rejected_invalid_steps: AtomicU64::new(0),
         }
     }
 
     pub fn dropped_live_sends(&self) -> u64 {
         self.dropped_live_sends.load(Ordering::Relaxed)
     }
+
+    pub fn rejected_invalid_steps(&self) -> u64 {
+        self.rejected_invalid_steps.load(Ordering::Relaxed)
+    }
 }
 
 impl TraceSink for BroadcastSink {
     fn record(&self, step: &RunTraceStep) {
+        if let Err(error) = super::write_run_artifact_json::validate_trace_step_cost(step) {
+            let rejected = self.rejected_invalid_steps.fetch_add(1, Ordering::Relaxed) + 1;
+            eprintln!(
+                "kuzushi: rejected invalid live trace step #{rejected} before durable or broadcast dispatch: {error:#}"
+            );
+            return;
+        }
         self.inner.record(step);
         if self.tx.send(step.clone()).is_err() {
             let dropped = self.dropped_live_sends.fetch_add(1, Ordering::Relaxed) + 1;

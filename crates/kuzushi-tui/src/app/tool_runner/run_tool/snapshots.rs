@@ -97,17 +97,27 @@ const MAX_RECON_SERVICES: usize = 500;
 const MAX_RECON_NOTES: usize = 200;
 
 fn cache_recon_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::Value) -> bool {
-    if !tool_name.starts_with("recon:") {
+    let Some(snapshot) = recon_snapshot_from_data(tool_name, data) else {
         return false;
-    }
-    app.domain_mut().set_recon_snapshot(ReconSnapshot {
+    };
+    app.domain_mut().set_recon_snapshot(snapshot);
+    true
+}
+
+pub(crate) fn recon_snapshot_from_result(result: &serde_json::Value) -> Option<ReconSnapshot> {
+    let data = result.get("data")?;
+    let tool_name = data_string(data, "tool")?;
+    recon_snapshot_from_data(&tool_name, data)
+}
+
+fn recon_snapshot_from_data(tool_name: &str, data: &serde_json::Value) -> Option<ReconSnapshot> {
+    tool_name.starts_with("recon:").then(|| ReconSnapshot {
         hosts: recon_hosts(data),
         services: recon_services(data),
         notes: recon_notes(data),
         last_tool: Some(data_string(data, "tool").unwrap_or_else(|| tool_name.to_string())),
         last_target: data_string(data, "target"),
-    });
-    true
+    })
 }
 
 fn cache_exploit_chain_snapshot(

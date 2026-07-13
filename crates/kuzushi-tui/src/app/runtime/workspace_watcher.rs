@@ -21,6 +21,12 @@ pub(crate) struct WorkspaceWatcherRuntime {
     state_artifact_flush_after: Option<Instant>,
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct WatcherMessageOutcome {
+    pub(crate) changed: bool,
+    pub(crate) tail_may_remain: bool,
+}
+
 impl WorkspaceWatcherRuntime {
     pub(crate) fn start(target: Option<&Path>, wake: TerminalLoopWake) -> Result<Option<Self>> {
         let Some(target) = target else {
@@ -46,21 +52,21 @@ impl WorkspaceWatcherRuntime {
         self.target == target
     }
 
-    fn drain_changes(&mut self, release_deferred_state: bool) -> WorkspaceWatcherBatch {
-        let (mut drained, new_state_event) = self.collect_pending_changes(release_deferred_state);
-        drained.changes = coalesce_changes(drained.changes);
+    fn drain_changes(&mut self, release_deferred_state: bool) -> WatcherDrainOutcome {
+        let mut outcome = self.collect_pending_changes(release_deferred_state);
+        let new_state_event = outcome.new_state_event;
+        let drained = &mut outcome.batch;
+        drained.changes = coalesce_changes(std::mem::take(&mut drained.changes));
         drained.state_artifact_paths.sort();
         drained.state_artifact_paths.dedup();
-        self.debounce_state_artifacts(&mut drained, new_state_event);
-        drained
+        self.debounce_state_artifacts(drained, new_state_event);
+        outcome
     }
 
-    fn collect_pending_changes(
-        &mut self,
-        release_deferred_state: bool,
-    ) -> (WorkspaceWatcherBatch, bool) {
+    fn collect_pending_changes(&mut self, release_deferred_state: bool) -> WatcherDrainOutcome {
         let mut drained = overflow_marker(&self.overflowed);
         let mut new_state_event = !drained.state_artifact_paths.is_empty();
+        let mut tail_may_remain = true;
         if release_deferred_state {
             drained
                 .state_artifact_paths
@@ -72,10 +78,17 @@ impl WorkspaceWatcherRuntime {
                     new_state_event |= !batch.state_artifact_paths.is_empty();
                     drained.merge(batch);
                 }
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => {
+                    tail_may_remain = false;
+                    break;
+                }
             }
         }
-        (drained, new_state_event)
+        WatcherDrainOutcome {
+            batch: drained,
+            new_state_event,
+            tail_may_remain,
+        }
     }
 
     fn debounce_state_artifacts(
@@ -101,6 +114,12 @@ impl WorkspaceWatcherRuntime {
         self.deferred_state_artifact_paths.sort();
         self.deferred_state_artifact_paths.dedup();
     }
+}
+
+struct WatcherDrainOutcome {
+    batch: WorkspaceWatcherBatch,
+    new_state_event: bool,
+    tail_may_remain: bool,
 }
 
 #[derive(Default)]
@@ -143,17 +162,21 @@ fn watcher_matches_target(
     }
 }
 
-pub(crate) fn apply_watcher_messages(
+pub(crate) fn apply_watcher_messages_with_outcome(
     app: &mut ShellApp,
     watcher: Option<&mut WorkspaceWatcherRuntime>,
-) -> bool {
+) -> WatcherMessageOutcome {
     let Some(watcher) = watcher else {
-        return false;
+        return WatcherMessageOutcome::default();
     };
     let work_running = app.has_running_work();
-    let batch = watcher.drain_changes(!work_running);
+    let drained = watcher.drain_changes(!work_running);
+    let batch = drained.batch;
     if batch.is_empty() {
-        return false;
+        return WatcherMessageOutcome {
+            changed: false,
+            tail_may_remain: drained.tail_may_remain,
+        };
     }
     let source_changed = !batch.changes.is_empty()
         && update_and_execute_effects(app, Msg::WorkspaceChanged(batch.changes));
@@ -167,7 +190,10 @@ pub(crate) fn apply_watcher_messages(
         EffectRuntime::execute(app, effects);
         true
     };
-    source_changed || state_changed
+    WatcherMessageOutcome {
+        changed: source_changed || state_changed,
+        tail_may_remain: drained.tail_may_remain,
+    }
 }
 
 fn watcher_sink(
@@ -234,7 +260,7 @@ mod tests {
             })
             .unwrap();
 
-        assert!(apply_watcher_messages(&mut app, Some(&mut watcher.runtime)));
+        assert!(apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed);
         assert!(input
             .recv_timeout(Duration::from_millis(0))
             .unwrap()
@@ -252,12 +278,48 @@ mod tests {
         let mut watcher = watcher_for_test(wake);
         watcher.runtime.overflowed.store(true, Ordering::SeqCst);
 
-        assert!(apply_watcher_messages(&mut app, Some(&mut watcher.runtime)));
+        assert!(apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed);
 
         assert_eq!(
             app.workspace_stale().unwrap().strongest_plan(),
             ReindexPlan::FullSnapshot
         );
+    }
+
+    #[test]
+    fn capped_watcher_drain_rearms_the_remaining_tail() {
+        let (input, wake) = TerminalLoopInbox::channel_for_test();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let mut watcher = watcher_for_test(wake.clone());
+        for index in 0..=WATCHER_DRAIN_LIMIT {
+            watcher
+                .tx
+                .try_send(WorkspaceWatcherBatch {
+                    changes: vec![WorkspaceChange::FileChanged(
+                        format!("src/file-{index}.rs").into(),
+                    )],
+                    state_artifact_paths: Vec::new(),
+                })
+                .unwrap();
+        }
+        wake.notify();
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO).unwrap(),
+            Some(TerminalLoopEvent::Wake)
+        ));
+
+        let first = apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime));
+        rearm_work_tail(&wake, first.tail_may_remain);
+
+        assert!(first.changed);
+        assert!(first.tail_may_remain);
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO).unwrap(),
+            Some(TerminalLoopEvent::Wake)
+        ));
+        let second = apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime));
+        assert!(second.changed);
+        assert!(!second.tail_may_remain);
     }
 
     #[test]
@@ -284,9 +346,9 @@ mod tests {
             .unwrap();
 
         let debounced = watcher.runtime.drain_changes(true);
-        assert!(debounced.state_artifact_paths.is_empty());
+        assert!(debounced.batch.state_artifact_paths.is_empty());
         std::thread::sleep(STATE_ARTIFACT_DEBOUNCE + Duration::from_millis(10));
-        assert!(apply_watcher_messages(&mut app, Some(&mut watcher.runtime)));
+        assert!(apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed);
         let refreshed = app.workbench_cache().borrow_mut().json_file(&artifact);
         assert!(matches!(
             refreshed,

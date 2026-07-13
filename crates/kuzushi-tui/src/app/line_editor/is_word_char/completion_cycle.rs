@@ -71,15 +71,51 @@ impl ShellApp {
     /// is mid-line. Empty inputs return `None` so the cold-start prompt isn't
     /// noisy.
     pub fn completion_preview(&self) -> Option<String> {
-        let candidate = self.completion_preview_candidate()?;
-        completion_preview_tail(self.input(), &candidate)
+        self.completion_preview_ref()
+            .map(|preview| preview.to_string())
     }
 
-    fn completion_preview_candidate(&self) -> Option<String> {
+    pub(crate) fn completion_preview_ref(&self) -> Option<std::cell::Ref<'_, str>> {
+        let key = self.completion_preview_key();
+        if !self.editor().completion_preview_matches(key, self.target()) {
+            let preview = self.compute_completion_preview();
+            self.editor()
+                .store_completion_preview(key, self.target(), preview);
+        }
+        self.editor().completion_preview()
+    }
+
+    fn compute_completion_preview(&self) -> Option<String> {
         if self.input().is_empty() || self.cursor() != self.input().chars().count() {
             return None;
         }
-        self.completion_candidates(self.input()).into_iter().next()
+        let candidate = self
+            .completion_candidates(self.input())
+            .into_iter()
+            .next()?;
+        completion_preview_tail(self.input(), &candidate)
+    }
+
+    fn completion_preview_key(&self) -> CompletionPreviewKey {
+        let (cache_generation, command_provider_generation) =
+            self.workbench_cache().borrow().completion_generations();
+        CompletionPreviewKey {
+            editor_revision: self.editor().revision(),
+            cursor: self.cursor(),
+            input_mode: self.input_mode(),
+            cache_generation,
+            command_provider_generation,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn completion_preview_recomputations_for_test(&self) -> usize {
+        self.editor().completion_preview_recomputations()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn completion_source_reads_for_test(&self) -> usize {
+        self.workbench_cache().borrow().completion_source_reads()
     }
 }
 

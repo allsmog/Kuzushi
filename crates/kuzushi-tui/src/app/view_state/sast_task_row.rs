@@ -45,13 +45,19 @@ pub struct WorkspaceView {
     pub status: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ReconSnapshot {
     pub hosts: Vec<ReconHost>,
     pub services: Vec<ReconService>,
     pub notes: Vec<ReconNote>,
     pub last_tool: Option<String>,
     pub last_target: Option<String>,
+}
+
+impl ReconSnapshot {
+    pub(crate) fn has_evidence(&self) -> bool {
+        !self.hosts.is_empty() || !self.services.is_empty() || !self.notes.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -124,6 +130,10 @@ pub enum ShellView {
     /// and `j`/`k`/`g`/`G`/`PgUp`/`PgDn` page through the buffer.
     Logs,
     Config,
+    /// Read-only application-policy summary. This is intentionally separate
+    /// from model configuration so `permissions` never presents model choices
+    /// as though they were authorization state.
+    Permissions,
     Health,
     Tools,
     Options,

@@ -5,16 +5,16 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-mod projection_projectors;
 mod projection_audit;
 mod projection_event_store;
 mod projection_finding_lifecycle;
 mod projection_fts;
 mod projection_observations;
 mod projection_payload;
+mod projection_projectors;
 mod projection_proof;
-mod projection_review;
 mod projection_rekey;
+mod projection_review;
 mod projection_runs;
 mod projection_schema;
 pub mod writer_actor;
@@ -129,7 +129,8 @@ impl ProjectionDb {
 
     #[cfg(test)]
     fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory().context("Could not open in-memory v3 projection")?;
+        let conn =
+            Connection::open_in_memory().context("Could not open in-memory v3 projection")?;
         configure_projection_connection(&conn)?;
         create_projection_schema(&conn)?;
         Ok(Self { conn })
@@ -311,6 +312,13 @@ impl ProjectionDb {
     }
 }
 
+pub(crate) fn projection_meta(conn: &Connection) -> Result<ProjectionMeta> {
+    Ok(ProjectionMeta {
+        applied_seq: meta_u64(conn, "applied_seq")?,
+        generation: meta_u64(conn, "generation")?,
+    })
+}
+
 fn reject_stale_projection<T>(meta: ProjectionMeta, min_seq: u64) -> Result<T> {
     anyhow::bail!(
         "projection watermark {} is behind required read seq {}",
@@ -360,8 +368,10 @@ fn stable_finding_read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StableFi
 }
 
 fn configure_projection_connection(conn: &Connection) -> Result<()> {
-    let _journal_mode: String =
-        conn.query_row("pragma journal_mode = wal", [], |row| row.get(0))?;
+    let journal_mode: String = conn.query_row("pragma journal_mode", [], |row| row.get(0))?;
+    if !journal_mode.eq_ignore_ascii_case("wal") && journal_mode != "memory" {
+        let _: String = conn.query_row("pragma journal_mode = wal", [], |row| row.get(0))?;
+    }
     conn.busy_timeout(std::time::Duration::from_millis(5_000))?;
     conn.execute_batch("pragma foreign_keys = on;")?;
     Ok(())
@@ -371,7 +381,17 @@ pub(crate) fn create_projection_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(PROJECTION_SCHEMA)?;
     migrate_review_decision_dismissal_columns(conn)?;
     migrate_verification_provenance_columns(conn)?;
+    migrate_patch_cost_columns(conn)?;
     create_optional_fts(conn)?;
+    Ok(())
+}
+
+fn migrate_patch_cost_columns(conn: &Connection) -> Result<()> {
+    if !table_has_column(conn, "patch_attempt_events", "provider_spend_unresolved")? {
+        conn.execute_batch(
+            "alter table patch_attempt_events add column provider_spend_unresolved integer",
+        )?;
+    }
     Ok(())
 }
 
@@ -417,9 +437,11 @@ fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool
 }
 
 fn meta_u64(conn: &Connection, key: &str) -> Result<u64> {
-    conn.query_row("select value from meta where key = ?1", params![key], |row| {
-        row.get::<_, String>(0)
-    })?
+    conn.query_row(
+        "select value from meta where key = ?1",
+        params![key],
+        |row| row.get::<_, String>(0),
+    )?
     .parse::<u64>()
     .with_context(|| format!("projection meta key {key:?} is not an integer"))
 }

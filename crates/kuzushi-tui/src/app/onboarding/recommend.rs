@@ -7,54 +7,10 @@
 
 use super::task_id::PlanningTaskId;
 use super::task_row::{ArtifactState, PlanningTaskRow};
+pub use kuzushi_core::repository_inventory::TargetProfile;
 use kuzushi_core::{TargetKind, WorkflowPhase};
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
-
-const SOURCE_SCAN_FILE_BUDGET: usize = 20_000;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TargetProfile {
-    pub kind: TargetKind,
-    pub has_c_family_source: bool,
-    pub has_rust_source: bool,
-    pub has_compile_commands: bool,
-    pub has_reverse_engineering_artifact: bool,
-}
-
-impl TargetProfile {
-    pub fn detect(target: &Path, kind: TargetKind) -> Self {
-        let source = detect_systems_source(target);
-        Self {
-            kind,
-            has_c_family_source: source.has_c_family_source,
-            has_rust_source: source.has_rust_source,
-            has_compile_commands: has_compile_commands_json(target),
-            has_reverse_engineering_artifact: has_reverse_engineering_artifact(target),
-        }
-    }
-
-    #[cfg(test)]
-    fn source_only(kind: TargetKind) -> Self {
-        Self {
-            kind,
-            has_c_family_source: false,
-            has_rust_source: false,
-            has_compile_commands: false,
-            has_reverse_engineering_artifact: kind.is_reverse_engineering_target(),
-        }
-    }
-
-    fn has_systems_surface(self) -> bool {
-        self.kind == TargetKind::NativeBinary || self.has_c_family_source || self.has_rust_source
-    }
-}
-
-#[derive(Default)]
-struct SystemsSourceEvidence {
-    has_c_family_source: bool,
-    has_rust_source: bool,
-}
+use std::path::Path;
 
 /// The tasks to pre-check for `phase`, given the target kind. Rows whose
 /// required CLI is missing are never recommended (they can't run).
@@ -100,11 +56,11 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
     match row.id {
         // 組 KUMI-KATA · map — foundational artifacts when not already cached.
         AttachFiles => false,
-        GatherRepoContext
-        | MapEntryPoints
-        | BuildStrideThreatModel
-        | BuildCodePropertyGraph
-        | BuildCodeQlDatabase => missing_artifact(row),
+        GatherRepoContext | MapEntryPoints => missing_artifact(row),
+        // Keep first value fast and predictable. These remain visible as
+        // deliberate Deep map work instead of silently starting database or
+        // model-backed construction from the default plan.
+        BuildStrideThreatModel | BuildCodePropertyGraph | BuildCodeQlDatabase => false,
         // Reverse-engineering artifacts only matter for binary/APK targets.
         BuildXRay => target.kind.is_reverse_engineering_target() && missing_artifact(row),
         ReverseEngineerBinary => {
@@ -115,7 +71,10 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         // 崩 KUZUSHI · hunt — scan source surfaces; specialized systems hunts
         // are visible only when `task_applies_to_target` found matching code.
         ScanSecrets => true,
-        ScanSemgrep | ScanCodeql | ScanAgenticSast | HuntTaint => source_like(target.kind),
+        ScanSemgrep => source_like(target.kind),
+        // Deep/model-backed hunts stay opt-in. CodeQL in particular needs a
+        // compatible database/build plan; CLI presence alone is not proof.
+        ScanCodeql | ScanAgenticSast | HuntTaint => false,
         HuntThreatModel => true,
         HuntSystems => false,
         HuntUseAfterFree => target.has_c_family_source && target.has_compile_commands,
@@ -154,142 +113,7 @@ fn source_like(kind: TargetKind) -> bool {
 }
 
 pub(crate) fn has_compile_commands_json(target: &Path) -> bool {
-    ["compile_commands.json", "build/compile_commands.json"]
-        .iter()
-        .any(|relative| target.join(relative).is_file())
-}
-
-fn has_reverse_engineering_artifact(target: &Path) -> bool {
-    if target.is_file() {
-        return true;
-    }
-    if target.join("classes.dex").is_file() {
-        return true;
-    }
-    has_file_with_extension(target, &["so", "dylib", "dll", "exe", "bin", "elf", "apk"])
-}
-
-fn has_file_with_extension(target: &Path, extensions: &[&str]) -> bool {
-    let mut stack = vec![target.to_path_buf()];
-    let mut budget = SOURCE_SCAN_FILE_BUDGET;
-    while budget > 0 {
-        let Some(dir) = stack.pop() else {
-            return false;
-        };
-        if directory_has_file_with_extension(&dir, extensions, &mut stack, &mut budget) {
-            return true;
-        }
-    }
-    false
-}
-
-fn directory_has_file_with_extension(
-    dir: &Path,
-    extensions: &[&str],
-    stack: &mut Vec<PathBuf>,
-    budget: &mut usize,
-) -> bool {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return false;
-    };
-    for entry in entries.flatten() {
-        if !consume_scan_budget(budget) {
-            break;
-        }
-        if path_matches_extension_or_queues_dir(entry.path(), extensions, stack) {
-            return true;
-        }
-    }
-    false
-}
-
-fn consume_scan_budget(budget: &mut usize) -> bool {
-    if *budget == 0 {
-        return false;
-    }
-    *budget -= 1;
-    true
-}
-
-fn path_matches_extension_or_queues_dir(
-    path: PathBuf,
-    extensions: &[&str],
-    stack: &mut Vec<PathBuf>,
-) -> bool {
-    if path.is_dir() {
-        if !is_skippable_source_dir(&path) {
-            stack.push(path);
-        }
-        return false;
-    }
-    extension_matches(&path, extensions)
-}
-
-fn extension_matches(path: &Path, extensions: &[&str]) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| {
-            let ext = ext.to_ascii_lowercase();
-            extensions.iter().any(|candidate| *candidate == ext)
-        })
-        .unwrap_or(false)
-}
-
-fn detect_systems_source(target: &Path) -> SystemsSourceEvidence {
-    let mut evidence = SystemsSourceEvidence::default();
-    let mut stack = vec![target.to_path_buf()];
-    let mut budget = SOURCE_SCAN_FILE_BUDGET;
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            if budget == 0 || systems_source_complete(&evidence) {
-                return evidence;
-            }
-            budget -= 1;
-            absorb_source_entry(&entry.path(), &mut evidence, &mut stack);
-        }
-    }
-    evidence
-}
-
-fn absorb_source_entry(
-    path: &Path,
-    evidence: &mut SystemsSourceEvidence,
-    stack: &mut Vec<PathBuf>,
-) {
-    if path.is_dir() {
-        if !is_skippable_source_dir(path) {
-            stack.push(path.to_path_buf());
-        }
-        return;
-    }
-    note_source_extension(path, evidence);
-}
-
-fn note_source_extension(path: &Path, evidence: &mut SystemsSourceEvidence) {
-    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
-        return;
-    };
-    match ext.to_ascii_lowercase().as_str() {
-        "c" | "cc" | "cpp" | "cxx" | "h" | "hh" | "hpp" | "hxx" | "ipp" | "cu" | "cuh" => {
-            evidence.has_c_family_source = true;
-        }
-        "rs" => evidence.has_rust_source = true,
-        _ => {}
-    }
-}
-
-fn systems_source_complete(evidence: &SystemsSourceEvidence) -> bool {
-    evidence.has_c_family_source && evidence.has_rust_source
-}
-
-fn is_skippable_source_dir(path: &Path) -> bool {
-    matches!(
-        path.file_name().and_then(|name| name.to_str()),
-        Some(".git" | "node_modules" | ".kuzushi" | "target" | "vendor")
-    )
+    kuzushi_core::repository_inventory::target_has_compile_commands(target)
 }
 
 #[cfg(test)]
@@ -312,7 +136,11 @@ mod tests {
     }
 
     fn profile(kind: TargetKind) -> TargetProfile {
-        TargetProfile::source_only(kind)
+        TargetProfile {
+            kind,
+            has_reverse_engineering_artifact: kind.is_reverse_engineering_target(),
+            ..TargetProfile::conservative()
+        }
     }
 
     fn c_profile() -> TargetProfile {
@@ -336,12 +164,15 @@ mod tests {
     }
 
     #[test]
-    fn map_preselects_context_for_a_fresh_source_target() {
+    fn map_defaults_to_quick_first_value_for_a_fresh_source_target() {
         let rows = rows_for(WorkflowPhase::Map);
         let picked =
             recommended_tasks_for_phase(WorkflowPhase::Map, profile(TargetKind::Source), &rows);
         assert!(picked.contains(&PlanningTaskId::GatherRepoContext));
-        assert!(picked.contains(&PlanningTaskId::BuildStrideThreatModel));
+        assert!(picked.contains(&PlanningTaskId::MapEntryPoints));
+        assert!(!picked.contains(&PlanningTaskId::BuildStrideThreatModel));
+        assert!(!picked.contains(&PlanningTaskId::BuildCodePropertyGraph));
+        assert!(!picked.contains(&PlanningTaskId::BuildCodeQlDatabase));
         // No reverse-engineering on a plain source tree.
         assert!(!picked.contains(&PlanningTaskId::ReverseEngineerBinary));
         // PASTA / threat-intel stay opt-in.
@@ -367,7 +198,11 @@ mod tests {
         let source =
             recommended_tasks_for_phase(WorkflowPhase::Hunt, profile(TargetKind::Source), &rows);
         assert!(!source.contains(&PlanningTaskId::HuntUseAfterFree));
-        assert!(source.contains(&PlanningTaskId::ScanAgenticSast));
+        assert!(source.contains(&PlanningTaskId::ScanSecrets));
+        assert!(source.contains(&PlanningTaskId::ScanSemgrep));
+        assert!(!source.contains(&PlanningTaskId::ScanCodeql));
+        assert!(!source.contains(&PlanningTaskId::ScanAgenticSast));
+        assert!(!source.contains(&PlanningTaskId::HuntTaint));
     }
 
     #[test]

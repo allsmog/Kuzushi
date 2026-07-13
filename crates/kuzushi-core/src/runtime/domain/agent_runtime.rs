@@ -30,7 +30,7 @@ pub enum LoopHistoryEntry {
     AssistantText(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentLoopOutcome {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -40,7 +40,70 @@ pub struct AgentLoopOutcome {
     /// Sum of per-step costs surfaced by the bridge.
     #[serde(default)]
     pub cost_usd: f64,
+    #[serde(
+        default = "default_agent_loop_cost_exact",
+        skip_serializing_if = "is_true"
+    )]
+    pub cost_usd_exact: bool,
     pub transcript: Vec<LoopHistoryEntry>,
+}
+
+impl Default for AgentLoopOutcome {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            structured: None,
+            steps_used: 0,
+            truncated: false,
+            cost_usd: 0.0,
+            cost_usd_exact: true,
+            transcript: Vec::new(),
+        }
+    }
+}
+
+const fn default_agent_loop_cost_exact() -> bool {
+    true
+}
+
+const fn is_true(value: &bool) -> bool {
+    *value
+}
+
+#[cfg(test)]
+mod agent_loop_outcome_serde_tests {
+    use super::*;
+
+    #[test]
+    fn legacy_cost_deserializes_as_exact_and_true_is_omitted() {
+        let legacy: AgentLoopOutcome = serde_json::from_value(serde_json::json!({
+            "text": "done",
+            "steps_used": 1,
+            "truncated": false,
+            "cost_usd": 0.25,
+            "transcript": [],
+        }))
+        .unwrap();
+
+        assert!(legacy.cost_usd_exact);
+        assert!(serde_json::to_value(legacy)
+            .unwrap()
+            .get("cost_usd_exact")
+            .is_none());
+    }
+
+    #[test]
+    fn unresolved_cost_serializes_explicit_false() {
+        let outcome = AgentLoopOutcome {
+            cost_usd_exact: false,
+            ..AgentLoopOutcome::default()
+        };
+
+        assert_eq!(
+            serde_json::to_value(outcome).unwrap()["cost_usd_exact"],
+            serde_json::json!(false)
+        );
+    }
 }
 
 #[async_trait]
@@ -59,19 +122,25 @@ pub trait AgentRuntime: Send + Sync {
         control: AgentQueryControl,
     ) -> Result<AgentQueryResponse> {
         control.ensure_active()?;
-        let response = self.query_blocking(request)?;
+        let response = self.query_blocking(request)?.validate_cost()?;
         control.ensure_active()?;
         Ok(response)
     }
 
     async fn query(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-        isolate_blocking(move || self.query_blocking(request))
+        isolate_blocking(move || {
+            self.query_blocking(request)
+                .and_then(AgentQueryResponse::validate_cost)
+        })
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome>;
 
     async fn triage_finding(&self, request: TriageRequest) -> Result<TriageOutcome> {
-        isolate_blocking(move || self.triage_finding_blocking(request))
+        isolate_blocking(move || {
+            self.triage_finding_blocking(request)
+                .and_then(TriageOutcome::validate_cost)
+        })
     }
 
     /// Whether this runtime supports tool-augmented loops.
@@ -127,6 +196,7 @@ pub trait AgentRuntime: Send + Sync {
             };
         }
         self.query_blocking(request)
+            .and_then(AgentQueryResponse::validate_cost)
     }
 
     /// Async wrapper for `spawn_subagent_blocking`. Override when the
@@ -138,6 +208,7 @@ pub trait AgentRuntime: Send + Sync {
         request: AgentQueryRequest,
     ) -> Result<AgentQueryResponse> {
         isolate_blocking(move || self.spawn_subagent_blocking(role, request))
+            .and_then(AgentQueryResponse::validate_cost)
     }
 }
 

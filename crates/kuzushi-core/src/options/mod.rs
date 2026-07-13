@@ -22,5 +22,5 @@ pub use prompt_paths::{
     relative_module_prompt_root, relative_prompt_override_path, relative_prompt_overrides_root,
     HOUSE_RULES_DIR, PROMPTS_DIR,
 };
-pub use prompt_override::prompt_content_sha256;
+pub use prompt_override::{prompt_content_sha256, MAX_PROMPT_OVERRIDE_BYTES};
 pub use tool_option_store::ToolOptionStore;

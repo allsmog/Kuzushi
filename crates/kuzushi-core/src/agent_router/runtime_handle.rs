@@ -18,7 +18,9 @@ impl<'a> RuntimeHandle<'a> {
 #[async_trait]
 impl<'a> AgentRuntime for RuntimeHandle<'a> {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-        self.inner().query_blocking(request)
+        self.inner()
+            .query_blocking(request)
+            .and_then(AgentQueryResponse::validate_cost)
     }
 
     fn query_blocking_controlled(
@@ -26,11 +28,15 @@ impl<'a> AgentRuntime for RuntimeHandle<'a> {
         request: AgentQueryRequest,
         control: AgentQueryControl,
     ) -> Result<AgentQueryResponse> {
-        self.inner().query_blocking_controlled(request, control)
+        self.inner()
+            .query_blocking_controlled(request, control)
+            .and_then(AgentQueryResponse::validate_cost)
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
-        self.inner().triage_finding_blocking(request)
+        self.inner()
+            .triage_finding_blocking(request)
+            .and_then(TriageOutcome::validate_cost)
     }
 
     fn supports_tools(&self) -> bool {
@@ -42,7 +48,9 @@ impl<'a> AgentRuntime for RuntimeHandle<'a> {
         request: &AgentToolLoopRequest,
         history: &[LoopHistoryEntry],
     ) -> Result<AgentLoopStep> {
-        self.inner().next_step_blocking(request, history)
+        self.inner()
+            .next_step_blocking(request, history)
+            .and_then(AgentLoopStep::validate_cost)
     }
 
     fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
@@ -58,6 +66,8 @@ impl<'a> AgentRuntime for RuntimeHandle<'a> {
         role: crate::runtime::SubagentRole,
         request: AgentQueryRequest,
     ) -> Result<AgentQueryResponse> {
-        self.inner().spawn_subagent_blocking(role, request)
+        self.inner()
+            .spawn_subagent_blocking(role, request)
+            .and_then(AgentQueryResponse::validate_cost)
     }
 }

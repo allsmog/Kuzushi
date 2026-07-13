@@ -49,6 +49,7 @@ pub(crate) struct TaintIrisNextInput {
     pub(crate) discover_signals: bool,
     pub(crate) target_subdir: Option<String>,
     pub(crate) allow_deterministic_fallback: bool,
+    pub(crate) system_prompt: String,
     /// Operator-supplied catalog entries merged on top of the hardcoded
     /// `TAINT_IRIS_NEXT_CATALOG` before ranking. Carries threat-intel
     /// TOML entries through to the agent prompt — see

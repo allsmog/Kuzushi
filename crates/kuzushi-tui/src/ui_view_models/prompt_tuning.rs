@@ -30,12 +30,13 @@ pub(crate) enum TuneHouseRules {
 pub(crate) struct PromptsModel {
     pub(crate) module: String,
     pub(crate) rows: Vec<PromptRow>,
-    pub(crate) stack: PromptStackModel,
+    pub(crate) stack: Option<PromptStackModel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PromptRow {
-    pub(crate) verb: &'static str,
+    pub(crate) role: String,
+    pub(crate) verb: String,
     pub(crate) source: String,
     pub(crate) path: String,
     pub(crate) selected: bool,
@@ -43,7 +44,7 @@ pub(crate) struct PromptRow {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PromptStackModel {
-    pub(crate) verb: &'static str,
+    pub(crate) verb: String,
     pub(crate) layers: Vec<PromptStackLayer>,
 }
 
@@ -72,32 +73,31 @@ pub(crate) fn tune_model(app: &ShellApp, house_rule_limit: usize) -> TuneModel {
 
 pub(crate) fn prompts_model(app: &ShellApp) -> PromptsModel {
     let module = focused_module(app);
+    let prompts = app.focused_prompt_specs();
     let cursor = app.prompts_cursor_clamped();
-    let override_states: Vec<_> = ShellApp::PROMPT_VERB_NAMES
+    let override_states: Vec<_> = prompts
         .iter()
-        .map(|verb| prompt_override_layer_state(app, &module, verb))
+        .map(|prompt| prompt_override_layer_state(app, &prompt.module_id, &prompt.verb))
         .collect();
-    let rows = ShellApp::PROMPT_VERB_NAMES
+    let rows = prompts
         .iter()
         .enumerate()
-        .map(|(index, verb)| PromptRow {
-            verb,
+        .map(|(index, prompt)| PromptRow {
+            role: prompt.role.clone(),
+            verb: prompt.verb.clone(),
             source: override_states[index].source_label().to_string(),
-            path: kuzushi_core::relative_prompt_override_path(&module, verb)
+            path: kuzushi_core::relative_prompt_override_path(&prompt.module_id, &prompt.verb)
                 .display()
                 .to_string(),
             selected: index == cursor,
         })
         .collect();
-    let verb = ShellApp::PROMPT_VERB_NAMES
-        .get(cursor)
-        .copied()
-        .unwrap_or("scan");
-    let override_state = override_states
-        .get(cursor)
-        .cloned()
-        .unwrap_or_else(|| prompt_override_layer_state(app, &module, verb));
-    let stack = prompt_stack_model(app, &module, verb, override_state);
+    let stack = prompts.get(cursor).and_then(|prompt| {
+        override_states
+            .get(cursor)
+            .cloned()
+            .map(|state| prompt_stack_model(app, prompt, state))
+    });
     PromptsModel {
         module,
         rows,
@@ -134,16 +134,21 @@ fn house_rules(app: &ShellApp, limit: usize) -> TuneHouseRules {
 
 fn prompt_stack_model(
     app: &ShellApp,
-    module: &str,
-    verb: &'static str,
+    prompt: &kuzushi_core::modules::PromptSpec,
     override_state: PromptOverrideLayerState,
 ) -> PromptStackModel {
-    let mutation_state = prompt_mutation_layer_state(app, module, verb);
-    let final_layer = prompt_final_layer(&override_state, &mutation_state);
+    let mutation_state = prompt_mutation_layer_state(app, &prompt.module_id, &prompt.verb);
+    let base_hash = kuzushi_core::prompt_content_sha256(&prompt.default_content);
+    let final_layer = prompt_final_layer(&override_state, &mutation_state, &base_hash);
     PromptStackModel {
-        verb,
+        verb: prompt.verb.clone(),
         layers: vec![
-            prompt_stack_layer("base", "module default", "built-in", "runtime"),
+            prompt_stack_layer(
+                "base",
+                format!("{} default", prompt.role),
+                "built-in",
+                base_hash,
+            ),
             override_state.layer(),
             prompt_stack_layer("variant", "inactive", "not configured", "-"),
             mutation_state.layer(),
@@ -191,12 +196,12 @@ impl PromptOverrideLayerState {
         }
     }
 
-    fn final_layer(&self) -> PromptStackLayer {
+    fn final_layer(&self, base_hash: &str) -> PromptStackLayer {
         match self {
             Self::Present { path, hash } => {
                 prompt_stack_layer("final", "override active", path, hash)
             }
-            _ => prompt_stack_layer("final", "base active", "built-in", "runtime"),
+            _ => prompt_stack_layer("final", "base active", "built-in", base_hash),
         }
     }
 
@@ -251,6 +256,7 @@ impl PromptMutationLayerState {
 fn prompt_final_layer(
     override_state: &PromptOverrideLayerState,
     mutation_state: &PromptMutationLayerState,
+    base_hash: &str,
 ) -> PromptStackLayer {
     match mutation_state {
         PromptMutationLayerState::Present {
@@ -273,7 +279,7 @@ fn prompt_final_layer(
             prompt_mutation_layer_path(id),
             hash,
         ),
-        _ => override_state.final_layer(),
+        _ => override_state.final_layer(base_hash),
     }
 }
 
