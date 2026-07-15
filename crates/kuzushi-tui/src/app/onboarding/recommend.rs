@@ -68,7 +68,7 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         }
         // Specialized / second-methodology builds are opt-in.
         BuildPastaThreatModel | ThreatIntelCves => false,
-        // 崩 KUZUSHI · hunt — scan source surfaces; specialized systems hunts
+        // Scan source surfaces; specialized systems hunts
         // are visible only when `task_applies_to_target` found matching code.
         ScanSecrets => true,
         ScanSemgrep => source_like(target.kind),
@@ -78,7 +78,7 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         HuntThreatModel => true,
         HuntSystems => false,
         HuntUseAfterFree => target.has_c_family_source && target.has_compile_commands,
-        // 作 TSUKURI · confirm — always triage then verify whatever was found.
+        // Review and Prove default to processing whatever the scan found.
         TriageFindings | VerifyFindings => true,
         // 掛 KAKE · fix — always report; patching is a deliberate opt-in.
         BuildReport => true,
@@ -189,14 +189,14 @@ mod tests {
     }
 
     #[test]
-    fn hunt_keeps_legacy_uaf_out_of_source_pickers() {
-        let rows = rows_for(WorkflowPhase::Hunt);
-        let c_source = recommended_tasks_for_phase(WorkflowPhase::Hunt, c_profile(), &rows);
+    fn scan_keeps_legacy_uaf_out_of_source_pickers() {
+        let rows = rows_for(WorkflowPhase::Scan);
+        let c_source = recommended_tasks_for_phase(WorkflowPhase::Scan, c_profile(), &rows);
         assert!(!c_source.contains(&PlanningTaskId::HuntUseAfterFree));
         assert!(c_source.contains(&PlanningTaskId::ScanSecrets));
 
         let source =
-            recommended_tasks_for_phase(WorkflowPhase::Hunt, profile(TargetKind::Source), &rows);
+            recommended_tasks_for_phase(WorkflowPhase::Scan, profile(TargetKind::Source), &rows);
         assert!(!source.contains(&PlanningTaskId::HuntUseAfterFree));
         assert!(source.contains(&PlanningTaskId::ScanSecrets));
         assert!(source.contains(&PlanningTaskId::ScanSemgrep));
@@ -206,38 +206,47 @@ mod tests {
     }
 
     #[test]
-    fn hunt_does_not_preselect_uaf_without_compile_commands() {
-        let rows = rows_for(WorkflowPhase::Hunt);
+    fn scan_does_not_preselect_uaf_without_compile_commands() {
+        let rows = rows_for(WorkflowPhase::Scan);
         let mut c_source = c_profile();
         c_source.has_compile_commands = false;
-        let picked = recommended_tasks_for_phase(WorkflowPhase::Hunt, c_source, &rows);
+        let picked = recommended_tasks_for_phase(WorkflowPhase::Scan, c_source, &rows);
         assert!(!picked.contains(&PlanningTaskId::HuntUseAfterFree));
-        assert!(!applicable_tasks_for_phase(WorkflowPhase::Hunt, c_source)
+        assert!(!applicable_tasks_for_phase(WorkflowPhase::Scan, c_source)
             .contains(&PlanningTaskId::HuntUseAfterFree));
     }
 
     #[test]
-    fn hunt_phase_hides_c_specific_rows_without_c_family_source() {
-        let source = applicable_tasks_for_phase(WorkflowPhase::Hunt, profile(TargetKind::Source));
+    fn scan_phase_hides_c_specific_rows_without_c_family_source() {
+        let source = applicable_tasks_for_phase(WorkflowPhase::Scan, profile(TargetKind::Source));
         assert!(!source.contains(&PlanningTaskId::HuntUseAfterFree));
         assert!(!source.contains(&PlanningTaskId::HuntSystems));
 
-        let rust = applicable_tasks_for_phase(WorkflowPhase::Hunt, rust_profile());
+        let rust = applicable_tasks_for_phase(WorkflowPhase::Scan, rust_profile());
         assert!(!rust.contains(&PlanningTaskId::HuntUseAfterFree));
         assert!(rust.contains(&PlanningTaskId::HuntSystems));
 
-        let c_source = applicable_tasks_for_phase(WorkflowPhase::Hunt, c_profile());
+        let c_source = applicable_tasks_for_phase(WorkflowPhase::Scan, c_profile());
         assert!(!c_source.contains(&PlanningTaskId::HuntUseAfterFree));
         assert!(c_source.contains(&PlanningTaskId::HuntSystems));
     }
 
     #[test]
-    fn confirm_always_triages_and_verifies() {
-        let rows = rows_for(WorkflowPhase::Confirm);
+    fn review_defaults_to_triage() {
+        let rows = rows_for(WorkflowPhase::Review);
         let picked =
-            recommended_tasks_for_phase(WorkflowPhase::Confirm, profile(TargetKind::Source), &rows);
+            recommended_tasks_for_phase(WorkflowPhase::Review, profile(TargetKind::Source), &rows);
         assert!(picked.contains(&PlanningTaskId::TriageFindings));
+        assert!(!picked.contains(&PlanningTaskId::VerifyFindings));
+    }
+
+    #[test]
+    fn prove_defaults_to_verification() {
+        let rows = rows_for(WorkflowPhase::Prove);
+        let picked =
+            recommended_tasks_for_phase(WorkflowPhase::Prove, profile(TargetKind::Source), &rows);
         assert!(picked.contains(&PlanningTaskId::VerifyFindings));
+        assert!(!picked.contains(&PlanningTaskId::TriageFindings));
     }
 
     #[test]

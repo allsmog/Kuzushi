@@ -48,7 +48,7 @@ fn settled_health_model_shares_failing_warning_totals_and_missing_context() {
     let model = health_display_model(&app);
 
     assert_eq!(model.status.ctx, "not built");
-    assert_eq!(model.summary, "health: 3 failing, 3 warning");
+    assert_eq!(model.summary, "health: 2 failing, 4 warning");
     assert_eq!(model.footer.stage, model.summary);
     assert!(!model
         .body_rows

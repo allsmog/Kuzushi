@@ -19,8 +19,9 @@ use lifecycle::require_state;
 pub use lifecycle::{WriterActorState, WriterLifecycle};
 pub use writes::{
     AttackSurfaceWrite, AuditWrite, CandidateObservationWrite, DecisionWrite, FileDeletedWrite,
-    FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite, RekeyWrite,
-    RunLifecycleWrite, SnapshotWrite, SuppressionEventMeta, VerificationWrite,
+    FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite,
+    PatchLifecycleWrite, RekeyWrite, RunLifecycleWrite, SnapshotWrite, SuppressionEventMeta,
+    VerificationWrite,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +108,23 @@ impl StorageWriter {
             Some(patch.patch_run_id.clone()),
             None,
             patch.payload(),
+        )?;
+        self.apply_appended_event(&event)
+    }
+
+    fn record_patch_lifecycle(&mut self, lifecycle: PatchLifecycleWrite) -> Result<WriteReceipt> {
+        require_state(self.lifecycle.state(), WriterActorState::Live)?;
+        let record = lifecycle.record;
+        let run_id = record
+            .reverify_run_id
+            .clone()
+            .unwrap_or_else(|| record.patch_run_id.clone());
+        let event = self.log.append(
+            EventKind::PatchLifecycleRecorded,
+            record.actor.clone(),
+            Some(run_id),
+            None,
+            PatchLifecycleWrite { record }.payload(),
         )?;
         self.apply_appended_event(&event)
     }

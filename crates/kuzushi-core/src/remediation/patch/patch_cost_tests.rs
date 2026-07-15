@@ -177,6 +177,7 @@ fn patch_result_with_cost(cost_usd: f64, provider_spend_unresolved: bool) -> Pat
         provider_spend_unresolved,
         validator_log: None,
         history: Vec::new(),
+        provenance: None,
         created_at: None,
         updated_at: None,
     }

@@ -16,6 +16,9 @@ pub(crate) struct Cli {
     /// Load a trusted dynamic JS module specifier (file://, path, or package:<name>).
     #[arg(long, global = true)]
     pub(crate) load: Vec<String>,
+    /// Run the shell without writing a durable session transcript.
+    #[arg(long, global = true, visible_alias = "ephemeral")]
+    pub(crate) no_session_persistence: bool,
 
     #[command(subcommand)]
     pub(crate) command: Option<Command>,

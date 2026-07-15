@@ -46,7 +46,7 @@ mod tests {
             Some(DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS)
         );
         assert_eq!(config.phases.stop_after, None);
-        assert_eq!(config.phases.hunt.concurrency, None);
+        assert_eq!(config.phases.scan.concurrency, None);
     }
 
     #[test]
@@ -58,9 +58,9 @@ mod tests {
             home.join(".kuzushi/v3/config.toml"),
             r#"
 [phases]
-stop_after = "hunt"
+stop_after = "scan"
 
-[phases.hunt]
+[phases.scan]
 budget_usd = 1.25
 concurrency = 2
 strategy_cap = 3
@@ -76,15 +76,105 @@ confirmation_depth = "sampled"
         })
         .unwrap();
 
-        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Hunt));
-        assert_eq!(config.phases.hunt.budget_usd, Some(1.25));
-        assert_eq!(config.phases.hunt.concurrency, Some(2));
-        assert_eq!(config.phases.hunt.strategy_cap, Some(3));
-        assert_eq!(config.phases.hunt.prompt_variant.as_deref(), Some("deep"));
+        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Scan));
+        assert_eq!(config.phases.scan.budget_usd, Some(1.25));
+        assert_eq!(config.phases.scan.concurrency, Some(2));
+        assert_eq!(config.phases.scan.strategy_cap, Some(3));
+        assert_eq!(config.phases.scan.prompt_variant.as_deref(), Some("deep"));
         assert_eq!(
-            config.phases.hunt.confirmation_depth.as_deref(),
+            config.phases.scan.confirmation_depth.as_deref(),
             Some("sampled")
         );
+    }
+
+    #[test]
+    fn loads_legacy_phase_aliases_and_serializes_canonical_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[phases]
+stop_after = "confirm"
+
+[phases.hunt]
+concurrency = 2
+
+[phases.confirm]
+confirmation_depth = "empirical"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+
+        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Prove));
+        assert_eq!(config.phases.scan.concurrency, Some(2));
+        assert_eq!(
+            config.phases.prove.confirmation_depth.as_deref(),
+            Some("empirical")
+        );
+        let serialized = toml::to_string(&config).unwrap();
+        assert!(serialized.contains("stop_after = \"prove\""));
+        assert!(serialized.contains("[phases.scan]"));
+        assert!(serialized.contains("[phases.review]"));
+        assert!(serialized.contains("[phases.prove]"));
+        assert!(!serialized.contains("[phases.hunt]"));
+        assert!(!serialized.contains("[phases.confirm]"));
+    }
+
+    #[test]
+    fn rejects_legacy_and_canonical_phase_tables_together() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[phases.scan]
+concurrency = 1
+
+[phases.hunt]
+concurrency = 2
+"#,
+        )
+        .unwrap();
+
+        let error = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("duplicate field"));
+    }
+
+    #[test]
+    fn rejects_numbered_stop_after_values() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[phases]
+stop_after = "2"
+"#,
+        )
+        .unwrap();
+
+        let error = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("unknown variant `2`"), "{message}");
+        assert!(message.contains("scan"), "{message}");
     }
 
     #[test]
@@ -123,7 +213,7 @@ strategy_cap = 1
         fs::write(
             home.join(".kuzushi/v3/config.toml"),
             r#"
-[phases.hunt]
+[phases.scan]
 concurrency = 0
 "#,
         )
@@ -134,7 +224,7 @@ concurrency = 0
             target_dir: None,
         })
         .unwrap_err();
-        assert!(err.to_string().contains("phases.hunt.concurrency"));
+        assert!(err.to_string().contains("phases.scan.concurrency"));
     }
 
     #[test]
@@ -145,7 +235,7 @@ concurrency = 0
         fs::write(
             home.join(".kuzushi/v3/config.toml"),
             r#"
-[phases.confirm]
+[phases.prove]
 prompt_variant = "   "
 "#,
         )
@@ -156,7 +246,7 @@ prompt_variant = "   "
             target_dir: None,
         })
         .unwrap_err();
-        assert!(err.to_string().contains("phases.confirm.prompt_variant"));
+        assert!(err.to_string().contains("phases.prove.prompt_variant"));
     }
 
     #[test]
@@ -277,7 +367,7 @@ stop_after = "hunt"
         .unwrap();
 
         assert_eq!(config.model.as_deref(), Some("openai:gpt-4o-mini"));
-        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Hunt));
+        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Scan));
         // The operator's api_key_env is preserved; project file cannot touch it.
         assert_eq!(config.runtime.api_key_env, "OPENAI_API_KEY");
     }
@@ -594,6 +684,91 @@ trusted_workflow_auto_accept = true
     }
 
     #[test]
+    fn global_config_loads_operator_keybindings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[[operator.keybindings]]
+context = "workbench"
+action = "cycle_phase"
+bindings = ["backtab", "g p"]
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+
+        assert_eq!(config.operator.keybindings.len(), 1);
+        assert_eq!(config.operator.keybindings[0].context, "workbench");
+        assert_eq!(config.operator.keybindings[0].bindings, ["backtab", "g p"]);
+    }
+
+    #[test]
+    fn project_config_cannot_steer_operator_keybindings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let target = tmp.path().join("evil-target");
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            target.join(".kuzushi/v3/config.toml"),
+            r#"
+[[operator.keybindings]]
+context = "global"
+action = "help"
+bindings = ["x"]
+"#,
+        )
+        .unwrap();
+
+        let error = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: Some(target),
+        })
+        .unwrap_err();
+
+        assert!(error.to_string().contains("operator.keybindings"));
+    }
+
+    #[test]
+    fn duplicate_operator_keybinding_actions_are_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[[operator.keybindings]]
+context = "workbench"
+action = "cycle_phase"
+bindings = ["x"]
+
+[[operator.keybindings]]
+context = "workbench"
+action = "cycle_phase"
+bindings = ["y"]
+"#,
+        )
+        .unwrap();
+
+        let error = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("duplicate operator.keybindings entry"));
+    }
+
+    #[test]
     fn project_config_rejects_kwp_operator_execution_policy() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
@@ -817,5 +992,75 @@ spend_hard_ceiling_usd = -1.0
         })
         .unwrap_err();
         assert!(err.to_string().contains("operator.spend_hard_ceiling_usd"));
+    }
+
+    #[test]
+    fn session_retention_defaults_to_thirty_days_and_accepts_global_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let defaults = load_config(ConfigPaths {
+            home_dir: home.clone(),
+            target_dir: None,
+        })
+        .unwrap();
+        assert_eq!(
+            defaults.operator.session_retention_days,
+            DEFAULT_SESSION_RETENTION_DAYS
+        );
+
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            "[operator]\nsession_retention_days = 90\n",
+        )
+        .unwrap();
+        let configured = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+        assert_eq!(configured.operator.session_retention_days, 90);
+    }
+
+    #[test]
+    fn session_retention_must_be_positive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            "[operator]\nsession_retention_days = 0\n",
+        )
+        .unwrap();
+
+        let error = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("operator.session_retention_days"));
+    }
+
+    #[test]
+    fn project_config_cannot_steer_session_retention() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("target");
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            target.join(".kuzushi/v3/config.toml"),
+            "[operator]\nsession_retention_days = 1\n",
+        )
+        .unwrap();
+
+        let error = load_config(ConfigPaths {
+            home_dir: tmp.path().join("home"),
+            target_dir: Some(target),
+        })
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("operator.session_retention_days"));
     }
 }

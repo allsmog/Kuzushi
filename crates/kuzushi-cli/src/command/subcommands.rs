@@ -175,6 +175,53 @@ pub(crate) enum RunsCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+pub(crate) enum SessionsCommand {
+    /// List durable shell session transcripts.
+    List {
+        /// Emit the session list as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one durable shell session transcript.
+    Show {
+        /// Session id from `kuzushi sessions list`.
+        session_id: String,
+        /// Emit the parsed transcript as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export one durable shell session transcript.
+    Export {
+        /// Session id from `kuzushi sessions list`.
+        session_id: String,
+        /// Export format: jsonl or markdown.
+        #[arg(long, value_enum)]
+        format: SessionExportFormat,
+        /// Destination file for the exported transcript.
+        #[arg(long = "out")]
+        output: PathBuf,
+    },
+    /// Delete expired durable shell session transcripts.
+    Prune {
+        /// Delete sessions older than this many days; omitted uses the configured retention.
+        #[arg(long = "older-than-days")]
+        older_than_days: Option<u64>,
+        /// Report what would be deleted without removing files.
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit the prune report as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum SessionExportFormat {
+    Jsonl,
+    Markdown,
+}
+
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub(crate) enum McpBackend {
     Gtags,

@@ -20,7 +20,7 @@ pub(crate) fn verify_module() -> BuiltinModule {
                 crate::verification::DEFAULT_VERIFY_PROMPT.to_string(),
             ))
             .with_policy(workspace_policy(
-                ToolPhase::Confirm,
+                ToolPhase::Prove,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Required,
             )),
@@ -30,7 +30,7 @@ pub(crate) fn verify_module() -> BuiltinModule {
                 vec![fingerprint_option()],
             )
             .with_policy(workspace_policy(
-                ToolPhase::Confirm,
+                ToolPhase::Prove,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             )),

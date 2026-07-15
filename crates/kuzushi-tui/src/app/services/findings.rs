@@ -1,6 +1,8 @@
 use super::*;
 use anyhow::Result;
-use kuzushi_core::{sorted_finding_alias_indices, FindingStore};
+use kuzushi_core::{
+    sorted_finding_alias_indices, FindingStore, PatchAttemptSummary, PatchLifecycleRecord,
+};
 use std::path::Path;
 
 pub(crate) fn open_finding_store_for_target_read_only(
@@ -22,6 +24,48 @@ pub(crate) fn finding_by_reference_for_target(
 ) -> Result<Option<Finding>> {
     let (_, store) = open_finding_store_for_target_read_only(target)?;
     store.get_finding_by_reference(reference)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FindingPatchTruth {
+    pub(crate) latest_result: Option<PatchAttemptSummary>,
+    pub(crate) lifecycle: Option<PatchLifecycleRecord>,
+    pub(crate) lifecycle_matches_finding_generation: bool,
+}
+
+pub(crate) fn finding_patch_truth_for_target(
+    target: &Path,
+    fingerprint: &str,
+    finding_scan_id: Option<&str>,
+) -> Result<Option<FindingPatchTruth>> {
+    let workspace = WorkspaceTarget::new(target)?;
+    let path = workspace.findings_db_path();
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => anyhow::bail!("findings DB path is not a regular file: {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }
+    let store = FindingStore::open_read_only(path)?;
+    let latest_result = store.latest_patch_attempt_summary_for_finding(fingerprint)?;
+    let lifecycle = store.latest_patch_lifecycle_for_finding(fingerprint)?;
+    let lifecycle_matches_finding_generation = lifecycle
+        .as_ref()
+        .is_none_or(|record| record.finding_scan_id.as_deref() == finding_scan_id);
+    Ok(Some(FindingPatchTruth {
+        latest_result,
+        lifecycle,
+        lifecycle_matches_finding_generation,
+    }))
+}
+
+impl ShellApp {
+    pub(crate) fn invalidate_finding_patch_truth(&mut self, fingerprint: Option<&str>) {
+        self.invalidate_view_hydration();
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_finding_patch_truth(fingerprint);
+    }
 }
 
 pub(crate) fn load_finding_completion_values(target: &Path) -> Vec<String> {
@@ -50,4 +94,19 @@ fn finding_completion_values(findings: Vec<Finding>) -> Vec<String> {
         values.push(finding.fingerprint.clone());
     }
     values
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_patch_truth_does_not_initialize_workspace_state() {
+        let target = tempfile::tempdir().unwrap();
+
+        let truth = finding_patch_truth_for_target(target.path(), "missing", None).unwrap();
+
+        assert!(truth.is_none());
+        assert!(!target.path().join(".kuzushi").exists());
+    }
 }

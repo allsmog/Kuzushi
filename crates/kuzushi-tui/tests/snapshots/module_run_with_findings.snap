@@ -16,5 +16,5 @@ o triage:run              queued after scan
 
  -- TRANSCRIPT ---------------------------------------------------------------------------------------------------------
  15:21:17 · system kuzushi shell
- 15:21:17 · startup ready: 34 modules, 52 tools, target none
+ 15:21:17 · startup ready: 34 modules, 53 tools, target none
  15:21:17 · help type `next` to continue the guided workflow · `help` for commands · `?<text>` to ask the agent

@@ -110,10 +110,16 @@ impl ShellApp {
         read_watermark: Option<u64>,
     ) {
         let decisions = self.load_review_decisions_for_findings(store, &findings);
-        let counts =
-            crate::ui_view_models::finding_ledger_counts(&findings, &decisions, total_count);
+        let counts = self.journey_ledger_counts(store, &findings, &decisions, total_count);
         self.domain_mut().set_finding_ledger_counts(counts);
         self.replace_findings(findings, decisions, announce, total_count, read_watermark);
+    }
+
+    pub(crate) fn refresh_journey_ledger_projection(&mut self) {
+        let Ok(store) = self.open_store() else {
+            return;
+        };
+        self.refresh_journey_ledger_counts(&store);
     }
 
     fn refresh_journey_ledger_counts(&mut self, store: &FindingStore) {
@@ -122,12 +128,101 @@ impl ShellApp {
             return;
         };
         let decisions = self.load_review_decisions_for_findings(store, &report.findings);
-        let counts = crate::ui_view_models::finding_ledger_counts(
-            &report.findings,
-            &decisions,
-            report.count,
-        );
+        let counts = self.journey_ledger_counts(store, &report.findings, &decisions, report.count);
         self.domain_mut().set_finding_ledger_counts(counts);
+    }
+
+    fn journey_ledger_counts(
+        &mut self,
+        store: &FindingStore,
+        fallback_findings: &[Finding],
+        fallback_decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
+        fallback_total: usize,
+    ) -> FindingLedgerCounts {
+        match self.selected_scan_findings(store) {
+            Ok(Some(findings)) => self.count_journey_findings(store, &findings, findings.len()),
+            Ok(None) => self.count_journey_findings_with_decisions(
+                store,
+                fallback_findings,
+                fallback_decisions,
+                fallback_total,
+            ),
+            Err(error) => {
+                self.log(
+                    "error",
+                    format!("could not project the selected Scan generation: {error}"),
+                );
+                self.count_journey_findings_with_decisions(
+                    store,
+                    fallback_findings,
+                    fallback_decisions,
+                    fallback_total,
+                )
+            }
+        }
+    }
+
+    fn selected_scan_findings(&self, store: &FindingStore) -> anyhow::Result<Option<Vec<Finding>>> {
+        let Some(attempt) = self.engagement.selected_phase_attempt(WorkflowPhase::Scan) else {
+            return Ok(None);
+        };
+        let mut findings = BTreeMap::new();
+        for run_id in &attempt.completed.run_refs {
+            for finding in store.list_findings_for_scan_id(run_id)? {
+                findings.insert(finding_generation_key(&finding), finding);
+            }
+        }
+        Ok(Some(findings.into_values().collect()))
+    }
+
+    fn count_journey_findings(
+        &mut self,
+        store: &FindingStore,
+        findings: &[Finding],
+        total: usize,
+    ) -> FindingLedgerCounts {
+        let decisions = self.load_review_decisions_for_findings(store, findings);
+        self.count_journey_findings_with_decisions(store, findings, &decisions, total)
+    }
+
+    fn count_journey_findings_with_decisions(
+        &mut self,
+        store: &FindingStore,
+        findings: &[Finding],
+        decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
+        total: usize,
+    ) -> FindingLedgerCounts {
+        let mut counts = crate::ui_view_models::finding_ledger_counts(findings, decisions, total);
+        crate::ui_view_models::attach_proof_deferral_counts(
+            &mut counts,
+            findings,
+            decisions,
+            &self.engagement,
+        );
+        self.refresh_remediation_projection(store, findings, decisions, &mut counts);
+        counts
+    }
+
+    fn refresh_remediation_projection(
+        &mut self,
+        store: &FindingStore,
+        findings: &[Finding],
+        decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
+        counts: &mut FindingLedgerCounts,
+    ) {
+        let lifecycles = match store.list_patch_lifecycle_current() {
+            Ok(lifecycles) => lifecycles,
+            Err(error) => {
+                self.domain_mut().set_patch_lifecycle_records(&[]);
+                self.log(
+                    "error",
+                    format!("could not load remediation projection: {error}"),
+                );
+                return;
+            }
+        };
+        crate::ui_view_models::attach_remediation_counts(counts, findings, decisions, &lifecycles);
+        self.domain_mut().set_patch_lifecycle_records(&lifecycles);
     }
 
     fn replace_findings(
@@ -232,6 +327,13 @@ impl ShellApp {
             );
         }
     }
+}
+
+fn finding_generation_key(finding: &Finding) -> String {
+    finding
+        .identity_id
+        .clone()
+        .unwrap_or_else(|| finding.fingerprint.clone())
 }
 
 fn findings_loaded_message(loaded: usize, total: usize) -> String {

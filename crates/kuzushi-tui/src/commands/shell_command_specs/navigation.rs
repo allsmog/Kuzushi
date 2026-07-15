@@ -20,6 +20,12 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         description: "open the split-pane command center",
     },
     ShellCommandSpec {
+        command: "report",
+        aliases: &["report", "/report"],
+        category: ShellCommandCategory::Navigation,
+        description: "export the engagement report with a durable receipt",
+    },
+    ShellCommandSpec {
         command: "aim [focus]",
         aliases: &["aim", "/aim", "aim sqli", "aim idor"],
         category: ShellCommandCategory::Navigation,
@@ -45,7 +51,7 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "find [query]",
-        aliases: &["/find", "find phase:hunt taint"],
+        aliases: &["/find", "find phase:scan taint"],
         category: ShellCommandCategory::Navigation,
         description: "open the Tools view grammar-first (alias for tools [query])",
     },
@@ -80,10 +86,10 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         description: "first-run guided setup",
     },
     ShellCommandSpec {
-        command: "onboarding",
-        aliases: &["/onboarding", "/planning"],
+        command: "setup",
+        aliases: &["/setup", "onboarding", "/onboarding", "/planning"],
         category: ShellCommandCategory::Navigation,
-        description: "open the planning-stage multi-select picker",
+        description: "review target, Map plan, model/credentials, prompt, and budget readiness",
     },
     // Keep the typed alias visible without adding `/continue`, which would
     // shadow `/context` in Tab completion for `/con…`.
@@ -94,13 +100,22 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         description: "continue the engagement (alias: continue) — open the current phase's picker",
     },
     ShellCommandSpec {
-        command: "phase <map|hunt|confirm|fix>",
-        aliases: &["phase map", "phase hunt", "phase confirm", "phase fix"],
+        command: "phase <map|scan|review|prove|fix>",
+        aliases: &[
+            "phase map",
+            "phase scan",
+            "phase review",
+            "phase prove",
+            "phase fix",
+            // Compatibility aliases for the v0.1 four-phase vocabulary.
+            "phase hunt",
+            "phase confirm",
+        ],
         category: ShellCommandCategory::Navigation,
         description: "open a specific engagement phase picker",
     },
     ShellCommandSpec {
-        command: "autonomy [recon|hunt|confirm|fix]",
+        command: "autonomy [recon|scan|review|prove|fix]",
         aliases: &["autonomy", "/autonomy", "posture", "/posture"],
         category: ShellCommandCategory::Navigation,
         description: "read/set the autonomy dial (also Ctrl+Up/Down) — the tool-dispatch ceiling",

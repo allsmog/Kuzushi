@@ -15,4 +15,5 @@ pub use response_and_roles::{AgentQueryResponse, ModelTier, SubagentRole};
 pub use runtime_cost::{triage_cost_report, RuntimeCost, RuntimeCostReport};
 pub use tool_loop::{
     AgentLoopStep, AgentTool, AgentToolLoopRequest, ToolBox, ToolCall, ToolCallHandler, ToolResult,
+    INTERACTION_REQUIRED_CODE, REQUEST_USER_INPUT_TOOL_NAME,
 };

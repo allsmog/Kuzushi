@@ -16,11 +16,12 @@ pub(crate) use application::{
     normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,
     GenericPersistedRun,
 };
-pub(crate) use domain::is_runtime_proof_state;
+pub(crate) use domain::{is_runtime_proof_state, now_isoish};
 pub use domain::{
     compute_dedup_key, compute_root_cause_key, compute_source_signature, derive_triage_state,
     extract_cwe, normalize_cwe, ConfidenceBand, DismissReason, Finding, FindingEvidence,
-    FindingSource, FindingTriageState, PatchAttempt, PatchResult, PatchStatus,
+    FindingSource, FindingTriageState, PatchAttempt, PatchAttemptSummary, PatchLifecycleFile,
+    PatchLifecycleRecord, PatchLifecycleState, PatchProvenance, PatchResult, PatchStatus,
     PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofConfidence,
     ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, Severity, StableLifecycleStatus,
     StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict,

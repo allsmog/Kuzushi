@@ -12,6 +12,9 @@ pub struct OnboardingWorld {
     pub binary: PathBuf,
     pub pending_seeds: Vec<ArtifactSeed>,
     pub terminal_size: Option<(u16, u16)>,
+    pub last_run_focus_capture: Option<String>,
+    pub shell_pane_pid: Option<u32>,
+    pub last_live_capture: Option<String>,
 }
 
 impl OnboardingWorld {

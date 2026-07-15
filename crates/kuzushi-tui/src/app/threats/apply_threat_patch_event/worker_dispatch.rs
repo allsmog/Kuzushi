@@ -18,12 +18,19 @@ impl ShellApp {
         let watchdog_cancel = ticket.cancel.clone();
         let run_id = kuzushi_core::new_run_id("threat");
         self.begin_run_cost_tracking(&run_id, true);
-        self.set_activity(Some(ActivitySession::for_optional_phase(
-            run_id,
-            start.origin_phase,
-        )));
+        let session = ActivitySession::for_optional_phase(run_id.clone(), start.origin_phase);
+        self.set_activity(Some(self.capture_run_focus_origin(session)));
+        self.record_session_event(kuzushi_core::session_transcript::SessionEvent::RunStarted {
+            run_id: run_id.clone(),
+            tool_name: "threat-model:proposal".to_string(),
+        });
         let runtime = self.start_threat_worker_runtime(&start, watchdog_cancel.clone());
-        let handle = spawn_threat_worker(start, runtime, ticket);
+        let loaded_modules = self.registry().loaded_module_specifiers();
+        let metadata = ProposalRunMetadata {
+            run_id,
+            loaded_modules,
+        };
+        let handle = spawn_threat_worker(start, runtime, ticket, metadata);
         self.register_worker_handle_with_watchdog(
             "threat model",
             generation,
@@ -245,30 +252,49 @@ fn spawn_threat_worker(
     start: ThreatWorkerStart,
     runtime: ThreatWorkerRuntime,
     ticket: JobTicket,
+    metadata: ProposalRunMetadata,
 ) -> std::thread::JoinHandle<()> {
-    let ThreatWorkerStart {
-        config,
-        model,
-        thinking_level,
-        cwd,
-        message: _,
-        task,
-        origin_phase: _,
-    } = start;
-    let existing = runtime.existing;
-    spawn_job_worker("threat model", ticket, move |sink, cancel| match task {
-        ThreatWorkerTask::Regenerate => {
-            threat_regen_worker(config, model, thinking_level, cwd, existing, sink, cancel)
-        }
-        ThreatWorkerTask::Ask { question } => threat_ask_worker(
-            config,
-            model,
-            thinking_level,
-            cwd,
-            existing,
-            question,
-            sink,
-            cancel,
-        ),
+    let invocation = ThreatWorkerInvocation {
+        start,
+        existing: runtime.existing,
+        metadata,
+    };
+    spawn_job_worker("threat model", ticket, move |sink, cancel| {
+        invocation.run(sink, cancel)
     })
+}
+
+struct ThreatWorkerInvocation {
+    start: ThreatWorkerStart,
+    existing: serde_json::Value,
+    metadata: ProposalRunMetadata,
+}
+
+impl ThreatWorkerInvocation {
+    fn run(self, sink: JobEventSink, cancel: ScanCancellation) {
+        let start = self.start;
+        match start.task {
+            ThreatWorkerTask::Regenerate => threat_regen_worker(
+                start.config,
+                start.model,
+                start.thinking_level,
+                start.cwd,
+                self.existing,
+                self.metadata,
+                sink,
+                cancel,
+            ),
+            ThreatWorkerTask::Ask { question } => threat_ask_worker(
+                start.config,
+                start.model,
+                start.thinking_level,
+                start.cwd,
+                self.existing,
+                question,
+                self.metadata,
+                sink,
+                cancel,
+            ),
+        }
+    }
 }

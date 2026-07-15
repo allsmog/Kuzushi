@@ -15,14 +15,26 @@ fn primary_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Module => Some(focused_or_default(app, "module")),
         ShellView::ModuleRun => Some(module_run_status(app)),
         ShellView::Workbench => Some("workbench".to_string()),
-        ShellView::ModelPicker => Some("model-picker".to_string()),
+        ShellView::Setup => Some(setup_view_status(app)),
+        ShellView::Report => Some("report".to_string()),
         ShellView::TargetPicker => Some("target-picker".to_string()),
-        ShellView::AuthMethodPicker => Some(format!(
-            "auth-picker:{}",
-            crate::app::auth_provider_label(app.router.auth_picker().provider())
-        )),
         ShellView::PlanningPicker => Some("planning".to_string()),
         _ => None,
+    }
+}
+
+fn setup_view_status(app: &ShellApp) -> String {
+    match app.router.setup().editor() {
+        Some(crate::app::SetupEditor::Model) => "setup:model".to_string(),
+        Some(crate::app::SetupEditor::Credentials) => format!(
+            "setup:credentials:{}",
+            crate::app::auth_provider_label(app.router.auth_picker().provider())
+        ),
+        Some(crate::app::SetupEditor::Plan) => "setup:map-plan".to_string(),
+        Some(crate::app::SetupEditor::Prompt) => "setup:prompt".to_string(),
+        Some(crate::app::SetupEditor::Budget) => "setup:budget".to_string(),
+        Some(crate::app::SetupEditor::Target) => "setup:target".to_string(),
+        None => "setup".to_string(),
     }
 }
 

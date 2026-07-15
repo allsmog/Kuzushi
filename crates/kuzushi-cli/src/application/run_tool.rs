@@ -120,6 +120,16 @@ fn emit_cli_repository_execution_disclosure(run: &PreparedCliToolRun) -> Result<
 fn authorize_explicit_cli_tool(
     prepared: kuzushi_core::PreparedToolInput,
 ) -> kuzushi_core::PreparedToolInput {
+    if prepared.tool_name() == "patch:reverify" {
+        let detector = prepared
+            .value()
+            .get("detectorTool")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        if let Some(detector) = detector {
+            return prepared.authorize_explicit_headless_with_delegated_tools(&[detector.as_str()]);
+        }
+    }
     let delegates_patch = prepared.tool_name() == "sast:scan"
         && prepared
             .value()

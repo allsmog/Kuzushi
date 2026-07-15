@@ -310,12 +310,13 @@ fn prepare_workspace_findings_export(
     let filtered =
         filter_export_findings(all_findings, all_reviews, positions, options.completeness);
     let run_contexts = workspace_run_export_contexts(workspace, &filtered.findings);
-    let records = workspace_finding_export_records_at_positions(
+    let mut records = workspace_finding_export_records_at_positions(
         &filtered.findings,
         &filtered.reviews,
         &run_contexts,
         &filtered.positions,
     );
+    attach_remediation_records(&store, &mut records)?;
     Ok(PreparedWorkspaceFindingsExport {
         findings: filtered.findings,
         records,
@@ -336,17 +337,31 @@ fn prepare_scan_findings_export(
     let filtered =
         filter_export_findings(all_findings, all_reviews, positions, options.completeness);
     let run_contexts = scan_run_export_contexts(workspace, &filtered.findings, run_ids);
-    let records = workspace_finding_export_records_at_positions(
+    let mut records = workspace_finding_export_records_at_positions(
         &filtered.findings,
         &filtered.reviews,
         &run_contexts,
         &filtered.positions,
     );
+    attach_remediation_records(&store, &mut records)?;
     Ok(PreparedWorkspaceFindingsExport {
         findings: filtered.findings,
         records,
         total_count,
     })
+}
+
+fn attach_remediation_records(
+    store: &FindingStore,
+    records: &mut [WorkspaceFindingExportRecord],
+) -> Result<()> {
+    for record in records {
+        record.remediation = store
+            .latest_patch_lifecycle_for_finding(&record.fingerprint)?
+            .as_ref()
+            .map(Into::into);
+    }
+    Ok(())
 }
 
 fn findings_for_run_ids(store: &FindingStore, run_ids: &[String]) -> Result<Vec<Finding>> {
@@ -731,6 +746,13 @@ const CSV_FINDINGS_HEADER: &[&str] = &[
     "run_status",
     "kuzushi_version",
     "model",
+    "remediation_application_id",
+    "remediation_patch_run_id",
+    "remediation_application_state",
+    "remediation_reverify_outcome",
+    "remediation_reverify_run_id",
+    "remediation_diff_hash",
+    "remediation_touched_paths",
     "export_completeness",
     "export_included_count",
     "export_total_count",
@@ -780,8 +802,24 @@ fn csv_finding_row(record: &WorkspaceFindingExportRecord, metadata: &[String; 4]
     row.extend(csv_review_fields(record));
     row.extend(csv_signal_fields(record));
     row.extend(csv_provenance_fields(record));
+    row.extend(csv_remediation_fields(record));
     row.extend(metadata.iter().cloned());
     row
+}
+
+fn csv_remediation_fields(record: &WorkspaceFindingExportRecord) -> Vec<String> {
+    let Some(remediation) = record.remediation.as_ref() else {
+        return vec![String::new(); 7];
+    };
+    vec![
+        remediation.application_id.clone(),
+        remediation.patch_run_id.clone(),
+        remediation.application_state.clone(),
+        remediation.reverify_outcome.clone().unwrap_or_default(),
+        remediation.reverify_run_id.clone().unwrap_or_default(),
+        remediation.diff_hash.clone(),
+        remediation.touched_paths.join(";"),
+    ]
 }
 
 fn csv_core_fields(record: &WorkspaceFindingExportRecord) -> Vec<String> {

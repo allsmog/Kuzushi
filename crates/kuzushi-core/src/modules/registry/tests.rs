@@ -139,6 +139,33 @@ mod tests {
     }
 
     #[test]
+    fn secret_scan_integer_ranges_reject_silent_rewrites() {
+        let registry = ModuleRegistry::with_v2_builtins();
+
+        let prepared = registry
+            .prepare_tool_input(
+                "secret-scan:scan",
+                json!({"maxFileBytes": "12345"}),
+                None,
+            )
+            .unwrap();
+        assert_eq!(prepared["maxFileBytes"], json!(12_345));
+
+        for value in [-1, 0, 1, 67_108_865] {
+            let error = registry
+                .prepare_tool_input(
+                    "secret-scan:scan",
+                    json!({"maxFileBytes": value}),
+                    None,
+                )
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("maxFileBytes"), "{error}");
+            assert!(error.contains("at least 1024") || error.contains("at most 67108864"), "{error}");
+        }
+    }
+
+    #[test]
     fn stored_required_options_satisfy_tool_validation_without_model_fallback() {
         let registry = ModuleRegistry::with_v2_builtins();
         let mut store = ToolOptionStore::new();
@@ -2440,7 +2467,7 @@ process.stdin.on("end", () => {
             .find(|tool| tool["name"] == "semgrep:scan")
             .unwrap();
         assert_eq!(semgrep["headless"], json!(true));
-        assert_eq!(semgrep["phase"], json!("hunt"));
+        assert_eq!(semgrep["phase"], json!("scan"));
         assert_eq!(semgrep["effect"], json!("workspace-write"));
         assert_eq!(semgrep["approval"], json!("none"));
         assert_eq!(semgrep["workspace_requirement"], json!("required"));
@@ -2901,7 +2928,7 @@ process.stdin.on("end", () => {
 
         assert_eq!(
             fingerprint,
-            "c764fae02bf85a027893e46fe7a5a0f5bb50c760d71a814fbb0d46da7458fe1f",
+            "3d3046a9178a8849645d132f680776ec88a099356ec03a34749c8d99f00438ea",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
     }

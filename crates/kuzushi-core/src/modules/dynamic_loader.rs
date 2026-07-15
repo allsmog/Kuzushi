@@ -326,6 +326,7 @@ fn describe_verified_worker(worker: &VerifiedDynamicWorker) -> Result<DynamicMod
         digest: worker.module.digest.clone(),
     };
     let output = describe_local_worker(&resolved)?;
+    warn_deprecated_dynamic_phases(&output, &resolved.specifier);
     serde_json::from_slice(&output).context("verified KWP worker returned invalid descriptor JSON")
 }
 
@@ -475,6 +476,7 @@ pub fn approve_dynamic_module(
     ensure_single_file_worker(&resolved)?;
     let (_snapshot, staged) = snapshot_worker_bundle(&resolved)?;
     let output = describe_local_worker(&staged)?;
+    warn_deprecated_dynamic_phases(&output, specifier);
     let mut loaded: DynamicModuleDescription = serde_json::from_slice(&output)
         .context("KWP worker returned invalid descriptor JSON during approval")?;
     validate_dynamic_module_shape(&mut loaded)?;
@@ -593,8 +595,35 @@ fn describe_dynamic_module(specifier: &str) -> Result<DynamicModuleDescription> 
         }
         Err(error) => return Err(error.into()),
     };
+    warn_deprecated_dynamic_phases(&output, specifier);
     serde_json::from_slice(&output)
         .with_context(|| format!("dynamic module {specifier:?} returned invalid descriptor JSON"))
+}
+
+fn warn_deprecated_dynamic_phases(output: &[u8], specifier: &str) {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(output) else {
+        return;
+    };
+    let Some(tools) = value.get("tools").and_then(serde_json::Value::as_array) else {
+        return;
+    };
+    for tool in tools {
+        let Some(phase) = tool.get("phase").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let replacement = match phase {
+            "hunt" => "scan",
+            "confirm" => "prove",
+            _ => continue,
+        };
+        let name = tool
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("<unnamed>");
+        eprintln!(
+            "warning: dynamic module {specifier:?} tool {name:?} uses deprecated phase {phase:?}; use {replacement:?}"
+        );
+    }
 }
 
 fn describe_local_worker(resolved: &ResolvedWorkerBundle) -> Result<Vec<u8>> {
@@ -1045,7 +1074,7 @@ fn validate_dynamic_tool_policy(tool: &ToolDescriptor) -> Result<()> {
     }
     if tool.effect != ToolEffect::Read && tool.phase == ToolPhase::Operate {
         anyhow::bail!(
-            "dynamic tool {:?} must declare map|hunt|confirm|fix for an effectful operation",
+            "dynamic tool {:?} must declare map|scan|review|prove|fix for an effectful operation",
             tool.name
         );
     }
@@ -1085,6 +1114,7 @@ fn validate_dynamic_tool_options(tool: &mut ToolDescriptor) -> Result<()> {
     for option in &mut tool.options {
         validate_dynamic_option_names(&tool.name, option, &mut names)?;
         validate_dynamic_enum_choices(&tool.name, option)?;
+        validate_dynamic_integer_range(&tool.name, option)?;
         normalize_dynamic_option_default(&tool.name, option)?;
         if option.option_type == OptionType::Path && option.path_semantics.is_none() {
             anyhow::bail!(
@@ -1093,6 +1123,23 @@ fn validate_dynamic_tool_options(tool: &mut ToolDescriptor) -> Result<()> {
                 option.name
             )
         }
+    }
+    Ok(())
+}
+
+fn validate_dynamic_integer_range(tool_name: &str, option: &OptionSpec) -> Result<()> {
+    let has_range = option.minimum.is_some() || option.maximum.is_some();
+    anyhow::ensure!(
+        !has_range || option.option_type == OptionType::Int,
+        "dynamic tool {tool_name:?} option {:?} declares an integer range for a non-integer type",
+        option.name
+    );
+    if let (Some(minimum), Some(maximum)) = (option.minimum, option.maximum) {
+        anyhow::ensure!(
+            minimum <= maximum,
+            "dynamic tool {tool_name:?} option {:?} has minimum {minimum} above maximum {maximum}",
+            option.name
+        );
     }
     Ok(())
 }
@@ -1768,6 +1815,28 @@ mod dynamic_loader_tests {
             .to_string();
 
         assert!(error.contains("native predicate"), "{error}");
+    }
+
+    #[test]
+    fn dynamic_integer_ranges_are_type_checked() {
+        let option = opt("label", OptionType::String, "label").integer_range(1, 2);
+
+        let error = validate_dynamic_integer_range("example:run", &option)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("non-integer type"), "{error}");
+    }
+
+    #[test]
+    fn dynamic_integer_ranges_reject_reversed_bounds() {
+        let option = opt("count", OptionType::Int, "count").integer_range(2, 1);
+
+        let error = validate_dynamic_integer_range("example:run", &option)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("minimum 2 above maximum 1"), "{error}");
     }
 
     fn sleeping_node_child() -> std::process::Child {

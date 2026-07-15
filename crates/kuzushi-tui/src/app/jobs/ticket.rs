@@ -98,8 +98,12 @@ impl JobTicket {
 }
 
 impl JobEventSink {
+    pub(crate) fn generation(&self) -> WorkerGeneration {
+        self.generation
+    }
+
     pub(crate) fn send(&self, event: ShellEvent) -> bool {
-        if event.kind() != self.kind {
+        if !event.is_operator_interaction() && event.kind() != self.kind {
             return false;
         }
         self.send_unchecked(event)
@@ -112,7 +116,14 @@ impl JobEventSink {
             generation: self.generation,
             event,
         };
-        let sent = if terminal {
+        let reliable = terminal
+            || matches!(
+                &stamped.event,
+                ShellEvent::OperatorQuestion(_)
+                    | ShellEvent::OperatorQuestionCompleted(_)
+                    | ShellEvent::CredentialQuestionRouted { .. }
+            );
+        let sent = if reliable {
             self.tx.send(stamped).is_ok()
         } else {
             self.tx.try_send(stamped).is_ok()

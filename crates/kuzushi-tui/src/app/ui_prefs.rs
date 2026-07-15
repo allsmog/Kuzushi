@@ -1,4 +1,6 @@
-use super::AdvisoryState;
+use super::{AdvisoryState, ConfiguredKeyResult, PendingKeyChord, RuntimeKeymap, ShellView};
+use crossterm::event::KeyEvent;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
@@ -14,10 +16,39 @@ pub(crate) struct UiPrefs {
     should_quit: bool,
     ctrl_c_armed_at: Option<Instant>,
     viewport: TerminalViewport,
+    runtime_keymap: RuntimeKeymap,
+    pending_key_chord: Option<PendingKeyChord>,
+    phase_result_cursor: Option<PhaseResultCursor>,
+    keymap_home: Option<PathBuf>,
+    keymap_config_fingerprint: Option<ConfigFingerprint>,
+    last_keymap_check: Option<Instant>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PhaseResultCursor {
+    attempt_id: String,
+    index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ConfigFingerprint {
+    modified: Option<std::time::SystemTime>,
+    len: u64,
 }
 
 impl UiPrefs {
-    pub(crate) fn new(auto_open_activity: bool, auto_open_viz: bool) -> Self {
+    pub(crate) fn new(
+        auto_open_activity: bool,
+        auto_open_viz: bool,
+        runtime_keymap: RuntimeKeymap,
+    ) -> Self {
+        let keymap_home = kuzushi_core::ConfigPaths::from_target(None)
+            .ok()
+            .map(|paths| paths.home_dir);
+        let keymap_config_fingerprint = keymap_home
+            .as_ref()
+            .map(kuzushi_core::workspace_config_path)
+            .and_then(|path| config_fingerprint(&path));
         Self {
             advisory: AdvisoryState::default(),
             auto_open_activity,
@@ -30,7 +61,131 @@ impl UiPrefs {
             should_quit: false,
             ctrl_c_armed_at: None,
             viewport: TerminalViewport::default(),
+            runtime_keymap,
+            pending_key_chord: None,
+            phase_result_cursor: None,
+            keymap_home,
+            keymap_config_fingerprint,
+            last_keymap_check: None,
         }
+    }
+
+    pub(crate) fn apply_keymap_overrides(
+        &self,
+        view: ShellView,
+        bindings: Vec<crate::app::state_transitions::ViewKeybinding>,
+    ) -> Vec<crate::app::state_transitions::ViewKeybinding> {
+        self.runtime_keymap.apply_view_overrides(view, bindings)
+    }
+
+    pub(crate) fn handle_configured_shell_key(
+        &mut self,
+        view: ShellView,
+        key: KeyEvent,
+        now: Instant,
+    ) -> ConfiguredKeyResult {
+        self.runtime_keymap
+            .handle_shell_key(view, key, &mut self.pending_key_chord, now)
+    }
+
+    pub(crate) fn handle_configured_context_key(
+        &mut self,
+        context: &str,
+        key: KeyEvent,
+        now: Instant,
+    ) -> ConfiguredKeyResult {
+        self.runtime_keymap
+            .handle_context_key(context, key, &mut self.pending_key_chord, now)
+    }
+
+    pub(crate) fn keymap_error(&self) -> Option<&str> {
+        self.runtime_keymap.error()
+    }
+
+    pub(crate) fn keymap_overrides_action(&self, context: &str, action: &str) -> bool {
+        self.runtime_keymap.overrides_action(context, action)
+    }
+
+    pub(crate) fn keymap_binding_labels(
+        &self,
+        context: &str,
+        action: &str,
+        defaults: &[&str],
+    ) -> Vec<String> {
+        self.runtime_keymap
+            .binding_labels(context, action, defaults)
+    }
+
+    pub(crate) fn phase_result_cursor_index(&self, attempt_id: &str, count: usize) -> usize {
+        self.phase_result_cursor
+            .as_ref()
+            .filter(|cursor| cursor.attempt_id == attempt_id)
+            .map_or(0, |cursor| cursor.index.min(count.saturating_sub(1)))
+    }
+
+    pub(crate) fn move_phase_result_cursor(
+        &mut self,
+        attempt_id: &str,
+        count: usize,
+        delta: isize,
+    ) {
+        if count == 0 {
+            self.phase_result_cursor = None;
+            return;
+        }
+        let current = self.phase_result_cursor_index(attempt_id, count);
+        let index = (current as isize + delta).rem_euclid(count as isize) as usize;
+        self.phase_result_cursor = Some(PhaseResultCursor {
+            attempt_id: attempt_id.to_string(),
+            index,
+        });
+    }
+
+    pub(crate) fn clear_phase_result_cursor(&mut self) {
+        self.phase_result_cursor = None;
+    }
+
+    pub(crate) fn replace_runtime_keymap(&mut self, keymap: RuntimeKeymap) -> Result<(), String> {
+        if let Some(error) = keymap.error() {
+            return Err(error.to_string());
+        }
+        self.runtime_keymap = keymap;
+        self.pending_key_chord = None;
+        Ok(())
+    }
+
+    pub(crate) fn poll_runtime_keymap(
+        &mut self,
+        now: Instant,
+    ) -> Option<Result<Vec<kuzushi_core::config::KeybindingOverrideConfig>, String>> {
+        if self
+            .last_keymap_check
+            .is_some_and(|previous| now.duration_since(previous) < Duration::from_secs(1))
+        {
+            return None;
+        }
+        self.last_keymap_check = Some(now);
+        let home = self.keymap_home.clone()?;
+        let path = kuzushi_core::workspace_config_path(&home);
+        let fingerprint = config_fingerprint(&path);
+        if fingerprint == self.keymap_config_fingerprint {
+            return None;
+        }
+        self.keymap_config_fingerprint = fingerprint;
+        let loaded = kuzushi_core::config::load_config(kuzushi_core::ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .map_err(|error| error.to_string());
+        let bindings = match loaded {
+            Ok(config) => config.operator.keybindings,
+            Err(error) => return Some(Err(error)),
+        };
+        let keymap = RuntimeKeymap::from_config(&bindings);
+        if let Err(error) = self.replace_runtime_keymap(keymap) {
+            return Some(Err(error));
+        }
+        Some(Ok(bindings))
     }
 
     pub(crate) fn advisory(&self) -> &AdvisoryState {
@@ -155,13 +310,21 @@ impl UiPrefs {
     }
 }
 
+fn config_fingerprint(path: &std::path::Path) -> Option<ConfigFingerprint> {
+    let metadata = std::fs::metadata(path).ok()?;
+    Some(ConfigFingerprint {
+        modified: metadata.modified().ok(),
+        len: metadata.len(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn liveness_redraw_clock_advances_once_per_second() {
-        let mut prefs = UiPrefs::new(true, true);
+        let mut prefs = UiPrefs::new(true, true, RuntimeKeymap::default());
         let start = Instant::now();
 
         assert!(prefs.liveness_redraw_due(start, Duration::from_secs(1)));
@@ -169,6 +332,18 @@ mod tests {
             !prefs.liveness_redraw_due(start + Duration::from_millis(999), Duration::from_secs(1))
         );
         assert!(prefs.liveness_redraw_due(start + Duration::from_secs(1), Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn phase_result_cursor_wraps_and_resets_for_a_new_attempt() {
+        let mut prefs = UiPrefs::new(true, true, RuntimeKeymap::default());
+
+        prefs.move_phase_result_cursor("attempt-a", 3, -1);
+        assert_eq!(prefs.phase_result_cursor_index("attempt-a", 3), 2);
+        assert_eq!(prefs.phase_result_cursor_index("attempt-b", 3), 0);
+
+        prefs.clear_phase_result_cursor();
+        assert_eq!(prefs.phase_result_cursor_index("attempt-a", 3), 0);
     }
 }
 

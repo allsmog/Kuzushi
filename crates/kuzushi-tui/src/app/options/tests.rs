@@ -14,6 +14,8 @@ mod tests {
             path_semantics: None,
             file_reference_semantics: None,
             default: None,
+            minimum: None,
+            maximum: None,
             choices: Vec::new(),
             aliases: Vec::new(),
             deprecated_aliases: Vec::new(),

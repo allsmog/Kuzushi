@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     fn completed_map_keeps_a_later_phase_from_reading_as_fresh() {
-        // Entering 崩 hunt straight after 組 map: no findings yet, and the hunt
+        // Entering 崩 scan straight after 組 map: no findings yet, and the Scan
         // rows are actions with nothing cached — but the map is done, so the
         // banner must not claim a fresh start.
         let rows = vec![row(HuntTaint, PlanningArtifactState::Action)];

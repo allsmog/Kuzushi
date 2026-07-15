@@ -105,6 +105,7 @@ fn patch_output_data(
     report_markdown: &str,
 ) -> Value {
     json!({
+        "patchResult": result,
         "summary": summary,
         "status": result.status.as_str(),
         "iterations": result.iterations,
@@ -215,23 +216,12 @@ mod tests {
 
     #[test]
     fn patch_result_exposes_report_and_proof_snapshots() {
-        let result = PatchResult {
-            patch_run_id: "patch-1".to_string(),
-            fingerprint: "fp-1".to_string(),
-            repo: "repo".to_string(),
-            diff: Some("diff --git a/x b/x".to_string()),
-            status: PatchStatus::Sound,
-            iterations: 1,
-            build_command: Some("cargo build".to_string()),
-            test_command: Some("cargo test".to_string()),
-            worktree_path: None,
-            cost_usd: Some(0.0),
-            provider_spend_unresolved: false,
-            validator_log: Some("ok".to_string()),
-            history: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
+        let mut result = patch_result();
+        result.diff = Some("diff --git a/x b/x".to_string());
+        result.build_command = Some("cargo build".to_string());
+        result.test_command = Some("cargo test".to_string());
+        result.validator_log = Some("ok".to_string());
+        result.provenance = Some(patch_provenance());
 
         let output =
             patch_result_to_tool_json("fp-1", &result, "ok", Some("fixed bounds")).unwrap();
@@ -244,6 +234,10 @@ mod tests {
             .unwrap()
             .contains("cost:          $0.0000"));
         assert_eq!(output["proof"]["patchStatus"], json!("SOUND"));
+        assert_eq!(
+            output["data"]["patchResult"]["provenance"]["sourceCommit"],
+            json!("0123456789012345678901234567890123456789")
+        );
         assert!(output["reportMarkdown"]
             .as_str()
             .unwrap()
@@ -306,8 +300,20 @@ mod tests {
             provider_spend_unresolved: false,
             validator_log: None,
             history: Vec::new(),
+            provenance: None,
             created_at: None,
             updated_at: None,
+        }
+    }
+
+    fn patch_provenance() -> PatchProvenance {
+        PatchProvenance {
+            source_commit: "0123456789012345678901234567890123456789".to_string(),
+            target: "/repo".to_string(),
+            originating_run_id: Some("run-patch".to_string()),
+            detector_tool: Some("semgrep:scan".to_string()),
+            detector_run_id: Some("run-scan".to_string()),
+            detector_input_digest: Some("digest".to_string()),
         }
     }
 }

@@ -15,6 +15,7 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 pub(crate) struct PromptArmorRuntimeInput<'a> {
+    pub(crate) finding_run_id: String,
     pub(crate) tool_name: &'a str,
     pub(crate) command: &'a str,
     pub(crate) input: &'a Value,
@@ -62,7 +63,7 @@ fn runtime_tool_response(
 ) -> Result<Value> {
     let findings = normalize_agent_json_findings(raw, request.target, "prompt-armor", 100)?;
     let persisted = persist_tool_findings(
-        "prompt-armor",
+        request.finding_run_id.clone(),
         request.target,
         &findings,
         request.workspace,

@@ -1,4 +1,4 @@
-use super::contract::REFERENCE_SHA256;
+use super::contract::COCKPIT_SPINE_CONTRACT;
 use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -55,7 +55,7 @@ fn snapshot_document(
     actual: &str,
 ) -> String {
     format!(
-        "---\nsource: Kuzushi TUI.pdf\nsha256: {REFERENCE_SHA256}\nphase: {}\nsize: {width}x{height}\n---\n{}\n",
+        "---\nsource: Kuzushi Cockpit Spine\ncontract: {COCKPIT_SPINE_CONTRACT}\nphase: {}\nsize: {width}x{height}\n---\n{}\n",
         contract.slug,
         actual.trim_end()
     )

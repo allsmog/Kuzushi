@@ -510,10 +510,13 @@ fn fake_verify_bridge(dir: &std::path::Path) -> std::path::PathBuf {
     std::fs::write(
         &binary,
         r#"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"fingerprint":"fp-from-bridge","exploitable":true,"poc_payload":"curl -X POST /admin","poc_description":"POST reaches admin sink","attack_vector":"curl POST /admin","preconditions":["network access"],"confidence":0.84,"proof_level":3,"proof_verdict":"exploited"}}
-JSON
+request="$(cat)"
+fingerprint="$(printf '%s\n' "$request" | grep -Eo 'fp3_[0-9a-f]{64}' | head -n 1)"
+if [ -z "$fingerprint" ]; then
+  echo '{"ok":false,"error":"verification request omitted its finding fingerprint"}'
+  exit 1
+fi
+printf '%s\n' "{\"ok\":true,\"structured\":{\"fingerprint\":\"$fingerprint\",\"exploitable\":true,\"poc_payload\":\"curl -X POST /admin\",\"poc_description\":\"POST reaches admin sink\",\"attack_vector\":\"curl POST /admin\",\"preconditions\":[\"network access\"],\"confidence\":0.84,\"proof_level\":3,\"proof_verdict\":\"exploited\"}}"
 "#,
     )
     .unwrap();
@@ -2781,6 +2784,7 @@ fn run_patch_finding_reaches_langgraph_runtime_bridge_and_persists() {
     std::fs::write(repo.join("src/db.ts"), "const query = req.query.q;\n").unwrap();
     init_git_repo(&repo);
     let finding = seed_triaged_finding(&repo);
+    seed_completed_detector_run(&repo, "run-1", "semgrep:scan");
     let bridge = fake_patch_bridge(temp.path());
 
     let output = kuzushi_command(&home)
@@ -2837,6 +2841,7 @@ fn run_patch_finding_without_model_fails_without_silent_fallback() {
     std::fs::write(repo.join("src/db.ts"), "const query = req.query.q;\n").unwrap();
     init_git_repo(&repo);
     let finding = seed_triaged_finding(&repo);
+    seed_completed_detector_run(&repo, "run-1", "semgrep:scan");
 
     let output = kuzushi_command(&home)
         .arg("--target")
@@ -3181,6 +3186,18 @@ fn seed_triaged_finding(repo: &std::path::Path) -> Finding {
         )
         .unwrap();
     finding
+}
+
+fn seed_completed_detector_run(repo: &std::path::Path, run_id: &str, tool: &str) {
+    let record = kuzushi_core::run_artifacts::ToolRunRecord::new(repo, run_id, "tool", tool);
+    kuzushi_core::run_artifacts::record_tool_run_started(
+        record,
+        &serde_json::json!({"fixture": "detector input"}),
+    );
+    kuzushi_core::run_artifacts::record_tool_run_complete(
+        record,
+        &serde_json::json!({"ok": true, "output": "fixture detector completed"}),
+    );
 }
 
 fn seed_taint_iris_next_mcp_artifacts(repo: &std::path::Path) {

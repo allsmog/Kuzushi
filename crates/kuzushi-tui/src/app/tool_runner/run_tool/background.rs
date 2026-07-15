@@ -350,8 +350,13 @@ impl ShellApp {
         // before the worker existed, so a fast dispatch error could strand the
         // operator on an empty Activity view. Flipping after thread::spawn
         // guarantees the run is in flight before the view becomes visible.
-        if self.ui().auto_open_activity() {
+        if self.run_focus_is_background_owned() {
+            return;
+        }
+        let committed_plan = self.engagement.running_tool().is_some();
+        if self.ui().auto_open_activity() || committed_plan {
             self.set_shell_view(ShellView::Activity);
+            self.set_input_mode(InputMode::Navigate);
             self.log(
                 "view",
                 "opened activity — Ctrl+C requests abort; type `back` to leave (disable: setg ui.auto_open_activity false)",
@@ -369,15 +374,12 @@ impl ShellApp {
         model_override: Option<String>,
     ) {
         self.set_target(Some(run.target.clone()));
-        let mut session = ActivitySession::new(run.run_id.clone());
-        if let Some(phase) = background_tool_origin_phase(
-            tool_name,
-            self.engagement.current_phase(),
-            self.engagement.running_tool(),
-        ) {
-            session = session.with_origin_phase(phase);
-        }
+        let session = self.background_activity_session(run, tool_name);
         self.set_activity(Some(session));
+        self.record_session_event(kuzushi_core::session_transcript::SessionEvent::RunStarted {
+            run_id: run.run_id.clone(),
+            tool_name: tool_name.to_string(),
+        });
         self.start_tool_run(
             tool_name.to_string(),
             cancel,
@@ -395,6 +397,24 @@ impl ShellApp {
         self.set_live_activity(
             activity.unwrap_or_else(|| live_activity_for_tool(tool_name, status)),
         );
+    }
+
+    fn background_activity_session(
+        &self,
+        run: &BackgroundToolRun,
+        tool_name: &str,
+    ) -> ActivitySession {
+        let mut session = ActivitySession::new(run.run_id.clone());
+        if let Some(phase) = background_tool_origin_phase(
+            tool_name,
+            self.engagement.current_phase(),
+            self.engagement.running_tool(),
+        ) {
+            session = session.with_origin_phase(phase);
+        }
+        session = self.capture_run_focus_origin(session);
+        session.seed_task_sequence(self.engagement.planning_tool_sequence());
+        session
     }
 }
 
@@ -417,6 +437,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn background_owned_plan_completion_keeps_setup_and_receipt() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Setup);
+        app.set_input_mode(InputMode::Navigate);
+        app.engagement.set_phase(crate::app::WorkflowPhase::Map);
+
+        let session = app.capture_run_focus_origin(ActivitySession::new("map-first"));
+        app.set_activity(Some(session));
+        app.set_shell_view(ShellView::Activity);
+        app.engagement
+            .set_running_tool("repository:inventory".to_string());
+        app.background_handoff();
+
+        let continuation = app.capture_run_focus_origin(ActivitySession::new("map-final"));
+        app.set_activity(Some(continuation));
+        app.engagement.set_running_tool("secrets:scan".to_string());
+        app.open_activity_for_started_background_tool();
+
+        assert_eq!(app.shell_view(), ShellView::Setup);
+        assert!(app.run_focus_is_background_owned());
+
+        app.set_running_tool_for_test("secrets:scan");
+        app.apply_job_event(ShellEvent::Tool(ToolEvent::Finished {
+            tool_name: "secrets:scan".to_string(),
+            result: serde_json::json!({ "output": "no secrets found" }),
+        }));
+
+        assert_eq!(app.shell_view(), ShellView::Setup);
+        assert_eq!(
+            app.engagement.current_phase(),
+            Some(crate::app::WorkflowPhase::Scan)
+        );
+        assert!(app.activity().is_some_and(|session| {
+            session.run_focus_backgrounded
+                && session
+                    .run_focus_receipt
+                    .as_ref()
+                    .is_some_and(|receipt| receipt.outcome == "completed" && receipt.run_count == 2)
+        }));
+    }
+
+    #[test]
+    fn committed_plan_opens_run_focus_even_when_ad_hoc_auto_open_is_disabled() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.ui_mut().set_auto_open_activity(false);
+        app.set_shell_view(ShellView::Setup);
+        app.engagement
+            .set_running_tool("repository:inventory".to_string());
+
+        app.open_activity_for_started_background_tool();
+
+        assert_eq!(app.shell_view(), ShellView::Activity);
+        assert_eq!(app.input_mode(), InputMode::Navigate);
+    }
+
+    #[test]
     fn declared_tool_phase_wins_over_a_different_walker_phase() {
         assert_eq!(
             background_tool_origin_phase(
@@ -424,7 +500,7 @@ mod tests {
                 Some(crate::app::WorkflowPhase::Fix),
                 Some("semgrep:scan"),
             ),
-            Some(crate::app::WorkflowPhase::Hunt)
+            Some(crate::app::WorkflowPhase::Scan)
         );
     }
 
@@ -433,7 +509,7 @@ mod tests {
         assert_eq!(
             background_tool_origin_phase(
                 "findings:list",
-                Some(crate::app::WorkflowPhase::Hunt),
+                Some(crate::app::WorkflowPhase::Scan),
                 None,
             ),
             None
@@ -445,10 +521,10 @@ mod tests {
         assert_eq!(
             background_tool_origin_phase(
                 "findings:list",
-                Some(crate::app::WorkflowPhase::Confirm),
+                Some(crate::app::WorkflowPhase::Prove),
                 Some("findings:list"),
             ),
-            Some(crate::app::WorkflowPhase::Confirm)
+            Some(crate::app::WorkflowPhase::Prove)
         );
     }
 

@@ -232,18 +232,34 @@ fn selected_review_queue_row(
 /// signals. Full word (`CONFIRMED`) at readable widths, a one-char marker
 /// (`✓ ◇ ? !`) when the row is too narrow to spend on a word.
 fn review_queue_confidence_chip(row: &ReviewQueueRow, width: usize) -> String {
-    if width < REVIEW_FULL_METADATA_MIN_WIDTH {
-        return proof_confidence_code(row).to_string();
+    let confidence = if width < REVIEW_FULL_METADATA_MIN_WIDTH {
+        proof_confidence_code(row)
+    } else {
+        row.proof_confidence_label.as_str()
+    };
+    format!(
+        "{} s{} {} {confidence}",
+        row.proof_meter,
+        row.source_count,
+        authority_marker(row)
+    )
+}
+
+fn authority_marker(row: &ReviewQueueRow) -> &'static str {
+    match row.decision_author.as_str() {
+        "human" | "operator" => "@H",
+        "auto" | "agent" | "model" => "@A",
+        "imported" => "@I",
+        _ => "@?",
     }
-    row.proof_confidence_label.clone()
 }
 
 fn proof_confidence_code(row: &ReviewQueueRow) -> &'static str {
     match row.proof_confidence {
-        ProofConfidence::Confirmed => "rt",
-        ProofConfidence::Likely => "src",
-        ProofConfidence::Unverified if row.evidence_state != "message-only" => "sig",
-        ProofConfidence::Unverified | ProofConfidence::Dismissed => "unv",
+        ProofConfidence::Confirmed => "CFM",
+        ProofConfidence::Likely => "LIK",
+        ProofConfidence::Unverified => "UNV",
+        ProofConfidence::Dismissed => "DIS",
     }
 }
 
@@ -259,7 +275,11 @@ fn review_queue_signal_text(row: &ReviewQueueRow, width: usize) -> String {
 
 fn review_queue_signal_width(width: usize) -> usize {
     if width < REVIEW_FULL_SIGNAL_MIN_WIDTH {
-        10
+        if width < 48 {
+            4
+        } else {
+            10
+        }
     } else if width >= REVIEW_FULL_METADATA_MIN_WIDTH {
         width.saturating_sub(72).clamp(32, 120)
     } else {
@@ -269,7 +289,7 @@ fn review_queue_signal_width(width: usize) -> usize {
 
 fn review_queue_title_budget(width: usize, signal_width: usize, chip_width: usize) -> usize {
     let prefix_width = 2 + 7 + 1 + 1 + 1 + chip_width + 1 + signal_width + 1;
-    width.saturating_sub(prefix_width).max(8)
+    width.saturating_sub(prefix_width)
 }
 
 fn review_queue_title_text(row: &ReviewQueueRow, width: usize) -> String {
@@ -380,6 +400,8 @@ mod tests {
             rule: "CWE-89".to_string(),
             tool: "semgrep".to_string(),
             proof_label: "source_sink_linked".to_string(),
+            proof_meter: "[●●○]".to_string(),
+            source_count: 2,
             evidence_state: "evidence:1".to_string(),
             next_action: "validate".to_string(),
             projection_index: 0,
@@ -452,7 +474,7 @@ mod tests {
         let wide = line_text(review_queue_row_line(&row, 220));
         // At metadata widths the full band word sits right after the severity glyph.
         assert!(wide.contains("CONFIRMED"), "{wide}");
-        assert!(wide.contains("H CONFIRMED"), "{wide}");
+        assert!(wide.contains("H [●●○] s2 @? CONFIRMED"), "{wide}");
     }
 
     #[test]
@@ -460,10 +482,22 @@ mod tests {
         let row = review_row();
         let narrow = line_text(review_queue_row_line(&row, 60));
         assert!(!narrow.contains("CONFIRMED"), "{narrow}");
-        assert!(narrow.contains("rt"), "{narrow}");
+        assert!(narrow.contains("[●●○] s2 @? CFM"), "{narrow}");
         assert!(narrow.contains("open"), "{narrow}");
         assert!(!narrow.contains("review-order"), "{narrow}");
         assert!(!narrow.contains('✓'), "{narrow}");
+    }
+
+    #[test]
+    fn every_row_discloses_human_decision_authority() {
+        let mut row = review_row();
+        row.decision_author = "human".to_string();
+
+        let narrow = line_text(review_queue_row_line(&row, 48));
+        let wide = line_text(review_queue_row_line(&row, 220));
+
+        assert!(narrow.contains("@H"), "{narrow}");
+        assert!(wide.contains("@H"), "{wide}");
     }
 
     #[test]

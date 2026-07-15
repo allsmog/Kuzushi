@@ -6,9 +6,46 @@ pub(crate) fn patch_module() -> BuiltinModule {
         "Patch",
         ModuleKind::Defense,
         "Generate and validate a patch for a finding.",
-        vec![patch_finding_tool()],
+        vec![patch_finding_tool(), patch_reverify_tool()],
         vec![dag("patch:finding", "patch", &["verify:finding"])],
     )
+}
+
+fn patch_reverify_tool() -> ToolDescriptor {
+    tool_with_options(
+        "patch:reverify",
+        "Re-run the originating detector against an applied patch.",
+        vec![
+            opt(
+                "applicationId",
+                OptionType::String,
+                "Durable patch application receipt to re-verify.",
+            )
+            .aliases(&["application_id"])
+            .required(),
+            internal_reverify_option("detectorTool", "Bound originating detector name."),
+            internal_reverify_option("detectorRunId", "Bound originating detector run."),
+            opt(
+                "detectorInput",
+                OptionType::Json,
+                "Bound originating detector input.",
+            )
+            .advanced(),
+            internal_reverify_option(
+                "comparisonUnavailable",
+                "Reason the originating detector cannot be replayed exactly.",
+            ),
+        ],
+    )
+    .with_policy(repository_execute_policy(
+        ToolPhase::Fix,
+        RuntimeRequirement::InputAware,
+        FindingStoreRequirement::Required,
+    ))
+}
+
+fn internal_reverify_option(name: &str, description: &str) -> OptionSpec {
+    opt(name, OptionType::String, description).advanced()
 }
 
 fn patch_finding_tool() -> ToolDescriptor {

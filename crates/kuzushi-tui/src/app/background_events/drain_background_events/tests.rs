@@ -294,6 +294,61 @@ fn stale_job_tool_event_is_discarded_without_clearing_current_guard() {
         .any(|line| line.body.contains("stale complete")));
 }
 
+fn test_operator_question_request(run_id: &str) -> OperatorQuestionRequest {
+    OperatorQuestionRequest::from_tool_input(
+        run_id,
+        serde_json::json!({"questions": [{
+            "id": "scope",
+            "header": "Scope",
+            "prompt": "What should Scan inspect?",
+            "options": [
+                {"label": "Changed", "description": "Current diff", "recommended": true},
+                {"label": "All", "description": "Whole target", "recommended": false}
+            ]
+        }]}),
+    )
+    .unwrap()
+}
+
+#[test]
+fn stale_operator_completion_cannot_clear_matching_current_question() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_activity(Some(ActivitySession::new("shared-run")));
+    let stale = app.jobs_mut().start(JobKind::Agent, "old-agent");
+    let current = app.jobs_mut().start(JobKind::Agent, "current-agent");
+    let request = test_operator_question_request("shared-run");
+    let request_id = request.request_id.clone();
+    let (control, _responses) = std::sync::mpsc::sync_channel(1);
+    assert!(
+        current.send(ShellEvent::OperatorQuestion(OperatorQuestionEnvelope {
+            request,
+            generation: current.generation(),
+            control,
+        }))
+    );
+    assert!(stale.send(ShellEvent::OperatorQuestionCompleted(
+        OperatorQuestionCompleted {
+            request_id: request_id.clone(),
+            run_id: "shared-run".to_string(),
+            outcome: OperatorQuestionOutcome::Submitted,
+            selected_labels: vec!["Changed".to_string()],
+            freeform_supplied: false,
+        }
+    )));
+
+    app.drain_job_events();
+
+    let session = app.activity().expect("current activity");
+    let card = session
+        .operator_question
+        .as_ref()
+        .expect("current question must remain");
+    assert_eq!(card.request().request_id, request_id);
+    assert_eq!(session.operator_answer_acknowledgement, None);
+    stale.complete();
+    current.complete();
+}
+
 #[test]
 fn stale_job_burst_consumes_drain_budget_before_current_event() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);

@@ -1,0 +1,95 @@
+---
+source: Kuzushi Cockpit Spine
+contract: cockpit-spine-v1
+phase: review
+size: 96x89
+---
+KUZUSHI · VIEW REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built · module context
+ 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
+ ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
+ Enter open in Prove · findings clear projection · z open heatmap · scan again
+│▸ FINDINGS · 6                           │SELECTED FINDING · Enter prove · z heatmap
+│▸F-0001  C [●●●] s1 @? CFM open SQL...   │SQL injection reaches query
+│  SQL injection reaches query            │
+│  src/auth/login.rs:17                   │── STATUS ──
+│  ▸ next:patch · Enter open              │severity: critical
+│ F-0002  H [●○○] s1 @? UNV open Orde...  │  confidence: CONFIRMED
+│ F-0003  H [●○○] s1 @? UNV open Temp...  │lifecycle status: runtime_verified
+│ F-0004  M [●○○] s1 @? UNV open Uplo...  │evidence state: evidence:1
+│ F-0005  M [●○○] s1 @? UNV open Sess...  │  proof summary: ✓ verified L4
+│ F-0006  L [●○○] s1 @? UNV open Debu...  │
+│                                         │── DECISION ──
+│                                         │  current decision: needs_review
+│                                         │  decision source: none
+│                                         │  decision history: no decision history loaded
+│                                         │
+│                                         │── NEXT ──
+│                                         │  patch: `patch F-0001`
+│                                         │  runtime proof is recorded; generate remediation
+│                                         │
+│                                         │── EVIDENCE ──
+│                                         │  origin: observed code evidence
+│                                         │  source-sink · conf 94 · src/auth/login.rs:17
+│                                         │    request_input -> database_query
+│                                         │    attacker-controlled input reaches a...
+│                                         │
+│                                         │── VERIFICATION ──
+│                                         │  runtime verification: verified L4 - runtime
+│                                         │  verification recorded empirical evidence for
+│                                         │  this finding
+│                                         │
+│                                         │── ANALYSIS ──
+│                                         │  static proof: path-linked - static evidence
+│                                         │  links source to sink
+│                                         │
+│                                         │── CLAIM ──
+│                                         │alias: F-0001
+│                                         │rule: phase.rule.0
+│                                         │location: src/auth/login.rs:17
+│                                         │producing tool: semgrep
+│                                         │
+│                                         │── SCANNER MESSAGE ──
+│                                         │  SQL injection reaches query
+│                                         │
+│                                         │── PROVENANCE ──
+│                                         │run: run:discov..-run
+│                                         │revision: rev:unknown
+│                                         │source signature:
+│                                         │login.rs:17:sql-injection-reaches-query
+│                                         │corroboration: 1
+│                                         │identity: phase-findin
+│                                         │fingerprint:
+│                                         │fp3_ed97bede6bddb8528fdfaad97714184aea0182bae8bf29
+│                                         │53e2c2451f61b5ae9c
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+route:run · 査  review 3/5 · ⛭ 掛  fix · workbench ·...       6 findings / 1 crit / 2 high / 2 med
+────────────────────────────────────────────────────────────────────────────────────────────────
+ Ctrl+C request abort   Esc prompt
+▣ REVIEW › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

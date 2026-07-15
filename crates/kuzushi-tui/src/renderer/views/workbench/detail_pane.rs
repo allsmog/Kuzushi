@@ -668,10 +668,7 @@ mod tests {
     fn detail_actions_include_report_command_when_available() {
         let text = detail_text(Some(WORKBENCH_REPORT_COMMAND));
 
-        assert!(
-            text.contains("`findings export report.sarif sarif`"),
-            "{text}"
-        );
+        assert!(text.contains("report: `report`"), "{text}");
         assert!(text.contains("validate: `verify F-0001`"), "{text}");
         assert!(text.contains("report:"), "{text}");
         assert!(!text.contains("o open in editor"), "{text}");

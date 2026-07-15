@@ -7,16 +7,19 @@ mod workspace;
 
 use super::ShellApp;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FooterKeybinding {
-    pub(crate) key: &'static str,
-    pub(crate) label: &'static str,
+    pub(crate) key: String,
+    pub(crate) label: String,
 }
 
 pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    if app.advisory().pending_confirm.is_some() {
+        return system::pending_confirm_keybindings(app);
+    }
     let mut bindings = active::active_keybindings(app).unwrap_or_else(|| idle_keybindings(app));
     if view_owns_its_input_contract(app) {
-        return bindings;
+        return apply_operator_chrome_overrides(bindings, app);
     }
     bindings = input_mode_bindings(bindings, app.input_mode());
     push_input_mode_binding(&mut bindings, app);
@@ -26,6 +29,39 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
             bindings.insert(after_critical_binding(&bindings), tab);
         }
     }
+    apply_operator_chrome_overrides(bindings, app)
+}
+
+fn apply_operator_chrome_overrides(
+    mut bindings: Vec<FooterKeybinding>,
+    app: &ShellApp,
+) -> Vec<FooterKeybinding> {
+    for (context, action, replaced_key) in [
+        ("global", "command_palette", "Ctrl+G"),
+        ("global", "help", "help"),
+        ("composer", "navigate_mode", "F2"),
+        ("composer", "prompt_mode", "Esc"),
+        ("composer", "complete", "Tab"),
+    ] {
+        if !app.ui().keymap_overrides_action(context, action) {
+            continue;
+        }
+        let label = bindings
+            .iter()
+            .find(|binding| binding.key == replaced_key)
+            .map(|binding| binding.label.clone())
+            .unwrap_or_else(|| action.replace('_', " "));
+        bindings.retain(|binding| binding.key != replaced_key);
+        bindings.extend(
+            app.ui()
+                .keymap_binding_labels(context, action, &[])
+                .into_iter()
+                .map(|key| FooterKeybinding {
+                    key,
+                    label: label.clone(),
+                }),
+        );
+    }
     bindings
 }
 
@@ -34,6 +70,8 @@ fn view_owns_its_input_contract(app: &ShellApp) -> bool {
         || matches!(
             app.shell_view(),
             crate::ShellView::FilePicker
+                | crate::ShellView::Setup
+                | crate::ShellView::Report
                 | crate::ShellView::ConfirmDialog
                 | crate::ShellView::QuitConfirm
                 | crate::ShellView::Keymap
@@ -51,11 +89,11 @@ fn input_mode_bindings(
 }
 
 fn binding_for_mode(binding: FooterKeybinding, mode: crate::InputMode) -> Option<FooterKeybinding> {
-    if is_global_chord(binding.key) {
+    if is_global_chord(&binding.key) || binding.key == "Shift+Tab" {
         return Some(binding);
     }
     match mode {
-        crate::InputMode::Prompt => (typed_command_key(binding.key)
+        crate::InputMode::Prompt => (typed_command_key(&binding.key)
             || binding.key == "PgUp/PgDn"
             || (binding.key == "Esc" && binding.label == "return to picker"))
             .then_some(binding),
@@ -64,10 +102,10 @@ fn binding_for_mode(binding: FooterKeybinding, mode: crate::InputMode) -> Option
 }
 
 fn navigation_binding_without_false_escape(binding: FooterKeybinding) -> Option<FooterKeybinding> {
-    if typed_command_key(binding.key) {
+    if typed_command_key(&binding.key) {
         return None;
     }
-    match binding.key {
+    match binding.key.as_str() {
         "Esc/q" => Some(bind("q", binding.label)),
         "n/Esc" => Some(bind("n", binding.label)),
         key if key.contains("Esc") => None,
@@ -122,7 +160,8 @@ fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp)
 
 fn after_critical_binding(bindings: &[FooterKeybinding]) -> usize {
     usize::from(bindings.first().is_some_and(|binding| {
-        binding.key == "Ctrl+C" && matches!(binding.label, "request abort" | "wait cleanup")
+        binding.key == "Ctrl+C"
+            && matches!(binding.label.as_str(), "request abort" | "wait cleanup")
     }))
 }
 
@@ -153,8 +192,11 @@ pub(super) fn push_view_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &
     }
 }
 
-pub(super) fn bind(key: &'static str, label: &'static str) -> FooterKeybinding {
-    FooterKeybinding { key, label }
+pub(super) fn bind(key: impl Into<String>, label: impl Into<String>) -> FooterKeybinding {
+    FooterKeybinding {
+        key: key.into(),
+        label: label.into(),
+    }
 }
 
 fn push_unique_binding(bindings: &mut Vec<FooterKeybinding>, binding: FooterKeybinding) {

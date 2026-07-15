@@ -59,15 +59,94 @@ impl ShellApp {
     #[doc(hidden)]
     pub fn set_shell_view(&mut self, view: ShellView) {
         let current = self.shell_view();
-        if contextual_overlay_view(view) && !contextual_overlay_view(current) {
+        if contextual_surface_view(view) && !contextual_surface_view(current) {
             self.router.set_overlay_origin(Some(current));
-        } else if !contextual_overlay_view(view) {
+            self.router.set_overlay_input_mode(Some(self.input_mode()));
+        } else if !contextual_surface_view(view) {
             self.router.set_overlay_origin(None);
+            self.router.set_overlay_input_mode(None);
         }
-        if view != ShellView::Workbench && !contextual_overlay_view(view) {
+        if !matches!(view, ShellView::Workbench | ShellView::Activity)
+            && !contextual_surface_view(view)
+        {
             self.router.workbench_mut().clear_zoom();
         }
         self.router.set_current(view);
+        if current != view {
+            self.record_session_event(
+                kuzushi_core::session_transcript::SessionEvent::ViewChanged {
+                    from: Some(format!("{current:?}")),
+                    to: format!("{view:?}"),
+                },
+            );
+        }
+    }
+
+    pub(crate) fn restore_contextual_surface_origin(&mut self) -> bool {
+        let Some(origin) = self.router.overlay_origin() else {
+            return false;
+        };
+        let input_mode = self
+            .router
+            .overlay_input_mode()
+            .unwrap_or(InputMode::Prompt);
+        self.set_shell_view(origin);
+        self.set_input_mode(input_mode);
+        self.router.navigation_mut().accept_back_transition(origin);
+        true
+    }
+
+    pub(crate) fn open_report_from_current_origin(&mut self) {
+        if self.shell_view() != ShellView::Report {
+            let origin = self.current_non_nested_origin();
+            if origin.view != ShellView::Report {
+                self.router.report_mut().set_origin(origin);
+            }
+        }
+        self.set_shell_view(ShellView::Report);
+        self.set_input_mode(InputMode::Navigate);
+    }
+
+    pub(crate) fn close_report_to_origin(&mut self) {
+        let origin = {
+            let report = self.router.report_mut();
+            report.set_editing_path(false);
+            report.take_origin()
+        };
+        let Some(origin) = origin else {
+            self.close_report_to_fix_fallback();
+            return;
+        };
+        self.set_shell_view(origin.view);
+        self.set_input_mode(origin.input_mode);
+    }
+
+    fn current_non_nested_origin(&self) -> ReportOrigin {
+        let current = self.shell_view();
+        if contextual_surface_view(current) {
+            return ReportOrigin {
+                view: self.router.overlay_origin().unwrap_or(current),
+                input_mode: self
+                    .router
+                    .overlay_input_mode()
+                    .unwrap_or(self.input_mode()),
+            };
+        }
+        ReportOrigin {
+            view: current,
+            input_mode: self.input_mode(),
+        }
+    }
+
+    fn close_report_to_fix_fallback(&mut self) {
+        self.set_shell_view(ShellView::Workbench);
+        self.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Fix));
+        self.router
+            .workbench_mut()
+            .set_focus(WorkbenchPane::Findings);
+        self.set_input_mode(InputMode::Navigate);
     }
 
     pub(crate) fn editor(&self) -> &EditorState {
@@ -83,7 +162,13 @@ impl ShellApp {
         let body = body.into();
         let surface_workbench_error =
             prefix == "error" && self.shell_view() == ShellView::Workbench;
-        self.domain.push_log(prefix, body.clone());
+        self.domain.push_log(prefix.clone(), body.clone());
+        if prefix != ">" {
+            self.record_session_event(kuzushi_core::session_transcript::SessionEvent::LogEmitted {
+                level: prefix.clone(),
+                message: body.clone(),
+            });
+        }
         if surface_workbench_error {
             self.advisory_mut().notice = Some(Notice {
                 source: "workbench".to_string(),
@@ -232,8 +317,7 @@ impl ShellApp {
 
     #[doc(hidden)]
     pub fn open_auth_method_picker_for_test(&mut self, provider: impl Into<String>) {
-        self.router.auth_picker_mut().open(provider.into());
-        self.set_shell_view(ShellView::AuthMethodPicker);
+        self.open_auth_method_picker(provider.into());
     }
 
     #[doc(hidden)]
@@ -402,10 +486,70 @@ impl ShellApp {
     }
 
     pub fn set_target(&mut self, target: Option<PathBuf>) {
-        if self.target() != target.as_deref() {
+        let changed = self.target() != target.as_deref();
+        if changed {
             self.invalidate_view_hydration();
         }
-        self.session.set_target(target);
+        self.session.set_target(target.clone());
+        if changed {
+            self.record_session_event(match target {
+                Some(target) => kuzushi_core::session_transcript::SessionEvent::TargetActivated {
+                    target,
+                    source: "operator".to_string(),
+                },
+                None => kuzushi_core::session_transcript::SessionEvent::TargetCleared {
+                    source: "operator".to_string(),
+                },
+            });
+            self.refresh_phase_attempt_projection();
+        }
+    }
+
+    pub(crate) fn refresh_phase_attempt_projection(&mut self) {
+        let Some(target) = self.target_owned() else {
+            self.engagement.set_phase_attempt_projection(
+                None,
+                kuzushi_core::workflow_attempts::PhaseAttemptLedger::default(),
+            );
+            return;
+        };
+        let snapshot = kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(&target);
+        match kuzushi_core::workflow_attempts::load_phase_attempt_ledger(&target) {
+            Ok(ledger) => self
+                .engagement
+                .set_phase_attempt_projection(Some(snapshot), ledger),
+            Err(error) => {
+                self.engagement.set_phase_attempt_projection(
+                    Some(snapshot),
+                    kuzushi_core::workflow_attempts::PhaseAttemptLedger::default(),
+                );
+                self.log(
+                    "workflow",
+                    format!("phase result ledger is unreadable: {error}"),
+                );
+            }
+        }
+    }
+
+    pub(crate) fn record_current_phase_skip(&mut self) {
+        let Some(phase) = self.engagement.mark_current_phase_skipped() else {
+            return;
+        };
+        let Some(target) = self.target_owned() else {
+            return;
+        };
+        let checkpoint = kuzushi_core::workflow_attempts::PhaseCheckpointSkipped::new(
+            phase,
+            kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(&target),
+        );
+        match kuzushi_core::workflow_attempts::append_phase_checkpoint_skipped(&target, checkpoint)
+        {
+            Ok(_) => self.refresh_phase_attempt_projection(),
+            Err(error) => self.log(
+                "workflow",
+                format!("could not persist explicit {} skip: {error}", phase.label()),
+            ),
+        }
     }
 
     /// Cached "YOUR TOOLS" shelf. Read-only; never triggers IO, so it is safe
@@ -742,6 +886,7 @@ impl ShellApp {
 
     pub fn set_findings(&mut self, findings: Vec<Finding>) {
         let completion_values = finding_completion_values_from_findings(&findings);
+        self.invalidate_finding_patch_truth(None);
         self.domain.set_findings(findings);
         if let Some(target) = self.target_owned() {
             self.workbench_cache()
@@ -892,6 +1037,36 @@ impl ShellApp {
         self.bump_completion_generation_when(changed);
     }
 
+    pub(crate) fn capture_run_focus_origin(&self, mut session: ActivitySession) -> ActivitySession {
+        if let Some(prior) = self.activity().filter(|prior| {
+            prior.run_focus_origin.is_some()
+                && (self.shell_view() == ShellView::Activity
+                    || prior.run_focus_terminal_pending
+                    || prior.run_focus_backgrounded)
+        }) {
+            session.continue_run_focus_sequence_from(prior);
+            return session;
+        }
+        if self.shell_view() == ShellView::Activity {
+            return session;
+        }
+        session.run_focus_origin = Some(crate::app::RunFocusOrigin {
+            view: self.shell_view(),
+            input_mode: self.input_mode(),
+            // Capturing an origin makes this a workflow-owned foreground
+            // sequence. If the run is intentionally left in the background,
+            // finalization also checks that Activity still owns the screen,
+            // so this never redirects a background-only launch.
+            auto_return: true,
+        });
+        session
+    }
+
+    pub(crate) fn run_focus_is_background_owned(&self) -> bool {
+        self.activity()
+            .is_some_and(|session| session.run_focus_backgrounded)
+    }
+
     pub(crate) fn set_activity_run_id(&mut self, run_id: String) {
         let changed =
             self.activity().map(|activity| activity.run_id.as_str()) != Some(run_id.as_str());
@@ -1024,7 +1199,7 @@ impl ShellApp {
     }
 }
 
-fn contextual_overlay_view(view: ShellView) -> bool {
+pub(crate) fn contextual_surface_view(view: ShellView) -> bool {
     matches!(
         view,
         ShellView::Catalog
@@ -1034,12 +1209,91 @@ fn contextual_overlay_view(view: ShellView) -> bool {
             | ShellView::ThemePicker
             | ShellView::Keymap
             | ShellView::UpdateAvailable
+            | ShellView::Help
+            | ShellView::Jobs
+            | ShellView::Replay
+            | ShellView::Trace
+            | ShellView::Scene
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contextual_utilities_restore_the_exact_workflow_origin() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Prove));
+        app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+        app.set_input_mode(InputMode::Prompt);
+
+        app.set_shell_view(ShellView::Help);
+        assert_eq!(app.router.overlay_origin(), Some(ShellView::Workbench));
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+
+        app.set_shell_view(ShellView::Jobs);
+        assert_eq!(app.router.overlay_origin(), Some(ShellView::Workbench));
+        assert!(app.restore_contextual_surface_origin());
+
+        assert_eq!(app.shell_view(), ShellView::Workbench);
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+        assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Prove));
+        assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+    }
+
+    #[test]
+    fn contextual_surface_replacement_does_not_nest_origins() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Report);
+        app.set_input_mode(InputMode::Navigate);
+
+        for view in [ShellView::Scene, ShellView::Trace, ShellView::Replay] {
+            app.set_shell_view(view);
+            assert_eq!(app.router.overlay_origin(), Some(ShellView::Report));
+        }
+
+        assert!(app.restore_contextual_surface_origin());
+        assert_eq!(app.shell_view(), ShellView::Report);
+        assert_eq!(app.input_mode(), InputMode::Navigate);
+    }
+
+    #[test]
+    fn contextual_decks_leave_activity_back_history_pointing_at_review() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Review));
+        app.set_input_mode(InputMode::Prompt);
+        app.sync_view_change();
+
+        app.set_shell_view(ShellView::Activity);
+        app.set_input_mode(InputMode::Navigate);
+        app.sync_view_change();
+        app.set_input_mode(InputMode::Prompt);
+
+        for view in [ShellView::Replay, ShellView::Trace, ShellView::Jobs] {
+            app.set_shell_view(view);
+            assert!(
+                !app.sync_view_change(),
+                "{view:?} must be history-transparent"
+            );
+        }
+
+        assert!(app.restore_contextual_surface_origin());
+        assert_eq!(app.shell_view(), ShellView::Activity);
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+        assert!(!app.sync_view_change());
+
+        app.go_back();
+        assert_eq!(app.shell_view(), ShellView::Workbench);
+        assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Review));
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+    }
 
     #[test]
     fn unknown_command_from_workbench_sets_error_notice_and_keeps_log() {

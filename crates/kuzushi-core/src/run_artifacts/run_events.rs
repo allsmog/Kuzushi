@@ -13,6 +13,22 @@ pub struct RunEvent {
     pub tool: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact: Option<RunArtifact>,
+    /// Privacy-preserving audit metadata for an interactive operator question.
+    /// Free-form answer text is deliberately never stored; callers may only
+    /// record whether free-form input was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction: Option<RunInteractionAudit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunInteractionAudit {
+    pub request_id: String,
+    pub question_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predefined_label: Option<String>,
+    pub resolution: String,
+    pub freeform_supplied: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +76,7 @@ impl RunEvent {
             at_unix: now_unix(),
             tool: None,
             artifact: None,
+            interaction: None,
         }
     }
 
@@ -70,6 +87,11 @@ impl RunEvent {
 
     pub fn with_artifact(mut self, artifact: RunArtifact) -> Self {
         self.artifact = artifact.normalized();
+        self
+    }
+
+    pub fn with_interaction(mut self, interaction: RunInteractionAudit) -> Self {
+        self.interaction = Some(interaction);
         self
     }
 }

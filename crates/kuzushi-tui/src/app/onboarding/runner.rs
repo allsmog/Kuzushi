@@ -49,7 +49,10 @@ impl ShellApp {
 
     fn apply_planning_dispatch_view(&mut self, view: Option<PlanningDispatchView>) {
         match view {
-            Some(PlanningDispatchView::Activity) => self.set_shell_view(ShellView::Activity),
+            // The background-run attachment captures the exact workflow
+            // origin before it opens Run Focus. Switching here would reduce
+            // every Setup/Planning launch origin to Activity.
+            Some(PlanningDispatchView::Activity) => {}
             Some(PlanningDispatchView::Catalog) => self.set_shell_view(ShellView::Catalog),
             None => {}
         }
@@ -500,10 +503,7 @@ impl ShellApp {
 
     fn should_refresh_recommendations_after_map(&self, completed: Option<WorkflowPhase>) -> bool {
         completed == Some(WorkflowPhase::Map)
-            && !self
-                .engagement
-                .skipped_phases()
-                .contains(&WorkflowPhase::Map)
+            && !self.engagement.phase_is_skipped(WorkflowPhase::Map)
             && !self.tool_is_running()
             && self.target().is_some()
     }
@@ -561,10 +561,24 @@ impl ShellApp {
     }
 
     fn should_auto_open_next_phase(&self) -> bool {
-        matches!(
-            self.shell_view(),
-            ShellView::Activity | ShellView::PlanningPicker
-        )
+        if self.run_focus_is_background_owned() {
+            return false;
+        }
+        match self.shell_view() {
+            ShellView::PlanningPicker => true,
+            ShellView::Activity => !self.foreground_run_focus_owns_activity(),
+            _ => false,
+        }
+    }
+
+    fn foreground_run_focus_owns_activity(&self) -> bool {
+        self.shell_view() == ShellView::Activity
+            && self.activity().is_some_and(|session| {
+                !session.run_focus_backgrounded
+                    && session
+                        .run_focus_origin
+                        .is_some_and(|origin| origin.auto_return)
+            })
     }
 
     /// End of the engagement (past 掛 KAKE). When tasks failed, offer a yes/no
@@ -728,7 +742,9 @@ impl ShellApp {
     fn finish_planning(&mut self) {
         self.engagement.clear_planning_queue();
         self.log("planning", "planning complete");
-        self.open_workbench(crate::app::WorkbenchPane::Findings);
+        if !self.foreground_run_focus_owns_activity() && !self.run_focus_is_background_owned() {
+            self.open_workbench(crate::app::WorkbenchPane::Findings);
+        }
         self.log(
             "recommend",
             "run `recommend` when you want suggested next modules",
@@ -956,6 +972,16 @@ mod tests {
     use super::*;
     use kuzushi_core::{Severity, TriageOutcome, V2Config};
     use PlanningTaskId::*;
+
+    #[test]
+    fn planning_activity_view_waits_until_run_attachment_captures_setup_origin() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Setup);
+
+        app.apply_planning_dispatch_view(Some(PlanningDispatchView::Activity));
+
+        assert_eq!(app.shell_view(), ShellView::Setup);
+    }
 
     #[test]
     fn retry_hint_parses_raise_heap_token() {

@@ -4,9 +4,7 @@ mod model;
 mod retention;
 mod sqlite_store;
 
-pub(super) use model::{
-    CurrentRunHistoryPrefix, IndexedRunHistoryPage, RunHistoryIndexEntry,
-};
+pub(super) use model::{CurrentRunHistoryPrefix, IndexedRunHistoryPage, RunHistoryIndexEntry};
 pub use model::{RunHistoryCursor, RunHistoryPageInfo};
 
 use super::{checked_run_history_dirty_path, RunSummary};

@@ -1,7 +1,9 @@
 use crate::{ActivityRouteState, ActivitySession, DagTaskState};
+use kuzushi_core::WorkflowPhase;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityHeaderModel {
+    pub(crate) origin_phase: Option<WorkflowPhase>,
     pub(crate) detailed_title: String,
     pub(crate) summary_title: String,
     pub(crate) compact_title: String,
@@ -13,6 +15,7 @@ pub(crate) struct ActivityHeaderModel {
 /// "0/30 done · 0 running" wall wondering whether anything is still alive.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ActivityRunOutcome {
+    WaitingForOperator,
     Terminal {
         status: String,
         findings: Option<u64>,
@@ -70,12 +73,17 @@ pub(crate) fn activity_header_model_with_queue(
     let cost = activity_cost_label(session);
     let progress = progress_segment(&outcome, counts, live_tool, queued_steer_steps);
     ActivityHeaderModel {
+        origin_phase: session.origin_phase,
         detailed_title: detailed_title(session, route, &progress, &cost),
         summary_title: format!(
-            "ACTIVITY  run {run_id}  ·  {progress}",
+            "RUN FOCUS{phase}  run {run_id}  ·  {progress}",
+            phase = origin_phase_segment(session.origin_phase),
             run_id = session.run_id
         ),
-        compact_title: format!("ACTIVITY  {progress}"),
+        compact_title: format!(
+            "RUN FOCUS{phase}  {progress}",
+            phase = origin_phase_segment(session.origin_phase)
+        ),
     }
 }
 
@@ -95,6 +103,9 @@ fn progress_segment(
     queued_steer_steps: usize,
 ) -> String {
     match outcome {
+        Some(ActivityRunOutcome::WaitingForOperator) => {
+            "? waiting for operator input · run paused safely".to_string()
+        }
         Some(ActivityRunOutcome::Terminal {
             status,
             findings,
@@ -147,6 +158,7 @@ struct ActivityTaskCounts {
     done: usize,
     running: usize,
     canceling: usize,
+    partial: usize,
     failing: usize,
     blocked: usize,
     canceled: usize,
@@ -160,6 +172,7 @@ impl ActivityTaskCounts {
             done: task_count(session, DagTaskState::Done),
             running: task_count(session, DagTaskState::Active),
             canceling: task_count(session, DagTaskState::Canceling),
+            partial: task_count(session, DagTaskState::Partial),
             failing: task_count(session, DagTaskState::Failing),
             blocked: task_count(session, DagTaskState::Blocked),
             canceled: task_count(session, DagTaskState::Canceled),
@@ -177,6 +190,7 @@ fn task_progress(
         format!("{}/{} done", counts.done, counts.total),
         format!("{} running", counts.running),
     ];
+    append_terminal_count(&mut parts, counts.partial, "⚠ partial");
     append_terminal_count(&mut parts, counts.failing, "! failed");
     append_terminal_count(&mut parts, counts.blocked, "▣ blocked");
     append_terminal_count(&mut parts, counts.canceling, "× canceling");
@@ -253,11 +267,16 @@ fn detailed_title(
     cost: &str,
 ) -> String {
     format!(
-        "ACTIVITY  run {run}  ·  {progress}  ·  {cost}{paused}{verbose}",
+        "RUN FOCUS{phase}  run {run}  ·  {progress}  ·  {cost}{paused}{verbose}",
+        phase = origin_phase_segment(session.origin_phase),
         run = compact_activity_run_id(&session.run_id),
         paused = paused_segment(route.paused),
         verbose = verbose_segment(route.verbose_subsystems),
     )
+}
+
+fn origin_phase_segment(phase: Option<WorkflowPhase>) -> String {
+    phase.map_or_else(String::new, |phase| format!(" · {}", phase.label()))
 }
 
 fn compact_activity_run_id(run_id: &str) -> String {
@@ -283,6 +302,21 @@ mod tests {
     use kuzushi_core::RunTraceStep;
 
     #[test]
+    fn waiting_operator_question_overrides_terminal_looking_progress() {
+        let session = ActivitySession::new("waiting-run");
+
+        let model = activity_header_model(
+            &session,
+            &ActivityRouteState::default(),
+            Some(ActivityRunOutcome::WaitingForOperator),
+            None,
+        );
+
+        assert!(model.summary_title.contains("waiting for operator input"));
+        assert!(!model.summary_title.contains("run completed"));
+    }
+
+    #[test]
     fn activity_header_model_counts_tasks_and_cost() {
         let mut session = ActivitySession::new("tool-1778354160-e1b1d602a576");
         session.tasks.insert(
@@ -303,7 +337,7 @@ mod tests {
 
         assert_eq!(
             model.summary_title,
-            "ACTIVITY  run tool-1778354160-e1b1d602a576  ·  1/2 done  ·  1 running"
+            "RUN FOCUS  run tool-1778354160-e1b1d602a576  ·  1/2 done  ·  1 running"
         );
         assert!(model.detailed_title.contains("…d602a576"));
         assert!(model.detailed_title.contains("cost $0.3750"));

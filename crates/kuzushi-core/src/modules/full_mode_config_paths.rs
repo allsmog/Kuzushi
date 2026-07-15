@@ -131,7 +131,7 @@ pub(crate) fn persist_full_mode_report(
         return Ok(());
     };
     let store = FindingStore::open(workspace.findings_db_path())?;
-    let scan_id = format!("full-mode-{}", uuid::Uuid::new_v4());
+    let scan_id = ctx.finding_run_id();
     store.with_run_lifecycle(&scan_id, workspace.root(), || {
         for finding in &mut report.findings {
             finding.id = Some(store.insert_finding(&scan_id, finding)?);

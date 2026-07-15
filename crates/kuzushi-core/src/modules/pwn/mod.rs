@@ -37,7 +37,7 @@ fn pwn_tools() -> Vec<ToolDescriptor> {
 fn pwn_analysis_tools() -> Vec<ToolDescriptor> {
     vec![
         pwn_profile_binary_tool().with_policy(workspace_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
         )),
@@ -47,17 +47,17 @@ fn pwn_analysis_tools() -> Vec<ToolDescriptor> {
             FindingStoreRequirement::Optional,
         )),
         pwn_state_tool().with_policy(workspace_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
         )),
         pwn_calibrate_local_tool().with_policy(external_action_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
         )),
         pwn_run_candidates_tool().with_policy(workspace_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
         )),
@@ -67,22 +67,22 @@ fn pwn_analysis_tools() -> Vec<ToolDescriptor> {
 fn pwn_execution_tools() -> Vec<ToolDescriptor> {
     vec![
         pwn_auto_solve_tool().with_policy(external_action_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Always,
             FindingStoreRequirement::Optional,
         )),
         pwn_menu_probe_tool().with_policy(external_action_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
         )),
         pwn_exploit_run_tool().with_policy(external_action_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
         )),
         pwn_heap_uaf_scan_tool().with_policy(workspace_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
         )),

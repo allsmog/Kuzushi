@@ -4,6 +4,15 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttackSurfaceRiskModel {
     pub(crate) summary: String,
+    pub(crate) hot_surfaces: Vec<AttackSurfaceRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AttackSurfaceRow {
+    pub(crate) title: String,
+    pub(crate) framework: String,
+    pub(crate) tier: String,
+    pub(crate) score: u64,
 }
 
 pub(crate) fn attack_surface_risk_model(artifact: JsonFileState) -> Option<AttackSurfaceRiskModel> {
@@ -29,18 +38,21 @@ pub(crate) fn attack_surface_risk_model(artifact: JsonFileState) -> Option<Attac
             &frameworks,
             top_surface.as_deref(),
         ),
+        hot_surfaces: hot_surface_rows(&value),
     })
 }
 
 fn malformed_attack_surface_model() -> AttackSurfaceRiskModel {
     AttackSurfaceRiskModel {
         summary: format!("malformed {}", attack_surface_artifact_leaf()),
+        hot_surfaces: Vec::new(),
     }
 }
 
 fn non_file_attack_surface_model() -> AttackSurfaceRiskModel {
     AttackSurfaceRiskModel {
         summary: format!("{} is not a file", attack_surface_artifact_leaf()),
+        hot_surfaces: Vec::new(),
     }
 }
 
@@ -126,6 +138,41 @@ fn surface_label(tier: Option<&str>, title: Option<&str>) -> Option<String> {
         (None, Some(title)) => Some(title.to_string()),
         (None, None) => None,
     }
+}
+
+fn hot_surface_rows(value: &serde_json::Value) -> Vec<AttackSurfaceRow> {
+    value
+        .get("surfaces")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(surface_row)
+        .take(8)
+        .collect()
+}
+
+fn surface_row(value: &serde_json::Value) -> Option<AttackSurfaceRow> {
+    let title = value.get("title")?.as_str()?.trim();
+    if title.is_empty() {
+        return None;
+    }
+    Some(AttackSurfaceRow {
+        title: title.to_string(),
+        framework: value
+            .get("framework")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_string(),
+        tier: value
+            .pointer("/risk/tier")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_string(),
+        score: value
+            .pointer("/risk/score")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+    })
 }
 
 fn attack_surface_risk_summary(

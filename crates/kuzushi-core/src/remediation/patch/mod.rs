@@ -1,6 +1,6 @@
 use super::patch_process_adapter::PatchProcessControl as PatchCommandControl;
 use crate::findings::{
-    Finding, PatchAttempt, PatchResult, PatchStatus, TriageOutcome, TriageVerdict,
+    Finding, PatchAttempt, PatchProvenance, PatchResult, PatchStatus, TriageOutcome, TriageVerdict,
 };
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime, RuntimeCost, RuntimeCostReport};
@@ -19,13 +19,16 @@ pub(crate) use validate_patch::*;
 mod apply_reviewed_patch;
 mod build_patch_prompt;
 mod detect_validation_plan;
+mod detector_identity;
 mod ensure_git_repository;
 mod from_tool_input;
 #[cfg(test)]
 mod patch_cost_tests;
 mod patch_refusal_response;
 mod patch_result_to_tool_json;
+mod reverify;
 mod run_patch_finding;
 mod validate_patch;
 
 pub use run_patch_finding::run_patch_finding;
+pub(crate) use reverify::{bind_patch_reverify_input, run_patch_reverify};

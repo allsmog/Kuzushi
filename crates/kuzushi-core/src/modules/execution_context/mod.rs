@@ -142,6 +142,14 @@ impl<'a> ToolExecutionContext<'a> {
         self.run_artifact_location().map(|(_, run_id)| run_id)
     }
 
+    /// Use the canonical run artifact identity when execution owns one.
+    /// Direct library callers without a run bundle retain the historical
+    /// generated finding-run identity.
+    pub(crate) fn finding_run_id(&self) -> String {
+        self.run_id()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    }
+
     pub fn ensure_active(&self) -> anyhow::Result<()> {
         if self
             .cancellation

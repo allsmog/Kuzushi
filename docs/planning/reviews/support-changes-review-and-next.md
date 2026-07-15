@@ -1,5 +1,9 @@
 # Support-changes review + cleanup plan
 
+> **Historical review — superseded:** file-existence and UI-contract claims in
+> this review describe the 2026-07-09 tree. In particular, the depth-stack
+> Workbench path it records was deleted by the Cockpit Spine cutover.
+
 Reviewed: 2026-07-09, uncommitted working tree at `4ce19401d5`.
 Scope: the "supporting" changes — deps (`package.json`/`pnpm-lock.yaml`),
 docs (`AGENTS.md`, the DevEx proof-loop playbook, doc-comment

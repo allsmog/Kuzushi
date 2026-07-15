@@ -1,4 +1,4 @@
-use crate::app::{PathState, StrategyQueueState};
+use crate::app::StrategyQueueState;
 use crate::{ShellApp, ViewDataState};
 #[cfg(test)]
 use kuzushi_core::WorkspaceTarget;
@@ -79,18 +79,6 @@ pub(crate) fn strategy_queue_model(app: &ShellApp) -> StrategyQueueModel {
         empty_state: strategy_queue_empty_state(source.target.is_some()),
         rows: snapshot.rows,
     }
-}
-
-pub(crate) fn target_artifact_ready(app: &ShellApp, relative: &str) -> bool {
-    let Some(path) = app.target().map(|target| target.join(relative)) else {
-        return false;
-    };
-    matches!(
-        app.workbench_cache()
-            .borrow()
-            .cached_path_state(app.target().expect("target checked above"), &path),
-        ViewDataState::Ready(PathState::File { .. } | PathState::Directory)
-    )
 }
 
 struct StrategyQueueSnapshot {

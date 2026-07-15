@@ -5,13 +5,6 @@ mod initial_state;
 
 pub(crate) const UI_AUTO_OPEN_ACTIVITY_OPTION: &str = "ui.auto_open_activity";
 pub(crate) const UI_AUTO_OPEN_VIZ_OPTION: &str = "ui.auto_open_viz";
-pub(crate) const UI_WORKBENCH_DEPTH_STACK_OPTION: &str = "ui.workbench_depth_stack";
-
-/// Opt-in depth-stack Workbench review surface. Default OFF — the four-pane
-/// ring stays the default. `setg ui.workbench_depth_stack true` enables it.
-fn read_workbench_depth_stack_pref(option_store: &ToolOptionStore) -> bool {
-    stored_bool_pref(option_store, UI_WORKBENCH_DEPTH_STACK_OPTION).unwrap_or(false)
-}
 
 /// Operator preference for the Activity view's auto-open behaviour at
 /// scan/tool start. Default ON. `setg ui.auto_open_activity false` wins over
@@ -38,10 +31,8 @@ fn read_auto_open_viz_pref(option_store: &ToolOptionStore) -> bool {
 pub(crate) fn refresh_auto_open_prefs_from_store(app: &mut ShellApp) {
     let auto_open_activity = read_auto_open_activity_pref(app.option_store());
     let auto_open_viz = read_auto_open_viz_pref(app.option_store());
-    let depth_stack = read_workbench_depth_stack_pref(app.option_store());
     app.ui_mut().set_auto_open_activity(auto_open_activity);
     app.ui_mut().set_auto_open_viz(auto_open_viz);
-    app.router.workbench_mut().set_depth_stack(depth_stack);
 }
 
 fn read_bool_pref(option_store: &ToolOptionStore, option_name: &str, env_key: &str) -> bool {
@@ -107,6 +98,15 @@ impl ShellApp {
         target: Option<&WorkspaceTarget>,
         registry: ModuleRegistry,
     ) -> Self {
+        Self::with_registry_and_transcript(config, target, registry, None)
+    }
+
+    pub(crate) fn with_registry_and_transcript(
+        config: V2Config,
+        target: Option<&WorkspaceTarget>,
+        registry: ModuleRegistry,
+        transcript: Option<kuzushi_core::session_transcript::SessionRecorder>,
+    ) -> Self {
         let selected_model_index = preferred_model_choice_index(&config);
         let (option_store, option_store_error) = persistent_option_store(target);
         let session_budget_usd = config.operator.session_budget_usd;
@@ -120,6 +120,9 @@ impl ShellApp {
             session_budget_usd,
             trusted_workflow_auto_accept
         );
+        if let Some(transcript) = transcript {
+            app.attach_session_transcript(transcript);
+        }
         Self::hydrate_initial_workspace(&mut app, target);
         app.announce_startup(selected_model_index, option_store_error, target.is_some());
         app
@@ -127,6 +130,15 @@ impl ShellApp {
 
     fn hydrate_initial_workspace(app: &mut Self, target: Option<&WorkspaceTarget>) {
         refresh_auto_open_prefs_from_store(app);
+        app.refresh_phase_attempt_projection();
+        if target.is_some() {
+            if let Err(error) = app.refresh_context_view() {
+                app.log(
+                    "context",
+                    format!("could not hydrate the initial context snapshot: {error}"),
+                );
+            }
+        }
         app.workbench_cache()
             .borrow_mut()
             .git_metadata(target.map(WorkspaceTarget::root));
@@ -169,6 +181,34 @@ impl ShellApp {
         if let Some(choice) = model_choices().get(selected_model_index) {
             self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
         }
+    }
+}
+
+#[cfg(test)]
+mod initial_context_tests {
+    use super::*;
+
+    #[test]
+    fn shell_startup_projects_an_existing_context_snapshot() {
+        let target = tempfile::tempdir().unwrap();
+        let snapshot_path = kuzushi_core::context_snapshot_path(target.path());
+        std::fs::create_dir_all(snapshot_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            snapshot_path,
+            serde_json::json!({
+                "target": target.path(),
+                "filesIndexed": 42,
+                "repoContext": { "languages": ["Rust"], "frameworks": [] }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        assert!(app.domain().context_view().exists);
+        assert_eq!(app.domain().context_view().files_indexed, Some(42));
     }
 }
 

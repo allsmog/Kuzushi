@@ -1,0 +1,95 @@
+---
+source: Kuzushi Cockpit Spine
+contract: cockpit-spine-v1
+phase: fix
+size: 96x89
+---
+KUZUSHI · VIEW FIX · REALITY REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built
+ 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
+ ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
+ v reverify applied patch · z chain / DFD · report open Report
+│▸ REMEDIATION                            │KUZUSHI · BREAKDOWN REPORT
+│STATE  Staged for approval               │1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal · 6...
+│▸ report                                 │report sarif/all · preview only · no report written
+│  choose format, completeness, and       │◆ F-0001  CRITICAL  SQL injection reaches query
+│destination                              │
+│F-0001 · pending reviewed diff           │
+│rationale: bind the user value as a      │
+│           query parameter               │
+│side effect: preserves the login         │
+│             response schema             │
+│✓ login_rejects_sqli · payload is inert  │
+│guardrail: human approval required       │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+│                                         │
+route:run · 査  review 3/5 · ⛭ 掛  fix · workbench ·...       6 findings / 1 crit / 2 high / 2 med
+────────────────────────────────────────────────────────────────────────────────────────────────
+ Ctrl+C request abort   Esc prompt
+◆ FIX › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

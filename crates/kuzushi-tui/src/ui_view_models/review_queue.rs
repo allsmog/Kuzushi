@@ -1,6 +1,6 @@
 use super::findings::{
-    finding_identity_label, projected_visible_findings, relativize_location, target_base,
-    visible_findings_cache_key,
+    finding_identity_label, finding_proof_meter, finding_unique_source_count,
+    projected_visible_findings, relativize_location, target_base, visible_findings_cache_key,
 };
 use super::review_conflicts::effective_review_decision_conflict_label;
 use super::review_state::{
@@ -97,6 +97,8 @@ pub(crate) struct ReviewQueueRow {
     pub(crate) rule: String,
     pub(crate) tool: String,
     pub(crate) proof_label: String,
+    pub(crate) proof_meter: String,
+    pub(crate) source_count: usize,
     pub(crate) evidence_state: String,
     pub(crate) next_action: String,
     pub(crate) projection_index: usize,
@@ -255,6 +257,8 @@ impl ReviewQueueRow {
             rule: projection.rule,
             tool: projection.tool,
             proof_label: projection.proof_state,
+            proof_meter: finding_proof_meter(finding),
+            source_count: finding_unique_source_count(finding),
             evidence_state: evidence_state_label(finding),
             next_action: review_next_action_label(finding, decision),
             projection_index: index,

@@ -5,7 +5,10 @@ use std::path::PathBuf;
 // Pull every step definition into the binary so cucumber's inventory
 // macros pick them up at link time.
 #[allow(unused_imports)]
-use kuzushi_bdd_tui::steps::{artifacts as _artifacts, background as _bg, ui as _ui};
+use kuzushi_bdd_tui::steps::{
+    artifacts as _artifacts, background as _bg, cockpit_resize as _cockpit_resize,
+    operator_questions as _operator_questions, ui as _ui, workbench_modes as _workbench_modes,
+};
 
 fn main() {
     let features = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("features");

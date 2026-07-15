@@ -17,11 +17,7 @@ impl ShellApp {
         match phase {
             InitialOnboardingPhase::Catalog => {}
             InitialOnboardingPhase::TargetPicker => self.open_target_picker(),
-            InitialOnboardingPhase::ModelPicker => self.open_model_picker(),
-            InitialOnboardingPhase::AuthMethodPicker { provider } => {
-                self.open_credential_entry(provider);
-            }
-            InitialOnboardingPhase::PlanningPicker => self.open_planning_picker(),
+            InitialOnboardingPhase::Setup => self.open_setup(),
         }
     }
 
@@ -45,11 +41,12 @@ impl ShellApp {
 
     pub(crate) fn open_model_picker(&mut self) {
         let visible = visible_model_choices(self.config().model.as_deref());
-        let selected_index = preferred_model_choice_index(self.config());
+        let selected_index = preferred_visible_model_choice_cursor(self.config());
         self.router
             .model_picker_mut()
             .open(selected_index, visible.len());
-        self.set_shell_view(ShellView::ModelPicker);
+        self.router.setup_mut().begin_editor(SetupEditor::Model);
+        self.set_shell_view(ShellView::Setup);
         self.log(
             "onboarding",
             "choose a model with ↑/↓/Enter (Esc defers onboarding)",
@@ -58,6 +55,9 @@ impl ShellApp {
 
     pub(crate) fn open_auth_method_picker(&mut self, provider: String) {
         self.router.auth_picker_mut().open(provider.clone());
+        self.router
+            .setup_mut()
+            .begin_editor(SetupEditor::Credentials);
         let label = auth_provider_label(&provider);
         self.log(
             "onboarding",
@@ -65,7 +65,7 @@ impl ShellApp {
                 "{label} needs credentials — paste an API key, pick OAuth, or press d for the offline demo"
             ),
         );
-        self.set_shell_view(ShellView::AuthMethodPicker);
+        self.set_shell_view(ShellView::Setup);
     }
 
     /// Inline credential-entry step for a credentialed provider whose
@@ -78,10 +78,36 @@ impl ShellApp {
         self.open_auth_method_picker(provider);
     }
 
-    /// Open the launch picker at the first phase (組 KUMI-KATA · map).
-    /// Constructing an app in tests never spawns a background tool here.
-    pub(crate) fn open_planning_picker(&mut self) {
-        self.open_phase_picker(crate::app::WorkflowPhase::Map);
+    /// Aggregate pre-engagement readiness surface for a fresh target. Map
+    /// recommendations are prepared without marking the engagement phase;
+    /// the phase becomes live only when Start Map commits the selected plan.
+    pub(crate) fn open_setup(&mut self) {
+        let Some(target_root) = self.target_owned() else {
+            self.open_target_picker();
+            return;
+        };
+        let (profile, pending) = self.phase_picker_target_profile(&target_root);
+        let (rows, selected) =
+            self.phase_picker_input(crate::app::WorkflowPhase::Map, profile, &target_root);
+        self.engagement.planning_picker_mut().open_phase_profiled(
+            crate::app::WorkflowPhase::Map,
+            rows,
+            selected,
+            pending,
+        );
+        self.engagement
+            .planning_picker_mut()
+            .set_return_to_setup(true);
+        self.engagement.clear_phase();
+        self.router.setup_mut().open();
+        self.set_shell_view(ShellView::Setup);
+        if let Some(index) = crate::ui_view_models::setup_readiness_model(self).first_blocker {
+            self.router.setup_mut().set_cursor(index);
+        }
+        self.log(
+            "setup",
+            "review target, Map plan, model/credentials, prompt, and budget; Start Map commits once ready",
+        );
     }
 
     /// Launch-time target picker for a bare interactive `kuzushi` (no
@@ -96,6 +122,14 @@ impl ShellApp {
             .target_picker_mut()
             .open(vec![crate::app::immediate_target_candidate(&cwd)]);
         self.runtime_state.start_target_candidate_discovery(cwd);
+        if let Some(path) = self
+            .router
+            .target_picker()
+            .selected()
+            .map(|candidate| candidate.path.clone())
+        {
+            self.runtime_state.start_target_candidate_facts(path);
+        }
         self.set_shell_view(ShellView::TargetPicker);
         self.log(
             "onboarding",
@@ -105,15 +139,34 @@ impl ShellApp {
 
     pub(crate) fn apply_target_candidate_discovery_results(&mut self) -> bool {
         let results = self.runtime_state.drain_target_candidate_discovery();
-        if !matches!(self.shell_view(), ShellView::TargetPicker) || results.is_empty() {
+        if !matches!(self.shell_view(), ShellView::TargetPicker) {
             return false;
         }
+        let mut changed = false;
         for result in results {
-            self.router
-                .target_picker_mut()
-                .replace_candidates(result.candidates);
+            self.apply_discovered_target_candidates(result.candidates);
+            changed = true;
         }
-        true
+        let facts = self.runtime_state.drain_target_candidate_facts();
+        for facts in facts {
+            self.router.target_picker_mut().apply_facts(facts);
+            changed = true;
+        }
+        changed
+    }
+
+    fn apply_discovered_target_candidates(&mut self, candidates: Vec<crate::app::TargetCandidate>) {
+        self.router
+            .target_picker_mut()
+            .replace_candidates(candidates);
+        if let Some(path) = self
+            .router
+            .target_picker()
+            .selected()
+            .map(|candidate| candidate.path.clone())
+        {
+            self.runtime_state.start_target_candidate_facts(path);
+        }
     }
 
     /// Open the picker for one engagement phase: announce the phase, list only
@@ -121,22 +174,9 @@ impl ShellApp {
     /// Map artifacts stay unchecked — reused, not rebuilt, unless the operator
     /// presses `g` to regenerate.
     pub(crate) fn open_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
-        if self.phase_blocked_by_config(phase) {
+        if !self.prepare_phase_picker_state(phase) {
             return;
         }
-        let Some(target_root) = self.target_owned() else {
-            self.log(
-                "error",
-                "planning requires an explicit target. Next: target <path> (or target .)",
-            );
-            return;
-        };
-        let (profile, pending) = self.phase_picker_target_profile(&target_root);
-        let (rows, selected) = self.phase_picker_input(phase, profile, &target_root);
-        self.engagement
-            .planning_picker_mut()
-            .open_phase_profiled(phase, rows, selected, pending);
-        self.engagement.set_phase(phase);
         self.set_shell_view(ShellView::PlanningPicker);
         self.log(
             "phase",
@@ -148,6 +188,29 @@ impl ShellApp {
                 phase.intent()
             ),
         );
+    }
+
+    pub(crate) fn prepare_phase_picker_state(&mut self, phase: crate::app::WorkflowPhase) -> bool {
+        if self.phase_blocked_by_config(phase) {
+            return false;
+        }
+        let Some(target_root) = self.target_owned() else {
+            self.log(
+                "error",
+                "planning requires an explicit target. Next: target <path> (or target .)",
+            );
+            return false;
+        };
+        let (profile, pending) = self.phase_picker_target_profile(&target_root);
+        let (rows, selected) = self.phase_picker_input(phase, profile, &target_root);
+        self.engagement
+            .planning_picker_mut()
+            .open_phase_profiled(phase, rows, selected, pending);
+        self.engagement
+            .planning_picker_mut()
+            .set_return_to_setup(false);
+        self.engagement.set_phase(phase);
+        true
     }
 
     fn phase_blocked_by_config(&mut self, phase: crate::app::WorkflowPhase) -> bool {
@@ -292,7 +355,9 @@ impl ShellApp {
         if !self.engagement.planning_picker().profile_pending() {
             return;
         }
-        let Some(phase) = self.engagement.current_phase() else {
+        let Some(phase) = self.engagement.current_phase().or_else(|| {
+            matches!(self.shell_view(), ShellView::Setup).then_some(crate::app::WorkflowPhase::Map)
+        }) else {
             return;
         };
         let (rows, selected) = self.phase_picker_input(phase, profile, target_root);
@@ -361,7 +426,7 @@ impl ShellApp {
 
     pub(crate) fn open_fresh_planner_or_workbench(&mut self) {
         if self.workspace_is_fresh_for_auto_planner() {
-            self.open_planning_picker();
+            self.open_setup();
         } else {
             self.open_workbench(WorkbenchPane::Findings);
         }
@@ -404,8 +469,9 @@ fn run_summary_exists_for_startup(target: &std::path::Path) -> bool {
 fn guided_phase_to_workflow_phase(phase: kuzushi_core::GuidedPhase) -> crate::app::WorkflowPhase {
     match phase {
         kuzushi_core::GuidedPhase::Map => crate::app::WorkflowPhase::Map,
-        kuzushi_core::GuidedPhase::Hunt => crate::app::WorkflowPhase::Hunt,
-        kuzushi_core::GuidedPhase::Confirm => crate::app::WorkflowPhase::Confirm,
+        kuzushi_core::GuidedPhase::Scan => crate::app::WorkflowPhase::Scan,
+        kuzushi_core::GuidedPhase::Review => crate::app::WorkflowPhase::Review,
+        kuzushi_core::GuidedPhase::Prove => crate::app::WorkflowPhase::Prove,
         kuzushi_core::GuidedPhase::Fix => crate::app::WorkflowPhase::Fix,
     }
 }
@@ -541,7 +607,7 @@ mod tests {
         });
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
         app.set_view_artifact_reader_for_test(reader);
-        app.open_phase_picker(crate::app::WorkflowPhase::Hunt);
+        app.open_phase_picker(crate::app::WorkflowPhase::Scan);
         app.engagement
             .planning_picker_mut()
             .selected_mut()

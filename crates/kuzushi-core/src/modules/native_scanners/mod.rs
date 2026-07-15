@@ -41,7 +41,6 @@ pub(in crate::modules) use run_android_apk::*;
 pub(in crate::modules) use semgrep_module::*;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 mod android_apk_code_scan;
 mod android_apk_fileprovider;
 mod android_apk_hybrid_detect;

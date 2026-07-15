@@ -16,7 +16,7 @@ pub(in crate::modules) fn run_fileprovider_scan(
         Err(error) => return Ok(fileprovider_failed_output(&target, error)),
     };
     let persisted = persist_tool_findings(
-        "android-apk",
+        ctx.finding_run_id(),
         &target,
         &scan.findings,
         ctx.workspace,

@@ -1,61 +1,46 @@
 # J14 — Narrow terminal (responsive matrix)
-# Re-run the J1 walk at 60x20. Exercises adaptive-footer wrap (<70 cols) and
-# compact-Workbench collapse. For the 80x24 cell of the matrix, re-run:
-#   ./scripts/devex/run-journey.sh --size 80x24 J14
-name: Narrow terminal (60x20)
+# Exercise the canonical Target → Setup → Run Focus spine at 60x20. For the
+# other live matrix cells, re-run with --size 80x24 or --size 96x89.
+name: Responsive cockpit spine
 size: 60x20
 cwd: @TMP_TARGET
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch:
 wait-for: 2 CHOOSE A TARGET
-snap: narrow-target-gate
+snap: narrow-target
 expect: Enter selects
-ask: 60 cols — is the target gate readable, does the footer wrap to two lines instead of truncating behind a +more chip?
+ask: At this terminal size, is explicit Target consent readable without clipping its selected identity or controls?
 keys: Enter
-wait-for: 3 CHOOSE A MODEL
-snap: narrow-model-gate
-expect: Target confirmed
-keys: Down Down Down Enter
-wait-for: 5 CHOOSE AUTH METHOD
-snap: narrow-credentials-gate
-expect: Target confirmed
-expect: API key (ANTHROPIC_API_KEY)
-type: bdd-session-only-key
+wait-for: 3 SETUP · READY THE MAP RUN
+snap: narrow-setup
+expect: Map plan
+expect: Model
+expect: NOT NEEDED
+expect: Credentials
+expect: Budget
+expect: Start Map
+ask: Does aggregate Setup keep every readiness dependency and the single Start Map commit reachable at this terminal size?
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.1
+keys: Down
+wait: 0.1
 keys: Enter
-wait-for: 10 KUMI-KATA
-snap: narrow-planning-gate
-expect: Target confirmed
-expect: Focused: Gather repo context
-expect: Enter:
-expect: Space check
-expect: Enter run
-expect-not: tool descriptor missing
-ask: Planning at 60x20 — are the selected tasks, exact Enter outcome, and controls all visible without internal or mid-word cropping?
-keys: Down
-wait: 0.1
-keys: Down
-wait: 0.1
-keys: Down
-wait: 0.1
-keys: Down
-wait: 0.1
-keys: Down
-wait: 0.1
-keys: Down
-wait: 0.5
-snap: narrow-planning-scrolled
+wait-snap: 5 TASKS | narrow-run-focus
 expect: TASKS
-expect: > SKIP    Threat intel (CVEs)
-expect: Enter:
-expect: Enter run
-ask: Scrolled Planning — did the task window follow the cursor while keeping the confirmation and controls fixed?
-keys: Escape
-submit: demo
-wait-for: 90 run completed
-snap: narrow-demo-result
-ask: Compact Workbench/Activity — do findings and detail text stay readable, with nothing truncated behind chrome?
-submit: findings
-wait: 3
-snap: narrow-findings
-ask: Findings at 60x20 — severity/confidence signifiers still visible per row, or clipped?
+expect: OUTPUT
+expect-not: kuzushi>
+ask: Does Run Focus use its responsive TASKS/OUTPUT geometry without reserving the generic shell prompt or a blank canyon?
+wait-for: 30 run receipt
+snap: narrow-setup-receipt
+expect: SETUP · READY THE MAP RUN
+expect: run receipt
+ask: Did terminal completion restore the exact Setup origin with one durable receipt and no background focus theft?

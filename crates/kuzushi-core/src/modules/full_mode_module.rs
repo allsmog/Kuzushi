@@ -8,7 +8,7 @@ pub(crate) fn full_mode_module() -> BuiltinModule {
         "Whole-codebase chunked LLM pass — token-greedy file clustering, per-chunk model query.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::InputAware,
                 FindingStoreRequirement::Optional,
             ),
@@ -107,7 +107,7 @@ pub(crate) fn classifier_gate_module() -> BuiltinModule {
         "Cheap LLM classifier with adaptive p80 quantile gate. Score one finding to decide whether the deep auditor should run.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Confirm,
+                ToolPhase::Review,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Optional,
             ),
@@ -142,7 +142,7 @@ pub(crate) fn deep_audit_module() -> BuiltinModule {
         "Tool-augmented LLM auditor — uses code-nav primitives to verify a finding's triggerability.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Confirm,
+                ToolPhase::Review,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Optional,
             ),

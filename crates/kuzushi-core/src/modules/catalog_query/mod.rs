@@ -1,6 +1,6 @@
 //! Typed `key:value` search grammar over the tool catalog, mirroring the
 //! findings filter grammar. Shared across CLI, shell, and scan so the three
-//! modes can never diverge on how `find phase:hunt runtime:agentic taint`
+//! modes can never diverge on how `find phase:scan runtime:agentic taint`
 //! resolves.
 
 use crate::modules::{ModuleKind, ModuleMetadata, RuntimeRequirement, ToolDescriptor, ToolPhase};
@@ -23,9 +23,9 @@ impl RuntimeFilter {
         match value.trim().to_ascii_lowercase().as_str() {
             "agentic" | "agent" | "llm" | "ai" => Ok(Self::Agentic),
             "static" | "native" | "deterministic" => Ok(Self::Static),
-            other => anyhow::bail!(
-                "unknown runtime filter {other:?}; expected one of: agentic, static"
-            ),
+            other => {
+                anyhow::bail!("unknown runtime filter {other:?}; expected one of: agentic, static")
+            }
         }
     }
 
@@ -119,8 +119,11 @@ impl ToolQuery {
 
     fn apply_phases(&mut self, values: &[String]) -> Result<()> {
         for value in values {
-            let phase = ToolPhase::parse(value)
-                .ok_or_else(|| anyhow::anyhow!("unknown phase {value:?}"))?;
+            let phase = ToolPhase::parse(value).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown phase {value:?}; expected one of map, scan, review, prove, fix, operate (hunt and confirm are deprecated aliases)"
+                )
+            })?;
             self.phases.push(phase);
         }
         Ok(())
@@ -185,12 +188,12 @@ impl ToolQuery {
 
     fn module_matches(&self, module: &ModuleMetadata) -> bool {
         let id = module.id.to_ascii_lowercase();
-        self.module_ids.is_empty()
-            || self.module_ids.iter().any(|needle| id.contains(needle))
+        self.module_ids.is_empty() || self.module_ids.iter().any(|needle| id.contains(needle))
     }
 
     fn headless_matches(&self, tool: &ToolDescriptor) -> bool {
-        self.headless.is_none_or(|expected| tool.headless == expected)
+        self.headless
+            .is_none_or(|expected| tool.headless == expected)
     }
 
     fn shelf_matches(&self, tool: &ToolDescriptor, shelf: &ToolShelf) -> bool {
@@ -240,7 +243,7 @@ mod tests {
             "hunt taint flows with an agent",
             Vec::new(),
         );
-        descriptor.phase = ToolPhase::Hunt;
+        descriptor.phase = ToolPhase::Scan;
         descriptor.runtime_requirement = RuntimeRequirement::Always;
         descriptor
     }
@@ -253,10 +256,13 @@ mod tests {
 
     #[test]
     fn phase_filter_matches_and_rejects() {
-        let hunt = ToolQuery::parse("phase:hunt").unwrap();
-        assert!(hunt.matches(&module(), &tool(), &ToolShelf::default()));
+        let scan = ToolQuery::parse("phase:scan").unwrap();
+        assert!(scan.matches(&module(), &tool(), &ToolShelf::default()));
+        let legacy_hunt = ToolQuery::parse("phase:hunt").unwrap();
+        assert!(legacy_hunt.matches(&module(), &tool(), &ToolShelf::default()));
         let map = ToolQuery::parse("phase:map").unwrap();
         assert!(!map.matches(&module(), &tool(), &ToolShelf::default()));
+        assert!(ToolQuery::parse("phase:2").is_err());
     }
 
     #[test]

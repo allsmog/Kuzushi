@@ -18,7 +18,7 @@ pub(crate) fn prompt_segments(
     let width = columns.max(1);
     let min_editor_width = 2.min(width);
     let fitted_prompt = fit_prompt(prompt, width.saturating_sub(min_editor_width));
-    let editor_width = width.saturating_sub(fitted_prompt.chars().count()).max(1);
+    let editor_width = width.saturating_sub(display_width(&fitted_prompt)).max(1);
 
     let input_chars = input.chars().collect::<Vec<_>>();
     let cursor = cursor_index.min(input_chars.len());
@@ -38,12 +38,40 @@ pub(crate) fn prompt_segments(
         .saturating_sub(start)
         .min(visible.len().saturating_sub(1));
 
-    PromptSegments {
-        prompt: fitted_prompt,
-        before_cursor: visible[..visible_cursor].iter().collect(),
-        cursor_text,
-        after_cursor: visible[visible_cursor.saturating_add(1)..].iter().collect(),
+    fit_editor_segments(
+        PromptSegments {
+            prompt: fitted_prompt,
+            before_cursor: visible[..visible_cursor].iter().collect(),
+            cursor_text,
+            after_cursor: visible[visible_cursor.saturating_add(1)..].iter().collect(),
+        },
+        editor_width,
+    )
+}
+
+fn fit_editor_segments(mut segments: PromptSegments, width: usize) -> PromptSegments {
+    let cursor_width = display_width(&segments.cursor_text).max(1).min(width);
+    let available = width.saturating_sub(cursor_width);
+    let (before, after) = editor_side_budgets(&segments, available);
+    segments.before_cursor = take_tail_columns(&segments.before_cursor, before);
+    segments.after_cursor = take_columns(&segments.after_cursor, after);
+    segments
+}
+
+fn editor_side_budgets(segments: &PromptSegments, available: usize) -> (usize, usize) {
+    let mut before = available / 2;
+    let mut after = available.saturating_sub(before);
+    let before_width = display_width(&segments.before_cursor);
+    let after_width = display_width(&segments.after_cursor);
+    if before_width < before {
+        after += before - before_width;
+        before = before_width;
     }
+    if after_width < after {
+        before += after - after_width;
+        after = after_width;
+    }
+    (before, after)
 }
 
 pub(crate) fn fit_prompt(prompt: &str, max_columns: usize) -> String {

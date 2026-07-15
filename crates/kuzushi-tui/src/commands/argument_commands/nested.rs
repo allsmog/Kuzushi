@@ -29,6 +29,7 @@ pub(crate) fn parse_nested_shell_command(
         "queue" => parse_queue_command(args),
         "strategy" | "strategies" => parse_strategy_command(args),
         "decision" | "review" => parse_review_decision_command(args),
+        "proof" => parse_proof_command(args),
         "dismiss" => parse_dismiss_command(args),
         "suppress" => parse_suppress_command(args),
         "patch" => parse_patch_command(args),
@@ -37,6 +38,20 @@ pub(crate) fn parse_nested_shell_command(
         _ => return None,
     };
     Some(command)
+}
+
+fn parse_proof_command(args: &[&str]) -> ShellCommand {
+    let ["defer", reference, rest @ ..] = args else {
+        return ShellCommand::Unknown("proof defer <finding> --reason <text>".to_string());
+    };
+    let reason = rest.strip_prefix(&["--reason"]).unwrap_or(rest).join(" ");
+    if reason.trim().is_empty() {
+        return ShellCommand::Unknown("proof defer <finding> --reason <text>".to_string());
+    }
+    ShellCommand::ProofDeferral {
+        reference: (*reference).to_string(),
+        reason,
+    }
 }
 
 fn parse_recon_import_command(args: &[&str]) -> ShellCommand {

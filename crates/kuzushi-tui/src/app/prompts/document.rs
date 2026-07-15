@@ -67,7 +67,11 @@ impl ShellApp {
         vec![ShellEffect::OpenPromptDocument(PromptDocumentOpen {
             prompts,
             prompt_index: 0,
-            origin: ShellView::PlanningPicker,
+            origin: if self.engagement.planning_picker().returns_to_setup() {
+                ShellView::Setup
+            } else {
+                ShellView::PlanningPicker
+            },
         })]
     }
 
@@ -311,6 +315,10 @@ impl ShellApp {
             .close_document()
             .map(|document| document.origin)
             .unwrap_or(ShellView::Workbench);
+        if origin == ShellView::Setup {
+            self.router.setup_mut().finish_editor();
+            self.engagement.clear_phase();
+        }
         self.set_shell_view(origin);
     }
 

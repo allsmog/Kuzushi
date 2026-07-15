@@ -469,10 +469,21 @@ export type NativeDynamicOptionSpec = NativeDynamicOptionSpecBase &
         readonly type: "path";
         /** Controls containment and stored-option provenance. */
         readonly pathSemantics: NativeDynamicPathSemantics;
+        readonly minimum?: never;
+        readonly maximum?: never;
       }
     | {
-        readonly type: Exclude<NativeDynamicOptionType, "path">;
+        readonly type: "int";
         readonly pathSemantics?: never;
+        /** Inclusive descriptor-owned bounds enforced before dispatch. */
+        readonly minimum?: number;
+        readonly maximum?: number;
+      }
+    | {
+        readonly type: Exclude<NativeDynamicOptionType, "path" | "int">;
+        readonly pathSemantics?: never;
+        readonly minimum?: never;
+        readonly maximum?: never;
       }
   );
 
@@ -513,7 +524,12 @@ export interface ModuleTool {
    */
   readonly runtimeRequirement?: "never" | "always";
   /** Journey/catalog grouping metadata consumed by native and SDK hosts. */
-  readonly phase?: "map" | "hunt" | "confirm" | "fix" | "operate";
+  /**
+   * Durable workflow phase. Hosts serialize the canonical five-phase tokens.
+   * `hunt` and `confirm` are deprecated input aliases retained for one major
+   * compatibility window; they normalize to `scan` and `prove` respectively.
+   */
+  readonly phase?: "map" | "scan" | "review" | "prove" | "fix" | "operate" | "hunt" | "confirm";
   /** Native dispatch side-effect contract. Required when loaded through `--load`. */
   readonly effect?:
     | "read"

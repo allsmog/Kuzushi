@@ -25,7 +25,16 @@ impl ShellApp {
         if self.view_offers_back(view) {
             binds.push(back_keybinding());
         }
-        binds
+        self.ui.apply_keymap_overrides(view, binds)
+    }
+
+    pub(crate) fn workbench_view_keybindings_for_plan(
+        &self,
+        plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
+    ) -> Vec<ViewKeybinding> {
+        let bindings = workbench_keybindings_for_plan(self, plan);
+        self.ui
+            .apply_keymap_overrides(ShellView::Workbench, bindings)
     }
 
     fn view_specific_keybindings(&self, view: ShellView) -> Vec<ViewKeybinding> {
@@ -73,10 +82,9 @@ impl ShellApp {
         matches!(
             view,
             ShellView::CommandPalette
-                | ShellView::ModelPicker
-                | ShellView::AuthMethodPicker
                 | ShellView::PlanningPicker
                 | ShellView::TargetPicker
+                | ShellView::Setup
         )
     }
 

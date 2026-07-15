@@ -251,7 +251,23 @@ fn sarif_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value 
     merge_sarif_properties(&mut properties, sarif_evidence_properties(record));
     merge_sarif_properties(&mut properties, sarif_proof_properties(record));
     merge_sarif_properties(&mut properties, sarif_provenance_properties(record));
+    merge_sarif_properties(&mut properties, sarif_remediation_properties(record));
     properties
+}
+
+fn sarif_remediation_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
+    let Some(remediation) = record.remediation.as_ref() else {
+        return json!({});
+    };
+    json!({
+        "kuzushiRemediationApplicationId": remediation.application_id,
+        "kuzushiRemediationPatchRunId": remediation.patch_run_id,
+        "kuzushiRemediationApplicationState": remediation.application_state,
+        "kuzushiRemediationReverifyOutcome": remediation.reverify_outcome,
+        "kuzushiRemediationReverifyRunId": remediation.reverify_run_id,
+        "kuzushiRemediationDiffHash": remediation.diff_hash,
+        "kuzushiRemediationTouchedPaths": remediation.touched_paths,
+    })
 }
 
 fn sarif_core_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value {

@@ -35,6 +35,9 @@ impl StorageWriter {
                 self.record_verification(verification)
             }
             DecisionCommand::RecordPatchAttempt(patch) => self.record_patch_attempt(patch),
+            DecisionCommand::RecordPatchLifecycle(lifecycle) => {
+                self.record_patch_lifecycle(lifecycle)
+            }
             DecisionCommand::RecordAudit(audit) => self.record_audit_event(audit),
             DecisionCommand::RecordRunLifecycle(run) => self.record_run_lifecycle(run),
             DecisionCommand::RecordFindingLifecycle(finding) => {

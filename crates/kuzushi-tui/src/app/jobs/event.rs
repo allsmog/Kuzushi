@@ -6,6 +6,9 @@ pub(crate) enum ShellEvent {
     Scan(ScanEvent),
     Tool(ToolEvent),
     Agent(AgentEvent),
+    OperatorQuestion(OperatorQuestionEnvelope),
+    OperatorQuestionCompleted(OperatorQuestionCompleted),
+    CredentialQuestionRouted { request_id: String, run_id: String },
     Plan(PlanEvent),
     Threat(ThreatPatchEvent),
 }
@@ -19,10 +22,22 @@ pub(crate) enum JobKind {
 }
 
 impl ShellEvent {
+    pub(crate) fn is_operator_interaction(&self) -> bool {
+        matches!(
+            self,
+            Self::OperatorQuestion(_)
+                | Self::OperatorQuestionCompleted(_)
+                | Self::CredentialQuestionRouted { .. }
+        )
+    }
+
     pub(crate) fn kind(&self) -> JobKind {
         match self {
             Self::Trace(_) | Self::Scan(_) | Self::Tool(_) => JobKind::Run,
-            Self::Agent(_) => JobKind::Agent,
+            Self::Agent(_)
+            | Self::OperatorQuestion(_)
+            | Self::OperatorQuestionCompleted(_)
+            | Self::CredentialQuestionRouted { .. } => JobKind::Agent,
             Self::Plan(_) => JobKind::Plan,
             Self::Threat(_) => JobKind::Threat,
         }
@@ -30,7 +45,11 @@ impl ShellEvent {
 
     pub(crate) fn is_terminal(&self) -> bool {
         match self {
-            Self::Trace(_) | Self::Scan(ScanEvent::Stage(_)) => false,
+            Self::Trace(_)
+            | Self::Scan(ScanEvent::Stage(_))
+            | Self::OperatorQuestion(_)
+            | Self::OperatorQuestionCompleted(_)
+            | Self::CredentialQuestionRouted { .. } => false,
             Self::Scan(ScanEvent::Finished { .. } | ScanEvent::Failed { .. }) => true,
             Self::Tool(
                 ToolEvent::Finished { .. } | ToolEvent::Failed { .. } | ToolEvent::Refused { .. },

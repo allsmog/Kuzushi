@@ -2,40 +2,47 @@
 pub(crate) struct ActivityFrameLayout {
     pub(crate) header_rows: u16,
     pub(crate) footer_rows: u16,
-    pub(crate) wide_dag_width: u16,
-    pub(crate) compact_breakpoint: u16,
-    pub(crate) compact_dag_percent: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ActivityPaneWidths {
-    pub(crate) dag: usize,
-    pub(crate) feed: usize,
+pub(crate) enum ActivityPaneLayout {
+    SideBySide { task_width: u16 },
+    Stacked { task_height: u16 },
+    Focused,
 }
 
-pub(crate) fn activity_frame_layout() -> ActivityFrameLayout {
+pub(crate) const ACTIVITY_WIDE_MIN_WIDTH: u16 = 78;
+pub(crate) const ACTIVITY_STACKED_MIN_WIDTH: u16 = 50;
+pub(crate) const ACTIVITY_COMPACT_MIN_HEIGHT: u16 = 14;
+
+pub(crate) fn activity_frame_layout(header_rows: u16, footer_rows: u16) -> ActivityFrameLayout {
     ActivityFrameLayout {
-        // title + context (model/findings/target)
-        header_rows: 2,
-        footer_rows: 2,
-        // Keep TASKS dense on wide terminals; OUTPUT gets the remaining width.
-        wide_dag_width: 44,
-        compact_breakpoint: 110,
-        compact_dag_percent: 40,
+        header_rows,
+        footer_rows,
     }
 }
 
-pub(crate) fn activity_plain_pane_widths(width: u16) -> ActivityPaneWidths {
-    let usable = (width as usize).saturating_sub(3);
-    let layout = activity_frame_layout();
-    let dag = if width >= layout.compact_breakpoint {
-        layout.wide_dag_width as usize
-    } else {
-        (usable * layout.compact_dag_percent as usize / 100).max(20)
-    };
-    ActivityPaneWidths {
-        dag,
-        feed: usable.saturating_sub(dag).max(20),
+/// One geometry policy shared by rendering and hit-testing. Wide terminals
+/// stay side-by-side regardless of how tall they are; only genuinely compact
+/// bodies collapse to a single focused viewport.
+pub(crate) fn activity_pane_layout(
+    width: u16,
+    height: u16,
+    task_content_rows: usize,
+) -> ActivityPaneLayout {
+    if width < ACTIVITY_STACKED_MIN_WIDTH || height < ACTIVITY_COMPACT_MIN_HEIGHT {
+        return ActivityPaneLayout::Focused;
+    }
+    if width >= ACTIVITY_WIDE_MIN_WIDTH {
+        let task_width = (width.saturating_mul(32) / 100).clamp(28, 40);
+        return ActivityPaneLayout::SideBySide { task_width };
+    }
+    let cap = (height.saturating_mul(40) / 100).max(3);
+    let desired = u16::try_from(task_content_rows)
+        .unwrap_or(u16::MAX)
+        .saturating_add(2);
+    ActivityPaneLayout::Stacked {
+        task_height: desired.clamp(3, cap),
     }
 }
 
@@ -44,28 +51,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn activity_frame_layout_projects_split_geometry() {
+    fn wide_layout_is_side_by_side_independent_of_tall_terminal() {
         assert_eq!(
-            activity_frame_layout(),
-            ActivityFrameLayout {
-                header_rows: 2,
-                footer_rows: 2,
-                wide_dag_width: 44,
-                compact_breakpoint: 110,
-                compact_dag_percent: 40,
-            }
+            activity_pane_layout(96, 80, 4),
+            ActivityPaneLayout::SideBySide { task_width: 30 }
+        );
+        assert_eq!(
+            activity_pane_layout(78, 14, 40),
+            ActivityPaneLayout::SideBySide { task_width: 28 }
         );
     }
 
     #[test]
-    fn activity_plain_pane_widths_matches_split_with_minimums() {
+    fn medium_layout_sizes_the_task_stack_from_content() {
         assert_eq!(
-            activity_plain_pane_widths(120),
-            ActivityPaneWidths { dag: 44, feed: 73 }
+            activity_pane_layout(60, 20, 3),
+            ActivityPaneLayout::Stacked { task_height: 5 }
         );
         assert_eq!(
-            activity_plain_pane_widths(30),
-            ActivityPaneWidths { dag: 20, feed: 20 }
+            activity_pane_layout(60, 20, 40),
+            ActivityPaneLayout::Stacked { task_height: 8 }
+        );
+    }
+
+    #[test]
+    fn narrow_or_short_layout_is_one_focused_viewport() {
+        assert_eq!(activity_pane_layout(49, 30, 4), ActivityPaneLayout::Focused);
+        assert_eq!(
+            activity_pane_layout(120, 13, 4),
+            ActivityPaneLayout::Focused
         );
     }
 }

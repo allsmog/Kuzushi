@@ -49,6 +49,18 @@ pub(super) fn remember(root: &Path, policy: &[u8], snapshot: PolicySnapshot) {
         );
 }
 
+pub(super) fn remember_if_current(
+    root: &Path,
+    policy: &[u8],
+    snapshot: PolicySnapshot,
+) -> Result<bool> {
+    if snapshot != snapshot.capture_current()? {
+        return Ok(false);
+    }
+    remember(root, policy, snapshot);
+    Ok(true)
+}
+
 impl VerifiedPolicyCache {
     fn get(&mut self, root: &Path) -> Option<CachedProof> {
         let cached = self.entries.get(root)?.clone();
@@ -105,6 +117,15 @@ mod tests {
         assert_eq!(cache.entries.len(), MAX_VERIFIED_POLICIES);
         assert!(cache.entries.contains_key(&root(0)));
         assert!(!cache.entries.contains_key(&root(1)));
+    }
+
+    #[test]
+    fn current_snapshot_is_verified_before_it_enters_the_cache() {
+        let root = root(MAX_VERIFIED_POLICIES + 1);
+        let snapshot = PolicySnapshot::capture(Vec::<PathBuf>::new()).unwrap();
+
+        assert!(remember_if_current(&root, b"policy", snapshot).unwrap());
+        assert!(is_current(&root, b"policy").unwrap());
     }
 
     fn root(index: usize) -> PathBuf {

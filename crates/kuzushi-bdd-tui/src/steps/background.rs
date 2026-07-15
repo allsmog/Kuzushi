@@ -9,6 +9,9 @@ async fn fresh_workspace(world: &mut OnboardingWorld) {
     world.env.clear();
     world.pending_seeds.clear();
     world.terminal_size = None;
+    world.last_run_focus_capture = None;
+    world.shell_pane_pid = None;
+    world.last_live_capture = None;
 }
 
 #[given(regex = r#"^a (\d+) by (\d+) terminal$"#)]
@@ -67,10 +70,17 @@ async fn launch_shell(world: &mut OnboardingWorld) {
     world.ensure_binary();
     let binary = world.binary.to_string_lossy().into_owned();
     let seeds = std::mem::take(&mut world.pending_seeds);
-    let session = TmuxSession::launch_with_seeds(&binary, world.env.clone(), &seeds)
+    let size = world.terminal_size.unwrap_or((200, 50));
+    let session = TmuxSession::launch_with_seeds_sized(&binary, world.env.clone(), &seeds, size)
         .expect("tmux session must launch — install tmux and rebuild the CLI if this fails");
-    // Give the binary a moment to render its first frame.
-    std::thread::sleep(Duration::from_millis(800));
+    session
+        .wait_for_interactive_frame(Duration::from_secs(10))
+        .expect("shell must paint its first alternate-screen frame");
+    world.shell_pane_pid = Some(
+        session
+            .pane_pid()
+            .expect("shell pane pid must be queryable"),
+    );
     world.session = Some(session);
 }
 
@@ -82,6 +92,13 @@ async fn launch_shell_without_target(world: &mut OnboardingWorld) {
     let size = world.terminal_size.unwrap_or((200, 50));
     let session = TmuxSession::launch_targetless_sized(&binary, world.env.clone(), size)
         .expect("tmux session must launch — install tmux and rebuild the CLI if this fails");
-    std::thread::sleep(Duration::from_millis(800));
+    session
+        .wait_for_interactive_frame(Duration::from_secs(10))
+        .expect("targetless shell must paint its first alternate-screen frame");
+    world.shell_pane_pid = Some(
+        session
+            .pane_pid()
+            .expect("shell pane pid must be queryable"),
+    );
     world.session = Some(session);
 }

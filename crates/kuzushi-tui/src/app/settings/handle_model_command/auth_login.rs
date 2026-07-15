@@ -7,9 +7,17 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn reduce_auth_status(&mut self) -> Vec<ShellEffect> {
-        // `/auth` now lands on the dedicated Auth surface
-        // (`design/mockups/auth.jsx`) instead of the generic Config panel.
-        self.set_shell_view(ShellView::Auth);
+        if let Some(provider) = self
+            .config()
+            .model
+            .as_deref()
+            .and_then(|model| model.split(':').next())
+            .map(str::to_string)
+        {
+            self.open_credential_entry(provider);
+        } else {
+            self.open_model_picker();
+        }
         vec![ShellEffect::ShowAuthStatus(AuthStatusShow {
             api_key_env: self.config().runtime.api_key_env.clone(),
         })]

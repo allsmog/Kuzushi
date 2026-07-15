@@ -146,6 +146,7 @@ fn rust_cli_help_is_the_documented_primary_surface() {
         "findings",
         "finding",
         "runs",
+        "sessions",
         "export",
         "suppress",
         "suppressions",
@@ -744,6 +745,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
             provider_spend_unresolved: false,
             validator_log: None,
             history: Vec::new(),
+            provenance: None,
             created_at: None,
             updated_at: None,
         })

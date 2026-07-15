@@ -40,7 +40,7 @@ mod tests {
     }
 
     #[test]
-    fn guided_scan_with_target_opens_current_phase_picker_without_worker() {
+    fn guided_scan_with_fresh_target_opens_map_questions_without_worker() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
 
@@ -56,14 +56,17 @@ mod tests {
 
         EffectRuntime::execute(&mut app, effects);
 
-        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        assert_eq!(app.shell_view(), ShellView::Workbench);
         assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+        assert!(app.guided_scan_question_model().is_some_and(|question| {
+            question.header == "MAP · ROUTE" && question.options.iter().any(|option| option.other)
+        }));
         assert!(app.target().is_some());
         assert!(app.scan_is_none());
         assert!(app
             .log_lines()
             .iter()
-            .any(|line| line.prefix == "scan" && line.body.contains("guided workflow")));
+            .any(|line| line.prefix == "scan" && line.body.contains("guided scan opened")));
     }
 
     #[test]
@@ -81,8 +84,13 @@ mod tests {
 
         EffectRuntime::execute(&mut app, effects);
 
-        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        assert_eq!(app.shell_view(), ShellView::Workbench);
         assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+        assert_eq!(
+            app.guided_scan_question_model()
+                .map(|question| question.header),
+            Some("MAP · ROUTE".to_string())
+        );
         assert_eq!(app.target(), Some(workspace.root()));
         assert!(app.scan_is_none());
     }

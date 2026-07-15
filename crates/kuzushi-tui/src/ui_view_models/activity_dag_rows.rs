@@ -1,6 +1,3 @@
-use super::activity_feed_rows::{
-    activity_feed_pane_rows, ActivityFeedPaneRow, ActivityFeedRowTone,
-};
 use crate::theme::{self, ThemeConfig};
 use crate::{
     ActivityRouteState, ActivitySession, DagTaskDetail, DagTaskDetailState, DagTaskRow,
@@ -9,7 +6,6 @@ use crate::{
 use std::sync::OnceLock;
 use std::time::Instant;
 
-const MAX_TASK_PANE_ACTION_ROWS: usize = 8;
 const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 static SPINNER_EPOCH: OnceLock<Instant> = OnceLock::new();
@@ -19,6 +15,7 @@ pub(crate) enum ActivityDagRowTone {
     Done,
     Active,
     Queued,
+    Warning,
     Failing,
     Canceled,
     Muted,
@@ -40,7 +37,7 @@ pub(crate) fn activity_dag_pane_rows(
     let mut rows = task_status_rows(session, route, width, now);
     append_subsystem_row(&mut rows, session, route, width);
     append_task_legend_row(&mut rows, session, width);
-    append_activity_tail_rows(&mut rows, session, route, width, running_tool, now);
+    append_taskless_live_row(&mut rows, session, route, running_tool);
     ensure_activity_rows(rows)
 }
 
@@ -55,15 +52,22 @@ fn task_status_rows(
             session
                 .tasks
                 .values()
-                .filter(|row| activity_row_is_never_started(row))
+                .filter(|row| {
+                    activity_row_is_never_started(row)
+                        && !session.task_is_sequence_owned(&row.task_id)
+                })
                 .count()
         })
         .unwrap_or(0);
     let mut rows = session
-        .tasks
-        .values()
+        .ordered_task_rows()
+        .into_iter()
         .enumerate()
-        .filter(|(_, row)| route.verbose_subsystems || !activity_row_is_never_started(row))
+        .filter(|(_, row)| {
+            route.verbose_subsystems
+                || !activity_row_is_never_started(row)
+                || session.task_is_sequence_owned(&row.task_id)
+        })
         .flat_map(|(index, row)| task_pane_rows(route, row, index, width, now))
         .collect::<Vec<_>>();
     if hidden_not_run > 0 {
@@ -110,13 +114,11 @@ fn append_task_legend_row(
     }
 }
 
-fn append_activity_tail_rows(
+fn append_taskless_live_row(
     rows: &mut Vec<ActivityDagPaneRow>,
     session: &ActivitySession,
     route: &ActivityRouteState,
-    width: usize,
     running_tool: Option<&str>,
-    now: Instant,
 ) {
     if should_show_taskless_live_row(rows, session, route, running_tool) {
         rows.push(ActivityDagPaneRow {
@@ -124,7 +126,6 @@ fn append_activity_tail_rows(
             tone: ActivityDagRowTone::Muted,
         });
     }
-    rows.extend(action_pane_rows(session, route, width, running_tool, now));
 }
 
 fn should_show_taskless_live_row(
@@ -157,59 +158,11 @@ fn activity_legend_row(width: usize) -> String {
     // braille spinner, not an idle-status symbol used elsewhere.
     fit(
         &format!(
-            " legend: ✓ done · {} active · ! fail · × canceled · ⊘ skipped · · queued",
+            " legend: ✓ done · {} active · ⚠ partial · ! fail · × canceled · ⊘ skipped · · queued",
             SPINNER_FRAMES[0]
         ),
         width,
     )
-}
-
-fn action_pane_rows(
-    session: &ActivitySession,
-    route: &ActivityRouteState,
-    width: usize,
-    running_tool: Option<&str>,
-    now: Instant,
-) -> Vec<ActivityDagPaneRow> {
-    let feed_width = width.saturating_sub(5).max(16);
-    let feed_rows = latest_action_rows(activity_feed_pane_rows(
-        session,
-        route,
-        feed_width,
-        running_tool,
-        now,
-    ));
-    if feed_rows.is_empty() {
-        return Vec::new();
-    }
-    let mut rows = vec![ActivityDagPaneRow {
-        text: fit("  ACTIONS", width),
-        tone: ActivityDagRowTone::Muted,
-    }];
-    rows.extend(feed_rows.into_iter().map(|row| ActivityDagPaneRow {
-        text: fit(&format!("     {}", row.text.trim_start()), width),
-        tone: action_row_tone(row.tone),
-    }));
-    rows
-}
-
-fn latest_action_rows(rows: Vec<ActivityFeedPaneRow>) -> Vec<ActivityFeedPaneRow> {
-    if rows.len() <= MAX_TASK_PANE_ACTION_ROWS {
-        return rows;
-    }
-    let first_visible = rows.len().saturating_sub(MAX_TASK_PANE_ACTION_ROWS);
-    rows.into_iter().skip(first_visible).collect()
-}
-
-fn action_row_tone(tone: ActivityFeedRowTone) -> ActivityDagRowTone {
-    match tone {
-        ActivityFeedRowTone::Primary => ActivityDagRowTone::Active,
-        ActivityFeedRowTone::Success => ActivityDagRowTone::Done,
-        ActivityFeedRowTone::Danger | ActivityFeedRowTone::Warn => ActivityDagRowTone::Failing,
-        ActivityFeedRowTone::Label | ActivityFeedRowTone::Muted | ActivityFeedRowTone::Subtle => {
-            ActivityDagRowTone::Muted
-        }
-    }
 }
 
 fn dag_row_tone(state: DagTaskState) -> ActivityDagRowTone {
@@ -218,6 +171,7 @@ fn dag_row_tone(state: DagTaskState) -> ActivityDagRowTone {
         DagTaskState::Active => ActivityDagRowTone::Active,
         DagTaskState::Canceling => ActivityDagRowTone::Active,
         DagTaskState::Queued => ActivityDagRowTone::Queued,
+        DagTaskState::Partial => ActivityDagRowTone::Warning,
         DagTaskState::Failing => ActivityDagRowTone::Failing,
         DagTaskState::Blocked => ActivityDagRowTone::Failing,
         DagTaskState::Canceled => ActivityDagRowTone::Canceled,
@@ -248,6 +202,7 @@ fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant, selected: bool) ->
         DagTaskState::Active => spinner_frame(now),
         DagTaskState::Canceling => "×",
         DagTaskState::Queued => "·",
+        DagTaskState::Partial => "⚠",
         DagTaskState::Failing => "!",
         DagTaskState::Blocked => "▣",
         DagTaskState::Canceled => "×",
@@ -371,6 +326,7 @@ fn dag_subsystems_row_text(
 
 fn subsystem_row_tone(state: DagTaskState) -> ActivityDagRowTone {
     match state {
+        DagTaskState::Partial => ActivityDagRowTone::Warning,
         DagTaskState::Failing => ActivityDagRowTone::Failing,
         DagTaskState::Blocked => ActivityDagRowTone::Failing,
         DagTaskState::Active => ActivityDagRowTone::Active,
@@ -384,6 +340,7 @@ fn subsystem_row_tone(state: DagTaskState) -> ActivityDagRowTone {
 
 fn subsystem_state_label(state: DagTaskState) -> &'static str {
     match state {
+        DagTaskState::Partial => "partial",
         DagTaskState::Failing => "failing",
         DagTaskState::Blocked => "blocked",
         DagTaskState::Active => "active",
@@ -449,15 +406,13 @@ mod tests {
         route.verbose_subsystems = true;
         let rows = activity_dag_pane_rows(&session, &route, 40, Instant::now(), None);
 
-        assert_eq!(rows.len(), 5);
+        assert_eq!(rows.len(), 3);
         assert!(rows[0].text.contains("semgrep:scan"));
         assert_eq!(rows[0].tone, ActivityDagRowTone::Queued);
         assert!(rows[1].text.contains("subsystems (2)"));
         assert!(rows[1].text.contains("expanded"));
         assert_eq!(rows[1].tone, ActivityDagRowTone::Muted);
         assert!(rows[2].text.contains("legend:"));
-        assert!(rows[3].text.contains("ACTIONS"));
-        assert!(rows[4].text.contains("no trace events"));
     }
 
     #[test]
@@ -494,15 +449,32 @@ mod tests {
     }
 
     #[test]
+    fn partial_task_uses_warning_copy_and_tone() {
+        let mut session = ActivitySession::new("r-1");
+        session.mark_task_partial("threat-model:build", "no concrete topology");
+
+        let rows = activity_dag_pane_rows(
+            &session,
+            &ActivityRouteState::default(),
+            80,
+            Instant::now(),
+            None,
+        );
+
+        assert!(rows[0].text.contains("⚠"));
+        assert_eq!(rows[0].tone, ActivityDagRowTone::Warning);
+        assert!(rows.last().unwrap().text.contains("⚠ partial"));
+    }
+
+    #[test]
     fn activity_dag_pane_rows_supplies_empty_state() {
         let session = ActivitySession::new("r-1");
 
         let route = ActivityRouteState::default();
         let rows = activity_dag_pane_rows(&session, &route, 40, Instant::now(), None);
 
-        assert_eq!(rows.len(), 2);
-        assert!(rows[0].text.contains("ACTIONS"));
-        assert!(rows[1].text.contains("no trace events"));
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].text.contains("no task rows yet"));
     }
 
     #[test]
@@ -533,7 +505,7 @@ mod tests {
         let route = ActivityRouteState::default();
         let rows = activity_dag_pane_rows(&session, &route, 80, Instant::now(), None);
 
-        assert_eq!(rows.len(), 6);
+        assert_eq!(rows.len(), 4);
         assert!(rows[0].text.contains("agentic-sast:scan"));
         assert!(rows[1].text.contains("✓ inventory-review"));
         assert_eq!(rows[1].tone, ActivityDagRowTone::Muted);
@@ -541,8 +513,6 @@ mod tests {
         assert!(rows[2].text.contains("2.4s"));
         assert_eq!(rows[2].tone, ActivityDagRowTone::Active);
         assert!(rows[3].text.contains("legend:"));
-        assert!(rows[4].text.contains("ACTIONS"));
-        assert!(rows[5].text.contains("no trace events"));
     }
 
     #[test]
@@ -562,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_dag_pane_rows_tails_latest_actions() {
+    fn activity_dag_pane_rows_never_duplicates_output_events() {
         let mut session = ActivitySession::new("r-1");
         for index in 0..12 {
             session.apply_step(
@@ -576,14 +546,8 @@ mod tests {
         let route = ActivityRouteState::default();
         let rows = activity_dag_pane_rows(&session, &route, 80, Instant::now(), None);
 
-        assert_eq!(
-            rows.iter()
-                .filter(|row| row.text.contains("[triage:run]"))
-                .count(),
-            MAX_TASK_PANE_ACTION_ROWS
-        );
-        assert!(rows.iter().all(|row| !row.text.contains("event 3")));
-        assert!(rows.iter().any(|row| row.text.contains("event 4")));
-        assert!(rows.last().unwrap().text.contains("event 11"));
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].text.contains("no task rows yet"));
+        assert!(rows.iter().all(|row| !row.text.contains("event")));
     }
 }

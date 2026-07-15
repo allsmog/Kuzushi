@@ -5,7 +5,7 @@ assertion_line: 69
  KUZUSHI › tools · mode:module · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- TOOLS · module:sast ------------------------------------------------------------------------------------------------
-filter: module:sast · showing 2 of 52 tools
+filter: module:sast · showing 2 of 53 tools
 
 HUNT find candidate vulnerabilities and security signals
 tool                          purpose                                                     next

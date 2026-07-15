@@ -13,7 +13,7 @@ pub(crate) fn threat_leads_module() -> BuiltinModule {
                 vec![target_option()],
             )
             .with_policy(workspace_policy(
-                ToolPhase::Confirm,
+                ToolPhase::Map,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             )),
@@ -23,7 +23,7 @@ pub(crate) fn threat_leads_module() -> BuiltinModule {
                 vec![target_option()],
             )
             .with_policy(tool_policy(
-                ToolPhase::Confirm,
+                ToolPhase::Map,
                 RuntimeRequirement::Never,
                 ToolEffect::Read,
                 WorkspaceRequirement::Required,

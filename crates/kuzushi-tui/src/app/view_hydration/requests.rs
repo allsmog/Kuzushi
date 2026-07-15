@@ -103,10 +103,12 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     append_threat_model_key(app, keys);
     append_selected_source_key(app, keys);
     append_selected_proof_key(app, keys);
+    append_finding_patch_truth_key(app, keys);
     keys.extend([
         ViewHydrationKey::StrategyQueue,
         ViewHydrationKey::HarnessFile,
     ]);
+    append_scan_receipt_keys(app, keys);
     let Some(target) = app.target() else {
         return;
     };
@@ -115,6 +117,46 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
             path: target.join(relative),
         });
     }
+}
+
+fn append_finding_patch_truth_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    if crate::ui_view_models::active_workbench_page(app) != WorkbenchPage::Fix {
+        return;
+    }
+    let Some((_, finding)) = crate::ui_view_models::current_finding_for_detail(app) else {
+        return;
+    };
+    let target_revision = app
+        .engagement
+        .phase_target_snapshot()
+        .and_then(|snapshot| snapshot.revision.clone());
+    keys.push(ViewHydrationKey::FindingPatchTruth {
+        fingerprint: finding.fingerprint,
+        finding_scan_id: finding.scan_id,
+        target_revision,
+    });
+}
+
+fn append_scan_receipt_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    if crate::ui_view_models::active_workbench_page(app) != WorkbenchPage::Scan {
+        return;
+    }
+    let attempt = app
+        .engagement
+        .unresolved_phase_attempt(WorkflowPhase::Scan)
+        .or_else(|| app.engagement.selected_phase_attempt(WorkflowPhase::Scan));
+    let Some(attempt) = attempt else {
+        return;
+    };
+    keys.extend(
+        attempt
+            .completed
+            .run_refs
+            .iter()
+            .rev()
+            .cloned()
+            .map(|run_id| ViewHydrationKey::ScanStageReceipt { run_id }),
+    );
 }
 
 fn append_selected_source_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {

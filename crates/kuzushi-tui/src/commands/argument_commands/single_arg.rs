@@ -79,7 +79,7 @@ fn parse_phase_command(first: Option<&str>, original: &str) -> ShellCommand {
 }
 
 /// `autonomy` / `posture` with no argument reads the current rung;
-/// `autonomy <recon|hunt|confirm|fix>` sets it. An unrecognized rung is an
+/// `autonomy <recon|scan|review|prove|fix>` sets it. An unrecognized rung is an
 /// explicit error, never a silent no-op.
 fn parse_autonomy_command(first: Option<&str>, original: &str) -> ShellCommand {
     match first {

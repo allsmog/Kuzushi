@@ -30,6 +30,7 @@ pub(super) fn spawn_agent_dispatch(
             dispatch.thinking_level,
             dispatch.cwd,
             dispatch.agent_prompt,
+            dispatch.run_id,
             sink,
             cancel,
         )

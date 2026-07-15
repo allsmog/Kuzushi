@@ -42,6 +42,20 @@ pub(crate) enum RunSummaryEntriesState {
     Failed(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ScanStageReceiptState {
+    Ready(kuzushi_core::run_artifacts::PhaseStageReceipt),
+    Missing,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FindingPatchTruthState {
+    Ready(FindingPatchTruth),
+    Missing,
+    Failed(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum FileCompletionLimit {
     EntryVisits,
@@ -108,6 +122,14 @@ pub(crate) enum ViewHydrationKey {
     RunTrace {
         run_id: String,
     },
+    ScanStageReceipt {
+        run_id: String,
+    },
+    FindingPatchTruth {
+        fingerprint: String,
+        finding_scan_id: Option<String>,
+        target_revision: Option<String>,
+    },
     SourceFile {
         path: PathBuf,
     },
@@ -149,6 +171,8 @@ pub(crate) enum ViewHydrationValue {
     RunSummaryEntries(RunSummaryEntriesState),
     RunArtifactText(RunArtifactTextRead),
     RunTrace(Option<RunTraceRead>),
+    ScanStageReceipt(ScanStageReceiptState),
+    FindingPatchTruth(FindingPatchTruthState),
     SourceFile(Result<String, String>),
     GitMetadata(Option<RunTargetGitMetadata>),
     ProjectScopeTree(ProjectScopeTreeState),

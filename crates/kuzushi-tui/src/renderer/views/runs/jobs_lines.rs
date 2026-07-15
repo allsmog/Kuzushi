@@ -3,7 +3,7 @@ use crate::ui_view_models::{
     jobs_registry_model, JobHistoryState, JobRow, JobRunStatus, JobsRegistryModel,
 };
 
-const JOBS_COLUMN_WIDTHS: [usize; 6] = [10, 8, 11, 8, 20, 8];
+const JOBS_COLUMN_WIDTHS: [usize; 6] = [10, 8, 13, 8, 20, 8];
 
 /// The `jobs` registry: the operator control surface over live + recent runs.
 /// Extends the historical Runs timeline with elapsed, current step, queued
@@ -110,6 +110,8 @@ fn findings_label(row: &JobRow) -> String {
 fn job_status_style(status: JobRunStatus) -> Style {
     match status {
         JobRunStatus::Running => theme::success(),
+        JobRunStatus::Canceling => theme::warn(),
+        JobRunStatus::WaitingInput => theme::warn(),
         JobRunStatus::Queued => theme::warn(),
         JobRunStatus::Completed => theme::success(),
         JobRunStatus::Partial | JobRunStatus::Interrupted => theme::warn(),

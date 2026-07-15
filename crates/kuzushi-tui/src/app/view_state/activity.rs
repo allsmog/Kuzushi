@@ -1,5 +1,7 @@
+use crate::app::{phase_attempt_outcome_from_label, phase_result_policy};
 use kuzushi_core::modules::{BuiltinModule, DagNodeDescriptor, ModuleRegistry};
 use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
+pub use kuzushi_core::workflow_attempts::PhaseResultAction as RunFocusResultAction;
 use kuzushi_core::{RunTraceStep, WorkflowPhase};
 use std::collections::{BTreeMap, VecDeque};
 use std::time::Instant;
@@ -27,73 +29,6 @@ impl PaneFocus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActivityDeckPage {
-    Findings,
-    AttackSurface,
-    Dfd,
-    Heatmap,
-    AttackPath,
-    ExploitChain,
-    Recon,
-}
-
-impl ActivityDeckPage {
-    pub const ALL: [Self; 7] = [
-        Self::Findings,
-        Self::AttackSurface,
-        Self::Dfd,
-        Self::Heatmap,
-        Self::AttackPath,
-        Self::ExploitChain,
-        Self::Recon,
-    ];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Findings => "findings",
-            Self::AttackSurface => "surface",
-            Self::Dfd => "dfd",
-            Self::Heatmap => "heatmap",
-            Self::AttackPath => "path",
-            Self::ExploitChain => "chain",
-            Self::Recon => "recon",
-        }
-    }
-
-    pub fn scene_page(self) -> Option<crate::scene3d::VizPage> {
-        match self {
-            Self::Findings => None,
-            Self::AttackSurface => Some(crate::scene3d::VizPage::AttackSurface),
-            Self::Dfd => Some(crate::scene3d::VizPage::Dfd),
-            Self::Heatmap => Some(crate::scene3d::VizPage::Heatmap),
-            Self::AttackPath => Some(crate::scene3d::VizPage::AttackPath),
-            Self::ExploitChain => Some(crate::scene3d::VizPage::ExploitChain),
-            Self::Recon => None,
-        }
-    }
-
-    pub fn from_scene_page(page: crate::scene3d::VizPage) -> Self {
-        match page {
-            crate::scene3d::VizPage::AttackSurface => Self::AttackSurface,
-            crate::scene3d::VizPage::Dfd => Self::Dfd,
-            crate::scene3d::VizPage::Heatmap => Self::Heatmap,
-            crate::scene3d::VizPage::AttackPath => Self::AttackPath,
-            crate::scene3d::VizPage::ExploitChain => Self::ExploitChain,
-        }
-    }
-
-    pub fn next(self) -> Self {
-        let index = Self::ALL.iter().position(|page| *page == self).unwrap_or(0);
-        Self::ALL[(index + 1) % Self::ALL.len()]
-    }
-
-    pub fn prev(self) -> Self {
-        let index = Self::ALL.iter().position(|page| *page == self).unwrap_or(0);
-        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
-    }
-}
-
 /// Symbolic state of a DAG task in the Activity view's left pane. Mirrors the
 /// shared `ProgressKind` semantics used elsewhere in the renderer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +37,7 @@ pub enum DagTaskState {
     Active,
     Canceling,
     Done,
+    Partial,
     Failing,
     Blocked,
     Canceled,
@@ -219,9 +155,26 @@ pub struct ActivitySession {
     /// the phase that launched it even when newly persisted artifacts advance
     /// the workspace-derived journey underneath the operator.
     pub origin_phase: Option<WorkflowPhase>,
+    /// Exact shell destination captured before a foreground run opens. Route-
+    /// local state (Workbench pane/page/scroll and pinned finding) stays in the
+    /// router, so restoring this view restores the full operator context.
+    pub run_focus_origin: Option<RunFocusOrigin>,
+    pub run_focus_backgrounded: bool,
+    pub run_focus_terminal_pending: bool,
+    pub run_focus_receipt: Option<RunFocusReceipt>,
+    pub sequence_run_refs: Vec<String>,
+    pub interaction_count: usize,
+    pub rerun_specification: Option<String>,
+    pub(crate) operator_question: Option<crate::PendingOperatorQuestion>,
+    pub(crate) operator_answer_acknowledgement: Option<String>,
+    pub(crate) run_focus_pending_viz: Option<crate::scene3d::VizPage>,
+    pub sequence_started_at: Instant,
+    pub sequence_run_count: usize,
     pub started_at: Instant,
     pub completed_at: Option<Instant>,
     pub tasks: BTreeMap<String, DagTaskRow>,
+    task_order: Vec<String>,
+    tool_task_aliases: BTreeMap<String, String>,
     pub step_task_ids: BTreeMap<usize, String>,
     pub subsystem_aggregate: SubsystemAggregate,
     pub events: VecDeque<RecordedTraceEvent>,
@@ -236,8 +189,7 @@ struct VisibleStepTask {
 
 /// Route-local UI state for the Activity surface. The paired `ActivitySession`
 /// owns run/DAG/event data; this type owns the operator's current projection of
-/// that data: focused task, pane, pause/filter flags, scroll positions, and
-/// generated-output deck selection.
+/// that data: focused task, pane, pause/filter flags, and scroll positions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivityRouteState {
     pub focus_task: Option<String>,
@@ -247,15 +199,70 @@ pub struct ActivityRouteState {
     pub feed_scroll: usize,
     pub task_scroll: usize,
     pub task_cursor: usize,
-    pub deck_page: ActivityDeckPage,
-    pub deck_cursor: usize,
-    pub deck_page_pinned_by_user: bool,
     pub paused_event_count: Option<usize>,
     /// True while the feed renderer should auto-scroll to the latest event.
     /// Becomes false the moment the operator manually scrolls the feed; reset
     /// to true on `G` (scroll-to-bottom). Decoupled from `paused` so toggling
     /// pause doesn't unpin a manually-scrolled position.
     pub feed_auto_tail: bool,
+    pub steer_editor: Option<RunFocusSteerEditor>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunFocusOrigin {
+    pub view: crate::ShellView,
+    pub input_mode: crate::InputMode,
+    pub auto_return: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunFocusReceipt {
+    pub outcome: String,
+    pub run_count: usize,
+    pub elapsed_secs: u64,
+    pub cost: String,
+    pub origin_phase: Option<WorkflowPhase>,
+    pub attempt_id: Option<String>,
+    pub run_refs: Vec<String>,
+    pub changed_findings: u64,
+    pub changed_artifacts: Vec<String>,
+    pub interaction_count: usize,
+    pub rerun_specification: Option<String>,
+    pub actions: Vec<RunFocusResultAction>,
+    pub recommended_next: Option<String>,
+}
+
+impl RunFocusReceipt {
+    pub fn summary(&self) -> String {
+        format!(
+            "{} · {} run{} · {}s · {}",
+            self.outcome,
+            self.run_count,
+            if self.run_count == 1 { "" } else { "s" },
+            self.elapsed_secs,
+            self.cost
+        )
+    }
+
+    pub(crate) fn durable_metadata(&self) -> kuzushi_core::workflow_attempts::PhaseAttemptReceipt {
+        kuzushi_core::workflow_attempts::PhaseAttemptReceipt {
+            run_count: self.run_count,
+            elapsed_secs: self.elapsed_secs,
+            cost: self.cost.clone(),
+            changed_findings: self.changed_findings,
+            changed_artifacts: self.changed_artifacts.clone(),
+            interaction_count: self.interaction_count,
+            rerun_specification: self.rerun_specification.clone(),
+            actions: self.actions.clone(),
+            recommended_next: self.recommended_next.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunFocusSteerEditor {
+    pub input: String,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -283,23 +290,36 @@ impl Default for ActivityRouteState {
             feed_scroll: 0,
             task_scroll: 0,
             task_cursor: 0,
-            deck_page: ActivityDeckPage::Findings,
-            deck_cursor: 0,
-            deck_page_pinned_by_user: false,
             paused_event_count: None,
-            feed_auto_tail: false,
+            feed_auto_tail: true,
+            steer_editor: None,
         }
     }
 }
 
 impl ActivitySession {
     pub fn new(run_id: impl Into<String>) -> Self {
+        let run_id = run_id.into();
         Self {
-            run_id: run_id.into(),
+            run_id: run_id.clone(),
             origin_phase: None,
+            run_focus_origin: None,
+            run_focus_backgrounded: false,
+            run_focus_terminal_pending: false,
+            run_focus_receipt: None,
+            sequence_run_refs: vec![run_id],
+            interaction_count: 0,
+            rerun_specification: None,
+            operator_question: None,
+            operator_answer_acknowledgement: None,
+            run_focus_pending_viz: None,
             started_at: Instant::now(),
+            sequence_started_at: Instant::now(),
+            sequence_run_count: 1,
             completed_at: None,
             tasks: BTreeMap::new(),
+            task_order: Vec::new(),
+            tool_task_aliases: BTreeMap::new(),
             step_task_ids: BTreeMap::new(),
             subsystem_aggregate: SubsystemAggregate::default(),
             events: VecDeque::with_capacity(ACTIVITY_FEED_RING_CAPACITY),
@@ -312,6 +332,83 @@ impl ActivitySession {
     pub fn with_origin_phase(mut self, phase: WorkflowPhase) -> Self {
         self.origin_phase = Some(phase);
         self
+    }
+
+    pub fn with_rerun_specification(mut self, specification: impl Into<String>) -> Self {
+        self.rerun_specification = Some(specification.into());
+        self
+    }
+
+    pub(crate) fn record_operator_question(&mut self) {
+        self.interaction_count = self.interaction_count.saturating_add(1);
+    }
+
+    pub fn with_run_focus_origin(mut self, origin: RunFocusOrigin) -> Self {
+        self.run_focus_origin = Some(origin);
+        self
+    }
+
+    pub(crate) fn continue_run_focus_sequence_from(&mut self, prior: &ActivitySession) {
+        self.origin_phase = prior.origin_phase.or(self.origin_phase);
+        self.run_focus_origin = prior.run_focus_origin;
+        self.run_focus_backgrounded = prior.run_focus_backgrounded;
+        self.run_focus_pending_viz = prior.run_focus_pending_viz;
+        self.sequence_run_refs = prior.sequence_run_refs.clone();
+        if !self.sequence_run_refs.contains(&self.run_id) {
+            self.sequence_run_refs.push(self.run_id.clone());
+        }
+        self.interaction_count = prior.interaction_count;
+        self.operator_answer_acknowledgement = prior.operator_answer_acknowledgement.clone();
+        self.rerun_specification = self
+            .rerun_specification
+            .clone()
+            .or_else(|| prior.rerun_specification.clone());
+        self.tasks = prior.tasks.clone();
+        self.task_order = prior.task_order.clone();
+        self.sequence_started_at = prior.sequence_started_at;
+        self.sequence_run_count = prior.sequence_run_count.saturating_add(1);
+        self.runtime_cost = prior.runtime_cost;
+        self.cost_accounting_error = prior.cost_accounting_error.clone();
+    }
+
+    pub(crate) fn mark_run_focus_terminal_pending(&mut self, outcome: impl Into<String>) {
+        self.mark_terminal();
+        self.run_focus_terminal_pending = true;
+        let outcome = outcome.into();
+        let policy = phase_result_policy(
+            self.origin_phase,
+            phase_attempt_outcome_from_label(&outcome),
+            false,
+        );
+        self.run_focus_receipt = Some(RunFocusReceipt {
+            outcome: outcome.clone(),
+            run_count: self.sequence_run_count,
+            elapsed_secs: self.sequence_started_at.elapsed().as_secs(),
+            cost: self.runtime_cost_report().map_or_else(
+                |_| "cost invalid".to_string(),
+                |report| {
+                    if report.is_unavailable() {
+                        "cost unavailable".to_string()
+                    } else if report.is_complete() {
+                        format!("${:.4}", report.observed_usd())
+                    } else {
+                        format!(">=${:.4} incomplete", report.observed_usd())
+                    }
+                },
+            ),
+            origin_phase: self.origin_phase,
+            // A phase origin is presentation context, not evidence. The
+            // completion publisher assigns an attempt id only after it proves
+            // this sequence contains a terminal, phase-aligned descriptor run.
+            attempt_id: None,
+            run_refs: self.sequence_run_refs.clone(),
+            changed_findings: 0,
+            changed_artifacts: Vec::new(),
+            interaction_count: self.interaction_count,
+            rerun_specification: self.rerun_specification.clone(),
+            actions: policy.actions,
+            recommended_next: policy.recommended_next,
+        });
     }
 
     /// Construct a session whose phase origin is known at launch time.
@@ -377,8 +474,9 @@ impl ActivitySession {
     /// already terminal, and writes no feed event so normal tools that emitted
     /// their own done step don't get a duplicate line.
     pub fn mark_task_done(&mut self, tool_name: &str) {
-        let task_id = collapse_doubled_tail(tool_name);
+        let task_id = self.task_id_for_tool(tool_name);
         let module_id = task_id.split(':').next().unwrap_or(&task_id).to_string();
+        self.remember_task(&task_id);
         let row = self
             .tasks
             .entry(task_id.clone())
@@ -389,6 +487,7 @@ impl ActivitySession {
         if matches!(
             row.state,
             DagTaskState::Done
+                | DagTaskState::Partial
                 | DagTaskState::Failing
                 | DagTaskState::Blocked
                 | DagTaskState::Skipped
@@ -404,8 +503,9 @@ impl ActivitySession {
     }
 
     pub fn mark_task_skipped(&mut self, tool_name: &str) {
-        let task_id = collapse_doubled_tail(tool_name);
+        let task_id = self.task_id_for_tool(tool_name);
         let module_id = task_id.split(':').next().unwrap_or(&task_id).to_string();
+        self.remember_task(&task_id);
         let row = self
             .tasks
             .entry(task_id.clone())
@@ -418,13 +518,14 @@ impl ActivitySession {
     }
 
     pub fn mark_task_partial(&mut self, tool_name: &str, reason: &str) {
-        let task_id = collapse_doubled_tail(tool_name);
+        let task_id = self.task_id_for_tool(tool_name);
         let module_id = task_id.split(':').next().unwrap_or(&task_id).to_string();
+        self.remember_task(&task_id);
         let row = self
             .tasks
             .entry(task_id.clone())
             .or_insert_with(|| DagTaskRow::queued(task_id, module_id, Vec::new()));
-        row.state = DagTaskState::Failing;
+        row.state = DagTaskState::Partial;
         row.started_at.get_or_insert_with(Instant::now);
         row.completed_at = Some(Instant::now());
         row.severity = Some("warn".to_string());
@@ -433,8 +534,9 @@ impl ActivitySession {
     }
 
     pub fn mark_task_blocked(&mut self, tool_name: &str, reason: &str) {
-        let task_id = collapse_doubled_tail(tool_name);
+        let task_id = self.task_id_for_tool(tool_name);
         let module_id = task_id.split(':').next().unwrap_or(&task_id).to_string();
+        self.remember_task(&task_id);
         let row = self
             .tasks
             .entry(task_id.clone())
@@ -544,7 +646,7 @@ impl ActivitySession {
     /// node. Collapsing a doubled trailing segment fixes it regardless of how
     /// the tool name split across module_id/verb, and is order-independent.
     fn resolve_step_task_id(&self, module_id: &str, verb: &str) -> String {
-        collapse_doubled_tail(&format!("{module_id}:{verb}"))
+        self.task_id_for_tool(&format!("{module_id}:{verb}"))
     }
 
     fn visible_step_task(
@@ -581,6 +683,7 @@ impl ActivitySession {
     ) -> Option<&mut DagTaskRow> {
         if activity_step_mints_row(step) {
             self.reserve_visible_task_capacity(task_id);
+            self.remember_task(task_id);
             return Some(self.tasks.entry(task_id.to_string()).or_insert_with(|| {
                 DagTaskRow::queued(task_id.to_string(), module_id.to_string(), Vec::new())
             }));
@@ -598,6 +701,8 @@ impl ActivitySession {
             visible_task_eviction_candidate(&self.tasks, protected_task_id)
         {
             self.tasks.remove(&evicted_task_id);
+            self.task_order
+                .retain(|task_id| task_id != &evicted_task_id);
             self.step_task_ids
                 .retain(|_, task_id| task_id != &evicted_task_id);
         }
@@ -639,6 +744,54 @@ impl ActivitySession {
             .map(|module| self.seed_registry_module(module))
             .sum();
         self.seed_hidden_subsystem_total(hidden_total);
+    }
+
+    pub(crate) fn seed_task_sequence(&mut self, task_ids: impl IntoIterator<Item = String>) {
+        for task_id in task_ids {
+            let module_id = module_id_for_task_id(&task_id);
+            self.remember_task(&task_id);
+            self.tasks
+                .entry(task_id.clone())
+                .or_insert_with(|| DagTaskRow::queued(task_id, module_id, Vec::new()));
+        }
+    }
+
+    pub(crate) fn bind_tool_task(&mut self, tool_name: &str, task_id: String) {
+        self.tool_task_aliases
+            .insert(collapse_doubled_tail(tool_name), task_id);
+    }
+
+    fn task_id_for_tool(&self, tool_name: &str) -> String {
+        let canonical = collapse_doubled_tail(tool_name);
+        self.tool_task_aliases
+            .get(&canonical)
+            .cloned()
+            .unwrap_or(canonical)
+    }
+
+    pub(crate) fn ordered_task_rows(&self) -> Vec<&DagTaskRow> {
+        let mut rows = self
+            .task_order
+            .iter()
+            .filter_map(|task_id| self.tasks.get(task_id))
+            .collect::<Vec<_>>();
+        rows.extend(
+            self.tasks
+                .iter()
+                .filter(|(task_id, _)| !self.task_order.contains(task_id))
+                .map(|(_, row)| row),
+        );
+        rows
+    }
+
+    pub(crate) fn task_is_sequence_owned(&self, task_id: &str) -> bool {
+        self.task_order.iter().any(|known| known == task_id)
+    }
+
+    fn remember_task(&mut self, task_id: &str) {
+        if !self.task_order.iter().any(|known| known == task_id) {
+            self.task_order.push(task_id.to_string());
+        }
     }
 
     pub fn mark_active_tasks_canceled(&mut self) {
@@ -728,9 +881,8 @@ impl ActivityRouteState {
 
     pub fn task_id_at_cursor<'a>(&self, session: &'a ActivitySession) -> Option<&'a str> {
         session
-            .tasks
-            .values()
-            .nth(self.task_cursor.min(self.task_cursor_max(session)))
+            .ordered_task_rows()
+            .get(self.task_cursor.min(self.task_cursor_max(session)))
             .map(|row| row.task_id.as_str())
     }
 
@@ -760,40 +912,6 @@ impl ActivityRouteState {
 
     fn task_cursor_max(&self, session: &ActivitySession) -> usize {
         session.tasks.len().saturating_sub(1)
-    }
-
-    pub fn next_deck_page(&mut self) {
-        self.set_deck_page_by_user(self.deck_page.next());
-    }
-
-    pub fn prev_deck_page(&mut self) {
-        self.set_deck_page_by_user(self.deck_page.prev());
-    }
-
-    pub fn set_deck_page(&mut self, page: ActivityDeckPage) {
-        self.apply_deck_page(page, false);
-    }
-
-    pub fn set_deck_page_by_user(&mut self, page: ActivityDeckPage) {
-        self.apply_deck_page(page, true);
-    }
-
-    fn apply_deck_page(&mut self, page: ActivityDeckPage, pinned_by_user: bool) {
-        self.deck_page = page;
-        self.deck_cursor = 0;
-        self.feed_scroll = 0;
-        self.feed_auto_tail = false;
-        if pinned_by_user {
-            self.deck_page_pinned_by_user = true;
-        }
-    }
-
-    pub fn set_deck_scene_page(&mut self, page: crate::scene3d::VizPage) {
-        self.set_deck_page(ActivityDeckPage::from_scene_page(page));
-    }
-
-    pub fn can_auto_switch_deck(&self) -> bool {
-        !self.deck_page_pinned_by_user
     }
 
     /// Focus that accounts for the collapsed TASKS pane: with no DAG tasks
@@ -829,10 +947,16 @@ impl ActivityRouteState {
         self.feed_scroll = 0;
         self.task_scroll = 0;
         self.task_cursor = 0;
-        self.deck_page = ActivityDeckPage::Findings;
-        self.deck_cursor = 0;
-        self.deck_page_pinned_by_user = false;
-        self.feed_auto_tail = false;
+        self.feed_auto_tail = true;
+        self.steer_editor = None;
+    }
+
+    pub fn open_steer_editor(&mut self) {
+        self.steer_editor = Some(RunFocusSteerEditor::default());
+    }
+
+    pub fn close_steer_editor(&mut self) {
+        self.steer_editor = None;
     }
 }
 
@@ -899,6 +1023,7 @@ fn terminal_task_state(state: DagTaskState) -> bool {
     matches!(
         state,
         DagTaskState::Done
+            | DagTaskState::Partial
             | DagTaskState::Failing
             | DagTaskState::Blocked
             | DagTaskState::Canceled
@@ -1249,7 +1374,9 @@ fn finalize_activity_row_details(row: &mut DagTaskRow) {
         return;
     }
     let terminal_state = match row.state {
-        DagTaskState::Failing | DagTaskState::Blocked => DagTaskDetailState::Failing,
+        DagTaskState::Partial | DagTaskState::Failing | DagTaskState::Blocked => {
+            DagTaskDetailState::Failing
+        }
         DagTaskState::Canceled => DagTaskDetailState::Canceled,
         _ => DagTaskDetailState::Done,
     };
@@ -1270,6 +1397,7 @@ fn next_activity_row_state(
         (_, _, DagTaskState::Blocked) => DagTaskState::Blocked,
         (_, _, DagTaskState::Canceling) => DagTaskState::Canceling,
         (_, _, DagTaskState::Skipped) => DagTaskState::Skipped,
+        (_, _, DagTaskState::Partial) => DagTaskState::Partial,
         (Some("danger"), _, _) if !rolled_up_child => DagTaskState::Failing,
         (_, _, DagTaskState::Failing) => DagTaskState::Failing,
         (_, "done" | "tool-complete", _) if !rolled_up_child => DagTaskState::Done,
@@ -1291,6 +1419,7 @@ fn activity_row_is_terminal(row: &DagTaskRow) -> bool {
     matches!(
         row.state,
         DagTaskState::Done
+            | DagTaskState::Partial
             | DagTaskState::Failing
             | DagTaskState::Blocked
             | DagTaskState::Canceled
@@ -1349,6 +1478,7 @@ fn subsystem_state(
 fn subsystem_priority_state(states: &[DagTaskState]) -> DagTaskState {
     [
         DagTaskState::Failing,
+        DagTaskState::Partial,
         DagTaskState::Blocked,
         DagTaskState::Canceled,
         DagTaskState::Canceling,
@@ -1432,7 +1562,79 @@ fn shift_index(current: usize, amount: isize, max: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::PendingOperatorQuestion;
     use kuzushi_core::RunTraceStep;
+
+    #[test]
+    fn continued_run_focus_sequence_accumulates_cost_and_run_count() {
+        let mut first = ActivitySession::new("run-1");
+        first.apply_step(
+            RunTraceStep::new(1, "reasoning", "model call complete")
+                .with_latency_ms(Some(1))
+                .with_cost_usd(Some(0.25))
+                .with_model_metadata("test:model", "test", "prompt-hash"),
+        );
+        let mut second = ActivitySession::new("run-2");
+        second.continue_run_focus_sequence_from(&first);
+        second.apply_step(
+            RunTraceStep::new(2, "reasoning", "model call complete")
+                .with_latency_ms(Some(1))
+                .with_cost_usd(Some(0.50))
+                .with_model_metadata("test:model", "test", "prompt-hash"),
+        );
+        second.mark_run_focus_terminal_pending("completed");
+
+        let receipt = second.run_focus_receipt.expect("sequence receipt");
+        assert_eq!(receipt.run_count, 2);
+        assert_eq!(receipt.cost, "$0.7500");
+    }
+
+    #[test]
+    fn continued_run_focus_sequence_preserves_the_ordered_plan_checklist() {
+        let mut first = ActivitySession::new("run-context");
+        first.seed_task_sequence([
+            "context:build".to_string(),
+            "entry-points:extract".to_string(),
+        ]);
+        first.mark_task_done("context:build");
+
+        let mut second = ActivitySession::new("run-entry-points");
+        second.continue_run_focus_sequence_from(&first);
+
+        let rows = second.ordered_task_rows();
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.task_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["context:build", "entry-points:extract"]
+        );
+        assert_eq!(rows[0].state, DagTaskState::Done);
+        assert_eq!(rows[1].state, DagTaskState::Queued);
+    }
+
+    #[test]
+    fn planned_tasks_sharing_a_tool_keep_distinct_activity_rows() {
+        let mut session = ActivitySession::new("run-stride");
+        session.seed_task_sequence([
+            "threat-model:build[stride]".to_string(),
+            "threat-model:build[pasta]".to_string(),
+        ]);
+        session.bind_tool_task(
+            "threat-model:build",
+            "threat-model:build[stride]".to_string(),
+        );
+        session.mark_task_partial("threat-model:build", "no topology");
+
+        assert_eq!(
+            session.tasks["threat-model:build[stride]"].state,
+            DagTaskState::Partial
+        );
+        assert_eq!(
+            session.tasks["threat-model:build[pasta]"].state,
+            DagTaskState::Queued
+        );
+        assert!(!session.tasks.contains_key("threat-model:build"));
+    }
 
     #[test]
     fn apply_step_creates_row_and_marks_active() {
@@ -1616,27 +1818,6 @@ mod tests {
 
         let row = session.tasks.get("triage:run").unwrap();
         assert_eq!(row.state, DagTaskState::Canceled);
-    }
-
-    #[test]
-    fn deck_page_changes_reset_cursor_and_feed_scroll() {
-        let mut route = ActivityRouteState {
-            feed_scroll: 12,
-            deck_cursor: 5,
-            ..ActivityRouteState::default()
-        };
-
-        route.next_deck_page();
-
-        assert_eq!(route.deck_page, ActivityDeckPage::AttackSurface);
-        assert_eq!(route.deck_cursor, 0);
-        assert_eq!(route.feed_scroll, 0);
-        assert!(!route.feed_auto_tail);
-
-        route.prev_deck_page();
-
-        assert_eq!(route.deck_page, ActivityDeckPage::Findings);
-        assert!(!route.feed_auto_tail);
     }
 
     #[test]

@@ -87,6 +87,43 @@ fn opening_legacy_projection_adds_patch_provider_spend_column() {
 }
 
 #[test]
+fn opening_legacy_projection_adds_patch_lifecycle_generation_columns() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("index.sqlite3");
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        r#"
+        create table patch_lifecycle_events (
+          event_hash text primary key, seq integer, application_id text,
+          stable_fp text, fingerprint text, patch_run_id text, target text,
+          diff_hash text, base_commit text, touched_files_json text, state text,
+          reverify_run_id text, detail text, actor text,
+          applied_at text,
+          application_started_at text, updated_at text, created_at text,
+          payload_json text
+        );
+        create table patch_lifecycle_current (
+          application_id text primary key, latest_seq integer, stable_fp text,
+          fingerprint text, patch_run_id text, target text, diff_hash text,
+          base_commit text, touched_files_json text, state text,
+          reverify_run_id text, detail text, actor text,
+          applied_at text,
+          application_started_at text, updated_at text
+        );
+        "#,
+    )
+    .unwrap();
+    drop(conn);
+
+    drop(ProjectionDb::open(&db_path).unwrap());
+
+    let conn = Connection::open(&db_path).unwrap();
+    for table in ["patch_lifecycle_events", "patch_lifecycle_current"] {
+        assert!(table_has_column(&conn, table, "finding_scan_id").unwrap());
+    }
+}
+
+#[test]
 fn legacy_patch_events_default_missing_unresolved_bit_to_false() {
     assert!(!projected_legacy_patch_spend_state(Some(125_000)));
     assert!(!projected_legacy_patch_spend_state(None));

@@ -1,8 +1,8 @@
 use super::{
     AbortReason, JobHub, ProjectScopeDiscoveryResult, ProjectScopeDiscoveryRuntime,
-    TargetCandidateDiscoveryResult, TargetCandidateDiscoveryRuntime, TerminalLoopWake,
-    ToolRunState, ViewArtifactReader, ViewHydrationDrain, ViewHydrationKey, ViewHydrationRuntime,
-    WorkerHandleRegistry,
+    TargetCandidateDiscoveryResult, TargetCandidateDiscoveryRuntime, TargetCandidateFacts,
+    TerminalLoopWake, ToolRunState, ViewArtifactReader, ViewHydrationDrain, ViewHydrationKey,
+    ViewHydrationRuntime, WorkerHandleRegistry,
 };
 use kuzushi_core::ScanCancellation;
 use std::path::PathBuf;
@@ -109,6 +109,15 @@ impl RuntimeState {
         &mut self,
     ) -> Vec<TargetCandidateDiscoveryResult> {
         self.target_candidate_discovery.drain_current()
+    }
+
+    pub(crate) fn start_target_candidate_facts(&mut self, path: PathBuf) {
+        self.target_candidate_discovery
+            .start_facts(path, self.loop_wake.clone());
+    }
+
+    pub(crate) fn drain_target_candidate_facts(&mut self) -> Vec<TargetCandidateFacts> {
+        self.target_candidate_discovery.drain_current_facts()
     }
 
     pub(crate) fn scan_cancel(&self) -> Option<&ScanCancellation> {

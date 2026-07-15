@@ -46,6 +46,9 @@ This snapshot tightens the path from scanner output to human review:
 - Workspace persistence is v3-first: append-only event log segments under
   `.kuzushi/v3/log/`, the projection DB at `.kuzushi/v3/index.sqlite3`, and
   replayable run artifacts under `.kuzushi/v3/runs/<runId>/`.
+- Shell causality is recorded separately as redacted semantic JSONL under
+  `~/.kuzushi/v3/sessions/`; `kuzushi sessions list|show|export|prune` inspects
+  that global operator-owned history without treating it as target evidence.
 - The Rust workbench is the primary shell landing surface. It presents attack
   surface, findings, details, activity, and generated artifact context without
   replacing domain terms such as severity, confidence, status, decision, proof,
@@ -65,7 +68,9 @@ This snapshot tightens the path from scanner output to human review:
 
 Kuzushi is local-first and ships **no first-party telemetry**. Findings,
 evidence, run artifacts, and suppressions live under `.kuzushi/` in your
-workspace. Network access is tool-dependent: configured model providers receive
+workspace; redacted shell session transcripts live under
+`~/.kuzushi/v3/sessions/` and expire after 30 days by default. Network access is
+tool-dependent: configured model providers receive
 prompts only when you invoke model-backed tools, while external scanners chosen
 automatically or explicitly may fetch rules or contact services according to
 their own documented behavior. Kuzushi disables Semgrep metrics, but registry-backed
@@ -335,23 +340,25 @@ Piped shell output automatically uses the same strict plain renderer as
 | `/show runs`, `/replay <runId>`, `/trace <runId>`, `/since <git-ref>` | Inspect replayable run artifacts and diff-scoped findings. |
 | `/threats [dfd\|stride\|stories\|scope\|summary\|1..4]`, `/threats edit`, `/threats regen`, `/threats apply`, `/threats reject`, `/threats ask <question>` | Switch threat-model views or request and review a threat-model patch. |
 | `/auth`, `/auth login <provider>`, `/provider`, `/backend`, `/model [choice]`, `/cost`, `/config`, `/permissions` | Show credential status without secrets, select explicit models, and report known cost/config/approval state. |
-| `/history`, `/clear`, `/load <specifier>`, `/pause`, `/resume [runId]`, `/story` | Session utilities and precise replacement messages for unsupported legacy live-control paths. |
+| `/session`, `/history`, `/clear`, `/load <specifier>`, `/pause`, `/resume [runId]`, `/story` | Show durable transcript health plus session utilities and precise replacement messages for unsupported legacy live-control paths. |
 | `/prompts`, `/prompt <verb>`, `/tune`, `/actor <n>`, `/plan <english>` | Prompt, tuning, transcript, and planner surfaces. |
 | `/quit`, `exit`, `/exit` | Exit. |
 
-## Phase-Driven Workflow (組 → 崩 → 作 → 掛)
+## Phase-Driven Workflow (Map → Scan → Review → Prove → Fix)
 
-Launching the shell against a target opens a guided, four-phase engagement —
-named after the judo throw Kuzushi is named for — instead of a flat task list.
-Each phase opens a picker that announces what it is for and pre-checks a
-dependency-correct task set:
+Launching the shell against a target opens a guided five-phase engagement
+instead of a flat task list. `Shift+Tab` moves between the five interaction
+modes without changing the shared draft or the durable reality checkpoint.
+Each phase announces what it is for and constrains planning to its own
+descriptor-backed tools:
 
 | Phase | | Focus |
 | --- | --- | --- |
-| 組 **KUMI-KATA** | map | establish the grip — context, entry points, threat model, CPG/CodeQL, and reverse-engineering for binary/APK targets |
-| 崩 **KUZUSHI** | hunt | break the target's balance — secrets, semgrep, CodeQL, taint, agentic SAST, threat-model-driven and systems hunts |
-| 作 **TSUKURI** | confirm | commit the entry — triage then verify findings |
-| 掛 **KAKE** | fix | finish the throw — patch and report |
+| ◇ **MAP** | map | establish context, scope, entry points, threat models, indexes, CPGs, and CodeQL databases |
+| ▦ **SCAN** | scan | run secrets, Semgrep, CodeQL, taint, agentic SAST, and semantic hunts to create candidate observations |
+| ▣ **REVIEW** | review | triage, classify, dismiss, defer, and persist durable review decisions |
+| ◎ **PROVE** | prove | verify actionable findings and retain empirical evidence with run provenance |
+| ◆ **FIX** | fix | draft, approve, apply, detector-bound re-verify, and report remediation |
 
 - **Target-aware preselection.** The target is classified (source / JVM /
   Android APK / native binary) and each phase pre-checks the relevant tasks —
@@ -363,7 +370,7 @@ dependency-correct task set:
   are detected and reused by default — press `g` on a row to force a rebuild.
 - **Dependency-aware failure.** If a task fails, only the tasks that depended on
   it are skipped; the independent rest of the queue keeps running.
-- **Retry gate.** After 掛 KAKE, a `y`/`n` gate offers to re-run failed tasks
+- **Retry gate.** In Fix, a `y`/`n` gate offers to re-run failed tasks
   with an auto-adjusted parameter when the cause is known (e.g. a joern
   `OutOfMemoryError` → re-run `cpg:build` with a larger `-J-Xmx`; see the
   `heapMb` option), unblocking the dependents that were skipped.
@@ -383,8 +390,8 @@ than a scanner catalog:
 | --- | --- | --- |
 | Recon | `recon:*` | import or collect target evidence |
 | Threat map | `threat-model:*` | map boundaries, flows, and attack surface |
-| Hunt | `sast:scan` | run a target-aware composition of engines |
-| Review | `findings:*` | triage, suppress, defer, or confirm findings |
+| Scan | `sast:scan` | run a target-aware composition of candidate-generating engines |
+| Review | `findings:*` | triage, suppress, defer, or record a terminal review decision |
 | Verify | `verify:finding` | corroborate a selected claim with proof |
 | Fix | `patch:finding` | review remediation and export the result |
 

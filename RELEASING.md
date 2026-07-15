@@ -87,7 +87,14 @@ Before publishing a release that changes the registry surface, check
 compatibility folds intentionally keep old exact tool names runnable while
 removing them from catalog/recommender discovery:
 
-- shell `home`, `/home`, and `/` -> the phase Workbench
+- `operator.keybindings` is an additive, home-scoped config surface. Empty
+  binding lists mean explicit unbind; project-scoped keybinding policy is
+  rejected, and invalid live edits preserve the last valid runtime map.
+
+- shell `home`, `/home`, `/`, and `workbench` -> the selected
+  Map/Scan/Review/Prove/Fix page in the Cockpit Spine, with workspace reality
+  disclosed separately
+- shell `findings` and `open <id>` -> Review; `report` -> the dedicated Report exit
 - shell `modules` -> the contextual Capabilities overlay (`tools` is the raw inventory)
 - `bounty:import-har` -> `recon:import {"tool":"har","path":"..."}`
 - `bounty:import-burp` -> `recon:import {"tool":"burp-xml","path":"..."}`
@@ -104,6 +111,56 @@ removing them from catalog/recommender discovery:
 
 `smoke:next-step` was a hidden runtime smoke-test helper and has no migration
 path.
+
+## Five-phase Cockpit Spine and patch-lifecycle migration (unreleased)
+
+The interactive shell has one canonical route:
+`Target → Setup → Map ↔ Run Focus → Scan ↔ Run Focus → Review → Prove ↔ Run
+Focus → Fix ↔ Run Focus → Report`. The old
+Target → Model → Credentials → Planning wizard, generic whole-screen
+Workbench, and duplicate Activity projections are superseded presentation
+contracts; no production feature flag retains them. The canonical persisted
+and descriptor phases are now `map`, `scan`, `review`, `prove`, and `fix`;
+Report is an exit rather than a sixth phase. For one major release, descriptor,
+query, CLI-autonomy, and config inputs accept deprecated `hunt` as `scan` and
+`confirm` as `prove`, emit a warning, and serialize only the canonical names.
+Config may not provide an old key together with its replacement. Existing run,
+finding, proof, and patch artifacts are projected in place: scan records imply
+Scan, triage records imply Review, verification records imply Prove, and patch
+records imply Fix, with `legacy inferred` shown when no explicit phase attempt
+exists.
+
+The shell's `sast:scan` dispatch is discovery-only (`triage=false`,
+`verify=false`, `autoPatch=false`). Explicit CLI full-pipeline calls remain
+available, but the registry preflights their highest requested phase before
+any scanner side effect. Phase attempts and dispositions are append-only
+reference records under `.kuzushi/v3/workflow/`; canonical run bundles remain
+the payload source of truth and discarding a result never deletes evidence.
+
+Storage v3 additively introduces the `PatchLifecycleRecorded` event plus
+`patch_lifecycle_events` and `patch_lifecycle_current` projections keyed by
+`applicationId`. The event is append-only; projection rebuild/reset replays it
+through the normal v3 projector. Existing event logs remain valid, absent
+lifecycle rows mean “not applied,” and historical `SOUND` `PatchResult` records
+must render as `draft available / not applied`. Do not synthesize application
+receipts or infer apply state while migrating an old workspace.
+
+`patch:reverify` is a new descriptor-backed, headless tool with required
+`applicationId`. It replays only the originating detector and original prepared
+input in the explicit workspace, refuses changed touched-file hashes, and
+never chooses a substitute target, detector, runtime, provider, or model. Only
+deterministic successful absence promotes the patch to `Verified`;
+nondeterministic absence is `NotRediscovered` and unavailable comparison is
+`Inconclusive`.
+
+Finding exports add an optional `remediation` object in JSON/JSONL/Markdown,
+SARIF properties prefixed `kuzushiRemediation`, and these flattened CSV
+columns: `remediation_application_id`, `remediation_patch_run_id`,
+`remediation_application_state`, `remediation_reverify_outcome`,
+`remediation_reverify_run_id`, `remediation_diff_hash`, and
+`remediation_touched_paths`. Consumers must tolerate the additive fields;
+records with no applied lifecycle retain their prior shape/empty CSV values.
+No existing finding or export record is rewritten.
 
 Optional PromptArmor, Shinsa, Trail of Bits, and Vuln Scout packages are no
 longer bundled or auto-discovered from `node_modules`. Configure an adapter

@@ -59,7 +59,26 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
         passes.into_iter().map(|pass| pass.value).collect(),
     )?;
 
-    verify_finding_response(result, cost)
+    bind_verification_result(result, &finding)
+        .and_then(|result| verify_finding_response(result, cost))
+}
+
+fn bind_verification_result(
+    mut result: Value,
+    finding: &crate::findings::Finding,
+) -> Result<Value> {
+    let scan_id = finding
+        .scan_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .context("verify:finding requires a canonical discovery run id")?;
+    let object = result
+        .as_object_mut()
+        .context("normalized verification result must be an object")?;
+    object.insert("verifiedScanId".to_string(), json!(scan_id));
+    object.insert("identityId".to_string(), json!(finding.identity_id.clone()));
+    Ok(result)
 }
 
 fn verify_finding_model(input: &Value, configured_model: Option<&str>) -> Result<String> {
@@ -215,6 +234,8 @@ fn verification_proof_snapshot(result: &Value) -> Result<Value> {
         "proofLevel": required_result_field(result, "proofLevel")?,
         "proofVerdict": required_result_field(result, "proofVerdict")?,
         "confidence": required_result_field(result, "confidence")?,
+        "verifiedScanId": required_result_field(result, "verifiedScanId")?,
+        "identityId": required_result_field(result, "identityId")?,
     }))
 }
 
@@ -264,7 +285,9 @@ mod tests {
                 "exploitable": true,
                 "confidence": 0.7,
                 "proofLevel": 2,
-                "proofVerdict": "not_reproduced"
+                "proofVerdict": "exploited",
+                "verifiedScanId": "scan-1",
+                "identityId": "identity-1"
             }),
             known_cost(0.25),
         )
@@ -274,6 +297,7 @@ mod tests {
         assert_eq!(response["proof"]["empirical"], json!(false));
         assert_eq!(response["data"]["proof"]["fingerprint"], json!("fp-1"));
         assert_eq!(response["data"]["exploitable"], json!(true));
+        assert_eq!(response["proof"]["verifiedScanId"], json!("scan-1"));
         assert_eq!(response["costUsd"], json!(0.25));
         assert!(response["artifacts"].as_array().unwrap().is_empty());
     }
@@ -317,7 +341,9 @@ mod tests {
                 "exploitable": false,
                 "confidence": 0.7,
                 "proofLevel": 2,
-                "proofVerdict": "not_reproduced"
+                "proofVerdict": "not_reproduced",
+                "verifiedScanId": "scan-1",
+                "identityId": null
             }),
             RuntimeCostReport::UNAVAILABLE,
         )
@@ -332,6 +358,18 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("cost unavailable"));
+    }
+
+    #[test]
+    fn verification_binding_captures_the_exact_finding_generation() {
+        let mut finding = crate::findings::Finding::default();
+        finding.scan_id = Some("scan-current".to_string());
+        finding.identity_id = Some("identity-current".to_string());
+
+        let result = bind_verification_result(json!({"fingerprint": "fp"}), &finding).unwrap();
+
+        assert_eq!(result["verifiedScanId"], "scan-current");
+        assert_eq!(result["identityId"], "identity-current");
     }
 
     #[test]

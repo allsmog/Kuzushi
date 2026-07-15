@@ -42,18 +42,34 @@ fn map_hydration_rejects_a_symlinked_state_parent() {
 
     let temp = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
-    std::fs::write(outside.path().join("context-snapshot.json"), "{}").unwrap();
+    std::fs::write(
+        outside.path().join("context-snapshot.json"),
+        serde_json::json!({"filesIndexed": 1}).to_string(),
+    )
+    .unwrap();
     symlink(outside.path(), temp.path().join(".kuzushi")).unwrap();
 
     assert!(!map_state(temp.path()));
 }
 
 #[test]
-fn map_hydration_accepts_a_real_codeql_database_directory() {
+fn map_hydration_accepts_an_indexed_source_context() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(temp.path().join(".kuzushi/codeql-db")).unwrap();
+    let path = kuzushi_core::context_snapshot_path(temp.path());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, serde_json::json!({"filesIndexed": 1}).to_string()).unwrap();
 
     assert!(map_state(temp.path()));
+}
+
+#[test]
+fn map_hydration_rejects_an_evidence_empty_context_artifact() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = kuzushi_core::context_snapshot_path(temp.path());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, serde_json::json!({"filesIndexed": 0}).to_string()).unwrap();
+
+    assert!(!map_state(temp.path()));
 }
 
 #[test]

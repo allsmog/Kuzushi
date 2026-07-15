@@ -42,11 +42,9 @@ mod tests;
 mod theme_picker;
 mod update_available;
 mod workbench_cache;
-mod workbench_nav;
 mod workbench_review_state;
 mod workbench_zoom;
 pub use activity::is_hidden_module_id;
-pub use activity::ActivityDeckPage;
 pub use activity::ActivityRouteState;
 pub use activity::ActivitySession;
 pub use activity::DagTaskDetail;
@@ -57,6 +55,7 @@ pub use activity::PaneFocus;
 pub use activity::RecordedTraceEvent;
 pub use activity::SubsystemAggregate;
 pub use activity::ACTIVITY_FEED_RING_CAPACITY;
+pub use activity::{RunFocusOrigin, RunFocusReceipt, RunFocusSteerEditor};
 pub use auth_screen::{AuthScreenFooter, AuthScreenSnapshot, AuthScreenStatus};
 pub use boot_splash::{BootSplashCheck, BootSplashCheckState, BootSplashSnapshot};
 pub use command_palette::{CommandPaletteFooter, CommandPaletteSnapshot, CommandPaletteStatus};
@@ -91,11 +90,13 @@ pub use rank::PlanChange;
 pub use rank::PlanProposal;
 pub use rank::ThrottleAdvisory;
 pub use rank::TuneAction;
+pub(crate) use routes::ReportOrigin;
 pub use routes::{
     AuthPickerRouteState, AuthRouteState, CatalogRouteState, CommandPaletteRouteState,
     DefaultScrollRouteState, FilePickerRouteState, FindingsRouteState, HelpRouteState,
     ModelCatalogRouteState, ModelPickerRouteState, NavigationRouteState, PlanningPickerRouteState,
-    PromptDocumentMode, PromptDocumentState, RouterState, SceneRouteState, ScrollRouteState,
+    PromptDocumentMode, PromptDocumentState, ReportReceipt, ReportRouteState, RouterState,
+    SceneRouteState, ScrollRouteState, SetupEditor, SetupRouteState, SetupRowId,
     TargetPickerRouteState, ToolsRouteState, WorkbenchRouteState,
 };
 pub use sast_task_row::AuthLoginView;
@@ -109,7 +110,6 @@ pub use sast_task_row::ReconSnapshot;
 pub(crate) use sast_task_row::SastTaskRow;
 pub use sast_task_row::ShellView;
 pub use sast_task_row::ThreatView;
-pub use sast_task_row::WorkbenchCenterMode;
 pub use sast_task_row::WorkbenchPage;
 pub use sast_task_row::WorkbenchPane;
 pub use sast_task_row::WorkbenchPaneScroll;
@@ -125,13 +125,6 @@ pub(crate) use workbench_cache::{
     RunTraceCacheState, StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey,
     WorkbenchCache,
 };
-pub use workbench_nav::BoundedScroll;
-pub use workbench_nav::DrawerTab;
-pub use workbench_nav::FindingPane;
-pub use workbench_nav::NavBounds;
-pub use workbench_nav::NavEffect;
-pub use workbench_nav::WorkbenchDepth;
-pub use workbench_nav::WorkbenchNav;
 #[cfg(test)]
 pub use workbench_review_state::ReviewCommand;
 pub use workbench_review_state::{PendingDecision, ReviewMode, ReviewRow, WorkbenchReviewState};

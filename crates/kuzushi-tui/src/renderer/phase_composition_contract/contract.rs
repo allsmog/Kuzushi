@@ -1,57 +1,54 @@
 use super::*;
 use crate::theme::{ColorDepth, ThemeConfig};
 
-pub(super) const REFERENCE_SHA256: &str =
-    "fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545";
-pub(super) const SIZES: [(u16, u16); 4] = [(60, 20), (80, 24), (120, 36), (160, 40)];
+pub(super) const COCKPIT_SPINE_CONTRACT: &str = "cockpit-spine-v1";
+pub(super) const SIZES: [(u16, u16); 6] =
+    [(40, 12), (60, 20), (80, 24), (96, 89), (120, 36), (160, 48)];
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PhaseCompositionContract {
     pub(super) page: WorkbenchPage,
     pub(super) phase: kuzushi_core::WorkflowPhase,
     pub(super) slug: &'static str,
-    pub(super) sections: &'static [&'static str],
     pub(super) complete_command: &'static str,
     pub(super) compact_command: &'static str,
 }
 
-pub(super) const CONTRACTS: [PhaseCompositionContract; 4] = [
+pub(super) const CONTRACTS: [PhaseCompositionContract; 5] = [
     PhaseCompositionContract {
-        page: WorkbenchPage::Terrain,
+        page: WorkbenchPage::Map,
         phase: kuzushi_core::WorkflowPhase::Map,
         slug: "map",
-        sections: &["MAP · RECON", "RECON", "TELEMETRY"],
-        complete_command: "context:build",
-        compact_command: "context:build",
+        complete_command: "z open terrain",
+        compact_command: "z open terrain",
     },
     PhaseCompositionContract {
-        page: WorkbenchPage::Coverage,
-        phase: kuzushi_core::WorkflowPhase::Hunt,
-        slug: "hunt",
-        sections: &["SOURCE", "HUNT", "REVIEW QUEUE", "FINDINGS HEATMAP"],
-        complete_command: "recommend",
-        compact_command: "findings list",
+        page: WorkbenchPage::Scan,
+        phase: kuzushi_core::WorkflowPhase::Scan,
+        slug: "scan",
+        complete_command: "run sast:scan {}",
+        compact_command: "run sast:scan {}",
     },
     PhaseCompositionContract {
         page: WorkbenchPage::Review,
-        phase: kuzushi_core::WorkflowPhase::Confirm,
-        slug: "confirm",
-        sections: &[
-            "FINDING",
-            "ATTACK PATH",
-            "DATA-FLOW LADDER",
-            "PROOF · REPLAY",
-        ],
+        phase: kuzushi_core::WorkflowPhase::Review,
+        slug: "review",
+        complete_command: "patch F-0001",
+        compact_command: "patch F-0001",
+    },
+    PhaseCompositionContract {
+        page: WorkbenchPage::Prove,
+        phase: kuzushi_core::WorkflowPhase::Prove,
+        slug: "prove",
         complete_command: "verify F-0001",
         compact_command: "verify F-0001",
     },
     PhaseCompositionContract {
-        page: WorkbenchPage::Ship,
+        page: WorkbenchPage::Fix,
         phase: kuzushi_core::WorkflowPhase::Fix,
         slug: "fix",
-        sections: &["BREAKDOWN REPORT", "ATTACK TREE", "DFD", "REMEDIATION"],
-        complete_command: "findings export report.sarif sarif",
-        compact_command: "findings export report.sarif sarif",
+        complete_command: "report",
+        compact_command: "report",
     },
 ];
 
@@ -66,18 +63,16 @@ impl PhaseCompositionContract {
 
     pub(super) const fn plain_truth_atom(self) -> &'static str {
         match self.phase {
-            kuzushi_core::WorkflowPhase::Map => "indexing bounded source roots",
-            kuzushi_core::WorkflowPhase::Hunt => "no hunt proposals",
-            kuzushi_core::WorkflowPhase::Confirm => "replay verify-phase-run",
-            kuzushi_core::WorkflowPhase::Fix => "patch staged for review",
+            kuzushi_core::WorkflowPhase::Map => "context:present",
+            kuzushi_core::WorkflowPhase::Scan => "scan-phase-run",
+            kuzushi_core::WorkflowPhase::Review => "s1",
+            kuzushi_core::WorkflowPhase::Prove => "replay verify-phase-run",
+            kuzushi_core::WorkflowPhase::Fix => "Staged for approval",
         }
     }
 
     pub(super) const fn plain_command_for_width(self, width: u16) -> &'static str {
-        match self.phase {
-            kuzushi_core::WorkflowPhase::Hunt => "recommend",
-            _ => self.command_for_width(width),
-        }
+        self.command_for_width(width)
     }
 }
 

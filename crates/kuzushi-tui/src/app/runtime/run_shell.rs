@@ -1,7 +1,53 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellTargetSource {
+    ShellFlag,
+    GlobalFlag,
+    Caller,
+    None,
+}
+
+impl ShellTargetSource {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::ShellFlag => "shell_flag",
+            Self::GlobalFlag => "global_flag",
+            Self::Caller => "caller",
+            Self::None => "none",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellLaunchContext {
+    pub argv: Vec<String>,
+    pub target_source: ShellTargetSource,
+    pub session_persistence: bool,
+}
+
+impl ShellLaunchContext {
+    pub fn caller(has_target: bool) -> Self {
+        Self {
+            argv: std::env::args().skip(1).collect(),
+            target_source: if has_target {
+                ShellTargetSource::Caller
+            } else {
+                ShellTargetSource::None
+            },
+            session_persistence: true,
+        }
+    }
+}
+
 pub fn run_shell(config: V2Config, target: Option<&WorkspaceTarget>) -> Result<()> {
-    run_shell_with_plain(config, target, false, ModuleRegistry::with_v2_builtins())
+    run_shell_with_context(
+        config,
+        target,
+        false,
+        ModuleRegistry::with_v2_builtins(),
+        ShellLaunchContext::caller(target.is_some()),
+    )
 }
 
 pub fn run_shell_with_plain(
@@ -10,14 +56,73 @@ pub fn run_shell_with_plain(
     force_plain: bool,
     registry: ModuleRegistry,
 ) -> Result<()> {
+    run_shell_with_context(
+        config,
+        target,
+        force_plain,
+        registry,
+        ShellLaunchContext::caller(target.is_some()),
+    )
+}
+
+pub fn run_shell_with_context(
+    config: V2Config,
+    target: Option<&WorkspaceTarget>,
+    force_plain: bool,
+    registry: ModuleRegistry,
+    launch: ShellLaunchContext,
+) -> Result<()> {
     let mut stdin = io::stdin();
     let stdin_is_terminal = stdin.is_terminal();
     let stdout_is_terminal = io::stdout().is_terminal();
-    if should_run_plain_shell(force_plain, stdin_is_terminal, stdout_is_terminal) {
-        return run_plain_shell(config, target, &mut stdin, stdin_is_terminal, registry);
+    let plain = should_run_plain_shell(force_plain, stdin_is_terminal, stdout_is_terminal);
+    let shell_mode = shell_mode_label(plain, stdin_is_terminal);
+    let (transcript, transcript_warning) =
+        prepare_session_transcript(&config, target, &launch, shell_mode);
+    if plain {
+        return run_plain_shell(
+            config,
+            target,
+            &mut stdin,
+            stdin_is_terminal,
+            registry,
+            transcript,
+            transcript_warning,
+        );
     }
 
-    run_terminal_shell(config, target, registry)
+    run_terminal_shell(config, target, registry, transcript, transcript_warning)
+}
+
+pub(crate) fn shell_mode_label(plain: bool, stdin_is_terminal: bool) -> &'static str {
+    match (plain, stdin_is_terminal) {
+        (false, _) => "interactive",
+        (true, false) => "scripted",
+        (true, true) => "plain",
+    }
+}
+
+fn prepare_session_transcript(
+    config: &V2Config,
+    target: Option<&WorkspaceTarget>,
+    launch: &ShellLaunchContext,
+    shell_mode: &str,
+) -> (
+    Option<kuzushi_core::session_transcript::SessionRecorder>,
+    Option<String>,
+) {
+    if !launch.session_persistence {
+        return (None, None);
+    }
+    match start_session_transcript(config, target, launch, shell_mode) {
+        Ok(recorder) => (Some(recorder), None),
+        Err(error) => (
+            None,
+            Some(format!(
+                "durable transcript could not start: {error}; Kuzushi will continue"
+            )),
+        ),
+    }
 }
 
 pub(crate) fn should_run_plain_shell(
@@ -52,14 +157,26 @@ pub(crate) fn run_terminal_shell(
     config: V2Config,
     target: Option<&WorkspaceTarget>,
     registry: ModuleRegistry,
+    transcript: Option<kuzushi_core::session_transcript::SessionRecorder>,
+    transcript_warning: Option<String>,
 ) -> Result<()> {
-    let mut app = ShellApp::with_registry(config, target, registry);
+    let mut app = ShellApp::with_registry_and_transcript(config, target, registry, transcript);
+    if let Some(warning) = transcript_warning {
+        app.surface_session_start_warning(warning);
+    }
     if let Ok((columns, rows)) = crossterm::terminal::size() {
         apply_initial_terminal_size(&mut app, columns, rows);
     }
     apply_launch_onboarding(&mut app);
-    let mut terminal = TerminalSession::setup()?;
-    terminal_shell_loop(terminal.terminal_mut(), &mut app)
+    let result = TerminalSession::setup()
+        .and_then(|mut terminal| terminal_shell_loop(terminal.terminal_mut(), &mut app));
+    let reason = if result.is_ok() {
+        "completed"
+    } else {
+        "failed"
+    };
+    app.finish_session_transcript(reason);
+    result
 }
 
 pub(crate) fn apply_initial_terminal_size(app: &mut ShellApp, columns: u16, rows: u16) -> bool {
@@ -100,10 +217,7 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     // would be clobbered the moment the terminal shell loop boots.
     if matches!(
         app.shell_view(),
-        ShellView::ModelPicker
-            | ShellView::AuthMethodPicker
-            | ShellView::PlanningPicker
-            | ShellView::TargetPicker
+        ShellView::PlanningPicker | ShellView::TargetPicker | ShellView::Setup
     ) {
         return;
     }
@@ -112,11 +226,9 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     // onboarding/target/model pickers above still take precedence — nothing
     // here clobbers a first-run gate.
     app.set_shell_view(ShellView::Workbench);
-    let center_mode = app.default_workbench_center_mode(WorkbenchPane::Findings);
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);
-    app.router.workbench_mut().set_center_mode(center_mode);
 }
 
 pub(crate) fn terminal_shell_loop(
@@ -140,11 +252,15 @@ pub(crate) fn terminal_shell_loop(
 #[derive(Debug)]
 pub(crate) struct TerminalLoopState {
     pub(crate) needs_redraw: bool,
+    pub(crate) last_title: Option<String>,
 }
 
 impl Default for TerminalLoopState {
     fn default() -> Self {
-        Self { needs_redraw: true }
+        Self {
+            needs_redraw: true,
+            last_title: None,
+        }
     }
 }
 

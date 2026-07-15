@@ -17,6 +17,8 @@ help - show grouped shell help
   aliases / examples: /help, /h, h, ?
 workbench - open the split-pane command center
   aliases / examples: /workbench
+report - export the engagement report with a durable receipt
+  aliases / examples: /report
 aim [focus] - seed the engagement harness from the Workbench AIM page
   aliases / examples: aim, /aim, aim sqli, aim idor
 modules - open phase-native capabilities (Expert engines with e)
@@ -37,8 +39,8 @@ back - return to the previous view
   aliases / examples: /back, /b, b
 quickstart - first-run guided setup
   aliases / examples: /quickstart
-onboarding - open the planning-stage multi-select picker
-  aliases / examples: /onboarding, /planning
+setup - review target, Map plan, model/credentials, prompt, and budget readiness
+  aliases / examples: /setup, onboarding, /onboarding, /planning
 next - continue the engagement (alias: continue) — open the current phase's picker
   aliases / examples: /next
 phase <map|hunt|confirm|fix> - open a specific engagement phase picker

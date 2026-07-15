@@ -60,7 +60,7 @@ impl ShellApp {
         self.log(
             "autonomy",
             format!(
-                "posture {} {} (authorizes up to {}; cap {}) — Ctrl+Up/Down or `autonomy <recon|hunt|confirm|fix>`",
+                "posture {} {} (authorizes up to {}; cap {}) — Ctrl+Up/Down or `autonomy <recon|scan|review|prove|fix>`",
                 posture.kanji(),
                 posture.label(),
                 posture.ceiling().word(),
@@ -112,7 +112,7 @@ mod tests {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_autonomy(AutonomyPosture::ReconOnly);
         app.raise_autonomy();
-        assert_eq!(app.autonomy(), AutonomyPosture::Hunt);
+        assert_eq!(app.autonomy(), AutonomyPosture::Scan);
         assert_eq!(
             app.advisory()
                 .notice
@@ -130,24 +130,24 @@ mod tests {
     #[test]
     fn stop_after_caps_the_dial() {
         let mut config = V2Config::default();
-        config.phases.stop_after = Some(GuidedPhase::Hunt);
+        config.phases.stop_after = Some(GuidedPhase::Scan);
         let mut app = ShellApp::new(config, None);
         // Requesting Fix is clamped to the project cap.
         let applied = app.set_autonomy(AutonomyPosture::Fix);
-        assert_eq!(applied, AutonomyPosture::Hunt);
-        assert_eq!(app.autonomy(), AutonomyPosture::Hunt);
+        assert_eq!(applied, AutonomyPosture::Scan);
+        assert_eq!(app.autonomy(), AutonomyPosture::Scan);
         // Raising cannot exceed the cap either.
         app.raise_autonomy();
-        assert_eq!(app.autonomy(), AutonomyPosture::Hunt);
+        assert_eq!(app.autonomy(), AutonomyPosture::Scan);
     }
 
     #[test]
     fn verb_sets_and_reads_without_panicking() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.reduce_autonomy_command(Some(AutonomyPosture::Confirm));
-        assert_eq!(app.autonomy(), AutonomyPosture::Confirm);
+        app.reduce_autonomy_command(Some(AutonomyPosture::Prove));
+        assert_eq!(app.autonomy(), AutonomyPosture::Prove);
         // Reading (None) leaves the posture unchanged.
         app.reduce_autonomy_command(None);
-        assert_eq!(app.autonomy(), AutonomyPosture::Confirm);
+        assert_eq!(app.autonomy(), AutonomyPosture::Prove);
     }
 }

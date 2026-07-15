@@ -527,6 +527,7 @@ mod tests {
             PersistedSandboxBackend::Bwrap,
             PersistedSandboxBackend::Podman,
             PersistedSandboxBackend::Plain,
+            PersistedSandboxBackend::Model,
         ] {
             assert_eq!(PersistedSandboxBackend::from_str(b.as_str()), Some(b));
         }

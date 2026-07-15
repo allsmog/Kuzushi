@@ -1,26 +1,26 @@
 ---
-source: Kuzushi TUI.pdf
-sha256: fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545
+source: Kuzushi Cockpit Spine
+contract: cockpit-spine-v1
 phase: map
 size: 60x20
 ---
-KUZUSHI · target ./phase-target · view map · ● LIVE
- 組  map ✓ · 崩  hunt ✓ · 作  confirm ● · 掛  fix ·
- ▸ NEXT triage & verify
-│▸ MAP · RECON
-│ ● LIVE run …hase-run · 42s · context:build
-│ ── RECON ────────────────────────────────────────────────
-│ … 7 earlier trace rows
-│   8  context:build  recording edge trust boundary ·...
-│   9  context:build  recording data trust boundary ·...
-│  10  context:build  3 entrypoints · 2 trust zones ·...
-│ ── TELEMETRY ────────────────────────────────────────────
-│coverage  ██████████████░░░░░░░░░░░░░░  1 / 2 tasks
-│budget    █████░░░░░░░░░░░░░░░░░░░░░░░  $0.37 / $2.00
-│tasks · active 1 · canceling 0 · failed 0 · blocked 0
-│artifacts · files 3 · dfd 3n/2f · findings 6 · chains 1
-mode:run · workbench            6 findings · 1 C · 2 H · 2 M
+KUZUSHI · VIEW MAP · REALITY REVIEW · target ./phase-target
+ 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
+ ▸ NEXT record terminal dispositions for 6 of 6 remaining
+        candidates
+│▸ PROJECT CONTEXT
+│./phase-target · rev:unknown
+│context:present · ⠋ context:build indexing repository...
+│○ scope tree    no persisted nested scopes yet; run...
+│◆ context feed  ./.kuzushi/context-snapshot.json · ⠋...
+│◆ inventory     indexed=3 total=3 files · languages...
+│◆ threat model  current threat model loaded;...
+│◆ data flow     3 nodes · 2 flows · zones external...
+│◆ review surface6 items · 0 triaged · 6 pending
+│
+│
+route:run · workbench           6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt
-NAVIGATION MODE — view keys active · Esc returns to prompt
+◇ MAP › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc promp

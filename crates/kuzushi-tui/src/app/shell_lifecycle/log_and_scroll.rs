@@ -4,8 +4,7 @@ impl ShellApp {
     pub fn scroll_up(&mut self, amount: u16) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.scroll_active_activity_pane(-(amount as isize)),
-            ScrollTarget::WorkbenchPane => {
-                let focus = self.router.workbench().focus();
+            ScrollTarget::WorkbenchPane(focus) => {
                 self.router
                     .workbench_mut()
                     .scroll_mut()
@@ -19,8 +18,7 @@ impl ShellApp {
     pub fn scroll_down(&mut self, amount: u16) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.scroll_active_activity_pane(amount as isize),
-            ScrollTarget::WorkbenchPane => {
-                let focus = self.router.workbench().focus();
+            ScrollTarget::WorkbenchPane(focus) => {
                 self.router
                     .workbench_mut()
                     .scroll_mut()
@@ -38,8 +36,7 @@ impl ShellApp {
                     focused_pane_to_top(session, self.router.activity_mut());
                 }
             }
-            ScrollTarget::WorkbenchPane => {
-                let focus = self.router.workbench().focus();
+            ScrollTarget::WorkbenchPane(focus) => {
                 self.router.workbench_mut().scroll_mut().set(focus, 0);
             }
             ScrollTarget::Logs => self.router.logs_mut().open(),
@@ -50,8 +47,7 @@ impl ShellApp {
     pub fn scroll_to_bottom(&mut self) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.focused_activity_pane_to_bottom(),
-            ScrollTarget::WorkbenchPane => {
-                let focus = self.router.workbench().focus();
+            ScrollTarget::WorkbenchPane(focus) => {
                 self.router
                     .workbench_mut()
                     .scroll_mut()
@@ -67,7 +63,6 @@ impl ShellApp {
     /// by manually scrolling the feed pane: once the operator scrolls up
     /// from the bottom, auto-tail is paused for that session.
     fn scroll_active_activity_pane(&mut self, amount: isize) {
-        let deck_cursor_max = self.activity_deck_cursor_max();
         let Some(session) = self.domain.activity() else {
             return;
         };
@@ -76,13 +71,12 @@ impl ShellApp {
             PaneFocus::Left => route.shift_task_cursor(session, amount),
             PaneFocus::Right => {
                 route.feed_auto_tail = false;
-                route.deck_cursor = shift_clamped(route.deck_cursor, amount, deck_cursor_max);
+                route.feed_scroll = shift_feed_from_tail(route.feed_scroll, amount);
             }
         }
     }
 
     fn focused_activity_pane_to_bottom(&mut self) {
-        let deck_cursor_max = self.activity_deck_cursor_max();
         let Some(session) = self.domain.activity() else {
             return;
         };
@@ -90,62 +84,33 @@ impl ShellApp {
         match route.effective_pane_focus(session) {
             PaneFocus::Left => route.move_task_cursor_to_bottom(session),
             PaneFocus::Right => {
-                route.deck_cursor = deck_cursor_max;
-                route.feed_auto_tail = false;
+                route.feed_scroll = 0;
+                route.feed_auto_tail = true;
             }
-        }
-    }
-
-    fn activity_deck_cursor_max(&self) -> usize {
-        if self.activity().is_none() {
-            return 0;
-        };
-        match self.router.activity().deck_page {
-            ActivityDeckPage::Findings => self.findings().len().saturating_sub(1),
-            ActivityDeckPage::AttackSurface => crate::ui_view_models::cached_risk_by_module(self)
-                .modules
-                .len()
-                .saturating_sub(1),
-            ActivityDeckPage::Dfd => threat_dfd_selectable_count(self).saturating_sub(1),
-            ActivityDeckPage::Heatmap => crate::ui_view_models::cached_risk_by_module(self)
-                .modules
-                .len()
-                .min(10)
-                .saturating_sub(1),
-            ActivityDeckPage::AttackPath => self
-                .domain()
-                .taint_flow()
-                .map(|flow| flow.stages.len().min(6))
-                .unwrap_or_default()
-                .saturating_sub(1),
-            ActivityDeckPage::ExploitChain => self
-                .domain()
-                .exploit_chains()
-                .len()
-                .min(3)
-                .saturating_sub(1),
-            ActivityDeckPage::Recon => self
-                .domain()
-                .recon_snapshot()
-                .map(|snapshot| {
-                    crate::ui_view_models::recon_snapshot_activity_model(snapshot, usize::MAX)
-                        .rows
-                        .len()
-                })
-                .unwrap_or_default()
-                .saturating_sub(1),
         }
     }
 
     fn scroll_target(&self) -> ScrollTarget {
         match self.shell_view() {
             ShellView::Activity => ScrollTarget::Activity,
-            ShellView::Workbench if self.router.workbench().focus() != WorkbenchPane::Findings => {
-                ScrollTarget::WorkbenchPane
-            }
+            ShellView::Workbench => self
+                .scrollable_workbench_slot()
+                .map(ScrollTarget::WorkbenchPane)
+                .unwrap_or(ScrollTarget::Default),
             ShellView::Logs => ScrollTarget::Logs,
             _ => ScrollTarget::Default,
         }
+    }
+
+    fn scrollable_workbench_slot(&self) -> Option<WorkbenchPane> {
+        let viewport = self.viewport();
+        let plan = crate::renderer::workbench_phase_plan_for_app(
+            self,
+            ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
+        )?;
+        let surface = plan.surface(plan.effective_focus)?;
+        (surface.interaction == crate::ui_view_models::SurfaceInteraction::Scrollable)
+            .then_some(surface.legacy_slot)
     }
 
     pub(crate) fn sync_view_change(&mut self) -> bool {
@@ -165,7 +130,7 @@ impl ShellApp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScrollTarget {
     Activity,
-    WorkbenchPane,
+    WorkbenchPane(WorkbenchPane),
     Logs,
     Default,
 }
@@ -173,59 +138,35 @@ enum ScrollTarget {
 fn focused_pane_to_top(session: &ActivitySession, route: &mut ActivityRouteState) {
     match route.effective_pane_focus(session) {
         PaneFocus::Left => route.move_task_cursor_to_top(session),
-        PaneFocus::Right => route.deck_cursor = 0,
+        PaneFocus::Right => {
+            route.feed_scroll = usize::MAX;
+            route.feed_auto_tail = false;
+        }
     }
 }
 
-fn threat_dfd_selectable_count(app: &ShellApp) -> usize {
-    let Some(doc) = crate::ui_view_models::threat_model_doc(app) else {
-        return 0;
-    };
-    let flows = json_array_len(doc.pointer("/dfd/flows"));
-    if flows > 0 {
-        return flows;
-    }
-    json_array_len(doc.pointer("/dfd/nodes"))
-}
-
-fn json_array_len(value: Option<&serde_json::Value>) -> usize {
-    value
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::len)
-        .unwrap_or_default()
-}
-
-/// Apply a signed scroll delta and clamp the result to `[0, max]`, so a pane
-/// can't be scrolled past its content into empty space.
-fn shift_clamped(current: usize, amount: isize, max: usize) -> usize {
-    let next = if amount.is_negative() {
-        current.saturating_sub(amount.unsigned_abs())
+/// Run Focus stores output scroll as distance above the live tail. This keeps
+/// input handling independent of the renderer's current viewport height.
+fn shift_feed_from_tail(current: usize, amount: isize) -> usize {
+    if amount.is_negative() {
+        current.saturating_add(amount.unsigned_abs())
     } else {
-        current.saturating_add(amount as usize)
-    };
-    next.min(max)
+        current.saturating_sub(amount as usize)
+    }
 }
 
 #[cfg(test)]
-mod shift_clamped_tests {
-    use super::shift_clamped;
+mod feed_scroll_tests {
+    use super::shift_feed_from_tail;
 
     #[test]
-    fn cannot_scroll_past_content() {
-        // Short content (max index 1): scrolling down hard stays clamped.
-        assert_eq!(shift_clamped(0, 5, 1), 1);
-        assert_eq!(shift_clamped(1, 3, 1), 1);
+    fn up_moves_away_from_the_tail_and_down_returns() {
+        assert_eq!(shift_feed_from_tail(0, -5), 5);
+        assert_eq!(shift_feed_from_tail(5, 3), 2);
     }
 
     #[test]
-    fn empty_content_never_scrolls() {
-        assert_eq!(shift_clamped(0, 9, 0), 0);
-    }
-
-    #[test]
-    fn scrolls_up_and_down_within_bounds() {
-        assert_eq!(shift_clamped(3, 2, 10), 5);
-        assert_eq!(shift_clamped(5, -2, 10), 3);
-        assert_eq!(shift_clamped(1, -9, 10), 0);
+    fn down_never_moves_below_the_live_tail() {
+        assert_eq!(shift_feed_from_tail(1, 9), 0);
     }
 }

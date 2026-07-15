@@ -1,4 +1,34 @@
 use super::*;
+
+#[test]
+fn transient_policy_verification_is_retried_once() {
+    let mut attempts = 0;
+    let result = retry_policy_verification(|| {
+        attempts += 1;
+        if attempts == 1 {
+            anyhow::bail!("inputs changed")
+        }
+        Ok("stable")
+    })
+    .unwrap();
+
+    assert_eq!(result, "stable");
+    assert_eq!(attempts, 2);
+}
+
+#[test]
+fn repeated_policy_verification_failure_remains_an_error() {
+    let mut attempts = 0;
+    let error = retry_policy_verification::<()>(|| {
+        attempts += 1;
+        anyhow::bail!("still changing")
+    })
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(attempts, 2);
+    assert!(error.contains("first attempt"), "{error}");
+}
 use std::process::{Command, Output};
 
 #[test]

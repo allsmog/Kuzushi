@@ -354,6 +354,16 @@ export const PatchResultSchema = z.object({
       output: z.string(),
     }),
   ),
+  provenance: z
+    .object({
+      sourceCommit: z.string(),
+      target: z.string(),
+      originatingRunId: z.string().optional(),
+      detectorTool: z.string().optional(),
+      detectorRunId: z.string().optional(),
+      detectorInputDigest: z.string().optional(),
+    })
+    .optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });

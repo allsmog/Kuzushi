@@ -35,6 +35,15 @@ fn primary_shell_view_lines(
         ),
         ShellView::ModuleRun => module_run_lines(app, area),
         ShellView::Workbench => workbench_lines(app, area),
+        ShellView::Setup => match app.router.setup().editor() {
+            Some(crate::app::SetupEditor::Model) => model_picker_lines(app, area),
+            Some(crate::app::SetupEditor::Credentials) => {
+                auth_method_picker_lines(app, area, app.router.auth_picker().provider())
+            }
+            Some(crate::app::SetupEditor::Plan) => planning_picker_lines(app, area),
+            _ => setup_lines(app, area),
+        },
+        ShellView::Report => report_lines(app, area),
         ShellView::Pwn => viewport_lines(
             pwn_lines(app, area),
             area.height,
@@ -167,10 +176,6 @@ fn system_picker_shell_view_lines(
 ) -> Option<Vec<Line<'static>>> {
     Some(match view {
         ShellView::CommandPalette => command_palette_lines(app, area),
-        ShellView::ModelPicker => model_picker_lines(app, area),
-        ShellView::AuthMethodPicker => {
-            auth_method_picker_lines(app, area, app.router.auth_picker().provider())
-        }
         ShellView::TargetPicker => target_picker_lines(app, area),
         ShellView::PlanningPicker => planning_picker_lines(app, area),
         ShellView::FilePicker => file_picker_lines(app, area),

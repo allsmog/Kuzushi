@@ -151,7 +151,7 @@ fn persist_shinsa_findings(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<GenericPersistedRun>> {
     persist_tool_findings(
-        "shinsa",
+        ctx.finding_run_id(),
         &run.target,
         findings,
         ctx.workspace,

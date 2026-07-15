@@ -7,8 +7,9 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::Path;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct ChromeRcePersistence<'a> {
+    pub(crate) finding_run_id: String,
     pub(crate) workspace: Option<&'a WorkspaceTarget>,
     pub(crate) findings_store: Option<&'a FindingStore>,
 }
@@ -42,7 +43,7 @@ fn persist_chrome_rce_findings(
     persistence: ChromeRcePersistence<'_>,
 ) -> Result<Option<crate::findings::GenericPersistedRun>> {
     persist_tool_findings(
-        "chrome-rce",
+        persistence.finding_run_id,
         target,
         findings,
         persistence.workspace,

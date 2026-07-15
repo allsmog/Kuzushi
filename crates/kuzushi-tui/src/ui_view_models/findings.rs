@@ -15,7 +15,7 @@ use kuzushi_core::{
     Finding, FindingListFilter, FindingNextAction, FindingProjection, PersistedProofVerdict,
     ProofConfidence, RunSummary, RunTargetGitMetadata, StaticProofState, TriageVerdict,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -87,6 +87,7 @@ pub(crate) struct FindingListRow {
     pub(crate) decision: String,
     pub(crate) decision_conflict: Option<String>,
     pub(crate) proof_label: String,
+    pub(crate) proof_meter: String,
     pub(crate) proof_marker: &'static str,
     pub(crate) proof_tier: ProofTier,
     pub(crate) proof_confidence: ProofConfidence,
@@ -110,6 +111,7 @@ pub(crate) struct FindingDetailModel {
     pub(crate) tool: String,
     pub(crate) source_signature: String,
     pub(crate) corroboration: String,
+    pub(crate) source_count: usize,
     pub(crate) fingerprint: String,
     pub(crate) run_label: String,
     pub(crate) run_status: String,
@@ -119,6 +121,7 @@ pub(crate) struct FindingDetailModel {
     pub(crate) run_kuzushi_version: String,
     pub(crate) revision_label: String,
     pub(crate) proof_label: String,
+    pub(crate) proof_meter: String,
     pub(crate) proof_marker: &'static str,
     pub(crate) proof_tier: ProofTier,
     pub(crate) proof_confidence: ProofConfidence,
@@ -503,7 +506,7 @@ fn cached_alias_for_fingerprint(app: &ShellApp, fingerprint: &str) -> Option<Str
 
 /// The canonical absolute target path, used to relativize finding locations so
 /// the list shows `crates/foo.rs:12` instead of a full `/Users/...` path. Shared
-/// with the Workbench SOURCE tree so both surfaces relativize identically.
+/// with the Map and Review projections so every surface relativizes identically.
 pub(crate) fn target_base(app: &ShellApp) -> Option<String> {
     match app
         .workbench_cache()
@@ -748,7 +751,7 @@ fn filtered_empty_state(app: &ShellApp) -> Option<FilteredFindingsEmptyState> {
 fn context_empty_state(context_state: &'static str) -> FindingsEmptyState {
     let (hint, context_cta) = match context_state {
         "present" => (
-            "opens the guided hunt workflow for the active target.",
+            "opens the guided Scan workflow for the active target.",
             None,
         ),
         "malformed" => (
@@ -857,6 +860,7 @@ impl FindingListRow {
             decision: effective_review_decision_label(finding, decision),
             decision_conflict: effective_review_decision_conflict_label(finding, decision),
             proof_label: proof.label,
+            proof_meter: finding_proof_meter(finding),
             proof_marker: proof.marker,
             proof_tier: proof.tier,
             proof_confidence: ProofConfidence::classify(finding),
@@ -886,6 +890,25 @@ fn finding_proof_badge(finding: &Finding) -> ProofBadge {
     runtime_proof_label(finding)
         .or_else(|| static_proof_label(finding))
         .unwrap_or_else(|| proof_badge("unverified", ProofTier::Suspected))
+}
+
+pub(crate) fn finding_proof_meter(finding: &Finding) -> String {
+    match finding_proof_badge(finding).tier {
+        ProofTier::RuntimeVerified => "[●●●]".to_string(),
+        ProofTier::StaticLinked => "[●●○]".to_string(),
+        ProofTier::Suspected => "[●○○]".to_string(),
+        ProofTier::Rejected => "[×××]".to_string(),
+    }
+}
+
+pub(crate) fn finding_unique_source_count(finding: &Finding) -> usize {
+    let unique = finding
+        .sources
+        .iter()
+        .map(|source| (&source.tool, &source.source_signature))
+        .collect::<BTreeSet<_>>()
+        .len();
+    unique.max(finding.corroboration_count as usize)
 }
 
 fn runtime_proof_label(finding: &Finding) -> Option<ProofBadge> {
@@ -1096,7 +1119,21 @@ impl FindingDetailModel {
         base: Option<&str>,
         provenance: FindingRunProvenance,
     ) -> Self {
-        let mut detail = Self {
+        let mut detail = Self::from_projection(finding, projection, base);
+        detail.apply_proof_fields(finding, proof);
+        detail.apply_provenance_fields(provenance);
+        detail.apply_status_fields(status);
+        detail.apply_body_fields(body);
+        detail
+    }
+
+    fn from_projection(
+        finding: &Finding,
+        projection: FindingProjection,
+        base: Option<&str>,
+    ) -> Self {
+        let confidence = ProofConfidence::classify(finding);
+        Self {
             alias: projection.alias,
             identity_label: finding_identity_label(finding),
             severity_tone: SeverityTone::from_severity(projection.severity),
@@ -1107,26 +1144,31 @@ impl FindingDetailModel {
             tool: projection.tool,
             source_signature: source_signature_label(finding),
             corroboration: corroboration_label(finding),
+            source_count: finding_unique_source_count(finding),
             fingerprint: projection.fingerprint,
-            run_label: provenance.run_label,
-            run_status: provenance.status_label,
-            run_tool: provenance.tool_label,
-            run_model: provenance.model_label,
-            run_runtime: provenance.runtime_label,
-            run_kuzushi_version: provenance.kuzushi_version_label,
-            revision_label: provenance.revision_label,
-            proof_label: proof.label,
-            proof_marker: proof.marker,
-            proof_tier: proof.tier,
-            proof_confidence: ProofConfidence::classify(finding),
-            proof_confidence_label: ProofConfidence::classify(finding).label().to_string(),
+            proof_confidence: confidence,
+            proof_confidence_label: confidence.label().to_string(),
             proof_state: projection.proof_state,
             runtime_verification: projection.runtime_validation,
             ..Self::default()
-        };
-        detail.apply_status_fields(status);
-        detail.apply_body_fields(body);
-        detail
+        }
+    }
+
+    fn apply_provenance_fields(&mut self, provenance: FindingRunProvenance) {
+        self.run_label = provenance.run_label;
+        self.run_status = provenance.status_label;
+        self.run_tool = provenance.tool_label;
+        self.run_model = provenance.model_label;
+        self.run_runtime = provenance.runtime_label;
+        self.run_kuzushi_version = provenance.kuzushi_version_label;
+        self.revision_label = provenance.revision_label;
+    }
+
+    fn apply_proof_fields(&mut self, finding: &Finding, proof: ProofBadge) {
+        self.proof_label = proof.label;
+        self.proof_meter = finding_proof_meter(finding);
+        self.proof_marker = proof.marker;
+        self.proof_tier = proof.tier;
     }
 
     fn apply_status_fields(&mut self, status: DetailStatusFields) {

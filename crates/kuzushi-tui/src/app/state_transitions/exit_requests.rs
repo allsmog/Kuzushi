@@ -46,6 +46,7 @@ impl ShellApp {
             // "stop". Drop the queue on the same stage that cancels jobs and
             // tell the operator exactly what was dropped.
             self.drop_queued_steer_items_for_abort();
+            self.flush_session_transcript();
         }
         requested
     }

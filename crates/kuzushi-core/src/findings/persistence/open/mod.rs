@@ -9,6 +9,7 @@ mod finding_lookup;
 mod finding_sources;
 mod finding_writes;
 mod patch_results;
+mod patch_lifecycle;
 mod rescan_reconciliation;
 mod review_decisions;
 mod run_lifecycle;

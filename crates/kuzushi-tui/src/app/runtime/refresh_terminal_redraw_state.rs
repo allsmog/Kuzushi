@@ -8,10 +8,29 @@ pub(crate) fn refresh_terminal_redraw_state(
 ) -> Result<bool> {
     let background = apply_runtime_messages_and_sync_view(app, Instant::now(), watcher);
     state.needs_redraw |= background.changed;
+    sync_terminal_title(terminal, app, state)?;
     state.needs_redraw |= clear_terminal_after_external_output(terminal, app)?;
     state.needs_redraw |= app.schedule_active_view_hydration();
     state.needs_redraw = draw_terminal_if_needed(terminal, app, state.needs_redraw)?;
     Ok(background.work_tail_may_remain)
+}
+
+fn sync_terminal_title(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &ShellApp,
+    state: &mut TerminalLoopState,
+) -> Result<()> {
+    let title = crate::ui_view_models::terminal_title(app);
+    if state.last_title.as_deref() == Some(&title) {
+        return Ok(());
+    }
+    execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::SetTitle(&title)
+    )
+    .context("Could not update terminal title")?;
+    state.last_title = Some(title);
+    Ok(())
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -113,9 +132,29 @@ pub(crate) fn run_plain_shell(
     stdin: &mut io::Stdin,
     stdin_is_terminal: bool,
     registry: ModuleRegistry,
+    transcript: Option<kuzushi_core::session_transcript::SessionRecorder>,
+    transcript_warning: Option<String>,
 ) -> Result<()> {
-    let mut app = ShellApp::with_registry(config, target, registry);
+    let mut app = ShellApp::with_registry_and_transcript(config, target, registry, transcript);
+    if let Some(warning) = transcript_warning {
+        app.surface_session_start_warning(warning);
+    }
     apply_launch_start_view(&mut app);
+    let result = run_plain_shell_session(&mut app, stdin, stdin_is_terminal);
+    let reason = if result.is_ok() {
+        "completed"
+    } else {
+        "failed"
+    };
+    app.finish_session_transcript(reason);
+    result
+}
+
+fn run_plain_shell_session(
+    app: &mut ShellApp,
+    stdin: &mut io::Stdin,
+    stdin_is_terminal: bool,
+) -> Result<()> {
     let mut script = String::new();
     if !stdin_is_terminal {
         stdin
@@ -130,11 +169,11 @@ pub(crate) fn run_plain_shell(
         .collect::<Vec<_>>();
 
     if commands.is_empty() {
-        print!("{}", plain_launch_summary(&app));
+        print!("{}", plain_launch_summary(app));
         return Ok(());
     }
 
-    let report = execute_plain_scripted_session(&mut app, &commands, 80);
+    let report = execute_plain_scripted_session(app, &commands, 80);
     print!("{}", report.output);
     if report.failed {
         anyhow::bail!("plain scripted session failed; see the result above");

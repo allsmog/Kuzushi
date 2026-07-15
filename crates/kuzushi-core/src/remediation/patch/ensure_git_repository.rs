@@ -89,7 +89,10 @@ fn clean_patch_source_commit(repo_root: &Path, control: PatchCommandControl<'_>)
     Ok(after)
 }
 
-fn resolve_head_commit(repo_root: &Path, control: PatchCommandControl<'_>) -> Result<String> {
+pub(crate) fn resolve_head_commit(
+    repo_root: &Path,
+    control: PatchCommandControl<'_>,
+) -> Result<String> {
     let output = control
         .run_git(
             repo_root,

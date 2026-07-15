@@ -80,7 +80,7 @@ pub(crate) fn sast_module() -> BuiltinModule {
         "Full SAST pipeline: context, scanners, AI triage, verification, patch, and report.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::InputAware,
                 FindingStoreRequirement::Required,
             ),
@@ -487,7 +487,7 @@ pub(crate) fn agentic_sast_module() -> BuiltinModule {
         "LLM-driven detectors that reason about data flow and intent rather than pattern-match.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Required,
             ),

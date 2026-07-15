@@ -12,7 +12,10 @@ pub mod world;
 pub mod steps {
     pub mod artifacts;
     pub mod background;
+    pub mod cockpit_resize;
+    pub mod operator_questions;
     pub mod ui;
+    pub mod workbench_modes;
 }
 
 pub use world::OnboardingWorld;

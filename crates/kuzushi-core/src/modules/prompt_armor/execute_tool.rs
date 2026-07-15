@@ -129,47 +129,81 @@ fn authorized_runtime_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    required_runtime(tool_name, runtime).and_then(|runtime| {
-        runtime_inputs(tool_name, command, input, ctx).and_then(|inputs| {
-            if let Some(trace) = ctx.trace {
-                let _ = trace
-                    .step("tool", command, format!("{tool_name} start"))
-                    .emit();
-            }
-            let model = resolve_tool_model(&inputs.tool_name, &inputs.input, ctx)?;
-            let _runtime_scope = ctx.trace.map(|trace| {
-                let phase = trace
-                    .step("reasoning", command, "seed-gen · attack-loop · judge")
-                    .emit();
-                trace.parent_scope(phase)
-            });
-            let result = prompt_armor_capability::run_runtime_tool(
-                prompt_armor_capability::PromptArmorRuntimeInput {
-                    tool_name: &inputs.tool_name,
-                    command: &inputs.command,
-                    input: &inputs.input,
-                    target: &inputs.target,
-                    plugin_root: &inputs.plugin_root,
-                    model,
-                    runtime,
-                    workspace: ctx.workspace,
-                    findings_store: ctx.findings_store,
-                },
-            )?;
-            drop(_runtime_scope);
-            if let Some(trace) = ctx.trace {
-                let count = prompt_armor_finding_count(&result);
-                let _ = trace
-                    .step(
-                        "done",
-                        command,
-                        format!("{tool_name} complete · {count} findings"),
-                    )
-                    .emit();
-            }
-            Ok(result)
-        })
-    })
+    let runtime = required_runtime(tool_name, runtime)?;
+    let inputs = runtime_inputs(tool_name, command, input, ctx)?;
+    execute_authorized_runtime_tool(command, inputs, ctx, runtime)
+}
+
+fn execute_authorized_runtime_tool(
+    command: &str,
+    inputs: RuntimeInputs,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: &dyn AgentRuntime,
+) -> Result<Value> {
+    emit_runtime_tool_start(&inputs.tool_name, command, ctx);
+    let model = resolve_tool_model(&inputs.tool_name, &inputs.input, ctx)?;
+    let _runtime_scope = ctx.trace.map(|trace| {
+        let phase = trace
+            .step("reasoning", command, "seed-gen · attack-loop · judge")
+            .emit();
+        trace.parent_scope(phase)
+    });
+    let result = run_prompt_armor_runtime(&inputs, model, ctx, runtime)?;
+    drop(_runtime_scope);
+    emit_runtime_tool_completion(&inputs.tool_name, command, &result, ctx);
+    Ok(result)
+}
+
+fn run_prompt_armor_runtime(
+    inputs: &RuntimeInputs,
+    model: String,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: &dyn AgentRuntime,
+) -> Result<Value> {
+    prompt_armor_capability::run_runtime_tool(
+        prompt_armor_capability::PromptArmorRuntimeInput {
+            finding_run_id: ctx.finding_run_id(),
+            tool_name: &inputs.tool_name,
+            command: &inputs.command,
+            input: &inputs.input,
+            target: &inputs.target,
+            plugin_root: &inputs.plugin_root,
+            model,
+            runtime,
+            workspace: ctx.workspace,
+            findings_store: ctx.findings_store,
+        },
+    )
+}
+
+fn emit_runtime_tool_start(
+    tool_name: &str,
+    command: &str,
+    ctx: &ToolExecutionContext<'_>,
+) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step("tool", command, format!("{tool_name} start"))
+            .emit();
+    }
+}
+
+fn emit_runtime_tool_completion(
+    tool_name: &str,
+    command: &str,
+    result: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) {
+    if let Some(trace) = ctx.trace {
+        let count = prompt_armor_finding_count(result);
+        let _ = trace
+            .step(
+                "done",
+                command,
+                format!("{tool_name} complete · {count} findings"),
+            )
+            .emit();
+    }
 }
 
 fn prompt_armor_finding_count(result: &Value) -> usize {

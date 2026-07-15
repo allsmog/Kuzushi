@@ -49,6 +49,7 @@ impl EffectRuntime {
                 | ShellEffect::OpenGuidedScan(_)
                 | ShellEffect::RecordScanRun(_)
                 | ShellEffect::RecordReviewDecision(_)
+                | ShellEffect::RecordProofDeferral(_)
                 | ShellEffect::RecordSuppression(_)
                 | ShellEffect::RecordStrategyCorrection(_)
                 | ShellEffect::SelectComponent(_)
@@ -94,6 +95,7 @@ impl EffectRuntime {
                 app.fire_next_approved_strategy_effect(fire)
             }
             ShellEffect::RecordReviewDecision(apply) => app.record_review_decision_effect(apply),
+            ShellEffect::RecordProofDeferral(apply) => app.record_proof_deferral_effect(apply),
             ShellEffect::RecordSuppression(apply) => app.record_suppression_effect(apply),
             ShellEffect::RecordStrategyCorrection(record) => {
                 app.record_strategy_correction_effect(record)
@@ -254,9 +256,9 @@ impl EffectRuntime {
             ShellEffect::StartOfflineDemoFixtureScan => {
                 unreachable!("handled before terminal effects")
             }
-            effect @ ShellEffect::WorkspaceExportFindings(_) => {
-                Self::execute_workspace_effect(app, effect)
-            }
+            effect @ (ShellEffect::WorkspaceExportFindings(_)
+            | ShellEffect::ExportReport(_)
+            | ShellEffect::RevealReportDestination) => Self::execute_workspace_effect(app, effect),
             effect @ ShellEffect::WorkspaceReindex(_) => {
                 Self::execute_workspace_effect(app, effect)
             }
@@ -269,6 +271,8 @@ impl EffectRuntime {
             ShellEffect::WorkspaceExportFindings(export) => {
                 app.export_workspace_findings_effect(export)
             }
+            ShellEffect::ExportReport(export) => app.export_report_effect(export),
+            ShellEffect::RevealReportDestination => app.reveal_report_destination_effect(),
             ShellEffect::WorkspaceReindex(reindex) => app.reindex_workspace_effect(reindex),
             _ => unreachable!("workspace effect dispatch"),
         }

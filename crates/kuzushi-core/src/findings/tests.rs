@@ -1065,6 +1065,14 @@ mod tests {
                     status: PatchStatus::Sound,
                     output: "ok".to_string(),
                 }],
+                provenance: Some(PatchProvenance {
+                    source_commit: "0123456789012345678901234567890123456789".to_string(),
+                    target: "/tmp/repo".to_string(),
+                    originating_run_id: Some("shell-run".to_string()),
+                    detector_tool: Some("semgrep:scan".to_string()),
+                    detector_run_id: Some(run_id.to_string()),
+                    detector_input_digest: Some("digest".to_string()),
+                }),
                 created_at: None,
                 updated_at: None,
             })
@@ -1116,6 +1124,13 @@ mod tests {
         assert_eq!(read_back[0].cost_usd, Some(0.000_000_4));
         assert!(read_back[0].provider_spend_unresolved);
         assert_eq!(
+            read_back[0]
+                .provenance
+                .as_ref()
+                .map(|provenance| provenance.source_commit.as_str()),
+            Some("0123456789012345678901234567890123456789")
+        );
+        assert_eq!(
             read_back[0].diff.as_deref(),
             Some("diff --git a/src/app.rs b/src/app.rs\n")
         );
@@ -1144,6 +1159,84 @@ mod tests {
             )
             .unwrap();
         assert_eq!(old_table_count, 0);
+    }
+
+    #[test]
+    fn patch_lifecycle_is_append_only_with_one_current_projection() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
+        let run_id = "run-patch-lifecycle";
+        store
+            .record_run_started(run_id, temp.path(), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "semgrep:scan",
+            "rules.cwe-89",
+            "src/app.rs",
+            42,
+            Some(42),
+            Severity::High,
+            "SQL injection reaches query builder",
+        );
+        store.insert_finding(run_id, &finding).unwrap();
+        let stable_fp = store
+            .patch_lifecycle_stable_fp(&finding.fingerprint)
+            .unwrap();
+        let mut record = PatchLifecycleRecord {
+            application_id: "application-1".to_string(),
+            stable_fp,
+            fingerprint: finding.fingerprint.clone(),
+            finding_scan_id: finding.scan_id.clone(),
+            patch_run_id: "patch-run-1".to_string(),
+            target: temp.path().display().to_string(),
+            diff_hash: "diff-hash".to_string(),
+            base_commit: Some("base-commit".to_string()),
+            touched_files: vec![PatchLifecycleFile {
+                path: "src/app.rs".to_string(),
+                before_hash: Some("before".to_string()),
+                after_hash: Some("after".to_string()),
+            }],
+            state: PatchLifecycleState::Applied,
+            reverify_run_id: None,
+            detail: None,
+            actor: "operator".to_string(),
+            application_started_at: "1".to_string(),
+            applied_at: Some("1".to_string()),
+            updated_at: "1".to_string(),
+        };
+        store.insert_patch_lifecycle_record(&record).unwrap();
+        record.state = PatchLifecycleState::Verified;
+        record.reverify_run_id = Some("reverify-1".to_string());
+        record.updated_at = "2".to_string();
+        store.insert_patch_lifecycle_record(&record).unwrap();
+
+        let loaded = store
+            .get_patch_lifecycle("application-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.state, PatchLifecycleState::Verified);
+        assert_eq!(
+            store
+                .latest_patch_lifecycle_for_finding(&finding.fingerprint)
+                .unwrap()
+                .unwrap(),
+            loaded
+        );
+        assert_eq!(store.list_patch_lifecycle_current().unwrap(), vec![loaded]);
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        let history: i64 = conn
+            .query_row("select count(*) from patch_lifecycle_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let current: i64 = conn
+            .query_row("select count(*) from patch_lifecycle_current", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(history, 2);
+        assert_eq!(current, 1);
     }
 
     #[test]

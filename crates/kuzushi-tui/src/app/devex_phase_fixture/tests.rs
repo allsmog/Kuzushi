@@ -106,9 +106,11 @@ fn shared_reference_seed_populates_every_phase_projection() {
     assert!(journey.progress.map_artifacts_built);
     assert_eq!(journey.progress.finding_total, 6);
     assert_eq!(journey.progress.reviewed_findings, 0);
-    assert_eq!(journey.progress.confirmed_findings, 1);
-    assert_eq!(journey.current, WorkflowPhase::Confirm);
-    assert!(journey.next_action.contains("6 of 6 findings need review"));
+    assert_eq!(journey.progress.confirmed_findings, 0);
+    assert_eq!(journey.current, WorkflowPhase::Review);
+    assert!(journey
+        .next_action
+        .contains("record terminal dispositions for 6 of 6 remaining candidates"));
 }
 
 #[test]
@@ -174,9 +176,9 @@ fn persisted_reference_projection_survives_workspace_refresh() {
     let selected = app.selected_finding().as_ref().expect("selected finding");
     assert!(selected.verification.is_some());
     assert!(app.domain().taint_flow_for_finding(selected).is_some());
-    let model = crate::ui_view_models::phase_cockpit_model_for_phase(&app, WorkflowPhase::Confirm);
-    let crate::ui_view_models::PhaseCockpitBody::Confirm(confirm) = model.body else {
-        panic!("confirm body")
+    let model = crate::ui_view_models::phase_cockpit_model_for_phase(&app, WorkflowPhase::Prove);
+    let crate::ui_view_models::PhaseCockpitBody::Prove(prove) = model.body else {
+        panic!("Prove body")
     };
-    assert!(confirm.proof.is_some_and(|proof| proof.has_replay()));
+    assert!(prove.proof.is_some_and(|proof| proof.has_replay()));
 }

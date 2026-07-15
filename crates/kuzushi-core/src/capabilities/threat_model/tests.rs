@@ -6,6 +6,7 @@ mod tests {
     use crate::config::V2Config;
     use crate::findings::{TriageOutcome, TriageVerdict};
     use crate::modules::{ModuleRegistry, ToolExecutionContext};
+    use crate::run_artifacts::TraceHandle;
     use crate::runtime::{AgentQueryResponse, TriageRequest};
     use crate::structured_output::parse_json_value_from_agent_text;
     use crate::workspace::WorkspaceTarget;
@@ -222,6 +223,29 @@ mod tests {
         })
     }
 
+    fn repository_scope_placeholder() -> Value {
+        json!({
+            "version": "2.0",
+            "dfd": {
+                "nodes": [{
+                    "id": "repository-scope",
+                    "type": "process",
+                    "name": "empty-target repository scope",
+                    "description": "Repository target under analysis",
+                    "trustZone": "analysis-scope"
+                }],
+                "flows": [],
+                "trustBoundaries": []
+            },
+            "threats": [],
+            "summary": {
+                "total": 0,
+                "bySeverity": {},
+                "byCategory": {}
+            }
+        })
+    }
+
     #[test]
     fn dispatches_threat_model_build_through_runtime_and_persists_artifacts() {
         let temp = tempfile::tempdir().unwrap();
@@ -340,6 +364,56 @@ authorization: Default::default(),
                 .and_then(Value::as_str),
             Some("skipped")
         );
+    }
+
+    #[test]
+    fn repository_scope_placeholder_is_a_partial_result_with_target_guidance() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({
+            "document": repository_scope_placeholder()
+        }));
+        let run_id = "threat-model-placeholder";
+        let trace = TraceHandle::jsonl(workspace.root(), run_id);
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: Some(&trace),
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("partial")
+        );
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        let target = workspace.root().display().to_string();
+        let output = result.get("output").and_then(Value::as_str).unwrap();
+        assert!(output.contains(&target));
+        assert!(output.contains("partial — inadequate evidence"));
+        assert!(!output.contains("threat-model:build complete"));
+        let trace = fs::read_to_string(crate::run_artifacts::run_dir(
+            workspace.root(),
+            run_id,
+        ).join("trace.jsonl"))
+        .unwrap();
+        assert!(trace.contains("partial — inadequate evidence"));
+        assert!(!trace.contains("threat-model:build complete"));
+        assert!(persistent_threat_model_path(workspace.root()).exists());
     }
 
     #[test]

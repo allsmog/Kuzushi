@@ -27,7 +27,7 @@ pub use application::{
     ProjectModelSectionOrigin, WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary,
     WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
     WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext,
-    WorkspaceFindingsExportPreview, WorkspaceRunExportContext, WorkspaceStatus,
+    WorkspaceFindingsExportPreview, WorkspaceRemediationExportSummary, WorkspaceRunExportContext, WorkspaceStatus,
     WorkspaceVerificationExportSummary, PROJECT_MODEL_SCHEMA_VERSION,
 };
 pub use artifact_kb::*;

@@ -1,8 +1,6 @@
 use super::*;
 use anyhow::Context;
 
-const MAX_CONTEXT_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
-
 pub(crate) fn default_context_snapshot_view(snapshot_path: Option<PathBuf>) -> ContextSnapshotView {
     ContextSnapshotView {
         snapshot_path,
@@ -46,7 +44,7 @@ pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<Conte
     let body = match kuzushi_core::workspace::read_optional_workspace_text(
         &workspace_root,
         &snapshot_path,
-        MAX_CONTEXT_SNAPSHOT_BYTES,
+        kuzushi_core::context::MAX_CONTEXT_SNAPSHOT_BYTES,
     ) {
         Ok(Some(body)) => body,
         Ok(None) => return Ok(default_context_snapshot_view(Some(snapshot_path))),

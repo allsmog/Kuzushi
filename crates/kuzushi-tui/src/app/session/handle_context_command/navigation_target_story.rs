@@ -289,8 +289,6 @@ impl ShellApp {
             self.router
                 .workbench_mut()
                 .set_focus(WorkbenchPane::Findings);
-            let center_mode = self.default_workbench_center_mode(WorkbenchPane::Findings);
-            self.router.workbench_mut().set_center_mode(center_mode);
             self.clamp_findings_cursor();
         }
     }
@@ -397,6 +395,7 @@ impl ShellApp {
     ) -> Vec<ShellEffect> {
         self.invalidate_view_hydration();
         *self.workbench_cache().borrow_mut() = WorkbenchCache::default();
+        self.refresh_phase_attempt_projection();
         self.refresh_target_scope_after_revision_switch(target);
         self.log_target_revision_switch(previous_sha, current_sha);
         target_revision_refresh_effects()

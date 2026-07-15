@@ -64,7 +64,7 @@ pub(in crate::modules) fn vuln_scout_module() -> BuiltinModule {
         "Whitebox pentest wrapper around the @kuzushi/vuln-scout Claude Code plugin.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Required,
             ),
@@ -101,13 +101,13 @@ pub(in crate::modules) fn tob_module() -> BuiltinModule {
                 ],
             )
             .with_policy(workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Required,
             )),
             tool("tob:skills", "List available Trail of Bits skill modules.").with_policy(
                 tool_policy(
-                    ToolPhase::Hunt,
+                    ToolPhase::Scan,
                     RuntimeRequirement::Never,
                     ToolEffect::Read,
                     WorkspaceRequirement::Required,

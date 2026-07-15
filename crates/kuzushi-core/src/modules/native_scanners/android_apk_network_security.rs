@@ -20,7 +20,7 @@ pub(in crate::modules) fn run_network_security_config_scan(
         }
     };
     let persisted = persist_tool_findings(
-        "android-apk",
+        ctx.finding_run_id(),
         &target,
         &outcome.findings,
         ctx.workspace,

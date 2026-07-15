@@ -9,7 +9,7 @@ pub(crate) fn persist_findings(
         return Ok(None);
     };
     workspace.ensure_state_dir()?;
-    let run_id = Uuid::new_v4().to_string();
+    let run_id = ctx.finding_run_id();
     store.with_run_lifecycle(&run_id, target, || {
         for finding in findings {
             store.insert_finding(&run_id, finding)?;
@@ -20,6 +20,51 @@ pub(crate) fn persist_findings(
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),
     }))
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+    use crate::config::V2Config;
+    use crate::findings::FindingStore;
+    use crate::workspace::WorkspaceTarget;
+
+    #[test]
+    fn untraced_direct_call_retains_generated_run_id_fallback() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let finding = Finding::new_tool(
+            "variant-ndiff",
+            "CWE-79",
+            "src/lib.rs",
+            3,
+            None,
+            Severity::Medium,
+            "variant candidate",
+        );
+
+        let persisted = persist_findings(temp.path(), &[finding], &ctx)
+            .unwrap()
+            .unwrap();
+
+        assert!(uuid::Uuid::parse_str(&persisted.run_id).is_ok());
+        let findings = store.list_findings_for_scan_id(&persisted.run_id).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].scan_id.as_deref(),
+            Some(persisted.run_id.as_str())
+        );
+    }
 }
 
 pub(crate) fn fetch_cve_or_advisory(id: &str, input: &Value) -> Result<Option<CveRecord>> {

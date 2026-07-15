@@ -1,5 +1,5 @@
 use crate::app::{
-    ExecutionAuthorization, FailedPlanningTask, PendingPatch, PendingPrereqPrompt,
+    ExecutionAuthorization, FailedPlanningTask, GuidedScanFlow, PendingPatch, PendingPrereqPrompt,
     PlanningOptionOverrides, PlanningPickerRouteState, PlanningRunStep, PlanningTaskId,
     PrereqChain, PrereqFinalInput, PrereqPlanAction, PrereqStep, RetryAdjustment, ThreatPatch,
     WorkflowPhase,
@@ -34,8 +34,18 @@ pub struct EngagementState {
     planning_option_overrides: PlanningOptionOverrides,
     planning_failed: Vec<FailedPlanningTask>,
     planning_skipped_phases: BTreeSet<WorkflowPhase>,
+    durable_skipped_phases: BTreeSet<WorkflowPhase>,
     planning_adjustments: BTreeMap<PlanningTaskId, RetryAdjustment>,
     model_recommended_tasks: Option<BTreeSet<PlanningTaskId>>,
+    latest_phase_attempt: Option<kuzushi_core::workflow_attempts::PhaseAttemptRecord>,
+    phase_attempt_ledger: kuzushi_core::workflow_attempts::PhaseAttemptLedger,
+    phase_target_snapshot: Option<kuzushi_core::workflow_attempts::PhaseTargetSnapshot>,
+    pending_attempt_lineage: Option<(
+        WorkflowPhase,
+        String,
+        kuzushi_core::workflow_attempts::PhaseAttemptDerivation,
+    )>,
+    guided_scan: Option<GuidedScanFlow>,
 }
 
 impl EngagementState {
@@ -55,14 +65,153 @@ impl EngagementState {
         self.workflow_phase = None;
     }
 
+    pub(crate) fn guided_scan(&self) -> Option<&GuidedScanFlow> {
+        self.guided_scan.as_ref()
+    }
+
+    pub(crate) fn guided_scan_mut(&mut self) -> Option<&mut GuidedScanFlow> {
+        self.guided_scan.as_mut()
+    }
+
+    pub(crate) fn set_guided_scan(&mut self, flow: GuidedScanFlow) {
+        self.guided_scan = Some(flow);
+    }
+
+    pub(crate) fn clear_guided_scan(&mut self) {
+        self.guided_scan = None;
+    }
+
+    pub(crate) fn set_phase_attempt_projection(
+        &mut self,
+        snapshot: Option<kuzushi_core::workflow_attempts::PhaseTargetSnapshot>,
+        ledger: kuzushi_core::workflow_attempts::PhaseAttemptLedger,
+    ) {
+        self.durable_skipped_phases = snapshot
+            .as_ref()
+            .map(|snapshot| ledger.skipped_phases_for(snapshot))
+            .unwrap_or_default();
+        self.latest_phase_attempt = snapshot
+            .as_ref()
+            .and_then(|snapshot| ledger.latest_for(snapshot))
+            .cloned();
+        self.phase_target_snapshot = snapshot;
+        self.phase_attempt_ledger = ledger;
+    }
+
+    pub(crate) fn selected_phase_attempt(
+        &self,
+        phase: WorkflowPhase,
+    ) -> Option<&kuzushi_core::workflow_attempts::PhaseAttemptRecord> {
+        let snapshot = self.phase_target_snapshot.as_ref()?;
+        self.phase_attempt_ledger.selected_for(phase, snapshot)
+    }
+
+    pub(crate) fn unresolved_phase_attempt(
+        &self,
+        phase: WorkflowPhase,
+    ) -> Option<&kuzushi_core::workflow_attempts::PhaseAttemptRecord> {
+        let snapshot = self.phase_target_snapshot.as_ref()?;
+        self.phase_attempt_ledger.unresolved_for(phase, snapshot)
+    }
+
+    pub(crate) fn unresolved_phase_attempt_by_id(
+        &self,
+        phase: WorkflowPhase,
+        attempt_id: &str,
+    ) -> Option<&kuzushi_core::workflow_attempts::PhaseAttemptRecord> {
+        let snapshot = self.phase_target_snapshot.as_ref()?;
+        let record = self.phase_attempt_ledger.attempt(attempt_id)?;
+        (record.completed.phase == phase
+            && &record.completed.target_snapshot == snapshot
+            && record.disposition.is_none())
+        .then_some(record)
+    }
+
+    pub(crate) fn has_phase_attempt_for_target(&self, phase: WorkflowPhase) -> bool {
+        self.phase_target_snapshot.as_ref().is_some_and(|snapshot| {
+            self.phase_attempt_ledger
+                .has_attempt_for_target(phase, snapshot)
+        })
+    }
+
+    pub(crate) fn phase_target_snapshot(
+        &self,
+    ) -> Option<&kuzushi_core::workflow_attempts::PhaseTargetSnapshot> {
+        self.phase_target_snapshot.as_ref()
+    }
+
+    pub(crate) fn proof_is_deferred_for(&self, finding: &kuzushi_core::Finding) -> bool {
+        let Some(snapshot) = self.phase_target_snapshot.as_ref() else {
+            return false;
+        };
+        let Some(scan_id) = finding
+            .scan_id
+            .as_deref()
+            .filter(|scan_id| !scan_id.trim().is_empty())
+        else {
+            return false;
+        };
+        self.phase_attempt_ledger.proof_is_deferred_for(
+            snapshot,
+            &finding.fingerprint,
+            finding.identity_id.as_deref(),
+            scan_id,
+        )
+    }
+
+    pub(crate) fn arm_attempt_lineage(
+        &mut self,
+        phase: WorkflowPhase,
+        parent_attempt_id: String,
+        derivation: kuzushi_core::workflow_attempts::PhaseAttemptDerivation,
+    ) {
+        self.pending_attempt_lineage = Some((phase, parent_attempt_id, derivation));
+    }
+
+    pub(crate) fn attempt_lineage(
+        &self,
+        phase: WorkflowPhase,
+    ) -> Option<(
+        String,
+        kuzushi_core::workflow_attempts::PhaseAttemptDerivation,
+    )> {
+        self.pending_attempt_lineage
+            .as_ref()
+            .filter(|(pending_phase, _, _)| *pending_phase == phase)
+            .map(|(_, parent, derivation)| (parent.clone(), *derivation))
+    }
+
+    pub(crate) fn clear_attempt_lineage(&mut self, phase: WorkflowPhase) {
+        if self
+            .pending_attempt_lineage
+            .as_ref()
+            .is_some_and(|(pending_phase, _, _)| *pending_phase == phase)
+        {
+            self.pending_attempt_lineage = None;
+        }
+    }
+
     pub(crate) fn mark_current_phase_skipped(&mut self) -> Option<WorkflowPhase> {
         let phase = self.workflow_phase?;
         self.planning_skipped_phases.insert(phase);
         Some(phase)
     }
 
+    #[cfg(test)]
     pub(crate) fn skipped_phases(&self) -> &BTreeSet<WorkflowPhase> {
         &self.planning_skipped_phases
+    }
+
+    pub(crate) fn phase_is_skipped(&self, phase: WorkflowPhase) -> bool {
+        self.planning_skipped_phases.contains(&phase)
+            || self.durable_skipped_phases.contains(&phase)
+    }
+
+    pub(crate) fn projected_skipped_phases(&self) -> BTreeSet<WorkflowPhase> {
+        self.planning_skipped_phases
+            .union(&self.durable_skipped_phases)
+            .copied()
+            .collect()
     }
 
     #[cfg(test)]
@@ -167,6 +316,33 @@ impl EngagementState {
 
     pub(crate) fn pending_planning_step_count(&self) -> usize {
         self.planning_expanded_queue.len() + self.planning_run_queue.len()
+    }
+
+    pub(crate) fn planning_tool_sequence(&self) -> Vec<String> {
+        self.planning_running_tool
+            .iter()
+            .cloned()
+            .chain(
+                self.planning_expanded_queue
+                    .iter()
+                    .map(|step| step.tool_name.clone()),
+            )
+            .chain(
+                self.planning_run_queue
+                    .iter()
+                    .map(|task| task.tool_name().to_string()),
+            )
+            .collect()
+    }
+
+    pub(crate) fn planning_tool_pending_after_current(&self, tool_name: &str) -> bool {
+        self.planning_expanded_queue
+            .iter()
+            .any(|step| step.tool_name == tool_name)
+            || self
+                .planning_run_queue
+                .iter()
+                .any(|task| task.tool_name() == tool_name)
     }
 
     pub(crate) fn planning_queues_empty(&self) -> bool {
@@ -423,15 +599,16 @@ impl EngagementState {
         &self.confirm_allowlist
     }
 
-    #[cfg(test)]
     pub(crate) fn confirm_denylist(&self) -> &BTreeSet<String> {
         &self.confirm_denylist
     }
 
     pub(crate) fn remember_confirm_decision(&mut self, key: String, outcome: bool) {
         if outcome {
+            self.confirm_denylist.remove(&key);
             self.confirm_allowlist.insert(key);
         } else {
+            self.confirm_allowlist.remove(&key);
             self.confirm_denylist.insert(key);
         }
     }

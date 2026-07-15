@@ -31,6 +31,19 @@ pub(crate) fn initialize_workspace_state(root: &Path) -> Result<PathBuf> {
 }
 
 fn ensure_policy_is_verified(root: &Path, ignore_path: &Path, policy: &[u8]) -> Result<()> {
+    retry_policy_verification(|| verify_policy_once(root, ignore_path, policy))
+}
+
+fn retry_policy_verification<T>(mut verify: impl FnMut() -> Result<T>) -> Result<T> {
+    match verify() {
+        Ok(value) => Ok(value),
+        Err(first_error) => verify().with_context(|| {
+            format!("Workspace policy verification changed during its first attempt: {first_error:#}")
+        }),
+    }
+}
+
+fn verify_policy_once(root: &Path, ignore_path: &Path, policy: &[u8]) -> Result<()> {
     descendant_policy::validate(root)?;
     if proof_cache::is_current(root, policy)? {
         return descendant_policy::validate(root);
@@ -43,9 +56,8 @@ fn ensure_policy_is_verified(root: &Path, ignore_path: &Path, policy: &[u8]) -> 
         "Workspace state ignore policy changed while Kuzushi was validating it; retry"
     );
     descendant_policy::validate(root)?;
-    proof_cache::remember(root, policy, snapshot);
     anyhow::ensure!(
-        proof_cache::is_current(root, policy)?,
+        proof_cache::remember_if_current(root, policy, snapshot)?,
         "Workspace ignore inputs changed while Kuzushi was validating them; retry"
     );
     Ok(())

@@ -1,21 +1,16 @@
+use super::activity_header::ActivityRunOutcome;
 use crate::{ActivitySession, DagTaskState};
-use kuzushi_core::WorkflowPhase;
 use std::time::{Duration, Instant};
 
 pub(crate) const ACTIVITY_STALE_PROGRESS_AFTER: Duration = Duration::from_secs(30);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ActivityPhaseStripModel {
-    pub(crate) phase: String,
-    pub(crate) current: String,
-    pub(crate) stage: String,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActivityHeartbeatTone {
     Live,
     Stalled,
     Complete,
+    Warning,
+    Failed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,33 +19,22 @@ pub(crate) struct ActivityHeartbeatModel {
     pub(crate) tone: ActivityHeartbeatTone,
 }
 
-pub(crate) fn activity_phase_strip_model(
-    session: &ActivitySession,
-    running_tool: Option<&str>,
-) -> Option<ActivityPhaseStripModel> {
-    let phase = session.origin_phase?;
-    Some(ActivityPhaseStripModel {
-        phase: phase_label(phase),
-        current: current_subject(session, running_tool),
-        stage: latest_progress_label(session),
-    })
-}
-
 pub(crate) fn activity_heartbeat_model(
     session: &ActivitySession,
     running_tool: Option<&str>,
     live: bool,
+    outcome: Option<&ActivityRunOutcome>,
     now: Instant,
 ) -> ActivityHeartbeatModel {
+    if matches!(outcome, Some(ActivityRunOutcome::WaitingForOperator)) {
+        return ActivityHeartbeatModel {
+            text: " ? WAITING INPUT · operator answer required · run paused safely".to_string(),
+            tone: ActivityHeartbeatTone::Warning,
+        };
+    }
     let (age, source) = progress_signal(session, now);
     if !live {
-        return ActivityHeartbeatModel {
-            text: format!(
-                " ✓ COMPLETE · last signal {} ago · {source}",
-                age_label(age)
-            ),
-            tone: ActivityHeartbeatTone::Complete,
-        };
+        return finished_heartbeat(age, &source, outcome);
     }
     if age >= ACTIVITY_STALE_PROGRESS_AFTER {
         return ActivityHeartbeatModel {
@@ -72,14 +56,46 @@ pub(crate) fn activity_heartbeat_model(
     }
 }
 
-fn phase_label(phase: WorkflowPhase) -> String {
-    format!(
-        "{} {} {}/{}",
-        phase.kanji(),
-        phase.word(),
-        phase.position(),
-        WorkflowPhase::ORDER.len()
-    )
+fn finished_heartbeat(
+    age: Duration,
+    source: &str,
+    outcome: Option<&ActivityRunOutcome>,
+) -> ActivityHeartbeatModel {
+    let terminal = terminal_heartbeat(outcome);
+    ActivityHeartbeatModel {
+        text: format!(
+            " {} · last signal {} ago · {source}",
+            terminal.label,
+            age_label(age)
+        ),
+        tone: terminal.tone,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TerminalHeartbeat {
+    label: &'static str,
+    tone: ActivityHeartbeatTone,
+}
+
+fn terminal_heartbeat(outcome: Option<&ActivityRunOutcome>) -> TerminalHeartbeat {
+    let status = match outcome {
+        Some(ActivityRunOutcome::WaitingForOperator) => "waiting",
+        Some(ActivityRunOutcome::Failed { .. }) => "failed",
+        Some(ActivityRunOutcome::Terminal { status, .. }) => status.as_str(),
+        None => "completed",
+    };
+    match status {
+        "failed" | "refused" | "interrupted" => terminal("✗ FAILED", ActivityHeartbeatTone::Failed),
+        "partial" => terminal("⚠ PARTIAL", ActivityHeartbeatTone::Warning),
+        "canceled" | "cancelled" => terminal("× CANCELED", ActivityHeartbeatTone::Warning),
+        "skipped" => terminal("⊘ SKIPPED", ActivityHeartbeatTone::Warning),
+        _ => terminal("✓ COMPLETE", ActivityHeartbeatTone::Complete),
+    }
+}
+
+fn terminal(label: &'static str, tone: ActivityHeartbeatTone) -> TerminalHeartbeat {
+    TerminalHeartbeat { label, tone }
 }
 
 fn current_subject(session: &ActivitySession, running_tool: Option<&str>) -> String {
@@ -94,16 +110,6 @@ fn active_task(session: &ActivitySession) -> Option<&crate::DagTaskRow> {
         .tasks
         .values()
         .find(|task| matches!(task.state, DagTaskState::Active | DagTaskState::Canceling))
-}
-
-fn latest_progress_label(session: &ActivitySession) -> String {
-    session
-        .events
-        .back()
-        .map(|event| event.step.label.clone())
-        .or_else(|| active_task(session).map(|task| task.last_label.clone()))
-        .filter(|label| !label.trim().is_empty())
-        .unwrap_or_else(|| "waiting for the first progress signal".to_string())
 }
 
 fn progress_signal(session: &ActivitySession, now: Instant) -> (Duration, String) {
@@ -129,8 +135,8 @@ fn age_label(age: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DagTaskRow, RecordedTraceEvent};
-    use kuzushi_core::RunTraceStep;
+    use crate::RecordedTraceEvent;
+    use kuzushi_core::{RunTraceStep, WorkflowPhase};
 
     #[test]
     fn stale_live_activity_names_the_current_tool_and_last_real_signal() {
@@ -141,7 +147,7 @@ mod tests {
             observed_at: now - Duration::from_secs(45),
         });
 
-        let model = activity_heartbeat_model(&session, Some("context:build"), true, now);
+        let model = activity_heartbeat_model(&session, Some("context:build"), true, None, now);
 
         assert_eq!(model.tone, ActivityHeartbeatTone::Stalled);
         assert!(
@@ -162,17 +168,33 @@ mod tests {
     }
 
     #[test]
-    fn phase_strip_projects_current_context_stage_without_next_action_copy() {
-        let mut session = ActivitySession::for_phase("context-run", WorkflowPhase::Map);
-        let mut task = DagTaskRow::queued("context:build".into(), "context".into(), Vec::new());
-        task.state = DagTaskState::Active;
-        task.last_label = "mapping attack surface".to_string();
-        session.tasks.insert(task.task_id.clone(), task);
+    fn failed_terminal_activity_never_uses_a_success_heartbeat() {
+        let now = Instant::now();
+        let session = ActivitySession::for_phase("failed-run", WorkflowPhase::Map);
+        let outcome = ActivityRunOutcome::Terminal {
+            status: "failed".to_string(),
+            findings: None,
+            reason: Some("context snapshot was too large".to_string()),
+        };
 
-        let model = activity_phase_strip_model(&session, Some("context:build")).unwrap();
+        let model = activity_heartbeat_model(&session, None, false, Some(&outcome), now);
 
-        assert_eq!(model.phase, "組 map 1/4");
-        assert_eq!(model.current, "context:build");
-        assert_eq!(model.stage, "mapping attack surface");
+        assert_eq!(model.tone, ActivityHeartbeatTone::Failed);
+        assert!(model.text.contains("✗ FAILED"), "{}", model.text);
+        assert!(!model.text.contains("✓ COMPLETE"), "{}", model.text);
+    }
+
+    #[test]
+    fn operator_wait_never_uses_a_terminal_success_heartbeat() {
+        let now = Instant::now();
+        let session = ActivitySession::for_phase("waiting-run", WorkflowPhase::Scan);
+        let outcome = ActivityRunOutcome::WaitingForOperator;
+
+        let model = activity_heartbeat_model(&session, None, false, Some(&outcome), now);
+
+        assert_eq!(model.tone, ActivityHeartbeatTone::Warning);
+        assert!(model.text.contains("WAITING INPUT"), "{}", model.text);
+        assert!(model.text.contains("run paused safely"), "{}", model.text);
+        assert!(!model.text.contains("✓ COMPLETE"), "{}", model.text);
     }
 }

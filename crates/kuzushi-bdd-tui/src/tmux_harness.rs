@@ -50,7 +50,16 @@ impl TmuxSession {
         env: HashMap<String, String>,
         seeds: &[ArtifactSeed],
     ) -> Result<Self> {
-        Self::launch_inner(binary, env, seeds, true, (200, 50))
+        Self::launch_with_seeds_sized(binary, env, seeds, (200, 50))
+    }
+
+    pub fn launch_with_seeds_sized(
+        binary: &str,
+        env: HashMap<String, String>,
+        seeds: &[ArtifactSeed],
+        size: (u16, u16),
+    ) -> Result<Self> {
+        Self::launch_inner(binary, env, seeds, true, size)
     }
 
     /// Launch a bare interactive `kuzushi shell` with **no** `--target`, from a
@@ -143,7 +152,108 @@ impl TmuxSession {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
-    fn alternate_screen_active(&self) -> Result<bool> {
+    pub fn pane_size(&self) -> Result<(u16, u16)> {
+        let output = Command::new("tmux")
+            .args([
+                "display-message",
+                "-p",
+                "-t",
+                &self.session_name,
+                "#{pane_width} #{pane_height}",
+            ])
+            .output()
+            .context("reading tmux pane size")?;
+        if !output.status.success() {
+            bail!("tmux pane-size query returned {:?}", output.status.code());
+        }
+        parse_pane_size(&String::from_utf8_lossy(&output.stdout))
+    }
+
+    /// Resize the existing tmux window in place and wait for the shell to
+    /// repaint its live alternate screen at the requested dimensions.
+    pub fn resize_to(&self, width: u16, height: u16, timeout: Duration) -> Result<String> {
+        let manual = Command::new("tmux")
+            .args([
+                "set-option",
+                "-w",
+                "-t",
+                &self.session_name,
+                "window-size",
+                "manual",
+            ])
+            .status()
+            .context("setting tmux window-size to manual")?;
+        if !manual.success() {
+            bail!(
+                "tmux window-size manual returned status {:?}",
+                manual.code()
+            );
+        }
+        let width_arg = width.to_string();
+        let height_arg = height.to_string();
+        let resized = Command::new("tmux")
+            .args([
+                "resize-window",
+                "-t",
+                &self.session_name,
+                "-x",
+                &width_arg,
+                "-y",
+                &height_arg,
+            ])
+            .status()
+            .context("resizing tmux window")?;
+        if !resized.success() {
+            bail!("tmux resize-window returned status {:?}", resized.code());
+        }
+        self.wait_for_resized_live_frame((width, height), timeout)
+    }
+
+    pub fn pane_pid(&self) -> Result<u32> {
+        let output = Command::new("tmux")
+            .args([
+                "display-message",
+                "-p",
+                "-t",
+                &self.session_name,
+                "#{pane_pid}",
+            ])
+            .output()
+            .context("reading tmux pane pid")?;
+        if !output.status.success() {
+            bail!("tmux pane-pid query returned {:?}", output.status.code());
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse()
+            .context("tmux pane pid was not numeric")
+    }
+
+    fn wait_for_resized_live_frame(
+        &self,
+        expected: (u16, u16),
+        timeout: Duration,
+    ) -> Result<String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            self.fail_if_pane_dead("while resizing its live terminal")?;
+            if self.pane_size()? == expected && self.alternate_screen_active()? {
+                // tmux applies the PTY size before the shell's redraw reaches the
+                // alternate-screen buffer. Give the event loop one bounded paint
+                // turn so this capture proves the resized frame, not cropped
+                // pre-resize content.
+                thread::sleep(Duration::from_millis(100));
+                if self.pane_size()? != expected {
+                    continue;
+                }
+                return self.capture_live_pane();
+            }
+            self.fail_if_wait_expired(deadline, timeout, "the requested live pane size")?;
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    pub fn alternate_screen_active(&self) -> Result<bool> {
         let output = Command::new("tmux")
             .args([
                 "display-message",
@@ -155,6 +265,110 @@ impl TmuxSession {
             .output()
             .context("checking tmux alternate screen state")?;
         Ok(output.status.success() && output.stdout.starts_with(b"1"))
+    }
+
+    /// Wait until the shell owns tmux's alternate screen and has painted a
+    /// recognizable interactive frame. A process merely existing is not a
+    /// readiness signal: sending input before the first frame is the source of
+    /// otherwise irreproducible BackTab failures in the live BDD suite.
+    pub fn wait_for_interactive_frame(&self, timeout: Duration) -> Result<()> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            self.fail_if_pane_dead("before its first interactive frame")?;
+            if self.interactive_snapshot()?.is_some() {
+                return Ok(());
+            }
+            self.fail_if_wait_expired(deadline, timeout, "the first interactive frame")?;
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Capture only the live alternate screen, polling through startup races
+    /// but never weakening the fullscreen contract to a saved-buffer capture.
+    pub fn wait_for_alternate_screen_snapshot(&self, timeout: Duration) -> Result<String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            self.fail_if_pane_dead("while waiting for its alternate screen")?;
+            if self.alternate_screen_active()? {
+                return self.capture_live_pane();
+            }
+            self.fail_if_wait_expired(deadline, timeout, "tmux alternate_on=1")?;
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn interactive_snapshot(&self) -> Result<Option<String>> {
+        if !self.alternate_screen_active()? {
+            return Ok(None);
+        }
+        let snapshot = self.capture_live_pane()?;
+        Ok(interactive_frame_ready(&snapshot).then_some(snapshot))
+    }
+
+    fn fail_if_pane_dead(&self, context: &str) -> Result<()> {
+        if self.pane_status()?.dead {
+            bail!("shell exited {context}\n{}", self.diagnostics()?);
+        }
+        Ok(())
+    }
+
+    fn fail_if_wait_expired(
+        &self,
+        deadline: Instant,
+        timeout: Duration,
+        expected: &str,
+    ) -> Result<()> {
+        if Instant::now() >= deadline {
+            bail!(
+                "timed out after {timeout:?} waiting for {expected}\n{}",
+                self.diagnostics()?
+            );
+        }
+        Ok(())
+    }
+
+    fn capture_live_pane(&self) -> Result<String> {
+        let output = self.capture_pane(&["-p"])?;
+        if !output.status.success() {
+            bail!(
+                "tmux live capture returned status {:?}",
+                output.status.code()
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    fn pane_status(&self) -> Result<PaneStatus> {
+        let output = Command::new("tmux")
+            .args([
+                "display-message",
+                "-p",
+                "-t",
+                &self.session_name,
+                "#{pane_dead}\t#{pane_dead_status}\t#{pane_current_command}",
+            ])
+            .output()
+            .context("checking tmux pane status")?;
+        if !output.status.success() {
+            bail!("tmux pane-status query returned {:?}", output.status.code());
+        }
+        Ok(PaneStatus::parse(&String::from_utf8_lossy(&output.stdout)))
+    }
+
+    fn diagnostics(&self) -> Result<String> {
+        let status = self.pane_status()?;
+        let alternate = self.alternate_screen_active()?;
+        let live = self.capture_pane(&["-p", "-S", "-200"])?;
+        let saved = self.capture_pane(&["-a", "-q", "-p"])?;
+        Ok(format!(
+            "pane_dead={} pane_dead_status={} command={} alternate_on={}\nlive pane:\n{}\nsaved pre-alternate buffer:\n{}",
+            status.dead,
+            status.dead_status,
+            status.command,
+            u8::from(alternate),
+            String::from_utf8_lossy(&live.stdout),
+            String::from_utf8_lossy(&saved.stdout)
+        ))
     }
 
     fn capture_pane(&self, options: &[&str]) -> Result<std::process::Output> {
@@ -199,6 +413,32 @@ impl TmuxSession {
             thread::sleep(Duration::from_millis(100));
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PaneStatus {
+    dead: bool,
+    dead_status: String,
+    command: String,
+}
+
+impl PaneStatus {
+    fn parse(value: &str) -> Self {
+        let mut fields = value.trim_end().splitn(3, '\t');
+        Self {
+            dead: fields.next() == Some("1"),
+            dead_status: fields.next().unwrap_or_default().to_string(),
+            command: fields.next().unwrap_or_default().to_string(),
+        }
+    }
+}
+
+fn interactive_frame_ready(snapshot: &str) -> bool {
+    output_has_visible_text(snapshot.as_bytes())
+        && (status_footer_line(snapshot).is_some()
+            || snapshot.contains("◇ MAP ›")
+            || snapshot.contains("TARGET")
+            || snapshot.contains("SETUP"))
 }
 
 fn prepare_scenario_workspace(
@@ -319,7 +559,29 @@ fn status_footer_line(snapshot: &str) -> Option<&str> {
         .lines()
         .rev()
         .take(8)
-        .find(|line| line.contains("mode:"))
+        .find(|line| is_status_footer_line(line))
+}
+
+fn is_status_footer_line(line: &str) -> bool {
+    let line = line.trim_start();
+    line.starts_with("route:")
+        || line.starts_with("mode:")
+        || (line.starts_with("KUZUSHI") && (line.contains("route:") || line.contains("mode:")))
+}
+
+fn parse_pane_size(value: &str) -> Result<(u16, u16)> {
+    let mut fields = value.split_whitespace();
+    let width = fields
+        .next()
+        .context("tmux pane-size query omitted width")?
+        .parse()
+        .context("tmux pane width was not numeric")?;
+    let height = fields
+        .next()
+        .context("tmux pane-size query omitted height")?
+        .parse()
+        .context("tmux pane height was not numeric")?;
+    Ok((width, height))
 }
 
 fn output_has_visible_text(bytes: &[u8]) -> bool {
@@ -404,4 +666,56 @@ fn apply_artifact_seeds(target: &std::path::Path, seeds: &[ArtifactSeed]) -> Res
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{interactive_frame_ready, status_footer_line, PaneStatus};
+
+    #[test]
+    fn finds_canonical_route_footer() {
+        let snapshot = "body\nroute:shell · 組 map 1/5 · workbench\ncomposer\n";
+
+        assert_eq!(
+            status_footer_line(snapshot),
+            Some("route:shell · 組 map 1/5 · workbench")
+        );
+    }
+
+    #[test]
+    fn retains_legacy_mode_footer_compatibility() {
+        let snapshot = "body\nKUZUSHI › workbench · mode:shell · target:none\ncomposer\n";
+
+        assert_eq!(
+            status_footer_line(snapshot),
+            Some("KUZUSHI › workbench · mode:shell · target:none")
+        );
+    }
+
+    #[test]
+    fn ignores_body_text_that_only_mentions_a_route() {
+        let snapshot = "help: use route:shell to return\nbody\ncomposer\n";
+
+        assert_eq!(status_footer_line(snapshot), None);
+    }
+
+    #[test]
+    fn readiness_requires_visible_shell_chrome() {
+        assert!(!interactive_frame_ready("loading repository\n"));
+        assert!(!interactive_frame_ready("   \n\t"));
+        assert!(interactive_frame_ready("body\nroute:shell · 組 map 1/5\n"));
+        assert!(interactive_frame_ready("◇ MAP › describe what to map\n"));
+    }
+
+    #[test]
+    fn pane_status_preserves_exit_diagnostics() {
+        assert_eq!(
+            PaneStatus::parse("1\t101\tkuzushi\n"),
+            PaneStatus {
+                dead: true,
+                dead_status: "101".to_string(),
+                command: "kuzushi".to_string(),
+            }
+        );
+    }
 }

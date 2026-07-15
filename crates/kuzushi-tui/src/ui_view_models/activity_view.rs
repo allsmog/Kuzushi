@@ -1,38 +1,38 @@
 use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow};
 use super::activity_empty_state::{activity_empty_state_model, ActivityEmptyStateModel};
-use super::activity_feed_rows::ActivityFeedPaneRow;
-use super::activity_footer::{activity_footer_model, ActivityFooterModel};
+use super::activity_feed_rows::{activity_feed_pane_rows, ActivityFeedPaneRow};
+use super::activity_footer::{
+    activity_footer_model, resolve_activity_footer_bindings, ActivityFooterModel,
+};
 use super::activity_header::{
     activity_header_model_with_queue, ActivityHeaderModel, ActivityLiveTool, ActivityRunOutcome,
 };
-use super::activity_layout::{
-    activity_frame_layout, activity_plain_pane_widths, ActivityFrameLayout, ActivityPaneWidths,
-};
-use super::activity_observability::{
-    activity_heartbeat_model, activity_phase_strip_model, ActivityHeartbeatModel,
-    ActivityPhaseStripModel,
-};
-use super::activity_pane_chrome::{
-    activity_pane_chrome_model, activity_plain_pane_header_model, ActivityPaneChromeModel,
-    ActivityPlainPaneHeaderModel,
-};
-use super::activity_plain_rows::{activity_plain_pane_rows, ActivityPlainPaneRow};
+use super::activity_layout::{activity_frame_layout, ActivityFrameLayout};
+use super::activity_observability::{activity_heartbeat_model, ActivityHeartbeatModel};
+use super::activity_pane_chrome::{activity_pane_chrome_model, ActivityPaneChromeModel};
 use super::activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
-use super::generated_views_feed::{activity_deck_plain_extra_rows, activity_deck_rows};
+use crate::app::PendingOperatorQuestion;
 use crate::{ActivityRouteState, ActivitySession, DagTaskState, ShellApp, ViewDataState};
 use kuzushi_core::RunSummary;
 use std::time::Instant;
 
 pub(crate) enum ActivityViewModel<'a> {
-    Active(ActiveActivityViewModel<'a>),
+    Active(RunFocusModel<'a>),
     Inactive(ActivityEmptyStateModel),
 }
 
-pub(crate) struct ActiveActivityViewModel<'a> {
+pub(crate) struct RunFocusModel<'a> {
     app: &'a ShellApp,
     session: &'a ActivitySession,
     route: &'a ActivityRouteState,
     context_line: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OperatorQuestionKeyHints {
+    pub(crate) segments: Vec<String>,
+    pub(crate) editor_segments: Vec<String>,
+    pub(crate) other_binding: Option<String>,
 }
 
 pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
@@ -40,7 +40,7 @@ pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
         Some(session) if manual_activity_session_is_idle(app, session) => {
             ActivityViewModel::Inactive(activity_empty_state_model())
         }
-        Some(session) => ActivityViewModel::Active(ActiveActivityViewModel {
+        Some(session) => ActivityViewModel::Active(RunFocusModel {
             app,
             session,
             route: app.activity_route(),
@@ -66,6 +66,9 @@ fn manual_activity_session_is_idle(app: &ShellApp, session: &ActivitySession) ->
 /// activity card (set by both scan refusals and tool failures) and only once
 /// nothing is still running, so an in-flight session never reads as failed.
 fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<ActivityRunOutcome> {
+    if session.operator_question.is_some() {
+        return Some(ActivityRunOutcome::WaitingForOperator);
+    }
     if activity_session_still_running(app, session) {
         return None;
     }
@@ -163,7 +166,15 @@ pub(crate) fn activity_execution_model_label(app: &ShellApp) -> Option<String> {
     Some(format!("{selected} · receipt pending"))
 }
 
-impl<'a> ActiveActivityViewModel<'a> {
+impl<'a> RunFocusModel<'a> {
+    pub(crate) fn operator_question(&self) -> Option<&PendingOperatorQuestion> {
+        self.session.operator_question.as_ref()
+    }
+
+    pub(crate) fn operator_question_key_hints(&self) -> OperatorQuestionKeyHints {
+        operator_question_key_hints(self.app)
+    }
+
     pub(crate) fn header(&self) -> ActivityHeaderModel {
         let live_tool = self.live_tool();
         activity_header_model_with_queue(
@@ -193,25 +204,19 @@ impl<'a> ActiveActivityViewModel<'a> {
         &self.context_line
     }
 
-    pub(crate) fn phase_strip(&self) -> Option<ActivityPhaseStripModel> {
-        activity_phase_strip_model(self.session, self.app.running_tool_name())
-    }
-
     pub(crate) fn heartbeat(&self, now: Instant) -> ActivityHeartbeatModel {
+        let outcome = activity_run_outcome(self.app, self.session);
         activity_heartbeat_model(
             self.session,
             self.app.running_tool_name(),
             activity_session_still_running(self.app, self.session),
+            outcome.as_ref(),
             now,
         )
     }
 
     pub(crate) fn abort_banner(&self) -> Option<String> {
         activity_abort_banner(self.app)
-    }
-
-    pub(crate) fn frame_layout(&self) -> ActivityFrameLayout {
-        activity_frame_layout()
     }
 
     /// Single-tool runs can still have live trace events. Keep TASKS visible
@@ -225,40 +230,6 @@ impl<'a> ActiveActivityViewModel<'a> {
 
     pub(crate) fn pane_chrome(&self) -> ActivityPaneChromeModel {
         activity_pane_chrome_model(self.session, self.route)
-    }
-
-    pub(crate) fn plain_pane_widths(&self, width: u16) -> ActivityPaneWidths {
-        activity_plain_pane_widths(width)
-    }
-
-    pub(crate) fn plain_pane_header(
-        &self,
-        widths: ActivityPaneWidths,
-    ) -> ActivityPlainPaneHeaderModel {
-        activity_plain_pane_header_model(self.session, self.route, widths.dag, widths.feed)
-    }
-
-    pub(crate) fn plain_pane_rows(
-        &self,
-        widths: ActivityPaneWidths,
-        now: Instant,
-    ) -> Vec<ActivityPlainPaneRow> {
-        let output_rows = activity_deck_plain_extra_rows(
-            self.app,
-            self.session,
-            self.route,
-            widths.feed,
-            self.app.running_tool_name(),
-        );
-        activity_plain_pane_rows(
-            self.session,
-            self.route,
-            widths.dag,
-            widths.feed,
-            now,
-            &output_rows,
-            self.app.running_tool_name(),
-        )
     }
 
     pub(crate) fn dag_pane_rows(
@@ -275,17 +246,16 @@ impl<'a> ActiveActivityViewModel<'a> {
         )
     }
 
-    /// The right pane is an output strip: one selected artifact/review page at
-    /// a time. Live trace rows are integrated into the TASKS pane. Pages are pulled
-    /// from persistent `ShellApp` state, so they persist across later phases and
-    /// — via the on-disk snapshots — across sessions.
+    /// The right pane is one live output window. Generated artifacts belong to
+    /// the durable phase pages and contextual visualization decks; Run Focus
+    /// does not compete with them for the same pane.
     pub(crate) fn feed_pane_rows(&self, inner_width: usize) -> Vec<ActivityFeedPaneRow> {
-        activity_deck_rows(
-            self.app,
+        activity_feed_pane_rows(
             self.session,
             self.route,
             inner_width,
             self.app.running_tool_name(),
+            Instant::now(),
         )
     }
 
@@ -298,14 +268,109 @@ impl<'a> ActiveActivityViewModel<'a> {
     }
 
     pub(crate) fn footer(&self, width: u16) -> ActivityFooterModel {
-        activity_footer_model(
+        let footer = activity_footer_model(
             self.session,
             self.route,
             width,
             self.app.running_tool_name(),
             activity_abort_pending(self.app),
             self.app.input_mode(),
-        )
+        );
+        let footer = resolve_activity_footer_bindings(footer, self.app, width);
+        if self.operator_question().is_some() {
+            return operator_question_owned_footer(footer, width);
+        }
+        footer
+    }
+
+    pub(crate) fn frame_layout(&self, width: u16) -> ActivityFrameLayout {
+        let footer = self.footer(width);
+        let header_rows = 3 + u16::from(self.abort_banner().is_some());
+        let footer_rows = 1
+            + u16::try_from(footer.hint_rows.len().max(1)).unwrap_or(u16::MAX)
+            + u16::from(footer.steer_line.is_some())
+            + u16::from(footer.steer_error.is_some());
+        activity_frame_layout(header_rows, footer_rows)
+    }
+}
+
+fn operator_question_owned_footer(
+    mut footer: ActivityFooterModel,
+    width: u16,
+) -> ActivityFooterModel {
+    footer.body = " ? WAITING INPUT  question owns keyboard · controls below".to_string();
+    footer.body_line = footer.body.chars().take(width as usize).collect();
+    footer.hints.clear();
+    footer.hint_rows = vec![Vec::new()];
+    footer.steer_line = None;
+    footer.steer_error = None;
+    footer
+}
+
+fn operator_question_key_hints(app: &ShellApp) -> OperatorQuestionKeyHints {
+    let mut segments = Vec::new();
+    push_question_hint(&mut segments, app, "submit", &["Enter"], "submit");
+    push_question_hint(&mut segments, app, "cancel", &["Esc"], "cancel");
+    push_question_hint(&mut segments, app, "background", &["b"], "background");
+    push_paired_question_hint(
+        &mut segments,
+        app,
+        ("previous_question", &["←"]),
+        ("next_question", &["→"]),
+        "question",
+    );
+    push_paired_question_hint(
+        &mut segments,
+        app,
+        ("previous_option", &["↑", "k"]),
+        ("next_option", &["↓", "j"]),
+        "choose",
+    );
+    segments.push("1–3 direct".to_string());
+    let other_bindings = app
+        .ui()
+        .keymap_binding_labels("question", "other", &["Tab"]);
+    if !other_bindings.is_empty() {
+        segments.push(format!("{} Other", other_bindings.join("/")));
+    }
+    let mut editor_segments = Vec::new();
+    push_question_hint(&mut editor_segments, app, "submit", &["Enter"], "submit");
+    push_question_hint(&mut editor_segments, app, "cancel", &["Esc"], "return");
+    editor_segments.push("Ctrl+W/Alt+Backspace delete word".to_string());
+    editor_segments.push("←/→ cursor".to_string());
+    OperatorQuestionKeyHints {
+        segments,
+        editor_segments,
+        other_binding: other_bindings.first().cloned(),
+    }
+}
+
+fn push_question_hint(
+    hints: &mut Vec<String>,
+    app: &ShellApp,
+    action: &str,
+    defaults: &[&str],
+    label: &str,
+) {
+    let bindings = app.ui().keymap_binding_labels("question", action, defaults);
+    if !bindings.is_empty() {
+        hints.push(format!("{} {label}", bindings.join("/")));
+    }
+}
+
+fn push_paired_question_hint(
+    hints: &mut Vec<String>,
+    app: &ShellApp,
+    previous: (&str, &[&str]),
+    next: (&str, &[&str]),
+    label: &str,
+) {
+    let mut bindings = app
+        .ui()
+        .keymap_binding_labels("question", previous.0, previous.1);
+    bindings.extend(app.ui().keymap_binding_labels("question", next.0, next.1));
+    if !bindings.is_empty() {
+        hints.push(format!("{} {label}", bindings.join("/")));
     }
 }
 
@@ -353,7 +418,7 @@ mod tests {
             panic!("expected inactive activity model");
         };
 
-        assert_eq!(empty.title, "ACTIVITY · idle");
+        assert_eq!(empty.title, "RUN FOCUS · idle");
         assert_eq!(empty.glyph_label, "no active run");
         assert!(empty.explanations.iter().any(|line| line.contains("logs")));
         assert!(empty.ctas.iter().any(|(command, _)| *command == "scan"));
@@ -374,14 +439,109 @@ mod tests {
             panic!("expected active activity model");
         };
 
-        let widths = model.plain_pane_widths(90);
         assert_eq!(
             model.header().summary_title,
-            "ACTIVITY  run r-activity  ·  0/1 done  ·  0 running"
+            "RUN FOCUS  run r-activity  ·  0/1 done  ·  0 running"
         );
         assert_eq!(model.pane_chrome().dag.block_title, "── TASKS ──");
-        assert!(!model.plain_pane_rows(widths, Instant::now()).is_empty());
+        assert!(!model.dag_pane_rows(36, Instant::now()).is_empty());
         assert!(model.footer(80).body.contains("[j/k] select"));
+    }
+
+    #[test]
+    fn question_hints_use_the_runtime_keymap_contract() {
+        let mut config = V2Config::default();
+        config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+            context: "question".to_string(),
+            action: "submit".to_string(),
+            bindings: vec!["ctrl+s".to_string()],
+        }];
+        let app = ShellApp::new(config, None);
+
+        let hints = operator_question_key_hints(&app).segments.join(" · ");
+
+        assert!(hints.contains("ctrl+s submit"), "{hints}");
+        assert!(!hints.contains("Enter submit"), "{hints}");
+        assert!(hints.contains("Esc cancel"), "{hints}");
+    }
+
+    #[test]
+    fn question_other_inline_hint_uses_the_runtime_binding() {
+        let mut config = V2Config::default();
+        config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+            context: "question".to_string(),
+            action: "other".to_string(),
+            bindings: vec!["ctrl+o".to_string()],
+        }];
+        let app = ShellApp::new(config, None);
+
+        let hints = operator_question_key_hints(&app);
+
+        assert_eq!(hints.other_binding.as_deref(), Some("ctrl+o"));
+        assert!(hints.segments.join(" · ").contains("ctrl+o Other"));
+    }
+
+    #[test]
+    fn question_other_editor_hints_only_advertise_editor_actions() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let hints = operator_question_key_hints(&app)
+            .editor_segments
+            .join(" · ");
+
+        assert!(hints.contains("Enter submit"), "{hints}");
+        assert!(hints.contains("Esc return"), "{hints}");
+        assert!(hints.contains("Alt+Backspace delete word"), "{hints}");
+        assert!(!hints.contains("background"), "{hints}");
+        assert!(!hints.contains("direct"), "{hints}");
+    }
+
+    #[test]
+    fn question_owned_footer_suppresses_run_focus_shortcuts() {
+        let session = ActivitySession::new("waiting-run");
+        let footer = activity_footer_model(
+            &session,
+            &ActivityRouteState::default(),
+            80,
+            None,
+            false,
+            crate::InputMode::Navigate,
+        );
+
+        let footer = operator_question_owned_footer(footer, 80);
+
+        assert!(footer.body.contains("question owns keyboard"));
+        assert!(footer.hints.is_empty());
+        assert_eq!(footer.hint_rows, vec![Vec::new()]);
+    }
+
+    #[test]
+    fn run_focus_footer_uses_the_runtime_binding_contract() {
+        let mut config = V2Config::default();
+        config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+            context: "run_focus".to_string(),
+            action: "background".to_string(),
+            bindings: vec!["ctrl+b".to_string()],
+        }];
+        let mut app = ShellApp::new(config, None);
+        app.set_activity(Some(ActivitySession::new("run-remapped")));
+
+        let ActivityViewModel::Active(model) = activity_view_model(&app) else {
+            panic!("expected active activity model");
+        };
+        let footer = model.footer(120);
+        let hints = footer
+            .hint_rows
+            .iter()
+            .flatten()
+            .map(|hint| format!("{} {}", hint.plain_key_text, hint.plain_hint_text))
+            .collect::<Vec<_>>();
+
+        assert!(
+            hints.contains(&"ctrl+b background".to_string()),
+            "{hints:?}"
+        );
+        assert!(!hints.contains(&"b background".to_string()), "{hints:?}");
     }
 
     #[test]
@@ -480,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_deck_shows_selected_artifact_regardless_of_session_tasks() {
+    fn run_focus_output_shows_live_trace_instead_of_persisted_artifacts() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.domain_mut()
             .set_taint_flows(vec![crate::TaintFlowSnapshot {
@@ -495,23 +655,25 @@ mod tests {
                     snippet: None,
                 }],
             }]);
-        // The active session ran only an unrelated task — no taint-iris and no
-        // threat-model — yet the persisted attack path must still pin to the
-        // OUTPUT feed, since the views now persist across phases from app state.
         let mut session = ActivitySession::new("r-x");
         session.tasks.insert(
             "context:build".to_string(),
             DagTaskRow::queued("context:build".into(), "context".into(), Vec::new()),
         );
+        session.apply_step(
+            kuzushi_core::RunTraceStep::new(1, "tool-progress", "mapping live output")
+                .with_module_id("context")
+                .with_verb("build"),
+        );
         app.set_activity(Some(session));
-        app.activity_route_mut()
-            .set_deck_page(crate::ActivityDeckPage::AttackPath);
-
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {
             panic!("expected active activity model");
         };
         let rows = model.feed_pane_rows(120);
-        assert!(rows.iter().any(|row| row.text.contains("ATTACK PATH")));
-        assert!(rows.iter().any(|row| row.text.contains("CWE-89")));
+        assert!(rows
+            .iter()
+            .any(|row| row.text.contains("mapping live output")));
+        assert!(!rows.iter().any(|row| row.text.contains("ATTACK PATH")));
+        assert!(!rows.iter().any(|row| row.text.contains("CWE-89")));
     }
 }

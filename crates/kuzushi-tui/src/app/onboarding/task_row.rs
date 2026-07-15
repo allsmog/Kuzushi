@@ -27,7 +27,7 @@ pub enum ArtifactState {
     Cached,
     Invalid,
     Missing,
-    /// The task is a re-runnable action (Hunt/Confirm/Fix scan, triage, patch)
+    /// The task is a re-runnable action (Scan/Review/Prove/Fix work)
     /// rather than an artifact build — there is nothing to cache or reuse.
     Action,
 }

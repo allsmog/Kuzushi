@@ -100,9 +100,6 @@ impl ShellApp {
             .set_focus(crate::app::WorkbenchPane::Details);
         self.router
             .workbench_mut()
-            .set_center_mode(crate::app::WorkbenchCenterMode::Code);
-        self.router
-            .workbench_mut()
             .scroll_mut()
             .set(crate::app::WorkbenchPane::Details, 0);
         self.log_opened_finding(&finding);
@@ -207,19 +204,21 @@ mod tests {
     }
 
     #[test]
-    fn successful_open_switches_from_hunt_to_confirm_details() {
+    fn successful_open_stays_on_review_with_selected_details() {
         let mut app = ShellApp::new(V2Config::default(), None);
+        let selected = finding();
+        app.set_findings(vec![selected.clone()]);
         app.set_shell_view(ShellView::Workbench);
         app.router
             .workbench_mut()
-            .set_page(Some(crate::app::WorkbenchPage::Coverage));
+            .set_page(Some(crate::app::WorkbenchPage::Review));
         app.router
             .workbench_mut()
             .set_focus(crate::app::WorkbenchPane::Findings);
 
         app.finalize_open_finding_effect(OpenFindingFinalize {
             reference: "F-0001".to_string(),
-            outcome: OpenFindingOutcome::Found(finding()),
+            outcome: OpenFindingOutcome::Found(selected),
         });
 
         assert_eq!(
@@ -232,13 +231,13 @@ mod tests {
         );
         let model = crate::ui_view_models::phase_cockpit_model_for_phase(
             &app,
-            crate::app::WorkflowPhase::Confirm,
+            crate::app::WorkflowPhase::Review,
         );
-        let crate::ui_view_models::PhaseCockpitBody::Confirm(confirm) = model.body else {
-            panic!("open must render the Confirm composition");
+        let crate::ui_view_models::PhaseCockpitBody::Review(review) = model.body else {
+            panic!("open must render the Review composition");
         };
         assert_eq!(
-            confirm.finding.as_ref().map(|detail| detail.title.as_str()),
+            review.finding.as_ref().map(|detail| detail.title.as_str()),
             Some("selected finding")
         );
     }

@@ -75,8 +75,15 @@ fn resolve_cli_autonomy(
     let Some(raw) = autonomy else {
         return Ok(config.autonomy);
     };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "hunt" => eprintln!("warning: --autonomy hunt is deprecated; use scan"),
+        "confirm" => eprintln!("warning: --autonomy confirm is deprecated; use prove"),
+        _ => {}
+    }
     let posture = AutonomyPosture::parse(&raw).ok_or_else(|| {
-        anyhow::anyhow!("--autonomy must be one of recon|hunt|confirm|fix, got {raw:?}")
+        anyhow::anyhow!(
+            "--autonomy must be one of recon|scan|review|prove|fix (hunt and confirm are deprecated aliases), got {raw:?}"
+        )
     })?;
     let cap = config
         .phases
@@ -411,17 +418,17 @@ mod resolve_cli_autonomy_tests {
         config.phases.stop_after = Some(GuidedPhase::Fix);
         assert_eq!(
             resolve_cli_autonomy(&config, Some("hunt".to_string())).unwrap(),
-            AutonomyPosture::Hunt
+            AutonomyPosture::Scan
         );
     }
 
     #[test]
     fn explicit_rung_above_the_cap_is_clamped() {
         let mut config = V2Config::default();
-        config.phases.stop_after = Some(GuidedPhase::Hunt);
+        config.phases.stop_after = Some(GuidedPhase::Scan);
         assert_eq!(
             resolve_cli_autonomy(&config, Some("fix".to_string())).unwrap(),
-            AutonomyPosture::Hunt
+            AutonomyPosture::Scan
         );
     }
 
@@ -429,6 +436,7 @@ mod resolve_cli_autonomy_tests {
     fn unrecognized_rung_is_a_hard_error() {
         let config = V2Config::default();
         assert!(resolve_cli_autonomy(&config, Some("nonsense".to_string())).is_err());
+        assert!(resolve_cli_autonomy(&config, Some("2".to_string())).is_err());
     }
 
     #[test]

@@ -16,7 +16,9 @@ fn recon_tools() -> Vec<ToolDescriptor> {
         nmap_tool().with_policy(external_action_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
         subdomain_tool().with_policy(external_action_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
         http_fingerprint_tool().with_policy(external_action_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
-        recon_import_tool().with_policy(workspace_policy(ToolPhase::Map, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
+        // Importing candidate findings is Scan truth even though the source is
+        // reconnaissance data; the resulting attempt must precede Review.
+        recon_import_tool().with_policy(workspace_policy(ToolPhase::Scan, RuntimeRequirement::Never, FindingStoreRequirement::Optional)),
     ]
 }
 

@@ -45,7 +45,13 @@ impl SastPipelineReports {
     }
 }
 
-pub(in crate::modules) fn run_sast_pipeline_reports(
+pub(in crate::modules) fn prepare_sast_task_selection(input: &Value) -> Result<SastTaskSelection> {
+    let request = parse_sast_tasks(input)?;
+    SastTaskSelection::from_tasks(request.tasks, request.source)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::modules) fn run_selected_sast_pipeline_reports(
     registry: &ModuleRegistry,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
@@ -54,29 +60,47 @@ pub(in crate::modules) fn run_sast_pipeline_reports(
     workspace: &crate::workspace::WorkspaceTarget,
     store: &crate::findings::FindingStore,
     options: &ScanRunOptions,
+    selected: &SastTaskSelection,
 ) -> Result<SastPipelineReports> {
-    let request = parse_sast_tasks(input)?;
-    let selected = SastTaskSelection::from_tasks(request.tasks, request.source)?;
     selected.ensure_non_empty()?;
-    let mut reports = SastPipelineReports {
-        native: selected.run_native(workspace, store, options, ctx)?,
-        agentic: None,
-        carlini: None,
-        taint_iris_next: None,
-        systems_hunt: None,
-        engine_ids: selected.engine_ids.clone(),
-        skipped_engines: selected.skipped_engines.clone(),
-    };
+    let native = selected.run_native(workspace, store, options, ctx)?;
+    let mut reports = initial_sast_pipeline_reports(selected, native);
     fill_agentic_reports(
         registry,
         option_store,
         &mut reports,
-        &selected,
+        selected,
         input,
         ctx,
         runtime,
     )?;
     Ok(reports)
+}
+
+fn initial_sast_pipeline_reports(
+    selected: &SastTaskSelection,
+    native: Option<ScanRun>,
+) -> SastPipelineReports {
+    let engine_outcomes = selected
+        .engine_ids
+        .iter()
+        .map(|engine| {
+            (
+                *engine,
+                crate::run_artifacts::ScanEngineStageOutcome::Complete,
+            )
+        })
+        .collect();
+    SastPipelineReports {
+        native,
+        agentic: None,
+        carlini: None,
+        taint_iris_next: None,
+        systems_hunt: None,
+        engine_ids: selected.engine_ids.clone(),
+        engine_outcomes,
+        skipped_engines: selected.skipped_engines.clone(),
+    }
 }
 
 pub(in crate::modules) struct SastTaskSelection {

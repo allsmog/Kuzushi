@@ -180,6 +180,7 @@ function normalizeOptions(options) {
       ...(type === "path"
         ? { pathSemantics: normalizePathSemantics(option.pathSemantics, option.name) }
         : {}),
+      ...normalizeIntegerBounds(option, type, `option ${option.name}`),
       ...(option.default === undefined ? {} : { default: option.default }),
       choices: stringArrayField(option.choices ?? [], `${option.name}.choices`),
       aliases: stringArrayField(option.aliases ?? [], `${option.name}.aliases`),
@@ -189,6 +190,19 @@ function normalizeOptions(options) {
       ),
     };
   });
+}
+
+function normalizeIntegerBounds(source, type, label) {
+  const bounds = {};
+  for (const field of ["minimum", "maximum"]) {
+    const value = source[field];
+    if (value === undefined) continue;
+    if (type !== "int" || !Number.isSafeInteger(value)) {
+      throw new Error(`${label}.${field} requires an integer option and a safe integer value`);
+    }
+    bounds[field] = value;
+  }
+  return bounds;
 }
 
 function normalizePathSemantics(value, optionName) {
@@ -279,7 +293,7 @@ function optionFromSchemaProperty(name, property, required) {
   const schema = property;
   rejectUnsupportedSchemaKeys(
     schema,
-    new Set(["type", "description", "default", "enum", "items"]),
+    new Set(["type", "description", "default", "enum", "items", "minimum", "maximum"]),
     `inputSchema.properties.${name}`,
   );
   const choices = schemaEnumValues(schema.enum);
@@ -291,6 +305,7 @@ function optionFromSchemaProperty(name, property, required) {
     required,
     advanced: false,
     evasion: false,
+    ...normalizeIntegerBounds(schema, type, `inputSchema.properties.${name}`),
     ...(schema.default === undefined ? {} : { default: schema.default }),
     choices,
     aliases: [],

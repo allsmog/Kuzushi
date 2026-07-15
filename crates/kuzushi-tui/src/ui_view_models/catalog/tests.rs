@@ -122,7 +122,7 @@ fn every_registered_module_has_an_explicit_product_disposition() {
 fn expert_toggle_keeps_default_surface_small_and_reveals_engines() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(PathBuf::from(".")));
-    app.engagement.set_phase(kuzushi_core::WorkflowPhase::Hunt);
+    app.engagement.set_phase(kuzushi_core::WorkflowPhase::Scan);
 
     let default_model = catalog_model(&app);
     assert_eq!(default_model.module_count, 3);

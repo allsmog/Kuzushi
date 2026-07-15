@@ -244,10 +244,38 @@ fn push_bundle_header(out: &mut String, record: &WorkspaceFindingExportRecord) {
     out.push_str(&format!("- **Rule:** `{}`\n", record.rule_id));
     out.push_str(&format!("- **Fingerprint:** `{}`\n", record.fingerprint));
     push_bundle_run_provenance(out, record);
+    push_bundle_remediation(out, record);
     out.push_str(&format!(
         "- **Location:** `{}:{}`\n\n",
         record.location.file, record.location.start_line
     ));
+}
+
+fn push_bundle_remediation(out: &mut String, record: &WorkspaceFindingExportRecord) {
+    let Some(remediation) = record.remediation.as_ref() else {
+        return;
+    };
+    out.push_str(&format!(
+        "- **Remediation:** {} (`{}`)\n",
+        remediation.application_state, remediation.application_id
+    ));
+    out.push_str(&format!(
+        "- **Patch run:** `{}` · diff `{}`\n",
+        remediation.patch_run_id, remediation.diff_hash
+    ));
+    if let Some(outcome) = remediation.reverify_outcome.as_deref() {
+        out.push_str(&format!("- **Re-verification:** {outcome}"));
+        if let Some(run_id) = remediation.reverify_run_id.as_deref() {
+            out.push_str(&format!(" (`{run_id}`)"));
+        }
+        out.push('\n');
+    }
+    if !remediation.touched_paths.is_empty() {
+        out.push_str(&format!(
+            "- **Touched paths:** {}\n",
+            remediation.touched_paths.join(", ")
+        ));
+    }
 }
 
 fn push_bundle_evidence_summary(out: &mut String, record: &WorkspaceFindingExportRecord) {

@@ -25,12 +25,9 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         .or(completion_hint.as_deref())
         .unwrap_or_default();
     let line = Line::from(vec![
-        // Prompt prefix in c-muted per `design/mockups/_shared.jsx::footer`
-        // (`<span className="c-muted">{promptText}</span>`). The Ratatui
-        // shell was using c-label (bold blue) which fought with the cursor
-        // block for attention; the mockup intentionally lets the cursor be
-        // the focal point and keeps the static prefix dim.
-        Span::styled(segments.prompt, theme::muted()),
+        // Workbench prefixes carry the selected phase accent; other routes
+        // retain the quiet shell prefix so the cursor stays the focal point.
+        Span::styled(segments.prompt, prompt_prefix_style(prompt.workbench_mode)),
         Span::raw(segments.before_cursor),
         Span::styled(segments.cursor_text, theme::cursor_block()),
         Span::raw(segments.after_cursor),
@@ -44,9 +41,7 @@ fn inactive_prompt_line(app: &ShellApp) -> Option<Line<'static>> {
         return Some(disabled_prompt_line(text));
     }
     if app.input_mode() == crate::InputMode::Navigate {
-        return Some(disabled_prompt_line(
-            "NAVIGATION MODE — view keys active · Esc returns to prompt",
-        ));
+        return Some(navigation_prompt_line(app));
     }
     if matches!(app.shell_view(), crate::ShellView::FilePicker) {
         return Some(disabled_prompt_line(
@@ -55,6 +50,33 @@ fn inactive_prompt_line(app: &ShellApp) -> Option<Line<'static>> {
     }
     (app.is_picker_view() && !app.picker_prompt_focused())
         .then(|| disabled_prompt_line("command prompt paused — : to type a command"))
+}
+
+fn prompt_prefix_style(page: Option<crate::WorkbenchPage>) -> ratatui::style::Style {
+    match page {
+        Some(crate::WorkbenchPage::Map) => theme::mode_map(),
+        Some(crate::WorkbenchPage::Scan) => theme::mode_scan(),
+        Some(crate::WorkbenchPage::Review) => theme::mode_review(),
+        Some(crate::WorkbenchPage::Prove) => theme::mode_prove(),
+        Some(crate::WorkbenchPage::Fix) => theme::mode_fix(),
+        None => theme::muted(),
+    }
+}
+
+fn navigation_prompt_line(app: &ShellApp) -> Line<'static> {
+    let Some(page) = crate::ui_view_models::workbench_prompt_mode(app) else {
+        return disabled_prompt_line("NAVIGATION MODE — view keys active · Esc returns to prompt");
+    };
+    Line::from(vec![
+        Span::styled(
+            crate::ui_view_models::workbench_prompt_token(page),
+            prompt_prefix_style(Some(page)),
+        ),
+        Span::styled(
+            crate::ui_view_models::navigation_prompt_text(app),
+            theme::disabled(),
+        ),
+    ])
 }
 
 fn captured_overlay_prompt(view: crate::ShellView) -> Option<&'static str> {

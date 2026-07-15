@@ -33,8 +33,6 @@ struct JobSlot {
     /// worker will be quarantined after the grace deadline.
     unresponsive_deadline: Option<Instant>,
     quarantined: bool,
-    #[cfg(test)]
-    cancel_requested: bool,
 }
 
 #[derive(Debug)]
@@ -126,8 +124,6 @@ impl JobHub {
                 label: label.clone(),
                 unresponsive_deadline: None,
                 quarantined: false,
-                #[cfg(test)]
-                cancel_requested: false,
             },
         );
         JobTicket::new(
@@ -153,11 +149,10 @@ impl JobHub {
         self.slots.get(&kind).map(|slot| slot.label.as_str())
     }
 
-    #[cfg(test)]
     pub(crate) fn cancel_requested(&self, kind: JobKind) -> bool {
         self.slots
             .get(&kind)
-            .is_some_and(|slot| slot.cancel_requested)
+            .is_some_and(|slot| slot.cancel.is_cancelled())
     }
 
     #[cfg(test)]
@@ -173,10 +168,6 @@ impl JobHub {
         let Some(slot) = self.slots.get_mut(&kind) else {
             return false;
         };
-        #[cfg(test)]
-        {
-            slot.cancel_requested = true;
-        }
         slot.cancel.cancel();
         true
     }

@@ -44,7 +44,7 @@ fn vendor_assessment_tools() -> Vec<ToolDescriptor> {
             vendor_assessment_assess_options(),
         )
         .with_policy(workspace_policy(
-            ToolPhase::Confirm,
+            ToolPhase::Scan,
             RuntimeRequirement::Always,
             FindingStoreRequirement::Optional,
         )),

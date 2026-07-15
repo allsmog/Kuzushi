@@ -97,6 +97,7 @@ fn patch_attempt(stable_fp: &str) -> PatchAttemptWrite {
         provider_spend_unresolved: false,
         validator_log: Some("tests passed".to_string()),
         history_json: "[]".to_string(),
+        provenance: None,
         actor: "patch-runner".to_string(),
     }
 }

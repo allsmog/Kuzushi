@@ -122,3 +122,16 @@ pub(crate) fn preferred_model_choice_index(config: &V2Config) -> usize {
         auth_ready_for_provider("anthropic"),
     )
 }
+
+/// Cursor position inside the *visible* onboarding list for the preferred
+/// model. The preferred selector above intentionally returns an index into
+/// `MODEL_CHOICES`; the picker renders a reordered subset, so feeding that
+/// absolute index directly to its cursor can highlight one row while Enter
+/// selects another.
+pub(crate) fn preferred_visible_model_choice_cursor(config: &V2Config) -> usize {
+    let preferred = preferred_model_choice_index(config);
+    visible_model_choice_indexes(config.model.as_deref())
+        .iter()
+        .position(|index| *index == preferred)
+        .unwrap_or(0)
+}

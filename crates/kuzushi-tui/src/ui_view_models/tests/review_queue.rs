@@ -216,7 +216,7 @@ fn repeated_j_crosses_workflow_group_boundary_without_identity_drift() {
     app.set_shell_view(crate::ShellView::Workbench);
     app.router
         .workbench_mut()
-        .set_page(Some(crate::app::WorkbenchPage::Coverage));
+        .set_page(Some(crate::app::WorkbenchPage::Review));
     app.router
         .workbench_mut()
         .set_focus(crate::WorkbenchPane::Findings);
@@ -349,23 +349,30 @@ fn assert_projected_identity_across_phase_models(app: &ShellApp, selected: &Find
         selected.fingerprint
     );
 
-    let PhaseCockpitBody::Hunt(hunt) = phase_cockpit_model_for_phase(app, WorkflowPhase::Hunt).body
+    let PhaseCockpitBody::Review(review) =
+        phase_cockpit_model_for_phase(app, WorkflowPhase::Review).body
     else {
-        panic!("expected Hunt cockpit");
+        panic!("expected Review cockpit");
     };
-    assert_eq!(hunt.heatmap.selected_module.as_deref(), Some("auth"));
-    assert_eq!(hunt.review.selected().unwrap().alias, alias);
+    assert_eq!(review.review.selected().unwrap().alias, alias);
+    assert_eq!(
+        review
+            .finding
+            .as_ref()
+            .map(|finding| finding.fingerprint.as_str()),
+        Some(selected.fingerprint.as_str())
+    );
 
-    let PhaseCockpitBody::Confirm(confirm) =
-        phase_cockpit_model_for_phase(app, WorkflowPhase::Confirm).body
+    let PhaseCockpitBody::Prove(prove) =
+        phase_cockpit_model_for_phase(app, WorkflowPhase::Prove).body
     else {
-        panic!("expected Confirm cockpit");
+        panic!("expected Prove cockpit");
     };
-    assert_eq!(confirm.finding.unwrap().fingerprint, selected.fingerprint);
+    assert_eq!(prove.finding.unwrap().fingerprint, selected.fingerprint);
 }
 
 fn assert_projected_identity_across_actions(app: &mut ShellApp, selected: &Finding, alias: &str) {
-    prepare_hunt_navigation(app);
+    prepare_prove_navigation(app);
     let verify = press_without_running_effects(app, KeyCode::Char('v'));
     assert!(verify.effects.is_empty());
     assert!(app.input().starts_with("run verify:exploit {"));
@@ -373,10 +380,10 @@ fn assert_projected_identity_across_actions(app: &mut ShellApp, selected: &Findi
     assert_eq!(app.input_mode(), InputMode::Prompt);
 
     app.set_input("");
-    prepare_hunt_navigation(app);
+    prepare_prove_navigation(app);
     press_without_running_effects(app, KeyCode::Char('x'));
     assert_eq!(app.input(), format!("suppress {alias} --reason "));
-    prepare_hunt_navigation(app);
+    prepare_prove_navigation(app);
     press_without_running_effects(app, KeyCode::Enter);
     assert_eq!(
         app.selected_finding().as_ref().unwrap().fingerprint,
@@ -395,6 +402,8 @@ fn assert_projected_identity_across_actions(app: &mut ShellApp, selected: &Findi
 
     app.engagement.set_pending_patch(PendingPatch {
         alias: alias.to_string(),
+        patch_run_id: "patch-fixture".to_string(),
+        status: kuzushi_core::PatchStatus::Sound,
         rationale: "parameterize query".to_string(),
         side_effect: None,
         diff: "- raw(query)\n+ bind(query)".to_string(),
@@ -410,11 +419,11 @@ fn assert_projected_identity_across_actions(app: &mut ShellApp, selected: &Findi
     assert_eq!(fix.patch.unwrap().alias, alias);
 }
 
-fn prepare_hunt_navigation(app: &mut ShellApp) {
+fn prepare_prove_navigation(app: &mut ShellApp) {
     app.set_shell_view(crate::ShellView::Workbench);
     app.router
         .workbench_mut()
-        .set_page(Some(WorkbenchPage::Review));
+        .set_page(Some(WorkbenchPage::Prove));
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);

@@ -27,7 +27,7 @@ pub use export_projection::{
 pub use export_projection_model::{
     WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary, WorkspaceFindingExportLocation,
     WorkspaceFindingExportRecord, WorkspaceFindingProvenanceSummary, WorkspaceRunExportContext,
-    WorkspaceVerificationExportSummary,
+    WorkspaceRemediationExportSummary, WorkspaceVerificationExportSummary,
 };
 pub use export_review_context::WorkspaceFindingReviewContext;
 pub use export_workspace_findings::{

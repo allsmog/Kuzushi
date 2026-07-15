@@ -24,6 +24,15 @@ pub const T_WARN: Color = Color::Rgb(0xe2, 0xc1, 0x4a);
 pub const T_DANGER: Color = Color::Rgb(0xe2, 0x5c, 0x5c);
 pub const TERM_BG: Color = Color::Rgb(0x0b, 0x0d, 0x10);
 
+// Interaction-mode accents. These colors are reserved for mode identity
+// chrome (composer token and selected-view label), never finding severity or
+// run outcome. The glyph + uppercase label remain the no-color contract.
+pub const T_MODE_MAP: Color = Color::Rgb(0x3d, 0xc7, 0xb5);
+pub const T_MODE_SCAN: Color = Color::Rgb(0xe7, 0xb9, 0x4b);
+pub const T_MODE_REVIEW: Color = Color::Rgb(0x66, 0xa9, 0xff);
+pub const T_MODE_PROVE: Color = Color::Rgb(0xb5, 0x7c, 0xff);
+pub const T_MODE_FIX: Color = Color::Rgb(0xee, 0x72, 0xb7);
+
 pub const SEV_CRITICAL: Color = T_DANGER;
 pub const SEV_HIGH: Color = Color::Rgb(0xff, 0x8b, 0x8b);
 pub const SEV_MEDIUM: Color = T_WARN;
@@ -114,6 +123,37 @@ pub fn accent() -> Style {
         return fg(Style::default(), T_HEADING, config).add_modifier(Modifier::BOLD);
     }
     fg(Style::default(), T_ACCENT, config).add_modifier(Modifier::BOLD)
+}
+
+pub fn mode_map() -> Style {
+    mode_style(T_MODE_MAP)
+}
+
+pub fn mode_scan() -> Style {
+    mode_style(T_MODE_SCAN)
+}
+
+pub fn mode_review() -> Style {
+    mode_style(T_MODE_REVIEW)
+}
+
+pub fn mode_prove() -> Style {
+    mode_style(T_MODE_PROVE)
+}
+
+pub fn mode_fix() -> Style {
+    mode_style(T_MODE_FIX)
+}
+
+fn mode_style(color: Color) -> Style {
+    let config = active_theme();
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::BOLD);
+    }
+    if config.high_contrast {
+        return fg(Style::default(), T_HEADING, config).add_modifier(Modifier::BOLD);
+    }
+    fg(Style::default(), color, config).add_modifier(Modifier::BOLD)
 }
 
 pub fn success() -> Style {
@@ -306,6 +346,11 @@ fn ansi256_color(color: Color) -> Color {
         T_SUCCESS => Color::Indexed(71),
         T_WARN => Color::Indexed(179),
         T_DANGER => Color::Indexed(167),
+        T_MODE_MAP => Color::Indexed(44),
+        T_MODE_SCAN => Color::Indexed(179),
+        T_MODE_REVIEW => Color::Indexed(75),
+        T_MODE_PROVE => Color::Indexed(141),
+        T_MODE_FIX => Color::Indexed(205),
         TERM_BG => Color::Indexed(232),
         SEV_HIGH => Color::Indexed(210),
         SEV_LOW => Color::Indexed(109),
@@ -322,6 +367,10 @@ fn ansi16_color(color: Color) -> Color {
         T_SUCCESS => Color::Green,
         T_WARN => Color::Yellow,
         T_DANGER | SEV_HIGH => Color::Red,
+        T_MODE_MAP => Color::Cyan,
+        T_MODE_SCAN => Color::Yellow,
+        T_MODE_REVIEW => Color::Blue,
+        T_MODE_PROVE | T_MODE_FIX => Color::Magenta,
         TERM_BG => Color::Black,
         _ => color,
     }
@@ -330,6 +379,49 @@ fn ansi16_color(color: Color) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workbench_modes_have_distinct_truecolor_chrome_accents() {
+        let _theme = scoped_theme_for_test(ThemeConfig::default());
+        let colors = [
+            mode_map().fg,
+            mode_scan().fg,
+            mode_review().fg,
+            mode_prove().fg,
+            mode_fix().fg,
+        ];
+
+        assert_eq!(
+            colors,
+            [
+                Some(T_MODE_MAP),
+                Some(T_MODE_SCAN),
+                Some(T_MODE_REVIEW),
+                Some(T_MODE_PROVE),
+                Some(T_MODE_FIX),
+            ]
+        );
+    }
+
+    #[test]
+    fn workbench_mode_chrome_retains_weight_without_color() {
+        let _theme = scoped_theme_for_test(ThemeConfig {
+            no_color: true,
+            color_depth: ColorDepth::None,
+            ..ThemeConfig::default()
+        });
+
+        for style in [
+            mode_map(),
+            mode_scan(),
+            mode_review(),
+            mode_prove(),
+            mode_fix(),
+        ] {
+            assert_eq!(style.fg, None);
+            assert!(style.add_modifier.contains(Modifier::BOLD));
+        }
+    }
 
     #[test]
     fn high_contrast_severity_tones_do_not_use_dim_default_palette() {

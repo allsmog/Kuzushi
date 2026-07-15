@@ -1,7 +1,7 @@
-//! Test-only contract for the four PDF-native phase compositions.
+//! Test-only contract for the five Cockpit Spine phase compositions.
 //!
-//! The 114 Atlas states remain owned by the parity suite. This module owns
-//! the separate 4 phases x 4 sizes x 4 terminal profiles PDF contract.
+//! This module owns the terminal-profile matrix for the canonical durable
+//! Map, Scan, Review, Prove, and Fix screens.
 
 use super::*;
 use crate::theme;
@@ -53,57 +53,64 @@ fn buffer_row_text(buffer: &Buffer, y: u16) -> String {
 
 #[test]
 fn deterministic_reference_fixture_contains_every_required_real_projection() {
-    let fixture = PhaseReferenceFixture::new(WorkbenchPage::Review, 120, 36);
+    let fixture = PhaseReferenceFixture::new(WorkbenchPage::Prove, 120, 36);
     let map = phase_cockpit_model_for_phase(&fixture.app, kuzushi_core::WorkflowPhase::Map);
-    let hunt = phase_cockpit_model_for_phase(&fixture.app, kuzushi_core::WorkflowPhase::Hunt);
-    let confirm = phase_cockpit_model_for_phase(&fixture.app, kuzushi_core::WorkflowPhase::Confirm);
+    let scan = phase_cockpit_model_for_phase(&fixture.app, kuzushi_core::WorkflowPhase::Scan);
+    let review = phase_cockpit_model_for_phase(&fixture.app, kuzushi_core::WorkflowPhase::Review);
+    let prove = phase_cockpit_model_for_phase(&fixture.app, kuzushi_core::WorkflowPhase::Prove);
     let fix = phase_cockpit_model_for_phase(&fixture.app, kuzushi_core::WorkflowPhase::Fix);
 
     let PhaseCockpitBody::Map(map) = map.body else {
         panic!("map body")
     };
-    let PhaseCockpitBody::Hunt(hunt) = hunt.body else {
-        panic!("hunt body")
+    let PhaseCockpitBody::Scan(scan) = scan.body else {
+        panic!("scan body")
     };
-    let PhaseCockpitBody::Confirm(confirm) = confirm.body else {
-        panic!("confirm body")
+    let PhaseCockpitBody::Review(review) = review.body else {
+        panic!("review body")
+    };
+    let PhaseCockpitBody::Prove(prove) = prove.body else {
+        panic!("prove body")
     };
     let PhaseCockpitBody::Fix(fix) = fix.body else {
         panic!("fix body")
     };
-    assert_eq!(map.console.len(), 10);
-    assert_eq!(map.task_counts.total, 2);
-    assert_eq!(map.artifact_metrics.len(), 4);
-    assert_eq!(hunt.review.total_count, 6);
-    assert_eq!(heatmap_total(&hunt.heatmap), 6);
-    assert!(confirm.attack_path.empty_hint.is_none());
-    assert!(confirm.proof.is_some_and(|proof| proof.has_replay()));
+    assert!(map.context.snapshot_present);
+    assert!(map.project.rows.len() >= 4);
+    assert!(map.attack_surface.is_some());
+    assert!(map.dfd.empty_hint.is_none());
+    assert_eq!(
+        scan.attempt.as_ref().map(|attempt| attempt.run_id.as_str()),
+        Some("scan-phase-run")
+    );
+    assert_eq!(review.review.total_count, 6);
+    assert!(review.finding.is_some());
+    assert!(prove.attack_path.empty_hint.is_none());
+    assert!(prove.proof.is_some_and(|proof| proof.has_replay()));
     assert!(fix.attack_tree.empty_hint.is_none());
     assert!(fix.dfd.empty_hint.is_none());
     assert!(fix.patch.is_some());
     assert_eq!(fix.report.counts.total_findings, 6);
 }
 
-fn heatmap_total(heatmap: &crate::ui_view_models::FindingsHeatmap) -> u32 {
-    heatmap.rows.iter().flat_map(|row| row.counts).sum()
-}
-
 #[test]
 fn reference_header_matches_hydrated_journey_reality() {
-    let fixture = PhaseReferenceFixture::new(WorkbenchPage::Terrain, 120, 36);
+    let fixture = PhaseReferenceFixture::new(WorkbenchPage::Map, 120, 36);
     let journey = crate::ui_view_models::journey_model(&fixture.app).expect("fixture journey");
     let cockpit = phase_cockpit_model_for_phase(&fixture.app, kuzushi_core::WorkflowPhase::Map);
 
     assert!(journey.progress.map_artifacts_built);
     assert_eq!(journey.progress.finding_total, 6);
-    assert_eq!(journey.current, kuzushi_core::WorkflowPhase::Confirm);
-    assert!(journey.next_action.contains("6 of 6 findings need review"));
+    assert_eq!(journey.current, kuzushi_core::WorkflowPhase::Review);
+    assert!(journey
+        .next_action
+        .contains("record terminal dispositions for 6 of 6 remaining candidates"));
     assert_eq!(cockpit.header.next_action, journey.next_action);
     assert_eq!(cockpit.header.phase_rail, journey.phases);
 }
 
 #[test]
-fn phase_composition_contract_covers_64_phase_size_profile_buffers() {
+fn phase_composition_contract_covers_120_phase_size_profile_buffers() {
     let mut count = 0;
     for contract in CONTRACTS {
         for (width, height) in SIZES {
@@ -114,11 +121,11 @@ fn phase_composition_contract_covers_64_phase_size_profile_buffers() {
             }
         }
     }
-    assert_eq!(count, 64);
+    assert_eq!(count, 120);
 }
 
 #[test]
-fn plain_phase_contract_covers_all_four_phases_at_all_four_widths() {
+fn plain_phase_contract_covers_all_five_phases_at_all_six_widths() {
     let mut count = 0;
     for contract in CONTRACTS {
         for (width, height) in SIZES {
@@ -130,11 +137,11 @@ fn plain_phase_contract_covers_all_four_phases_at_all_four_widths() {
             count += 1;
         }
     }
-    assert_eq!(count, 16);
+    assert_eq!(count, 30);
 }
 
 #[test]
-fn truecolor_phase_reference_has_16_canonical_buffer_snapshots() {
+fn truecolor_phase_reference_has_30_canonical_buffer_snapshots() {
     let mut count = 0;
     for contract in CONTRACTS {
         for (width, height) in SIZES {
@@ -143,5 +150,5 @@ fn truecolor_phase_reference_has_16_canonical_buffer_snapshots() {
             count += 1;
         }
     }
-    assert_eq!(count, 16);
+    assert_eq!(count, 30);
 }

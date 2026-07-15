@@ -57,7 +57,7 @@ pub(crate) const TOOL_INPUT_ARTIFACTS: [CanonicalRunArtifactSpec; 1] = [Canonica
     kind: "json",
 }];
 
-pub(crate) const SCAN_PIPELINE_ARTIFACTS: [CanonicalRunArtifactSpec; 4] = [
+pub(crate) const SCAN_PIPELINE_ARTIFACTS: [CanonicalRunArtifactSpec; 5] = [
     CanonicalRunArtifactSpec {
         leaf: "scan-input.json",
         label: "scan input",
@@ -76,6 +76,11 @@ pub(crate) const SCAN_PIPELINE_ARTIFACTS: [CanonicalRunArtifactSpec; 4] = [
     CanonicalRunArtifactSpec {
         leaf: "patch.jsonl",
         label: "scan patch events",
+        kind: "jsonl",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "phase-stages.jsonl",
+        label: "scan phase stage receipts",
         kind: "jsonl",
     },
 ];

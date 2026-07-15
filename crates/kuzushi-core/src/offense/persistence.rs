@@ -29,10 +29,9 @@ pub fn persist_chain_finding(
     persist_chain_finding_for_run(store, workspace_root, target_host, backend, outcome, None)
 }
 
-/// Persist a chain while linking its empirical proof to the outer replayable
-/// tool run. The finding observation keeps its own discovery run id; the two
-/// identities must not be conflated because only the outer run owns
-/// `.kuzushi/v3/runs/<id>/trace.jsonl`.
+/// Persist a chain while linking its finding and empirical proof to the outer
+/// replayable tool run. Direct library callers without an outer run retain a
+/// generated discovery identity.
 pub fn persist_chain_finding_for_run(
     store: &FindingStore,
     workspace_root: &Path,
@@ -45,7 +44,9 @@ pub fn persist_chain_finding_for_run(
     if landed.is_empty() {
         return Ok(None);
     }
-    let run_id = Uuid::new_v4().to_string();
+    let run_id = verification_run_id
+        .map(str::to_string)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
     store
         .with_run_lifecycle(&run_id, workspace_root, || {
             let finding = build_chain_finding(target_host, outcome, &landed);
@@ -204,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_chain_links_proof_to_replayable_outer_run() {
+    fn completed_chain_uses_replayable_outer_run_as_discovery_identity() {
         let store = FindingStore::open_in_memory().unwrap();
         let id = persist_chain_finding_for_run(
             &store,
@@ -228,8 +229,9 @@ mod tests {
             verification.verification_run_id.as_deref(),
             Some("tool-replayable")
         );
+        assert_eq!(finding.scan_id.as_deref(), Some("tool-replayable"));
         assert_eq!(verification.verified_scan_id, finding.scan_id);
-        assert_ne!(
+        assert_eq!(
             verification.verification_run_id,
             verification.verified_scan_id
         );

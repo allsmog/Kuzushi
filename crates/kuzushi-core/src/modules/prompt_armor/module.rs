@@ -1,17 +1,22 @@
 use super::*;
 
 const ACTIVE_POLICY: ToolPolicy = target_write_policy(
-    ToolPhase::Hunt,
+    ToolPhase::Scan,
     RuntimeRequirement::Always,
     FindingStoreRequirement::Required,
 );
-const ARTIFACT_POLICY: ToolPolicy = target_write_policy(
-    ToolPhase::Hunt,
+const REPORT_POLICY: ToolPolicy = target_write_policy(
+    ToolPhase::Fix,
+    RuntimeRequirement::Never,
+    FindingStoreRequirement::Optional,
+);
+const CONFIG_POLICY: ToolPolicy = target_write_policy(
+    ToolPhase::Scan,
     RuntimeRequirement::Never,
     FindingStoreRequirement::Optional,
 );
 const DIFF_POLICY: ToolPolicy = workspace_policy(
-    ToolPhase::Hunt,
+    ToolPhase::Scan,
     RuntimeRequirement::Never,
     FindingStoreRequirement::Optional,
 );
@@ -29,20 +34,18 @@ pub(in crate::modules) fn module() -> BuiltinModule {
 
 fn prompt_armor_tools() -> Vec<ToolDescriptor> {
     vec![
-            prompt_armor_scan_tool().with_policy(ACTIVE_POLICY),
-            tool_with_options(
-                "prompt-armor:analyze",
-                "Statically analyze prompt-injection surface.",
-                vec![target_option(), plugin_root_option(), model_option()],
-            )
-            .with_policy(ACTIVE_POLICY),
-            prompt_armor_attack_tool().with_policy(ACTIVE_POLICY),
-            prompt_armor_diff_tool().with_policy(DIFF_POLICY),
-            prompt_armor_report_tool()
-            .with_policy(ARTIFACT_POLICY),
-            prompt_armor_config_tool()
-            .with_policy(ARTIFACT_POLICY),
-        ]
+        prompt_armor_scan_tool().with_policy(ACTIVE_POLICY),
+        tool_with_options(
+            "prompt-armor:analyze",
+            "Statically analyze prompt-injection surface.",
+            vec![target_option(), plugin_root_option(), model_option()],
+        )
+        .with_policy(ACTIVE_POLICY),
+        prompt_armor_attack_tool().with_policy(ACTIVE_POLICY),
+        prompt_armor_diff_tool().with_policy(DIFF_POLICY),
+        prompt_armor_report_tool().with_policy(REPORT_POLICY),
+        prompt_armor_config_tool().with_policy(CONFIG_POLICY),
+    ]
 }
 
 fn prompt_armor_report_tool() -> ToolDescriptor {
@@ -91,9 +94,18 @@ fn prompt_armor_active_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
         plugin_root_option(),
-        opt("authorized", OptionType::Bool, "Confirm authorization to test.")
-            .default(json!(false)),
-        opt("payload", OptionType::String, "Single attack payload to test.").evasion(),
+        opt(
+            "authorized",
+            OptionType::Bool,
+            "Confirm authorization to test.",
+        )
+        .default(json!(false)),
+        opt(
+            "payload",
+            OptionType::String,
+            "Single attack payload to test.",
+        )
+        .evasion(),
         model_option(),
     ]
 }
@@ -107,10 +119,14 @@ fn prompt_armor_diff_tool() -> ToolDescriptor {
                 .aliases(&["run_a"])
                 .workspace_read()
                 .required(),
-            opt("runB", OptionType::Path, "Comparison prompt-armor run path.")
-                .aliases(&["run_b"])
-                .workspace_read()
-                .required(),
+            opt(
+                "runB",
+                OptionType::Path,
+                "Comparison prompt-armor run path.",
+            )
+            .aliases(&["run_b"])
+            .workspace_read()
+            .required(),
         ],
     )
 }

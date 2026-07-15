@@ -190,37 +190,6 @@ impl ShellApp {
         self.mark_tool_activity_complete(tool_name);
         self.record_tool_duration_and_notify(tool_name, abort_requested);
         self.auto_open_viz_for_tool(tool_name);
-        self.auto_open_recon_output(tool_name);
-    }
-
-    fn auto_open_recon_output(&mut self, tool_name: &str) {
-        if !tool_name.starts_with("recon:") || self.recon_continuation_pending(tool_name) {
-            return;
-        }
-        let has_evidence = self
-            .domain()
-            .recon_snapshot()
-            .is_some_and(ReconSnapshot::has_evidence);
-        if !has_evidence || self.activity().is_none() || !self.ui().auto_open_activity() {
-            return;
-        }
-        if !self.router.activity().can_auto_switch_deck() {
-            self.log(
-                "recon",
-                "recon evidence ready — output page unchanged; cycle to the recon view",
-            );
-            return;
-        }
-        self.router
-            .activity_mut()
-            .set_deck_page(ActivityDeckPage::Recon);
-        self.log("recon", "recon evidence ready — showing in Activity output");
-    }
-
-    fn recon_continuation_pending(&self, tool_name: &str) -> bool {
-        self.engagement.has_pending_chain()
-            || self.engagement.running_tool_is(tool_name)
-            || !self.engagement.planning_queues_empty()
     }
 
     fn finished_tool_continuation(
@@ -263,9 +232,18 @@ impl ShellApp {
     /// early because its binary isn't installed). Guarded so tools that already
     /// reported done don't get a duplicate feed line.
     fn mark_tool_activity_complete(&mut self, tool_name: &str) {
+        let planning_continues =
+            self.engagement.running_tool_is(tool_name) && !self.engagement.planning_queues_empty();
+        let same_task_continues = self
+            .engagement
+            .planning_tool_pending_after_current(tool_name);
         if let Some(session) = self.activity_mut() {
-            session.mark_task_done(tool_name);
-            session.mark_incomplete_tasks_after_success(ActivityTerminalContext::Run);
+            if !same_task_continues {
+                session.mark_task_done(tool_name);
+            }
+            if !planning_continues {
+                session.mark_incomplete_tasks_after_success(ActivityTerminalContext::Run);
+            }
         }
     }
 
@@ -541,6 +519,7 @@ impl ShellApp {
         }
         self.invalidate_view_hydration();
         let mut cache = self.workbench_cache().borrow_mut();
+        cache.invalidate_finding_patch_truth(None);
         cache.invalidate_run_summaries();
         cache.invalidate_workspace_files();
     }
@@ -864,6 +843,50 @@ mod tests {
     }
 
     #[test]
+    fn completed_plan_step_keeps_remaining_checklist_rows_queued() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.engagement
+            .queue_plan(vec![crate::app::PlanningTaskId::MapEntryPoints]);
+        app.engagement.set_running_tool("context:build".to_string());
+        let mut session = ActivitySession::new("run-context");
+        session.seed_task_sequence(app.engagement.planning_tool_sequence());
+        app.set_activity(Some(session));
+
+        app.mark_tool_activity_complete("context:build");
+
+        let session = app.activity().expect("plan activity");
+        assert_eq!(session.tasks["context:build"].state, DagTaskState::Done);
+        assert_eq!(
+            session.tasks["entry-points:extract"].state,
+            DagTaskState::Queued
+        );
+    }
+
+    #[test]
+    fn batched_plan_row_stays_active_until_its_final_invocation() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let repeated = crate::app::PlanningTaskId::VerifyFindings;
+        app.engagement.replace_expanded_steps(vec![PlanningRunStep {
+            task: repeated,
+            tool_name: "verify:finding".to_string(),
+            input: serde_json::json!({"fingerprint": "second"}),
+        }]);
+        app.engagement
+            .set_running_tool("verify:finding".to_string());
+        let mut session = ActivitySession::new("verify-first");
+        session.seed_task_sequence(app.engagement.planning_tool_sequence());
+        session.tasks.get_mut("verify:finding").unwrap().state = DagTaskState::Active;
+        app.set_activity(Some(session));
+
+        app.mark_tool_activity_complete("verify:finding");
+
+        assert_eq!(
+            app.activity().unwrap().tasks["verify:finding"].state,
+            DagTaskState::Active
+        );
+    }
+
+    #[test]
     fn failed_agentic_tool_credits_trace_streamed_cost_to_meter() {
         let mut app = app_with_tool_session("triage:run", "run-f4");
         stream_llm_cost_steps(&mut app, "triage", "run", &[0.03, 0.012]);
@@ -1031,94 +1054,5 @@ mod tests {
             .find(|row| row.run_id == run_id)
             .expect("canceled run remains visible in Jobs");
         assert_eq!(row.status, JobRunStatus::Canceled);
-    }
-
-    #[test]
-    fn standalone_recon_completion_selects_structured_activity_output() {
-        let mut app = app_with_tool_session("recon:import", "run-recon");
-        app.set_shell_view(ShellView::Activity);
-
-        app.apply_tool_event(ToolEvent::Finished {
-            tool_name: "recon:import".to_string(),
-            result: recon_result(true),
-        });
-
-        assert_eq!(app.router.activity().deck_page, ActivityDeckPage::Recon);
-        assert!(!app.router.activity().deck_page_pinned_by_user);
-        assert!(app.log_lines().iter().any(|line| {
-            line.prefix == "recon" && line.body.contains("showing in Activity output")
-        }));
-    }
-
-    #[test]
-    fn empty_recon_result_does_not_replace_the_output_page() {
-        let mut app = app_with_tool_session("recon:import", "run-recon-empty");
-        app.set_shell_view(ShellView::Activity);
-
-        app.apply_tool_event(ToolEvent::Finished {
-            tool_name: "recon:import".to_string(),
-            result: recon_result(false),
-        });
-
-        assert_eq!(app.router.activity().deck_page, ActivityDeckPage::Findings);
-    }
-
-    #[test]
-    fn recon_completion_respects_pinned_output_and_planning_continuations() {
-        let mut pinned = app_with_tool_session("recon:import", "run-recon-pinned");
-        pinned
-            .router
-            .activity_mut()
-            .set_deck_page_by_user(ActivityDeckPage::Dfd);
-        pinned.apply_tool_event(ToolEvent::Finished {
-            tool_name: "recon:import".to_string(),
-            result: recon_result(true),
-        });
-        assert_eq!(pinned.router.activity().deck_page, ActivityDeckPage::Dfd);
-
-        let mut planned = app_with_tool_session("recon:import", "run-recon-planned");
-        planned
-            .engagement
-            .queue_plan(vec![crate::app::PlanningTaskId::GatherRepoContext]);
-        planned.apply_tool_event(ToolEvent::Finished {
-            tool_name: "recon:import".to_string(),
-            result: recon_result(true),
-        });
-        assert_eq!(
-            planned.router.activity().deck_page,
-            ActivityDeckPage::Findings
-        );
-    }
-
-    fn recon_result(with_evidence: bool) -> serde_json::Value {
-        let (hosts, services, notes) = if with_evidence {
-            (
-                serde_json::json!([{
-                    "id": "h1", "workspaceId": "ws", "address": "192.0.2.10",
-                    "hostname": "acme.example", "state": "alive"
-                }]),
-                serde_json::json!([{
-                    "id": "s1", "hostId": "h1", "port": 443, "proto": "tcp",
-                    "name": "https", "state": "open"
-                }]),
-                serde_json::json!([{
-                    "id": "n1", "workspaceId": "ws", "hostId": "h1",
-                    "serviceId": "s1", "ntype": "httpx", "data": { "status-code": 200 }
-                }]),
-            )
-        } else {
-            (
-                serde_json::json!([]),
-                serde_json::json!([]),
-                serde_json::json!([]),
-            )
-        };
-        serde_json::json!({
-            "ok": true,
-            "data": {
-                "tool": "recon:import", "target": "httpx.json",
-                "hosts": hosts, "services": services, "notes": notes
-            }
-        })
     }
 }

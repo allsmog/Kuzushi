@@ -2075,9 +2075,11 @@ dependencies = [
  "kuzushi-core",
  "kuzushi-openai",
  "ratatui",
+ "serde",
  "serde_json",
  "tempfile",
  "unicode-width",
+ "uuid",
 ]
 
 [[package]]

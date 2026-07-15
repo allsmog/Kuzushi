@@ -128,7 +128,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-        assert_eq!(app.shell_view(), ShellView::ModelPicker);
+        assert_eq!(app.shell_view(), ShellView::Setup);
 
         let report = execute_plain_scripted_session(&mut app, &["findings"], 80);
 
@@ -250,6 +250,7 @@ fn rollback_terminal_mode() {
         io::stdout(),
         DisableMouseCapture,
         DisableBracketedPaste,
+        crossterm::terminal::SetTitle("Kuzushi"),
         LeaveAlternateScreen
     );
     let _ = disable_raw_mode();
@@ -295,6 +296,7 @@ pub(crate) fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>
         terminal.backend_mut(),
         DisableMouseCapture,
         DisableBracketedPaste,
+        crossterm::terminal::SetTitle("Kuzushi"),
         LeaveAlternateScreen
     );
     let raw_result = disable_raw_mode();

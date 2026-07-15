@@ -27,9 +27,6 @@ impl ShellApp {
             .set_focus(crate::app::WorkbenchPane::Details);
         self.router
             .workbench_mut()
-            .set_center_mode(crate::app::WorkbenchCenterMode::Code);
-        self.router
-            .workbench_mut()
             .scroll_mut()
             .set(crate::app::WorkbenchPane::Details, 0);
     }

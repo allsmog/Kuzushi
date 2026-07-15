@@ -1,35 +1,6 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn show_model_catalog(&mut self) {
-        self.set_shell_view(ShellView::Config);
-        self.sync_selected_model_index();
-        self.log_model_catalog_status();
-        self.log_model_catalog_choices();
-        self.log_model_catalog_scope_hint();
-    }
-
-    fn log_model_catalog_status(&mut self) {
-        let active = active_model_label(self.config());
-        let effort = self.session_thinking_level().unwrap_or("default");
-        self.log(
-            "model",
-            format!("active {active} / {effort}. Select with: model <n> [low|medium|high|xhigh]"),
-        );
-    }
-
-    fn log_model_catalog_choices(&mut self) {
-        for choice in visible_model_choices(self.config().model.as_deref()) {
-            self.log("model", model_catalog_choice_line(choice));
-        }
-    }
-
-    fn log_model_catalog_scope_hint(&mut self) {
-        if let Some(hint) = model_catalog_scope_hint(self.focused_module(), self.config()) {
-            self.log("model", hint);
-        }
-    }
-
     pub(crate) fn provider_label(&self) -> String {
         self.config()
             .model
@@ -81,35 +52,4 @@ impl ShellApp {
             Some(choice.thinking_level),
         )]
     }
-}
-
-fn active_model_label(config: &V2Config) -> String {
-    config
-        .model
-        .as_deref()
-        .map(display_model_selector)
-        .unwrap_or_else(|| "unconfigured".to_string())
-}
-
-fn model_catalog_choice_line(choice: &ModelChoice) -> String {
-    format!(
-        "{}. {}  {}  {}  auth {}",
-        choice.index,
-        model_choice_display_selector(choice),
-        choice.thinking_level,
-        choice.label,
-        choice.auth
-    )
-}
-
-fn model_catalog_scope_hint(
-    focused_module: Option<&str>,
-    config: &V2Config,
-) -> Option<&'static str> {
-    focused_module?;
-    Some(if config.model.is_none() {
-        "focused module detected, but no global model yet — model <n> sets the global model so `ask` works. Use `model module <n>` to scope per-module."
-    } else {
-        "focused module detected: model <n> sets this module; use `model global <n>` for global ask/defaults."
-    })
 }

@@ -4,7 +4,6 @@ use crate::modules::ToolExecutionContext;
 use crate::runtime::LoopHistoryEntry;
 use anyhow::{Context, Result};
 use std::path::Path;
-use uuid::Uuid;
 
 pub fn persist_uaf_hunt_findings(
     target: &Path,
@@ -16,7 +15,7 @@ pub fn persist_uaf_hunt_findings(
         return Ok(None);
     };
     workspace.ensure_state_dir()?;
-    let run_id = Uuid::new_v4().to_string();
+    let run_id = ctx.finding_run_id();
     if !transcript.is_empty() {
         crate::workspace::prepare_workspace_output_path(
             workspace.root(),
@@ -98,7 +97,48 @@ fn transcript_relative_path(run_id: &str) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::V2Config;
+    use crate::findings::{FindingStore, Severity};
+    use crate::run_artifacts::TraceHandle;
     use crate::runtime::{ToolCall, ToolResult};
+    use crate::workspace::WorkspaceTarget;
+
+    #[test]
+    fn persistence_uses_the_canonical_trace_run_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config::default();
+        let trace = TraceHandle::jsonl(temp.path(), "run-uaf-canonical");
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: Some(&trace),
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let finding = Finding::new_tool(
+            "uaf-hunt",
+            "CWE-416",
+            "src/lib.c",
+            7,
+            None,
+            Severity::High,
+            "use after free",
+        );
+
+        let persisted = persist_uaf_hunt_findings(temp.path(), &[finding], &[], &ctx)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(persisted.run_id, "run-uaf-canonical");
+        let findings = store
+            .list_findings_for_scan_id("run-uaf-canonical")
+            .unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].scan_id.as_deref(), Some("run-uaf-canonical"));
+    }
 
     #[test]
     fn transcript_writer_skips_empty_and_writes_jsonl() {

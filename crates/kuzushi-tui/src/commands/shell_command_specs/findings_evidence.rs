@@ -47,6 +47,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "record a human review decision for the selected finding",
     },
     ShellCommandSpec {
+        command: "proof defer <id> --reason <text>",
+        aliases: &["/proof defer F-0001 --reason production harness unavailable"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "record a human proof deferral for the current finding generation",
+    },
+    ShellCommandSpec {
         command: "dismiss <reason> <note>",
         aliases: &[
             "dismiss false_positive not reachable in prod",

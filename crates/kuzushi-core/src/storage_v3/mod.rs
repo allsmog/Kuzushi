@@ -10,6 +10,7 @@ mod projection_event_store;
 mod projection_finding_lifecycle;
 mod projection_fts;
 mod projection_observations;
+mod projection_patch_lifecycle;
 mod projection_payload;
 mod projection_projectors;
 mod projection_proof;
@@ -382,7 +383,31 @@ pub(crate) fn create_projection_schema(conn: &Connection) -> Result<()> {
     migrate_review_decision_dismissal_columns(conn)?;
     migrate_verification_provenance_columns(conn)?;
     migrate_patch_cost_columns(conn)?;
+    migrate_patch_lifecycle_columns(conn)?;
     create_optional_fts(conn)?;
+    Ok(())
+}
+
+fn migrate_patch_lifecycle_columns(conn: &Connection) -> Result<()> {
+    for table in ["patch_lifecycle_events", "patch_lifecycle_current"] {
+        if !table_has_column(conn, table, "finding_scan_id")? {
+            conn.execute_batch(&format!(
+                "alter table {table} add column finding_scan_id text"
+            ))?;
+        }
+        if !table_has_column(conn, table, "application_started_at")? {
+            conn.execute_batch(&format!(
+                "alter table {table} add column application_started_at text"
+            ))?;
+        }
+        conn.execute(
+            &format!(
+                "update {table} set application_started_at = applied_at \
+                 where application_started_at is null or application_started_at = ''"
+            ),
+            [],
+        )?;
+    }
     Ok(())
 }
 

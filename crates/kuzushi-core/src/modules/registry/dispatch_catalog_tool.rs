@@ -429,7 +429,7 @@ fn store_dep_hygiene_findings(
         .map(|finding| finding.to_core_finding(target))
         .collect::<Vec<_>>();
     let persisted = crate::findings::persist_tool_findings(
-        "dep-hygiene",
+        ctx.finding_run_id(),
         target,
         &findings,
         ctx.workspace,
@@ -453,7 +453,7 @@ fn store_secret_scan_findings(
         .map(|finding| finding.to_core_finding())
         .collect::<Vec<_>>();
     let persisted = crate::findings::persist_tool_findings(
-        "secret-scan",
+        ctx.finding_run_id(),
         target,
         &findings,
         ctx.workspace,

@@ -4,7 +4,68 @@ use std::fs;
 pub(super) fn seed_files(target: &Path) -> Result<(), String> {
     seed_project_files(target)?;
     seed_threat_model(target)?;
-    seed_replay_trace(target)
+    seed_replay_trace(target)?;
+    seed_scan_receipt(target)?;
+    seed_attack_surface(target)
+}
+
+fn seed_scan_receipt(target: &Path) -> Result<(), String> {
+    let mut summary = kuzushi_core::RunSummary::running(
+        "scan-phase-run",
+        "scan",
+        Some("sast:scan".to_string()),
+        target.display().to_string(),
+    )
+    .complete()
+    .with_findings(Some(6))
+    .with_cost(Some(0.042));
+    summary.completed_at_unix = Some(summary.started_at_unix + 12);
+    kuzushi_core::write_run_summary(target, &summary)
+        .map(|_| ())
+        .map_err(|error| format!("write scan run fixture: {error}"))
+}
+
+fn seed_attack_surface(target: &Path) -> Result<(), String> {
+    let run_id = "map-phase-run";
+    let mut summary = kuzushi_core::RunSummary::running(
+        run_id,
+        "repository-inventory:build",
+        None,
+        target.display().to_string(),
+    )
+    .complete();
+    // The Scan and Map receipts are seeded within one clock tick. Keep the
+    // artifact-owning Map receipt deterministically newest so the ordinary
+    // latest-run hydration path projects its attack-surface artifact.
+    summary.started_at_unix = summary.started_at_unix.saturating_add(1);
+    summary.completed_at_unix = summary
+        .completed_at_unix
+        .map(|completed| completed.saturating_add(1));
+    kuzushi_core::write_run_summary(target, &summary)
+        .map_err(|error| format!("write map run fixture: {error}"))?;
+    let artifact = serde_json::json!({
+        "summary": {
+            "highRisk": 2,
+            "maxRiskScore": 91,
+            "byRiskTier": {"critical": 1, "high": 1}
+        },
+        "surfaces": [
+            {
+                "title": "POST /login",
+                "framework": "Axum",
+                "risk": {"tier": "critical", "score": 91}
+            },
+            {
+                "title": "GET /orders/:id",
+                "framework": "Axum",
+                "risk": {"tier": "high", "score": 72}
+            }
+        ]
+    });
+    let path = kuzushi_core::run_dir(target, run_id).join("attack-surface.json");
+    let body = serde_json::to_vec_pretty(&artifact)
+        .map_err(|error| format!("serialize attack-surface fixture: {error}"))?;
+    fs::write(&path, body).map_err(|error| io_error("write", &path, error))
 }
 
 fn seed_project_files(target: &Path) -> Result<(), String> {

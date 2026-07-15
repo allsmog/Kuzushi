@@ -1,464 +1,408 @@
-# Design spec — Kuzushi end-to-end product flow
+# Design spec — Cockpit Spine product flow
 
-> **Status:** proposal, awaiting review.
-> **Companion to:** [`docs/plans/product-flow-prd.md`](../plans/product-flow-prd.md)
-> (the *why* and the requirements) and
-> [`docs/plans/cannon-port-plan.md`](../plans/cannon-port-plan.md) (the code seams).
-> This document is the *how it looks and behaves* — screens, states,
-> signifiers, keybinding grammar, and headless parity for the five-phase flow.
-> Mockups are illustrative; exact widths/glyphs follow the shipped `kuzushi-tui`
-> theme and Ratatui layout.
+**Status:** canonical design for the shipped cutover
+**Supersedes:** the earlier four-phase cutover, steering-gate mockups, and
+legacy whole-screen Workbench/Activity compositions. The current product has
+five durable workflow phases plus a Report exit.
 
----
+## 1. Product promise
 
-## 0. Design goals
+Kuzushi is an operator cockpit for turning a target into durable security
+evidence and remediation truth. The interface makes a strict distinction
+between:
 
-The product is a **control room for non-deterministic scans**: a *control plane*
-to steer where the non-determinism spends and how hard to corroborate, and a
-*visual plane* to see the otherwise-invisible agent reasoning. Every screen
-serves one of those two planes.
+- **durable truth:** target facts, artifacts, findings, proof, patch lifecycle,
+  and export receipts;
+- **live work:** one foreground Run Focus presentation;
+- **context:** help, operational decks, and visualizations that return exactly
+  where the operator came from.
 
-1. **The screen is the map.** At any moment the operator can see which phase they
-   are in, what phase reality is (from artifacts on disk, not the viewed page),
-   the running **cost**, and the single most useful next action.
-2. **Steering lives at the phase boundary.** The control-plane levers — model
-   tiers, prompts, budget, **strategy**, **engines**, the **harness/focus**, and
-   verify config — are surfaced *together* at the moment you advance a phase, not
-   scattered across 92 commands.
-3. **Signifiers are honest by construction.** One glyph = one meaning. Terminal
-   states are terminal. Cost and corroboration are always on screen. Nothing
-   renders that phase reality doesn't support.
-4. **Depth on demand.** The catalog — the 42 modules (composable *parts*, not a
-   catalog to shop) and the MCP oracles — is one keystroke away, never the
-   default path.
-5. **Parity is structural.** Every interactive gate has a headless equivalent
-   (`scan --until <phase>`, `run <tool>`, `--approve`, `--when/--max/--votes`,
-   `--engines`, `--focus`, `findings seed`).
+The resulting spine is:
 
----
-
-## 1. Information architecture
-
-```
-Shell (kuzushi)
-├── Cockpit  ......... the home surface; phase rail + phase pane + steer + prompt
-│   ├── Aim pane ......... attack surface / engagement folder
-│   ├── Hunt pane ........ proposal queue (priced sweeps) + live activity
-│   ├── Confirm pane ..... findings list with proof markers + verify config
-│   ├── Fix pane ......... patch + re-verify
-│   └── Report pane ...... export targets (SARIF / markdown / ledger)
-├── Steering gate  ... modal-ish overlay at each phase boundary (model/prompts/
-│                       budget/strategy/verify) — the one place levers converge
-├── Finding detail ... proof ladder, evidence, sources[], corroboration, votes
-├── Advanced catalog . the 42 modules as composable parts, grouped by phase
-│                       (was the tile home + Recommend/Module/ModuleRun)
-├── Activity ......... run-owned live tasks + context-aware output (auto-opens on run/scan)
-└── Utility views .... logs, help, config, replay/trace, KB, threat views
+```text
+Target -> Setup -> Map <-> Run Focus -> Scan <-> Run Focus
+       -> Review -> Prove <-> Run Focus -> Fix <-> Run Focus -> Report
 ```
 
-The **Cockpit replaces the catalog as home.** `Catalog` / `Recommend` /
-`Module` / `ModuleRun` collapse into the **Advanced catalog** (§7), reached by
-`catalog` / `tools` or from the steering gate's "advanced" affordance.
+The canonical persisted phases are `Map`, `Scan`, `Review`, `Prove`, and
+`Fix`. Report is an exit surface. Viewing Scan, Review, Prove, Fix, Report, or
+a visualization never advances phase reality. The selected page is interaction
+state; current reality is derived from durable target/revision evidence,
+accepted attempts, review dispositions, proof, and remediation lifecycle.
 
----
+## 2. Navigation model
 
-## 2. The Cockpit (home surface)
+### 2.1 Primary routes
 
-Wide terminal (≥ ~100 cols):
-
-```
-┌ Kuzushi · acme-api · Node/Express · LIVE ······················ 崩 hunt 2/5 ┐
-├────────────────────────────────────────────────────────────────────────────┤
-│ 組 aim ✓   崩 HUNT ▸   作 confirm   掛 fix   ▪ report                        │  ← phase rail (reality-derived)
-├──────────────────────────────┬─────────────────────────────────────────────┤
-│ HUNT — proposal queue        │ ACTIVITY                                     │
-│                              │                                              │
-│ ▸ P-001  incomplete-fix hunt │  ⠿ taint-iris:hunt  src→sink  12s           │
-│   commits · $0.40 · yield .82│  ⠿ semgrep         running    3/7 rules     │
-│   [k]eep [s]kip              │  ✓ context-snapshot           done          │
-│                              │                                              │
-│   P-002  SSRF reachability   │  OUTPUT ▸ 2 candidates, 0 confirmed          │
-│   threatmodel · $0.30 · .74  │  ─────────────────────────────────────────  │
-│   [k]eep [s]kip              │  ◇ SSRF  webhook.ts:47   candidate           │
-│                              │  ◇ IDOR  users.ts:31     candidate           │
-│   P-003  dep footguns        │                                              │
-│   intel · $0.15 · .40  [k/s] │                                              │
-│                              │                                              │
-│ budget: $0.85 / $2.00  ▓▓▓░░ │                                              │
-├──────────────────────────────┴─────────────────────────────────────────────┤
-│ NEXT ▸ approve sweeps, then `next` to fire   ·   steer: [m]odel [p]rompts   │  ← next-action + steer
-│ [budget] [strategy: stride ▾]                                                │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ > _                                                          / for commands   │  ← prompt (always focused when non-empty)
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-Compact terminal (< ~80 cols) collapses toward the review path (phase pane +
-prompt), exactly as the current Workbench does, so findings/detail stay readable.
-
-When a run starts, **Activity owns the primary frame**. The phase contributes a
-compact phase/current-stage strip only; Activity never embeds the full phase
-cockpit beneath or beside its own panes. At tall sizes, OUTPUT and TASKS stack
-vertically so both receive useful height. The full Map/Hunt/Confirm/Fix cockpit
-returns when the operator browses Workbench after artifacts exist. This
-run-time handoff takes precedence over the illustrative side-by-side preview
-above: width changes geometry, not frame ownership.
-
-**Top bar** `Kuzushi · <project> · <target-facts> · <LIVE?> ······ <phase chip>`.
-- `LIVE` lights only on real run activity (`has_run_activity`), never on view.
-- The phase chip (`崩 hunt 2/5`) and rail are **derived from engagement reality**
-  (`journey.rs`), not the viewed page. **With no target, there is no chip and no
-  rail** (target-gated) — the fabricated-chip bug is designed out.
-
-**Phase rail** shows the five phases with honest state glyphs:
-`✓` done · `▸` current · (dim) not started. Exactly one `▸`. Done never
-regresses to current.
-
-**Phase pane** is the body; its content is the current phase's working surface
-(§3–§6).
-
-**Steer strip** exposes the levers relevant to *this* phase inline, and opens the
-full steering gate (§8) on `next` or on the named key.
-
-**Prompt** is a distinct focus (§9): when it holds text, keystrokes go to the
-prompt, never to view hotkeys.
-
----
-
-## 3. Aim (組) — map the target, generate the engagement folder
-
-```
-│ AIM — engagement/acme-api                                                   │
-│                                                                             │
-│ attack surface (map/)          threat model (threat-model.md)   [edit]      │
-│   3 routes · 2 untrusted        STRIDE · 6 elements · 4 threats             │
-│   POST /auth/login  public                                                  │
-│   GET  /api/users/:id  IDOR?    strategies/                       [edit]     │
-│   POST /api/upload  no-type     stride  ·  deep  ·  quick                    │
-│                                                                             │
-│ sources fed → context ✓  x-ray ✓  entry-points ✓  design-doc ○ (attach)     │
-│                                                                             │
-│ NEXT ▸ review & edit the folder, then `next` to open Hunt                   │
-```
-
-- **`aim`** synthesizes/refreshes the editable `engagement/` folder
-  (`profile.toml`, `threat-model.md`, `map/`, `kb/`, `strategies/`, `prompts/`,
-  `context/`, `authorization.md`) from existing producers. The
-  provenance-tagged source bundle (context / prior threat-model / x-ray /
-  entry-points / design-doc / seeds, each an `<untrusted-source label kind path
-  sha256 truncated>` block) is what feeds the model — already in flight for
-  `threat-model:build`.
-- Every folder artifact is **editable in place** (`[edit]` opens the prompt/KB
-  editor or the file). Editing calibration before Hunt is the whole point of the
-  phase — no spend happens here beyond the map build.
-- **`aim` seeds the harness.** A recon/discover pass pre-populates
-  `engagement/harness.toml` — ranked focus areas (`{entry, input_surface,
-  rank}`), detected toolchain/build system, an input vocabulary, and the default
-  strategy/oracle. This is the mutable scan config the operator edits and the
-  Hunt sweep fires (PRD §7). A fuzzer is never handed `main()`.
-- **Prepare engines here, where cost is a one-time build.** `cpg:build` /
-  `codeql-db:build` are surfaced as Aim actions with their build cost, so the
-  scoped Confirm pass can enable the CPG oracle instantly (§8 steering gate).
-- Empty state (no map yet): a single guidance line — *"run `aim` to map the
-  target"* — never dummy content.
-
----
-
-## 4. Hunt (崩) — signal-driven proposal queue
-
-The static 22-task walker is replaced by a **priced, ranked, budget-gated
-proposal queue** (see cockpit mockup §2). Behavior:
-
-- Generators (`commits`, `threatmodel`, `intel`, `evolve`) emit `Proposal`s.
-  Each row shows: id · generator · price · yield-score · `[k]eep`/`[s]kip`.
-- A **budget bar** shows spend/cap. Proposals gate *between* firings; a single
-  in-flight proposal that overshoots the cap is **surfaced** (`⚠ P-002 ran
-  $0.05 over cap`), never hidden — honest about cannon's known edge.
-- `next` fires the kept sweeps as a bounded fan-out with per-round checkpointing;
-  Activity (right pane / auto-opened view) streams the live DAG.
-- **Detectors and imports feed one ledger.** Live `native_scanners`
-  (Semgrep/CodeQL) and `findings seed <sarif>` both write the *same* row via
-  `sources[]`; the OUTPUT deck shows corroboration as it accrues.
-- Headless parity: `scan --until hunt --approve P-001,P-003 --budget 2.00`.
-
----
-
-## 5. Confirm (作) — proof, configurably
-
-```
-│ CONFIRM — findings (12)                    verify: when≥high · max 8 · votes 2│
-│                                                                              │
-│  ✓ SSRF   webhook.ts:47   critical   confirmed   proof●●●●  sources: 2       │
-│  ◇ IDOR   users.ts:31     high       candidate   proof●●○○  sources: 1       │
-│  ? XSS    render.ts:88    medium     unverified  proof●○○○  votes 1/2        │
-│  ! ReDoS  parse.ts:12     low        rejected    (human)    ← sticky         │
-│                                                                              │
-│  NEXT ▸ [enter] inspect · [v] re-verify selection · steer verify at the gate │
-```
-
-- **Every list row carries its proof marker** — `✓` confirmed / `◇` candidate /
-  `?` unverified / `!` rejected — plus a proof-ladder mini-meter and the
-  `sources[]` count. This is the §8 signifier contract: confirmed-vs-guess is
-  visible in the *list*, not just detail.
-- **Verify is configurable at the steering gate:** `when severity>=X`, `max N`,
-  `votes K`. Bare scan still verifies nothing. The header echoes the active
-  config so the operator always knows what will be proven.
-- **Human verdicts are sticky.** A row triaged by a human (`triaged_by="human"`)
-  shows a `(human)` tag and is never overwritten by an AI re-run.
-- **Detail view** (`enter`) shows the full proof ladder, verified evidence
-  (span + content hash), `sources[]`, corroboration count, and — when votes ran —
-  the per-lens verdicts (reachability / exploitability / mitigation) with the
-  MCP-oracle reachability sentence (hedged: oracle, not ground truth). MCP-absent
-  is an explicit named state, never a silent pass.
-
----
-
-## 6. Fix (掛) & Report
-
-**Fix.** Patch synthesis over a confirmed finding, re-verified against the same
-ledger row. The diff is shown tied to the finding's evidence; re-verify updates
-the proof state in place (never fabricating a higher proof than the re-run
-supports).
-
-**Report.** One explicit exit, reachable from the phase rail's `▪ report` and
-from both surfaces:
-
-```
-│ REPORT — export evidence                                                     │
-│   SARIF (CI / Code Scanning)      → ./acme-api.sarif        [export]          │
-│   Markdown bundle (bounty)        → ./report/               [export]          │
-│   Ledger (audit, JSON)            → engagement/findings.json [export]         │
-│   CSV / JSONL                      → …                        [export]         │
-```
-
-- The friendly verb `findings export <path> <format>` honors **all five** formats
-  and accepts a **directory** for the markdown bundle (closes the current gap).
-- Headless: `workspace:export-findings {"format":"markdown-bundle","path":"…"}`
-  and the first-class `kuzushi export` verb produce byte-identical output.
-
----
-
-## 7. Advanced catalog (the reframed home)
-
-The full registry stays reachable — legible, not a wall. The 42 modules read as
-**composable parts** (detectors · analysis oracles · signal generators ·
-verifiers, §6 of the PRD), grouped by the phase they serve:
-
-```
-│ CATALOG — 42 modules · ~67 tools                   [/] filter   [tab] complete│
-│                                                                              │
-│ AIM ── map & model                                                           │
-│   context        build the context snapshot                                  │
-│   threat-model   STRIDE/PASTA/DREAD threat model                             │
-│   x-ray          entry points, invariants, data-flow                         │
-│ HUNT ── find                                                                 │
-│   taint-iris     source→sink taint hunt                                      │
-│   semgrep/codeql live pattern + dataflow scanners                            │
-│   variant-hunter lift a finding to a signature, hunt variants                │
-│ CONFIRM ── prove                                                             │
-│   triage · verify · exploit-chain                                            │
-│ … (OFFENSE · INTEL · GOVERNANCE · ADVANCED show the rest)                    │
-│                                                                              │
-│ hidden-but-runnable: carlini-threat-hunt, tob, shinsa, recon … (type name)   │
-```
-
-- **Grouped by phase, then category**, with headers — never flat alphabetical.
-- Each row uses the human-readable `name` field with a plain-language one-liner
-  (retire circular descriptions).
-- **Tab-completion is advertised:** the `completion_preview()` ghost-text (dead
-  code today) renders inline; `[tab] complete` shows in the affordance bar.
-- The 7 plumbing modules are hidden here (still runnable by exact name); the
-  ~11 `.deferred()` capabilities are listed under an explicit
-  "hidden-but-runnable" line so power users know they exist.
-
----
-
-## 8. The steering gate (phase-boundary overlay)
-
-The one place the scattered levers converge. Triggered by `next` (advancing a
-phase) or by a steer key. It is the interactive equivalent of the headless flags.
-
-```
-┌ STEER → entering HUNT ─────────────────────────────────────────────┐
-│  model      find:mid  triage:cheap  verify:deep     [change]        │
-│  strategy   deep  ▾   (quick · deep · pr-review)                    │
-│  engines    cpg ✓ (~40s/scan)  codeql ○  clangd-lsp ○   [toggle]    │
-│  harness    focus: request handlers · seeds: 2 · oracle: reach      │
-│  focus  ›   "focus on sqli"________________________              ↵  │
-│  runs × variants   2 × {default, aggressive}   → 4-round sweep      │
-│  prompts    engagement/prompts/ · 2 overrides · base sha 9f3a…      │
-│  budget     $2.00 cap    ▓▓▓░░ $0.85 spent   · ~$0.75/round         │
-│  verify     when≥high · max 8 · votes 2         (Confirm phase)     │
-│  sweeps     P-001 ✓  P-002 ✓  P-003 ○                               │
-│                                                                    │
-│  [enter] fire   [e] edit a lever   [a] advanced catalog   [esc] back│
-└────────────────────────────────────────────────────────────────────┘
-```
-
-- **Model tiers** route per role — cheap models for triage/dedup/classify, deep
-  models for verify/patch/PoV. Each pick flows through the layered option store
-  and is validated against the runtime here (no `anthropic:` model on an
-  incompatible backend passing silently). No silent fallback: an incompatible pick is rejected
-  in the gate with the reason.
-- **Strategy** is the composed recipe = the sweep's variant axis (`deep = pattern
-  + iris-taint + review×2 + invariant`); picking it expands into the sweep matrix.
-- **Engines** toggles the analysis oracles for *this* pass (Joern CPG, CodeQL DB,
-  clangd LSP) with a **cost/latency estimate shown before commit** — artifact-
-  gated and honest; a missing prerequisite refuses with a build hint, never a
-  silent degrade. The analysis-depth ladder (`structural → linked → path →
-  proven`) drives which engine is needed.
-- **Harness / focus** is the mutable scan config (§3): recon-seeded focus areas,
-  seeds, oracle. Typing intent — *"focus on sqli"* — re-ranks focus areas, sets
-  the oracle CWEs, and biases seeds for the next sweep.
-- **Prompts** shows the 3-level resolution (`project override → variant → base`)
-  and the base sha — provenance the operator can trust and diff.
-- **Budget** prices the approved sweep; the cap is enforced between proposals with
-  a self-calibrating `$/round`; a single-proposal overshoot is surfaced.
-- **Verify** config shows only in/entering Confirm.
-- Everything here has a headless twin: `--model`/`MODEL_<ROLE>`, `--strategy`,
-  `--engines`, `--focus`, `--prompts`, `--budget`, `--when/--max/--votes`,
-  `--approve`.
-
----
-
-## 9. Interaction model & keybinding grammar
-
-Fixing the audited interaction defects is part of this spec, not a follow-up.
-
-**Prompt focus is distinct (fixes the empty-prompt hotkey trap).**
-- The prompt is its own focus. When it holds text, *every* keystroke edits the
-  prompt. View hotkeys fire only when the prompt is empty **and** the view has
-  focus, or via an explicit modifier.
-- A persistent affordance shows the mode: `> _   / for commands`. The `/`-escape
-  to command mode is advertised, not hidden.
-- Result: typing `config` / `cancel` / `demo` on the cockpit never fires
-  `c` → exploit-chain and then inserts the rest.
-
-**One scroll grammar.**
-- `j`/`k` and `↑`/`↓` **both scroll the focused pane's content.** Command-history
-  recall moves to the prompt context only (e.g. `↑` in an *empty* prompt), so
-  arrows in Logs/Help/Activity scroll instead of silently recalling history.
-- `g`/`G` = top/bottom everywhere (retire the `PlanningPicker` `g`=rebuild
-  collision — move rebuild to an explicit key).
-- `Tab` cycles pane focus, `Shift+Tab` reverses it **consistently** across
-  Cockpit and Activity (retire the re-toggle divergence).
-- Scroll-on-re-entry: **restore** last scroll in scrollable views, uniformly.
-
-**One glyph = one meaning (fixes the DAG legend lie & state glyphs).**
-- The DAG legend names exactly what rows render (if rows show a braille spinner
-  for active, the legend says spinner, not `● active`). `●` is retired as a
-  multi-meaning glyph.
-- Task states: `⠿ running` (spinner) · `✓ done` · `× canceled` · `! failed`.
-  **Canceled is terminal** — a late-finishing worker cannot flip `×` → `✓`
-  (the `mark_task_done` guard includes `Canceled`).
-- Proof glyphs (`✓ ◇ ? !`) and focus glyphs are each single-meaning and shared
-  across views via the theme.
-
-**Cancellation.** Two-stage Ctrl+C stays (it's honest today). Per-task cancel is
-added where per-task `enter`/`f`/`o` already exist, so a runaway proposal can be
-killed without aborting the sweep.
-
-**Command grammar.** Converge on one grammar (`verb [subverb] [--flags | json]`);
-retire the alias sprawl (`studio`/`cc`/bare-`/`) and the unconditional
-single-letter `y`/`n` parse when no plan is pending.
-
----
-
-## 10. First-run & empty states (keyless path)
-
-The fresh-launch sequence is designed so value precedes credentials.
-
-```
-first launch, no key, no target
-        │
-        ▼
-  TargetPicker ──(pick / defer)──► Cockpit (Aim, empty)
-        │                                │
-        ▼                                ▼
-  ModelPicker  ── offers: providers  ·  ▶ demo (offline, no key)  ·  local
-        │           incompatible pair rejected here, with reason
-        ▼
-  AuthPicker  ── paste API key (in-session) · OAuth (in-session)
-                 never "set ENV and relaunch"
-```
-
-- **`demo` is a first-class choice** in the model picker and on every relevant
-  empty state — *"no key? run `demo` to see a finding now (offline)"*. It runs
-  the *same* deterministic secret-scan + iac-scan the CLI `demo` runs (not the
-  full `sast:scan` umbrella), so its no-key/no-scanner promise is true.
-- **Empty Cockpit** (no target/model) points at `demo` and `target`, not at
-  `scan`/`next` (which need both).
-- **`target <path>`** runs the *same* onboarding phase as the picker (model →
-  auth), so both entry paths converge.
-- Every empty phase pane draws **one guidance line** with the exact next verb —
-  never dummy content, never a bare blank.
-
----
-
-## 11. Headless & CI parity (the same flow, no TTY)
-
-Every interactive gate maps to a flag so the flow is identical in `scan`/`run`:
-
-| Interactive | Headless |
+| Intent | Route |
 | --- | --- |
-| `aim` (build engagement folder) | `run context:build` / `threat-model:build` → `scan --until aim` |
-| Hunt proposal approve | `scan --until hunt --approve P-001,P-003 --budget 2.00` |
-| Steering gate model/prompts | `--model … --prompts engagement/prompts` |
-| Confirm verify config | `--when severity>=high --max 8 --votes 2` |
-| Report export | `workspace:export-findings {"format":"…","path":"…"}` / `kuzushi export` |
-| Measure/Tune | `kuzushi measure --against x.sarif --gate` / `kuzushi tune` |
+| Bare interactive launch | Target consent |
+| Fresh or switched explicit target | Setup |
+| Existing hydrated engagement | Reality-derived phase page |
+| `workbench` | Reality-derived phase page |
+| `findings`, `open <id>` | Review, with the finding disclosed |
+| `next`, `continue` | Planner for the reality-derived phase |
+| `report` | Report exit |
+| `/setup` | Aggregate Setup |
+| `jobs`, replay, trace, visualization | Contextual full-frame deck |
+| help, controls, capabilities | Contextual modal |
 
-Contract fixes required for CI (from the devEX audit):
-- **`recon:import` reachable** (wired into dispatch — standing blocker).
-- **`--target` one rule** across `scan`/`run`/`findings`/`finding`/`shell`;
-  `kuzushi --target . scan` works; every subcommand's `--target` has help text.
-- **`run` errors are always a JSON envelope** (prepare-errors included) so `jq`
-  never hits empty stdout.
-- **Export honors format + directories** through the friendly verb.
+The route model captures selection and interaction state, not merely a view
+enum. Run Focus and contextual surfaces can therefore restore the exact phase
+page, pane, cursor, filter, scroll, pinned finding, and input mode.
 
----
+`Shift+Tab` cycles `Map -> Scan -> Review -> Prove -> Fix` from Prompt or
+Navigate mode without changing the shared draft or cursor. Navigate-mode
+`1..5` selects a page directly. If the selected page and reality differ, both
+are named (`VIEW SCAN · REALITY REVIEW`). `Tab` retains completion or
+pane-forward ownership; `]` additionally moves forward and `[` moves backward.
+Modal editors, pickers, questions, and Run Focus receive keys first.
 
-## 12. Terminal robustness
+### 2.2 Persistence versus presentation
 
-- **Palette degrades:** detect `COLORTERM`; downsample the truecolor `Color::Rgb`
-  palette to 256-color when truecolor is absent, so semantic colors survive on
-  macOS Terminal.app. `NO_COLOR` and `KUZUSHI_THEME=high-contrast` still honored;
-  `KUZUSHI_REDUCED_MOTION=1` still pauses the spinner.
-- **Unicode-aware width:** layout math uses display width (not one-cell-per-char)
-  so the phase chip (`組/崩/作/掛`), CJK, and emoji don't misalign tables or spill
-  the footer. The adaptive footer wraps below 70 cols (already good) — keep it.
-- **Frame-rendered pages fall back to text:** the 3D terrain and box-drawing
-  diagrams degrade to line/plain output off-TTY (heatmap data already exists; the
-  terrain needs the text fallback wired).
+Durable pages consume application/presentation projections. They do not inspect
+live Activity state or reconstruct storage policy in the renderer. Run Focus
+owns ephemeral execution state. Contextual decks consume durable artifacts or
+read-only run artifacts and do not become workflow pages.
 
----
+## 3. First-contact flow
 
-## 13. What we explicitly keep (do-not-cut)
+### 3.1 Target consent
 
-From the audits, these already tell the truth — preserve them through the reframe:
-- Two-stage Ctrl+C (honest, consistent).
-- No anonymous spinner — every spinner bound to a named subject.
-- `journey.rs` phase derivation (refuses to forge Done) — the reframe builds *on*
-  it, replacing execution, not derivation.
-- `doctor` WARN/FAIL always names the problem + a `Next:` remediation — the gold
-  standard for every new error message in this flow.
-- `scan --fail-on` exits 3 (distinct from 1/2), CI-safe.
-- In-session API-key paste (already fixed) — make it the advertised path.
-- `NO_COLOR` respected through every theme fn; out-of-scope refusal names the
-  file + edit.
-- Machine output (`--json`/`--ci`/`--sarif`/`--fail-on`) is solid — parity work
-  extends it, doesn't disturb it.
+The first screen makes scope consent explicit. Highlighting a candidate shows
+facts but performs no activation. `Enter` activates; `Esc` browses capabilities
+without a target. Cwd is only a candidate row and is never silently chosen.
 
----
+Candidate inspection is asynchronous. Results are generation-stamped so quick
+cursor movement cannot show facts from an old selection. The screen presents:
 
-## 14. Open design questions
+- absolute path and repository kind;
+- revision, branch, and dirty state;
+- detected languages and build systems;
+- nested scope;
+- prior Kuzushi engagement/artifact status.
 
-Mirrors the PRD's §12, framed for design:
-1. Does the steering gate render as a full-screen view or an in-cockpit overlay?
-   *(Recommend overlay — keeps the phase pane visible for context.)*
-2. In Confirm, is the proof-ladder mini-meter (`proof●●○○`) or a numeric level
-   (`L2/4`) clearer at list density? *(Recommend the meter; numeric in detail.)*
-3. Advanced catalog: phase-first grouping (as drawn) or category-first? Phase-first
-   matches the flow but splits OFFENSE across phases.
-4. Hunt: show all generator proposals at once, or paginate by generator? At high
-   proposal counts a flat list may overflow the pane.
+The transition after activation depends on truth: fresh/switched targets open
+Setup, while existing engagements resume the page derived from artifacts and
+the finding ledger.
+
+### 3.2 Aggregate Setup
+
+Setup is a readiness ledger, not a sequence of disconnected pickers:
+
+```text
+Target
+Map plan
+Model
+Credentials
+Prompt
+Budget
+Start Map
+```
+
+The currently selected row has the only action accent. `Enter` opens its editor
+and all editors return to Setup without losing any other draft. Target facts,
+model selection, credential presence, prompt readiness, plan dependencies, CLI
+availability, required options, and budget validation converge into one
+`SetupReadinessModel`.
+
+The Map plan controls requirements. A deterministic/runtime-free plan is
+explicitly keyless. A model-backed plan blocks on an explicit compatible model
+and the credentials for that provider. No provider, model, target, CLI,
+runtime, detector, or prompt fallback is invented. The selected model is keyed
+by stable id, so filtering or catalog reorder cannot make highlight and Enter
+disagree.
+
+Before `Start Map`, journey and autonomy chrome is hidden. This prevents an
+uncommitted target/setup draft from looking like an engagement in progress.
+
+## 4. Live execution flow
+
+### 4.1 Foreground launch
+
+Every foreground workflow run captures its exact `RunFocusOrigin` before
+opening Run Focus. The run screen is built from one authoritative model:
+
+- run and sequence identity;
+- planned/DAG task identities and states;
+- current task;
+- one retained output window;
+- health/stall state and last progress age;
+- cost and queue depth;
+- origin and terminal receipt.
+
+There is no generic prompt on this screen. Input starts in Navigate mode. `s`
+opens a steer editor that accepts only `run <tool> ...`; it reuses the existing
+steer queue. `b` backgrounds work without canceling it.
+
+### 4.2 Responsive composition
+
+| Body geometry | Composition |
+| --- | --- |
+| width `>=78` | Steps left, Output right, same top row; Steps 32%, clamped 28-40; Output at least 48 |
+| width `50-77` | Vertical stack; Steps content-height capped at 40% |
+| width `<50` or body height `<14` | One viewport; `Tab` switches Steps/Output |
+
+Terminal height does not force a wide layout to stack. Rendering, scrolling,
+and hit-testing use the same rectangles. Events are windowed before formatting
+and output rows are built once per frame. Plain output serializes Steps and
+then Output from the same model.
+
+### 4.3 Completion and receipts
+
+Sequence precedence stays `prerequisite chain -> plan -> steer`. Intermediate
+receipts accumulate while more sequence work remains. The final terminal event
+restores the captured origin and presents one receipt containing origin phase,
+attempt id, all run references, outcome, duration, cost, changed findings and
+artifacts, interaction count, exact rerun input, typed actions, and one next
+action.
+
+This applies to success, failure, and cancellation. Manual Run Focus inspection
+does not claim auto-return ownership. Background work reports completion but
+never steals focus. A background request restores the origin immediately.
+
+The receipt is backed by append-only `PhaseAttemptCompleted` and
+`PhaseAttemptDispositionRecorded` records, so it survives restart. Selecting a
+completed attempt, or explicitly acknowledging and selecting a partial one,
+causes reality to be re-derived. Dismiss or Discard retains every canonical run
+artifact. An unresolved foreground attempt blocks a second bare intent from the
+same page, while navigation and explicit commands remain available.
+
+### 4.4 Operator questions
+
+Only the root interactive shell agent loop may request up to three structured
+questions at a time. Run Focus owns the question card: arrows or `j`/`k` select,
+numbers choose directly, left/right changes question, `Tab` opens Other,
+`Enter` submits, `Esc` leaves Other or cancels, and `b` backgrounds. A
+background question never steals focus and appears in Jobs as `WAITING INPUT`.
+Delivery uses a reliable worker-to-UI event plus a one-shot response channel;
+cancellation, timeout, and stale job generations are checked before an answer
+is accepted.
+
+Each run is capped at three question calls and eight model steps. Run artifacts
+store question ids, predefined labels, resolution, and whether freeform was
+supplied, never the raw freeform text. Credential requests route to Setup/Auth.
+Headless execution has no question tool and returns the structured
+`INTERACTION_REQUIRED` refusal rather than reading stdin or choosing silently.
+
+### 4.5 Durable-page adaptive composition
+
+Map, Scan, Review, Prove, and Fix share one semantic presentation policy.
+Content occupancy and selection decide whether the page is `Sparse`,
+`MasterDetail`, or `Dense`; an explicit `Z` deck is `Focused`, and a foreground
+question or unresolved result is `Guided`. Automatic Dense presentation is
+capped at three populated surfaces. Missing or unavailable artifacts remain
+truthful rows inside the primary surface instead of receiving blank panes.
+
+The policy is calculated from the exact body rectangle left after header,
+attention card, and chrome allocation. Its visible surface order and
+rectangles are also the keyboard, scroll, zoom, and mouse contract. Resizing or
+temporarily entering Guided mode may use a visible fallback focus without
+overwriting the operator's stored semantic focus.
+
+## 5. Durable work screens
+
+### 5.1 Map — know the target
+
+Map projects durable artifact truth only:
+
+- target/revision context and source inventory;
+- grouped attack surface and hot modules;
+- threat-model and DFD readiness;
+- harness/material readiness;
+- artifact age/freshness.
+
+Map never reads a retained Activity session. An empty projection gives one
+specific action. DFD, terrain, and heatmap remain available as contextual decks
+rather than displacing Map with a legacy multi-pane screen.
+
+### 5.2 Scan — collect candidate observations
+
+Scan is a durable resting surface, never live progress. It projects the scope
+and selected engine plan, the accepted attempt for the current target and
+revision, per-engine `complete | partial | skipped | failed` outcomes, finding
+and artifact deltas, failures, duration, cost, freshness, canonical run
+references, and one specific next action. Source shows scope and plan, Center
+shows engine coverage, Findings shows the candidate delta, and Details shows
+the selected engine, run, or failure. At `40x12` these collapse into one summary
+that retains mode, reality, scope, outcome, engine count, finding delta, and
+NEXT.
+
+A completed selected Scan advances reality. A partial result requires explicit
+acknowledgement; failed, canceled, or stale results do not count. Imported
+findings create an imported Scan attempt. An accepted zero-finding attempt
+makes Review, Prove, and Fix not applicable and offers Report.
+
+Shell-originated `sast:scan` is discovery-only. Explicit full-pipeline CLI
+calls preflight their highest requested phase before any scanner side effect
+and record nested Scan, Review, Prove, and Fix stages separately.
+
+### 5.3 Review — decide what matters
+
+Review combines the confidence-first findings queue and selected detail. Each
+visible row includes authority marker, severity, canonical proof mini-meter,
+unique source count, confidence, and any human decision. Group headings are not
+selectable findings; every action resolves through the projected visible row.
+
+Selection safety is explicit. If a pinned finding is filtered out, the screen
+continues to name that finding, says which filter excluded it, and offers
+`reveal in queue`. Verify, suppress, patch, and apply cannot target an invisible
+implicit selection.
+
+Every current-generation finding needs a terminal durable review disposition.
+Triage and classification never count as proof. An all-rejected review offers
+Report while preserving the review ledger.
+
+### 5.4 Prove — make evidence legible
+
+The hierarchy is fixed:
+
+1. finding identity;
+2. `STATUS`;
+3. the single shared `NEXT` strip;
+4. evidence and Proof Ladder;
+5. replay/provenance.
+
+Wide screens place Evidence and Proof Ladder side by side. Compact screens keep
+identity, status, next, proof meter, sources, and stale-proof warning before
+metadata. Replay always uses the verification run. Evidence carried from an
+earlier observation is labeled stale and requests revalidation.
+
+Only real terminal verification or an explicit human deferral satisfies an
+actionable finding. Prose may invoke a verifier, but prose itself cannot become
+proof. If no proof-backed actionable finding remains, the next destination is
+Report rather than an empty Fix traversal.
+
+### 5.5 Fix — preserve remediation truth
+
+Fix displays an attributable lifecycle:
+
+```text
+Draft available
+Staged for approval
+Applied; re-verification required
+Re-verification running
+Verified | Still vulnerable | Not rediscovered | Inconclusive
+Failed | Interrupted
+Changed since apply
+```
+
+Synthesis/worktree validation alone creates a draft; it does not imply apply.
+After apply, the screen stays on Fix with Remediation focused and shows touched
+paths, diff hash, application id, and the exact `v` action. Re-verification uses
+the original detector/tool input against the explicit workspace. Changed
+touched-file hashes refuse attribution. Only deterministic successful absence
+is `Verified`; nondeterministic absence is `Not rediscovered`.
+
+Apply is available only for a `SOUND` candidate whose persisted generation
+commit, target identity, originating run, detector tool/run, and detector-input
+digest still match. Apply intent and application id are persisted before files
+change. Re-verification replays that bound detector; missing legacy provenance
+is `Inconclusive` and requires regeneration. Selecting a result never applies
+it and moving to Report never implies Apply.
+
+## 6. Report exit
+
+Report exposes every existing format in fixed order:
+
+1. SARIF — `report.sarif`
+2. Markdown bundle — `report/`
+3. JSONL — `findings.jsonl`
+4. JSON — `findings.json`
+5. CSV — `findings.csv`
+
+Completeness defaults to All; `c` cycles All, Open, Complete. The destination
+is editable before export and target-relative paths resolve to an absolute
+destination at execution. The existing export application service performs the
+write.
+
+Success and error both remain on Report. The receipt includes format, count,
+completeness, absolute path or error, and timestamp, with Retry, Back to Fix,
+and Reveal Destination actions. `o` is the explicit consent required to invoke
+the platform file browser. An unavailable adapter becomes an inline error.
+Exported findings include additive remediation identity, application state,
+re-verification result/run, diff hash, and touched paths.
+
+## 7. Contextual surfaces and DFD visibility
+
+The cockpit keeps every existing analysis visualization. It changes ownership:
+
+| Surface | Presentation | Source of truth |
+| --- | --- | --- |
+| Help, Controls, Capabilities | modal | shell/application model |
+| Jobs | full-frame deck | live job hub plus run summaries |
+| Replay, Trace | full-frame deck | `.kuzushi/v3/runs/<id>/` |
+| DFD | full-frame visualization deck | persisted threat model |
+| Terrain, heatmap | full-frame visualization deck | module risk/findings |
+| Attack tree | full-frame visualization deck | exploit chains |
+| Attack path | full-frame visualization deck | source-to-sink flows |
+
+There is one non-nesting contextual route. The first contextual open captures
+the workflow origin and input mode. Opening another overlay/deck replaces the
+current contextual surface while preserving that first origin. `Esc` restores
+the exact origin. Empty visualization models show one truthful guidance line,
+never dummy nodes or evidence.
+
+Foreground artifact completion may auto-open the relevant visualization only
+after workflow-origin restoration. Background completion posts a receipt and
+does not navigate.
+
+## 8. Interaction grammar
+
+- Prompt mode owns printable input on durable pages.
+- Navigate mode owns view keys.
+- The one-row composer names and colors the selected mode: `◇ MAP ›` teal,
+  `▦ SCAN ›` gold, `▣ REVIEW ›` blue, `◎ PROVE ›` violet, and `◆ FIX ›`
+  magenta. Accents apply only to mode chrome; semantic warning, failure,
+  severity, proof, and success colors do not change.
+- Known commands, slash commands, and explicit `run <tool>` parse before
+  Workbench prose. Remaining prose becomes phase intent for the selected page
+  and must pass planner, descriptor, option, autonomy, authorization, and
+  no-silent-fallback boundaries. Missing prerequisites are explained rather
+  than silently selecting another phase, tool, model, or runtime.
+- Setup and Target own their local input and suppress generic prompt chrome.
+- Run Focus owns Navigate input and its compact steer editor.
+- `Esc` leaves a modal/editor/deck for its captured origin before applying any
+  broader navigation meaning.
+- `Shift+Tab` cycles all five pages from Prompt or Navigate mode. `Tab` keeps
+  completion/pane-forward behavior; `]` and `[` are explicit next/previous pane
+  keys.
+- Home-scoped runtime keybindings may replace these defaults or explicitly
+  unbind an action. Two-stroke chords time out after one second, question and
+  modal contexts retain first ownership, and invalid reloads keep the previous
+  complete map instead of partially applying it.
+- `j`/`k` and arrows move the active list or viewport; scroll state is route
+  state and survives contextual excursions.
+- Advertised actions either act or display an inline explanation.
+- Phase page selection is quiet UI state: cycling or direct selection does not
+  append transcript lines or imply durable progress.
+
+## 9. Plain and headless parity
+
+Setup, Run Focus, phase models, receipts, and Report have one presentation DTO
+each. Plain rendering flattens them in reading order without changing state
+names. Interactive-only menus list their exact command equivalents.
+
+The headless `patch:reverify` tool requires `applicationId` in its descriptor.
+It passes through the shared registry preparation/dispatch boundary and never
+substitutes another detector, model, runtime, provider, or workspace. Existing
+scan/shell/run target consent, output, and run artifact contracts remain intact.
+
+## 10. Visual acceptance
+
+The mandatory viewport matrix is `40x12`, `60x20`, `80x24`, `96x89`,
+`120x36`, and `160x48`, under truecolor, ANSI-256, no-color, and plain modes.
+
+Critical assertions:
+
+- at `96x89`, Run Focus Steps and Output start on the same row;
+- Run Focus has no generic prompt and no artificial blank canyon;
+- narrow Prove preserves identity, STATUS, NEXT, proof, sources, and stale state;
+- `40x12` Scan preserves mode, reality, scope, outcome, engine count, finding
+  delta, and NEXT;
+- literal xterm `ESC[Z` cycles all five pages without changing draft/cursor;
+- selection remains visible without color;
+- DFD and every visualization has a real-data or explicit-empty projection;
+- every contextual `Esc` restores the exact originating phase/page/pane, scroll,
+  finding, and input mode;
+- report export success and failure never navigate away from Report.

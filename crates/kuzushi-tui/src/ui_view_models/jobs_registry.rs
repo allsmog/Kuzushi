@@ -11,6 +11,8 @@ use std::collections::HashSet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum JobRunStatus {
     Running,
+    Canceling,
+    WaitingInput,
     Queued,
     /// A disk summary still marked `running` but with **no live backing** in
     /// this session. The liveness can't be trusted (the owning process may
@@ -31,6 +33,8 @@ impl JobRunStatus {
     pub(crate) fn label(self) -> &'static str {
         match self {
             JobRunStatus::Running => "running",
+            JobRunStatus::Canceling => "canceling",
+            JobRunStatus::WaitingInput => "WAITING INPUT",
             JobRunStatus::Queued => "pending",
             JobRunStatus::Stale => "running?",
             JobRunStatus::Completed => "completed",
@@ -153,7 +157,7 @@ fn live_run_row(app: &ShellApp) -> Option<JobRow> {
         run_id: session.run_id.clone(),
         kind: kind_from_run_id(&session.run_id),
         label,
-        status: JobRunStatus::Running,
+        status: live_run_status(app, session, scan),
         elapsed_secs: Some(session.started_at.elapsed().as_secs()),
         phase: live_run_phase(session, scan.map(|scan| scan.stage.as_str())),
         findings: scan.map(|scan| scan.findings_count as u64),
@@ -161,6 +165,25 @@ fn live_run_row(app: &ShellApp) -> Option<JobRow> {
         source: JobSource::Live,
         cancelable: true,
     })
+}
+
+fn live_run_status(
+    app: &ShellApp,
+    session: &ActivitySession,
+    scan: Option<&crate::ScanPanelState>,
+) -> JobRunStatus {
+    let activity_is_canceling = session
+        .tasks
+        .values()
+        .any(|row| row.state == DagTaskState::Canceling);
+    if activity_is_canceling
+        || app.tool_abort_requested()
+        || scan.is_some_and(|scan| scan.abort_requested)
+    {
+        JobRunStatus::Canceling
+    } else {
+        JobRunStatus::Running
+    }
 }
 
 /// Current step of the live run: the active DAG row's label, falling back to
@@ -188,25 +211,75 @@ fn live_run_phase(session: &ActivitySession, scan_stage: Option<&str>) -> Option
 fn worker_job_rows(app: &ShellApp) -> Vec<JobRow> {
     let mut rows = Vec::new();
     if app.jobs().is_running(JobKind::Plan) && app.planner_running() {
-        rows.push(worker_job_row("plan", "planner"));
+        rows.push(worker_job_row(
+            "plan",
+            "planner",
+            requested_status(app.plan_abort_requested()),
+            None,
+        ));
     }
     if app.jobs().is_running(JobKind::Threat) && app.threat_worker_running() {
-        rows.push(worker_job_row("threat", "threat-model"));
+        rows.push(worker_job_row(
+            "threat",
+            "threat-model",
+            requested_status(app.threat_abort_requested()),
+            None,
+        ));
     }
-    if app.jobs().is_running(JobKind::Agent) {
-        rows.push(worker_job_row("agent", "agent"));
+    if let Some(agent) = agent_worker_job_row(app) {
+        rows.push(agent);
     }
     rows
 }
 
-fn worker_job_row(run_id: &str, label: &str) -> JobRow {
+fn agent_worker_job_row(app: &ShellApp) -> Option<JobRow> {
+    if !app.jobs().is_running(JobKind::Agent) {
+        return None;
+    }
+    let question = app
+        .activity()
+        .and_then(|session| session.operator_question.as_ref());
+    let status = if app.jobs().cancel_requested(JobKind::Agent)
+        || app.agent_chat().is_some_and(|agent| agent.abort_requested)
+    {
+        JobRunStatus::Canceling
+    } else {
+        question.map_or(JobRunStatus::Running, |_| JobRunStatus::WaitingInput)
+    };
+    let phase = question.map(|card| {
+        format!(
+            "question {}/{}",
+            card.active_question_index() + 1,
+            card.request().questions.len()
+        )
+    });
+    let run_id = app
+        .activity()
+        .map_or_else(|| "agent".to_string(), |session| session.run_id.clone());
+    Some(worker_job_row(&run_id, "agent", status, phase))
+}
+
+fn requested_status(abort_requested: bool) -> JobRunStatus {
+    if abort_requested {
+        JobRunStatus::Canceling
+    } else {
+        JobRunStatus::Running
+    }
+}
+
+fn worker_job_row(
+    run_id: &str,
+    label: &str,
+    status: JobRunStatus,
+    phase: Option<String>,
+) -> JobRow {
     JobRow {
         run_id: run_id.to_string(),
         kind: run_id.to_string(),
         label: label.to_string(),
-        status: JobRunStatus::Running,
+        status,
         elapsed_secs: None,
-        phase: None,
+        phase,
         findings: None,
         target: String::new(),
         source: JobSource::Live,
@@ -217,9 +290,8 @@ fn worker_job_row(run_id: &str, label: &str) -> JobRow {
 fn queued_job_rows(app: &ShellApp) -> Vec<JobRow> {
     app.steer_queue()
         .iter()
-        .enumerate()
-        .map(|(index, cmd)| JobRow {
-            run_id: crate::app::SteerQueue::synthetic_id(index),
+        .map(|(run_id, cmd)| JobRow {
+            run_id,
             kind: "queued".to_string(),
             label: cmd.summary.clone(),
             status: JobRunStatus::Queued,

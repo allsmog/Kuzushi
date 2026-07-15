@@ -8,7 +8,7 @@ pub(crate) fn offense_review_module() -> BuiltinModule {
         "Model-backed offensive review tools over existing threat-model artifacts.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Required,
             ),

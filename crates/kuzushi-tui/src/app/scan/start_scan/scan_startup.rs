@@ -16,18 +16,14 @@ impl ShellApp {
         self.workbench_cache()
             .borrow_mut()
             .invalidate_map_artifacts();
-        let Some(journey) = crate::ui_view_models::journey_model(self) else {
+        if self.target().is_none() {
             self.log(
                 "journey",
                 "no active workspace target; set one with `target <path>` first",
             );
             return;
-        };
-        self.log(
-            "scan",
-            "opening guided workflow — review checked tasks, then press Enter to run",
-        );
-        self.open_phase_picker(journey.current);
+        }
+        self.begin_guided_scan_questions();
     }
 
     fn guided_scan_target_effects(&mut self, target: Option<PathBuf>) -> Option<Vec<ShellEffect>> {
@@ -140,20 +136,27 @@ impl ShellApp {
         self.set_scan_abort_reason(None);
         self.set_findings(Vec::new());
         *self.selected_finding_mut() = None;
-        self.engagement.set_phase(crate::app::WorkflowPhase::Hunt);
+        self.engagement.set_phase(crate::app::WorkflowPhase::Scan);
         self.set_active_model_override(active_model_override_from_input(
             &request.input,
             self.config(),
         ));
         self.set_activity(Some(self.pending_scan_activity(&request.run_id)));
+        self.record_session_event(kuzushi_core::session_transcript::SessionEvent::RunStarted {
+            run_id: request.run_id.clone(),
+            tool_name: "sast:scan".to_string(),
+        });
         self.set_shell_view(self.scan_shell_view());
+        if self.shell_view() == ShellView::Activity {
+            self.set_input_mode(InputMode::Navigate);
+        }
         self.log_scan_start(&request.target_root, &request.effective_options);
     }
 
     fn pending_scan_activity(&self, run_id: &str) -> ActivitySession {
-        let mut session = ActivitySession::for_phase(run_id, crate::app::WorkflowPhase::Hunt);
+        let mut session = ActivitySession::for_phase(run_id, crate::app::WorkflowPhase::Scan);
         session.seed_from_registry(self.registry());
-        session
+        self.capture_run_focus_origin(session)
     }
 
     fn scan_shell_view(&self) -> ShellView {
@@ -167,7 +170,7 @@ impl ShellApp {
     fn log_scan_start(&mut self, target_root: &PathBuf, effective_options: &[EffectiveScanOption]) {
         self.log(
             "phase",
-            "崩 hunt (2/4): `scan` is the full-scan action for this phase",
+            "崩 scan (2/5): `scan` is the discovery action for this phase",
         );
         self.log("scan", format!("starting {}", target_root.display()));
         self.log(
@@ -283,6 +286,9 @@ impl ShellApp {
         workspace: &WorkspaceTarget,
     ) -> Result<serde_json::Value> {
         let use_stored_options = explicit_input.is_none();
+        let input = explicit_input.unwrap_or_else(|| serde_json::json!({}));
+        let input = force_shell_discovery_only_sast_input("sast:scan", input);
+        anyhow::ensure!(input.is_object(), "shell scan input must be a JSON object");
         let ctx = ToolExecutionContext {
             config: self.config(),
             workspace: Some(workspace),
@@ -293,7 +299,7 @@ impl ShellApp {
         };
         self.registry().prepare_tool_input_for_dispatch(
             "sast:scan",
-            explicit_input.unwrap_or_else(|| serde_json::json!({})),
+            input,
             &ctx,
             use_stored_options.then_some(self.option_store()),
         )
@@ -311,12 +317,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pending_scan_activity_captures_hunt_as_its_launch_phase() {
+    fn pending_scan_activity_captures_scan_as_its_launch_phase() {
         let app = ShellApp::new(V2Config::default(), None);
 
         let session = app.pending_scan_activity("scan-origin");
 
-        assert_eq!(session.origin_phase, Some(crate::app::WorkflowPhase::Hunt));
+        assert_eq!(session.origin_phase, Some(crate::app::WorkflowPhase::Scan));
     }
 
     #[test]

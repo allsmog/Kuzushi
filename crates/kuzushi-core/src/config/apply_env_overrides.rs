@@ -109,13 +109,43 @@ fn validate_operator(operator: &OperatorConfig) -> Result<()> {
     validate_trusted_modules(&operator.trusted_modules)?;
     validate_signature_keys(&operator.signature_keys)?;
     validate_mcp_mounts(&operator.mcp_mounts)?;
-    validate_fuzz_executors(&operator.fuzz_executors)
+    validate_fuzz_executors(&operator.fuzz_executors)?;
+    validate_keybinding_overrides(&operator.keybindings)?;
+    anyhow::ensure!(
+        operator.session_retention_days > 0,
+        "operator.session_retention_days must be greater than zero"
+    );
+    Ok(())
+}
+
+fn validate_keybinding_overrides(overrides: &[KeybindingOverrideConfig]) -> Result<()> {
+    let mut pairs = std::collections::BTreeSet::new();
+    for entry in overrides {
+        anyhow::ensure!(
+            !entry.context.trim().is_empty() && !entry.action.trim().is_empty(),
+            "operator.keybindings context and action must not be empty"
+        );
+        anyhow::ensure!(
+            pairs.insert((entry.context.as_str(), entry.action.as_str())),
+            "duplicate operator.keybindings entry for {}.{}",
+            entry.context,
+            entry.action
+        );
+        for binding in &entry.bindings {
+            anyhow::ensure!(
+                !binding.trim().is_empty(),
+                "operator.keybindings bindings must not contain empty strings"
+            );
+        }
+    }
+    Ok(())
 }
 
 fn validate_phases(phases: &GuidedPhaseConfig) -> Result<()> {
     validate_phase_template("phases.map", &phases.map)?;
-    validate_phase_template("phases.hunt", &phases.hunt)?;
-    validate_phase_template("phases.confirm", &phases.confirm)?;
+    validate_phase_template("phases.scan", &phases.scan)?;
+    validate_phase_template("phases.review", &phases.review)?;
+    validate_phase_template("phases.prove", &phases.prove)?;
     validate_phase_template("phases.fix", &phases.fix)
 }
 

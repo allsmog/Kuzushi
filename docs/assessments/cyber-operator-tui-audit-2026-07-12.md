@@ -1,5 +1,9 @@
 # Cyber operator TUI experience audit — 2026-07-12
 
+> **Historical record — superseded:** the ordered picker and Activity/
+> Workbench claims below describe the assessed build before the Cockpit Spine
+> cutover. The current contract lives in the terminal cockpit reference.
+
 ## Verdict
 
 **Ready for operator use on the exercised local paths.** This second audit did

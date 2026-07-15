@@ -45,6 +45,10 @@ not commit, push, reset, clean, or replace whole files.
 | 034 | Make runtime cost a checked end-to-end result | P1 | L | 017, 023 | DONE |
 | 035 | Make structured-output parsing and repair linear and bounded | P1 | M | 009 | DONE |
 | 036 | Bind benchmark provenance to the executed scan and validated corpus | P1 | M | 018, 019 | DONE |
+| 037 | Make cockpit layout one semantic presentation policy | P1 | L | - | DONE |
+| 038 | Make every phase and foreground question adapt to truthful content | P1 | L | 037 | DONE |
+| 039 | Cache cockpit projections outside the render loop | P1 | M | 037 | DONE |
+| 040 | Prove adaptive cockpit behavior across semantic states and live terminals | P1 | L | 038, 039 | DONE |
 
 Status values: TODO, IN PROGRESS, DONE, BLOCKED, or REJECTED.
 
@@ -149,3 +153,15 @@ Windows/MSVC C SDK (`assert.h` was unavailable and `VCINSTALLDIR` was unset),
 before Kuzushi target code could be checked. Native workspace verification is
 green; the cross-target toolchain limitation is recorded rather than treated
 as a source failure.
+
+## State-responsive cockpit audit (2026-07-14)
+
+The operator approved the audit direction and implementation of Plans 037-040.
+The semantic policy, adaptive phase surfaces, cached remediation projections,
+and exact-binary resize journey are implemented and verified. The post-split
+TUI library suite passes 2,004 tests; the exact-binary BDD suite passes 40
+scenarios and 544 steps. Shared repository gates still disclose unrelated
+concurrent drift in activity-observability CRAP risk, one separate audit doc,
+and legacy broad snapshots; this cockpit work does not overwrite those
+user-owned changes. The governing audit is
+`plans/state-responsive-cockpit-layout-audit-2026-07-14.md`.

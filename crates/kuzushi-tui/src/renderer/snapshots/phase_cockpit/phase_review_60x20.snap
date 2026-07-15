@@ -1,0 +1,26 @@
+---
+source: Kuzushi Cockpit Spine
+contract: cockpit-spine-v1
+phase: review
+size: 60x20
+---
+KUZUSHI · VIEW REVIEW · target ./phase-target · ● LIVE
+ 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
+ ▸ NEXT record terminal dispositions for 6 of 6 remaining
+        candidates
+│▸ FINDINGS · 6
+│▸F-0001  C [●●●] s1 @? CFM open       SQL injection...
+│  SQL injection reaches query
+│  src/auth/login.rs:17
+│  ▸ next:patch · Enter open
+│ F-0002  H [●○○] s1 @? UNV open       Order identifier...
+│ F-0003  H [●○○] s1 @? UNV open       Template input...
+│ F-0004  M [●○○] s1 @? UNV open       Upload type is...
+│ F-0005  M [●○○] s1 @? UNV open       Session cookie...
+│ F-0006  L [●○○] s1 @? UNV open       Debug endpoint...
+│
+route:run · workbench           6 findings · 1 C · 2 H · 2 M
+────────────────────────────────────────────────────────────
+ Ctrl+C request abort
+ Esc prompt
+▣ REVIEW › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc pr

@@ -53,17 +53,12 @@ pub(crate) fn render_keybind_footer(frame: &mut Frame<'_>, area: Rect, app: &She
     render_lines(frame, area, lines);
 }
 
-fn split_keybindings_for_wrap(
-    app: &ShellApp,
-) -> (
-    Vec<(&'static str, &'static str)>,
-    Vec<(&'static str, &'static str)>,
-) {
-    let mut bindings: Vec<(&'static str, &'static str)> = footer_keybindings(app)
+fn split_keybindings_for_wrap(app: &ShellApp) -> (Vec<(String, String)>, Vec<(String, String)>) {
+    let mut bindings: Vec<(String, String)> = footer_keybindings(app)
         .into_iter()
         .map(|binding| (binding.key, binding.label))
         .collect();
-    bindings.sort_by_key(|binding| wrapped_binding_priority(*binding));
+    bindings.sort_by_key(|binding| wrapped_binding_priority((&binding.0, &binding.1)));
     distribute_wrapped_bindings(bindings)
 }
 
@@ -76,25 +71,23 @@ fn wrapped_binding_priority(binding: (&str, &str)) -> u8 {
     }
 }
 
-fn distribute_wrapped_bindings(
-    bindings: Vec<(&'static str, &'static str)>,
-) -> (
-    Vec<(&'static str, &'static str)>,
-    Vec<(&'static str, &'static str)>,
-) {
+fn distribute_wrapped_bindings<K: Into<String>, L: Into<String>>(
+    bindings: Vec<(K, L)>,
+) -> (Vec<(String, String)>, Vec<(String, String)>) {
     let mut rows = [Vec::new(), Vec::new()];
     let mut widths = [0usize, 0usize];
-    for binding in bindings {
+    for (key, label) in bindings {
+        let binding = (key.into(), label.into());
         let row = usize::from(widths[1] < widths[0]);
-        widths[row] += pair_len(binding) + usize::from(!rows[row].is_empty()) * 3;
+        widths[row] += pair_len((&binding.0, &binding.1)) + usize::from(!rows[row].is_empty()) * 3;
         rows[row].push(binding);
     }
     let [top, bottom] = rows;
     (top, bottom)
 }
 
-fn keybindings_line_for_wrapped_row(
-    bindings: Vec<(&'static str, &'static str)>,
+fn keybindings_line_for_wrapped_row<K: Into<String>, L: Into<String>>(
+    bindings: Vec<(K, L)>,
     width: usize,
     hint: OverflowHint,
 ) -> (Line<'static>, bool) {
@@ -116,8 +109,8 @@ enum OverflowHint {
     ShowIf(bool),
 }
 
-fn keybinding_spans_with_hint(
-    bindings: Vec<(&'static str, &'static str)>,
+fn keybinding_spans_with_hint<K: Into<String>, L: Into<String>>(
+    bindings: Vec<(K, L)>,
     width: usize,
     hint: OverflowHint,
 ) -> (Vec<Span<'static>>, bool) {
@@ -127,6 +120,10 @@ fn keybinding_spans_with_hint(
         OverflowHint::Defer => 0,
         OverflowHint::ShowIf(_) => 3 + TAIL.chars().count(),
     };
+    let bindings = bindings
+        .into_iter()
+        .map(|(key, label)| (key.into(), label.into()))
+        .collect::<Vec<_>>();
     let bindings_len = bindings.len();
     let mut layout = KeybindingLineLayout::new(width, reserve);
     let mut spans = vec![Span::raw(" ")];
@@ -172,10 +169,10 @@ impl KeybindingLineLayout {
     fn try_push(
         &mut self,
         spans: &mut Vec<Span<'static>>,
-        binding: (&'static str, &'static str),
+        binding: (String, String),
         is_last: bool,
     ) -> bool {
-        let pair_len = pair_len(binding);
+        let pair_len = pair_len((&binding.0, &binding.1));
         let need = self.separator_len() + pair_len;
         if self.used + need > self.capacity(is_last) {
             self.overflow = true;
@@ -183,13 +180,13 @@ impl KeybindingLineLayout {
                 return false;
             }
             let available = self.capacity(is_last).saturating_sub(self.used);
-            push_fitted_binding_pair(spans, binding, available);
+            push_fitted_binding_pair(spans, (&binding.0, &binding.1), available);
             self.used += available;
             self.placed += usize::from(available > 0);
             return false;
         }
         self.push_separator(spans);
-        push_binding_pair(spans, binding);
+        push_binding_pair(spans, (&binding.0, &binding.1));
         self.used += pair_len;
         self.placed += 1;
         true
@@ -223,7 +220,7 @@ fn pair_len((key, label): (&str, &str)) -> usize {
     display_width(key) + 1 + display_width(label)
 }
 
-fn push_binding_pair(spans: &mut Vec<Span<'static>>, (key, label): (&'static str, &'static str)) {
+fn push_binding_pair(spans: &mut Vec<Span<'static>>, (key, label): (&str, &str)) {
     spans.push(Span::styled(key.to_string(), binding_key_style(key)));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(label.to_string(), theme::muted()));
@@ -231,7 +228,7 @@ fn push_binding_pair(spans: &mut Vec<Span<'static>>, (key, label): (&'static str
 
 fn push_fitted_binding_pair(
     spans: &mut Vec<Span<'static>>,
-    (key, label): (&'static str, &'static str),
+    (key, label): (&str, &str),
     width: usize,
 ) {
     if width == 0 {
@@ -293,7 +290,7 @@ mod tests {
     #[test]
     fn right_atom_survives_double_width_left_labels() {
         let line = justify_prefer_right(
-            "mode:shell · 組 map 1/4 · ⛭ 掛 fix · workbench".to_string(),
+            "route:shell · 組 map 1/5 · ⛭ 掛 fix · workbench".to_string(),
             "7 findings".to_string(),
             60,
         );
@@ -314,7 +311,7 @@ mod tests {
             OverflowHint::Defer,
         );
         let (bottom, bottom_overflow) = keybindings_line_for_wrapped_row(
-            vec![("1..4", "page"), ("Tab", "pane"), ("j/k/↑/↓", "move")],
+            vec![("1..5", "page"), ("Tab", "pane"), ("j/k/↑/↓", "move")],
             30,
             OverflowHint::ShowIf(top_overflow),
         );

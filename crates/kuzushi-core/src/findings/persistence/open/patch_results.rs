@@ -26,7 +26,7 @@ impl FindingStore {
             select patch_run_id, fingerprint, repo, diff_object, diff_size_bytes, status, iterations,
                    build_command, test_command, worktree_path, cost_usd,
                    provider_spend_unresolved, validator_log, history_json,
-                   created_at, created_at
+                   created_at, created_at, payload_json
             from patch_attempt_events
             where fingerprint = ?1
             order by seq desc
@@ -41,6 +41,34 @@ impl FindingStore {
             .into_iter()
             .map(|stored| stored.result)
             .collect())
+    }
+
+    /// Read the latest patch-attempt identity without opening the writable
+    /// projection connection or materializing its diff object.
+    pub fn latest_patch_attempt_summary_for_finding(
+        &self,
+        fingerprint: &str,
+    ) -> Result<Option<PatchAttemptSummary>> {
+        self.conn
+            .query_row(
+                r#"
+                select patch_run_id, status
+                  from patch_attempt_events
+                 where fingerprint = ?1
+                 order by seq desc
+                 limit 1
+                "#,
+                params![fingerprint],
+                |row| {
+                    let status: String = row.get(1)?;
+                    Ok(PatchAttemptSummary {
+                        patch_run_id: row.get(0)?,
+                        status: PatchStatus::try_from(status.as_str()).map_err(to_sql_error)?,
+                    })
+                },
+            )
+            .optional()
+            .context("Could not load latest patch attempt summary")
     }
 
     fn record_v3_patch_attempt(
@@ -76,6 +104,7 @@ impl FindingStore {
                 provider_spend_unresolved: result.provider_spend_unresolved,
                 validator_log: result.validator_log.clone(),
                 history_json: history_json.to_string(),
+                provenance: result.provenance.clone(),
                 actor: "patch-runner".to_string(),
             })),
         )?;
@@ -152,6 +181,7 @@ fn row_to_v3_patch_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredPat
         validator_log: row.get(12)?,
         history: serde_json::from_str::<Vec<PatchAttempt>>(&history_json)
             .map_err(|error| to_sql_error(anyhow::Error::new(error)))?,
+        provenance: patch_provenance_from_payload(row, 16)?,
         created_at: row.get(14)?,
         updated_at: row.get(15)?,
     };
@@ -160,6 +190,22 @@ fn row_to_v3_patch_result(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredPat
         result,
         diff_size_bytes: optional_nonnegative_u64(row, 4)?,
     })
+}
+
+fn patch_provenance_from_payload(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Option<PatchProvenance>> {
+    let payload_json: String = row.get(index)?;
+    let payload: serde_json::Value = serde_json::from_str(&payload_json)
+        .map_err(|error| to_sql_error(anyhow::Error::new(error)))?;
+    payload
+        .get("provenance")
+        .filter(|value| !value.is_null())
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|error| to_sql_error(anyhow::Error::new(error)))
 }
 
 fn validated_patch_cost_usd(result: &PatchResult) -> Result<Option<f64>> {
@@ -223,7 +269,7 @@ mod cost_tests {
         let stored = conn
             .query_row(
                 "select 'patch-run', 'fp', '/repo', null, null, 'UNKNOWN', 0,
-                        null, null, null, null, null, null, '[]', null, null",
+                        null, null, null, null, null, null, '[]', null, null, '{}'",
                 [],
                 row_to_v3_patch_result,
             )
@@ -249,8 +295,75 @@ mod cost_tests {
             provider_spend_unresolved,
             validator_log: None,
             history: Vec::new(),
+            provenance: None,
             created_at: None,
             updated_at: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod read_only_summary_tests {
+    use super::*;
+    use crate::{Finding, Severity};
+
+    #[test]
+    fn read_only_summary_does_not_materialize_patch_objects() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join("findings.sqlite3");
+        let finding = seed_patch_attempt(&temp, &db_path);
+        let objects = temp.path().join("objects");
+        assert!(!objects.exists());
+
+        let store = FindingStore::open_read_only(&db_path).unwrap();
+        let summary = store
+            .latest_patch_attempt_summary_for_finding(&finding.fingerprint)
+            .unwrap()
+            .expect("patch summary");
+
+        assert_eq!(summary.patch_run_id, "patch-run");
+        assert_eq!(summary.status, PatchStatus::Sound);
+        assert!(!objects.exists());
+    }
+
+    fn seed_patch_attempt(temp: &tempfile::TempDir, db_path: &Path) -> Finding {
+        let store = FindingStore::open(&db_path).unwrap();
+        store
+            .record_run_started("scan-run", temp.path(), "completed")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "fixture.rule",
+            "src/lib.rs",
+            1,
+            None,
+            Severity::High,
+            "fixture finding",
+        );
+        store.insert_finding("scan-run", &finding).unwrap();
+        store
+            .insert_patch_result(&patch_result(temp, &finding))
+            .unwrap();
+        finding
+    }
+
+    fn patch_result(temp: &tempfile::TempDir, finding: &Finding) -> PatchResult {
+        PatchResult {
+            patch_run_id: "patch-run".to_string(),
+            fingerprint: finding.fingerprint.clone(),
+            repo: temp.path().display().to_string(),
+            diff: None,
+            status: PatchStatus::Sound,
+            iterations: 1,
+            build_command: None,
+            test_command: None,
+            worktree_path: None,
+            cost_usd: Some(0.0),
+            provider_spend_unresolved: false,
+            validator_log: None,
+            history: Vec::new(),
+            provenance: None,
+            created_at: Some("1".to_string()),
+            updated_at: Some("1".to_string()),
         }
     }
 }

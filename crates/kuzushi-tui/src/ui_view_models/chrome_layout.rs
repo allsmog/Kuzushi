@@ -12,10 +12,7 @@ fn activity_supplies_own_chrome(app: &ShellApp) -> bool {
 fn onboarding_supplies_own_guidance(app: &ShellApp) -> bool {
     matches!(
         app.shell_view(),
-        ShellView::TargetPicker
-            | ShellView::ModelPicker
-            | ShellView::AuthMethodPicker
-            | ShellView::PlanningPicker
+        ShellView::TargetPicker | ShellView::PlanningPicker | ShellView::Setup
     )
 }
 

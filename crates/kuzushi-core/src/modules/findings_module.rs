@@ -13,7 +13,7 @@ pub(crate) fn findings_module() -> BuiltinModule {
                 findings_list_options(),
             )
             .with_policy(ToolPolicy::new(
-                ToolPhase::Confirm,
+                ToolPhase::Review,
                 RuntimeRequirement::Never,
                 ToolEffect::Read,
                 WorkspaceRequirement::Required,
@@ -25,7 +25,7 @@ pub(crate) fn findings_module() -> BuiltinModule {
                 findings_dismiss_options(),
             )
             .with_policy(workspace_policy(
-                ToolPhase::Confirm,
+                ToolPhase::Review,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             )),

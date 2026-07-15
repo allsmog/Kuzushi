@@ -47,6 +47,7 @@ pub(in crate::modules) const SAST_SUMMARY_FILE: &str = "sast-summary.json";
 pub(in crate::modules) const SAST_TRIAGE_JSONL_FILE: &str = "triage.jsonl";
 pub(in crate::modules) const SAST_VERIFY_JSONL_FILE: &str = "verify.jsonl";
 pub(in crate::modules) const SAST_PATCH_JSONL_FILE: &str = "patch.jsonl";
+pub(in crate::modules) use crate::run_artifacts::SAST_PHASE_STAGES_JSONL_FILE;
 
 impl SastRunArtifacts {
     pub(in crate::modules) fn create(workspace: &WorkspaceTarget, run_id: &str) -> Result<Self> {
@@ -58,6 +59,7 @@ impl SastRunArtifacts {
             SAST_TRIAGE_JSONL_FILE,
             SAST_VERIFY_JSONL_FILE,
             SAST_PATCH_JSONL_FILE,
+            SAST_PHASE_STAGES_JSONL_FILE,
         ] {
             let spec = crate::run_artifacts::scan_pipeline_artifact_spec(leaf)
                 .context("scan pipeline artifact must be declared")?;

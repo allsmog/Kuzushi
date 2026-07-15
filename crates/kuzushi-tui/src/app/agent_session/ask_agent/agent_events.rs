@@ -2,6 +2,9 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn apply_agent_event(&mut self, event: AgentEvent) -> Vec<ShellEffect> {
+        if let Some(session) = self.activity_mut() {
+            session.operator_question = None;
+        }
         let state = AgentEventState::from_app(self);
         match event {
             AgentEvent::Answered { text, audit } => self.apply_agent_answer(text, audit, state),
@@ -39,6 +42,11 @@ impl ShellApp {
                 state,
             );
         }
+        self.record_session_event(
+            kuzushi_core::session_transcript::SessionEvent::AgentAssistantTurn {
+                text: text.clone(),
+            },
+        );
         self.log("answer", text.clone());
         self.set_completed_activity("agent", "answer received");
         self.agent_success_record(&text, audit, state)

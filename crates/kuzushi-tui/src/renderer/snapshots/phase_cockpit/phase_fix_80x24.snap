@@ -1,30 +1,30 @@
 ---
-source: Kuzushi TUI.pdf
-sha256: fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545
+source: Kuzushi Cockpit Spine
+contract: cockpit-spine-v1
 phase: fix
 size: 80x24
 ---
-KUZUSHI · target ./phase-target · view fix · ● LIVE · cost $0.37 · ctx:✓ built
- 組  map ✓ · 崩  hunt ✓ · 作  confirm ● · 掛  fix ·
- ▸ NEXT triage & verify
- c order exploit chain · findings export report.sarif sarif export report
-│▸ FIX · BREAKDOWN REPORT
-│1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal · 6 open
-│report sarif/all · preview only · no report written
-│◆ F-0001  CRITICAL  SQL injection reaches query
-│ ── ATTACK TREE ──────────────────────────────────────────────────────────────
-│◇ OR — any one chain
-│ ── DFD ──────────────────────────────────────────────────────────────────────
-│3 zones · 3 nodes · 2 flows · 2 boundary crossings
-│ ── REMEDIATION ──────────────────────────────────────────────────────────────
-│F-0001  patch staged for review
-│▸ findings export report.sarif sarif
-│
-│
-│
-│
-│
-mode:run · 作  confirm 3/4 · ⛭ 掛  fix ·...   6 findings / 1 crit / 2 high / 2 med
+KUZUSHI · VIEW FIX · REALITY REVIEW · target ./phase-target · ● LIVE · cost $0.37
+ 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
+ ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
+ v reverify applied patch · z chain / DFD · report open Report
+│▸ REMEDIATION                     │KUZUSHI · BREAKDOWN REPORT
+│STATE  Staged for approval        │1 C · 2 H · 2 M · 1 L · 6 total · 0...
+│▸ report                          │report sarif/all · preview only · no...
+│  choose format, completeness, and│◆ F-0001  CRITICAL  SQL injection reache...
+│destination                       │
+│F-0001 · pending reviewed diff    │
+│rationale: bind the user value as │
+│           a query parameter      │
+│side effect: preserves the login  │
+│             response schema      │
+│✓ login_rejects_sqli ·...         │
+│guardrail: human approval         │
+│           required               │
+│                                  │
+│                                  │
+│                                  │
+route:run · 査  review 3/5 · ⛭ 掛  fix ·...   6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
-NAVIGATION MODE — view keys active · Esc returns to prompt
+◆ FIX › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

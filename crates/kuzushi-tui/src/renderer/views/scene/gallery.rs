@@ -389,6 +389,24 @@ mod tests {
     }
 
     #[test]
+    fn every_empty_gallery_page_names_an_actionable_prerequisite() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let cases = [
+            (VizPage::AttackSurface, "scan"),
+            (VizPage::AttackPath, "taint-iris:hunt"),
+            (VizPage::Dfd, "threat-model:build"),
+            (VizPage::Heatmap, "scan"),
+            (VizPage::ExploitChain, "exploit-chain:scan"),
+        ];
+
+        for (page, command) in cases {
+            let lines = scene_page_lines(&app, Rect::new(0, 0, 96, 24), page);
+            let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+            assert!(text.contains(command), "{page:?} missing {command}: {text}");
+        }
+    }
+
+    #[test]
     fn attack_surface_plain_lines_project_heatmap_data() {
         let mut app = ShellApp::new(V2Config::default(), None);
         *app.findings_mut() = vec![kuzushi_core::Finding::new_semgrep(

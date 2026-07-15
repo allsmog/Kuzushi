@@ -1,151 +1,343 @@
 use super::*;
 use crate::ui_view_models::{
-    ActivityTaskCountModel, EngagementHeaderModel, MapArtifactMetric, MapConsoleRow, MapPhaseModel,
+    AttackSurfaceRiskModel, DfdFlowModel, DfdModel, EngagementHeaderModel, MapPhaseModel,
+    ModuleRisk, ProjectModelOrigin,
 };
+use ratatui::layout::{Constraint, Direction, Layout};
 
-mod console;
-mod telemetry;
-
-use console::console_lines;
-use telemetry::{task_count_line, telemetry_lines};
+const GRID_MIN_WIDTH: u16 = 78;
+const COMPACT_MIN_HEIGHT: u16 = 14;
 
 pub(super) fn render(
     frame: &mut Frame<'_>,
     area: Rect,
     model: &MapPhaseModel,
-    header: &EngagementHeaderModel,
+    _header: &EngagementHeaderModel,
+    state: PhaseRenderState,
+) {
+    if let Some(pane) = state.zoom {
+        render_map_pane(frame, area, model, state, pane);
+        return;
+    }
+    if area.width < GRID_MIN_WIDTH || area.height < COMPACT_MIN_HEIGHT {
+        render_compact(frame, area, model, state);
+        return;
+    }
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(52), Constraint::Percentage(48)])
+        .split(area);
+    let top = split_row(rows[0], 54);
+    let bottom = split_row(rows[1], 54);
+    render_context(frame, top[0], model, state);
+    render_attack_surface(frame, top[1], model, state);
+    render_hot_modules(frame, bottom[0], model, state);
+    render_dfd_readiness(frame, bottom[1], model, state);
+}
+
+pub(super) fn plain_lines(
+    model: &MapPhaseModel,
+    _header: &EngagementHeaderModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = divider_lines("PROJECT CONTEXT", context_lines(model, width), width);
+    lines.extend(divider_lines(
+        "ATTACK SURFACE",
+        attack_surface_lines(model.attack_surface.as_ref(), width),
+        width,
+    ));
+    lines.extend(divider_lines(
+        "HOT MODULES",
+        hot_module_lines(&model.hot_modules.modules, width),
+        width,
+    ));
+    lines.extend(divider_lines(
+        "THREAT MODEL / DFD",
+        dfd_readiness_lines(&model.dfd, width),
+        width,
+    ));
+    lines
+}
+
+fn split_row(area: Rect, left_percent: u16) -> std::rc::Rc<[Rect]> {
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(left_percent),
+            Constraint::Percentage(100 - left_percent),
+        ])
+        .split(area)
+}
+
+fn render_compact(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &MapPhaseModel,
     state: PhaseRenderState,
 ) {
     let width = area.width.saturating_sub(2) as usize;
-    let height = area.height.saturating_sub(1) as usize;
+    let mut lines = context_lines(model, width);
+    lines.push(divider("ATTACK SURFACE", area.width.saturating_sub(2)));
+    lines.extend(attack_surface_lines(model.attack_surface.as_ref(), width));
+    lines.push(divider("HOT MODULES", area.width.saturating_sub(2)));
+    lines.extend(hot_module_lines(&model.hot_modules.modules, width));
+    lines.push(divider("THREAT MODEL / DFD", area.width.saturating_sub(2)));
+    lines.extend(dfd_readiness_lines(&model.dfd, width));
     render_lines_pane(
         frame,
         area,
-        "MAP · RECON",
-        map_lines(model, header, width, height),
+        "MAP · Tab focus · z visualize",
+        lines,
+        state.focus.unwrap_or(WorkbenchPane::Source),
+        state,
+    );
+}
+
+fn render_map_pane(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &MapPhaseModel,
+    state: PhaseRenderState,
+    pane: WorkbenchPane,
+) {
+    match pane {
+        WorkbenchPane::Source => render_context(frame, area, model, state),
+        WorkbenchPane::Center => render_attack_surface(frame, area, model, state),
+        WorkbenchPane::Findings => render_hot_modules(frame, area, model, state),
+        WorkbenchPane::Details => render_dfd_readiness(frame, area, model, state),
+    }
+}
+
+fn render_context(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &MapPhaseModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "PROJECT CONTEXT",
+        context_lines(model, area.width.saturating_sub(2) as usize),
+        WorkbenchPane::Source,
+        state,
+    );
+}
+
+fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
+        Span::styled(fit(&model.project.scope_label, width), theme::heading()),
+        Span::styled(
+            format!(" · {}", model.project.revision_label),
+            theme::muted(),
+        ),
+    ])];
+    if let Some(hint) = model.empty_hint.as_deref() {
+        lines.push(Line::styled(fit(hint, width), theme::warn()));
+    }
+    lines.push(Line::styled(
+        fit(
+            &format!("context:{} · {}", model.context.state, model.context.status),
+            width,
+        ),
+        artifact_state_style(model.context.state),
+    ));
+    lines.extend(model.project.rows.iter().take(8).map(|row| {
+        Line::from(vec![
+            Span::styled(
+                format!("{} {:<14}", row.origin.glyph(), row.section),
+                origin_style(row.origin),
+            ),
+            Span::styled(fit(&row.summary, width.saturating_sub(17)), theme::muted()),
+        ])
+    }));
+    lines
+}
+
+fn render_attack_surface(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &MapPhaseModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "ATTACK SURFACE · z terrain",
+        attack_surface_lines(
+            model.attack_surface.as_ref(),
+            area.width.saturating_sub(2) as usize,
+        ),
         WorkbenchPane::Center,
         state,
     );
 }
 
-pub(super) fn plain_lines(
-    model: &MapPhaseModel,
-    header: &EngagementHeaderModel,
+fn attack_surface_lines(
+    attack_surface: Option<&AttackSurfaceRiskModel>,
     width: usize,
 ) -> Vec<Line<'static>> {
-    divider_lines(
-        "MAP · RECON",
-        map_lines(model, header, width, usize::MAX),
-        width,
-    )
-}
-
-fn map_lines(
-    model: &MapPhaseModel,
-    header: &EngagementHeaderModel,
-    width: usize,
-    height: usize,
-) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        operation_line(model, header, width),
-        section_line("RECON", width),
-    ];
-    lines.extend(console_lines(
-        model,
-        width,
-        console_row_budget(height, !model.artifact_metrics.is_empty()),
+    let Some(model) = attack_surface else {
+        return empty_state_panel(
+            "no attack-surface artifact",
+            &["run `next` to inventory externally reachable surfaces"],
+            &[("next", "continue Map")],
+        );
+    };
+    let mut lines = vec![Line::styled(fit(&model.summary, width), theme::primary())];
+    lines.extend(model.hot_surfaces.iter().map(|row| {
+        let score = (row.score > 0)
+            .then(|| format!(" · {}", row.score))
+            .unwrap_or_default();
+        Line::from(vec![
+            Span::styled(format!("{:<8}", row.tier), tier_style(&row.tier)),
+            Span::styled(
+                fit(
+                    &format!("{} · {}{score}", row.framework, row.title),
+                    width.saturating_sub(9),
+                ),
+                theme::muted(),
+            ),
+        ])
+    }));
+    lines.push(Line::styled(
+        "▸ z open terrain visualization",
+        theme::accent(),
     ));
-    lines.push(section_line("TELEMETRY", width));
-    lines.extend(telemetry_lines(model, header, width));
     lines
 }
 
-fn operation_line(
+fn render_hot_modules(
+    frame: &mut Frame<'_>,
+    area: Rect,
     model: &MapPhaseModel,
-    header: &EngagementHeaderModel,
-    width: usize,
-) -> Line<'static> {
-    let state = if header.live {
-        "● LIVE"
-    } else {
-        "○ settled"
-    };
-    let run = model
-        .run_id
-        .as_deref()
-        .map(compact_run_id)
-        .unwrap_or_else(|| "no run".to_string());
-    let elapsed = model
-        .elapsed_secs
-        .map(|seconds| format!(" · {seconds}s"))
-        .unwrap_or_default();
-    Line::from(vec![
-        Span::styled(format!(" {state} "), live_style(header.live)),
-        Span::styled(
-            fit(
-                &format!("run {run}{elapsed} · {}", header.module),
-                width.saturating_sub(9),
-            ),
-            theme::primary(),
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "HOT MODULES · z heatmap",
+        hot_module_lines(
+            &model.hot_modules.modules,
+            area.width.saturating_sub(2) as usize,
         ),
-    ])
+        WorkbenchPane::Findings,
+        state,
+    );
 }
 
-fn live_style(live: bool) -> ratatui::style::Style {
-    if live {
-        theme::success()
+fn hot_module_lines(modules: &[ModuleRisk], width: usize) -> Vec<Line<'static>> {
+    if modules.is_empty() {
+        return vec![Line::styled(
+            fit("no finding-bearing modules yet — run `scan`", width),
+            theme::muted(),
+        )];
+    }
+    modules
+        .iter()
+        .take(8)
+        .map(|module| {
+            let [critical, high, medium, low, info] = module.counts;
+            Line::from(vec![
+                Span::styled(
+                    fit(&module.module, width.saturating_sub(25)),
+                    theme::primary(),
+                ),
+                Span::styled(
+                    format!(
+                        "  {:>4.1} · {critical}C {high}H {medium}M {low}L {info}I",
+                        module.score
+                    ),
+                    theme::muted(),
+                ),
+            ])
+        })
+        .collect()
+}
+
+fn render_dfd_readiness(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &MapPhaseModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "THREAT MODEL / DFD · z open",
+        dfd_readiness_lines(&model.dfd, area.width.saturating_sub(2) as usize),
+        WorkbenchPane::Details,
+        state,
+    );
+}
+
+fn dfd_readiness_lines(dfd: &DfdModel, width: usize) -> Vec<Line<'static>> {
+    if let Some(hint) = dfd.empty_hint.as_deref() {
+        return missing_dfd_lines(hint);
+    }
+    ready_dfd_lines(dfd, width)
+}
+
+fn missing_dfd_lines(hint: &str) -> Vec<Line<'static>> {
+    empty_state_panel(
+        "DFD not ready",
+        &[hint],
+        &[("run threat-model:build {}", "build threat model")],
+    )
+}
+
+fn ready_dfd_lines(dfd: &DfdModel, width: usize) -> Vec<Line<'static>> {
+    let crossing = dfd.flows.iter().filter(|flow| flow.crosses).count();
+    let summary = format!(
+        "ready · {} nodes · {} flows · {crossing} trust crossings",
+        dfd.nodes.len(),
+        dfd.flows.len()
+    );
+    let mut lines = vec![Line::styled(fit(&summary, width), theme::success())];
+    lines.push(Line::styled(
+        fit(&format!("zones: {}", dfd.zones.join(" → ")), width),
+        theme::muted(),
+    ));
+    lines.extend(
+        dfd.flows
+            .iter()
+            .take(6)
+            .map(|flow| dfd_flow_line(flow, width)),
+    );
+    lines
+}
+
+fn dfd_flow_line(flow: &DfdFlowModel, width: usize) -> Line<'static> {
+    let arrow = if flow.crosses { "⇒" } else { "→" };
+    let label = format!("{} {arrow} {} · {}", flow.from, flow.to, flow.label);
+    let style = if flow.crosses {
+        theme::warn()
     } else {
-        theme::muted()
+        theme::primary()
+    };
+    Line::styled(fit(&label, width), style)
+}
+
+fn origin_style(origin: ProjectModelOrigin) -> ratatui::style::Style {
+    match origin {
+        ProjectModelOrigin::Local | ProjectModelOrigin::Inherited => theme::success(),
+        ProjectModelOrigin::Missing => theme::muted(),
+        ProjectModelOrigin::Stale => theme::warn(),
     }
 }
 
-fn compact_run_id(run_id: &str) -> String {
-    let reference = crate::app::compact_run_reference(run_id);
-    if reference == run_id {
-        reference
-    } else {
-        format!("…{reference}")
+fn artifact_state_style(state: &str) -> ratatui::style::Style {
+    match state {
+        "present" => theme::success(),
+        "malformed" => theme::danger(),
+        _ => theme::muted(),
     }
 }
 
-fn console_row_budget(height: usize, has_artifact_metrics: bool) -> usize {
-    height
-        .saturating_sub(8 + usize::from(has_artifact_metrics))
-        .clamp(3, 24)
-}
-
-fn section_line(title: &str, width: usize) -> Line<'static> {
-    divider(title, width as u16)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn run_reference_is_copyable_eight_character_suffix() {
-        assert_eq!(compact_run_id("scan-1234-abcdef12"), "…abcdef12");
-        assert_eq!(compact_run_id("short"), "short");
-    }
-
-    #[test]
-    fn compact_task_status_drops_whole_secondary_atoms() {
-        let line = task_count_line(
-            &ActivityTaskCountModel {
-                active: 1,
-                canceling: 2,
-                failed: 3,
-                blocked: 4,
-                canceled: 5,
-                skipped: 6,
-                ..ActivityTaskCountModel::default()
-            },
-            38,
-        );
-        let text = line.to_string();
-
-        assert!(line.width() <= 38);
-        assert!(!text.contains('…'));
-        assert!(!text.ends_with('·'));
+fn tier_style(tier: &str) -> ratatui::style::Style {
+    match tier.to_ascii_lowercase().as_str() {
+        "critical" | "high" => theme::danger(),
+        "medium" => theme::warn(),
+        _ => theme::muted(),
     }
 }

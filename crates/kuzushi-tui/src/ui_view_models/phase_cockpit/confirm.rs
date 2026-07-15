@@ -1,11 +1,13 @@
-use super::{ConfirmPhaseModel, ProofReplayModel};
+use super::{ProofReplayModel, ProvePhaseModel};
 use crate::ui_view_models::{
-    current_finding_for_detail, finding_detail_model_for_projection, taint_flow_path_for_finding,
+    current_finding_for_detail, finding_detail_model_for_projection, findings_model,
+    taint_flow_path_for_finding,
 };
 use crate::{ShellApp, ViewDataState};
 use kuzushi_core::{PersistedVerification, RunArtifactRead};
 
-pub(super) fn confirm_phase_model(app: &ShellApp) -> ConfirmPhaseModel {
+pub(super) fn prove_phase_model(app: &ShellApp) -> ProvePhaseModel {
+    let findings = findings_model(app);
     let selected = current_finding_for_detail(app);
     let finding = selected
         .as_ref()
@@ -15,7 +17,12 @@ pub(super) fn confirm_phase_model(app: &ShellApp) -> ConfirmPhaseModel {
             proof_replay_model(app, alias.clone(), finding.scan_id.as_deref(), verification)
         })
     });
-    ConfirmPhaseModel {
+    ProvePhaseModel {
+        selection_disclosure: super::phase_bodies::actionable_selection_disclosure(
+            app,
+            &findings,
+            finding.as_ref(),
+        ),
         finding,
         attack_path: taint_flow_path_for_finding(
             app,
@@ -57,11 +64,7 @@ fn proof_replay_model(
         created_at: verification.created_at.clone(),
         provenance_run_id,
         replay_run_id,
-        requires_revalidation: verification
-            .verified_scan_id
-            .as_deref()
-            .zip(current_scan_id)
-            .is_some_and(|(verified, current)| verified != current),
+        requires_revalidation: !verification.is_current_for_scan(current_scan_id),
     }
 }
 

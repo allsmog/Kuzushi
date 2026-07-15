@@ -1,4 +1,5 @@
 use super::*;
+use crate::modules::autonomy::WorkflowPhase;
 use crate::{Finding, Severity};
 
 pub(in crate::modules) fn run_sast_verification_and_patch(
@@ -23,6 +24,7 @@ pub(in crate::modules) fn run_sast_verification_and_patch(
             option_store,
             artifacts,
             requests,
+            &run_ids.primary,
             fingerprint,
         )?;
         verification_results.push(result.verification);
@@ -89,6 +91,7 @@ fn run_sast_verification_for_fingerprint(
     option_store: &crate::options::ToolOptionStore,
     artifacts: &SastRunArtifacts,
     requests: &SastScanRequests,
+    primary_run_id: &str,
     fingerprint: String,
 ) -> Result<SastVerificationResult> {
     let verification = run_sast_verifier(
@@ -97,6 +100,8 @@ fn run_sast_verification_for_fingerprint(
         ctx,
         runtime,
         option_store,
+        artifacts,
+        primary_run_id,
         fingerprint.clone(),
     )?;
     write_verify_jsonl(artifacts, &verification)?;
@@ -108,6 +113,7 @@ fn run_sast_verification_for_fingerprint(
         option_store,
         artifacts,
         requests,
+        primary_run_id,
         &fingerprint,
         &verification,
     )?;
@@ -123,6 +129,8 @@ fn run_sast_verifier(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
     option_store: &crate::options::ToolOptionStore,
+    artifacts: &SastRunArtifacts,
+    primary_run_id: &str,
     fingerprint: String,
 ) -> Result<Value> {
     let verify_input = with_sast_prompt_override(
@@ -132,13 +140,16 @@ fn run_sast_verifier(
         "verify",
         "VERIFY_PROMPT",
     )?;
-    run_sast_subtool(
+    run_sast_phase_subtool(
         registry,
         "verify:finding",
         verify_input,
         ctx,
         runtime,
         option_store,
+        artifacts,
+        WorkflowPhase::Prove,
+        primary_run_id,
     )
 }
 
@@ -150,19 +161,23 @@ fn run_optional_sast_patch(
     option_store: &crate::options::ToolOptionStore,
     artifacts: &SastRunArtifacts,
     requests: &SastScanRequests,
+    primary_run_id: &str,
     fingerprint: &str,
     verification: &Value,
 ) -> Result<Option<Value>> {
     if !requests.auto_patch || !sast_verification_exploitable(verification) {
         return Ok(None);
     }
-    let patch = run_sast_subtool(
+    let patch = run_sast_phase_subtool(
         registry,
         "patch:finding",
         sast_patch_input(input, fingerprint),
         ctx,
         runtime,
         option_store,
+        artifacts,
+        WorkflowPhase::Fix,
+        primary_run_id,
     )?;
     write_patch_jsonl(artifacts, fingerprint, &patch)?;
     Ok(Some(patch))
@@ -230,8 +245,44 @@ pub(in crate::modules) fn whitebox_mode_label(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::WorkspaceTarget;
     use crate::{TriageOutcome, TriageVerdict};
     use std::path::Path;
+
+    #[test]
+    fn non_exploitable_verification_does_not_execute_or_record_fix() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let artifacts = SastRunArtifacts::create(&workspace, "scan-no-fix").unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = crate::config::V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let requests = SastScanRequests::from_input(&json!({"autoPatch": true})).unwrap();
+
+        let patch = run_optional_sast_patch(
+            &registry,
+            &json!({}),
+            &ctx,
+            None,
+            &crate::options::ToolOptionStore::new(),
+            &artifacts,
+            &requests,
+            "scan-no-fix",
+            "finding-no-fix",
+            &json!({"data": {"exploitable": false}}),
+        )
+        .unwrap();
+
+        assert!(patch.is_none());
+        assert!(load_sast_phase_stages(&artifacts).unwrap().is_empty());
+    }
 
     #[test]
     fn selected_verification_fingerprints_filters_votes_when_and_max() {

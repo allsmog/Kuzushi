@@ -1,6 +1,8 @@
 use super::*;
 
-pub(super) const MAX_SUPPORTED_FILE_BYTES: u64 = 64 * 1024 * 1024;
+pub(crate) const MAX_SUPPORTED_FILE_BYTES: u64 = 64 * 1024 * 1024;
+const MIN_FILE_BYTES: u64 = 1024;
+const MAX_SUPPORTED_FINDINGS: u64 = 10_000;
 
 impl SecretSeverity {
     pub(crate) fn as_str(self) -> &'static str {
@@ -63,20 +65,21 @@ impl Default for SecretScanOptions {
 impl SecretScanOptions {
     pub fn from_tool_input(input: &Value) -> Result<Self> {
         let mut options = Self::default();
-        options.apply_limits(input);
+        options.apply_limits(input)?;
         options.extend_excluded_directories(input);
         options.extend_binary_extensions(input);
         options.apply_severity_filter(input)?;
         Ok(options)
     }
 
-    fn apply_limits(&mut self, input: &Value) {
-        if let Some(value) = input.get("maxFileBytes").and_then(Value::as_u64) {
-            self.max_file_bytes = value.clamp(1024, MAX_SUPPORTED_FILE_BYTES);
+    fn apply_limits(&mut self, input: &Value) -> Result<()> {
+        if let Some(value) = bounded_u64(input, "maxFileBytes", MIN_FILE_BYTES, MAX_SUPPORTED_FILE_BYTES)? {
+            self.max_file_bytes = value;
         }
-        if let Some(value) = input.get("maxFindings").and_then(Value::as_u64) {
-            self.max_findings = value.clamp(1, 10_000) as usize;
+        if let Some(value) = bounded_u64(input, "maxFindings", 1, MAX_SUPPORTED_FINDINGS)? {
+            self.max_findings = value as usize;
         }
+        Ok(())
     }
 
     fn extend_excluded_directories(&mut self, input: &Value) {
@@ -109,6 +112,20 @@ impl SecretScanOptions {
         }
         Ok(())
     }
+}
+
+fn bounded_u64(input: &Value, name: &str, minimum: u64, maximum: u64) -> Result<Option<u64>> {
+    let Some(raw) = input.get(name) else {
+        return Ok(None);
+    };
+    let value = raw
+        .as_u64()
+        .with_context(|| format!("{name} must be an integer from {minimum} to {maximum}"))?;
+    anyhow::ensure!(
+        (minimum..=maximum).contains(&value),
+        "{name} must be from {minimum} to {maximum}, got {value}"
+    );
+    Ok(Some(value))
 }
 
 fn normalize_binary_extension(value: &str) -> Option<String> {

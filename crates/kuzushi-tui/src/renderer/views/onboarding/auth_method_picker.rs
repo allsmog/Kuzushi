@@ -29,7 +29,7 @@ fn expanded_auth_picker_lines(
     if app.router.auth_picker().is_api_key_row() {
         lines.extend(api_key_draft_lines(app, provider, area.width));
     }
-    lines.extend(auth_picker_footer(area.width));
+    lines.extend(auth_picker_footer(app, area.width));
     lines
 }
 
@@ -40,7 +40,7 @@ fn compact_auth_picker_lines(
     rows: &[AuthMethodRow],
 ) -> Vec<Line<'static>> {
     let mut lines = compact_auth_intro(app, provider, area.width);
-    let footer = compact_auth_footer();
+    let footer = compact_auth_footer(app);
     let fixed_rows = lines.len() + footer.len() + 1;
     let candidate_budget = (area.height as usize).saturating_sub(fixed_rows).max(1);
     let show_window_label = rows.len() > candidate_budget;
@@ -73,10 +73,16 @@ fn compact_auth_intro(app: &ShellApp, provider: &str, width: u16) -> Vec<Line<'s
     lines
 }
 
-fn compact_auth_footer() -> Vec<Line<'static>> {
+fn compact_auth_footer(app: &ShellApp) -> Vec<Line<'static>> {
+    if app.router.auth_picker().is_api_key_row() {
+        return vec![
+            muted(" type/paste key · ↑/↓ move · Enter accept"),
+            muted(" Esc back · : command"),
+        ];
+    }
     vec![
-        muted(" ↑/↓ move · Enter select · d demo"),
-        muted(" Esc back · q leave setup"),
+        muted(" ↑/↓/j/k move · Enter select · d demo"),
+        muted(" Esc back · q leave setup · : command"),
     ]
 }
 
@@ -164,27 +170,40 @@ fn offline_demo_lead(width: u16) -> Vec<Line<'static>> {
     lines
 }
 
-fn auth_picker_footer(width: u16) -> Vec<Line<'static>> {
+fn auth_picker_footer(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    let (wide, narrow): (&[(&str, &str)], &[(&str, &str)]) =
+        if app.router.auth_picker().is_api_key_row() {
+            (
+                &[
+                    ("↑/↓", "move"),
+                    (":", "type a command"),
+                    ("Enter", "accept key"),
+                    ("Esc", "back"),
+                ],
+                &[("↑/↓", "move"), ("Enter", "accept"), ("Esc", "back")],
+            )
+        } else {
+            (
+                &[
+                    ("↑/↓/j/k", "move"),
+                    ("d", "offline fixture"),
+                    (":", "type a command"),
+                    ("Enter", "confirm"),
+                    ("Esc", "back"),
+                    ("q", "leave setup"),
+                ],
+                &[
+                    ("↑/↓", "move"),
+                    ("Enter", "select"),
+                    ("d", "demo"),
+                    ("Esc", "back"),
+                    ("q", "leave setup"),
+                ],
+            )
+        };
     vec![
         blank(),
-        responsive_keybind_hint_line(
-            width as usize,
-            &[
-                ("↑/↓/j/k", "move"),
-                ("d", "offline fixture"),
-                (":", "type a command"),
-                ("Enter", "confirm"),
-                ("Esc", "back"),
-                ("q", "leave setup"),
-            ],
-            &[
-                ("↑/↓", "move"),
-                ("Enter", "select"),
-                ("d", "demo"),
-                ("Esc", "back"),
-                ("q", "leave setup"),
-            ],
-        ),
+        responsive_keybind_hint_line(width as usize, wide, narrow),
     ]
 }
 
@@ -233,8 +252,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auth_footer_distinguishes_back_from_leaving_setup() {
-        let text = auth_picker_footer(120)
+    fn api_key_footer_uses_only_non_conflicting_controls() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.open_auth_method_picker("anthropic".to_string());
+        let text = auth_picker_footer(&app, 120)
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains("Esc back"), "{text}");
+        assert!(text.contains("Enter accept key"), "{text}");
+        assert!(!text.contains("j/k"), "{text}");
+        assert!(!text.contains("d offline"), "{text}");
+        assert!(!text.contains("q leave setup"), "{text}");
+    }
+
+    #[test]
+    fn non_editor_footer_distinguishes_back_from_leaving_setup() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.open_auth_method_picker("anthropic".to_string());
+        app.router.auth_picker_mut().set_cursor(1);
+        let text = auth_picker_footer(&app, 120)
             .iter()
             .flat_map(|line| line.spans.iter())
             .map(|span| span.content.as_ref())

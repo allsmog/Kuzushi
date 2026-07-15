@@ -150,6 +150,7 @@ impl ShellApp {
         workspace: &WorkspaceTarget,
     ) -> Option<PreparedToolInput> {
         let input = self.parse_run_input_for_tool(tool_name, input)?;
+        let input = force_shell_discovery_only_sast_input(tool_name, input);
         let ctx = ToolExecutionContext {
             config: self.config(),
             workspace: Some(workspace),
@@ -212,22 +213,49 @@ impl ShellApp {
     }
 
     fn request_run_confirmation(&mut self, request: &RunToolRequest) -> bool {
-        let input_gate = confirm_gate_for_tool(
-            &request.tool_name,
-            request.input.value(),
-            self.engagement.confirm_allowlist(),
-        );
-        let descriptor_gate = || {
+        let Some(confirm) = self.run_confirmation(request) else {
+            return false;
+        };
+        self.apply_run_confirmation(confirm, request)
+    }
+
+    fn run_confirmation(&self, request: &RunToolRequest) -> Option<PendingConfirm> {
+        let empty_allowlist = std::collections::BTreeSet::new();
+        let input_gate =
+            confirm_gate_for_tool(&request.tool_name, request.input.value(), &empty_allowlist);
+        input_gate.or_else(|| {
             self.registry()
                 .resolve_tool(&request.tool_name)
                 .and_then(|descriptor| {
                     descriptor_approval_confirm(descriptor, request.input.value())
                 })
                 .map(|confirm| patch_validation_confirm(confirm, request))
-        };
-        let Some(confirm) = input_gate.or_else(descriptor_gate) else {
-            return false;
-        };
+        })
+    }
+
+    fn apply_run_confirmation(
+        &mut self,
+        confirm: PendingConfirm,
+        request: &RunToolRequest,
+    ) -> bool {
+        match remembered_confirm_decision(
+            &confirm,
+            self.engagement.confirm_allowlist(),
+            self.engagement.confirm_denylist(),
+        ) {
+            RememberedConfirmDecision::Allow => false,
+            RememberedConfirmDecision::Deny => {
+                self.block_remembered_confirmation(&confirm);
+                true
+            }
+            RememberedConfirmDecision::Ask => {
+                self.prompt_run_confirmation(confirm, request);
+                true
+            }
+        }
+    }
+
+    fn prompt_run_confirmation(&mut self, confirm: PendingConfirm, request: &RunToolRequest) {
         self.log(
             "system",
             format!(
@@ -237,7 +265,16 @@ impl ShellApp {
             ),
         );
         self.request_confirm_for_run(confirm, request.clone().into_launch());
-        true
+    }
+
+    fn block_remembered_confirmation(&mut self, confirm: &PendingConfirm) {
+        self.set_warn_notice(
+            "approval",
+            format!(
+                "{} {} blocked by remembered denial for this session; change the exact target or restart Kuzushi to reconsider",
+                confirm.tool, confirm.target
+            ),
+        );
     }
 
     fn run_tool_workspace(&mut self, target: Option<&PathBuf>) -> Option<WorkspaceTarget> {
@@ -329,5 +366,155 @@ mod workspace_initialization_tests {
 
         assert!(workspace.root().join(".kuzushi/.gitignore").is_file());
         assert!(workspace.state_dir().is_dir());
+    }
+}
+
+#[cfg(test)]
+mod remembered_confirmation_tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use kuzushi_core::V2Config;
+
+    fn prepare(
+        app: &mut ShellApp,
+        workspace: &WorkspaceTarget,
+        tool_name: &str,
+        input: serde_json::Value,
+    ) -> Vec<ShellEffect> {
+        app.prepare_run_tool_launch(RunToolPreparation {
+            tool_name: tool_name.to_string(),
+            input: Some(input.to_string()),
+            target: Some(workspace.root().to_path_buf()),
+        })
+    }
+
+    fn remember_key(ch: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(ch), KeyModifiers::SHIFT)
+    }
+
+    fn pwn_input(target: &str) -> serde_json::Value {
+        serde_json::json!({"target": target, "stateId": "state-1"})
+    }
+
+    #[test]
+    fn remembered_descriptor_denial_blocks_exact_scope_without_run_mutation() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("source.txt"), "unchanged").unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let input = serde_json::json!({"target": "127.0.0.1"});
+
+        assert!(prepare(&mut app, &workspace, "recon:nmap", input.clone()).is_empty());
+        assert!(app.reduce_key(remember_key('N')).effects.is_empty());
+        assert!(prepare(&mut app, &workspace, "recon:nmap", input).is_empty());
+
+        assert!(app.advisory().pending_confirm.is_none());
+        assert!(app.advisory().pending_confirm_launch.is_none());
+        let notice = app.advisory().notice.as_ref().expect("visible denial");
+        assert_eq!(notice.severity, NoticeSeverity::Warn);
+        assert!(notice.message.contains("recon:nmap 127.0.0.1 blocked"));
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("source.txt")).unwrap(),
+            "unchanged"
+        );
+        assert!(!kuzushi_core::runs_root(workspace.root()).exists());
+    }
+
+    #[test]
+    fn remembered_descriptor_denial_does_not_match_another_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        assert!(prepare(
+            &mut app,
+            &workspace,
+            "recon:nmap",
+            serde_json::json!({"target": "127.0.0.1"}),
+        )
+        .is_empty());
+        app.reduce_key(remember_key('N'));
+        assert!(prepare(
+            &mut app,
+            &workspace,
+            "recon:nmap",
+            serde_json::json!({"target": "127.0.0.2"}),
+        )
+        .is_empty());
+
+        let confirm = app
+            .advisory()
+            .pending_confirm
+            .as_ref()
+            .expect("new scope prompt");
+        assert_eq!(confirm.target, "127.0.0.2");
+    }
+
+    #[test]
+    fn remembered_input_denial_blocks_same_candidate_request() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let input = pwn_input("127.0.0.1:31337");
+
+        assert!(prepare(&mut app, &workspace, "pwn:run-candidates", input.clone()).is_empty());
+        app.reduce_key(remember_key('N'));
+        assert!(prepare(&mut app, &workspace, "pwn:run-candidates", input).is_empty());
+
+        assert!(app.advisory().pending_confirm.is_none());
+        assert!(app.advisory().pending_confirm_launch.is_none());
+        assert!(app
+            .advisory()
+            .notice
+            .as_ref()
+            .is_some_and(|notice| notice.message.contains("remembered denial")));
+    }
+
+    #[test]
+    fn remembered_input_allow_skips_the_same_candidate_prompt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let input = pwn_input("127.0.0.1:31337");
+
+        assert!(prepare(&mut app, &workspace, "pwn:run-candidates", input.clone()).is_empty());
+        let approved = app.reduce_key(remember_key('Y'));
+        assert!(matches!(
+            approved.effects.as_slice(),
+            [ShellEffect::DispatchRunTool(_)]
+        ));
+
+        let repeated = prepare(&mut app, &workspace, "pwn:run-candidates", input);
+        assert!(matches!(
+            repeated.as_slice(),
+            [ShellEffect::DispatchRunTool(_)]
+        ));
+        assert!(app.advisory().pending_confirm.is_none());
+    }
+
+    #[test]
+    fn descriptor_shift_y_cannot_resolve_or_launch_but_lowercase_y_can() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        assert!(prepare(
+            &mut app,
+            &workspace,
+            "recon:nmap",
+            serde_json::json!({"target": "127.0.0.1"}),
+        )
+        .is_empty());
+        let remembered = app.reduce_key(remember_key('Y'));
+        assert!(remembered.effects.is_empty());
+        assert!(app.advisory().pending_confirm.is_some());
+        assert!(app.advisory().pending_confirm_launch.is_some());
+
+        let once = app.reduce_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+        assert!(matches!(
+            once.effects.as_slice(),
+            [ShellEffect::DispatchRunTool(_)]
+        ));
+        assert!(app.engagement.confirm_allowlist().is_empty());
     }
 }

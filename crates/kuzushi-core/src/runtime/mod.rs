@@ -23,7 +23,8 @@ pub use domain::{
     AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
     AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
     McpAttachment, ModelTier, RuntimeCost, RuntimeCostReport, SubagentRole, ToolBox, ToolCall,
-    ToolCallHandler, ToolResult, TriageRequest, DEFAULT_TRIAGE_PROMPT,
+    ToolCallHandler, ToolResult, TriageRequest, DEFAULT_TRIAGE_PROMPT, INTERACTION_REQUIRED_CODE,
+    REQUEST_USER_INPUT_TOOL_NAME,
 };
 pub use mcp_probe::{
     mcp_attachment_plan_for_target, plan_contains, McpArtifactSpec, MCP_ARTIFACT_TABLE,

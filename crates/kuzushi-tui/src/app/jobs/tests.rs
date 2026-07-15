@@ -15,6 +15,56 @@ fn shell_event_reports_kind_and_terminal_state() {
 }
 
 #[test]
+fn planner_sink_accepts_only_cross_kind_operator_interactions() {
+    use crate::app::operator_questions::{
+        OperatorQuestion, OperatorQuestionEnvelope, OperatorQuestionOption, OperatorQuestionRequest,
+    };
+    use std::sync::mpsc::sync_channel;
+
+    let mut hub = JobHub::default();
+    let ticket = hub.start(JobKind::Plan, "planner");
+    let (control, _responses) = sync_channel(1);
+    let question = OperatorQuestionEnvelope {
+        request: OperatorQuestionRequest {
+            request_id: "q-1".to_string(),
+            run_id: "run-1".to_string(),
+            questions: vec![OperatorQuestion {
+                id: "scope".to_string(),
+                header: "Scope".to_string(),
+                prompt: "What should be scanned?".to_string(),
+                options: vec![
+                    OperatorQuestionOption {
+                        label: "Changed".to_string(),
+                        description: "Only changed files".to_string(),
+                        recommended: true,
+                    },
+                    OperatorQuestionOption {
+                        label: "All".to_string(),
+                        description: "The whole repository".to_string(),
+                        recommended: false,
+                    },
+                ],
+            }],
+            auto_resolution_ms: None,
+        },
+        generation: ticket.generation(),
+        control,
+    };
+
+    assert!(ticket.send(ShellEvent::OperatorQuestion(question)));
+    assert!(!ticket.send(ShellEvent::Agent(AgentEvent::Failed {
+        error: "wrong worker kind".to_string(),
+        audit: AgentCallAudit::test(),
+    })));
+    ticket.complete();
+
+    assert!(matches!(
+        hub.drain(2).as_slice(),
+        [ShellEvent::OperatorQuestion(_)]
+    ));
+}
+
+#[test]
 fn jobhub_drops_stale_events_per_kind() {
     let mut hub = JobHub::default();
     let old = hub.start(JobKind::Run, "old-tool");

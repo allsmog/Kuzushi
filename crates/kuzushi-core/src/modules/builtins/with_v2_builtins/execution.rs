@@ -1,6 +1,7 @@
 use super::output_contract::normalize_tool_output_contract;
 use super::*;
 use crate::module_result::tool_result_status;
+use crate::modules::autonomy::WorkflowPhase;
 
 mod prompt_input_limits;
 use prompt_input_limits::validate_tool_prompt_inputs;
@@ -206,6 +207,19 @@ impl ModuleRegistry {
         self.dispatch_prepared_input_with_runtime(prepared, ctx, runtime)
     }
 
+    pub(crate) fn dispatch_delegated_tool_with_runtime(
+        &self,
+        name: &str,
+        input: Value,
+        ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
+    ) -> Result<Value> {
+        let prepared = self
+            .prepare_dispatch_input(name, input, ctx, None)?
+            .authorize_delegated(&ctx.authorization);
+        self.dispatch_prepared_input_with_runtime(prepared, ctx, runtime)
+    }
+
     pub fn dispatch_prepared_input_with_runtime(
         &self,
         prepared: PreparedToolInput,
@@ -232,7 +246,7 @@ impl ModuleRegistry {
             true,
             Some(&operation_binding),
         )?;
-        enforce_autonomy_posture(descriptor, authorized_ctx.config.autonomy)?;
+        enforce_autonomy_posture(descriptor, &input, authorized_ctx.config.autonomy)?;
         enforce_descriptor_approval(descriptor, &authorized_ctx, &operation_binding)?;
         self.enforce_runtime_requirement(name, &input, runtime)?;
         enforce_descriptor_finding_store(descriptor, &authorized_ctx)?;
@@ -365,6 +379,9 @@ fn bind_repository_execution_input(
     mut input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
+    if name == "patch:reverify" {
+        return crate::remediation::patch::bind_patch_reverify_input(input, ctx);
+    }
     if !operation_delegates_patch_validation(name, &input) {
         return Ok(input);
     }
@@ -443,10 +460,14 @@ fn dispatch_timestamp() -> String {
 /// caller's existing confirm gate, not by this refusal.
 fn enforce_autonomy_posture(
     descriptor: &ToolDescriptor,
+    input: &Value,
     posture: crate::modules::autonomy::AutonomyPosture,
 ) -> Result<()> {
-    use crate::modules::autonomy::{gate_descriptor, AutonomyDecision};
-    match gate_descriptor(descriptor, posture) {
+    use crate::modules::autonomy::{gate_descriptor, gate_phase, AutonomyDecision};
+    let decision = sast_scan_required_phase(descriptor, input)
+        .map(|phase| gate_phase(phase, posture))
+        .unwrap_or_else(|| gate_descriptor(descriptor, posture));
+    match decision {
         AutonomyDecision::Refuse { needed, ceiling } => {
             Err(crate::modules::autonomy::AutonomyRefusal {
                 tool_name: descriptor.name.clone(),
@@ -466,6 +487,25 @@ fn enforce_autonomy_posture(
         // proof before the autonomy ceiling was evaluated.
         AutonomyDecision::Allow | AutonomyDecision::RequireApproval => Ok(()),
     }
+}
+
+fn sast_scan_required_phase(descriptor: &ToolDescriptor, input: &Value) -> Option<WorkflowPhase> {
+    (descriptor.name == "sast:scan").then(|| requested_sast_scan_phase(input))
+}
+
+fn requested_sast_scan_phase(input: &Value) -> WorkflowPhase {
+    [
+        ("autoPatch", WorkflowPhase::Fix),
+        ("verify", WorkflowPhase::Prove),
+        ("triage", WorkflowPhase::Review),
+    ]
+    .into_iter()
+    .find_map(|(flag, phase)| input_flag(input, flag).then_some(phase))
+    .unwrap_or(WorkflowPhase::Scan)
+}
+
+fn input_flag(input: &Value, key: &str) -> bool {
+    input.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
 fn enforce_descriptor_context(
@@ -1550,7 +1590,8 @@ mod prompt_file_default_tests {
 
 #[cfg(test)]
 mod autonomy_gate_dispatch_tests {
-    use crate::modules::autonomy::AutonomyPosture;
+    use super::sast_scan_required_phase;
+    use crate::modules::autonomy::{AutonomyPosture, WorkflowPhase};
     use crate::modules::registry::ModuleRegistry;
     use crate::{V2Config, WorkspaceTarget};
     use serde_json::json;
@@ -1587,13 +1628,54 @@ mod autonomy_gate_dispatch_tests {
     }
 
     #[test]
-    fn fix_tool_is_refused_under_hunt_posture_with_actionable_message() {
+    fn sast_composite_preflights_the_highest_requested_phase() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let descriptor = registry.resolve_tool("sast:scan").unwrap();
+
+        assert_eq!(
+            sast_scan_required_phase(descriptor, &json!({})),
+            Some(WorkflowPhase::Scan)
+        );
+        assert_eq!(
+            sast_scan_required_phase(descriptor, &json!({"triage": true})),
+            Some(WorkflowPhase::Review)
+        );
+        assert_eq!(
+            sast_scan_required_phase(descriptor, &json!({"verify": true})),
+            Some(WorkflowPhase::Prove)
+        );
+        assert_eq!(
+            sast_scan_required_phase(descriptor, &json!({"autoPatch": true})),
+            Some(WorkflowPhase::Fix)
+        );
+    }
+
+    #[test]
+    fn sast_triage_is_refused_under_scan_posture_before_runtime_or_store_checks() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut config = V2Config::default();
+        config.autonomy = AutonomyPosture::Scan;
+        let ctx = ctx_with_posture(&config, &workspace);
+
+        let error = registry
+            .dispatch_prepared_tool_with_runtime("sast:scan", json!({"triage": true}), &ctx, None)
+            .expect_err("sast:scan triage must preflight the Review ceiling");
+        let message = error.to_string();
+        assert!(message.contains("review action"), "{message}");
+        assert!(!message.contains("requires an agent runtime"), "{message}");
+        assert!(!message.contains("requires a findings store"), "{message}");
+    }
+
+    #[test]
+    fn fix_tool_is_refused_under_scan_posture_with_actionable_message() {
         let registry = ModuleRegistry::with_v2_builtins();
         let temp = tempfile::tempdir().unwrap();
         initialize_repo(temp.path());
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let mut config = V2Config::default();
-        config.autonomy = AutonomyPosture::Hunt;
+        config.autonomy = AutonomyPosture::Scan;
         let ctx = ctx_with_posture(&config, &workspace);
 
         let error = registry
@@ -1612,14 +1694,14 @@ mod autonomy_gate_dispatch_tests {
 
     #[test]
     fn refusal_fires_before_the_runtime_requirement_check() {
-        // triage:run needs a runtime AND is above a Hunt ceiling; the posture
+        // triage:run needs a runtime AND is above a Scan ceiling; the posture
         // refusal must win so the operator sees the authorization message, not
         // a runtime error.
         let registry = ModuleRegistry::with_v2_builtins();
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let mut config = V2Config::default();
-        config.autonomy = AutonomyPosture::Hunt;
+        config.autonomy = AutonomyPosture::Scan;
         let ctx = ctx_with_posture(&config, &workspace);
 
         let error = registry

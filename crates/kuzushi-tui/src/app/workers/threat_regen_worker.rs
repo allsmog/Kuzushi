@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::json;
 
 pub(crate) fn threat_regen_worker(
     config: V2Config,
@@ -6,23 +7,61 @@ pub(crate) fn threat_regen_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     existing: serde_json::Value,
+    metadata: ProposalRunMetadata,
     sink: JobEventSink,
     cancel: ScanCancellation,
 ) {
     let prompt = threat_regen_prompt(&existing);
     let audit = AgentCallAudit::for_prompt(&model, THREAT_PATCH_SYSTEM_PROMPT, &prompt);
-    let event = match run_threat_regen_worker(config, model, thinking_level, cwd, existing, cancel)
-    {
-        Ok((patch, cost)) => ThreatPatchEvent::Proposed {
+    let run = ProposalRun {
+        target: &cwd,
+        run_id: &metadata.run_id,
+        kind: "threat",
+        tool: "threat-model:propose",
+    };
+    let input = threat_regen_input(&existing);
+    let start = run.start(&input, model.clone(), &config, metadata.loaded_modules);
+    if let Err(error) = start {
+        sink.send(ShellEvent::Threat(ThreatPatchEvent::Failed {
+            error: error.to_string(),
+            audit,
+        }));
+        return;
+    }
+    let event = match run_threat_regen_worker(
+        config,
+        model,
+        thinking_level,
+        cwd.clone(),
+        existing,
+        cancel.clone(),
+    ) {
+        Ok((patch, cost)) => persisted_threat_patch_event(&run, patch, cost, audit),
+        Err(error) => failed_threat_event(&run, error, audit, cancel.is_cancelled()),
+    };
+    sink.send(ShellEvent::Threat(event));
+}
+
+fn persisted_threat_patch_event(
+    run: &ProposalRun<'_>,
+    patch: ThreatPatch,
+    cost: kuzushi_core::runtime::RuntimeCostReport,
+    audit: AgentCallAudit,
+) -> ThreatPatchEvent {
+    match run.complete(
+        "threat-model proposal ready",
+        threat_patch_value(&patch),
+        cost,
+    ) {
+        Ok(()) => ThreatPatchEvent::Proposed {
             patch,
             audit: audit.with_cost(cost),
         },
         Err(error) => ThreatPatchEvent::Failed {
-            error: error.error.to_string(),
-            audit: audit.with_outcome(error.cost, error.call_attempted),
+            error: threat_terminal_persistence_error(run, error),
+            audit: audit.with_cost(cost),
         },
-    };
-    sink.send(ShellEvent::Threat(event));
+    }
 }
 
 pub(crate) fn run_threat_regen_worker(
@@ -64,30 +103,94 @@ pub(crate) fn threat_ask_worker(
     cwd: PathBuf,
     existing: serde_json::Value,
     question: String,
+    metadata: ProposalRunMetadata,
     sink: JobEventSink,
     cancel: ScanCancellation,
 ) {
     let prompt = threat_ask_prompt(&question, &existing);
     let audit = AgentCallAudit::for_prompt(&model, ASK_SYSTEM_PROMPT, &prompt);
+    let run = ProposalRun {
+        target: &cwd,
+        run_id: &metadata.run_id,
+        kind: "threat",
+        tool: "threat-model:ask",
+    };
+    let input = threat_ask_input(&existing, &question);
+    let start = run.start(&input, model.clone(), &config, metadata.loaded_modules);
+    if let Err(error) = start {
+        send_threat_start_failure(&sink, error, audit);
+        return;
+    }
     let event = match run_threat_ask_worker(
         config,
         model,
         thinking_level,
-        cwd,
+        cwd.clone(),
         existing,
         &question,
-        cancel,
+        cancel.clone(),
     ) {
-        Ok((answer, cost)) => ThreatPatchEvent::Answer {
+        Ok((answer, cost)) => persisted_threat_answer_event(&run, answer, cost, audit),
+        Err(error) => failed_threat_event(&run, error, audit, cancel.is_cancelled()),
+    };
+    sink.send(ShellEvent::Threat(event));
+}
+
+fn send_threat_start_failure(sink: &JobEventSink, error: anyhow::Error, audit: AgentCallAudit) {
+    sink.send(ShellEvent::Threat(ThreatPatchEvent::Failed {
+        error: error.to_string(),
+        audit,
+    }));
+}
+
+fn persisted_threat_answer_event(
+    run: &ProposalRun<'_>,
+    answer: String,
+    cost: kuzushi_core::runtime::RuntimeCostReport,
+    audit: AgentCallAudit,
+) -> ThreatPatchEvent {
+    match run.complete(
+        "threat-model answer ready",
+        json!({ "answer": answer.clone() }),
+        cost,
+    ) {
+        Ok(()) => ThreatPatchEvent::Answer {
             text: answer,
             audit: audit.with_cost(cost),
         },
         Err(error) => ThreatPatchEvent::Failed {
-            error: error.error.to_string(),
-            audit: audit.with_outcome(error.cost, error.call_attempted),
+            error: threat_terminal_persistence_error(run, error),
+            audit: audit.with_cost(cost),
         },
-    };
-    sink.send(ShellEvent::Threat(event));
+    }
+}
+
+fn failed_threat_event(
+    run: &ProposalRun<'_>,
+    error: CostedWorkerError,
+    audit: AgentCallAudit,
+    canceled: bool,
+) -> ThreatPatchEvent {
+    let message = error.error.to_string();
+    let persisted = run.fail(&message, canceled);
+    ThreatPatchEvent::Failed {
+        error: threat_persistence_aware_failure(message, persisted),
+        audit: audit.with_outcome(error.cost, error.call_attempted),
+    }
+}
+
+fn threat_terminal_persistence_error(run: &ProposalRun<'_>, error: anyhow::Error) -> String {
+    let message = format!("threat result unavailable because persistence failed: {error:#}");
+    threat_persistence_aware_failure(message.clone(), run.fail(&message, false))
+}
+
+fn threat_persistence_aware_failure(message: String, persisted: anyhow::Result<()>) -> String {
+    match persisted {
+        Ok(()) => message,
+        Err(error) => {
+            format!("{message}; additionally, terminal run persistence failed: {error:#}")
+        }
+    }
 }
 
 pub(crate) fn run_threat_ask_worker(

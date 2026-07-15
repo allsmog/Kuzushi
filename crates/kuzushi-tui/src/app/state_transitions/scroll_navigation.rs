@@ -135,8 +135,19 @@ impl ShellApp {
     /// PgUp/PgDn page the FINDINGS list only while the Workbench has that pane
     /// focused; otherwise paging falls through to line/section scrolling.
     fn workbench_findings_paging(&self) -> bool {
-        matches!(self.shell_view(), ShellView::Workbench)
-            && self.router.workbench().focus() == crate::app::WorkbenchPane::Findings
+        if !matches!(self.shell_view(), ShellView::Workbench) {
+            return false;
+        }
+        let viewport = self.viewport();
+        let Some(plan) = crate::renderer::workbench_phase_plan_for_app(
+            self,
+            ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
+        ) else {
+            return false;
+        };
+        plan.surface(plan.effective_focus).is_some_and(|surface| {
+            surface.interaction == crate::ui_view_models::SurfaceInteraction::Selectable
+        })
     }
 
     fn add_page_scroll(&mut self, kind: PageScrollKind, step: usize) {

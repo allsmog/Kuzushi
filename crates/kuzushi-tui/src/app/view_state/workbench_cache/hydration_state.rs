@@ -54,6 +54,9 @@ impl WorkbenchCache {
             ViewHydrationKey::RunTrace { run_id } => {
                 self.cached_run_trace(target, run_id).is_not_requested()
             }
+            ViewHydrationKey::ScanStageReceipt { run_id } => self
+                .cached_scan_stage_receipt(target, run_id)
+                .is_not_requested(),
             _ => false,
         }
     }
@@ -74,6 +77,18 @@ impl WorkbenchCache {
             }
             ViewHydrationKey::PromptMutations => self
                 .cached_prompt_mutations(Some(target))
+                .is_not_requested(),
+            ViewHydrationKey::FindingPatchTruth {
+                fingerprint,
+                finding_scan_id,
+                target_revision,
+            } => self
+                .cached_finding_patch_truth(
+                    target,
+                    fingerprint,
+                    finding_scan_id.as_deref(),
+                    target_revision.as_deref(),
+                )
                 .is_not_requested(),
             _ => false,
         }
@@ -149,6 +164,12 @@ impl WorkbenchCache {
                 self.run_traces
                     .insert((target, run_id), RunTraceCache { state });
             }
+            (
+                ViewHydrationKey::ScanStageReceipt { run_id },
+                ViewHydrationValue::ScanStageReceipt(state),
+            ) => {
+                self.scan_stage_receipts.insert((target, run_id), state);
+            }
             _ => {}
         }
     }
@@ -169,22 +190,61 @@ impl WorkbenchCache {
             (
                 ViewHydrationKey::ProjectModelDocument { scope_id, revision },
                 ViewHydrationValue::ProjectModelDocument(document),
-            ) => {
-                self.project_model_document = Some(ProjectModelDocumentCache {
-                    target,
-                    scope_id,
-                    revision,
-                    document,
-                });
-            }
+            ) => self.store_project_model_document(target, scope_id, revision, document),
             (ViewHydrationKey::StrategyQueue, ViewHydrationValue::StrategyQueue(state)) => {
                 self.strategy_queue = Some(StrategyQueueCache { target, state });
             }
             (ViewHydrationKey::PromptMutations, ViewHydrationValue::PromptMutations(state)) => {
                 self.prompt_mutations = Some(PromptMutationsCache { target, state });
             }
+            (
+                ViewHydrationKey::FindingPatchTruth {
+                    fingerprint,
+                    finding_scan_id,
+                    target_revision,
+                },
+                ViewHydrationValue::FindingPatchTruth(state),
+            ) => self.store_hydrated_finding_patch_truth(
+                target,
+                fingerprint,
+                finding_scan_id,
+                target_revision,
+                state,
+            ),
             _ => {}
         }
+    }
+
+    fn store_project_model_document(
+        &mut self,
+        target: PathBuf,
+        scope_id: String,
+        revision: Option<String>,
+        document: Option<kuzushi_core::workspace::ProjectModelDocument>,
+    ) {
+        self.project_model_document = Some(ProjectModelDocumentCache {
+            target,
+            scope_id,
+            revision,
+            document,
+        });
+    }
+
+    fn store_hydrated_finding_patch_truth(
+        &mut self,
+        target: PathBuf,
+        fingerprint: String,
+        finding_scan_id: Option<String>,
+        target_revision: Option<String>,
+        state: FindingPatchTruthState,
+    ) {
+        self.store_finding_patch_truth(
+            &target,
+            &fingerprint,
+            finding_scan_id.as_deref(),
+            target_revision.as_deref(),
+            state,
+        );
     }
 
     fn apply_workspace_hydration(
@@ -265,12 +325,14 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         ViewHydrationKey::LatestRunPointer
         | ViewHydrationKey::RunSummaryEntries
         | ViewHydrationKey::RunArtifactText { .. }
-        | ViewHydrationKey::RunTrace { .. } => HydrationGroup::Run,
+        | ViewHydrationKey::RunTrace { .. }
+        | ViewHydrationKey::ScanStageReceipt { .. } => HydrationGroup::Run,
         ViewHydrationKey::GitMetadata
         | ViewHydrationKey::ProjectScopeTree
         | ViewHydrationKey::ProjectModelDocument { .. }
         | ViewHydrationKey::StrategyQueue
-        | ViewHydrationKey::PromptMutations => HydrationGroup::Project,
+        | ViewHydrationKey::PromptMutations
+        | ViewHydrationKey::FindingPatchTruth { .. } => HydrationGroup::Project,
         ViewHydrationKey::SourceFile { .. }
         | ViewHydrationKey::HarnessFile
         | ViewHydrationKey::JsonFile { .. }

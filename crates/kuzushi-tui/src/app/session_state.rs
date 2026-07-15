@@ -1,4 +1,4 @@
-use super::{SteerQueue, TargetCandidateScope};
+use super::{ShellSessionTranscript, SteerQueue, TargetCandidateScope};
 use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
 use kuzushi_core::{ModuleRegistry, ToolOptionStore, V2Config};
 use std::collections::{BTreeMap, BTreeSet};
@@ -23,6 +23,8 @@ pub(crate) struct SessionState {
     /// readiness only; key material stays in the `SetSessionEnv` effect.
     session_api_key_providers: BTreeSet<String>,
     steer_queue: SteerQueue,
+    transcript: Option<ShellSessionTranscript>,
+    transcript_start_warning: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -56,7 +58,34 @@ impl SessionState {
             thinking_level: None,
             session_api_key_providers: BTreeSet::new(),
             steer_queue: SteerQueue::default(),
+            transcript: None,
+            transcript_start_warning: None,
         }
+    }
+
+    pub(crate) fn attach_transcript(&mut self, transcript: ShellSessionTranscript) {
+        self.transcript = Some(transcript);
+        self.transcript_start_warning = None;
+    }
+
+    pub(crate) fn transcript(&self) -> Option<&ShellSessionTranscript> {
+        self.transcript.as_ref()
+    }
+
+    pub(crate) fn transcript_mut(&mut self) -> Option<&mut ShellSessionTranscript> {
+        self.transcript.as_mut()
+    }
+
+    pub(crate) fn take_transcript(&mut self) -> Option<ShellSessionTranscript> {
+        self.transcript.take()
+    }
+
+    pub(crate) fn set_transcript_start_warning(&mut self, warning: String) {
+        self.transcript_start_warning = Some(warning);
+    }
+
+    pub(crate) fn transcript_start_warning(&self) -> Option<&str> {
+        self.transcript_start_warning.as_deref()
     }
 
     pub(crate) fn steer_queue(&self) -> &SteerQueue {

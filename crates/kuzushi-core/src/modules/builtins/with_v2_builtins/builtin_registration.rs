@@ -218,12 +218,20 @@ fn execute_runtime_analysis_tool(
 }
 
 fn execute_finding_action_tool(
-    _registry: &ModuleRegistry,
+    registry: &ModuleRegistry,
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    if name == "patch:reverify" {
+        return crate::remediation::patch::run_patch_reverify(
+            registry,
+            input.clone(),
+            ctx,
+            runtime,
+        );
+    }
     dispatch_result(
         dispatch_finding_action_tool(name, input, ctx, runtime),
         name,

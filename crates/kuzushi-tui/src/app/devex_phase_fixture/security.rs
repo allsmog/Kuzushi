@@ -67,6 +67,8 @@ fn chain_steps() -> Vec<ExploitChainStep> {
 fn seed_patch(app: &mut ShellApp) {
     app.engagement.set_pending_patch(PendingPatch {
         alias: "F-0001".to_string(),
+        patch_run_id: "patch-phase-run".to_string(),
+        status: kuzushi_core::PatchStatus::Sound,
         rationale: "bind the user value as a query parameter".to_string(),
         side_effect: Some("preserves the login response schema".to_string()),
         diff: "- query(user)\n+ query_bind(user)".to_string(),

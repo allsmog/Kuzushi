@@ -33,11 +33,18 @@ impl From<KeymapSnapshot> for KeymapModel {
 }
 
 fn default_keymap_model(app: &ShellApp) -> KeymapModel {
+    let note = app
+        .ui()
+        .keymap_error()
+        .map(|error| format!("operator keymap invalid; defaults retained · {error}"))
+        .unwrap_or_else(|| {
+            "the footer and this view are generated from the effective action keymap".to_string()
+        });
     KeymapModel {
         status: default_status(app),
         event_time: "--:--:--".to_string(),
         sections: default_keymap_sections(app),
-        note: "the footer shows primary controls · this keymap lists every active control for the originating screen".to_string(),
+        note,
         footer: default_footer(app),
     }
 }
@@ -67,13 +74,44 @@ fn default_cost(app: &ShellApp) -> String {
 }
 
 pub(crate) fn default_keymap_sections(app: &ShellApp) -> Vec<KeymapSection> {
-    vec![
+    let mut sections = vec![
         global_keymap_section(),
         navigation_keymap_section(),
         dispatch_keymap_section(),
         lifecycle_keymap_section(),
         active_view_keymap_section(app),
-    ]
+    ];
+    if let Some(section) = operator_override_section(app) {
+        sections.push(section);
+    }
+    sections
+}
+
+fn operator_override_section(app: &ShellApp) -> Option<KeymapSection> {
+    let rows = app
+        .config()
+        .operator
+        .keybindings
+        .iter()
+        .map(|entry| {
+            let keys = if entry.bindings.is_empty() {
+                "unbound".to_string()
+            } else {
+                entry.bindings.join(" · ")
+            };
+            KeymapBindingRow::new(
+                keys,
+                format!("{}.{} · operator override", entry.context, entry.action),
+            )
+        })
+        .collect::<Vec<_>>();
+    (!rows.is_empty()).then(|| {
+        KeymapSection::new(
+            "OPERATOR OVERRIDES",
+            "effective bindings loaded from global operator config",
+            rows,
+        )
+    })
 }
 
 fn global_keymap_section() -> KeymapSection {
@@ -163,7 +201,7 @@ fn active_view_keymap_section(app: &ShellApp) -> KeymapSection {
         app.view_keybindings_for_view(origin)
             .into_iter()
             .filter(|binding| !(binding.hint == "Esc" && binding.label == "back"))
-            .filter(|binding| seen.insert((binding.hint, binding.label)))
+            .filter(|binding| seen.insert((binding.hint.clone(), binding.label.clone())))
             .map(|binding| KeymapBindingRow::new(binding.hint, binding.label)),
     );
     rows.extend([
@@ -250,6 +288,9 @@ mod tests {
     fn default_keymap_lists_every_originating_workbench_control() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_shell_view(crate::ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(crate::app::WorkbenchPage::Prove));
         app.set_shell_view(crate::ShellView::Keymap);
 
         let model = keymap_model(&app);
@@ -264,6 +305,8 @@ mod tests {
         assert!(keys.contains(&"v"), "{keys:?}");
         assert!(keys.contains(&"x"), "{keys:?}");
         assert!(keys.contains(&"c"), "{keys:?}");
+        assert!(!keys.contains(&"d"), "{keys:?}");
+        assert!(!keys.contains(&"←/→"), "{keys:?}");
         assert!(keys.contains(&"/keys"), "{keys:?}");
         assert!(!model.note.contains("doesn't do anything"));
     }

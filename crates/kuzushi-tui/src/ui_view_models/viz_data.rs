@@ -231,6 +231,7 @@ pub(crate) fn taint_flow_path(app: &ShellApp) -> TaintFlowPath {
     taint_flow_path_from_snapshot(flow)
 }
 
+#[cfg(test)]
 pub(crate) fn selected_taint_flow_path(app: &ShellApp) -> TaintFlowPath {
     let selected = super::current_finding_for_detail(app).map(|(_, finding)| finding);
     taint_flow_path_for_finding(app, selected.as_ref())

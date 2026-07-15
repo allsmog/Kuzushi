@@ -1,6 +1,30 @@
 use super::*;
 
 impl SastTaskSelection {
+    pub(in crate::modules) fn planned_engine_ids(&self) -> Vec<String> {
+        let mut engines = self
+            .engine_ids
+            .iter()
+            .map(|engine| (*engine).to_string())
+            .collect::<Vec<_>>();
+        for (selected, engine) in [
+            (self.run_agentic, "agentic"),
+            (self.run_carlini, "offense-review"),
+            (self.run_taint_iris_next, "taint-iris-next"),
+            (self.run_systems_hunt, "systems-hunt"),
+        ] {
+            if selected {
+                engines.push(engine.to_string());
+            }
+        }
+        engines.extend(
+            self.skipped_engines
+                .iter()
+                .map(|engine| engine.id.to_string()),
+        );
+        engines
+    }
+
     pub(in crate::modules) fn from_tasks(
         tasks: Vec<String>,
         source: SastTaskSelectionSource,
@@ -156,7 +180,9 @@ fn fill_agentic_sast_report(
 ) -> Result<()> {
     if selected.run_agentic {
         reports.engine_ids.push("agentic");
-        reports.agentic = Some(dispatch.report_from_data("agentic-sast:scan")?);
+        let (report, outcome) = dispatch.report_from_data("agentic-sast:scan")?;
+        reports.engine_outcomes.insert("agentic", outcome);
+        reports.agentic = Some(report);
     }
     Ok(())
 }
@@ -168,7 +194,9 @@ fn fill_offense_review_report(
 ) -> Result<()> {
     if selected.run_carlini {
         reports.engine_ids.push("offense-review");
-        reports.carlini = Some(dispatch.report_from_data("offense-review:threat-hunt")?);
+        let (report, outcome) = dispatch.report_from_data("offense-review:threat-hunt")?;
+        reports.engine_outcomes.insert("offense-review", outcome);
+        reports.carlini = Some(report);
     }
     Ok(())
 }
@@ -180,7 +208,9 @@ fn fill_taint_iris_next_report(
 ) -> Result<()> {
     if selected.run_taint_iris_next {
         reports.engine_ids.push("taint-iris-next");
-        reports.taint_iris_next = Some(dispatch.taint_iris_next_report()?);
+        let (report, outcome) = dispatch.taint_iris_next_report()?;
+        reports.engine_outcomes.insert("taint-iris-next", outcome);
+        reports.taint_iris_next = Some(report);
     }
     Ok(())
 }
@@ -192,7 +222,9 @@ fn fill_systems_hunt_report(
 ) -> Result<()> {
     if selected.run_systems_hunt {
         reports.engine_ids.push("systems-hunt");
-        reports.systems_hunt = Some(dispatch.report_from_data("systems-hunt:systems-hunt")?);
+        let (report, outcome) = dispatch.report_from_data("systems-hunt:systems-hunt")?;
+        reports.engine_outcomes.insert("systems-hunt", outcome);
+        reports.systems_hunt = Some(report);
     }
     Ok(())
 }
@@ -206,7 +238,10 @@ struct SastSubtoolDispatch<'a> {
 }
 
 impl SastSubtoolDispatch<'_> {
-    fn report_from_data<T>(&self, tool_name: &str) -> Result<T>
+    fn report_from_data<T>(
+        &self,
+        tool_name: &str,
+    ) -> Result<(T, crate::run_artifacts::ScanEngineStageOutcome)>
     where
         T: serde::de::DeserializeOwned,
     {
@@ -215,26 +250,131 @@ impl SastSubtoolDispatch<'_> {
             .get("data")
             .cloned()
             .with_context(|| format!("{tool_name} output did not include data"))?;
-        serde_json::from_value(data)
-            .with_context(|| format!("{tool_name} returned invalid report data"))
+        let report = serde_json::from_value(data)
+            .with_context(|| format!("{tool_name} returned invalid report data"))?;
+        Ok((report, scan_engine_outcome(&output)))
     }
 
-    fn taint_iris_next_report(&self) -> Result<TaintIrisNextReport> {
+    fn taint_iris_next_report(
+        &self,
+    ) -> Result<(
+        TaintIrisNextReport,
+        crate::run_artifacts::ScanEngineStageOutcome,
+    )> {
         let tool_name = "taint-iris-next:hunt";
         let output = self.run(tool_name, &taint_iris_next_hunt_input(self.input))?;
-        taint_iris_next_report_from_tool_output(&output)
+        let outcome = scan_engine_outcome(&output);
+        Ok((taint_iris_next_report_from_tool_output(&output)?, outcome))
     }
 
     fn run(&self, tool_name: &str, input: &Value) -> Result<Value> {
         let input = descriptor_filtered_input(self.registry, tool_name, input)?;
-        run_sast_subtool(
+        let output = dispatch_scan_engine_with_run(
             self.registry,
             tool_name,
             input,
             self.ctx,
             self.runtime,
             self.option_store,
-        )
+        )?;
+        validate_sast_scan_engine_result(tool_name, &output)?;
+        Ok(output)
+    }
+}
+
+fn dispatch_scan_engine_with_run(
+    registry: &ModuleRegistry,
+    tool_name: &str,
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    option_store: &crate::options::ToolOptionStore,
+) -> Result<Value> {
+    let workspace = ctx
+        .workspace
+        .context("sast:scan child engine requires an active workspace")?;
+    let run_id = crate::run_artifacts::new_run_id("scan-engine");
+    let record = crate::run_artifacts::ToolRunRecord::new(
+        workspace.root(),
+        &run_id,
+        "tool",
+        tool_name,
+    );
+    start_scan_engine_run(registry, record, &input, ctx)?;
+    let trace = crate::run_artifacts::TraceHandle::jsonl(workspace.root(), &run_id);
+    let child_ctx = ToolExecutionContext {
+        config: ctx.config,
+        workspace: ctx.workspace,
+        findings_store: ctx.findings_store,
+        trace: Some(&trace),
+        cancellation: ctx.cancellation,
+        authorization: ctx.authorization.clone(),
+    };
+    let dispatched = dispatch_sast_subtool(
+        registry,
+        tool_name,
+        input,
+        &child_ctx,
+        runtime,
+        option_store,
+    );
+    finish_scan_engine_run(record, dispatched)
+}
+
+fn start_scan_engine_run(
+    registry: &ModuleRegistry,
+    record: crate::run_artifacts::ToolRunRecord<'_>,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<()> {
+    let model = registry
+        .tool_needs_runtime(record.tool, input)
+        .then(|| ctx.config.model.clone())
+        .flatten();
+    crate::run_artifacts::try_record_tool_run_started_with_reproducibility(
+        record,
+        input,
+        model,
+        crate::config::config_hash(ctx.config).ok(),
+        registry.loaded_module_specifiers(),
+    )
+}
+
+fn finish_scan_engine_run(
+    record: crate::run_artifacts::ToolRunRecord<'_>,
+    dispatched: Result<Value>,
+) -> Result<Value> {
+    match dispatched {
+        Ok(output) => {
+            crate::run_artifacts::try_record_tool_run_complete(record, &output)?;
+            Ok(output)
+        }
+        Err(error) => match crate::run_artifacts::try_record_tool_run_failed(
+            record,
+            &error.to_string(),
+        ) {
+            Ok(()) => Err(error),
+            Err(persistence) => Err(anyhow::anyhow!(
+                "{error:#}; additionally, child run persistence failed: {persistence:#}"
+            )),
+        },
+    }
+}
+
+fn validate_sast_scan_engine_result(name: &str, output: &Value) -> Result<()> {
+    if crate::tool_result_status(output) != crate::ToolResultStatus::Failed {
+        return Ok(());
+    }
+    validate_sast_subtool_result(name, output)
+}
+
+fn scan_engine_outcome(output: &Value) -> crate::run_artifacts::ScanEngineStageOutcome {
+    use crate::run_artifacts::ScanEngineStageOutcome;
+    match crate::tool_result_status(output) {
+        crate::ToolResultStatus::Completed => ScanEngineStageOutcome::Complete,
+        crate::ToolResultStatus::Partial => ScanEngineStageOutcome::Partial,
+        crate::ToolResultStatus::Skipped => ScanEngineStageOutcome::Skipped,
+        crate::ToolResultStatus::Failed => ScanEngineStageOutcome::Failed,
     }
 }
 
@@ -401,5 +541,30 @@ mod canonical_report_cost_tests {
             .unwrap()
             .get("costUsdExact")
             .is_none());
+    }
+
+    #[test]
+    fn usable_partial_scan_engine_retains_its_partial_status() {
+        let output = json!({"ok": true, "status": "partial", "data": {}});
+
+        validate_sast_scan_engine_result("agentic-sast:scan", &output).unwrap();
+
+        assert_eq!(
+            scan_engine_outcome(&output),
+            crate::run_artifacts::ScanEngineStageOutcome::Partial
+        );
+    }
+
+    #[test]
+    fn failed_scan_engine_aborts_the_composite_report() {
+        let output = json!({
+            "ok": false,
+            "status": "failed",
+            "errors": ["runtime disconnected"]
+        });
+
+        let error = validate_sast_scan_engine_result("agentic-sast:scan", &output).unwrap_err();
+
+        assert!(error.to_string().contains("runtime disconnected"));
     }
 }

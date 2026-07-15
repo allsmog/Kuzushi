@@ -16,7 +16,6 @@ mod activity_header;
 mod activity_layout;
 mod activity_observability;
 mod activity_pane_chrome;
-mod activity_plain_rows;
 mod activity_scroll;
 mod activity_view;
 mod actor_detail;
@@ -28,7 +27,6 @@ mod auth;
 mod boot_splash;
 mod catalog;
 mod chrome_layout;
-mod code_context;
 mod command_palette;
 mod config;
 mod confirm_card;
@@ -40,7 +38,6 @@ mod display_text;
 mod failure_handoff;
 mod finding_summary;
 mod findings;
-mod generated_views_feed;
 mod health;
 mod help;
 mod home_cockpit;
@@ -81,10 +78,11 @@ mod run_trace;
 mod sast_tasks;
 mod screen_context;
 mod session_story;
+mod setup;
 mod severity_tone;
-mod source_tree;
 mod status_footer;
 mod strategy_queue;
+mod terminal_title;
 mod theme_picker;
 mod threat_dfd_diagram;
 mod threat_impact;
@@ -100,23 +98,21 @@ mod update_available;
 mod view_status;
 mod viz_data;
 mod workbench;
-mod workbench_depth;
 mod workspace;
 pub(crate) use active_stage::active_stage_label;
 pub(crate) use activity_dag_rows::ActivityDagRowTone;
 pub(crate) use activity_empty_state::ActivityEmptyStateModel;
 pub(crate) use activity_feed_rows::ActivityFeedRowTone;
 pub(crate) use activity_footer::ActivityFooterHint;
-pub(crate) use activity_layout::{activity_frame_layout, ActivityFrameLayout};
-pub(crate) use activity_observability::{
-    ActivityHeartbeatModel, ActivityHeartbeatTone, ActivityPhaseStripModel,
+pub(crate) use activity_header::ActivityHeaderModel;
+pub(crate) use activity_layout::{
+    activity_frame_layout, activity_pane_layout, ActivityFrameLayout, ActivityPaneLayout,
 };
-pub(crate) use activity_pane_chrome::{ActivityPaneTitle, ActivityPlainPaneHeaderCell};
-pub(crate) use activity_plain_rows::{
-    ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneRow,
-};
+pub(crate) use activity_observability::{ActivityHeartbeatModel, ActivityHeartbeatTone};
+pub(crate) use activity_pane_chrome::{ActivityPaneChromeModel, ActivityPaneTitle};
 pub(crate) use activity_view::{
-    activity_execution_model_label, activity_view_model, ActiveActivityViewModel, ActivityViewModel,
+    activity_execution_model_label, activity_view_model, ActivityViewModel,
+    OperatorQuestionKeyHints, RunFocusModel,
 };
 pub(crate) use actor_detail::{actor_detail_model, ActorDetailModel, ActorTranscriptRow};
 pub(crate) use advisory_chrome::{
@@ -124,7 +120,9 @@ pub(crate) use advisory_chrome::{
 };
 pub(crate) use agent_chat::{agent_chat_model, AgentChatModel, AgentChatSession, AgentChatTurn};
 pub(crate) use ambient_progress::ambient_progress_chip;
-pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
+pub(crate) use attack_surface::{
+    attack_surface_risk_model, AttackSurfaceRiskModel, AttackSurfaceRow,
+};
 pub(crate) use auth::{
     auth_env_summary, auth_login_model, auth_provider_rows, model_auth_status, oauth_summary,
     AuthLoginModel, AuthProviderRow, AuthProviderTone,
@@ -137,7 +135,6 @@ pub(crate) use catalog::{
 pub(crate) use chrome_layout::{
     keybind_footer_chrome_height, status_footer_chrome_height, transcript_chrome_height,
 };
-pub(crate) use code_context::{selected_finding_code_model, CodePaneModel, CodePaneRow};
 pub(crate) use command_palette::{command_palette_model, CommandPaletteModel, PaletteRow};
 pub(crate) use config::{
     config_model, plain_config_model, ConfigModel, ConfigModelRow, ConfigModelTable,
@@ -179,15 +176,17 @@ pub(crate) use help::{
     PlainHelpModel, QuickstartStep,
 };
 pub(crate) use home_cockpit::{
-    home_cockpit_model, HomeArtifactRow, HomeCockpitModel, HomeFindingsCard, HomeNextCard,
-    HomeRunArtifactChip, HomeRunCard, HomeTopRiskRow,
+    attack_surface_model, home_cockpit_model, HomeArtifactRow, HomeCockpitModel, HomeFindingsCard,
+    HomeNextCard, HomeRunArtifactChip, HomeRunCard, HomeTopRiskRow,
 };
 pub(crate) use jobs_registry::{
     jobs_registry_model, JobHistoryState, JobRow, JobRunStatus, JobSource, JobsRegistryModel,
 };
 pub(crate) use journey::{
-    autonomy_footer_segment, finding_ledger_counts, journey_footer_segment, journey_model,
-    journey_phase_segment, JourneyModel, JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone,
+    attach_proof_deferral_counts, attach_remediation_counts, autonomy_footer_segment,
+    finding_is_review_actionable, finding_ledger_counts, journey_footer_segment, journey_model,
+    journey_phase_segment, JourneyDestination, JourneyModel, JourneyPhaseState, JourneyPhaseStatus,
+    JourneyPhaseTone, ReportReason,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use keymap::{keymap_model, KeymapModel};
@@ -220,9 +219,13 @@ pub(crate) use permission_policy::{
 #[cfg(test)]
 pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
-    phase_cockpit_header_model_for_phase, phase_cockpit_model_for_phase, ActivityTaskCountModel,
-    ConfirmPhaseModel, EngagementHeaderModel, FixPhaseModel, HuntPhaseModel, MapArtifactMetric,
-    MapConsoleRow, MapPhaseModel, PhaseCockpitBody, PhaseCockpitModel, ProofReplayModel,
+    phase_cockpit_model_for_phase, phase_presentation_plan, phase_surface_specs, AttentionMode,
+    EngagementHeaderModel, FixPhaseModel, LayoutDensity, MapPhaseModel, PhaseCockpitBody,
+    PhaseCockpitModel, PhasePresentationPlan, PhaseResultCardModel, PhaseSurfaceId,
+    PlannedPhaseSurface, ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel,
+    RemediationLifecycleStage, RemediationLoadState, ReviewPhaseModel, ScanAttemptModel,
+    ScanEngineOutcomeModel, ScanPhaseModel, SelectionDisclosureModel, SurfaceInteraction,
+    SurfaceState,
 };
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use planning_overview::{
@@ -234,7 +237,10 @@ pub(crate) use prereq_prompt::{
     PrereqPromptStepModel,
 };
 pub(crate) use project_model::{project_model, ProjectModel, ProjectModelOrigin, ProjectModelRow};
-pub(crate) use prompt::{prompt_model, prompt_text};
+pub(crate) use prompt::{
+    navigation_prompt_text, prompt_model, prompt_text, workbench_prompt_mode,
+    workbench_prompt_token,
+};
 pub(crate) use prompt_tuning::{
     prompts_model, tune_model, PromptRow, PromptStackLayer, PromptStackModel, TuneActionRow,
     TuneHouseRules, TuneModel,
@@ -286,19 +292,19 @@ pub(crate) use screen_context::{screen_context_model, ScreenContext};
 pub(crate) use session_story::{
     session_history_model, session_story_model, CommandHistoryModel, SessionStoryModel,
 };
-pub(crate) use severity_tone::SeverityTone;
-pub(crate) use source_tree::{
-    source_tree_model, SourceTreeComponentTier, SourceTreeModel, SourceTreeRow,
+pub(crate) use setup::{
+    configured_model_credential_readiness, credential_readiness_for_provider,
+    setup_readiness_model, CredentialReadiness, SetupReadinessModel, SetupReadinessRow,
+    SetupReadinessTone,
 };
+pub(crate) use severity_tone::SeverityTone;
 pub(crate) use status_footer::status_footer_model;
 pub(crate) use strategy_queue::{
-    strategy_queue_model, target_artifact_ready, StrategyQueueDetailRow, StrategyQueueEmptyState,
-    StrategyQueueModel, StrategyQueueRow,
+    strategy_queue_model, StrategyQueueDetailRow, StrategyQueueEmptyState, StrategyQueueModel,
+    StrategyQueueRow,
 };
+pub(crate) use terminal_title::terminal_title;
 pub(crate) use theme_picker::{theme_picker_model, ThemePickerModel};
-pub(crate) use threat_dfd_diagram::{
-    threat_dfd_diagram_lines, threat_dfd_view, DfdDiagramLine, DfdLineKind,
-};
 pub(crate) use threat_model::{
     threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
 };
@@ -320,22 +326,18 @@ pub(crate) use transcript::{
 };
 pub(crate) use update_available::{update_available_model, UpdateAvailableModel};
 pub(crate) use view_status::view_status_segment;
+#[cfg(test)]
+pub(crate) use viz_data::selected_taint_flow_path;
 pub(crate) use viz_data::{
     attack_tree, cached_findings_heatmap, cached_findings_heatmap_with_selection,
-    cached_risk_by_module, dfd_model, risk_by_module, selected_taint_flow_path, taint_flow_path,
-    taint_flow_path_for_finding, AttackChain, AttackTree, DfdFlowModel, DfdKind, DfdModel,
-    DfdNodeModel, FindingsHeatmap, ModuleRisk, RiskByModule, TaintFlowPath, TaintStageModel,
+    cached_risk_by_module, dfd_model, risk_by_module, taint_flow_path, taint_flow_path_for_finding,
+    AttackChain, AttackTree, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap,
+    ModuleRisk, RiskByModule, TaintFlowPath, TaintStageModel,
 };
 pub(crate) use workbench::{
-    active_review_queue_mode, active_workbench_page, workbench_chrome_model,
-    workbench_chrome_model_for_selection, workbench_export_command, workbench_report_command,
-    workbench_view_model, WorkbenchCenter, WorkbenchCenterBody, WorkbenchCenterTab,
-    WorkbenchChromeModel, WorkbenchHint, WorkbenchState, WorkbenchTopBar, WorkbenchViewModel,
-    WORKBENCH_REPORT_COMMAND,
-};
-pub(crate) use workbench_depth::{
-    workbench_depth_bounds, workbench_depth_model, DrawerContent, FindingRow, LegKind, Stanza,
-    TraceLeg, Waypoint, WorkbenchModel,
+    active_review_queue_mode, active_workbench_page, workbench_presentation_snapshot,
+    workbench_report_command, WorkbenchChromeModel, WorkbenchHint, WorkbenchPresentationSnapshot,
+    WorkbenchState, WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
 };
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_projection, workspace_model,

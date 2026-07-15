@@ -1,4 +1,5 @@
 use crate::event_log::EventKind;
+use crate::findings::PatchLifecycleRecord;
 use serde_json::{json, Value};
 
 mod observations;
@@ -138,6 +139,7 @@ pub struct PatchAttemptWrite {
     pub provider_spend_unresolved: bool,
     pub validator_log: Option<String>,
     pub history_json: String,
+    pub provenance: Option<crate::findings::PatchProvenance>,
     pub actor: String,
 }
 
@@ -160,7 +162,20 @@ impl PatchAttemptWrite {
             "providerSpendUnresolved": self.provider_spend_unresolved,
             "validatorLog": self.validator_log,
             "historyJson": self.history_json,
+            "provenance": self.provenance,
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchLifecycleWrite {
+    pub record: PatchLifecycleRecord,
+}
+
+impl PatchLifecycleWrite {
+    pub(super) fn payload(&self) -> Value {
+        serde_json::to_value(&self.record)
+            .expect("PatchLifecycleRecord is always JSON-serializable")
     }
 }
 

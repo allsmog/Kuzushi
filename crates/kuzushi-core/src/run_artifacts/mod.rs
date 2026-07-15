@@ -23,6 +23,7 @@ mod run_paths;
 mod run_reproducibility_metadata;
 mod run_summary_store;
 mod running;
+mod scan_stage;
 #[cfg(test)]
 mod tests;
 mod tool_output_cost;
@@ -44,6 +45,7 @@ pub use run_artifact_reader::{
 };
 pub use run_events::{
     append_run_event, load_run_events, next_run_event_number, RunEvent, RunEventRead,
+    RunInteractionAudit,
 };
 pub(crate) use run_failures::run_failure_artifact_path;
 pub use run_failures::{
@@ -71,7 +73,13 @@ pub use running::{
     RunEnvFingerprint, RunHouseRuleFingerprint, RunLlmCallAudit, RunPromptOverrideFingerprint,
     RunSummary, RunTargetGitMetadata, RunTraceStep,
 };
+pub use scan_stage::{
+    load_scan_stage_data, PhaseStageOutcome, PhaseStageReceipt, ScanArtifactDelta,
+    ScanEngineStageOutcome, ScanFindingDelta, ScanStageCost, ScanStageData, ScanStageEngine,
+    ScanStagePlan, ScanStageScope, SAST_PHASE_STAGES_JSONL_FILE,
+};
 pub use tool_output_cost::tool_run_output_cost_report;
+pub(crate) use tool_run_record::terminal_result_digest;
 pub use tool_run_record::{
     record_tool_run_canceled, record_tool_run_complete, record_tool_run_failed,
     record_tool_run_interrupted, record_tool_run_refused, record_tool_run_started,

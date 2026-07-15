@@ -121,12 +121,7 @@ pub(crate) fn render_command_palette_overlay(frame: &mut Frame<'_>, area: Rect, 
 fn onboarding_overlay_origin(app: &ShellApp) -> bool {
     matches!(
         app.router.overlay_origin(),
-        Some(
-            ShellView::TargetPicker
-                | ShellView::ModelPicker
-                | ShellView::AuthMethodPicker
-                | ShellView::PlanningPicker
-        )
+        Some(ShellView::TargetPicker | ShellView::PlanningPicker | ShellView::Setup)
     )
 }
 

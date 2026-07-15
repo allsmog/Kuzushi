@@ -41,6 +41,12 @@ describe("KWP dynamic host context", () => {
           contextNote: "Runtime context is appended separately.",
         },
       ]);
+      expect(result.initialize.tools[0]?.options?.[1]).toMatchObject({
+        name: "maxBytes",
+        type: "int",
+        minimum: 1024,
+        maximum: 67108864,
+      });
       expect(result.output).toEqual({
         aliases: ["symcc"],
         body: "network-body",
@@ -209,7 +215,7 @@ interface SmokeState {
 
 interface SmokeInitialize {
   hidden: boolean;
-  tools: Array<{ prompts?: unknown[] }>;
+  tools: Array<{ options?: unknown[]; prompts?: unknown[] }>;
 }
 
 interface Deferred<T> {
@@ -247,6 +253,12 @@ export default {
       name: "KWP_PROMPT",
       type: "string",
       description: "Editable instructions.",
+    }, {
+      name: "maxBytes",
+      type: "int",
+      description: "Maximum bytes.",
+      minimum: 1024,
+      maximum: 67108864,
     }],
     prompts: [{
       role: "scan instructions",

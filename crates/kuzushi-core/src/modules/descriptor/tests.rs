@@ -54,7 +54,7 @@ mod tests {
         );
         let before = descriptor.clone();
         let policy = ToolPolicy::new(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             ToolEffect::Read,
             WorkspaceRequirement::Required,
@@ -71,7 +71,7 @@ mod tests {
         let after = &module.tools()[0];
 
         assert_eq!(before.phase, ToolPhase::Operate);
-        assert_eq!(after.phase, ToolPhase::Hunt);
+        assert_eq!(after.phase, ToolPhase::Scan);
         assert_eq!(after.name, before.name);
         assert_eq!(after.headless, before.headless);
         assert_eq!(after.hidden, before.hidden);
@@ -117,7 +117,7 @@ mod tests {
                 "Review the target.".to_string(),
             ))
             .with_policy(workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Optional,
             ));

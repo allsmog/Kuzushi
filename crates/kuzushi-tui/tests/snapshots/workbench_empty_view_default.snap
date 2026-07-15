@@ -4,26 +4,16 @@ assertion_line: 33
 ---
  KUZUSHI › workbench · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
-Kuzushi · target:no target · page:confirm · o idle · modules:all modules
- type next guided workflow · type scan guided plan · type options sast:scan tune scanners · type ask ask the agent
+Kuzushi · target:no target · page:review · o idle · modules:all modules
+ type Enter open in Prove · type findings clear projection · press z open heatmap · type scan hunt again
 
- -- FINDING ------------------------------------------------------------------------------------------------------------
+ -- FINDINGS -----------------------------------------------------------------------------------------------------------
+∅ review queue empty
+no findings loaded for review
+> findings
+> filter completeness:open
+ -- SELECTED FINDING ---------------------------------------------------------------------------------------------------
        ∅  no finding selected
-       select a finding to inspect its path and proof
+       move through FINDINGS to inspect a result
 
-       > 2                     open Hunt and choose a finding
- -- ATTACK PATH --------------------------------------------------------------------------------------------------------
-       ∅  no taint flow
-       no taint flow yet — run `taint-iris:hunt`
-
-       > taint-iris:hunt       generate a source-to-sink path
- -- DATA-FLOW LADDER ---------------------------------------------------------------------------------------------------
-       ∅  no data-flow ladder
-       no taint flow yet — run `taint-iris:hunt`
-
-       > taint-iris-next:hunt  generate a selected source-to-sink path
- -- PROOF --------------------------------------------------------------------------------------------------------------
-       ∅  no finding selected
-       select a finding to inspect its path and proof
-
-       > 2                     open Hunt and choose a finding
+       > Enter                 open selected finding in Prove

@@ -8,7 +8,7 @@ pub(crate) fn carlini_threat_hunt_module() -> BuiltinModule {
         "Compatibility alias for the offense-review threat-model hunt executor.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Required,
             ),
@@ -122,7 +122,7 @@ fn taint_iris_tool() -> ToolDescriptor {
         crate::capabilities::taint_iris_next::taint_iris_next_system_prompt(),
     ))
     .with_policy(workspace_policy(
-        ToolPhase::Hunt,
+        ToolPhase::Scan,
         RuntimeRequirement::Always,
         FindingStoreRequirement::Required,
     ))
@@ -173,34 +173,34 @@ pub(crate) fn taint_iris_next_module() -> BuiltinModule {
 fn taint_iris_next_tools() -> Vec<ToolDescriptor> {
     vec![
         taint_iris_next_hunt_tool().with_policy(workspace_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Always,
             FindingStoreRequirement::Required,
         )),
         taint_iris_next_dataflow_plan_tool().with_policy(workspace_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
         )),
         taint_iris_next_source_sink_trace_tool().with_policy(workspace_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
         )),
         taint_iris_next_finding_review_tool().with_policy(workspace_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Always,
             FindingStoreRequirement::Required,
         )),
         taint_iris_next_catalog_tool().with_policy(ToolPolicy::new(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Always,
             ToolEffect::Read,
             WorkspaceRequirement::Required,
             FindingStoreRequirement::Optional,
         )),
         taint_iris_next_codeql_db_tool().with_policy(workspace_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Always,
             FindingStoreRequirement::Optional,
         )),
@@ -517,7 +517,7 @@ fn systems_hunt_tools() -> Vec<ToolDescriptor> {
         .into_iter()
         .map(|(name, description, runtime_requirement)| {
             systems_hunt_tool(name, description).with_policy(workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 runtime_requirement,
                 FindingStoreRequirement::Required,
             ))

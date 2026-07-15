@@ -1,7 +1,7 @@
 use super::{
     AttackSurfaceWrite, AuditWrite, CandidateObservationWrite, DecisionWrite, FileDeletedWrite,
-    FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite, RekeyWrite,
-    RunLifecycleWrite, SnapshotWrite, VerificationWrite,
+    FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite,
+    PatchLifecycleWrite, RekeyWrite, RunLifecycleWrite, SnapshotWrite, VerificationWrite,
 };
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -33,6 +33,7 @@ pub enum DecisionCommand {
     ReviewDecision(DecisionWrite),
     RecordVerification(VerificationWrite),
     RecordPatchAttempt(PatchAttemptWrite),
+    RecordPatchLifecycle(PatchLifecycleWrite),
     RecordAudit(AuditWrite),
     RecordRunLifecycle(RunLifecycleWrite),
     RecordFindingLifecycle(FindingLifecycleWrite),

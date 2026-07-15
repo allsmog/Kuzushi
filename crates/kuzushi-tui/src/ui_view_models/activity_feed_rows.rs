@@ -4,11 +4,11 @@ use crate::{ActivityRouteState, ActivitySession, DagTaskState, RecordedTraceEven
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const STALLED_TRACE_AFTER_SECS: u64 = 30;
+const LIVE_OUTPUT_EVENT_WINDOW: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActivityFeedRowTone {
     Primary,
-    Label,
     Success,
     Muted,
     Danger,
@@ -29,13 +29,28 @@ pub(crate) fn activity_feed_pane_rows(
     running_tool: Option<&str>,
     now: Instant,
 ) -> Vec<ActivityFeedPaneRow> {
+    let visible_count = visible_event_count(session, route);
+    let window_start = visible_count.saturating_sub(LIVE_OUTPUT_EVENT_WINDOW);
     let mut rows = session
         .events
         .iter()
-        .take(visible_event_count(session, route))
+        .take(visible_count)
+        .skip(window_start)
         .flat_map(|event| feed_event_rows(event, route.verbose_subsystems, width))
         .collect::<Vec<_>>();
-    append_feed_status_rows(&mut rows, session, route, running_tool);
+    if window_start > 0 {
+        rows.insert(
+            0,
+            ActivityFeedPaneRow {
+                text: fit(
+                    &format!(" {window_start} older events retained in trace/replay"),
+                    width,
+                ),
+                tone: ActivityFeedRowTone::Muted,
+            },
+        );
+    }
+    append_feed_status_rows(&mut rows, session, route, running_tool, width);
     if let Some(row) = stalled_trace_row(session, route, width, running_tool, now) {
         rows.push(row);
     }
@@ -55,6 +70,7 @@ fn append_feed_status_rows(
     session: &ActivitySession,
     route: &ActivityRouteState,
     running_tool: Option<&str>,
+    width: usize,
 ) {
     if let Some(model) = activity_feed_pause_model(route) {
         rows.insert(
@@ -72,6 +88,12 @@ fn append_feed_status_rows(
         rows.push(ActivityFeedPaneRow {
             text: model.text,
             tone: ActivityFeedRowTone::Muted,
+        });
+    }
+    if let Some(acknowledgement) = session.operator_answer_acknowledgement.as_deref() {
+        rows.push(ActivityFeedPaneRow {
+            text: fit(&format!(" ✓ {acknowledgement}"), width),
+            tone: ActivityFeedRowTone::Success,
         });
     }
 }
@@ -313,6 +335,20 @@ mod tests {
     }
 
     #[test]
+    fn activity_feed_retains_operator_answer_acknowledgement_after_completion() {
+        let mut session = ActivitySession::new("r-1");
+        session.operator_answer_acknowledgement =
+            Some("accepted Repository · run resumed".to_string());
+        let route = ActivityRouteState::default();
+
+        let rows = activity_feed_pane_rows(&session, &route, 80, None, Instant::now());
+
+        let acknowledgement = rows.last().expect("answer acknowledgement");
+        assert_eq!(acknowledgement.tone, ActivityFeedRowTone::Success);
+        assert!(acknowledgement.text.contains("accepted Repository"));
+    }
+
+    #[test]
     fn activity_feed_pane_rows_warns_when_live_trace_output_stalls() {
         let now = Instant::now();
         let mut session = ActivitySession::new("r-1");
@@ -367,5 +403,29 @@ mod tests {
         assert!(!paused_rows
             .iter()
             .any(|row| row.text.contains("no trace output")));
+    }
+
+    #[test]
+    fn live_output_windows_events_before_formatting() {
+        let mut session = ActivitySession::new("r-window");
+        for index in 0..600 {
+            session.apply_step(
+                RunTraceStep::new(index, "reasoning", format!("event-{index:03}"))
+                    .with_module_id("triage")
+                    .with_verb("run"),
+            );
+        }
+
+        let rows = activity_feed_pane_rows(
+            &session,
+            &ActivityRouteState::default(),
+            120,
+            None,
+            Instant::now(),
+        );
+
+        assert!(rows[0].text.contains("88 older events retained"));
+        assert!(!rows.iter().any(|row| row.text.contains("event-087")));
+        assert!(rows.iter().any(|row| row.text.contains("event-599")));
     }
 }

@@ -25,7 +25,7 @@ pub(in crate::modules) fn run_hybrid_detect(
         }
     };
     let persisted = persist_tool_findings(
-        "android-apk",
+        ctx.finding_run_id(),
         &target,
         &outcome.findings,
         ctx.workspace,

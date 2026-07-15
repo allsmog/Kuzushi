@@ -1,5 +1,9 @@
 # Cyber operator TUI experience audit — 2026-07-11
 
+> **Historical record — superseded:** the screens and workflow below predate
+> the Cockpit Spine (`Target → Setup → Map → Review → Prove → Fix → Report`).
+> Retain this audit as evidence of the assessed build, not as current UI truth.
+
 ## Remediation update — 2026-07-11
 
 **Current verdict: the UI/UX findings in this audit are cleared.** The original

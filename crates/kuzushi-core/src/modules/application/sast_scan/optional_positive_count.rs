@@ -1,4 +1,5 @@
 use super::*;
+use crate::modules::autonomy::WorkflowPhase;
 
 pub(in crate::modules) struct WhiteboxArtifactPaths {
     pub(in crate::modules) static_narratives: Option<String>,
@@ -155,19 +156,37 @@ pub(in crate::modules) fn run_sast_triage(
     };
     let triage_input =
         with_sast_prompt_override(triage_input, input, ctx, "triage", "TRIAGE_PROMPT")?;
-    let output = run_sast_subtool(
+    let output = run_sast_phase_subtool(
         registry,
         "triage:run",
         triage_input,
         ctx,
         runtime,
         option_store,
+        artifacts,
+        WorkflowPhase::Review,
+        &run_ids.primary,
     )?;
     write_triage_jsonl(artifacts, &output)?;
     Ok(output)
 }
 
-pub(in crate::modules) fn run_sast_subtool(
+pub(in crate::modules) fn run_sast_phase_subtool(
+    registry: &ModuleRegistry,
+    name: &str,
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    option_store: &crate::options::ToolOptionStore,
+    artifacts: &SastRunArtifacts,
+    phase: WorkflowPhase,
+    primary_run_id: &str,
+) -> Result<Value> {
+    let dispatched = dispatch_sast_subtool(registry, name, input, ctx, runtime, option_store);
+    record_phase_dispatch(dispatched, name, artifacts, phase, primary_run_id)
+}
+
+pub(in crate::modules) fn dispatch_sast_subtool(
     registry: &ModuleRegistry,
     name: &str,
     input: Value,
@@ -178,12 +197,40 @@ pub(in crate::modules) fn run_sast_subtool(
     let prepared = registry
         .prepare_dispatch_input(name, input, ctx, Some(option_store))?
         .authorize_delegated(&ctx.authorization);
-    let output = registry.dispatch_prepared_input_with_runtime(prepared, ctx, runtime)?;
-    validate_sast_subtool_result(name, &output)?;
-    Ok(output)
+    registry.dispatch_prepared_input_with_runtime(prepared, ctx, runtime)
 }
 
-fn validate_sast_subtool_result(name: &str, output: &Value) -> Result<()> {
+fn record_phase_dispatch(
+    dispatched: Result<Value>,
+    name: &str,
+    artifacts: &SastRunArtifacts,
+    phase: WorkflowPhase,
+    primary_run_id: &str,
+) -> Result<Value> {
+    match dispatched {
+        Ok(output) => {
+            record_sast_phase_output(artifacts, phase, primary_run_id, &output)?;
+            validate_sast_subtool_result(name, &output)?;
+            Ok(output)
+        }
+        Err(error) => {
+            let persistence = record_sast_phase_stage(
+                artifacts,
+                phase,
+                SastPhaseStageOutcome::Failed,
+                vec![primary_run_id.to_string()],
+            );
+            match persistence {
+                Ok(()) => Err(error),
+                Err(persistence) => Err(anyhow::anyhow!(
+                    "{error:#}; additionally, phase receipt persistence failed: {persistence:#}"
+                )),
+            }
+        }
+    }
+}
+
+pub(in crate::modules) fn validate_sast_subtool_result(name: &str, output: &Value) -> Result<()> {
     if crate::module_result::tool_result_status(&output).is_failure_like() {
         let details = output
             .get("errors")
@@ -211,6 +258,14 @@ fn validate_sast_subtool_result(name: &str, output: &Value) -> Result<()> {
 #[cfg(test)]
 mod result_truth_tests {
     use super::*;
+    use crate::WorkspaceTarget;
+
+    fn stage_artifacts(run_id: &str) -> (tempfile::TempDir, SastRunArtifacts) {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let artifacts = SastRunArtifacts::create(&workspace, run_id).unwrap();
+        (target, artifacts)
+    }
 
     #[test]
     fn failed_subtool_envelope_is_not_treated_as_success() {
@@ -233,5 +288,52 @@ mod result_truth_tests {
         let output = json!({"ok": true, "status": "skipped"});
 
         validate_sast_subtool_result("triage:run", &output).unwrap();
+    }
+
+    #[test]
+    fn partial_phase_subtool_cannot_be_mislabeled_as_complete() {
+        let output = json!({"ok": true, "status": "partial", "data": {}});
+
+        let error = validate_sast_subtool_result("verify:finding", &output).unwrap_err();
+
+        assert!(error.to_string().contains("did not complete successfully"));
+    }
+
+    #[test]
+    fn partial_stage_receipt_survives_outer_failure() {
+        let (_target, artifacts) = stage_artifacts("scan-partial-stage");
+
+        let error = record_phase_dispatch(
+            Ok(json!({"ok": true, "status": "partial"})),
+            "verify:finding",
+            &artifacts,
+            WorkflowPhase::Prove,
+            "scan-partial-stage",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("did not complete successfully"));
+        let stages = load_sast_phase_stages(&artifacts).unwrap();
+        assert_eq!(stages[0]["phase"], "prove");
+        assert_eq!(stages[0]["outcome"], "partial");
+    }
+
+    #[test]
+    fn transport_failure_persists_failed_stage_receipt() {
+        let (_target, artifacts) = stage_artifacts("scan-failed-stage");
+
+        let error = record_phase_dispatch(
+            Err(anyhow::anyhow!("runtime disconnected")),
+            "triage:run",
+            &artifacts,
+            WorkflowPhase::Review,
+            "scan-failed-stage",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("runtime disconnected"));
+        let stages = load_sast_phase_stages(&artifacts).unwrap();
+        assert_eq!(stages[0]["phase"], "review");
+        assert_eq!(stages[0]["outcome"], "failed");
     }
 }

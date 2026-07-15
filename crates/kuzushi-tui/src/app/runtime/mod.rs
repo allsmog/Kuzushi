@@ -33,6 +33,8 @@ pub(super) use render_plain_scripted_session::mouse_capture_setting_enabled;
 #[cfg(test)]
 pub(super) use render_plain_scripted_session::render_plain_scripted_session;
 pub use run_shell::run_shell;
+pub use run_shell::run_shell_with_context;
 pub use run_shell::run_shell_with_plain;
+pub use run_shell::{ShellLaunchContext, ShellTargetSource};
 pub(crate) use terminal_loop_event::*;
 pub(crate) use workspace_watcher::*;

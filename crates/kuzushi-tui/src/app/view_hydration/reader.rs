@@ -62,6 +62,14 @@ fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydration
         ViewHydrationKey::RunTrace { run_id } => Some(ViewHydrationValue::RunTrace(
             kuzushi_core::load_run_trace(target, run_id).ok(),
         )),
+        ViewHydrationKey::ScanStageReceipt { run_id } => {
+            let state = match kuzushi_core::run_artifacts::load_scan_stage_data(target, run_id) {
+                Ok(Some(receipt)) => ScanStageReceiptState::Ready(receipt),
+                Ok(None) => ScanStageReceiptState::Missing,
+                Err(error) => ScanStageReceiptState::Failed(error.to_string()),
+            };
+            Some(ViewHydrationValue::ScanStageReceipt(state))
+        }
         _ => None,
     }
 }
@@ -81,32 +89,57 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
         ViewHydrationKey::ProjectScopeTree => Some(ViewHydrationValue::ProjectScopeTree(
             project_scope_tree(target),
         )),
-        ViewHydrationKey::ProjectModelDocument { scope_id, revision } => {
-            Some(ViewHydrationValue::ProjectModelDocument(
-                kuzushi_core::workspace::load_project_model_document(
-                    target,
-                    scope_id,
-                    revision.as_deref(),
-                )
-                .ok()
-                .flatten(),
-            ))
-        }
+        ViewHydrationKey::ProjectModelDocument { scope_id, revision } => Some(
+            read_project_model_document(target, scope_id, revision.as_deref()),
+        ),
         ViewHydrationKey::StrategyQueue => {
             Some(ViewHydrationValue::StrategyQueue(strategy_queue(target)))
         }
         ViewHydrationKey::PromptMutations => Some(ViewHydrationValue::PromptMutations(
             prompt_mutations(target),
         )),
+        ViewHydrationKey::FindingPatchTruth {
+            fingerprint,
+            finding_scan_id,
+            ..
+        } => Some(read_finding_patch_truth(
+            target,
+            fingerprint,
+            finding_scan_id.as_deref(),
+        )),
         ViewHydrationKey::TargetProfile => Some(ViewHydrationValue::TargetProfile(
             TargetProfile::detect(target),
         )),
         ViewHydrationKey::MapArtifacts => Some(ViewHydrationValue::MapArtifacts(
-            map_artifact_exists(target),
+            map_evidence_is_adequate(target),
         )),
         ViewHydrationKey::TargetBase => Some(ViewHydrationValue::TargetBase(target_base(target))),
         _ => None,
     }
+}
+
+fn read_project_model_document(
+    target: &Path,
+    scope_id: &str,
+    revision: Option<&str>,
+) -> ViewHydrationValue {
+    let document = kuzushi_core::workspace::load_project_model_document(target, scope_id, revision)
+        .ok()
+        .flatten();
+    ViewHydrationValue::ProjectModelDocument(document)
+}
+
+fn read_finding_patch_truth(
+    target: &Path,
+    fingerprint: &str,
+    finding_scan_id: Option<&str>,
+) -> ViewHydrationValue {
+    let state = match finding_patch_truth_for_target(target, fingerprint, finding_scan_id) {
+        Ok(Some(truth)) => FindingPatchTruthState::Ready(truth),
+        Ok(None) => FindingPatchTruthState::Missing,
+        Err(error) => FindingPatchTruthState::Failed(error.to_string()),
+    };
+    ViewHydrationValue::FindingPatchTruth(state)
 }
 
 fn read_workspace_file_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
@@ -153,22 +186,9 @@ fn read_latest_pointer(target: &Path) -> ViewHydrationValue {
     ViewHydrationValue::LatestRunPointer(state)
 }
 
-fn map_artifact_exists(target: &Path) -> bool {
-    PlanningTaskId::in_phase(WorkflowPhase::Map)
-        .into_iter()
-        .filter_map(PlanningTaskId::artifact_relative_path)
-        .any(|relative| valid_map_artifact(target, relative))
-}
-
-fn valid_map_artifact(target: &Path, relative: &str) -> bool {
-    let Ok(Some(checked)) = checked_workspace_path(target, &target.join(relative)) else {
-        return false;
-    };
-    if relative == ".kuzushi/codeql-db" {
-        checked.metadata.is_dir()
-    } else {
-        checked.metadata.is_file()
-    }
+fn map_evidence_is_adequate(target: &Path) -> bool {
+    let facts = kuzushi_core::workflow_attempts::collect_map_evidence(target, &[]);
+    kuzushi_core::workflow_attempts::assess_map_evidence(&facts).is_adequate()
 }
 
 fn project_scope_tree(target: &Path) -> ProjectScopeTreeState {

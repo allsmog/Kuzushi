@@ -7,9 +7,10 @@ use kuzushi_core::{
     findings::ReviewDecisionRecord,
     incremental_index::{coalesce_changes, plan_for_change, ReindexPlan, WorkspaceChange},
     workspace::ToolShelf,
-    AgenticSastReport, CarliniThreatHuntReport, Finding, ProgramScope, ScanProgress,
-    WorkspaceTarget,
+    AgenticSastReport, CarliniThreatHuntReport, Finding, PatchLifecycleRecord, PatchLifecycleState,
+    ProgramScope, ScanProgress, WorkspaceTarget,
 };
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkspaceStaleSummary {
@@ -22,6 +23,16 @@ pub(crate) struct FindingLedgerCounts {
     pub(crate) total: usize,
     pub(crate) reviewed: usize,
     pub(crate) confirmed: usize,
+    pub(crate) proven: usize,
+    /// Human proof deferrals bound to the current finding generations.
+    pub(crate) proof_deferred: usize,
+    pub(crate) proof_backed: usize,
+    pub(crate) remediated: usize,
+    pub(crate) remediation_projection_complete: bool,
+    /// At least one unfiltered, store-backed finding names its discovery run.
+    /// This is sufficient to project a pre-attempt Scan checkpoint, but never
+    /// overrides a modern phase attempt for the same target.
+    pub(crate) durable_scan_evidence: bool,
 }
 
 impl WorkspaceStaleSummary {
@@ -120,6 +131,7 @@ pub struct DomainCache {
     review_decisions: Vec<ReviewDecisionRecord>,
     review_decisions_revision: u64,
     finding_ledger_counts: Option<FindingLedgerCounts>,
+    patch_lifecycles_by_reverify_run: BTreeMap<String, PatchLifecycleRecord>,
     workspace_stale: Option<WorkspaceStaleSummary>,
     /// Cached "YOUR TOOLS" shelf (favorites + recents). Loaded from disk on
     /// target wiring and favorite toggles — never read per frame.
@@ -160,6 +172,7 @@ impl DomainCache {
             review_decisions: Vec::new(),
             review_decisions_revision: 0,
             finding_ledger_counts: None,
+            patch_lifecycles_by_reverify_run: BTreeMap::new(),
             workspace_stale: None,
             tool_shelf: ToolShelf::default(),
         }
@@ -211,6 +224,7 @@ impl DomainCache {
         self.review_decisions.clear();
         self.bump_review_decisions_revision();
         self.finding_ledger_counts = None;
+        self.patch_lifecycles_by_reverify_run.clear();
     }
 
     pub(crate) fn tool_shelf(&self) -> &ToolShelf {
@@ -527,6 +541,34 @@ impl DomainCache {
 
     pub(crate) fn set_finding_ledger_counts(&mut self, counts: FindingLedgerCounts) {
         self.finding_ledger_counts = Some(counts);
+    }
+
+    pub(crate) fn set_patch_lifecycle_records(&mut self, records: &[PatchLifecycleRecord]) {
+        self.patch_lifecycles_by_reverify_run.clear();
+        for record in records {
+            let Some(run_id) = record.reverify_run_id.as_ref() else {
+                continue;
+            };
+            self.patch_lifecycles_by_reverify_run
+                .entry(run_id.clone())
+                .or_insert_with(|| record.clone());
+        }
+    }
+
+    pub(crate) fn matching_verified_reverify_run<'a>(
+        &self,
+        run_refs: &'a [String],
+    ) -> Option<&'a str> {
+        // `patch:reverify` writes its execution-context run id into the
+        // application lifecycle. Phase attempt run refs have already crossed
+        // descriptor/phase validation, so this exact intersection binds the
+        // result to its durable application without consulting UI selection.
+        run_refs.iter().find_map(|run_id| {
+            self.patch_lifecycles_by_reverify_run
+                .get(run_id)
+                .is_some_and(|record| record.state == PatchLifecycleState::Verified)
+                .then_some(run_id.as_str())
+        })
     }
 
     fn bump_findings_revision(&mut self) {

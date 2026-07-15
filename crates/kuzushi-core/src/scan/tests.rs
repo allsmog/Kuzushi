@@ -192,6 +192,54 @@ mod tests {
         assert_eq!(store.latest_run_id().unwrap(), None);
     }
 
+    struct SuccessfulNativeScanner;
+
+    impl ScanEngine for SuccessfulNativeScanner {
+        fn id(&self) -> &'static str {
+            "successful-native"
+        }
+
+        fn scan(&self, _target: &Path, _cancel: &ScanCancellation) -> Result<Vec<Finding>> {
+            Ok(vec![Finding::new_tool(
+                self.id(),
+                "native/success",
+                "src/lib.rs",
+                1,
+                None,
+                Severity::Low,
+                "candidate",
+            )])
+        }
+    }
+
+    struct FailingNativeScanner;
+
+    impl ScanEngine for FailingNativeScanner {
+        fn id(&self) -> &'static str {
+            "failing-native"
+        }
+
+        fn scan(&self, _target: &Path, _cancel: &ScanCancellation) -> Result<Vec<Finding>> {
+            anyhow::bail!("native engine failed")
+        }
+    }
+
+    #[test]
+    fn native_scan_run_exists_only_after_every_selected_engine_completes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![
+            Box::new(SuccessfulNativeScanner),
+            Box::new(FailingNativeScanner),
+        ];
+
+        let error = run_scan_engines(&workspace, &store, &scanners).unwrap_err();
+
+        assert!(error.to_string().contains("native engine failed"));
+        assert!(store.list_findings(10).unwrap().is_empty());
+    }
+
     #[test]
     fn subprocess_scanners_report_missing_configured_binary_in_preflight() {
         let tmp = tempfile::tempdir().unwrap();

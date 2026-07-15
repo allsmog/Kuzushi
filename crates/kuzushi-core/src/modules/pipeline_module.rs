@@ -30,7 +30,7 @@ pub(crate) fn pipeline_module() -> BuiltinModule {
 fn pipeline_tools() -> Vec<ToolDescriptor> {
     tools_with_policy(
         tool_policy(
-            ToolPhase::Hunt,
+            ToolPhase::Scan,
             RuntimeRequirement::Never,
             ToolEffect::WorkspaceWrite,
             WorkspaceRequirement::Optional,
@@ -117,7 +117,7 @@ pub(crate) fn variant_module() -> BuiltinModule {
 
 fn variant_policy() -> ToolPolicy {
     workspace_policy(
-        ToolPhase::Hunt,
+        ToolPhase::Scan,
         RuntimeRequirement::Always,
         FindingStoreRequirement::Required,
     )

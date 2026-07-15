@@ -154,9 +154,21 @@ fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<
         ),
         "full-mode:hunt" => Some(full_mode_hunt_needs_runtime(input)),
         "threat-model:build" => Some(threat_model_build_needs_runtime(input)),
+        "patch:reverify" => Some(patch_reverify_needs_runtime(input)),
         "sast:scan" => Some(wants_sast_runtime(input)),
         _ => None,
     }
+}
+
+fn patch_reverify_needs_runtime(input: &Value) -> bool {
+    let Some(tool) = input.get("detectorTool").and_then(Value::as_str) else {
+        return false;
+    };
+    if tool == "patch:reverify" {
+        return false;
+    }
+    let detector_input = input.get("detectorInput").unwrap_or(&Value::Null);
+    tool_needs_runtime(tool, detector_input)
 }
 
 fn threat_model_build_wants_runtime(tool_name: &str, config: &V2Config) -> bool {

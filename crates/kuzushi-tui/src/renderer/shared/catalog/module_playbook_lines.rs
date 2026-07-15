@@ -36,7 +36,7 @@ const MODULE_PLAYBOOKS: &[(&str, ModulePlaybook)] = &[
     (
         "sast",
         ModulePlaybook {
-            run: PlaybookText::Static("next opens guided hunt; run . dispatches sast:scan"),
+            run: PlaybookText::Static("next opens guided Scan; run . dispatches sast:scan"),
             needs: "target, scanner/task config",
             output: PlaybookText::FindingsDbPath,
             inspect: "tasks · findings · use triage",

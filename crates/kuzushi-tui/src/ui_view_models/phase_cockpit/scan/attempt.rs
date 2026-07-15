@@ -1,0 +1,289 @@
+use crate::ui_view_models::{ScanAttemptModel, ScanEngineOutcomeModel};
+use crate::{ShellApp, ViewDataState};
+use kuzushi_core::run_artifacts::{PhaseStageOutcome, PhaseStageReceipt, ScanEngineStageOutcome};
+use kuzushi_core::workflow_attempts::{
+    PhaseAttemptOutcome, PhaseAttemptRecord, PhaseTargetSnapshot,
+};
+use kuzushi_core::RunSummary;
+
+pub(super) fn scan_attempt_from_stage(
+    app: &ShellApp,
+    record: &PhaseAttemptRecord,
+    disposition: &str,
+    receipt: &PhaseStageReceipt,
+) -> Option<ScanAttemptModel> {
+    let scan = receipt.scan.as_ref()?;
+    let findings = scan
+        .finding_delta
+        .added
+        .saturating_add(scan.finding_delta.updated);
+    Some(ScanAttemptModel {
+        attempt_id: Some(record.completed.attempt_id.clone()),
+        run_id: typed_run_id(receipt, record),
+        run_refs: typed_run_refs(receipt, record),
+        outcome: stage_outcome_label(receipt.outcome).to_string(),
+        disposition: disposition.to_string(),
+        freshness: attempt_freshness(app, &scan.target_snapshot),
+        findings: Some(findings),
+        findings_added: Some(scan.finding_delta.added),
+        findings_updated: Some(scan.finding_delta.updated),
+        artifact_count: scan.artifact_delta.len(),
+        artifact_paths: typed_artifact_paths(scan),
+        duration_secs: Some(scan.duration_ms.saturating_add(999) / 1_000),
+        cost_usd: scan.cost.map(|cost| cost.observed_usd),
+        cost_complete: scan.cost.map(|cost| cost.complete),
+        error: typed_scan_error(scan),
+    })
+}
+
+fn typed_run_id(receipt: &PhaseStageReceipt, record: &PhaseAttemptRecord) -> String {
+    receipt
+        .run_refs
+        .first()
+        .cloned()
+        .or_else(|| record.completed.run_refs.first().cloned())
+        .unwrap_or_else(|| "run reference missing".to_string())
+}
+
+fn typed_run_refs(receipt: &PhaseStageReceipt, record: &PhaseAttemptRecord) -> Vec<String> {
+    let mut refs = record.completed.run_refs.clone();
+    for run_ref in &receipt.run_refs {
+        if !refs.contains(run_ref) {
+            refs.push(run_ref.clone());
+        }
+    }
+    refs
+}
+
+fn typed_artifact_paths(scan: &kuzushi_core::run_artifacts::ScanStageData) -> Vec<String> {
+    scan.artifact_delta
+        .iter()
+        .map(|artifact| format!("{}:{}", artifact.run_ref, artifact.path))
+        .collect()
+}
+
+fn typed_scan_error(scan: &kuzushi_core::run_artifacts::ScanStageData) -> Option<String> {
+    scan.engines
+        .iter()
+        .find(|engine| engine.outcome == ScanEngineStageOutcome::Failed)
+        .and_then(|engine| engine.detail.clone())
+}
+
+pub(super) fn scan_attempt_from_record(
+    app: &ShellApp,
+    record: &PhaseAttemptRecord,
+    disposition: &str,
+    summaries: &[&RunSummary],
+) -> ScanAttemptModel {
+    let run_id = record
+        .completed
+        .run_refs
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "run reference missing".to_string());
+    ScanAttemptModel {
+        attempt_id: Some(record.completed.attempt_id.clone()),
+        run_id,
+        run_refs: record.completed.run_refs.clone(),
+        outcome: attempt_outcome_label(record.completed.outcome).to_string(),
+        disposition: disposition.to_string(),
+        freshness: attempt_freshness(app, &record.completed.target_snapshot),
+        findings: sum_recorded_findings(summaries),
+        findings_added: None,
+        findings_updated: None,
+        artifact_count: summaries
+            .iter()
+            .map(|summary| summary.artifacts.len())
+            .sum(),
+        artifact_paths: Vec::new(),
+        duration_secs: sum_recorded_durations(summaries),
+        cost_usd: sum_recorded_cost(summaries),
+        cost_complete: None,
+        error: summaries.iter().find_map(|summary| summary.error.clone()),
+    }
+}
+
+pub(super) fn scan_attempt_from_legacy_summary(
+    app: &ShellApp,
+    summary: &RunSummary,
+) -> ScanAttemptModel {
+    ScanAttemptModel {
+        attempt_id: None,
+        run_id: summary.run_id.clone(),
+        run_refs: vec![summary.run_id.clone()],
+        outcome: normalized_outcome(&summary.status),
+        disposition: "legacy inferred".to_string(),
+        freshness: scan_freshness(app, summary),
+        findings: summary.findings.or_else(|| findings_for_run(app, summary)),
+        findings_added: None,
+        findings_updated: None,
+        artifact_count: summary.artifacts.len(),
+        artifact_paths: Vec::new(),
+        duration_secs: summary
+            .completed_at_unix
+            .map(|completed| completed.saturating_sub(summary.started_at_unix)),
+        cost_usd: summary.cost_usd.or(summary.observed_cost_usd),
+        cost_complete: summary
+            .cost_usd
+            .map(|_| true)
+            .or_else(|| summary.observed_cost_usd.map(|_| false)),
+        error: summary.error.clone(),
+    }
+}
+
+fn sum_recorded_findings(summaries: &[&RunSummary]) -> Option<u64> {
+    let values = summaries
+        .iter()
+        .filter_map(|summary| summary.findings)
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.into_iter().sum())
+}
+
+fn sum_recorded_durations(summaries: &[&RunSummary]) -> Option<u64> {
+    let values = summaries
+        .iter()
+        .filter_map(|summary| {
+            summary
+                .completed_at_unix
+                .map(|completed| completed.saturating_sub(summary.started_at_unix))
+        })
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.into_iter().sum())
+}
+
+fn sum_recorded_cost(summaries: &[&RunSummary]) -> Option<f64> {
+    let values = summaries
+        .iter()
+        .filter_map(|summary| summary.cost_usd.or(summary.observed_cost_usd))
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.into_iter().sum())
+}
+
+fn attempt_outcome_label(outcome: PhaseAttemptOutcome) -> &'static str {
+    match outcome {
+        PhaseAttemptOutcome::Completed => "completed",
+        PhaseAttemptOutcome::Partial => "partial",
+        PhaseAttemptOutcome::Failed => "failed",
+        PhaseAttemptOutcome::Canceled => "canceled",
+    }
+}
+
+fn stage_outcome_label(outcome: PhaseStageOutcome) -> &'static str {
+    match outcome {
+        PhaseStageOutcome::Completed => "completed",
+        PhaseStageOutcome::Partial => "partial",
+        PhaseStageOutcome::Failed => "failed",
+        PhaseStageOutcome::Skipped => "skipped",
+    }
+}
+
+pub(super) fn engine_outcome_from_attempt(outcome: PhaseAttemptOutcome) -> &'static str {
+    match outcome {
+        PhaseAttemptOutcome::Completed => "complete",
+        PhaseAttemptOutcome::Partial => "partial",
+        PhaseAttemptOutcome::Failed => "failed",
+        PhaseAttemptOutcome::Canceled => "canceled",
+    }
+}
+
+fn normalized_outcome(status: &str) -> String {
+    let status = status.trim().to_ascii_lowercase();
+    if status.is_empty() {
+        "unknown".to_string()
+    } else {
+        status
+    }
+}
+
+fn findings_for_run(app: &ShellApp, summary: &RunSummary) -> Option<u64> {
+    let count = app
+        .findings()
+        .iter()
+        .filter(|finding| finding.scan_id.as_deref() == Some(summary.run_id.as_str()))
+        .count();
+    (count > 0).then_some(count as u64)
+}
+
+fn scan_freshness(app: &ShellApp, summary: &RunSummary) -> String {
+    let current = app
+        .workbench_cache()
+        .borrow()
+        .cached_git_metadata(app.target());
+    match (summary.target_git.as_ref(), current) {
+        (Some(recorded), ViewDataState::Ready(Some(current))) if recorded.sha == current.sha => {
+            "current revision".to_string()
+        }
+        (Some(_), ViewDataState::Ready(Some(_))) => "stale revision".to_string(),
+        (None, _) => "revision not recorded".to_string(),
+        (_, ViewDataState::Loading) => "freshness loading".to_string(),
+        (_, ViewDataState::NotRequested | ViewDataState::Ready(None)) => {
+            "freshness unavailable".to_string()
+        }
+    }
+}
+
+fn attempt_freshness(app: &ShellApp, recorded: &PhaseTargetSnapshot) -> String {
+    let current = app
+        .workbench_cache()
+        .borrow()
+        .cached_git_metadata(app.target());
+    match (recorded.revision.as_deref(), current) {
+        (Some(revision), ViewDataState::Ready(Some(current))) if revision == current.sha => {
+            "current revision".to_string()
+        }
+        (Some(_), ViewDataState::Ready(Some(_))) => "stale revision".to_string(),
+        (None, _) => "revision not recorded".to_string(),
+        (_, ViewDataState::Loading) => "freshness loading".to_string(),
+        (_, ViewDataState::NotRequested | ViewDataState::Ready(None)) => {
+            "freshness unavailable".to_string()
+        }
+    }
+}
+
+pub(super) fn engine_outcome(summary: &RunSummary) -> ScanEngineOutcomeModel {
+    ScanEngineOutcomeModel {
+        engine: summary
+            .tool
+            .clone()
+            .unwrap_or_else(|| "scan run".to_string()),
+        outcome: normalized_engine_outcome(&summary.status).to_string(),
+        run_ref: Some(summary.run_id.clone()),
+        detail: summary.error.clone(),
+    }
+}
+
+fn normalized_engine_outcome(status: &str) -> &'static str {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "complete" | "completed" | "success" | "succeeded" => "complete",
+        "partial" => "partial",
+        "skipped" => "skipped",
+        "canceled" | "cancelled" => "canceled",
+        "interrupted" => "interrupted",
+        _ => "failed",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canceled_and_interrupted_runs_keep_their_terminal_identity() {
+        let mut canceled = RunSummary::running(
+            "run-canceled",
+            "tool",
+            Some("semgrep:scan".to_string()),
+            ".",
+        );
+        canceled.status = "canceled".to_string();
+        let mut interrupted = canceled.clone();
+        interrupted.status = "interrupted".to_string();
+
+        assert_eq!(engine_outcome(&canceled).outcome, "canceled");
+        assert_eq!(engine_outcome(&interrupted).outcome, "interrupted");
+        assert_eq!(
+            engine_outcome_from_attempt(PhaseAttemptOutcome::Canceled),
+            "canceled"
+        );
+    }
+}

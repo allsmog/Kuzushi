@@ -1,78 +1,67 @@
-use crate::{ActivityRouteState, ActivitySession, InputMode};
+use crate::{ActivityRouteState, ActivitySession, InputMode, ShellApp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityFooterModel {
     pub(crate) body: String,
     pub(crate) body_line: String,
-    pub(crate) hints: &'static [ActivityFooterHint],
+    pub(crate) hints: Vec<ActivityFooterHint>,
     /// Hints wrapped to the pane width — one row per inner Vec, so narrow
     /// terminals get a second hint line instead of keys clipped to "[c".
     pub(crate) hint_rows: Vec<Vec<ActivityFooterHint>>,
+    pub(crate) steer_line: Option<String>,
+    pub(crate) steer_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityFooterHint {
-    pub(crate) full_key_text: &'static str,
-    pub(crate) full_hint_text: &'static str,
-    pub(crate) plain_key_text: &'static str,
+    pub(crate) full_key_text: String,
+    pub(crate) full_hint_text: String,
+    pub(crate) plain_key_text: String,
     pub(crate) plain_hint_text: &'static str,
+    action_id: Option<&'static str>,
 }
 
-macro_rules! footer_hint {
-    ($key:literal, $hint:literal) => {
-        ActivityFooterHint {
-            full_key_text: concat!("[", $key),
-            full_hint_text: concat!($hint, "]"),
-            plain_key_text: $key,
-            plain_hint_text: $hint,
-        }
-    };
+#[derive(Debug, Clone, Copy)]
+struct ActivityFooterHintSpec {
+    default_key: &'static str,
+    hint: &'static str,
+    action_id: Option<&'static str>,
 }
 
-const NAV_FULL_HINTS: &[ActivityFooterHint] = &[
-    footer_hint!("j/k/g/G", "scroll"),
-    footer_hint!("Tab", "pane"),
-    footer_hint!("[/]", "views"),
-    footer_hint!("f", "findings"),
-    footer_hint!("o", "open"),
-    footer_hint!("V", "verbose"),
-    footer_hint!("Space", "pause"),
-    footer_hint!("x", "reset view"),
-    footer_hint!("Enter", "focus"),
-    footer_hint!("b", "background"),
-    footer_hint!("Esc", "prompt"),
+const NAV_FULL_HINTS: &[ActivityFooterHintSpec] = &[
+    hint_spec("j/k/g/G", "scroll", None),
+    hint_spec("Tab", "pane", Some("cycle_pane")),
+    hint_spec("V", "verbose", Some("verbose")),
+    hint_spec("Space", "pause", Some("pause_feed")),
+    hint_spec("x", "reset view", None),
+    hint_spec("Enter", "focus", Some("focus")),
+    hint_spec("b", "background", Some("background")),
+    hint_spec("s", "steer", Some("steer")),
 ];
 
 /// Taskless (single-tool) runs collapse the TASKS pane, which pins focus to
 /// OUTPUT: `Tab` (pane toggle) and `Enter` (focus a task) have no task target,
 /// so the footer must not advertise them.
-const NAV_TASKLESS_HINTS: &[ActivityFooterHint] = &[
-    footer_hint!("j/k/g/G", "scroll"),
-    footer_hint!("[/]", "views"),
-    footer_hint!("f", "findings"),
-    footer_hint!("o", "open"),
-    footer_hint!("V", "verbose"),
-    footer_hint!("Space", "pause"),
-    footer_hint!("x", "reset view"),
-    footer_hint!("b", "background"),
-    footer_hint!("Esc", "prompt"),
+const NAV_TASKLESS_HINTS: &[ActivityFooterHintSpec] = &[
+    hint_spec("j/k/g/G", "scroll", None),
+    hint_spec("V", "verbose", Some("verbose")),
+    hint_spec("Space", "pause", Some("pause_feed")),
+    hint_spec("x", "reset view", None),
+    hint_spec("b", "background", Some("background")),
+    hint_spec("s", "steer", Some("steer")),
 ];
 
-const NAV_CONTEXT_BUILD_HINTS: &[ActivityFooterHint] = &[
-    footer_hint!("j/k/g/G", "tasks"),
-    footer_hint!("Tab", "pane"),
-    footer_hint!("V", "verbose"),
-    footer_hint!("Space", "pause"),
-    footer_hint!("b", "background"),
-    footer_hint!("Esc", "prompt"),
-];
-
-const PROMPT_HINTS: &[ActivityFooterHint] = &[
-    footer_hint!("F2", "controls"),
-    footer_hint!("findings", "list"),
-    footer_hint!("back", "workbench"),
-    footer_hint!("Ctrl+C", "stop / exit"),
-];
+const fn hint_spec(
+    default_key: &'static str,
+    hint: &'static str,
+    action_id: Option<&'static str>,
+) -> ActivityFooterHintSpec {
+    ActivityFooterHintSpec {
+        default_key,
+        hint,
+        action_id,
+    }
+}
 
 pub(crate) fn activity_footer_model(
     session: &ActivitySession,
@@ -80,15 +69,64 @@ pub(crate) fn activity_footer_model(
     width: u16,
     running_tool: Option<&str>,
     abort_pending: bool,
-    input_mode: InputMode,
+    _input_mode: InputMode,
 ) -> ActivityFooterModel {
-    let hints = footer_hints(session, input_mode, running_tool);
-    let body = focus_body(session, route, running_tool, abort_pending, input_mode);
+    let hints = footer_hints(session);
+    let body = focus_body(session, route, running_tool, abort_pending);
+    let steer_line = route
+        .steer_editor
+        .as_ref()
+        .map(|editor| format!(" STEER > {}", editor.input));
+    let steer_error = route
+        .steer_editor
+        .as_ref()
+        .and_then(|editor| editor.error.clone());
     ActivityFooterModel {
         body_line: fit(&body, width as usize),
         body,
+        hint_rows: wrap_hints(&hints, width as usize),
         hints,
-        hint_rows: wrap_hints(hints, width as usize),
+        steer_line,
+        steer_error,
+    }
+}
+
+pub(crate) fn resolve_activity_footer_bindings(
+    mut model: ActivityFooterModel,
+    app: &ShellApp,
+    width: u16,
+) -> ActivityFooterModel {
+    model.hints = model
+        .hints
+        .into_iter()
+        .filter_map(|hint| resolve_hint_binding(hint, app))
+        .collect();
+    model.hint_rows = wrap_hints(&model.hints, width as usize);
+    model
+}
+
+fn resolve_hint_binding(hint: ActivityFooterHint, app: &ShellApp) -> Option<ActivityFooterHint> {
+    let Some(action_id) = hint.action_id else {
+        return Some(hint);
+    };
+    let defaults = [hint.plain_key_text.as_str()];
+    let bindings = app
+        .ui()
+        .keymap_binding_labels("run_focus", action_id, &defaults);
+    (!bindings.is_empty())
+        .then(|| ActivityFooterHint::new(bindings.join("/"), hint.plain_hint_text, hint.action_id))
+}
+
+impl ActivityFooterHint {
+    fn new(key: impl Into<String>, hint: &'static str, action_id: Option<&'static str>) -> Self {
+        let plain_key_text = key.into();
+        Self {
+            full_key_text: format!("[{plain_key_text}"),
+            full_hint_text: format!("{hint}]"),
+            plain_key_text,
+            plain_hint_text: hint,
+            action_id,
+        }
     }
 }
 
@@ -104,7 +142,7 @@ fn wrap_hints(hints: &[ActivityFooterHint], width: usize) -> Vec<Vec<ActivityFoo
             used = 1;
         }
         used += cell;
-        row.push(*hint);
+        row.push(hint.clone());
     }
     if !row.is_empty() {
         rows.push(row);
@@ -122,44 +160,22 @@ fn focus_body(
     route: &ActivityRouteState,
     running_tool: Option<&str>,
     abort_pending: bool,
-    input_mode: InputMode,
 ) -> String {
     if abort_pending {
         return " ⚠ ABORT REQUESTED  waiting for cleanup · Ctrl+C stays here".to_string();
-    }
-    if input_mode == InputMode::Prompt {
-        return prompt_body(running_tool);
     }
     // Taskless (single-tool) runs have nothing to focus — "select a task to
     // inspect a task" would point at a pane that isn't on screen.
     if session.tasks.is_empty() {
         return taskless_body(running_tool);
     }
-    tasked_body(session, route, running_tool)
+    tasked_body(session, route)
 }
 
-fn prompt_body(running_tool: Option<&str>) -> String {
-    match running_tool {
-        Some(tool) => {
-            format!(" ● RUNNING  {tool} — output streams above · F2 controls · Ctrl+C aborts")
-        }
-        None => " ● PROMPT  type a command · F2 enables Activity controls".to_string(),
-    }
-}
-
-fn tasked_body(
-    session: &ActivitySession,
-    route: &ActivityRouteState,
-    running_tool: Option<&str>,
-) -> String {
+fn tasked_body(session: &ActivitySession, route: &ActivityRouteState) -> String {
     if route.effective_pane_focus(session) == crate::PaneFocus::Right {
-        if running_tool == Some("context:build") {
-            return " ● OUTPUT  build trace · Tab tasks · b background · Ctrl+C aborts".to_string();
-        }
-        return format!(
-            " ● OUTPUT  {} · j/k item · f findings · o open",
-            route.deck_page.label()
-        );
+        return " ● OUTPUT  live trace · j/k scroll · switch pane for steps · Ctrl+C aborts"
+            .to_string();
     }
     match route.focus_task.as_ref() {
         Some(task_id) => focused_task_body(session, task_id),
@@ -195,21 +211,16 @@ fn focused_task_row_body(row: &crate::DagTaskRow) -> String {
 /// Hint selection follows what the keys can actually do (narrow widths are
 /// handled by `wrap_hints`, which keeps every key visible): with no DAG tasks
 /// the pane-focus keys are inert and disappear from the hints.
-fn footer_hints(
-    session: &ActivitySession,
-    input_mode: InputMode,
-    running_tool: Option<&str>,
-) -> &'static [ActivityFooterHint] {
-    if input_mode == InputMode::Prompt {
-        return PROMPT_HINTS;
-    }
-    if running_tool == Some("context:build") && !session.tasks.is_empty() {
-        return NAV_CONTEXT_BUILD_HINTS;
-    }
-    if session.tasks.is_empty() {
-        return NAV_TASKLESS_HINTS;
-    }
-    NAV_FULL_HINTS
+fn footer_hints(session: &ActivitySession) -> Vec<ActivityFooterHint> {
+    let specs = if session.tasks.is_empty() {
+        NAV_TASKLESS_HINTS
+    } else {
+        NAV_FULL_HINTS
+    };
+    specs
+        .iter()
+        .map(|spec| ActivityFooterHint::new(spec.default_key, spec.hint, spec.action_id))
+        .collect()
 }
 
 fn fit(value: &str, width: usize) -> String {
@@ -227,7 +238,7 @@ fn fit(value: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ActivityDeckPage, DagTaskRow, DagTaskState, PaneFocus};
+    use crate::{DagTaskRow, DagTaskState, PaneFocus};
 
     #[test]
     fn activity_footer_model_projects_focused_task() {
@@ -248,15 +259,15 @@ mod tests {
         );
         assert_eq!(model.body_line, model.body);
         assert_eq!(
-            model.hints.last().map(|hint| hint.plain_key_text),
-            Some("Esc")
+            model.hints.last().map(|hint| hint.plain_key_text.as_str()),
+            Some("s")
         );
         assert_eq!(
-            model.hints.first().map(|hint| hint.full_key_text),
+            model.hints.first().map(|hint| hint.full_key_text.as_str()),
             Some("[j/k/g/G")
         );
         assert_eq!(
-            model.hints.first().map(|hint| hint.full_hint_text),
+            model.hints.first().map(|hint| hint.full_hint_text.as_str()),
             Some("scroll]")
         );
     }
@@ -280,14 +291,9 @@ mod tests {
         // OUTPUT — Tab and Enter are task controls, so they must not appear.
         let taskless = ActivitySession::new("r-1");
         let route = ActivityRouteState::default();
-        let keys = plain_keys(&activity_footer_model(
-            &taskless,
-            &route,
-            120,
-            None,
-            false,
-            InputMode::Navigate,
-        ));
+        let taskless_model =
+            activity_footer_model(&taskless, &route, 120, None, false, InputMode::Navigate);
+        let keys = plain_keys(&taskless_model);
         assert!(!keys.contains(&"Tab"), "{keys:?}");
         assert!(!keys.contains(&"Enter"), "{keys:?}");
 
@@ -296,14 +302,9 @@ mod tests {
             "triage:run".to_string(),
             DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
         );
-        let keys = plain_keys(&activity_footer_model(
-            &with_tasks,
-            &route,
-            120,
-            None,
-            false,
-            InputMode::Navigate,
-        ));
+        let with_tasks_model =
+            activity_footer_model(&with_tasks, &route, 120, None, false, InputMode::Navigate);
+        let keys = plain_keys(&with_tasks_model);
         assert!(keys.contains(&"Tab"), "{keys:?}");
         assert!(keys.contains(&"Enter"), "{keys:?}");
     }
@@ -354,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn artifact_deck_footer_names_right_pane_navigation() {
+    fn output_footer_names_the_live_output_window() {
         let mut session = ActivitySession::new("r-1");
         let mut route = ActivityRouteState::default();
         session.tasks.insert(
@@ -365,17 +366,16 @@ mod tests {
                 Vec::new(),
             ),
         );
-        route.set_deck_page(ActivityDeckPage::Dfd);
         route.pane_focus = PaneFocus::Right;
 
         assert_eq!(
             activity_footer_model(&session, &route, 100, None, false, InputMode::Navigate).body,
-            " ● OUTPUT  dfd · j/k item · f findings · o open"
+            " ● OUTPUT  live trace · j/k scroll · switch pane for steps · Ctrl+C aborts"
         );
     }
 
     #[test]
-    fn context_build_footer_does_not_advertise_empty_artifact_navigation() {
+    fn context_build_footer_uses_the_same_output_contract() {
         let mut session = ActivitySession::new("context-run");
         let mut route = ActivityRouteState::default();
         session.tasks.insert(
@@ -393,7 +393,7 @@ mod tests {
             InputMode::Navigate,
         );
 
-        assert!(model.body.contains("OUTPUT  build trace"), "{}", model.body);
+        assert!(model.body.contains("OUTPUT"), "{}", model.body);
         let keys = plain_keys(&model);
         assert!(!keys.contains(&"[/]"), "{keys:?}");
         assert!(!keys.contains(&"f"), "{keys:?}");
@@ -432,12 +432,12 @@ mod tests {
                 false,
                 InputMode::Navigate,
             )),
-            vec!["j/k/g/G", "Tab", "[/]", "f", "o", "V", "Space", "x", "Enter", "b", "Esc"]
+            vec!["j/k/g/G", "Tab", "V", "Space", "x", "Enter", "b", "s"]
         );
     }
 
     #[test]
-    fn activity_footer_model_exposes_deck_hint_pairs() {
+    fn activity_footer_model_exposes_run_focus_hint_pairs() {
         let mut session = ActivitySession::new("r-1");
         let route = ActivityRouteState::default();
         session.tasks.insert(
@@ -457,21 +457,18 @@ mod tests {
             vec![
                 ("j/k/g/G", "scroll"),
                 ("Tab", "pane"),
-                ("[/]", "views"),
-                ("f", "findings"),
-                ("o", "open"),
                 ("V", "verbose"),
                 ("Space", "pause"),
                 ("x", "reset view"),
                 ("Enter", "focus"),
                 ("b", "background"),
-                ("Esc", "prompt"),
+                ("s", "steer"),
             ]
         );
     }
 
     #[test]
-    fn prompt_mode_only_advertises_prompt_reachable_activity_actions() {
+    fn input_mode_does_not_change_the_run_owned_footer_contract() {
         let mut session = ActivitySession::new("r-1");
         session.tasks.insert(
             "triage:run".to_string(),
@@ -482,16 +479,8 @@ mod tests {
         let model = activity_footer_model(&session, &route, 120, None, false, InputMode::Prompt);
         let pairs = plain_pairs(&model);
 
-        assert_eq!(
-            pairs,
-            vec![
-                ("F2", "controls"),
-                ("findings", "list"),
-                ("back", "workbench"),
-                ("Ctrl+C", "stop / exit"),
-            ]
-        );
-        assert!(model.body.contains("F2 enables Activity controls"));
+        assert!(pairs.contains(&("s", "steer")));
+        assert!(!pairs.iter().any(|(key, _)| *key == "F2"));
 
         let running = activity_footer_model(
             &session,
@@ -501,21 +490,38 @@ mod tests {
             false,
             InputMode::Prompt,
         );
-        assert!(running.body.contains("● RUNNING  threat-model:build"));
-        assert!(running.body.contains("F2 controls"));
-        assert!(running.body.contains("Ctrl+C aborts"));
+        assert!(running.body.contains("● FOCUS"));
+        assert!(!running.body.contains("threat-model:build"));
     }
 
-    fn plain_keys(model: &ActivityFooterModel) -> Vec<&'static str> {
+    #[test]
+    fn steer_editor_projects_input_and_inline_validation_error() {
+        let session = ActivitySession::new("r-1");
+        let mut route = ActivityRouteState::default();
+        route.open_steer_editor();
+        let editor = route.steer_editor.as_mut().expect("steer editor");
+        editor.input = "findings".to_string();
+        editor.error = Some("steer accepts only: run <tool> [input]".to_string());
+
+        let model = activity_footer_model(&session, &route, 120, None, false, InputMode::Navigate);
+
+        assert_eq!(model.steer_line.as_deref(), Some(" STEER > findings"));
+        assert!(model
+            .steer_error
+            .as_deref()
+            .is_some_and(|error| error.contains("run <tool>")));
+    }
+
+    fn plain_keys(model: &ActivityFooterModel) -> Vec<&str> {
         plain_pairs(model).into_iter().map(|(key, _)| key).collect()
     }
 
-    fn plain_pairs(model: &ActivityFooterModel) -> Vec<(&'static str, &'static str)> {
+    fn plain_pairs(model: &ActivityFooterModel) -> Vec<(&str, &str)> {
         model
             .hint_rows
             .iter()
             .flatten()
-            .map(|hint| (hint.plain_key_text, hint.plain_hint_text))
+            .map(|hint| (hint.plain_key_text.as_str(), hint.plain_hint_text))
             .collect()
     }
 }

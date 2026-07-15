@@ -2,6 +2,12 @@ use super::*;
 
 pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
     ShellCommandSpec {
+        command: "session",
+        aliases: &["/session"],
+        category: ShellCommandCategory::Session,
+        description: "show durable session transcript status",
+    },
+    ShellCommandSpec {
         command: "history",
         aliases: &["/history"],
         category: ShellCommandCategory::Session,

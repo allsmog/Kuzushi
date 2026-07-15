@@ -27,6 +27,8 @@ fn build_agentic_threat_model(
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
     let mut generated =
         generate_threat_model_document(runtime, ctx, flavor, verb, &input, &source_bundle)?;
+    let has_concrete_content =
+        crate::workflow_attempts::threat_model_has_concrete_content(&generated.document);
     let artifacts = write_threat_model_outputs(flavor, &input, &generated.document)?;
     emit_artifact_write(ctx, verb, &artifacts);
     let findings = take_threat_model_findings(&input, &mut generated);
@@ -37,15 +39,16 @@ fn build_agentic_threat_model(
         &summary,
         findings.len(),
         artifacts.persisted,
+        has_concrete_content,
     );
-    emit_threat_model_done(ctx, verb, flavor, &summary);
+    emit_threat_model_terminal(ctx, verb, flavor, &summary, has_concrete_content);
     threat_model_response(
         input,
         flavor,
         generated,
         artifacts,
         findings,
-        summary,
+        has_concrete_content,
         lines,
         source_bundle,
     )
@@ -377,11 +380,12 @@ fn threat_model_response(
     generated: GeneratedThreatModel,
     artifacts: ThreatModelArtifacts,
     findings: Vec<Value>,
-    summary: ThreatModelSummary,
+    has_concrete_content: bool,
     mut lines: Vec<String>,
     source_bundle: ThreatModelSourceBundle,
 ) -> Result<Value> {
     append_top_threats(&mut lines, &generated.document);
+    let target = input.target.clone();
     let persistent_artifact = persistent_threat_model_path(&input.target);
     let artifact_items = threat_model_artifacts(
         &artifacts.normalized_artifact,
@@ -398,14 +402,35 @@ fn threat_model_response(
         source_bundle,
         persistent_artifact,
     );
-    let mut result = json!({
-        "ok": summary.threat_count > 0 || summary.node_count > 0 || summary.flow_count > 0,
-        "output": lines.join("\n"),
-        "artifacts": artifact_items,
-        "data": data,
-    });
+    let mut result =
+        threat_model_result_envelope(flavor, &target, has_concrete_content, lines, data);
+    result["artifacts"] = json!(artifact_items);
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     Ok(result)
+}
+
+fn threat_model_result_envelope(
+    flavor: BuildFlavor,
+    target: &Path,
+    has_concrete_content: bool,
+    mut lines: Vec<String>,
+    data: Value,
+) -> Value {
+    if has_concrete_content {
+        let output = lines.join("\n");
+        return crate::module_result::completed_output_result(output.clone(), output, data);
+    }
+    let guidance = crate::workflow_attempts::insufficient_map_evidence_message(target);
+    lines.push(guidance.clone());
+    crate::module_result::partial_output_result(
+        format!(
+            "{} produced no concrete threat-model evidence",
+            flavor.tool_name()
+        ),
+        lines.join("\n"),
+        vec![json!(guidance)],
+        data,
+    )
 }
 
 fn generated_threat_model_cost(

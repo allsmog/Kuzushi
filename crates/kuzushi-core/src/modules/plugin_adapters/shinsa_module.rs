@@ -38,7 +38,7 @@ fn shinsa_tools() -> Vec<ToolDescriptor> {
         ),
         tool("shinsa:frameworks", "List supported compliance frameworks.").with_policy(
             tool_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 ToolEffect::Read,
                 WorkspaceRequirement::Required,
@@ -52,7 +52,7 @@ fn shinsa_assessment_tool(name: &str, description: &str, hidden: bool) -> ToolDe
     let mut descriptor = tool_with_options(name, description, shinsa_tool_options());
     descriptor.hidden = hidden;
     descriptor.with_policy(target_write_policy(
-        ToolPhase::Hunt,
+        ToolPhase::Scan,
         RuntimeRequirement::Always,
         FindingStoreRequirement::Required,
     ))

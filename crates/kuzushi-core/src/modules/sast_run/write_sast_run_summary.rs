@@ -101,6 +101,7 @@ fn record_pipeline_artifacts(
         SAST_TRIAGE_JSONL_FILE,
         SAST_VERIFY_JSONL_FILE,
         SAST_PATCH_JSONL_FILE,
+        SAST_PHASE_STAGES_JSONL_FILE,
     ]
     .into_iter()
     .map(|leaf| {

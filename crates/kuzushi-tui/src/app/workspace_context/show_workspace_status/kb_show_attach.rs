@@ -32,40 +32,44 @@ impl ShellApp {
     }
 
     pub(crate) fn attach_kb_source(&mut self, source: &str) {
-        let module_id = match self.resolve_kb_module(None) {
-            Ok(module_id) => module_id,
-            Err(error) => {
-                self.log("error", error.to_string());
-                return;
-            }
-        };
-        let workspace = match self.current_workspace() {
-            Ok(workspace) => workspace,
+        let (workspace, module_id) = match self.kb_attachment_context() {
+            Ok(context) => context,
             Err(error) => {
                 self.log("error", error.to_string());
                 return;
             }
         };
         match attach_source(&workspace, &module_id, source) {
-            Ok(record) => {
-                let _ = self.refresh_kb_view(&module_id);
-                self.set_focused_module(Some(module_id));
-                self.set_shell_view(ShellView::KnowledgeBase);
-                self.log(
-                    "attach",
-                    format!(
-                        "{} {} ({})",
-                        record.id,
-                        record.source,
-                        if record.metadata_only {
-                            "metadata-only"
-                        } else {
-                            "local"
-                        }
-                    ),
-                );
-            }
+            Ok(record) => self.accept_kb_attachment(module_id, record),
             Err(error) => self.log("error", error.to_string()),
         }
+    }
+
+    fn kb_attachment_context(&self) -> Result<(WorkspaceTarget, String)> {
+        let module_id = self.resolve_kb_module(None)?;
+        let workspace = self.current_workspace()?;
+        Ok((workspace, module_id))
+    }
+
+    fn accept_kb_attachment(&mut self, module_id: String, record: kuzushi_core::AttachmentRecord) {
+        let _ = self.refresh_kb_view(&module_id);
+        self.set_focused_module(Some(module_id));
+        self.set_shell_view(ShellView::KnowledgeBase);
+        self.record_session_event(
+            kuzushi_core::session_transcript::SessionEvent::AttachmentRef {
+                attachment_id: record.id.clone(),
+                path: (!record.metadata_only).then(|| std::path::PathBuf::from(&record.source)),
+                digest: record.content_hash.clone(),
+            },
+        );
+        let kind = if record.metadata_only {
+            "metadata-only"
+        } else {
+            "local"
+        };
+        self.log(
+            "attach",
+            format!("{} {} ({kind})", record.id, record.source),
+        );
     }
 }

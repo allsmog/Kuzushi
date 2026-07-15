@@ -185,19 +185,23 @@ function smokeWrapperWithEmptyPath(packageRoot) {
   const version = run(process.execPath, [wrapper, "--version"], {
     cwd: packageRoot,
     capture: true,
-    env: isolatedNativeEnvironment(),
+    env: isolatedNativeEnvironment(packageRoot),
   });
   assertMatchingVersion(version.stdout, manifest.version);
 
   run(process.execPath, [wrapper, "mcp", "health", "tree-sitter"], {
     cwd: packageRoot,
     capture: true,
-    env: isolatedNativeEnvironment(),
+    env: isolatedNativeEnvironment(packageRoot),
   });
 }
 
-function isolatedNativeEnvironment() {
-  const env = { ...process.env, PATH: "" };
+function isolatedNativeEnvironment(readRoot) {
+  const env = {
+    ...process.env,
+    PATH: "",
+    KUZUSHI_MCP_READ_ROOTS: JSON.stringify([readRoot]),
+  };
   delete env.KUZUSHI_NATIVE_BIN;
   for (const name of Object.keys(env)) {
     if (name.startsWith("KUZUSHI_MCP_") && name.endsWith("_BIN")) delete env[name];
@@ -216,7 +220,7 @@ function smokeDirectNativeRuntimeWithEmptyPath(packageRoot) {
   run(cli, ["mcp", "health", "tree-sitter"], {
     cwd: packageRoot,
     capture: true,
-    env: { ...process.env, PATH: "" },
+    env: isolatedNativeEnvironment(packageRoot),
   });
 }
 

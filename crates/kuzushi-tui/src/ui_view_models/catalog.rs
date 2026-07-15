@@ -258,8 +258,9 @@ fn capability_actions(
 fn default_action_specs(phase: WorkflowPhase) -> &'static [CapabilityActionSpec] {
     match phase {
         WorkflowPhase::Map => &MAP_ACTIONS,
-        WorkflowPhase::Hunt => &HUNT_ACTIONS,
-        WorkflowPhase::Confirm => &CONFIRM_ACTIONS,
+        WorkflowPhase::Scan => &SCAN_ACTIONS,
+        WorkflowPhase::Review => &REVIEW_ACTIONS,
+        WorkflowPhase::Prove => &PROVE_ACTIONS,
         WorkflowPhase::Fix => &FIX_ACTIONS,
     }
 }
@@ -267,17 +268,18 @@ fn default_action_specs(phase: WorkflowPhase) -> &'static [CapabilityActionSpec]
 fn expert_action_specs(phase: WorkflowPhase) -> &'static [CapabilityActionSpec] {
     match phase {
         WorkflowPhase::Map => &MAP_EXPERT_ACTIONS,
-        WorkflowPhase::Hunt => &HUNT_EXPERT_ACTIONS,
-        WorkflowPhase::Confirm => &CONFIRM_EXPERT_ACTIONS,
+        WorkflowPhase::Scan => &SCAN_EXPERT_ACTIONS,
+        WorkflowPhase::Review => &REVIEW_EXPERT_ACTIONS,
+        WorkflowPhase::Prove => &PROVE_EXPERT_ACTIONS,
         WorkflowPhase::Fix => &FIX_EXPERT_ACTIONS,
     }
 }
 
 fn integration_action_specs(phase: WorkflowPhase) -> &'static [CapabilityActionSpec] {
     match phase {
-        WorkflowPhase::Hunt => &HUNT_INTEGRATION_ACTIONS,
+        WorkflowPhase::Scan => &SCAN_INTEGRATION_ACTIONS,
         WorkflowPhase::Fix => &FIX_INTEGRATION_ACTIONS,
-        WorkflowPhase::Map | WorkflowPhase::Confirm => &[],
+        WorkflowPhase::Map | WorkflowPhase::Review | WorkflowPhase::Prove => &[],
     }
 }
 
@@ -334,8 +336,9 @@ fn action_row(
 fn phase_label(phase: WorkflowPhase) -> &'static str {
     match phase {
         WorkflowPhase::Map => "MAP",
-        WorkflowPhase::Hunt => "HUNT",
-        WorkflowPhase::Confirm => "CONFIRM",
+        WorkflowPhase::Scan => "SCAN",
+        WorkflowPhase::Review => "REVIEW",
+        WorkflowPhase::Prove => "PROVE",
         WorkflowPhase::Fix => "FIX",
     }
 }
@@ -402,7 +405,7 @@ const MAP_ACTIONS: [CapabilityActionSpec; 3] = [
     ),
 ];
 
-const HUNT_ACTIONS: [CapabilityActionSpec; 3] = [
+const SCAN_ACTIONS: [CapabilityActionSpec; 3] = [
     action!(
         "recommended-hunt",
         "Recommended hunt",
@@ -429,7 +432,7 @@ const HUNT_ACTIONS: [CapabilityActionSpec; 3] = [
     ),
 ];
 
-const CONFIRM_ACTIONS: [CapabilityActionSpec; 3] = [
+const REVIEW_ACTIONS: [CapabilityActionSpec; 2] = [
     action!(
         "review-findings",
         "Review next finding",
@@ -445,15 +448,16 @@ const CONFIRM_ACTIONS: [CapabilityActionSpec; 3] = [
         "CURRENT",
         tool = "triage:run"
     ),
-    action!(
-        "verify-finding",
-        "Verify exploitability",
-        "Add a finding reference before submitting",
-        "run verify:finding ",
-        "CURRENT",
-        tool = "verify:finding"
-    ),
 ];
+
+const PROVE_ACTIONS: [CapabilityActionSpec; 1] = [action!(
+    "verify-finding",
+    "Verify exploitability",
+    "Add a finding reference before submitting",
+    "run verify:finding ",
+    "CURRENT",
+    tool = "verify:finding"
+)];
 
 const FIX_ACTIONS: [CapabilityActionSpec; 3] = [
     action!(
@@ -540,7 +544,7 @@ const MAP_EXPERT_ACTIONS: [CapabilityActionSpec; 7] = [
     ),
 ];
 
-const HUNT_EXPERT_ACTIONS: [CapabilityActionSpec; 13] = [
+const SCAN_EXPERT_ACTIONS: [CapabilityActionSpec; 13] = [
     action!(
         "semgrep",
         "Semgrep",
@@ -647,24 +651,23 @@ const HUNT_EXPERT_ACTIONS: [CapabilityActionSpec; 13] = [
     ),
 ];
 
-const CONFIRM_EXPERT_ACTIONS: [CapabilityActionSpec; 2] = [
-    action!(
-        "triage",
-        "Deep triage",
-        "Run the canonical evidence classifier",
-        "run triage:run",
-        "EXPERT",
-        tool = "triage:run"
-    ),
-    action!(
-        "verify",
-        "Empirical verify",
-        "Run proof against a finding reference",
-        "run verify:finding ",
-        "EXPERT",
-        tool = "verify:finding"
-    ),
-];
+const REVIEW_EXPERT_ACTIONS: [CapabilityActionSpec; 1] = [action!(
+    "triage",
+    "Deep triage",
+    "Run the canonical evidence classifier",
+    "run triage:run",
+    "EXPERT",
+    tool = "triage:run"
+)];
+
+const PROVE_EXPERT_ACTIONS: [CapabilityActionSpec; 1] = [action!(
+    "verify",
+    "Empirical verify",
+    "Run proof against a finding reference",
+    "run verify:finding ",
+    "EXPERT",
+    tool = "verify:finding"
+)];
 
 const FIX_EXPERT_ACTIONS: [CapabilityActionSpec; 3] = [
     action!(
@@ -693,7 +696,7 @@ const FIX_EXPERT_ACTIONS: [CapabilityActionSpec; 3] = [
     ),
 ];
 
-const HUNT_INTEGRATION_ACTIONS: [CapabilityActionSpec; 5] = [
+const SCAN_INTEGRATION_ACTIONS: [CapabilityActionSpec; 5] = [
     action!(
         "android-apk",
         "Android APK",

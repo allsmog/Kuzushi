@@ -227,7 +227,7 @@ pub(crate) fn dep_hygiene_module() -> BuiltinModule {
         "Dependency Hygiene",
         ModuleKind::Defense,
         "Check dependency manifests for stale, vulnerable, or policy-risky packages.",
-        tools_with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Required), vec![tool_with_options(
+        tools_with_policy(workspace_policy(ToolPhase::Scan, RuntimeRequirement::Never, FindingStoreRequirement::Required), vec![tool_with_options(
             "dep-hygiene:check",
             "Inspect dependency manifests for stale versions, known-vulnerability signals, and supply-chain policy risks.",
             vec![target_option()],
@@ -242,7 +242,7 @@ pub(crate) fn secret_scan_module() -> BuiltinModule {
         "Secret Scan",
         ModuleKind::Defense,
         "Fast deterministic secret scanner over source files.",
-        tools_with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Never, FindingStoreRequirement::Required), vec![tool_with_options(
+        tools_with_policy(workspace_policy(ToolPhase::Scan, RuntimeRequirement::Never, FindingStoreRequirement::Required), vec![tool_with_options(
             "secret-scan:scan",
             "Scan source files for high-confidence secrets.",
             vec![
@@ -253,8 +253,9 @@ pub(crate) fn secret_scan_module() -> BuiltinModule {
                     "Maximum file size to scan.",
                 )
                 .aliases(&["max_file_bytes"])
+                .integer_range(1024, crate::secret_scan::MAX_SUPPORTED_FILE_BYTES as i64)
                 .default(json!(524288)),
-                max_findings_option(1000),
+                max_findings_option(1000).integer_range(1, 10_000),
             ],
         )]),
         vec![dag("secret-scan:scan", "findings", &["context:build"])],

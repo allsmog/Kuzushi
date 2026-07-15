@@ -384,6 +384,26 @@ mod tests {
     }
 
     #[test]
+    fn headless_operator_question_returns_interaction_required_without_answering() {
+        let call = ToolCall {
+            name: REQUEST_USER_INPUT_TOOL_NAME.to_string(),
+            input: serde_json::json!({"questions": []}),
+            call_id: "question_call".to_string(),
+        };
+        let mut toolbox = ToolBox::new();
+
+        let result = toolbox.run(&call).unwrap();
+
+        assert!(result.is_error);
+        assert_eq!(result.call_id, "question_call");
+        assert_eq!(result.output["code"], INTERACTION_REQUIRED_CODE);
+        assert!(result.output["error"]
+            .as_str()
+            .unwrap()
+            .contains("interactive"));
+    }
+
+    #[test]
     fn handler_panic_is_caught_as_error_result() {
         // Defence in depth: a tool that panics shouldn't unwind the loop —
         // catch in the handler closure and return a structured error.

@@ -9,6 +9,11 @@ impl ShellApp {
         let Some(operator_question) = self.accept_agent_question(question) else {
             return Vec::new();
         };
+        self.record_session_event(
+            kuzushi_core::session_transcript::SessionEvent::AgentUserTurn {
+                text: operator_question.clone(),
+            },
+        );
         let prior = self.agent_chat().cloned().unwrap_or_default();
         let Some(target) = self.agent_target_for_question(&prior, &operator_question) else {
             return Vec::new();
@@ -42,10 +47,13 @@ impl ShellApp {
         let generation = ticket.generation();
         let watchdog_cancel = ticket.cancel.clone();
         self.begin_run_cost_tracking(&dispatch.run_id, true);
-        self.set_activity(Some(ActivitySession::for_optional_phase(
-            dispatch.run_id.clone(),
-            dispatch.origin_phase,
-        )));
+        let session =
+            ActivitySession::for_optional_phase(dispatch.run_id.clone(), dispatch.origin_phase);
+        self.set_activity(Some(self.capture_run_focus_origin(session)));
+        self.record_session_event(kuzushi_core::session_transcript::SessionEvent::RunStarted {
+            run_id: dispatch.run_id.clone(),
+            tool_name: "agent:ask".to_string(),
+        });
         self.install_agent_dispatch_state(&dispatch, watchdog_cancel.clone());
         self.log_agent_dispatch(&dispatch);
         self.log_agent_failure_context_attachment(dispatch.attached_failure_context);
@@ -389,14 +397,14 @@ mod tests {
         );
         assert_eq!(manual.origin_phase, None);
 
-        app.engagement.set_phase(WorkflowPhase::Hunt);
+        app.engagement.set_phase(WorkflowPhase::Scan);
         let guided = app.build_agent_dispatch(
             AgentChatView::default(),
             "steer the hunt".to_string(),
             model,
             target.path().to_path_buf(),
         );
-        assert_eq!(guided.origin_phase, Some(WorkflowPhase::Hunt));
+        assert_eq!(guided.origin_phase, Some(WorkflowPhase::Scan));
     }
 
     #[test]

@@ -12,7 +12,7 @@ pub(crate) fn offense_module() -> BuiltinModule {
         "Authorized live-target operations: run declarative attack chains (auth-bypass -> IDOR -> RCE) against a host the engagement scope allows.",
         tools_with_policy(
             external_action_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::InputAware,
                 FindingStoreRequirement::Required,
             ),

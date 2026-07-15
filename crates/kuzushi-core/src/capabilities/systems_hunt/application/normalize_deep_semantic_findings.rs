@@ -190,7 +190,7 @@ pub(crate) fn persist_systems_findings(
     };
 
     workspace.ensure_state_dir()?;
-    let run_id = Uuid::new_v4().to_string();
+    let run_id = ctx.finding_run_id();
     store.with_run_lifecycle(&run_id, target, || {
         for finding in findings {
             store.insert_finding(&run_id, finding)?;

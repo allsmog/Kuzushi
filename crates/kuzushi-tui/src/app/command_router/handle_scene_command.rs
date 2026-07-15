@@ -47,11 +47,14 @@ impl ShellApp {
         if !self.ui().auto_open_viz() {
             return;
         }
-        if self.activity_deck_is_pinned() {
-            self.log_scene_ready(page, "output page unchanged");
+        if self.run_focus_is_not_foreground() {
+            self.log_scene_ready(page, "background run finished; view unchanged");
             return;
         }
-        self.sync_activity_deck_to_scene_page(page);
+        if self.defer_viz_until_run_focus_returns(page) {
+            self.log_scene_ready(page, "opens after Run Focus returns");
+            return;
+        }
         self.open_or_log_scene_ready(page);
     }
 
@@ -63,21 +66,7 @@ impl ShellApp {
         if crate::ui_view_models::dfd_model(self).empty_hint.is_some() {
             return;
         }
-        if self.can_auto_open_viz_now() {
-            self.open_workbench(crate::app::WorkbenchPane::Center);
-            self.router
-                .workbench_mut()
-                .set_page(Some(crate::app::WorkbenchPage::Review));
-            self.router
-                .workbench_mut()
-                .set_center_mode(crate::app::WorkbenchCenterMode::Dfd);
-            self.log(
-                "workbench",
-                "data-flow model ready — showing Workbench DFD center pane",
-            );
-        } else {
-            self.log_workbench_ready("use `workbench` to view");
-        }
+        self.auto_open_viz_page(VizPage::Dfd);
     }
 
     fn hydrate_latest_threat_model_for_dfd(&mut self) {
@@ -95,19 +84,29 @@ impl ShellApp {
         );
     }
 
-    fn activity_deck_is_pinned(&self) -> bool {
-        self.activity().is_some() && !self.router.activity().can_auto_switch_deck()
+    fn run_focus_is_not_foreground(&self) -> bool {
+        self.activity()
+            .is_some_and(|session| session.run_focus_backgrounded)
+            || (self.activity().is_some() && !matches!(self.shell_view(), ShellView::Activity))
     }
 
-    fn sync_activity_deck_to_scene_page(&mut self, page: VizPage) {
-        if self.activity().is_some() {
-            self.router.activity_mut().set_deck_scene_page(page);
+    fn defer_viz_until_run_focus_returns(&mut self, page: VizPage) -> bool {
+        let Some(session) = self.activity_mut() else {
+            return false;
+        };
+        let owned = !session.run_focus_backgrounded
+            && session
+                .run_focus_origin
+                .is_some_and(|origin| origin.auto_return);
+        if owned {
+            session.run_focus_pending_viz = Some(page);
         }
+        owned
     }
 
     fn open_or_log_scene_ready(&mut self, page: VizPage) {
         if matches!(self.shell_view(), ShellView::Activity) {
-            self.log_scene_ready(page, "showing in Activity output");
+            self.log_scene_ready(page, "use `scene` to view");
             return;
         }
         if self.can_auto_open_viz_now() {
@@ -127,15 +126,6 @@ impl ShellApp {
         );
     }
 
-    fn log_workbench_ready(&mut self, message: &str) {
-        self.log(
-            "workbench",
-            format!(
-                "data-flow model ready — {message}; setg ui.auto_open_viz false disables auto-open"
-            ),
-        );
-    }
-
     fn can_auto_open_viz_now(&self) -> bool {
         if self
             .ui()
@@ -148,8 +138,7 @@ impl ShellApp {
             ShellView::Workbench
                 | ShellView::TargetPicker
                 | ShellView::PlanningPicker
-                | ShellView::ModelPicker
-                | ShellView::AuthMethodPicker
+                | ShellView::Setup
                 | ShellView::PromptsEditor
                 | ShellView::ThreatEditor
                 | ShellView::AgentChat

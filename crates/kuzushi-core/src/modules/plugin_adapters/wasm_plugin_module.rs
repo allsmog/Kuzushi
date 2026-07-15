@@ -23,7 +23,7 @@ pub(in crate::modules) fn wasm_plugin_module() -> BuiltinModule {
         "Run a capability-scoped Wasm analyzer against the indexed source snapshot.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             ),

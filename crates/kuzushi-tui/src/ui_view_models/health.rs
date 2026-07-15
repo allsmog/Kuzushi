@@ -1,4 +1,7 @@
-use super::{context_snapshot_state, cost_model, format_session_cost};
+use super::{
+    configured_model_credential_readiness, context_snapshot_state, cost_model, format_session_cost,
+    CredentialReadiness,
+};
 use crate::{
     app::PathState, HealthFooter, HealthSnapshot, HealthStatus, ShellApp, ViewDataState,
     ViewHealthChecks,
@@ -197,23 +200,49 @@ fn model_runtime_row(app: &ShellApp) -> HealthRow {
 
 fn credential_row(app: &ShellApp, checks: Option<&ViewHealthChecks>) -> HealthRow {
     let api_key_env = effective_credential_env(app);
+    if let Some(row) = configured_credential_row(app, api_key_env) {
+        return row;
+    }
     let Some(checks) = checks else {
-        return loading_health_row("credential env");
+        return loading_health_row("credentials");
     };
     if checks.credential_set {
         return health_row(
             HealthTone::Pass,
-            "credential env",
+            "credentials",
             format!("{api_key_env}=set; value hidden"),
             "run tools normally",
         );
     }
     health_row(
         HealthTone::Fail,
-        "credential env",
+        "credentials",
         format!("{api_key_env}=missing"),
         "export the key or run `auth`",
     )
+}
+
+fn configured_credential_row(app: &ShellApp, api_key_env: &str) -> Option<HealthRow> {
+    let detail = match configured_model_credential_readiness(app) {
+        CredentialReadiness::Session => "session credential accepted; value hidden".to_string(),
+        CredentialReadiness::StoredOAuth => "stored OAuth ready; value hidden".to_string(),
+        CredentialReadiness::ApiKey => format!("{api_key_env}=set; value hidden"),
+        CredentialReadiness::NotRequired => {
+            return Some(health_row(
+                HealthTone::Warn,
+                "credentials",
+                "no model selected",
+                "deterministic tools can still run",
+            ));
+        }
+        CredentialReadiness::Missing => return None,
+    };
+    Some(health_row(
+        HealthTone::Pass,
+        "credentials",
+        detail,
+        "run tools normally",
+    ))
 }
 
 fn effective_credential_env(app: &ShellApp) -> &str {

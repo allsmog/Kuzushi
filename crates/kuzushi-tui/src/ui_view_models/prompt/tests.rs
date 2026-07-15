@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ShellApp, ShellView};
+use crate::{ShellApp, ShellView, WorkbenchPage};
 use kuzushi_core::V2Config;
 
 #[test]
@@ -77,4 +77,62 @@ fn prompt_model_projects_prompt_and_editor_state() {
     app.clear_running_tool_for_test();
     let model = prompt_model(&app);
     assert!(model.prefix.ends_with("/sast> "));
+}
+
+#[test]
+fn workbench_prompt_projects_the_selected_mode_token_and_placeholder() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+
+    for (page, token, placeholder) in [
+        (WorkbenchPage::Map, "◇ MAP › ", "describe what to map"),
+        (WorkbenchPage::Scan, "▦ SCAN › ", "describe what to scan"),
+        (
+            WorkbenchPage::Review,
+            "▣ REVIEW › ",
+            "describe what to review",
+        ),
+        (
+            WorkbenchPage::Prove,
+            "◎ PROVE › ",
+            "describe what to verify",
+        ),
+        (
+            WorkbenchPage::Fix,
+            "◆ FIX › ",
+            "describe the patch to draft",
+        ),
+    ] {
+        app.router.workbench_mut().set_page(Some(page));
+        let model = prompt_model(&app);
+        assert_eq!(model.workbench_mode, Some(page));
+        assert_eq!(model.prefix, token);
+        assert_eq!(model.placeholder.as_deref(), Some(placeholder));
+    }
+}
+
+#[test]
+fn navigation_prompt_uses_the_default_prompt_binding() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    assert_eq!(
+        navigation_prompt_text(&app),
+        "NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt"
+    );
+}
+
+#[test]
+fn navigation_prompt_uses_the_remapped_prompt_binding() {
+    let mut config = V2Config::default();
+    config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+        context: "composer".to_string(),
+        action: "prompt_mode".to_string(),
+        bindings: vec!["x".to_string()],
+    }];
+    let app = ShellApp::new(config, None);
+
+    assert_eq!(
+        navigation_prompt_text(&app),
+        "NAVIGATE · Shift+Tab mode · Tab/[/] pane · x prompt"
+    );
 }

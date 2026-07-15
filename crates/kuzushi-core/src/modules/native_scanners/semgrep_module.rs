@@ -8,7 +8,7 @@ pub(in crate::modules) fn semgrep_module() -> BuiltinModule {
         "Native SAST path using semgrep JSON output.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             ),
@@ -43,7 +43,7 @@ pub(in crate::modules) fn codeql_module() -> BuiltinModule {
         "GitHub's taint-query semantic analyzer: deeper than pattern scanners but slower.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             ),
@@ -155,7 +155,7 @@ pub(in crate::modules) fn iac_scan_module() -> BuiltinModule {
         "Scan IaC manifests for security misconfigurations.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             ),
@@ -202,7 +202,7 @@ pub(in crate::modules) fn cargo_audit_module() -> BuiltinModule {
         "Run cargo-audit against Rust lockfiles and persist advisory findings.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             ),
@@ -224,7 +224,7 @@ pub(in crate::modules) fn govulncheck_module() -> BuiltinModule {
         "Run govulncheck against Go packages and persist reachable vulnerability findings.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             ),
@@ -246,7 +246,7 @@ pub(in crate::modules) fn license_scan_module() -> BuiltinModule {
         "Scan package manifests for missing or copyleft license declarations.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             ),
@@ -281,7 +281,7 @@ pub(in crate::modules) fn sbom_scan_module() -> BuiltinModule {
         "Extract a deterministic dependency inventory from package manifests.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             ),
@@ -301,7 +301,7 @@ pub(in crate::modules) fn exploit_chain_module() -> BuiltinModule {
         "Exploit Chain Scan",
         ModuleKind::Defense,
         "LLM-driven analyzer that connects vulnerability primitives into likely exploit paths and PoC guidance.",
-        tools_with_policy(workspace_policy(ToolPhase::Hunt, RuntimeRequirement::Always, FindingStoreRequirement::Required), vec![tool_with_options(
+        tools_with_policy(workspace_policy(ToolPhase::Scan, RuntimeRequirement::Always, FindingStoreRequirement::Required), vec![tool_with_options(
             "exploit-chain:scan",
             "Scan source for chained exploitability signals and synthesize PoC shapes with the configured agent runtime.",
             vec![

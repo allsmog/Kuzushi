@@ -7,10 +7,11 @@ pub use crate::findings::{
     severity_icon, sorted_finding_alias_indices, sorted_finding_aliases, stable_finding_alias,
     static_proof_summary, ConfidenceBand, Finding, FindingDetailReport, FindingEvidence,
     FindingListFilter, FindingListReport, FindingNextAction, FindingProjection, FindingStore,
-    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, PersistedProofVerdict,
-    PersistedSandboxBackend, PersistedVerification, ProofConfidence, ProofLadderState,
-    RuntimeValidationSummary, Severity, StaticProofState, StaticProofSummary, TriageOutcome,
-    TriageVerdict, VulnSource,
+    FindingVerdictFilter, PatchAttempt, PatchAttemptSummary, PatchLifecycleFile,
+    PatchLifecycleRecord, PatchLifecycleState, PatchProvenance, PatchResult, PatchStatus,
+    PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofConfidence,
+    ProofLadderState, RuntimeValidationSummary, Severity, StaticProofState, StaticProofSummary,
+    TriageOutcome, TriageVerdict, VulnSource,
 };
 pub use crate::pr_comment::{
     build_pr_comment, PrCommentChain, PrCommentChainStep, PrCommentInput, PrCommentPhaseCost,

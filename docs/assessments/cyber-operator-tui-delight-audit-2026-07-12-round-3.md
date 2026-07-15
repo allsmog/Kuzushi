@@ -1,5 +1,9 @@
 # Cyber Operator TUI Delight Audit — Round 3
 
+> **Historical record — superseded:** this audit remains evidence for its
+> recorded binary, but its screen and routing descriptions are not the current
+> Cockpit Spine contract.
+
 Date: 2026-07-12
 
 Baseline binary: `kuzushi 0.24.0-alpha.7 (775a4134f+dirty · debug)`

@@ -2,9 +2,9 @@
 mod tests {
     use super::super::*;
     use crate::findings::{
-        DismissReason, Finding, FindingEvidence, FindingStore, ReviewDecision,
-        ReviewDecisionVerdict, Severity, StaticProofState, TriageAuthor, TriageOutcome,
-        TriageVerdict,
+        DismissReason, Finding, FindingEvidence, FindingStore, PatchLifecycleFile,
+        PatchLifecycleRecord, PatchLifecycleState, ReviewDecision, ReviewDecisionVerdict,
+        Severity, StaticProofState, TriageAuthor, TriageOutcome, TriageVerdict,
     };
     use crate::run_artifacts::{write_run_summary, RunLlmCallAudit, RunSummary};
     use crate::runtime::{RuntimeCost, RuntimeCostReport};
@@ -583,6 +583,94 @@ mod tests {
         assert!(first["properties"].get("kuzushiCwe").is_none());
         // Non-suppressed findings carry no SARIF result.suppressions array.
         assert!(first.get("suppressions").is_none());
+    }
+
+    #[test]
+    fn remediation_truth_is_additive_across_every_export_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        seed_workspace_with_findings(&workspace, 1);
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let finding = store.list_findings(1).unwrap().remove(0);
+        let stable_fp = store
+            .patch_lifecycle_stable_fp(&finding.fingerprint)
+            .unwrap();
+        store
+            .insert_patch_lifecycle_record(&PatchLifecycleRecord {
+                application_id: "application-1".to_string(),
+                stable_fp,
+                fingerprint: finding.fingerprint,
+                finding_scan_id: finding.scan_id,
+                patch_run_id: "patch-run-1".to_string(),
+                target: workspace.root().display().to_string(),
+                diff_hash: "sha256:diff".to_string(),
+                base_commit: Some("base-commit".to_string()),
+                touched_files: vec![PatchLifecycleFile {
+                    path: "src/app.ts".to_string(),
+                    before_hash: Some("sha256:before".to_string()),
+                    after_hash: Some("sha256:after".to_string()),
+                }],
+                state: PatchLifecycleState::Verified,
+                reverify_run_id: Some("reverify-run-1".to_string()),
+                detail: Some("originating detector no longer rediscovered it".to_string()),
+                actor: "operator".to_string(),
+                application_started_at: "2026-07-13T11:59:59Z".to_string(),
+                applied_at: Some("2026-07-13T12:00:00Z".to_string()),
+                updated_at: "2026-07-13T12:05:00Z".to_string(),
+            })
+            .unwrap();
+
+        let json_path = tmp.path().join("findings.json");
+        export_workspace_findings(&workspace, &json_path, None).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(json_path).unwrap()).unwrap();
+        let remediation = &json["findings"][0]["remediation"];
+        assert_eq!(remediation["applicationId"], "application-1");
+        assert_eq!(remediation["applicationState"], "verified");
+        assert_eq!(remediation["reverifyOutcome"], "verified");
+        assert_eq!(remediation["touchedPaths"][0], "src/app.ts");
+
+        let jsonl_path = tmp.path().join("findings.jsonl");
+        export_workspace_findings(&workspace, &jsonl_path, None).unwrap();
+        let finding_line = fs::read_to_string(jsonl_path)
+            .unwrap()
+            .lines()
+            .nth(1)
+            .unwrap()
+            .to_string();
+        assert!(finding_line.contains("\"applicationId\":\"application-1\""));
+
+        let csv_path = tmp.path().join("findings.csv");
+        export_workspace_findings(&workspace, &csv_path, None).unwrap();
+        let csv = fs::read_to_string(csv_path).unwrap();
+        assert!(csv.contains("remediation_application_id"));
+        assert!(csv.contains("application-1,patch-run-1,verified,verified,reverify-run-1"));
+
+        let sarif_path = tmp.path().join("findings.sarif");
+        export_workspace_findings(&workspace, &sarif_path, None).unwrap();
+        let sarif: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(sarif_path).unwrap()).unwrap();
+        let properties = &sarif["runs"][0]["results"][0]["properties"];
+        assert_eq!(properties["kuzushiRemediationApplicationId"], "application-1");
+        assert_eq!(properties["kuzushiRemediationReverifyOutcome"], "verified");
+
+        let markdown_path = tmp.path().join("report");
+        export_workspace_findings(
+            &workspace,
+            &markdown_path,
+            Some(WorkspaceExportFormat::MarkdownBundle),
+        )
+        .unwrap();
+        let finding_doc = fs::read_dir(markdown_path.join("findings"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let markdown = fs::read_to_string(finding_doc).unwrap();
+        assert!(markdown.contains("**Remediation:** verified (`application-1`)"));
+        assert!(markdown.contains("**Re-verification:** verified (`reverify-run-1`)"));
+        assert!(markdown.contains("**Touched paths:** src/app.ts"));
     }
 
     #[test]

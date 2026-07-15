@@ -1,33 +1,27 @@
 use super::*;
 use crate::ui_view_models::{
-    FindingDetailModel, FixPhaseModel, PatchReviewModel, ThreatPatchCardModel,
+    FindingDetailModel, FixPhaseModel, PatchReviewModel, RemediationLifecycleModel,
+    RemediationLifecycleStage, RemediationLoadState, ThreatPatchCardModel,
 };
 
 pub(super) fn remediation_lines(model: &FixPhaseModel, width: usize) -> Vec<Line<'static>> {
-    let mut details = match (&model.finding, &model.patch) {
-        (_, Some(patch)) => patch_lines(patch, width),
-        (Some(finding), None) => unstaged_patch_lines(finding, width),
-        (None, None) => no_finding_lines(),
-    };
-    let mut lines = take_state_line(&mut details);
+    let mut lines = selection_disclosure_lines(model.selection_disclosure.as_ref(), width);
+    lines.extend(lifecycle_lines(&model.remediation, width));
     lines.extend(export_command_lines(&model.export_command, width));
-    lines.extend(details);
+    lines.extend(remediation_detail_lines(model, width));
     if let Some(threat_patch) = model.threat_patch.as_ref() {
         lines.extend(threat_patch_lines(threat_patch, width));
     }
     lines
 }
 
-fn take_state_line(details: &mut Vec<Line<'static>>) -> Vec<Line<'static>> {
-    if details.is_empty() {
-        Vec::new()
-    } else {
-        vec![details.remove(0)]
-    }
-}
-
 pub(super) fn compact_remediation_lines(model: &FixPhaseModel, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![compact_patch_state(model, width)];
+    let mut lines = selection_disclosure_lines(model.selection_disclosure.as_ref(), width);
+    lines.extend(
+        lifecycle_lines(&model.remediation, width)
+            .into_iter()
+            .take(2),
+    );
     lines.extend(
         export_command_lines(&model.export_command, width)
             .into_iter()
@@ -36,39 +30,123 @@ pub(super) fn compact_remediation_lines(model: &FixPhaseModel, width: usize) -> 
     lines
 }
 
-fn compact_patch_state(model: &FixPhaseModel, width: usize) -> Line<'static> {
-    match (&model.finding, &model.patch) {
-        (_, Some(patch)) => staged_patch_state(patch),
-        (Some(finding), None) => unstaged_patch_state(finding, width),
-        (None, None) => Line::styled("no remediation selected", theme::muted()),
+fn remediation_detail_lines(model: &FixPhaseModel, width: usize) -> Vec<Line<'static>> {
+    if matches!(
+        model.remediation.load_state,
+        RemediationLoadState::Loading | RemediationLoadState::Failed
+    ) {
+        return Vec::new();
+    }
+    match (&model.finding, &model.patch, model.remediation.stage) {
+        (_, Some(patch), _) => patch_lines(patch, width),
+        (Some(_), None, RemediationLifecycleStage::DraftAvailable) => Vec::new(),
+        (Some(_), None, stage) if lifecycle_receipt_stage(stage) => Vec::new(),
+        (Some(finding), None, _) => unstaged_patch_lines(finding, width),
+        (None, None, _) => no_finding_lines(),
     }
 }
 
-fn staged_patch_state(patch: &PatchReviewModel) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(format!("{}  ", patch.alias), theme::label()),
-        Span::styled("patch staged for review", theme::success()),
-    ])
-}
-
-fn unstaged_patch_state(finding: &FindingDetailModel, width: usize) -> Line<'static> {
-    Line::styled(
-        fit(
-            &format!(
-                "{}  patch not staged",
-                finding.alias.as_deref().unwrap_or("selected")
-            ),
-            width,
-        ),
-        theme::warn(),
+fn lifecycle_receipt_stage(stage: RemediationLifecycleStage) -> bool {
+    !matches!(
+        stage,
+        RemediationLifecycleStage::NotDrafted
+            | RemediationLifecycleStage::DraftAvailable
+            | RemediationLifecycleStage::StagedForApproval
     )
 }
 
-fn patch_lines(patch: &PatchReviewModel, width: usize) -> Vec<Line<'static>> {
+fn lifecycle_lines(model: &RemediationLifecycleModel, width: usize) -> Vec<Line<'static>> {
+    if model.load_state == RemediationLoadState::Loading {
+        return vec![Line::from(vec![
+            Span::styled("STATE  ", theme::label()),
+            Span::styled("loading remediation truth", theme::muted()),
+        ])];
+    }
+    if model.load_state == RemediationLoadState::Failed {
+        let mut lines = vec![Line::from(vec![
+            Span::styled("STATE  ", theme::label()),
+            Span::styled("remediation truth unavailable", theme::warn()),
+        ])];
+        append_optional_detail(&mut lines, "error", model.load_error.as_deref(), width);
+        return lines;
+    }
     let mut lines = vec![Line::from(vec![
-        Span::styled(format!("{}  ", patch.alias), theme::label()),
-        Span::styled("patch staged for review", theme::success()),
+        Span::styled("STATE  ", theme::label()),
+        Span::styled(model.stage.label(), lifecycle_style(model.stage)),
     ])];
+    append_receipt_identity(&mut lines, model, width);
+    append_touched_paths(&mut lines, &model.touched_paths, width);
+    append_optional_detail(&mut lines, "outcome", model.detail.as_deref(), width);
+    append_optional_detail(&mut lines, "updated", model.updated_at.as_deref(), width);
+    append_optional_detail(&mut lines, "error", model.load_error.as_deref(), width);
+    if let Some(command) = model.reverify_command.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("▸ v  re-verify · ", theme::warn()),
+            Span::styled(fit(command, width.saturating_sub(16)), theme::accent()),
+        ]));
+    }
+    lines
+}
+
+fn append_receipt_identity(
+    lines: &mut Vec<Line<'static>>,
+    model: &RemediationLifecycleModel,
+    width: usize,
+) {
+    append_optional_detail(lines, "application", model.application_id.as_deref(), width);
+    append_optional_detail(lines, "patch run", model.patch_run_id.as_deref(), width);
+    append_optional_detail(lines, "diff hash", model.diff_hash.as_deref(), width);
+    append_optional_detail(
+        lines,
+        "reverify run",
+        model.reverify_run_id.as_deref(),
+        width,
+    );
+}
+
+fn append_touched_paths(lines: &mut Vec<Line<'static>>, paths: &[String], width: usize) {
+    for (index, path) in paths.iter().enumerate() {
+        let label = if index == 0 { "touched" } else { "" };
+        lines.extend(wrapped_detail(label, path, width));
+    }
+}
+
+fn append_optional_detail(
+    lines: &mut Vec<Line<'static>>,
+    label: &str,
+    value: Option<&str>,
+    width: usize,
+) {
+    if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+        lines.extend(wrapped_detail(label, value, width));
+    }
+}
+
+fn lifecycle_style(stage: RemediationLifecycleStage) -> ratatui::style::Style {
+    match stage {
+        RemediationLifecycleStage::Verified => theme::success(),
+        RemediationLifecycleStage::Applied
+        | RemediationLifecycleStage::Applying
+        | RemediationLifecycleStage::ReverifyRunning
+        | RemediationLifecycleStage::DraftAvailable
+        | RemediationLifecycleStage::StagedForApproval => theme::accent(),
+        RemediationLifecycleStage::StillVulnerable
+        | RemediationLifecycleStage::NotRediscovered
+        | RemediationLifecycleStage::Inconclusive
+        | RemediationLifecycleStage::ApplyFailed
+        | RemediationLifecycleStage::Failed
+        | RemediationLifecycleStage::Interrupted
+        | RemediationLifecycleStage::ChangedSinceApply
+        | RemediationLifecycleStage::PriorFindingGeneration => theme::warn(),
+        RemediationLifecycleStage::NotDrafted => theme::muted(),
+    }
+}
+
+fn patch_lines(patch: &PatchReviewModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::styled(
+        format!("{} · pending reviewed diff", patch.alias),
+        theme::label(),
+    )];
     lines.extend(wrapped_detail("rationale", &patch.rationale, width));
     if let Some(side_effect) = patch.side_effect.as_deref() {
         lines.extend(wrapped_detail("side effect", side_effect, width));
@@ -167,7 +245,10 @@ fn export_command_lines(command: &str, width: usize) -> Vec<Line<'static>> {
             ])
         })
         .collect::<Vec<_>>();
-    lines.push(Line::styled("  export findings as SARIF", theme::muted()));
+    lines.push(Line::styled(
+        "  choose format, completeness, and destination",
+        theme::muted(),
+    ));
     lines
 }
 
@@ -175,9 +256,28 @@ fn export_command_lines(command: &str, width: usize) -> Vec<Line<'static>> {
 mod tests {
     use super::*;
 
+    fn remediation_model(
+        load_state: RemediationLoadState,
+        load_error: Option<&str>,
+    ) -> RemediationLifecycleModel {
+        RemediationLifecycleModel {
+            load_state,
+            stage: RemediationLifecycleStage::NotDrafted,
+            application_id: None,
+            patch_run_id: None,
+            diff_hash: None,
+            touched_paths: Vec::new(),
+            reverify_run_id: None,
+            detail: None,
+            updated_at: None,
+            reverify_command: None,
+            load_error: load_error.map(str::to_string),
+        }
+    }
+
     #[test]
-    fn export_command_is_complete_at_reference_width() {
-        let command = "findings export report.sarif sarif";
+    fn report_exit_command_is_complete_at_reference_width() {
+        let command = "report";
         let rendered = export_command_lines(command, 120)
             .into_iter()
             .map(|line| line.to_string())
@@ -185,5 +285,35 @@ mod tests {
             .join("\n");
 
         assert!(rendered.contains(command));
+    }
+
+    #[test]
+    fn loading_truth_does_not_claim_that_no_patch_was_drafted() {
+        let rendered = lifecycle_lines(&remediation_model(RemediationLoadState::Loading, None), 80)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("loading remediation truth"));
+        assert!(!rendered.contains("not drafted"));
+    }
+
+    #[test]
+    fn failed_truth_surfaces_the_reader_error() {
+        let rendered = lifecycle_lines(
+            &remediation_model(
+                RemediationLoadState::Failed,
+                Some("database is unavailable"),
+            ),
+            80,
+        )
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+        assert!(rendered.contains("remediation truth unavailable"));
+        assert!(rendered.contains("database is unavailable"));
     }
 }

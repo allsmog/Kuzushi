@@ -443,7 +443,7 @@ fn existing_run_artifacts(record: ToolRunRecord<'_>) -> Result<Vec<RunArtifact>>
         .with_context(|| format!("could not load artifacts for run {}", record.run_id))
 }
 
-pub(super) fn terminal_result_digest(status: &str, result: &Value) -> String {
+pub(crate) fn terminal_result_digest(status: &str, result: &Value) -> String {
     let bytes = serde_json::to_vec(&json!({
         "status": status,
         "result": result,

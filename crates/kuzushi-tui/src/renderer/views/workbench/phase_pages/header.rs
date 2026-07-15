@@ -9,17 +9,90 @@ pub(in crate::renderer::views) fn phase_header_lines(
     width: usize,
 ) -> Vec<Line<'static>> {
     let mut lines = vec![identity_line(header, width)];
-    if let Some(rail) = phase_rail_line(&header.phase_rail, width) {
-        lines.push(rail);
+    lines.extend(context_header_lines(header, width));
+    lines.extend(result_card_lines(header.result_card.as_ref(), width));
+    lines.extend(command_hint_lines(header, hints, width));
+    lines
+}
+
+fn context_header_lines(header: &EngagementHeaderModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.extend(phase_rail_line(&header.phase_rail, width));
+    lines.extend(
+        header
+            .finding_filter
+            .as_deref()
+            .map(|filter| finding_filter_line(filter, width)),
+    );
+    lines.extend(next_header_lines(header, width));
+    lines
+}
+
+fn next_header_lines(header: &EngagementHeaderModel, width: usize) -> Vec<Line<'static>> {
+    if uses_compact_result_header(header, width) {
+        return Vec::new();
     }
-    if let Some(filter) = header.finding_filter.as_deref() {
-        lines.push(finding_filter_line(filter, width));
+    next_lines(header, width)
+}
+
+fn command_hint_lines(
+    header: &EngagementHeaderModel,
+    hints: &[WorkbenchHint],
+    width: usize,
+) -> Vec<Line<'static>> {
+    if header.result_card.is_some() || width < 80 || hints.is_empty() {
+        return Vec::new();
     }
-    lines.extend(next_lines(header, width));
-    if width >= 80 && !hints.is_empty() {
-        lines.push(command_hint_line(hints, width));
+    vec![command_hint_line(hints, width)]
+}
+
+fn uses_compact_result_header(header: &EngagementHeaderModel, width: usize) -> bool {
+    width < 50 && header.result_card.is_some()
+}
+
+fn result_card_lines(
+    card: Option<&crate::ui_view_models::PhaseResultCardModel>,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let Some(card) = card else {
+        return Vec::new();
+    };
+    let mut lines = vec![Line::from(vec![
+        Span::styled(" RESULT ", theme::warn()),
+        Span::styled(
+            fit(
+                &format!("{} · attempt {}", card.outcome, card.attempt_id),
+                width.saturating_sub(8),
+            ),
+            theme::primary(),
+        ),
+    ])];
+    lines.extend(result_detail_lines(card, width));
+    lines.push(Line::from(Span::styled(
+        fit(&format!("  {}", card.control_hint), width),
+        theme::accent(),
+    )));
+    if width >= 80 {
+        lines.push(Line::from(Span::styled(
+            fit(&format!("  next: {}", card.recommended), width),
+            theme::label(),
+        )));
     }
     lines
+}
+
+fn result_detail_lines(
+    card: &crate::ui_view_models::PhaseResultCardModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    if width < 50 {
+        return Vec::new();
+    }
+    let available = width.saturating_sub(3).max(16);
+    wrap_text(&card.detail, available)
+        .into_iter()
+        .map(|text| Line::from(Span::styled(format!("  {text}"), theme::muted())))
+        .collect()
 }
 
 fn finding_filter_line(filter: &str, width: usize) -> Line<'static> {
@@ -47,10 +120,22 @@ fn identity_line(header: &EngagementHeaderModel, width: usize) -> Line<'static> 
 fn identity_atoms(header: &EngagementHeaderModel) -> Vec<(String, ratatui::style::Style)> {
     let mut atoms = vec![
         ("KUZUSHI".to_string(), theme::heading()),
-        (format!("target {}", header.target), theme::label()),
-        (format!("view {}", header.phase.word()), theme::label()),
-        live_atom(header.live),
+        (
+            format!("VIEW {}", header.phase.label()),
+            mode_style(header.phase),
+        ),
     ];
+    if header
+        .reality_phase
+        .is_some_and(|reality| reality != header.phase)
+    {
+        let reality = header.reality_phase.expect("checked reality phase");
+        atoms.push((format!("REALITY {}", reality.label()), theme::muted()));
+    }
+    atoms.extend([
+        (format!("target {}", header.target), theme::label()),
+        live_atom(header.live),
+    ]);
     if header.cost_invalid {
         atoms.push(("cost invalid".to_string(), theme::danger()));
     } else if !header.cost_complete {
@@ -67,6 +152,16 @@ fn identity_atoms(header: &EngagementHeaderModel) -> Vec<(String, ratatui::style
         (module_atom(&header.module), module_style(&header.module)),
     ]);
     atoms
+}
+
+fn mode_style(phase: kuzushi_core::WorkflowPhase) -> ratatui::style::Style {
+    match phase {
+        kuzushi_core::WorkflowPhase::Map => theme::mode_map(),
+        kuzushi_core::WorkflowPhase::Scan => theme::mode_scan(),
+        kuzushi_core::WorkflowPhase::Review => theme::mode_review(),
+        kuzushi_core::WorkflowPhase::Prove => theme::mode_prove(),
+        kuzushi_core::WorkflowPhase::Fix => theme::mode_fix(),
+    }
 }
 
 fn module_atom(module: &str) -> String {
@@ -197,49 +292,4 @@ fn command_hint_line(hints: &[WorkbenchHint], width: usize) -> Line<'static> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use kuzushi_core::V2Config;
-    use std::time::{Duration, Instant};
-
-    fn line_text(line: Line<'static>) -> String {
-        line.spans
-            .into_iter()
-            .map(|span| span.content.into_owned())
-            .collect()
-    }
-
-    #[test]
-    fn compact_filter_line_names_the_active_filter_and_reset_command() {
-        let text = line_text(finding_filter_line("severity:high", 60));
-
-        assert!(text.contains("FILTER"), "{text}");
-        assert!(text.contains("severity:high"), "{text}");
-        assert!(text.contains("findings filter clear"), "{text}");
-    }
-
-    #[test]
-    fn reduced_motion_freezes_live_pulse_but_keeps_elapsed_redraws_due() {
-        let _theme = theme::scoped_theme_for_test(theme::ThemeConfig {
-            reduced_motion: true,
-            color_depth: theme::ColorDepth::TrueColor,
-            ..theme::ThemeConfig::default()
-        });
-        assert!(!live_pulse_on(), "reduced motion must freeze LIVE styling");
-
-        let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_running_tool_for_test("context:build");
-        app.ui_mut().set_spinner_phase_for_test(7);
-        let started_at = Instant::now();
-
-        assert!(app.tick_at(started_at));
-        assert_eq!(app.ui().spinner_phase(), 0);
-        assert!(!app.tick_at(started_at + Duration::from_millis(999)));
-        assert!(app.tick_at(started_at + Duration::from_secs(1)));
-        assert_eq!(
-            app.ui().spinner_phase(),
-            0,
-            "elapsed redraws must not restart animation"
-        );
-    }
-}
+mod tests;

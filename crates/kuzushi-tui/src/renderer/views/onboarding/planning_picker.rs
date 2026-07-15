@@ -96,7 +96,9 @@ fn compact_phase_header_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> 
     if let Some(target) = confirmed_target_line(app, width as usize) {
         lines.push(target);
     }
-    push_phase_rail(app, width, &mut lines);
+    if !app.engagement.planning_picker().returns_to_setup() {
+        push_phase_rail(app, width, &mut lines);
+    }
     push_target_profile_status(app, &mut lines);
     let prior = prior_state_banner(app);
     lines.push(fit_spans(prior.spans, width as usize));
@@ -112,6 +114,9 @@ fn push_target_profile_status(app: &ShellApp, lines: &mut Vec<Line<'static>>) {
 }
 
 fn compact_phase_title(app: &ShellApp) -> &'static str {
+    if app.engagement.planning_picker().returns_to_setup() {
+        return "SETUP · MAP PLAN";
+    }
     app.engagement
         .current_phase()
         .map(WorkflowPhase::label)
@@ -257,6 +262,9 @@ fn planning_controls_line(app: &ShellApp, width: usize) -> Line<'static> {
 }
 
 fn ultra_compact_planning_controls(app: &ShellApp) -> &'static str {
+    if app.engagement.planning_picker().returns_to_setup() {
+        return " ↑/↓  Space check  Enter save  Esc setup";
+    }
     match app.engagement.planning_picker().focus() {
         PickerFocus::OptionsPane => " ↑/↓  Space cycle  Enter edit  Esc",
         PickerFocus::Prompt => " Esc tasks  Enter submit  Ctrl+C exit",
@@ -269,13 +277,16 @@ fn ultra_compact_planning_controls(app: &ShellApp) -> &'static str {
 }
 
 fn planning_list_controls(app: &ShellApp, width: usize) -> &'static str {
-    if let Some(selected) = current_inline_action_selected(app) {
-        return if selected {
-            " ↑/↓ move  Space uncheck  Enter attach file  Esc exit"
-        } else {
-            " ↑/↓ move  Space select attach  Enter run checked  Esc exit"
-        };
+    if app.engagement.planning_picker().returns_to_setup() {
+        return setup_planning_controls(width);
     }
+    if let Some(selected) = current_inline_action_selected(app) {
+        return inline_planning_controls(selected);
+    }
+    default_planning_controls(app, width)
+}
+
+fn default_planning_controls(app: &ShellApp, width: usize) -> &'static str {
     if width < 76 {
         return " ↑/↓ move  Space check  Tab pane  Enter run  Esc exit";
     }
@@ -283,6 +294,22 @@ fn planning_list_controls(app: &ShellApp, width: usize) -> &'static str {
         " ↑/↓ move  Space check  p Review prompt  Tab pane  Enter run  Esc exit"
     } else {
         " ↑/↓ move  Space check  Tab pane  h/l phase  Enter run  Esc exit"
+    }
+}
+
+fn setup_planning_controls(width: usize) -> &'static str {
+    if width < 76 {
+        " ↑/↓ move  Space check  Enter save  Esc setup"
+    } else {
+        " ↑/↓ move  Space check  p Review prompt  Tab pane  Enter save to Setup  Esc return"
+    }
+}
+
+fn inline_planning_controls(selected: bool) -> &'static str {
+    if selected {
+        " ↑/↓ move  Space uncheck  Enter attach file  Esc exit"
+    } else {
+        " ↑/↓ move  Space select attach  Enter run checked  Esc exit"
     }
 }
 
@@ -302,32 +329,52 @@ fn planning_row_selected(app: &ShellApp, row: &PlanningTaskRow) -> bool {
 
 /// Announce the current judo phase (組→崩→作→掛) and its intent.
 fn push_phase_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
-    match app.engagement.current_phase() {
-        Some(phase) => {
-            lines.push(divider(phase.label(), width));
-            if let Some(target) = confirmed_target_line(app, width as usize) {
-                lines.push(target);
-            }
-            lines.push(blank());
-            push_phase_rail(app, width, lines);
-            lines.push(muted(&format!(
-                "phase {} of {} — {}",
-                phase.position(),
-                WorkflowPhase::ORDER.len(),
-                phase.intent()
-            )));
-        }
-        None => {
-            lines.push(divider("PLAN THE WORKSPACE", width));
-            if let Some(target) = confirmed_target_line(app, width as usize) {
-                lines.push(target);
-            }
-            lines.push(blank());
-            lines.push(muted(
-                "Select tasks. Dependencies auto-toggle. Steps run in order.",
-            ));
-        }
+    if app.engagement.planning_picker().returns_to_setup() {
+        push_setup_plan_header(app, width, lines);
+        return;
     }
+    match app.engagement.current_phase() {
+        Some(phase) => push_active_phase_header(app, phase, width, lines),
+        None => push_unphased_plan_header(app, width, lines),
+    }
+}
+
+fn push_setup_plan_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
+    push_header_identity(app, "SETUP · MAP PLAN", width, lines);
+    lines.push(muted(
+        "Choose Map tasks. Model and credential blockers are evaluated back on Setup.",
+    ));
+}
+
+fn push_active_phase_header(
+    app: &ShellApp,
+    phase: WorkflowPhase,
+    width: u16,
+    lines: &mut Vec<Line<'static>>,
+) {
+    push_header_identity(app, phase.label(), width, lines);
+    push_phase_rail(app, width, lines);
+    lines.push(muted(&format!(
+        "phase {} of {} — {}",
+        phase.position(),
+        WorkflowPhase::ORDER.len(),
+        phase.intent()
+    )));
+}
+
+fn push_unphased_plan_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
+    push_header_identity(app, "PLAN THE WORKSPACE", width, lines);
+    lines.push(muted(
+        "Select tasks. Dependencies auto-toggle. Steps run in order.",
+    ));
+}
+
+fn push_header_identity(app: &ShellApp, title: &str, width: u16, lines: &mut Vec<Line<'static>>) {
+    lines.push(divider(title, width));
+    if let Some(target) = confirmed_target_line(app, width as usize) {
+        lines.push(target);
+    }
+    lines.push(blank());
 }
 
 fn push_phase_rail(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
@@ -392,8 +439,9 @@ fn fallback_phase_rail_line(current: WorkflowPhase, width: usize) -> Line<'stati
 fn fallback_phase_rail_label(phase: WorkflowPhase) -> &'static str {
     match phase {
         WorkflowPhase::Map => "組 map",
-        WorkflowPhase::Hunt => "崩 hunt",
-        WorkflowPhase::Confirm => "作 confirm",
+        WorkflowPhase::Scan => "崩 scan",
+        WorkflowPhase::Review => "査 review",
+        WorkflowPhase::Prove => "作 prove",
         WorkflowPhase::Fix => "掛 fix",
     }
 }
@@ -1179,6 +1227,16 @@ fn pane_title_style(focused: bool) -> Style {
 /// State exactly what Enter will do, styled green only when something actually
 /// runs — a reused/skipped-only plan stays muted so the colour can't overclaim.
 fn enter_summary_line(app: &ShellApp, width: usize) -> Line<'static> {
+    if app.engagement.planning_picker().returns_to_setup() {
+        let selected = app.engagement.planning_picker().selected().len();
+        return styled(
+            &fit(
+                &format!(" Enter saves {selected} selected Map task(s) and returns to Setup"),
+                width,
+            ),
+            theme::success().add_modifier(Modifier::BOLD),
+        );
+    }
     let plan = enter_plan(
         app.engagement.planning_picker().tasks(),
         app.engagement.planning_picker().selected(),
@@ -1282,7 +1340,7 @@ mod tests {
         let target_dir = tempfile::tempdir().expect("temp target");
         let target = WorkspaceTarget::new(target_dir.path()).expect("workspace target");
         let mut app = ShellApp::new(V2Config::default(), Some(&target));
-        app.open_planning_picker();
+        app.open_phase_picker(crate::app::WorkflowPhase::Map);
         planning_picker_lines(&app, Rect::new(0, 0, width, height))
             .iter()
             .map(line_text)

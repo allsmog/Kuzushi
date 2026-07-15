@@ -42,8 +42,9 @@ pub fn tool_mutates(tool_name: &str) -> bool {
 fn workflow_phase(phase: ToolPhase) -> Option<WorkflowPhase> {
     match phase {
         ToolPhase::Map => Some(WorkflowPhase::Map),
-        ToolPhase::Hunt => Some(WorkflowPhase::Hunt),
-        ToolPhase::Confirm => Some(WorkflowPhase::Confirm),
+        ToolPhase::Scan => Some(WorkflowPhase::Scan),
+        ToolPhase::Review => Some(WorkflowPhase::Review),
+        ToolPhase::Prove => Some(WorkflowPhase::Prove),
         ToolPhase::Fix => Some(WorkflowPhase::Fix),
         ToolPhase::Operate => None,
     }
@@ -56,9 +57,16 @@ mod tests {
     #[test]
     fn registered_descriptor_drives_phase_and_effect() {
         assert_eq!(tool_phase("context:build"), Some(WorkflowPhase::Map));
-        assert_eq!(tool_phase("semgrep:scan"), Some(WorkflowPhase::Hunt));
-        assert_eq!(tool_phase("triage:run"), Some(WorkflowPhase::Confirm));
+        assert_eq!(tool_phase("semgrep:scan"), Some(WorkflowPhase::Scan));
+        assert_eq!(tool_phase("triage:run"), Some(WorkflowPhase::Review));
+        assert_eq!(
+            tool_phase("classifier-gate:score"),
+            Some(WorkflowPhase::Review)
+        );
+        assert_eq!(tool_phase("deep-audit:run"), Some(WorkflowPhase::Review));
+        assert_eq!(tool_phase("verify:finding"), Some(WorkflowPhase::Prove));
         assert_eq!(tool_phase("patch:finding"), Some(WorkflowPhase::Fix));
+        assert_eq!(tool_phase("prompt-armor:report"), Some(WorkflowPhase::Fix));
         assert_eq!(classify("findings:list"), Some(ToolClassification::Read));
         assert!(tool_mutates("patch:finding"));
         assert!(!tool_mutates("findings:dismiss"));

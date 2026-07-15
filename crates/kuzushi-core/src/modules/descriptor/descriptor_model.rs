@@ -144,6 +144,10 @@ pub struct OptionSpec {
     pub file_reference_semantics: Option<FileReferenceSemantics>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<i64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -188,6 +192,8 @@ impl OptionSpec {
             path_semantics: None,
             file_reference_semantics: None,
             default: None,
+            minimum: None,
+            maximum: None,
             choices: Vec::new(),
             aliases: Vec::new(),
             deprecated_aliases: Vec::new(),
@@ -251,6 +257,12 @@ impl OptionSpec {
 
     pub(in crate::modules) fn default(mut self, value: Value) -> Self {
         self.default = Some(value);
+        self
+    }
+
+    pub(in crate::modules) fn integer_range(mut self, minimum: i64, maximum: i64) -> Self {
+        self.minimum = Some(minimum);
+        self.maximum = Some(maximum);
         self
     }
 

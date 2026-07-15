@@ -58,13 +58,20 @@ pub fn toggle_planning_row(
     if selected.contains(&task) {
         toggle_off(task, selected)
     } else {
-        toggle_on(task, selected)
+        toggle_on(task, rows, selected)
     }
 }
 
-fn toggle_on(task: PlanningTaskId, selected: &mut BTreeSet<PlanningTaskId>) -> ToggleOutcome {
+fn toggle_on(
+    task: PlanningTaskId,
+    rows: &[PlanningTaskRow],
+    selected: &mut BTreeSet<PlanningTaskId>,
+) -> ToggleOutcome {
     let mut auto_added = Vec::new();
     for dep in transitive_dependencies(task) {
+        if !rows.iter().any(|row| row.id == dep) {
+            continue;
+        }
         if selected.insert(dep) {
             auto_added.push(dep);
         }
@@ -201,6 +208,25 @@ mod tests {
         }
         assert!(selected.contains(&GatherRepoContext));
         assert!(selected.contains(&BuildXRay));
+    }
+
+    #[test]
+    fn toggle_on_omits_dependencies_outside_visible_rows() {
+        let mut codeql = row(ScanCodeql, ArtifactState::Missing);
+        codeql.cli_available = true;
+        let rows = vec![codeql];
+        let mut selected = BTreeSet::new();
+
+        let outcome = toggle_planning_row(ScanCodeql, &rows, &mut selected);
+
+        assert_eq!(
+            outcome,
+            ToggleOutcome::On {
+                task: ScanCodeql,
+                auto_added: Vec::new(),
+            }
+        );
+        assert_eq!(selected, [ScanCodeql].into_iter().collect());
     }
 
     #[test]

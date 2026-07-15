@@ -77,6 +77,13 @@ mod tests {
     }
 
     #[test]
+    fn transcript_metadata_distinguishes_interactive_plain_and_scripted_shells() {
+        assert_eq!(shell_mode_label(false, true), "interactive");
+        assert_eq!(shell_mode_label(true, true), "plain");
+        assert_eq!(shell_mode_label(true, false), "scripted");
+    }
+
+    #[test]
     fn full_redraw_clears_without_querying_cursor_position() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.ui_mut().request_full_redraw();
@@ -115,17 +122,29 @@ mod tests {
 
         assert!(apply_terminal_event(&mut app, Event::Resize(120, 40)));
         app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Review));
         app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+        let viewport = app.viewport();
+        let plan = crate::renderer::workbench_phase_plan_for_app(
+            &app,
+            ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
+        )
+        .expect("workbench presentation plan");
+        let queue = plan
+            .surface(crate::ui_view_models::PhaseSurfaceId::ReviewQueue)
+            .expect("visible review queue");
         assert!(apply_terminal_event(
             &mut app,
             Event::Mouse(MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
-                column: 0,
-                row: 0,
+                column: queue.rect.x + queue.rect.width / 2,
+                row: queue.rect.y + queue.rect.height / 2,
                 modifiers: KeyModifiers::NONE,
             })
         ));
-        assert_eq!(app.router.workbench().focus(), WorkbenchPane::Source);
+        assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
         assert!(!apply_terminal_event(&mut app, Event::FocusGained));
     }
 
@@ -152,11 +171,12 @@ mod tests {
     #[test]
     fn launch_start_view_preserves_onboarding_picker_through_command_update() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.set_shell_view(ShellView::ModelPicker);
+        app.open_model_picker();
 
         assert!(apply_launch_start_view(&mut app));
 
-        assert_eq!(app.shell_view(), ShellView::ModelPicker);
+        assert_eq!(app.shell_view(), ShellView::Setup);
+        assert_eq!(app.router.setup().editor(), Some(SetupEditor::Model));
     }
 
     #[test]
@@ -232,7 +252,7 @@ mod tests {
                 .changed
         );
         app.router.default_scroll_mut().set(25);
-        app.set_shell_view(ShellView::Catalog);
+        app.set_shell_view(ShellView::Tools);
 
         let outcome =
             apply_runtime_messages_and_sync_view(&mut app, std::time::Instant::now(), None);

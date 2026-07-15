@@ -9,6 +9,64 @@ pub struct PatchAttempt {
     pub output: String,
 }
 
+/// Immutable source and detector binding captured when a patch is generated.
+///
+/// The binding is deliberately reference-only: detector input remains in the
+/// canonical run artifact store and is checked against `detector_input_digest`
+/// before re-verification replays it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchProvenance {
+    pub source_commit: String,
+    pub target: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub originating_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detector_tool: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detector_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detector_input_digest: Option<String>,
+}
+
+impl PatchProvenance {
+    /// Compute the canonical digest stored beside detector provenance.
+    /// Consumers that construct or inspect a persisted `PatchResult` can use
+    /// this to bind the exact canonical `input.json` bytes without duplicating
+    /// the domain separator.
+    pub fn digest_detector_input(input: &[u8]) -> String {
+        crate::identity::hash_parts("kuzushi.patch.detector-input.v1", &[input]).to_string()
+    }
+
+    /// Reject partially-bound candidates at every selection and Apply edge.
+    /// Optional fields remain serde-compatible for legacy records, but a new
+    /// application must have complete source, target, run, and detector
+    /// provenance.
+    pub fn ensure_complete_for_apply(&self) -> Result<()> {
+        ensure_nonempty_binding("generation commit", &self.source_commit)?;
+        ensure_nonempty_binding("target identity", &self.target)?;
+        ensure_optional_binding("originating run", self.originating_run_id.as_deref())?;
+        ensure_optional_binding("detector tool", self.detector_tool.as_deref())?;
+        ensure_optional_binding("detector run", self.detector_run_id.as_deref())?;
+        ensure_optional_binding(
+            "detector input digest",
+            self.detector_input_digest.as_deref(),
+        )
+    }
+}
+
+fn ensure_optional_binding(label: &str, value: Option<&str>) -> Result<()> {
+    ensure_nonempty_binding(label, value.unwrap_or_default())
+}
+
+fn ensure_nonempty_binding(label: &str, value: &str) -> Result<()> {
+    anyhow::ensure!(
+        !value.trim().is_empty(),
+        "patch provenance has no {label}; regenerate it"
+    );
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PatchResult {
@@ -31,10 +89,25 @@ pub struct PatchResult {
     pub provider_spend_unresolved: bool,
     pub validator_log: Option<String>,
     pub history: Vec<PatchAttempt>,
+    /// Missing only on legacy patch attempts. Legacy candidates remain
+    /// viewable, but cannot cross the source-bound Apply gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<PatchProvenance>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+}
+
+/// Minimal durable patch-attempt truth for presentation and status surfaces.
+///
+/// This intentionally omits the diff and validator payload so read-only
+/// callers do not need to open the content-object store merely to display the
+/// latest synthesis state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchAttemptSummary {
+    pub patch_run_id: String,
+    pub status: PatchStatus,
 }
 
 impl PatchResult {
@@ -109,6 +182,7 @@ mod patch_cost_tests {
             "costUsd": cost_usd,
             "validatorLog": null,
             "history": [],
+            "provenance": null,
         }))
         .unwrap()
     }
@@ -208,6 +282,56 @@ pub struct PersistedVerification {
     pub created_at: String,
 }
 
+impl PersistedVerification {
+    /// A proof outcome belongs to the current discovery generation only when
+    /// both canonical run references are present and the verified scan id
+    /// exactly matches the finding's current scan id. Legacy or stale proof is
+    /// still displayable, but cannot advance workflow reality.
+    pub fn is_current_for_scan(&self, current_scan_id: Option<&str>) -> bool {
+        let has_verification_run = self
+            .verification_run_id
+            .as_deref()
+            .is_some_and(|run_id| !run_id.trim().is_empty());
+        has_verification_run
+            && self
+                .verified_scan_id
+                .as_deref()
+                .filter(|scan_id| !scan_id.trim().is_empty())
+                .zip(current_scan_id.filter(|scan_id| !scan_id.trim().is_empty()))
+                .is_some_and(|(verified, current)| verified == current)
+    }
+}
+
+#[cfg(test)]
+mod verification_generation_tests {
+    use super::*;
+
+    fn verification(run_id: Option<&str>, scan_id: Option<&str>) -> PersistedVerification {
+        PersistedVerification {
+            proof_level: 3,
+            proof_verdict: PersistedProofVerdict::Exploited,
+            backend: PersistedSandboxBackend::Plain,
+            language: None,
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 1,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            verification_run_id: run_id.map(str::to_string),
+            verified_scan_id: scan_id.map(str::to_string),
+            created_at: "1".to_string(),
+        }
+    }
+
+    #[test]
+    fn current_generation_requires_both_exact_run_references() {
+        assert!(verification(Some("verify-2"), Some("scan-2")).is_current_for_scan(Some("scan-2")));
+        assert!(!verification(Some("verify-1"), Some("scan-1")).is_current_for_scan(Some("scan-2")));
+        assert!(!verification(None, Some("scan-2")).is_current_for_scan(Some("scan-2")));
+        assert!(!verification(Some("verify-2"), None).is_current_for_scan(Some("scan-2")));
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PersistedProofVerdict {
@@ -251,6 +375,7 @@ pub enum PersistedSandboxBackend {
     Bwrap,
     Podman,
     Plain,
+    Model,
 }
 
 impl PersistedSandboxBackend {
@@ -259,6 +384,7 @@ impl PersistedSandboxBackend {
             Self::Bwrap => "bwrap",
             Self::Podman => "podman",
             Self::Plain => "plain",
+            Self::Model => "model",
         }
     }
 
@@ -268,6 +394,7 @@ impl PersistedSandboxBackend {
             "bwrap" => Self::Bwrap,
             "podman" => Self::Podman,
             "plain" => Self::Plain,
+            "model" => Self::Model,
             _ => return None,
         })
     }

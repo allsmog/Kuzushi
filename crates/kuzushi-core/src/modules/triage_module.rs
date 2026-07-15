@@ -8,7 +8,7 @@ pub(crate) fn triage_module() -> BuiltinModule {
         "LLM-driven triage of scanner findings with evidence-backed verdicts.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Confirm,
+                ToolPhase::Review,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Required,
             ),

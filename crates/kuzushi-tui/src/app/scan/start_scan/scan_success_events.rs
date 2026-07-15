@@ -242,9 +242,9 @@ impl ShellApp {
         if self
             .engagement
             .current_phase()
-            .is_none_or(|phase| phase <= crate::app::WorkflowPhase::Hunt)
+            .is_none_or(|phase| phase <= crate::app::WorkflowPhase::Scan)
         {
-            self.engagement.set_phase(crate::app::WorkflowPhase::Hunt);
+            self.engagement.set_phase(crate::app::WorkflowPhase::Scan);
         }
     }
 
@@ -359,6 +359,7 @@ impl ShellApp {
         let effects = self.record_scan_run_outcome(record);
         self.invalidate_view_hydration();
         let mut cache = self.workbench_cache().borrow_mut();
+        cache.invalidate_finding_patch_truth(None);
         cache.invalidate_run_summaries();
         cache.invalidate_workspace_files();
         effects
@@ -696,9 +697,9 @@ fn scan_finding_label(count: usize) -> &'static str {
 
 fn scan_completion_next_step(findings_count: usize) -> &'static str {
     if findings_count == 0 {
-        "崩 hunt remains active · `options sast:scan` to tune or `scan` to rerun"
+        "崩 scan complete · no candidates · inspect the Scan result before Report"
     } else {
-        "next: 作 confirm · `findings` to browse or `next` to triage/verify"
+        "next: 査 review · `findings` to browse or `next` to triage"
     }
 }
 

@@ -22,7 +22,9 @@ mod tests {
         suppress_command, suppressions_command, suppressions_command_output,
         suppressions_plain_lines,
     };
-    use crate::command::{Command, ConfigCommand, McpBackend, ScanModeArg};
+    use crate::command::{
+        Command, ConfigCommand, McpBackend, ScanModeArg, SessionExportFormat, SessionsCommand,
+    };
     use crate::doctor::{
         check_auth_env, check_model_config, deterministic_capability_checks, DoctorStatus,
     };
@@ -94,6 +96,103 @@ mod tests {
     #[test]
     fn cli_target_args_share_help_text() {
         assert_target_args_share_help(&crate::cli::Cli::command(), "kuzushi");
+    }
+
+    #[test]
+    fn sessions_cli_parses_management_subcommands() {
+        let list = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "--target",
+            "/tmp/project",
+            "sessions",
+            "list",
+            "--json",
+        ])
+        .unwrap();
+        let Some(Command::Sessions {
+            command: SessionsCommand::List { json },
+        }) = list.command
+        else {
+            panic!("expected sessions list command");
+        };
+        assert!(json);
+        assert_eq!(list.target, Some(PathBuf::from("/tmp/project")));
+
+        let export = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "sessions",
+            "export",
+            "session-1",
+            "--format",
+            "markdown",
+            "--out",
+            "session.md",
+        ])
+        .unwrap();
+        let Some(Command::Sessions {
+            command:
+                SessionsCommand::Export {
+                    session_id,
+                    format,
+                    output,
+                },
+        }) = export.command
+        else {
+            panic!("expected sessions export command");
+        };
+        assert_eq!(session_id, "session-1");
+        assert_eq!(format, SessionExportFormat::Markdown);
+        assert_eq!(output, PathBuf::from("session.md"));
+    }
+
+    #[test]
+    fn sessions_cli_parses_show_and_prune_options() {
+        let show =
+            crate::cli::Cli::try_parse_from(["kuzushi", "sessions", "show", "session-1", "--json"])
+                .unwrap();
+        assert!(matches!(
+            show.command,
+            Some(Command::Sessions {
+                command: SessionsCommand::Show {
+                    session_id,
+                    json: true,
+                },
+            }) if session_id == "session-1"
+        ));
+
+        let prune = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "sessions",
+            "prune",
+            "--older-than-days",
+            "45",
+            "--dry-run",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            prune.command,
+            Some(Command::Sessions {
+                command: SessionsCommand::Prune {
+                    older_than_days: Some(45),
+                    dry_run: true,
+                    json: true,
+                },
+            })
+        ));
+    }
+
+    #[test]
+    fn shell_session_persistence_opt_out_has_visible_alias() {
+        for flag in ["--no-session-persistence", "--ephemeral"] {
+            let cli = crate::cli::Cli::try_parse_from(["kuzushi", flag, "shell"]).unwrap();
+            assert!(cli.no_session_persistence, "flag {flag} was not applied");
+            assert!(matches!(cli.command, Some(Command::Shell { .. })));
+        }
+
+        let help = crate::cli::Cli::command().render_help().to_string();
+        assert!(help.contains("--no-session-persistence"), "{help}");
+        assert!(help.contains("--ephemeral"), "{help}");
     }
 
     #[test]
@@ -448,8 +547,8 @@ mod tests {
     fn cli_autonomy_flag_refuses_tools_above_the_rung() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-        // triage:run is a confirm action; `--autonomy hunt` must refuse it with
-        // the actionable message rather than silently running or substituting.
+        // triage:run is a Review action; deprecated `--autonomy hunt` resolves
+        // to Scan and must refuse it rather than silently running/substituting.
         let error = run_tool_command(
             "triage:run".to_string(),
             "{}".to_string(),
@@ -458,7 +557,7 @@ mod tests {
             Some(workspace.root().to_path_buf()),
             Vec::new(),
         )
-        .expect_err("triage:run must be refused under --autonomy hunt");
+        .expect_err("triage:run must be refused under deprecated --autonomy hunt alias");
         assert!(error.to_string().contains("raise posture"), "{error}");
     }
 

@@ -43,11 +43,11 @@ pub(crate) fn routing_mode(app: &ShellApp) -> RoutingMode {
 
 pub(crate) fn routing_mode_segment(app: &ShellApp) -> String {
     match routing_mode(app) {
-        RoutingMode::Shell => "mode:shell",
-        RoutingMode::Module => "mode:module",
-        RoutingMode::Agent => "mode:agent",
-        RoutingMode::Plan => "mode:plan",
-        RoutingMode::Run => "mode:run",
+        RoutingMode::Shell => "route:shell",
+        RoutingMode::Module => "route:module",
+        RoutingMode::Agent => "route:agent",
+        RoutingMode::Plan => "route:plan",
+        RoutingMode::Run => "route:run",
     }
     .to_string()
 }
@@ -102,17 +102,6 @@ pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
 
 fn interactive_only_plain_model(app: &ShellApp) -> Option<PlainInteractiveOnlyModel> {
     match &app.shell_view() {
-        ShellView::ModelPicker => Some(PlainInteractiveOnlyModel {
-            title: "MODEL PICKER",
-            next: "This picker needs an interactive terminal. Use `model <id>` or `config` in plain mode.".to_string(),
-        }),
-        ShellView::AuthMethodPicker => Some(PlainInteractiveOnlyModel {
-            title: "AUTH PICKER",
-            next: format!(
-                "This picker needs an interactive terminal. Use `auth login {}` or set credentials before relaunch.",
-                crate::app::auth_provider_label(app.router.auth_picker().provider())
-            ),
-        }),
         ShellView::TargetPicker => Some(PlainInteractiveOnlyModel {
             title: "TARGET PICKER",
             next: "This picker needs an interactive terminal. Use `target <path>` in plain mode.".to_string(),

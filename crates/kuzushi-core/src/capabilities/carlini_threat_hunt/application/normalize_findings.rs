@@ -116,7 +116,7 @@ pub(crate) fn persist_findings(
         return Ok(None);
     };
     workspace.ensure_state_dir()?;
-    let run_id = Uuid::new_v4().to_string();
+    let run_id = ctx.finding_run_id();
     store.with_run_lifecycle(&run_id, target, || {
         for finding in findings {
             store.insert_finding(&run_id, finding)?;

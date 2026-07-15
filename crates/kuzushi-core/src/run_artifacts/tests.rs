@@ -6082,7 +6082,8 @@ mod tests {
                 "scan-input.json",
                 "triage.jsonl",
                 "verify.jsonl",
-                "patch.jsonl"
+                "patch.jsonl",
+                "phase-stages.jsonl"
             ]
         );
         for spec in SCAN_PIPELINE_ARTIFACTS {

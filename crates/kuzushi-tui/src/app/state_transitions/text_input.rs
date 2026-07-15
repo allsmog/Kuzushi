@@ -5,7 +5,10 @@ impl ShellApp {
         match key.code {
             KeyCode::Char(ch) => self.insert_printable_key(ch),
             KeyCode::Backspace => self.backspace(),
-            KeyCode::Tab => self.apply_completion(),
+            KeyCode::Tab if !self.ui().keymap_overrides_action("composer", "complete") => {
+                self.apply_completion()
+            }
+            KeyCode::Tab => return InputUpdate::handled(),
             KeyCode::PageDown if self.input().is_empty() && key.modifiers.is_empty() => {
                 self.page_down_current_view();
             }
@@ -34,25 +37,42 @@ impl ShellApp {
     }
 
     pub(super) fn clear_conversation_preserving_input(&mut self) -> Vec<ShellEffect> {
-        let (saved_input, saved_cursor) = self.editor().snapshot_input();
+        let snapshot = self.editor().snapshot_input();
         let effects = self.clear_conversation();
-        self.editor_mut()
-            .restore_input_snapshot(saved_input, saved_cursor);
+        self.editor_mut().restore_input_snapshot(snapshot);
         effects
     }
 
     pub(crate) fn reduce_paste(&mut self, text: &str) -> InputUpdate {
-        if text.is_empty() || self.input_mode() == InputMode::Navigate {
+        if text.is_empty() {
             return InputUpdate::ignored();
         }
-        let normalised = normalise_paste_text(text);
-        if let Some(update) = self.handle_routed_paste(&normalised) {
-            return update;
-        }
-        if self.handle_multiline_paste(&normalised) {
+        if self.advisory().pending_confirm.is_some() {
             return InputUpdate::handled();
         }
-        self.insert_str_at_cursor(&normalised);
+        let normalised = normalise_paste_text(text);
+        self.paste_before_prompt(&normalised)
+            .unwrap_or_else(|| self.paste_into_prompt(&normalised))
+    }
+
+    fn paste_before_prompt(&mut self, text: &str) -> Option<InputUpdate> {
+        if self.paste_guided_scan_other(text) {
+            return Some(InputUpdate::handled());
+        }
+        if self.paste_operator_question_other(text) {
+            return Some(InputUpdate::handled());
+        }
+        (self.input_mode() == InputMode::Navigate).then(InputUpdate::ignored)
+    }
+
+    fn paste_into_prompt(&mut self, text: &str) -> InputUpdate {
+        if let Some(update) = self.handle_routed_paste(text) {
+            return update;
+        }
+        if self.handle_multiline_paste(text) {
+            return InputUpdate::handled();
+        }
+        self.insert_str_at_cursor(text);
         InputUpdate::handled()
     }
 
@@ -68,22 +88,22 @@ impl ShellApp {
         if !text.contains('\n') {
             return false;
         }
-        let first_line = text.lines().next().unwrap_or("");
-        let total = text.chars().count();
-        let kept = first_line.chars().count();
-        let dropped_lines = text.lines().count().saturating_sub(1);
-        self.insert_str_at_cursor(first_line);
+        let lines = text.split('\n').count();
+        let chars = text.chars().count();
+        let marker = self.editor_mut().insert_multiline_paste(text);
         self.set_warn_notice(
             "paste",
             format!(
-                "kept first line ({kept}/{total} chars); dropped {dropped_lines} more line(s). Submit, then paste the next part."
+                "stored all {lines} pasted lines ({chars} chars) as {marker}; keep the placeholder intact and press Enter once to submit"
             ),
         );
         true
     }
 
     fn capture_auth_key_paste(&mut self, text: &str) -> bool {
-        if !matches!(self.shell_view(), ShellView::AuthMethodPicker)
+        if !matches!(self.shell_view(), ShellView::Setup)
+            || self.router.setup().editor() != Some(crate::app::SetupEditor::Credentials)
+            || self.picker_prompt_focused()
             || !self.router.auth_picker().is_api_key_row()
         {
             return false;
@@ -93,6 +113,7 @@ impl ShellApp {
             return true;
         }
         self.router.auth_picker_mut().push_key_str(key);
+        self.clear_onboarding_credential_notice();
         if text.contains('\n') {
             self.set_warn_notice(
                 "paste",
@@ -102,21 +123,13 @@ impl ShellApp {
         true
     }
 
-    /// The wheel moves the FINDINGS cursor only when the Workbench has that
-    /// pane focused and there are findings; everywhere else it scrolls lines.
-    fn mouse_scrolls_findings(&self) -> bool {
-        matches!(self.shell_view(), ShellView::Workbench)
-            && self.router.workbench().focus() == crate::app::WorkbenchPane::Findings
-            && !self.findings().is_empty()
-    }
-
     pub(crate) fn reduce_mouse(&mut self, mouse: MouseEvent) -> InputUpdate {
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
                 InputUpdate::handled_if(self.handle_left_mouse_down(mouse.column, mouse.row))
             }
-            MouseEventKind::ScrollUp => self.handle_mouse_scroll(-1),
-            MouseEventKind::ScrollDown => self.handle_mouse_scroll(1),
+            MouseEventKind::ScrollUp => self.handle_mouse_scroll(-1, mouse.column, mouse.row),
+            MouseEventKind::ScrollDown => self.handle_mouse_scroll(1, mouse.column, mouse.row),
             _ => InputUpdate::ignored(),
         }
     }
@@ -127,7 +140,10 @@ impl ShellApp {
     }
 
     fn handle_left_mouse_down(&mut self, column: u16, row: u16) -> bool {
-        if let Some(pane) = self.workbench_pane_for_mouse(column, row) {
+        if self.workbench_foreground_attention_is_active() {
+            return self.shell_view() == ShellView::Workbench;
+        }
+        if let Some((pane, _)) = self.workbench_surface_for_mouse(column, row) {
             self.router.workbench_mut().set_focus(pane);
             return true;
         }
@@ -139,9 +155,11 @@ impl ShellApp {
         false
     }
 
-    fn handle_mouse_scroll(&mut self, amount: i32) -> InputUpdate {
-        if self.mouse_scrolls_findings() {
-            self.move_findings_cursor(amount);
+    fn handle_mouse_scroll(&mut self, amount: i32, column: u16, row: u16) -> InputUpdate {
+        if self.workbench_foreground_attention_is_active() {
+            return InputUpdate::handled();
+        }
+        if self.scroll_workbench_surface(amount, column, row) {
             return InputUpdate::handled();
         }
         if amount.is_negative() {
@@ -150,6 +168,34 @@ impl ShellApp {
             self.scroll_down(1);
         }
         InputUpdate::handled()
+    }
+
+    fn scroll_workbench_surface(&mut self, amount: i32, column: u16, row: u16) -> bool {
+        let Some((slot, interaction)) = self.workbench_surface_for_mouse(column, row) else {
+            return false;
+        };
+        match interaction {
+            crate::ui_view_models::SurfaceInteraction::Selectable => {
+                self.move_findings_cursor(amount)
+            }
+            crate::ui_view_models::SurfaceInteraction::Scrollable => {
+                self.router.workbench_mut().scroll_mut().shift(slot, amount)
+            }
+            crate::ui_view_models::SurfaceInteraction::Static
+            | crate::ui_view_models::SurfaceInteraction::Diagram => {}
+        }
+        true
+    }
+
+    fn workbench_foreground_attention_is_active(&self) -> bool {
+        if self.shell_view() != ShellView::Workbench {
+            return false;
+        }
+        if self.guided_scan_question_is_open() {
+            return true;
+        }
+        let phase = crate::ui_view_models::active_workbench_page(self).phase();
+        self.engagement.unresolved_phase_attempt(phase).is_some()
     }
 
     fn move_findings_cursor(&mut self, amount: i32) {
@@ -163,12 +209,21 @@ impl ShellApp {
             .set(crate::app::WorkbenchPane::Details, 0);
     }
 
-    fn workbench_pane_for_mouse(&self, column: u16, row: u16) -> Option<crate::app::WorkbenchPane> {
-        if !matches!(self.shell_view(), ShellView::Workbench) {
-            return None;
-        }
+    fn workbench_surface_for_mouse(
+        &self,
+        column: u16,
+        row: u16,
+    ) -> Option<(
+        crate::app::WorkbenchPane,
+        crate::ui_view_models::SurfaceInteraction,
+    )> {
         let viewport = self.viewport();
-        workbench_pane_for_click(column, row, viewport.columns, viewport.rows)
+        let plan = crate::renderer::workbench_phase_plan_for_app(
+            self,
+            ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
+        )?;
+        plan.hit_test(column, row)
+            .map(|surface| (surface.legacy_slot, surface.interaction))
     }
 
     fn activity_pane_for_mouse(&self, column: u16, row: u16) -> Option<crate::app::PaneFocus> {
@@ -177,122 +232,21 @@ impl ShellApp {
         }
         let session = self.activity()?;
         let viewport = self.viewport();
+        let crate::ui_view_models::ActivityViewModel::Active(model) =
+            crate::ui_view_models::activity_view_model(self)
+        else {
+            return None;
+        };
         activity_pane_for_click(
             column,
             row,
             viewport.columns,
             viewport.rows,
             session.tasks.is_empty(),
+            session.tasks.len(),
+            self.router.activity().pane_focus,
+            model.frame_layout(viewport.columns),
         )
-    }
-}
-
-fn workbench_pane_for_click(
-    column: u16,
-    row: u16,
-    width: u16,
-    height: u16,
-) -> Option<crate::app::WorkbenchPane> {
-    if width < 8 || height < 3 {
-        return None;
-    }
-    Some(workbench_click_layout(width, height).pane_for_click(column, row, width, height))
-}
-
-const WORKBENCH_FOUR_COLUMN_MIN_WIDTH: u16 = 120;
-const WORKBENCH_THREE_COLUMN_MIN_WIDTH: u16 = 100;
-const WORKBENCH_STACKED_MIN_TERMINAL_HEIGHT: u16 = 30;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum WorkbenchClickLayout {
-    FourColumn,
-    ThreeColumn,
-    Stacked,
-    ShortReview,
-}
-
-impl WorkbenchClickLayout {
-    fn pane_for_click(
-        self,
-        column: u16,
-        row: u16,
-        width: u16,
-        height: u16,
-    ) -> crate::app::WorkbenchPane {
-        match self {
-            WorkbenchClickLayout::FourColumn => {
-                four_column_workbench_pane_for_column(column, width)
-            }
-            WorkbenchClickLayout::ThreeColumn => {
-                three_column_workbench_pane_for_column(column, width)
-            }
-            WorkbenchClickLayout::Stacked => stacked_workbench_pane_for_row(row, height),
-            WorkbenchClickLayout::ShortReview => short_review_workbench_pane_for_row(row, height),
-        }
-    }
-}
-
-fn workbench_click_layout(width: u16, height: u16) -> WorkbenchClickLayout {
-    match (
-        width >= WORKBENCH_FOUR_COLUMN_MIN_WIDTH,
-        width >= WORKBENCH_THREE_COLUMN_MIN_WIDTH,
-        height >= WORKBENCH_STACKED_MIN_TERMINAL_HEIGHT,
-    ) {
-        (true, _, _) => WorkbenchClickLayout::FourColumn,
-        (_, true, _) => WorkbenchClickLayout::ThreeColumn,
-        (_, _, true) => WorkbenchClickLayout::Stacked,
-        _ => WorkbenchClickLayout::ShortReview,
-    }
-}
-
-fn four_column_workbench_pane_for_column(column: u16, width: u16) -> crate::app::WorkbenchPane {
-    let source = (width * 14 / 100).clamp(18, 32);
-    let findings = (width * 23 / 100).clamp(34, 56);
-    let mut center = (width * 30 / 100).clamp(32, 76);
-    let details_min = 44;
-    let fixed = source + findings + center;
-    if fixed + details_min > width {
-        let reducible = center.saturating_sub(24);
-        let needed = fixed + details_min - width;
-        center = center.saturating_sub(needed.min(reducible));
-    }
-    if column < source {
-        crate::app::WorkbenchPane::Source
-    } else if column < source + center {
-        crate::app::WorkbenchPane::Center
-    } else if column < source + center + findings {
-        crate::app::WorkbenchPane::Findings
-    } else {
-        crate::app::WorkbenchPane::Details
-    }
-}
-
-fn three_column_workbench_pane_for_column(column: u16, width: u16) -> crate::app::WorkbenchPane {
-    let center = (width * 34 / 100).clamp(32, 52);
-    let findings = (width * 30 / 100).clamp(30, 44);
-    if column < center {
-        crate::app::WorkbenchPane::Center
-    } else if column < center + findings {
-        crate::app::WorkbenchPane::Findings
-    } else {
-        crate::app::WorkbenchPane::Details
-    }
-}
-
-fn stacked_workbench_pane_for_row(row: u16, height: u16) -> crate::app::WorkbenchPane {
-    match row.saturating_mul(4) / height.max(1) {
-        0 => crate::app::WorkbenchPane::Source,
-        1 => crate::app::WorkbenchPane::Center,
-        2 => crate::app::WorkbenchPane::Findings,
-        _ => crate::app::WorkbenchPane::Details,
-    }
-}
-
-fn short_review_workbench_pane_for_row(row: u16, height: u16) -> crate::app::WorkbenchPane {
-    if row < height / 2 {
-        crate::app::WorkbenchPane::Findings
-    } else {
-        crate::app::WorkbenchPane::Details
     }
 }
 
@@ -302,144 +256,73 @@ fn activity_pane_for_click(
     width: u16,
     height: u16,
     tasks_empty: bool,
+    task_rows: usize,
+    focused: crate::app::PaneFocus,
+    frame_layout: crate::ui_view_models::ActivityFrameLayout,
 ) -> Option<crate::app::PaneFocus> {
-    if width < 8 || height < 6 {
-        return None;
-    }
-    let layout = crate::ui_view_models::activity_frame_layout();
-    if !activity_body_contains_row(row, height, layout.header_rows, layout.footer_rows) {
-        return None;
-    }
-    let dag_percent = activity_dag_percent(width, layout);
-    Some(activity_body_pane_for_column(
-        column,
+    let (body_height, body_row) = activity_click_body_position(
+        row,
         width,
-        dag_percent,
-        tasks_empty,
-    ))
-}
-
-fn activity_dag_percent(width: u16, layout: crate::ui_view_models::ActivityFrameLayout) -> u16 {
-    if width >= layout.compact_breakpoint {
-        return (layout.wide_dag_width.saturating_mul(100) / width).max(1);
-    }
-    layout.compact_dag_percent
-}
-
-fn activity_body_contains_row(row: u16, height: u16, header_rows: u16, footer_rows: u16) -> bool {
-    row >= header_rows && row < height.saturating_sub(footer_rows)
-}
-
-fn activity_body_pane_for_column(
-    column: u16,
-    width: u16,
-    dag_percent: u16,
-    tasks_empty: bool,
-) -> crate::app::PaneFocus {
+        height,
+        frame_layout.header_rows,
+        frame_layout.footer_rows,
+    )?;
     if tasks_empty {
-        return crate::app::PaneFocus::Right;
+        return Some(crate::app::PaneFocus::Right);
     }
-    let task_width = (width * dag_percent / 100).max(1);
-    if column < task_width {
+    let layout = crate::ui_view_models::activity_pane_layout(width, body_height, task_rows);
+    Some(activity_pane_for_layout(column, body_row, focused, layout))
+}
+
+fn activity_click_body_position(
+    row: u16,
+    width: u16,
+    height: u16,
+    header_rows: u16,
+    footer_rows: u16,
+) -> Option<(u16, u16)> {
+    if width < 8 || height < 6 || !activity_body_contains_row(row, height, header_rows, footer_rows)
+    {
+        return None;
+    }
+    let body_height = height
+        .saturating_sub(header_rows)
+        .saturating_sub(footer_rows);
+    Some((body_height, row.saturating_sub(header_rows)))
+}
+
+fn activity_pane_for_layout(
+    column: u16,
+    body_row: u16,
+    focused: crate::app::PaneFocus,
+    layout: crate::ui_view_models::ActivityPaneLayout,
+) -> crate::app::PaneFocus {
+    match layout {
+        crate::ui_view_models::ActivityPaneLayout::SideBySide { task_width } => {
+            pane_before_boundary(column, task_width)
+        }
+        crate::ui_view_models::ActivityPaneLayout::Stacked { task_height } => {
+            pane_before_boundary(body_row, task_height)
+        }
+        crate::ui_view_models::ActivityPaneLayout::Focused => focused,
+    }
+}
+
+fn pane_before_boundary(position: u16, boundary: u16) -> crate::app::PaneFocus {
+    if position < boundary {
         crate::app::PaneFocus::Left
     } else {
         crate::app::PaneFocus::Right
     }
 }
 
+fn activity_body_contains_row(row: u16, height: u16, header_rows: u16, footer_rows: u16) -> bool {
+    row >= header_rows && row < height.saturating_sub(footer_rows)
+}
+
 fn normalise_paste_text(text: &str) -> String {
-    text.replace("\r\n", "\n")
-        .chars()
-        .filter(|ch| *ch != '\r')
-        .collect()
+    text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn four_column_workbench_clicks_map_to_horizontal_panes() {
-        assert_eq!(
-            workbench_pane_for_click(2, 10, 120, 24),
-            Some(crate::app::WorkbenchPane::Source)
-        );
-        assert_eq!(
-            workbench_pane_for_click(20, 10, 120, 24),
-            Some(crate::app::WorkbenchPane::Center)
-        );
-        assert_eq!(
-            workbench_pane_for_click(50, 10, 120, 24),
-            Some(crate::app::WorkbenchPane::Findings)
-        );
-        assert_eq!(
-            workbench_pane_for_click(90, 10, 120, 24),
-            Some(crate::app::WorkbenchPane::Details)
-        );
-    }
-
-    #[test]
-    fn three_column_workbench_clicks_skip_source() {
-        assert_eq!(
-            workbench_pane_for_click(2, 10, 110, 24),
-            Some(crate::app::WorkbenchPane::Center)
-        );
-        assert_eq!(
-            workbench_pane_for_click(45, 10, 110, 24),
-            Some(crate::app::WorkbenchPane::Findings)
-        );
-        assert_eq!(
-            workbench_pane_for_click(90, 10, 110, 24),
-            Some(crate::app::WorkbenchPane::Details)
-        );
-    }
-
-    #[test]
-    fn narrow_tall_workbench_clicks_map_to_vertical_panes() {
-        assert_eq!(
-            workbench_pane_for_click(10, 2, 80, 30),
-            Some(crate::app::WorkbenchPane::Source)
-        );
-        assert_eq!(
-            workbench_pane_for_click(10, 10, 80, 30),
-            Some(crate::app::WorkbenchPane::Center)
-        );
-        assert_eq!(
-            workbench_pane_for_click(10, 18, 80, 30),
-            Some(crate::app::WorkbenchPane::Findings)
-        );
-        assert_eq!(
-            workbench_pane_for_click(10, 26, 80, 30),
-            Some(crate::app::WorkbenchPane::Details)
-        );
-    }
-
-    #[test]
-    fn narrow_short_workbench_clicks_map_to_review_panes() {
-        assert_eq!(
-            workbench_pane_for_click(10, 8, 80, 24),
-            Some(crate::app::WorkbenchPane::Findings)
-        );
-        assert_eq!(
-            workbench_pane_for_click(10, 18, 80, 24),
-            Some(crate::app::WorkbenchPane::Details)
-        );
-    }
-
-    #[test]
-    fn activity_clicks_map_to_visible_panes() {
-        assert_eq!(
-            activity_pane_for_click(4, 4, 120, 40, false),
-            Some(crate::app::PaneFocus::Left)
-        );
-        assert_eq!(
-            activity_pane_for_click(80, 4, 120, 40, false),
-            Some(crate::app::PaneFocus::Right)
-        );
-        assert_eq!(
-            activity_pane_for_click(4, 4, 120, 40, true),
-            Some(crate::app::PaneFocus::Right)
-        );
-        assert_eq!(activity_pane_for_click(4, 1, 120, 40, false), None);
-    }
-}
+mod tests;

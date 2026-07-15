@@ -9,7 +9,7 @@ pub(crate) fn uaf_hunt_module() -> BuiltinModule {
          by walking the clang call graph between allocation and free sites.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Scan,
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Required,
             ),

@@ -677,7 +677,7 @@ mod tests {
     fn planning_picker_review_key_opens_selected_agentic_prompt() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        app.open_phase_picker(WorkflowPhase::Hunt);
+        app.open_phase_picker(WorkflowPhase::Scan);
         app.engagement
             .planning_picker_mut()
             .selected_mut()
@@ -707,7 +707,7 @@ mod tests {
     fn planning_prompt_review_never_falls_back_to_another_selected_row() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        app.open_phase_picker(WorkflowPhase::Hunt);
+        app.open_phase_picker(WorkflowPhase::Scan);
         let semgrep_index = app
             .engagement
             .planning_picker()

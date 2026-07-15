@@ -1,27 +1,149 @@
 use super::*;
 use std::path::Component;
 
+const MAX_PATCH_TOUCHED_FILE_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewedPatchApplyReport {
     pub checked: bool,
     pub applied: bool,
     pub touched_paths: Vec<String>,
+    pub touched_files: Vec<crate::findings::PatchLifecycleFile>,
+    pub diff_hash: String,
+    pub base_commit: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewedPatchApplyPlan {
+    pub touched_paths: Vec<String>,
+    pub touched_files: Vec<crate::findings::PatchLifecycleFile>,
+    pub diff_hash: String,
+    pub source_commit: String,
 }
 
 pub fn apply_reviewed_patch(repo_root: &Path, diff: &str) -> Result<ReviewedPatchApplyReport> {
     let control = unattended_patch_control();
     ensure_git_repository(repo_root, control)?;
+    let source_commit = resolve_head_commit(repo_root, control)?;
+    let plan = prepare_reviewed_patch_apply(repo_root, diff, &source_commit)?;
+    apply_prepared_reviewed_patch(repo_root, diff, &plan)
+}
+
+pub fn prepare_reviewed_patch_apply(
+    repo_root: &Path,
+    diff: &str,
+    source_commit: &str,
+) -> Result<ReviewedPatchApplyPlan> {
+    let control = unattended_patch_control();
+    verify_patch_source_snapshot(repo_root, source_commit, control)?;
     let touched_paths = validated_diff_paths(diff)?;
-    run_git_with_input(repo_root, &["apply", "--check"], diff, control).map_err(|error| {
-        anyhow::anyhow!("reviewed patch did not pass `git apply --check`: {error:#}")
-    })?;
+    let before_hashes = touched_path_hashes(repo_root, &touched_paths)?;
+    check_reviewed_patch(repo_root, diff, control)?;
+    Ok(ReviewedPatchApplyPlan {
+        touched_files: lifecycle_files(&touched_paths, &before_hashes, &vec![None; touched_paths.len()]),
+        touched_paths,
+        diff_hash: patch_diff_hash(diff),
+        source_commit: source_commit.to_string(),
+    })
+}
+
+pub fn apply_prepared_reviewed_patch(
+    repo_root: &Path,
+    diff: &str,
+    plan: &ReviewedPatchApplyPlan,
+) -> Result<ReviewedPatchApplyReport> {
+    anyhow::ensure!(
+        patch_diff_hash(diff) == plan.diff_hash,
+        "reviewed patch changed after application intent was recorded"
+    );
+    let control = unattended_patch_control();
+    verify_patch_source_snapshot(repo_root, &plan.source_commit, control)?;
+    ensure_planned_files_unchanged(repo_root, plan)?;
+    check_reviewed_patch(repo_root, diff, control)?;
     run_git_with_input(repo_root, &["apply"], diff, control)
         .map_err(|error| anyhow::anyhow!("reviewed patch failed during `git apply`: {error:#}"))?;
+    let after_hashes = touched_path_hashes(repo_root, &plan.touched_paths)?;
     Ok(ReviewedPatchApplyReport {
         checked: true,
         applied: true,
-        touched_paths,
+        touched_paths: plan.touched_paths.clone(),
+        touched_files: lifecycle_files(
+            &plan.touched_paths,
+            &plan
+                .touched_files
+                .iter()
+                .map(|file| file.before_hash.clone())
+                .collect::<Vec<_>>(),
+            &after_hashes,
+        ),
+        diff_hash: plan.diff_hash.clone(),
+        base_commit: Some(plan.source_commit.clone()),
     })
+}
+
+fn check_reviewed_patch(
+    repo_root: &Path,
+    diff: &str,
+    control: PatchCommandControl<'_>,
+) -> Result<()> {
+    run_git_with_input(repo_root, &["apply", "--check"], diff, control)
+        .map(|_| ())
+        .map_err(|error| anyhow::anyhow!("reviewed patch did not pass `git apply --check`: {error:#}"))
+}
+
+fn ensure_planned_files_unchanged(repo_root: &Path, plan: &ReviewedPatchApplyPlan) -> Result<()> {
+    let current = touched_path_hashes(repo_root, &plan.touched_paths)?;
+    let expected = plan
+        .touched_files
+        .iter()
+        .map(|file| file.before_hash.clone())
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        current == expected,
+        "reviewed patch target files changed after application intent was recorded"
+    );
+    Ok(())
+}
+
+fn lifecycle_files(
+    paths: &[String],
+    before_hashes: &[Option<String>],
+    after_hashes: &[Option<String>],
+) -> Vec<crate::findings::PatchLifecycleFile> {
+    paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| crate::findings::PatchLifecycleFile {
+            path: path.clone(),
+            before_hash: before_hashes[index].clone(),
+            after_hash: after_hashes[index].clone(),
+        })
+        .collect()
+}
+
+fn patch_diff_hash(diff: &str) -> String {
+    crate::identity::hash_parts("kuzushi.patch.diff.v1", &[diff.as_bytes()]).to_string()
+}
+
+fn touched_path_hashes(repo_root: &Path, paths: &[String]) -> Result<Vec<Option<String>>> {
+    paths
+        .iter()
+        .map(|path| hash_optional_file(repo_root, Path::new(path)))
+        .collect()
+}
+
+pub(crate) fn hash_optional_file(root: &Path, path: &Path) -> Result<Option<String>> {
+    match crate::bounded_file::read_regular_bytes_within(
+        root,
+        path,
+        MAX_PATCH_TOUCHED_FILE_BYTES,
+    ) {
+        Ok(bytes) => Ok(Some(
+            crate::identity::hash_parts("kuzushi.patch.file.v1", &[&bytes]).to_string(),
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("Could not read {}", path.display())),
+    }
 }
 
 fn validated_diff_paths(diff: &str) -> Result<Vec<String>> {
@@ -165,6 +287,40 @@ mod tests {
         .to_string();
 
         assert!(error.contains(".git"));
+    }
+
+    #[test]
+    fn preparation_is_source_bound_and_does_not_mutate() {
+        if git_is_unavailable() {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path();
+        initialize_repo(repo);
+        let source = resolve_head_commit(repo, unattended_patch_control()).unwrap();
+
+        let plan = prepare_reviewed_patch_apply(repo, demo_diff(), &source).unwrap();
+
+        assert_eq!(plan.source_commit, source);
+        assert_eq!(std::fs::read_to_string(repo.join("demo.txt")).unwrap(), "before\n");
+    }
+
+    #[test]
+    fn preparation_rejects_a_different_generation_commit() {
+        if git_is_unavailable() {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path();
+        initialize_repo(repo);
+        let wrong_source = "0123456789012345678901234567890123456789";
+
+        let error = prepare_reviewed_patch_apply(repo, demo_diff(), wrong_source)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("source commit changed"));
+        assert_eq!(std::fs::read_to_string(repo.join("demo.txt")).unwrap(), "before\n");
     }
 
     fn initialize_repo(repo: &Path) {

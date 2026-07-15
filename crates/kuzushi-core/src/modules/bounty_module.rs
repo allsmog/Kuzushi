@@ -12,7 +12,7 @@ pub(crate) fn bounty_module() -> BuiltinModule {
         "Bug-bounty intake: import Burp Suite XML and HAR captures into the findings ledger as http-request evidence.",
         tools_with_policy(
             workspace_policy(
-                ToolPhase::Map,
+                ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             ),

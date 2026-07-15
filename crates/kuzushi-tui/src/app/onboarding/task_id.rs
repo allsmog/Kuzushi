@@ -1,9 +1,9 @@
 use kuzushi_core::WorkflowPhase;
 
-/// Every task an operator can select across the four engagement phases. Each
+/// Every task an operator can select across the five engagement phases. Each
 /// variant maps to a concrete tool (or a tool + option) and, for the Map-phase
 /// tasks that build reusable artifacts, an artifact path used for prior-run
-/// detection. Hunt/Confirm/Fix tasks are actions (no cached artifact).
+/// detection. Scan/Review/Prove/Fix tasks are actions (no cached artifact).
 ///
 /// Ordering of variants is the canonical UI/run order, grouped by phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -22,7 +22,7 @@ pub enum PlanningTaskId {
     /// source-security phase picker.
     #[allow(dead_code)]
     ReverseEngineerBinary,
-    // 崩 KUZUSHI · hunt — find vulnerabilities.
+    // Scan — find candidate vulnerabilities and security signals.
     ScanSecrets,
     ScanSemgrep,
     ScanCodeql,
@@ -33,8 +33,9 @@ pub enum PlanningTaskId {
     /// Retained only to decode older saved plans; superseded by the supported
     /// systems/dataflow engines and no longer offered by Planning.
     HuntUseAfterFree,
-    // 作 TSUKURI · confirm — triage & verify.
+    // Review — triage and decide candidate findings.
     TriageFindings,
+    // Prove — verify actionable findings with empirical evidence.
     VerifyFindings,
     // 掛 KAKE · fix — patch & report.
     PatchFindings,
@@ -88,8 +89,9 @@ impl PlanningTaskId {
             | ThreatIntelCves
             | ReverseEngineerBinary => WorkflowPhase::Map,
             ScanSecrets | ScanSemgrep | ScanCodeql | ScanAgenticSast | HuntTaint
-            | HuntThreatModel | HuntSystems | HuntUseAfterFree => WorkflowPhase::Hunt,
-            TriageFindings | VerifyFindings => WorkflowPhase::Confirm,
+            | HuntThreatModel | HuntSystems | HuntUseAfterFree => WorkflowPhase::Scan,
+            TriageFindings => WorkflowPhase::Review,
+            VerifyFindings => WorkflowPhase::Prove,
             PatchFindings | BuildReport => WorkflowPhase::Fix,
         }
     }
@@ -151,6 +153,16 @@ impl PlanningTaskId {
         }
     }
 
+    /// Stable Activity identity for one planned capability invocation.
+    /// Distinct planning tasks may intentionally dispatch the same tool.
+    pub(crate) fn activity_task_id(self) -> String {
+        match self {
+            Self::BuildStrideThreatModel => "threat-model:build[stride]".to_string(),
+            Self::BuildPastaThreatModel => "threat-model:build[pasta]".to_string(),
+            _ => self.tool_name().to_string(),
+        }
+    }
+
     /// Whether the task requires an agent runtime. Used to surface a
     /// "model-backed" / "no model cost" hint next to each row.
     pub fn is_model_backed(self) -> bool {
@@ -177,7 +189,7 @@ impl PlanningTaskId {
 
     /// Relative artifact path under the workspace root used to determine
     /// whether the task has already been run. `None` for action tasks
-    /// (Hunt/Confirm/Fix and reverse-engineering) that don't cache a
+    /// (Scan/Review/Prove/Fix and reverse-engineering) that don't cache a
     /// reusable artifact at a fixed path.
     pub fn artifact_relative_path(self) -> Option<&'static str> {
         use PlanningTaskId::*;
@@ -276,8 +288,9 @@ mod tests {
             };
             let expected = match task.phase() {
                 WorkflowPhase::Map => ToolPhase::Map,
-                WorkflowPhase::Hunt => ToolPhase::Hunt,
-                WorkflowPhase::Confirm => ToolPhase::Confirm,
+                WorkflowPhase::Scan => ToolPhase::Scan,
+                WorkflowPhase::Review => ToolPhase::Review,
+                WorkflowPhase::Prove => ToolPhase::Prove,
                 WorkflowPhase::Fix => ToolPhase::Fix,
             };
             assert_eq!(

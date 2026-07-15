@@ -1,33 +1,12 @@
-//! Draws the threat model's data-flow diagram as ASCII boxes grouped by trust
-//! zone, with the flows listed as labelled arrows below. Pure projection over
-//! the persisted `threat-model.json` (`/dfd/{nodes,flows}`); Threat and
-//! Workbench consume the same role-tagged lines.
-
-#[cfg(test)]
-use super::activity_feed_rows::{ActivityFeedPaneRow, ActivityFeedRowTone};
+//! Shared parser for the persisted threat-model DFD.
+//!
+//! Renderers consume the resulting node/flow model through the contextual DFD
+//! deck; the retired whole-screen Workbench ASCII projection no longer owns a
+//! second diagram representation.
 
 const MAX_NODES: usize = 18;
 const MAX_FLOWS: usize = 14;
-const INDENT: usize = 2;
-const BOX_GAP: usize = 2;
-
-/// The semantic role of a diagram line, so each call site can pick a tone/style.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DfdLineKind {
-    Title,
-    Zone,
-    Node,
-    Boundary,
-    Flow,
-    Summary,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DfdDiagramLine {
-    pub(crate) text: String,
-    pub(crate) kind: DfdLineKind,
-}
-
 pub(crate) struct DfdNode {
     pub(crate) id: String,
     pub(crate) name: String,
@@ -36,91 +15,12 @@ pub(crate) struct DfdNode {
     pub(crate) kind: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DfdFlow {
     pub(crate) source: String,
     pub(crate) target: String,
     pub(crate) label: String,
     pub(crate) crosses: bool,
-}
-
-/// The persisted threat model's DFD as role-tagged lines, or `None` when no
-/// parseable artifact with nodes exists. Renderer-facing entry point so views
-/// never load or parse the artifact themselves.
-pub(crate) fn threat_dfd_view(app: &crate::ShellApp, width: usize) -> Option<Vec<DfdDiagramLine>> {
-    let doc = super::threat_model_doc(app)?;
-    threat_dfd_diagram_lines(&doc, width)
-}
-
-/// Render the DFD as role-tagged lines, or `None` when the artifact has no nodes.
-pub(crate) fn threat_dfd_diagram_lines(
-    doc: &serde_json::Value,
-    width: usize,
-) -> Option<Vec<DfdDiagramLine>> {
-    let nodes = parse_nodes(doc);
-    if nodes.is_empty() {
-        return None;
-    }
-    let flows = parse_flows(doc, &nodes);
-    let zones = zones_in_order(&nodes);
-    let crossings = flows.iter().filter(|flow| flow.crosses).count();
-
-    let mut lines = vec![title_line(nodes.len(), flows.len(), width)];
-    lines.extend(zone_bands(&nodes, &zones, width));
-    lines.extend(flow_lines(&flows));
-    lines.push(summary_line(zones.len(), flows.len(), crossings));
-    Some(lines)
-}
-
-/// The same diagram, mapped to Activity OUTPUT-pane feed rows.
-#[cfg(test)]
-pub(crate) fn threat_dfd_diagram_feed_rows(
-    doc: &serde_json::Value,
-    width: usize,
-) -> Vec<ActivityFeedPaneRow> {
-    match threat_dfd_diagram_lines(doc, width) {
-        Some(lines) => lines.into_iter().map(diagram_feed_row).collect(),
-        None => Vec::new(),
-    }
-}
-
-/// Title + summary only — for panes too narrow to draw the node boxes.
-/// A clipped box diagram reads as noise; the counts still orient.
-#[cfg(test)]
-pub(crate) fn threat_dfd_summary_feed_rows(
-    doc: &serde_json::Value,
-    width: usize,
-) -> Vec<ActivityFeedPaneRow> {
-    match threat_dfd_diagram_lines(doc, width) {
-        Some(lines) => lines
-            .into_iter()
-            .filter(|line| matches!(line.kind, DfdLineKind::Title | DfdLineKind::Summary))
-            .map(diagram_feed_row)
-            .collect(),
-        None => Vec::new(),
-    }
-}
-
-#[cfg(test)]
-fn diagram_feed_row(line: DfdDiagramLine) -> ActivityFeedPaneRow {
-    ActivityFeedPaneRow {
-        text: line.text,
-        tone: diagram_tone(line.kind),
-    }
-}
-
-#[cfg(test)]
-fn diagram_tone(kind: DfdLineKind) -> ActivityFeedRowTone {
-    match kind {
-        DfdLineKind::Title => ActivityFeedRowTone::Primary,
-        DfdLineKind::Zone => ActivityFeedRowTone::Success,
-        DfdLineKind::Boundary => ActivityFeedRowTone::Warn,
-        DfdLineKind::Flow => ActivityFeedRowTone::Muted,
-        DfdLineKind::Node | DfdLineKind::Summary => ActivityFeedRowTone::Subtle,
-    }
-}
-
-fn line(kind: DfdLineKind, text: String) -> DfdDiagramLine {
-    DfdDiagramLine { text, kind }
 }
 
 pub(crate) fn parse_nodes(doc: &serde_json::Value) -> Vec<DfdNode> {
@@ -185,140 +85,6 @@ pub(crate) fn zones_in_order(nodes: &[DfdNode]) -> Vec<String> {
     zones
 }
 
-fn zone_bands(nodes: &[DfdNode], zones: &[String], width: usize) -> Vec<DfdDiagramLine> {
-    let mut out = Vec::new();
-    for (index, zone) in zones.iter().enumerate() {
-        if index > 0 {
-            out.push(line(DfdLineKind::Boundary, boundary_text(width)));
-        }
-        out.extend(zone_band_lines(zone, &names_in_zone(nodes, zone), width));
-    }
-    out
-}
-
-fn zone_band_lines(zone: &str, names: &[String], width: usize) -> Vec<DfdDiagramLine> {
-    let mut out = vec![line(DfdLineKind::Zone, zone_rule(zone, width))];
-    for chunk in pack_boxes(names, width) {
-        let [top, mid, bot] = box_triplet(&chunk);
-        out.push(line(DfdLineKind::Node, top));
-        out.push(line(DfdLineKind::Node, mid));
-        out.push(line(DfdLineKind::Node, bot));
-    }
-    out
-}
-
-fn box_triplet(names: &[String]) -> [String; 3] {
-    let indent = " ".repeat(INDENT);
-    let mut rows = [indent.clone(), indent.clone(), indent];
-    for (index, name) in names.iter().enumerate() {
-        let gap = " ".repeat(if index > 0 { BOX_GAP } else { 0 });
-        let inner = name.chars().count() + 2;
-        rows[0].push_str(&format!("{gap}┌{}┐", "─".repeat(inner)));
-        rows[1].push_str(&format!("{gap}│ {name} │"));
-        rows[2].push_str(&format!("{gap}└{}┘", "─".repeat(inner)));
-    }
-    rows
-}
-
-fn pack_boxes(names: &[String], width: usize) -> Vec<Vec<String>> {
-    let budget = width.saturating_sub(INDENT).max(box_width("x"));
-    let mut rows: Vec<Vec<String>> = Vec::new();
-    let mut current: Vec<String> = Vec::new();
-    let mut used = 0;
-    for name in names {
-        let cost = box_width(name) + gap_before(current.is_empty());
-        if !current.is_empty() && used + cost > budget {
-            rows.push(std::mem::take(&mut current));
-            used = 0;
-        }
-        used += box_width(name) + gap_before(current.is_empty());
-        current.push(name.clone());
-    }
-    if !current.is_empty() {
-        rows.push(current);
-    }
-    rows
-}
-
-fn gap_before(is_first: bool) -> usize {
-    if is_first {
-        0
-    } else {
-        BOX_GAP
-    }
-}
-
-fn box_width(name: &str) -> usize {
-    name.chars().count() + 4
-}
-
-fn flow_lines(flows: &[DfdFlow]) -> Vec<DfdDiagramLine> {
-    if flows.is_empty() {
-        return Vec::new();
-    }
-    let mut out = vec![line(DfdLineKind::Zone, "FLOWS".to_string())];
-    out.extend(
-        flows
-            .iter()
-            .map(|flow| line(DfdLineKind::Flow, flow_text(flow))),
-    );
-    out
-}
-
-fn flow_text(flow: &DfdFlow) -> String {
-    let arrow = if flow.crosses {
-        "══▶"
-    } else {
-        "──▶"
-    };
-    if flow.label.is_empty() {
-        format!("  {} {arrow} {}", flow.source, flow.target)
-    } else {
-        format!(
-            "  {} {arrow} {}  · {}",
-            flow.source, flow.target, flow.label
-        )
-    }
-}
-
-fn title_line(node_count: usize, flow_count: usize, width: usize) -> DfdDiagramLine {
-    let label = format!("DATA-FLOW DIAGRAM · {node_count} nodes · {flow_count} flows");
-    line(DfdLineKind::Title, rule(&label, width))
-}
-
-fn summary_line(zone_count: usize, flow_count: usize, crossings: usize) -> DfdDiagramLine {
-    line(
-        DfdLineKind::Summary,
-        format!("  {zone_count} zones · {flow_count} flows · {crossings} boundary crossings"),
-    )
-}
-
-fn zone_rule(zone: &str, width: usize) -> String {
-    rule(&zone.to_uppercase(), width)
-}
-
-fn rule(label: &str, width: usize) -> String {
-    let prefix = format!("── {label} ");
-    let used = prefix.chars().count();
-    let fill = width.saturating_sub(used).min(40);
-    format!("{prefix}{}", "─".repeat(fill))
-}
-
-fn boundary_text(width: usize) -> String {
-    let label = " trust boundary ";
-    let dashes = width.saturating_sub(label.chars().count() + INDENT) / 2;
-    let side = "· ".repeat(dashes / 2);
-    format!("  {side}{label}{side}")
-}
-
-fn names_in_zone(nodes: &[DfdNode], zone: &str) -> Vec<String> {
-    nodes
-        .iter()
-        .filter(|node| node.zone == zone)
-        .map(|node| node.name.clone())
-        .collect()
-}
-
 fn zone_of(nodes: &[DfdNode], id: &str) -> String {
     nodes
         .iter()
@@ -361,62 +127,26 @@ mod tests {
     }
 
     #[test]
-    fn diagram_lines_draw_boxes_zones_and_flows() {
-        let lines = threat_dfd_diagram_lines(&sample_doc(), 70).expect("diagram");
-        let kinds: Vec<DfdLineKind> = lines.iter().map(|l| l.kind).collect();
+    fn parser_preserves_nodes_flows_and_trust_zones_for_the_contextual_deck() {
+        let doc = sample_doc();
+        let nodes = parse_nodes(&doc);
+        let flows = parse_flows(&doc, &nodes);
 
-        assert_eq!(lines[0].kind, DfdLineKind::Title);
-        assert!(lines[0].text.contains("3 nodes · 2 flows"));
-        assert!(kinds.contains(&DfdLineKind::Boundary));
-        assert!(lines
-            .iter()
-            .any(|l| l.text.contains("┌") && l.text.contains("┐")));
-        assert!(lines.iter().any(|l| l.text.contains("│ Browser │")));
-        assert!(lines
-            .iter()
-            .any(|l| l.kind == DfdLineKind::Flow && l.text.contains("Browser ══▶ API server")));
-        let summary = lines.last().expect("summary");
-        assert_eq!(summary.kind, DfdLineKind::Summary);
-        assert!(summary
-            .text
-            .contains("3 zones · 2 flows · 2 boundary crossings"));
-    }
-
-    #[test]
-    fn diagram_lines_none_without_nodes() {
-        assert!(threat_dfd_diagram_lines(&json!({}), 70).is_none());
-        assert!(threat_dfd_diagram_lines(&json!({"dfd": {"nodes": []}}), 70).is_none());
-    }
-
-    #[test]
-    fn summary_feed_rows_keep_only_title_and_counts() {
-        let rows = threat_dfd_summary_feed_rows(&sample_doc(), 30);
-        assert_eq!(rows.len(), 2, "title + summary only: {rows:?}");
-        assert!(rows[0].text.contains("DATA-FLOW DIAGRAM"));
-        assert!(rows[1].text.contains("3 zones · 2 flows"));
-        assert!(
-            !rows.iter().any(|row| row.text.contains('┌')),
-            "no clipped box drawings in the compact form"
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(
+            zones_in_order(&nodes),
+            ["internet", "app-tier", "data-tier"]
         );
+        assert_eq!(flows.len(), 2);
+        assert_eq!(flows[0].source, "Browser");
+        assert_eq!(flows[0].target, "API server");
+        assert_eq!(flows[0].label, "https");
+        assert!(flows.iter().all(|flow| flow.crosses));
     }
 
     #[test]
-    fn feed_rows_carry_tones() {
-        let rows = threat_dfd_diagram_feed_rows(&sample_doc(), 70);
-        assert!(!rows.is_empty());
-        assert_eq!(rows[0].tone, ActivityFeedRowTone::Primary);
-        assert!(rows
-            .iter()
-            .any(|row| row.tone == ActivityFeedRowTone::Success && row.text.contains("INTERNET")));
-    }
-
-    #[test]
-    fn boxes_wrap_to_width() {
-        let names: Vec<String> = (0..6).map(|i| format!("node{i}")).collect();
-        let rows = pack_boxes(&names, 30);
-        assert!(
-            rows.len() > 1,
-            "narrow width should wrap boxes onto multiple rows"
-        );
+    fn parser_is_empty_when_the_artifact_has_no_nodes() {
+        assert!(parse_nodes(&json!({})).is_empty());
+        assert!(parse_nodes(&json!({"dfd": {"nodes": []}})).is_empty());
     }
 }

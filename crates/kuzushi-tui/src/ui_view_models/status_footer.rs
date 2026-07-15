@@ -22,10 +22,19 @@ pub(crate) fn status_footer_model(app: &ShellApp) -> StatusFooterModel {
     StatusFooterModel {
         left_segments: status_footer_left_segments(app),
         right_segments: status_footer_right_segments(app, warning),
-        compact_left_segments: vec![routing_mode_segment(app), view_status_segment(app)],
+        compact_left_segments: compact_status_footer_left_segments(app),
         compact_right_segments: compact_status_footer_right_segments(app, warning),
         warning,
     }
+}
+
+fn compact_status_footer_left_segments(app: &ShellApp) -> Vec<String> {
+    let mut segments = vec![routing_mode_segment(app)];
+    if let Some(attention) = attention_footer_segment(app) {
+        segments.push(attention);
+    }
+    segments.push(view_status_segment(app));
+    segments
 }
 
 fn status_footer_left_segments(app: &ShellApp) -> Vec<String> {
@@ -55,7 +64,7 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
     // chip (M2 §2.1) is kept here — it's live gating state, not a session
     // fact, so it belongs with routing/view rather than the cockpit strip.
     let mut segments = vec![routing_mode_segment(app)];
-    // Engagement orientation (M-journey): the same `組 map 1/4` phase chip used
+    // Engagement orientation (M-journey): the same `組 map 1/5` phase chip used
     // by the Workbench keeps the current journey step visible on every view,
     // not just inside the launch walker.
     segments.extend(optional_idle_chips(app));
@@ -64,9 +73,13 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
 }
 
 fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
+    let onboarding = setup_is_in_progress(app);
     [
-        journey_footer_segment(app),
-        autonomy_footer_segment(app),
+        attention_footer_segment(app),
+        (!onboarding).then(|| journey_footer_segment(app)).flatten(),
+        (!onboarding)
+            .then(|| autonomy_footer_segment(app))
+            .flatten(),
         review_conflict_footer_segment(app),
         workspace_stale_footer_segment(app),
     ]
@@ -75,11 +88,15 @@ fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
 }
 
 fn optional_idle_chips(app: &ShellApp) -> impl Iterator<Item = String> {
+    let onboarding = setup_is_in_progress(app);
     [
-        journey_footer_segment(app),
+        attention_footer_segment(app),
+        (!onboarding).then(|| journey_footer_segment(app)).flatten(),
         // The autonomy dial rides beside the phase chip — the always-visible
-        // master control (`⛭ 作 confirm`, with `⚠` when it throttles the walker).
-        autonomy_footer_segment(app),
+        // master control (`⛭ 作 prove`, with `⚠` when it throttles the walker).
+        (!onboarding)
+            .then(|| autonomy_footer_segment(app))
+            .flatten(),
         scope_footer_segment(app),
         project_scope_footer_segment(app),
         review_conflict_footer_segment(app),
@@ -87,6 +104,15 @@ fn optional_idle_chips(app: &ShellApp) -> impl Iterator<Item = String> {
     ]
     .into_iter()
     .flatten()
+}
+
+fn attention_footer_segment(app: &ShellApp) -> Option<String> {
+    crate::AttentionBroker::from_app(app).footer_segment()
+}
+
+fn setup_is_in_progress(app: &ShellApp) -> bool {
+    matches!(app.shell_view(), ShellView::TargetPicker | ShellView::Setup)
+        || app.router.setup().editor().is_some()
 }
 
 fn scope_footer_segment(app: &ShellApp) -> Option<String> {

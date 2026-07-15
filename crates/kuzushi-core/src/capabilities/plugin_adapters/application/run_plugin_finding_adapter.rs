@@ -198,7 +198,7 @@ fn persist_plugin_adapter_findings(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<GenericPersistedRun>> {
     persist_tool_findings(
-        run.spec.tool_slug,
+        ctx.finding_run_id(),
         &run.target,
         findings,
         ctx.workspace,

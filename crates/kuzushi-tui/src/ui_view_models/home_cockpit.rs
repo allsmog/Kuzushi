@@ -48,7 +48,7 @@ pub struct HomeCockpitModel {
     pub run_card: HomeRunCard,
     pub workspace_line: String,
     pub command_labels: [&'static str; 6],
-    /// The engagement spine (組 map → 崩 hunt → 作 confirm → 掛 fix), derived
+    /// The engagement spine (組 map → 崩 scan → 査 review → 作 prove → 掛 fix), derived
     /// from workspace state. `None` without a target.
     pub journey: Option<JourneyModel>,
 }
@@ -106,10 +106,7 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
     let module_count = app.registry().modules().count();
     HomeCockpitModel {
         title: "HOME",
-        attack_surface: match run_artifact_json(app, &run, "attack-surface.json") {
-            ViewDataState::Ready(artifact) => attack_surface_risk_model(artifact),
-            ViewDataState::NotRequested | ViewDataState::Loading => None,
-        },
+        attack_surface: attack_surface_model_for_run(app, &run),
         next_card: home_next_card(journey.as_ref()),
         findings_card: home_findings_card(app),
         top_risks: home_top_risks(app),
@@ -117,6 +114,23 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
         workspace_line: home_workspace_line(app, module_count),
         command_labels: home_command_labels(journey.as_ref()),
         journey,
+    }
+}
+
+/// Project only the attack-surface artifact needed by the durable Map page.
+/// This avoids constructing Home cards, finding summaries, and journey state
+/// merely to obtain one already-hydrated artifact projection.
+pub(crate) fn attack_surface_model(app: &ShellApp) -> Option<AttackSurfaceRiskModel> {
+    attack_surface_model_for_run(app, &HomeRunModel::from_app(app))
+}
+
+fn attack_surface_model_for_run(
+    app: &ShellApp,
+    run: &HomeRunModel,
+) -> Option<AttackSurfaceRiskModel> {
+    match run_artifact_json(app, run, "attack-surface.json") {
+        ViewDataState::Ready(artifact) => attack_surface_risk_model(artifact),
+        ViewDataState::NotRequested | ViewDataState::Loading => None,
     }
 }
 

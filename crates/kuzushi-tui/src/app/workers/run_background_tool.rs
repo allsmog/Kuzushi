@@ -43,6 +43,17 @@ fn authorize_background_prepared_input(
     prepared: kuzushi_core::PreparedToolInput,
     authorization: ExecutionAuthorization,
 ) -> Result<kuzushi_core::PreparedToolInput> {
+    if prepared.tool_name() == "patch:reverify" {
+        let detector = prepared
+            .value()
+            .get("detectorTool")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        if let Some(detector) = detector {
+            return prepared
+                .authorize_requested_with_delegated_tools(authorization, &[detector.as_str()]);
+        }
+    }
     let delegates_patch = prepared.tool_name() == "sast:scan"
         && prepared
             .value()

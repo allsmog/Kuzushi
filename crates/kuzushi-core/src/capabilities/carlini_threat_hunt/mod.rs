@@ -17,7 +17,6 @@ use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 mod adapters;
 mod application;

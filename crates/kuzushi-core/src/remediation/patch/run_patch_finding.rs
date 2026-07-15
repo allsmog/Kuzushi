@@ -14,6 +14,12 @@ pub fn run_patch_finding(
         PatchCandidateLookup::Ready(candidate) => candidate,
         PatchCandidateLookup::Refused(response) => return Ok(response),
     };
+    let provenance = patch_provenance(
+        ctx,
+        resources.workspace.root(),
+        &candidate.finding,
+        &input.source_commit,
+    )?;
     emit_patch_progress(ctx, parent_step, "execution · use approved validation plan");
     let execution = patch_execution(ctx, runtime, resources.workspace.root(), &input, &raw_input)?;
     let attempts = run_patch_attempts(
@@ -24,9 +30,35 @@ pub fn run_patch_finding(
         &candidate,
         &input,
     )?;
+    finish_patch_finding(
+        ctx,
+        parent_step,
+        &resources,
+        &candidate,
+        &execution,
+        attempts,
+        provenance,
+    )
+}
+
+fn finish_patch_finding(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    resources: &PatchResources<'_>,
+    candidate: &ConfirmedPatchFinding,
+    execution: &PatchExecution<'_>,
+    attempts: PatchAttemptOutcome,
+    provenance: PatchProvenance,
+) -> Result<Value> {
     let validator_log = patch_validator_log(&attempts.history);
     let final_explanation = attempts.final_explanation.clone();
-    let result = patch_result(&candidate, &execution, attempts, validator_log.clone());
+    let result = patch_result(
+        &candidate,
+        &execution,
+        attempts,
+        validator_log.clone(),
+        provenance,
+    );
     emit_patch_progress(ctx, parent_step, "persist · save patch result");
     resources.store.insert_patch_result(&result)?;
     emit_patch_done(ctx, &result);
@@ -490,6 +522,7 @@ fn patch_result(
     execution: &PatchExecution<'_>,
     attempts: PatchAttemptOutcome,
     validator_log: String,
+    provenance: PatchProvenance,
 ) -> PatchResult {
     PatchResult {
         patch_run_id: Uuid::new_v4().to_string(),
@@ -505,9 +538,55 @@ fn patch_result(
         provider_spend_unresolved: !attempts.cost.is_complete(),
         validator_log: Some(validator_log.clone()),
         history: attempts.history,
+        provenance: Some(provenance),
         created_at: None,
         updated_at: None,
     }
+}
+
+fn patch_provenance(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+    finding: &Finding,
+    source_commit: &str,
+) -> Result<PatchProvenance> {
+    let detector_binding = direct_detector_binding(target, finding).context(
+        "patch:finding requires a canonical detector run and input; re-scan the finding before generating a patch",
+    )?;
+    let provenance = PatchProvenance {
+        source_commit: source_commit.to_string(),
+        target: target.display().to_string(),
+        originating_run_id: Some(
+            ctx.run_id()
+                .context("patch:finding requires a canonical patch run id")?,
+        ),
+        detector_tool: Some(detector_binding.tool),
+        detector_run_id: Some(detector_binding.run_id),
+        detector_input_digest: Some(detector_binding.input_digest),
+    };
+    provenance.ensure_complete_for_apply()?;
+    Ok(provenance)
+}
+
+struct DirectDetectorBinding {
+    tool: String,
+    run_id: String,
+    input_digest: String,
+}
+
+fn direct_detector_binding(target: &Path, finding: &Finding) -> Option<DirectDetectorBinding> {
+    let run_id = finding.scan_id.as_deref()?;
+    let summary = crate::run_artifacts::load_run_summary(target, run_id).ok()?;
+    let tool = summary.tool?;
+    super::detector_identity::qualified_tool_matches_identity(&tool, &finding.tool).then_some(())?;
+    let (_, input) = crate::run_artifacts::read_run_artifact_text(target, run_id, "input.json")
+        .require("originating detector input")
+        .ok()?;
+    Some(DirectDetectorBinding {
+        tool,
+        run_id: run_id.to_string(),
+        input_digest: PatchProvenance::digest_detector_input(input.as_bytes()),
+    })
 }
 
 fn emit_patch_done(ctx: &ToolExecutionContext<'_>, result: &PatchResult) {
@@ -519,5 +598,108 @@ fn emit_patch_done(ctx: &ToolExecutionContext<'_>, result: &PatchResult) {
                 format!("patch:finding complete · status={:?}", result.status),
             )
             .emit();
+    }
+}
+
+#[cfg(test)]
+mod detector_provenance_tests {
+    use super::*;
+    use crate::run_artifacts::{record_tool_run_started, ToolRunRecord};
+    use crate::Severity;
+
+    fn context<'a>(config: &'a crate::V2Config) -> ToolExecutionContext<'a> {
+        ToolExecutionContext {
+            config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: crate::ExecutionAuthorization::default(),
+        }
+    }
+
+    #[test]
+    fn new_patch_generation_refuses_missing_detector_provenance_before_persistence() {
+        let target = tempfile::tempdir().unwrap();
+        let finding = Finding::new_tool(
+            "semgrep",
+            "demo.rule",
+            "src/lib.rs",
+            1,
+            None,
+            Severity::High,
+            "candidate",
+        );
+        let config = crate::V2Config::default();
+
+        let error = patch_provenance(
+            &context(&config),
+            target.path(),
+            &finding,
+            "source-commit",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("canonical detector run"), "{error}");
+        assert!(error.contains("re-scan"), "{error}");
+    }
+
+    #[test]
+    fn module_only_finding_binds_the_canonical_detector_run() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "secret-run";
+        record_tool_run_started(
+            ToolRunRecord::new(target.path(), run_id, "tool", "secret-scan:scan"),
+            &serde_json::json!({"depth": "full"}),
+        );
+        let mut finding = Finding::new_tool(
+            "secret-scan",
+            "secret/key",
+            "config.env",
+            1,
+            Some(1),
+            Severity::High,
+            "exposed key",
+        );
+        finding.scan_id = Some(run_id.to_string());
+
+        let binding = direct_detector_binding(target.path(), &finding).expect("detector binding");
+
+        assert_eq!(binding.tool, "secret-scan:scan");
+        assert_eq!(binding.run_id, run_id);
+        assert!(!binding.input_digest.is_empty());
+    }
+
+    #[test]
+    fn new_patch_generation_requires_its_own_canonical_run_reference() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "secret-run";
+        record_tool_run_started(
+            ToolRunRecord::new(target.path(), run_id, "tool", "secret-scan:scan"),
+            &serde_json::json!({"depth": "full"}),
+        );
+        let mut finding = Finding::new_tool(
+            "secret-scan",
+            "secret/key",
+            "config.env",
+            1,
+            Some(1),
+            Severity::High,
+            "exposed key",
+        );
+        finding.scan_id = Some(run_id.to_string());
+        let config = crate::V2Config::default();
+
+        let error = patch_provenance(
+            &context(&config),
+            target.path(),
+            &finding,
+            "source-commit",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("canonical patch run id"), "{error}");
     }
 }

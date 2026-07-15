@@ -33,4 +33,5 @@ pub use output::SecretSeverity;
 pub use scan_for_secrets::scan_for_secrets;
 pub use scanner_options::SecretScanOptions;
 pub use scanner_options::SecretScanScanner;
+pub(crate) use scanner_options::MAX_SUPPORTED_FILE_BYTES;
 pub use secret_scan_report::SecretScanReport;

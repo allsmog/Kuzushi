@@ -1,7 +1,8 @@
 use super::*;
-use crate::app::{WorkbenchPage, WorkbenchPane, WorkbenchPaneScroll};
-use crate::ui_view_models::{PhaseCockpitBody, PhaseCockpitModel};
-use kuzushi_core::WorkflowPhase;
+use crate::app::{WorkbenchPane, WorkbenchPaneScroll};
+use crate::ui_view_models::{
+    LayoutDensity, PhaseCockpitBody, PhaseCockpitModel, PhasePresentationPlan,
+};
 use ratatui::layout::Rect;
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
@@ -11,6 +12,7 @@ mod fix;
 mod header;
 mod hunt;
 mod map;
+mod scan;
 
 pub(in crate::renderer::views) use header::phase_header_lines;
 
@@ -19,23 +21,17 @@ pub(in crate::renderer::views) struct PhaseRenderState {
     pub(super) focus: Option<WorkbenchPane>,
     pub(super) zoom: Option<WorkbenchPane>,
     pub(super) scroll: WorkbenchPaneScroll,
+    pub(super) density: LayoutDensity,
 }
 
 impl PhaseRenderState {
-    pub(super) fn workbench(app: &ShellApp, page: WorkbenchPage) -> Self {
+    pub(super) fn workbench(app: &ShellApp, plan: &PhasePresentationPlan) -> Self {
         let route = app.router.workbench();
-        let raw_focus = route.focus();
-        let viewport = app.viewport();
-        let pane_order = page.pane_order_for_viewport(viewport.columns, viewport.rows);
-        let focus = pane_order
-            .contains(&raw_focus)
-            .then_some(raw_focus)
-            .unwrap_or_else(|| page.primary_pane_for_viewport(viewport.columns, viewport.rows));
-        let zoom = route.zoom().pane().filter(|pane| pane_order.contains(pane));
         Self {
-            focus: Some(focus),
-            zoom,
+            focus: (plan.density != LayoutDensity::Guided).then(|| plan.effective_slot()),
+            zoom: route.zoom().pane(),
             scroll: route.scroll(),
+            density: plan.density,
         }
     }
 
@@ -46,15 +42,6 @@ impl PhaseRenderState {
     pub(super) fn scroll(self, pane: WorkbenchPane) -> u16 {
         self.scroll.get(pane)
     }
-
-    #[cfg(test)]
-    pub(in crate::renderer::views) fn activity() -> Self {
-        Self {
-            focus: None,
-            zoom: None,
-            scroll: WorkbenchPaneScroll::default(),
-        }
-    }
 }
 
 pub(in crate::renderer::views) fn render_phase_cockpit_body(
@@ -62,13 +49,28 @@ pub(in crate::renderer::views) fn render_phase_cockpit_body(
     area: Rect,
     app: &ShellApp,
     model: &PhaseCockpitModel,
+    plan: &PhasePresentationPlan,
     state: PhaseRenderState,
 ) {
-    match &model.body {
-        PhaseCockpitBody::Map(map) => map::render(frame, area, map, &model.header, state),
-        PhaseCockpitBody::Hunt(hunt) => hunt::render(frame, area, app, hunt, state),
-        PhaseCockpitBody::Confirm(confirm) => confirm::render(frame, area, confirm, state),
-        PhaseCockpitBody::Fix(fix) => fix::render(frame, area, fix, state),
+    let _ = area;
+    for surface in &plan.surfaces {
+        let surface_state = PhaseRenderState {
+            zoom: Some(surface.legacy_slot),
+            ..state
+        };
+        match &model.body {
+            PhaseCockpitBody::Map(map) => {
+                map::render(frame, surface.rect, map, &model.header, surface_state)
+            }
+            PhaseCockpitBody::Scan(scan) => scan::render(frame, surface.rect, scan, surface_state),
+            PhaseCockpitBody::Review(hunt) => {
+                hunt::render(frame, surface.rect, app, hunt, surface_state)
+            }
+            PhaseCockpitBody::Prove(confirm) => {
+                confirm::render(frame, surface.rect, confirm, surface_state)
+            }
+            PhaseCockpitBody::Fix(fix) => fix::render(frame, surface.rect, fix, surface_state),
+        }
     }
 }
 
@@ -78,8 +80,9 @@ pub(in crate::renderer::views) fn phase_cockpit_plain_lines(
 ) -> Vec<Line<'static>> {
     match &model.body {
         PhaseCockpitBody::Map(map) => map::plain_lines(map, &model.header, width),
-        PhaseCockpitBody::Hunt(hunt) => hunt::plain_lines(hunt, width),
-        PhaseCockpitBody::Confirm(confirm) => confirm::plain_lines(confirm, width),
+        PhaseCockpitBody::Scan(scan) => scan::plain_lines(scan, width),
+        PhaseCockpitBody::Review(hunt) => hunt::plain_lines(hunt, width),
+        PhaseCockpitBody::Prove(confirm) => confirm::plain_lines(confirm, width),
         PhaseCockpitBody::Fix(fix) => fix::plain_lines(fix, width),
     }
 }
@@ -99,13 +102,10 @@ pub(super) fn render_lines_pane(
     );
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let scroll = clamped_scroll(state.scroll(pane), lines.len(), inner.height);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .scroll((scroll, 0))
-            .wrap(Wrap { trim: false }),
-        inner,
-    );
+    let visual_rows = wrapped_line_count(&lines, inner.width);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let scroll = clamped_scroll(state.scroll(pane), visual_rows, inner.height);
+    frame.render_widget(paragraph.scroll((scroll, 0)), inner);
 }
 
 pub(super) fn render_diagram_pane(
@@ -136,13 +136,32 @@ pub(super) fn divider_lines(
     lines
 }
 
-pub(super) fn page_phase(page: WorkbenchPage) -> WorkflowPhase {
-    match page {
-        WorkbenchPage::Terrain => WorkflowPhase::Map,
-        WorkbenchPage::Coverage => WorkflowPhase::Hunt,
-        WorkbenchPage::Review => WorkflowPhase::Confirm,
-        WorkbenchPage::Ship => WorkflowPhase::Fix,
-    }
+pub(super) fn selection_disclosure_lines(
+    disclosure: Option<&crate::ui_view_models::SelectionDisclosureModel>,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let Some(disclosure) = disclosure else {
+        return Vec::new();
+    };
+    vec![
+        Line::styled(
+            fit(&format!("⚠ {}", disclosure.message), width),
+            theme::warn(),
+        ),
+        Line::from(vec![
+            Span::styled(
+                fit(
+                    &format!("filter:{} · ", disclosure.filter),
+                    width.saturating_sub(disclosure.reveal_command.len() + 10),
+                ),
+                theme::muted(),
+            ),
+            Span::styled(
+                format!("▸ {} reveal", disclosure.reveal_command),
+                theme::accent(),
+            ),
+        ]),
+    ]
 }
 
 fn clamped_scroll(scroll: u16, rows: usize, viewport: u16) -> u16 {
@@ -150,4 +169,29 @@ fn clamped_scroll(scroll: u16, rows: usize, viewport: u16) -> u16 {
         rows.saturating_sub(viewport as usize)
             .min(u16::MAX as usize) as u16,
     )
+}
+
+fn wrapped_line_count(lines: &[Line<'_>], width: u16) -> usize {
+    let width = width.max(1) as usize;
+    lines
+        .iter()
+        .map(|line| wrap_text(&line.to_string(), width).len())
+        .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrapped_unicode_rows_expand_the_scroll_extent() {
+        let lines = vec![Line::from(
+            "touched: src/認証/very-long-remediation-target-with-emoji-🔐.rs",
+        )];
+
+        let rows = wrapped_line_count(&lines, 18);
+
+        assert!(rows >= 4, "expected visual wrapping, got {rows} row(s)");
+        assert!(clamped_scroll(u16::MAX, rows, 2) >= 2);
+    }
 }

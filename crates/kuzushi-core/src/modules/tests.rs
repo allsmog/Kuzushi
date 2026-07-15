@@ -6,7 +6,7 @@ mod tests {
         Finding, FindingListFilter, PatchStatus, Severity, StaticProofState, TriageOutcome,
         TriageVerdict,
     };
-    use crate::run_artifacts::{run_dir, write_run_summary, RunSummary};
+    use crate::run_artifacts::{run_dir, write_run_summary, RunSummary, TraceHandle};
     use crate::runtime::{
         AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentToolLoopRequest,
         LoopHistoryEntry, TriageRequest,
@@ -479,7 +479,6 @@ mod tests {
             Ok(AgentQueryResponse {
                 text: String::new(),
                 structured: Some(json!({
-                    "fingerprint": "from-bridge",
                     "exploitable": true,
                     "poc_payload": "curl -X POST /admin",
                     "poc_description": "POST reaches the admin sink.",
@@ -843,16 +842,31 @@ OUT
         }
     }
 
+    fn seed_completed_detector_run(target: &Path, run_id: &str, tool_name: &str) {
+        let record = crate::run_artifacts::ToolRunRecord::new(
+            target, run_id, "tool", tool_name,
+        );
+        crate::run_artifacts::record_tool_run_started(
+            record,
+            &json!({"fixture": "detector input"}),
+        );
+        crate::run_artifacts::record_tool_run_complete(
+            record,
+            &json!({"ok": true, "output": "fixture detector completed"}),
+        );
+    }
+
     #[test]
-    fn persist_full_mode_report_writes_findings_when_workspace_is_available() {
+    fn persist_full_mode_report_uses_the_canonical_trace_run_identity() {
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let config = V2Config::default();
+        let trace = TraceHandle::jsonl(temp.path(), "run-full-mode-canonical");
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
             findings_store: None,
-            trace: None,
+            trace: Some(&trace),
             cancellation: None,
             authorization: Default::default(),
         };
@@ -891,7 +905,15 @@ OUT
             .findings;
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].rule_id, "demo.rule");
+        assert_eq!(rows[0].scan_id.as_deref(), Some("run-full-mode-canonical"));
         assert_eq!(report.findings[0].id, rows[0].id);
+        assert_eq!(
+            store
+                .list_findings_for_scan_id("run-full-mode-canonical")
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -3631,6 +3653,20 @@ OUT
                 .and_then(Value::as_u64),
             Some(1)
         );
+        let phase_stages = result
+            .pointer("/data/phaseStages")
+            .and_then(Value::as_array)
+            .expect("actual SAST phase stage receipts");
+        assert_eq!(
+            phase_stages
+                .iter()
+                .filter_map(|stage| stage["phase"].as_str())
+                .collect::<Vec<_>>(),
+            vec!["scan", "review", "prove", "fix"]
+        );
+        assert!(phase_stages
+            .iter()
+            .all(|stage| stage["outcome"] == "completed"));
 
         let summary = result
             .pointer("/data/artifacts/summary")
@@ -3646,6 +3682,10 @@ OUT
             .unwrap();
         let patch_log = result
             .pointer("/data/artifacts/patchJsonl")
+            .and_then(Value::as_str)
+            .unwrap();
+        let phase_stages_log = result
+            .pointer("/data/artifacts/phaseStagesJsonl")
             .and_then(Value::as_str)
             .unwrap();
         assert!(Path::new(summary).exists());
@@ -3680,6 +3720,13 @@ OUT
         assert!(fs::read_to_string(patch_log)
             .unwrap()
             .contains("patch:complete"));
+        let phase_stages_log = fs::read_to_string(phase_stages_log).unwrap();
+        for phase in ["scan", "review", "prove", "fix"] {
+            assert!(
+                phase_stages_log.contains(&format!(r#""phase":"{phase}""#)),
+                "{phase_stages_log}"
+            );
+        }
 
         let finding = store.list_findings(10).unwrap().pop().unwrap();
         assert_eq!(
@@ -3693,6 +3740,24 @@ OUT
             .unwrap();
         assert_eq!(patch_results.len(), 1);
         assert_eq!(patch_results[0].status, PatchStatus::Sound);
+        let provenance = patch_results[0]
+            .provenance
+            .as_ref()
+            .expect("new SAST patches must retain detector provenance");
+        assert_eq!(provenance.detector_tool.as_deref(), Some("agentic-sast:scan"));
+        let detector_run_id = provenance
+            .detector_run_id
+            .as_deref()
+            .expect("detector run reference");
+        let detector_summary =
+            crate::run_artifacts::load_run_summary(temp.path(), detector_run_id).unwrap();
+        assert_eq!(detector_summary.tool.as_deref(), Some("agentic-sast:scan"));
+        assert!(crate::run_artifacts::run_artifact_path(
+            temp.path(),
+            detector_run_id,
+            "input.json"
+        )
+        .is_file());
     }
 
     #[test]
@@ -5018,7 +5083,7 @@ OUT
         assert_completed_result_envelope(&result, "verify:finding complete");
         assert_eq!(
             result.pointer("/data/fingerprint").and_then(Value::as_str),
-            Some("from-bridge")
+            Some(finding.fingerprint.as_str())
         );
         assert_eq!(
             result.pointer("/data/exploitable").and_then(Value::as_bool),
@@ -5145,6 +5210,7 @@ OUT
         store
             .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
+        seed_completed_detector_run(workspace.root(), "run-1", "semgrep:scan");
         let finding = Finding::new_semgrep(
             "demo.sql",
             "src/db.ts",
@@ -5170,11 +5236,15 @@ OUT
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
         let runtime = MockRuntime::new();
+        let patch_trace = crate::run_artifacts::TraceHandle::jsonl(
+            workspace.root(),
+            "patch-direct-run",
+        );
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
-            trace: None,
+            trace: Some(&patch_trace),
             cancellation: None,
             authorization: Default::default(),
         };
@@ -5268,6 +5338,7 @@ OUT
         store
             .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
+        seed_completed_detector_run(workspace.root(), "run-1", "semgrep:scan");
         let finding = Finding::new_semgrep(
             "demo.sql",
             "src/db.ts",
@@ -5293,11 +5364,15 @@ OUT
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
         let runtime = MutatingPatchRuntime::new(temp.path().to_path_buf());
+        let patch_trace = crate::run_artifacts::TraceHandle::jsonl(
+            workspace.root(),
+            "patch-mutation-run",
+        );
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
-            trace: None,
+            trace: Some(&patch_trace),
             cancellation: None,
             authorization: Default::default(),
         };
@@ -5347,6 +5422,7 @@ OUT
         store
             .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
+        seed_completed_detector_run(workspace.root(), "run-1", "semgrep:scan");
         let finding = Finding::new_semgrep(
             "demo.sql",
             "src/db.ts",
@@ -5359,11 +5435,15 @@ OUT
 
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
+        let patch_trace = crate::run_artifacts::TraceHandle::jsonl(
+            workspace.root(),
+            "patch-policy-run",
+        );
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
-            trace: None,
+            trace: Some(&patch_trace),
             cancellation: None,
             authorization: Default::default(),
         };

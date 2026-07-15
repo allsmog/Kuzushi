@@ -10,10 +10,9 @@ impl ShellApp {
     pub(crate) fn is_picker_view(&self) -> bool {
         matches!(
             self.shell_view(),
-            ShellView::ModelPicker
-                | ShellView::AuthMethodPicker
-                | ShellView::PlanningPicker
+            ShellView::PlanningPicker
                 | ShellView::TargetPicker
+                | ShellView::Setup
                 | ShellView::FilePicker
         )
     }
@@ -67,13 +66,20 @@ impl ShellApp {
     }
 
     fn picker_should_capture_key(&self, key: KeyEvent) -> bool {
-        self.is_picker_view() && !picker_shell_chord(key.modifiers)
+        self.is_picker_view()
+            && (!picker_shell_chord(key.modifiers) || self.auth_key_editor_owns_word_delete(key))
+    }
+
+    fn auth_key_editor_owns_word_delete(&self, key: KeyEvent) -> bool {
+        self.shell_view() == ShellView::Setup
+            && self.router.setup().editor() == Some(SetupEditor::Credentials)
+            && self.router.auth_picker().is_api_key_row()
+            && auth_key_word_delete_requested(key)
     }
 
     fn dispatch_picker_control_key(&mut self, key: KeyEvent) -> InputUpdate {
         match &self.shell_view() {
-            ShellView::ModelPicker => self.handle_model_picker_key(key.code),
-            ShellView::AuthMethodPicker => self.handle_auth_picker_key(key.code),
+            ShellView::Setup => self.handle_setup_key(key),
             ShellView::PlanningPicker => self.handle_planning_picker_key(key),
             ShellView::TargetPicker => self.handle_target_picker_key(key.code),
             ShellView::FilePicker => self.handle_file_picker_key(key),
@@ -113,8 +119,16 @@ impl ShellApp {
 
     fn current_picker_focus(&self) -> PickerFocus {
         match self.shell_view() {
-            ShellView::ModelPicker => self.router.model_picker().focus(),
-            ShellView::AuthMethodPicker => self.router.auth_picker().focus(),
+            ShellView::Setup if self.router.setup().editor() == Some(SetupEditor::Model) => {
+                self.router.model_picker().focus()
+            }
+            ShellView::Setup if self.router.setup().editor() == Some(SetupEditor::Credentials) => {
+                self.router.auth_picker().focus()
+            }
+            ShellView::Setup if self.router.setup().editor() == Some(SetupEditor::Plan) => {
+                self.engagement.planning_picker().focus()
+            }
+            ShellView::Setup => self.router.setup().focus(),
             ShellView::TargetPicker => self.router.target_picker().focus(),
             ShellView::PlanningPicker => self.engagement.planning_picker().focus(),
             _ => PickerFocus::List,
@@ -123,8 +137,16 @@ impl ShellApp {
 
     fn set_current_picker_focus(&mut self, focus: PickerFocus) {
         match self.shell_view() {
-            ShellView::ModelPicker => self.router.model_picker_mut().set_focus(focus),
-            ShellView::AuthMethodPicker => self.router.auth_picker_mut().set_focus(focus),
+            ShellView::Setup if self.router.setup().editor() == Some(SetupEditor::Model) => {
+                self.router.model_picker_mut().set_focus(focus)
+            }
+            ShellView::Setup if self.router.setup().editor() == Some(SetupEditor::Credentials) => {
+                self.router.auth_picker_mut().set_focus(focus)
+            }
+            ShellView::Setup if self.router.setup().editor() == Some(SetupEditor::Plan) => {
+                self.engagement.planning_picker_mut().set_focus(focus)
+            }
+            ShellView::Setup => self.router.setup_mut().set_focus(focus),
             ShellView::TargetPicker => self.router.target_picker_mut().set_focus(focus),
             ShellView::PlanningPicker => self.engagement.planning_picker_mut().set_focus(focus),
             _ => {}
@@ -149,6 +171,193 @@ impl ShellApp {
             }
             _ => InputUpdate::ignored(),
         }
+    }
+
+    fn handle_setup_key(&mut self, key: KeyEvent) -> InputUpdate {
+        match self.router.setup().editor() {
+            Some(SetupEditor::Model) => return self.handle_model_picker_key(key.code),
+            Some(SetupEditor::Credentials) => return self.handle_auth_picker_key(key),
+            Some(SetupEditor::Plan) => return self.handle_planning_picker_key(key),
+            _ => {}
+        }
+        let code = key.code;
+        if self.router.setup().editor() == Some(SetupEditor::Budget) {
+            return self.handle_setup_budget_key(code);
+        }
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.router.setup_mut().move_cursor(-1);
+                InputUpdate::handled()
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.router.setup_mut().move_cursor(1);
+                InputUpdate::handled()
+            }
+            KeyCode::Enter => self.activate_setup_row(),
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.open_workbench(WorkbenchPane::Findings);
+                InputUpdate::handled()
+            }
+            _ => InputUpdate::ignored(),
+        }
+    }
+
+    fn handle_setup_budget_key(&mut self, code: KeyCode) -> InputUpdate {
+        match code {
+            KeyCode::Enter => self.commit_setup_budget(),
+            KeyCode::Esc => {
+                self.router.setup_mut().finish_editor();
+                InputUpdate::handled()
+            }
+            KeyCode::Backspace => {
+                self.router.setup_mut().pop_budget_char();
+                InputUpdate::handled()
+            }
+            KeyCode::Delete => {
+                self.router.setup_mut().clear_budget_draft();
+                InputUpdate::handled()
+            }
+            KeyCode::Char(ch) if ch.is_ascii_digit() || ch == '.' => {
+                self.router.setup_mut().push_budget_char(ch);
+                InputUpdate::handled()
+            }
+            _ => InputUpdate::handled(),
+        }
+    }
+
+    fn commit_setup_budget(&mut self) -> InputUpdate {
+        let draft = self.router.setup().budget_draft().trim().to_string();
+        if draft.is_empty() {
+            self.session_mut().set_session_budget_usd(None);
+            self.router.setup_mut().finish_editor();
+            self.log("setup", "session budget unset; spending is not capped");
+            return InputUpdate::handled();
+        }
+        let Ok(value) = draft.parse::<f64>() else {
+            self.router
+                .setup_mut()
+                .set_budget_error("enter a positive USD amount, or clear to leave unset");
+            return InputUpdate::handled();
+        };
+        if !value.is_finite() || value <= 0.0 {
+            self.router
+                .setup_mut()
+                .set_budget_error("budget must be a finite positive amount");
+            return InputUpdate::handled();
+        }
+        if self
+            .config()
+            .operator
+            .spend_hard_ceiling_usd
+            .is_some_and(|ceiling| value > ceiling)
+        {
+            let ceiling = self.config().operator.spend_hard_ceiling_usd.unwrap_or(0.0);
+            self.router
+                .setup_mut()
+                .set_budget_error(format!("budget exceeds the hard ceiling ${ceiling:.2}"));
+            return InputUpdate::handled();
+        }
+        self.session_mut().set_session_budget_usd(Some(value));
+        self.router.setup_mut().finish_editor();
+        self.log("setup", format!("session budget set to ${value:.2}"));
+        InputUpdate::handled()
+    }
+
+    fn activate_setup_row(&mut self) -> InputUpdate {
+        match self.router.setup().row() {
+            SetupRowId::Target => {
+                self.router.setup_mut().begin_editor(SetupEditor::Target);
+                self.open_target_picker();
+                InputUpdate::handled()
+            }
+            SetupRowId::Plan => self.open_setup_plan_editor(),
+            SetupRowId::Model => {
+                self.router.setup_mut().begin_editor(SetupEditor::Model);
+                self.open_model_picker();
+                InputUpdate::handled()
+            }
+            SetupRowId::Credentials => self.open_setup_credentials_editor(),
+            SetupRowId::Prompt => self.open_setup_prompt_editor(),
+            SetupRowId::Budget => {
+                let current = self.session().session_budget_usd();
+                self.router.setup_mut().begin_budget_edit(current);
+                InputUpdate::handled()
+            }
+            SetupRowId::Start => self.start_setup_map(),
+        }
+    }
+
+    fn open_setup_plan_editor(&mut self) -> InputUpdate {
+        self.router.setup_mut().begin_editor(SetupEditor::Plan);
+        self.engagement
+            .planning_picker_mut()
+            .set_return_to_setup(true);
+        InputUpdate::handled()
+    }
+
+    fn open_setup_credentials_editor(&mut self) -> InputUpdate {
+        let provider = self
+            .config()
+            .model
+            .as_deref()
+            .and_then(|model| model.split(':').next())
+            .map(str::to_string);
+        let Some(provider) = provider else {
+            self.router.setup_mut().begin_editor(SetupEditor::Model);
+            self.open_model_picker();
+            return InputUpdate::handled();
+        };
+        self.router
+            .setup_mut()
+            .begin_editor(SetupEditor::Credentials);
+        self.open_credential_entry(provider);
+        InputUpdate::handled()
+    }
+
+    fn open_setup_prompt_editor(&mut self) -> InputUpdate {
+        let task = self
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .find(|row| {
+                self.engagement
+                    .planning_picker()
+                    .selected()
+                    .contains(&row.id)
+                    && !self.prompt_specs_for_tool(row.tool_name).is_empty()
+            })
+            .map(|row| row.id);
+        let Some(task) = task else {
+            self.log("setup", "the selected Map plan has no editable prompt");
+            return InputUpdate::handled();
+        };
+        self.engagement
+            .planning_picker_mut()
+            .set_cursor_to_task(task);
+        self.router.setup_mut().begin_editor(SetupEditor::Prompt);
+        InputUpdate::handled_with_effects(self.review_planning_prompt())
+    }
+
+    fn start_setup_map(&mut self) -> InputUpdate {
+        let readiness = crate::ui_view_models::setup_readiness_model(self);
+        if !readiness.can_start {
+            if let Some(index) = readiness.first_blocker {
+                self.router.setup_mut().set_cursor(index);
+            }
+            let blocker = readiness
+                .first_blocker
+                .and_then(|index| readiness.rows.get(index))
+                .map(|row| row.detail.as_str())
+                .unwrap_or("setup is incomplete");
+            self.set_warn_notice("setup", format!("Start Map blocked — {blocker}"));
+            return InputUpdate::handled();
+        }
+        self.engagement.set_phase(WorkflowPhase::Map);
+        self.engagement
+            .planning_picker_mut()
+            .set_return_to_setup(false);
+        self.accept_planning_picker()
     }
 
     fn reduce_picker_command(&mut self, command: ShellCommand) -> InputUpdate {
@@ -188,6 +397,10 @@ impl ShellApp {
     }
 
     fn transition_after_model_choice(&mut self, provider: &'static str) {
+        if self.router.setup().editor() == Some(SetupEditor::Model) {
+            self.return_to_setup_from_editor();
+            return;
+        }
         // A credentialed provider with no wired credentials opens the inline
         // credential-entry step (API key / OAuth / offline demo) instead of
         // stranding the operator on the Workbench. Session readiness also
@@ -222,6 +435,14 @@ impl ShellApp {
 
     fn move_target_picker_cursor(&mut self, delta: isize) {
         self.router.target_picker_mut().move_cursor(delta);
+        if let Some(path) = self
+            .router
+            .target_picker()
+            .selected()
+            .map(|candidate| candidate.path.clone())
+        {
+            self.runtime_state.start_target_candidate_facts(path);
+        }
     }
 
     fn accept_target_picker_choice(&mut self) -> Vec<ShellEffect> {
@@ -253,25 +474,31 @@ impl ShellApp {
             "onboarding",
             "model selection deferred — set one with /model <id>, or run `demo` for the offline fixture",
         );
-        self.open_workbench(WorkbenchPane::Findings);
+        if self.router.setup().editor() == Some(SetupEditor::Model) {
+            self.return_to_setup_from_editor();
+        } else {
+            self.open_workbench(WorkbenchPane::Findings);
+        }
     }
 
-    fn handle_auth_picker_key(&mut self, code: KeyCode) -> InputUpdate {
-        match code {
-            KeyCode::Esc => {
-                self.return_to_model_picker();
-                return InputUpdate::handled();
-            }
-            KeyCode::Char('q') => {
-                self.defer_auth_picker();
-                return InputUpdate::handled();
-            }
-            _ => {}
+    fn handle_auth_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let code = key.code;
+        if code == KeyCode::Esc {
+            self.return_to_model_picker();
+            return InputUpdate::handled();
+        }
+        if auth_key_word_delete_requested(key) && self.router.auth_picker().is_api_key_row() {
+            self.router.auth_picker_mut().delete_key_word_left();
+            return InputUpdate::handled();
         }
         if self.handle_auth_api_key_draft_key(code) {
             return InputUpdate::handled();
         }
         match code {
+            KeyCode::Char('q') => {
+                self.defer_auth_picker();
+                InputUpdate::handled()
+            }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.move_auth_picker_cursor(-1);
                 InputUpdate::handled()
@@ -291,19 +518,9 @@ impl ShellApp {
             return false;
         }
         match code {
-            // With an empty draft these are picker chords, not key text:
-            // `j/k` navigate and `d` runs the offline fixture —
-            // the same keyless escape hatch offered on the model/target
-            // pickers. `q` is reserved for explicit defer at every draft
-            // length; pasted values still arrive through the paste handler.
-            KeyCode::Char(ch)
-                if self.router.auth_picker().key_draft().is_empty()
-                    && matches!(ch, 'j' | 'k' | 'd') =>
-            {
-                false
-            }
             KeyCode::Char(ch) if !ch.is_control() && !ch.is_whitespace() => {
                 self.router.auth_picker_mut().push_key_char(ch);
+                self.clear_onboarding_credential_notice();
                 true
             }
             KeyCode::Backspace => {
@@ -327,7 +544,9 @@ impl ShellApp {
     /// no-op rather than silently landing on OAuth.
     fn accept_auth_picker_choice(&mut self) -> InputUpdate {
         let provider = match self.shell_view() {
-            ShellView::AuthMethodPicker => self.router.auth_picker().provider().to_string(),
+            ShellView::Setup if self.router.setup().editor() == Some(SetupEditor::Credentials) => {
+                self.router.auth_picker().provider().to_string()
+            }
             _ => return InputUpdate::ignored(),
         };
         match self.router.auth_picker().selected_kind() {
@@ -362,8 +581,7 @@ impl ShellApp {
         let env_var = api_key_env_var(api_key_provider);
         let message =
             format!("API key is empty — paste {env_var}, then press Enter; it stays session-only and hidden");
-        self.set_warn_notice("onboarding", message.clone());
-        self.log("onboarding", message);
+        self.set_warn_notice("onboarding", message);
         Vec::new()
     }
 
@@ -377,7 +595,7 @@ impl ShellApp {
         let mut effects = self.select_api_key_model_for_provider(provider);
         self.session_mut()
             .mark_session_api_key_ready(api_key_provider);
-        self.log(
+        self.set_success_notice(
             "onboarding",
             format!("{env_var} accepted for this session; value hidden"),
         );
@@ -403,6 +621,7 @@ impl ShellApp {
             self.transition_after_auth_ready();
             return effects;
         }
+        self.clear_onboarding_credential_notice();
         self.log(
             "onboarding",
             format!(
@@ -411,6 +630,17 @@ impl ShellApp {
             ),
         );
         self.reduce_picker_auth_login(provider)
+    }
+
+    pub(crate) fn clear_onboarding_credential_notice(&mut self) {
+        let is_onboarding = self
+            .advisory()
+            .notice
+            .as_ref()
+            .is_some_and(|notice| notice.source == "onboarding");
+        if is_onboarding {
+            self.clear_notice();
+        }
     }
 
     fn select_api_key_model_for_provider(&mut self, provider: &str) -> Vec<ShellEffect> {
@@ -456,16 +686,34 @@ impl ShellApp {
             "onboarding",
             "auth deferred — set credentials and re-run /onboarding, or run `demo` for the offline fixture",
         );
-        self.open_workbench(WorkbenchPane::Findings);
+        if self.router.setup().editor() == Some(SetupEditor::Credentials) {
+            self.return_to_setup_from_editor();
+        } else {
+            self.open_workbench(WorkbenchPane::Findings);
+        }
     }
 
     fn return_to_model_picker(&mut self) {
         self.router.auth_picker_mut().clear_key_draft();
-        self.open_model_picker();
+        if self.router.setup().editor() == Some(SetupEditor::Credentials) {
+            self.return_to_setup_from_editor();
+        } else {
+            self.open_model_picker();
+        }
     }
 
     pub(crate) fn transition_after_auth_ready(&mut self) {
-        self.open_fresh_planner_or_workbench();
+        if self.router.setup().editor() == Some(SetupEditor::Credentials) {
+            self.return_to_setup_from_editor();
+        } else {
+            self.open_fresh_planner_or_workbench();
+        }
+    }
+
+    fn return_to_setup_from_editor(&mut self) {
+        self.router.setup_mut().finish_editor();
+        self.engagement.clear_phase();
+        self.set_shell_view(ShellView::Setup);
     }
 
     fn handle_planning_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -520,6 +768,18 @@ impl ShellApp {
     }
 
     fn handle_planning_step_navigation_key(&mut self, code: KeyCode) -> bool {
+        if self.engagement.planning_picker().returns_to_setup()
+            && matches!(
+                code,
+                KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l' | '1' | '2' | '3' | '4')
+            )
+        {
+            self.log(
+                "setup",
+                "Setup edits the Map plan only; Start Map before moving phases",
+            );
+            return true;
+        }
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.move_planning_cursor(-1);
@@ -576,11 +836,19 @@ impl ShellApp {
                 self.enter_planning_options_pane();
                 InputUpdate::handled()
             }
+            KeyCode::Enter if self.engagement.planning_picker().returns_to_setup() => {
+                self.return_to_setup_from_editor();
+                InputUpdate::handled()
+            }
             KeyCode::Enter => {
                 if self.open_file_picker_for_current_planning_row() {
                     return InputUpdate::handled();
                 }
                 self.accept_planning_picker()
+            }
+            KeyCode::Char('s') if self.engagement.planning_picker().returns_to_setup() => {
+                self.return_to_setup_from_editor();
+                InputUpdate::handled()
             }
             KeyCode::Char('s') => InputUpdate::handled_with_effects(self.skip_planning_phase()),
             KeyCode::Esc | KeyCode::Char('q') => {
@@ -737,7 +1005,11 @@ impl ShellApp {
         self.log("planning", "cleared selection");
     }
 
-    fn accept_planning_picker(&mut self) -> InputUpdate {
+    pub(crate) fn accept_planning_picker(&mut self) -> InputUpdate {
+        if self.engagement.planning_picker().returns_to_setup() {
+            self.return_to_setup_from_editor();
+            return InputUpdate::handled();
+        }
         if self.open_file_picker_for_attach_only_plan() {
             return InputUpdate::handled();
         }
@@ -861,7 +1133,7 @@ impl ShellApp {
                 .map(|phase| phase.label())
                 .unwrap_or("planning");
             self.log("phase", format!("nothing selected — skipping {phase}"));
-            self.engagement.mark_current_phase_skipped();
+            self.record_current_phase_skip();
             return self.advance_to_next_phase();
         }
         self.log(
@@ -883,11 +1155,15 @@ impl ShellApp {
             .map(|phase| phase.label())
             .unwrap_or("planning");
         self.log("phase", format!("skipped {phase}"));
-        self.engagement.mark_current_phase_skipped();
+        self.record_current_phase_skip();
         self.advance_to_next_phase()
     }
 
     fn close_planning_picker(&mut self) {
+        if self.engagement.planning_picker().returns_to_setup() {
+            self.return_to_setup_from_editor();
+            return;
+        }
         let phase = self
             .engagement
             .current_phase()
@@ -902,12 +1178,23 @@ fn picker_shell_chord(modifiers: KeyModifiers) -> bool {
     modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::ALT)
 }
 
+fn auth_key_word_delete_requested(key: KeyEvent) -> bool {
+    let modified_backspace = key.code == KeyCode::Backspace
+        && key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+    let control_w = key.code == KeyCode::Char('w')
+        && key.modifiers.contains(KeyModifiers::CONTROL);
+    modified_backspace || control_w
+}
+
 fn phase_for_digit(ch: char) -> Option<WorkflowPhase> {
     match ch {
         '1' => Some(WorkflowPhase::Map),
-        '2' => Some(WorkflowPhase::Hunt),
-        '3' => Some(WorkflowPhase::Confirm),
-        '4' => Some(WorkflowPhase::Fix),
+        '2' => Some(WorkflowPhase::Scan),
+        '3' => Some(WorkflowPhase::Review),
+        '4' => Some(WorkflowPhase::Prove),
+        '5' => Some(WorkflowPhase::Fix),
         _ => None,
     }
 }
@@ -1007,6 +1294,38 @@ fn api_key_env_var(provider: &str) -> &'static str {
 mod tests {
     use super::*;
 
+    fn plain_key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn colon_opens_the_command_prompt_from_aggregate_setup() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::Setup);
+        app.router.setup_mut().open();
+
+        let update = app.reduce_key(plain_key(KeyCode::Char(':')));
+
+        assert!(update.handled);
+        assert!(app.picker_prompt_focused());
+        assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn advertised_colon_opens_prompt_without_editing_the_api_key() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.open_auth_method_picker("anthropic".to_string());
+
+        let update = app.reduce_key(plain_key(KeyCode::Char(':')));
+
+        assert!(update.handled);
+        assert!(app.picker_prompt_focused());
+        assert!(app.router.auth_picker().key_draft().is_empty());
+        app.reduce_key(plain_key(KeyCode::Char('j')));
+        assert_eq!(app.input(), "j");
+        assert!(app.router.auth_picker().key_draft().is_empty());
+    }
+
     #[test]
     fn selecting_openai_oauth_auth_method_selects_oauth_model() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
@@ -1041,7 +1360,7 @@ mod tests {
         // empty (or otherwise kind-less) row list must never fall through
         // to dispatching OAuth.
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.set_shell_view(ShellView::AuthMethodPicker);
+        app.open_auth_method_picker("unsupported".to_string());
         assert_eq!(app.router.auth_picker().row_count(), 0);
         assert_eq!(app.router.auth_picker().selected_kind(), None);
 

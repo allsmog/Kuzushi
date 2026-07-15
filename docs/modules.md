@@ -29,9 +29,10 @@ Kuzushi has one module/tool contract, but not every loading surface is equally
 productized today.
 
 - **Built-in Rust modules are execution parts, not the default product
-  navigation.** The shell projects them into six phase capabilities; direct
-  engines remain discoverable through `tools`, `/use`, scan tasks, and
-  `kuzushi run <module:tool>`.
+  navigation.** The shell projects them into five workflow modes
+  (`map`, `scan`, `review`, `prove`, `fix`); `operate` remains a contextual
+  tool phase. Direct engines remain discoverable through `tools`, `/use`, scan
+  tasks, and `kuzushi run <module:tool>`.
 - **Retained TypeScript SDK modules are an authoring and compatibility
   surface.** The SDK remains useful for tests, package shape, dynamic-module
   descriptors, and migration references.
@@ -231,12 +232,12 @@ import type { ExecutionContext } from "kuzushi/modules";
 import type { Finding } from "kuzushi/scanners";
 import type { ScanOpts } from "kuzushi";
 
-const hunt = defineDagTool<"my-scanner", ScanOpts, Finding[]>({
+const scan = defineDagTool<"my-scanner", ScanOpts, Finding[]>({
   name: "my-scanner:hunt",
   displayName: "My Scanner",
   description: "LLM-driven hunt for weirdness X.",
   headless: true,
-  phase: "hunt",
+  phase: "scan",
   effect: "workspace-write",
   approval: "none",
   workspaceRequirement: "required",
@@ -600,6 +601,16 @@ before an interactive dispatch (or emit the exact preflight for an explicit
 headless invocation), and fail closed when an isolating execution backend is
 unavailable.
 
+The canonical descriptor phase vocabulary is `map | scan | review | prove |
+fix | operate`. Candidate-generating scanners and semantic hunts are `scan`;
+triage/classification tools are `review`; only tools that create real
+verification evidence are `prove`; patch/remediation tools are `fix`.
+Descriptor and query input accepts deprecated `hunt` as `scan` and `confirm` as
+`prove` for one major release, with a warning, but descriptors serialize only
+the canonical values. The retained TypeScript SDK likewise accepts deprecated
+input aliases during that window while publishing `review` in its canonical
+union. Numeric phases are invalid.
+
 Every explicit option with `type: "path"` must also declare
 `pathSemantics`: `workspace-read`, `state-write`, `target-write`,
 `external-read`, `external-write`, or `executable`. `state-write` is confined
@@ -627,7 +638,8 @@ For `inputSchema`, the native bridge requires top-level
 unknown option keys. The bridge supports object properties with primitive
 string/boolean/integer/number types, string enums, JSON objects without nested
 schema constraints, and arrays of strings. Supported property metadata is
-`description`, `default`, `enum`, and `items`. Unsupported schema keywords,
+`description`, `default`, `enum`, `items`, and inclusive `minimum`/`maximum`
+for integer properties. Unsupported schema keywords,
 non-string enum members, undeclared required properties, invalid defaults, and
 non-string array items fail during load instead of being weakened silently.
 Use explicit descriptor `options` when the JSON Schema subset cannot express

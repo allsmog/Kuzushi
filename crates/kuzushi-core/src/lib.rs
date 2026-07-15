@@ -13,9 +13,11 @@ public_modules!(
     engagement, event_log, events, evidence, findings, full_mode_multi, iac_scan, identity, incremental_index,
     license_scan, modules, offense, options, patch, plugin_sandbox, pr_comment, prompt_stack, prompts, proof, query, recon,
     remediation, report, repository_inventory, run_artifacts,
+    session_transcript,
     run_trace, runbooks, runtime, sbom_scan, scan, scanners, secret_scan, semgrep_rule_synthesis, source_span, spend, static_context,
     static_evidence, static_narrative, static_proof_validator, static_ranking, static_registry, storage_v3,
     strategy, suppressions, systems_hunt, text, threat_leads, threat_model, triage, variant_ndiff, verification, verify,
+    workflow_attempts,
     whitebox_static, whitebox_suppressions, worker_protocol, workspace, x_ray,
 );
 

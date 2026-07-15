@@ -58,6 +58,12 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
             })
         }
         ViewHydrationKey::RunTrace { .. } => ViewHydrationValue::RunTrace(None),
+        ViewHydrationKey::ScanStageReceipt { .. } => {
+            ViewHydrationValue::ScanStageReceipt(ScanStageReceiptState::Missing)
+        }
+        ViewHydrationKey::FindingPatchTruth { .. } => {
+            ViewHydrationValue::FindingPatchTruth(FindingPatchTruthState::Missing)
+        }
         ViewHydrationKey::SourceFile { .. } => {
             ViewHydrationValue::SourceFile(Err("missing fixture source".to_string()))
         }
@@ -178,6 +184,113 @@ fn workbench_hydrates_the_map_artifact_state() {
     app.set_shell_view(ShellView::Workbench);
 
     assert!(active_view_hydration_keys(&app).contains(&ViewHydrationKey::MapArtifacts));
+}
+
+#[test]
+fn fix_requests_generation_bound_finding_patch_truth() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Fix));
+    let mut finding = Finding::new_semgrep(
+        "fixture.rule",
+        "src/lib.rs",
+        7,
+        None,
+        kuzushi_core::Severity::High,
+        "fixture finding",
+    );
+    finding.scan_id = Some("scan-generation".to_string());
+    let fingerprint = finding.fingerprint.clone();
+    app.set_findings(vec![finding]);
+    app.engagement.set_phase_attempt_projection(
+        Some(kuzushi_core::workflow_attempts::PhaseTargetSnapshot {
+            target: temp.path().display().to_string(),
+            revision: Some("revision-1".to_string()),
+            dirty: false,
+        }),
+        kuzushi_core::workflow_attempts::PhaseAttemptLedger::default(),
+    );
+
+    let keys = active_view_hydration_keys(&app);
+
+    assert!(keys.contains(&ViewHydrationKey::FindingPatchTruth {
+        fingerprint,
+        finding_scan_id: Some("scan-generation".to_string()),
+        target_revision: Some("revision-1".to_string()),
+    }));
+}
+
+#[test]
+fn non_fix_workbench_pages_do_not_request_finding_patch_truth() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.set_findings(vec![Finding::new_semgrep(
+        "fixture.rule",
+        "src/lib.rs",
+        7,
+        None,
+        kuzushi_core::Severity::High,
+        "fixture finding",
+    )]);
+
+    assert!(!active_view_hydration_keys(&app)
+        .iter()
+        .any(|key| matches!(key, ViewHydrationKey::FindingPatchTruth { .. })));
+}
+
+#[test]
+fn replacing_findings_invalidates_same_key_remediation_truth() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let mut finding = Finding::new_semgrep(
+        "fixture.rule",
+        "src/lib.rs",
+        7,
+        None,
+        kuzushi_core::Severity::High,
+        "fixture finding",
+    );
+    finding.scan_id = Some("scan-generation".to_string());
+    let fingerprint = finding.fingerprint.clone();
+    app.set_findings(vec![finding.clone()]);
+    let key = ViewHydrationKey::FindingPatchTruth {
+        fingerprint: fingerprint.clone(),
+        finding_scan_id: finding.scan_id.clone(),
+        target_revision: None,
+    };
+    app.hydrate_view_keys_blocking(workspace.root(), vec![key]);
+    assert!(matches!(
+        app.workbench_cache().borrow().cached_finding_patch_truth(
+            workspace.root(),
+            &fingerprint,
+            finding.scan_id.as_deref(),
+            None,
+        ),
+        ViewDataState::Ready(_)
+    ));
+
+    app.set_findings(vec![finding.clone()]);
+
+    assert!(app
+        .workbench_cache()
+        .borrow()
+        .cached_finding_patch_truth(
+            workspace.root(),
+            &fingerprint,
+            finding.scan_id.as_deref(),
+            None,
+        )
+        .is_not_requested());
 }
 
 #[test]

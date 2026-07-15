@@ -5,7 +5,7 @@ use ratatui::style::{Color, Modifier};
 impl PhaseCompositionContract {
     pub(super) fn assert_buffer(self, buffer: &Buffer, text: &str, profile: TerminalProfile) {
         let _theme = theme::scoped_theme_for_test(profile.config());
-        self.assert_semantic_content(text);
+        self.assert_semantic_content(text, buffer.area.width);
         self.assert_navigation_controls(text);
         assert!(text.contains('▸'), "{} needs a non-color marker", self.slug);
         assert_bounded_rails(text, self.slug);
@@ -14,7 +14,7 @@ impl PhaseCompositionContract {
     }
 
     pub(super) fn assert_plain_text(self, text: &str, width: u16) {
-        self.assert_semantic_content(text);
+        self.assert_semantic_content(text, width);
         let flattened = collapse_whitespace(text);
         let command = self.plain_command_for_width(width);
         assert!(
@@ -46,28 +46,61 @@ impl PhaseCompositionContract {
         );
     }
 
-    fn assert_semantic_content(self, text: &str) {
-        for section in self.sections {
+    fn assert_semantic_content(self, text: &str, width: u16) {
+        self.assert_sections(text, width);
+        self.assert_priority_atoms(text, width);
+        assert!(!text.contains("[object Object]"), "{text}");
+        assert!(!text.contains("undefined"), "{text}");
+        self.assert_compact_content(text, width);
+    }
+
+    fn assert_sections(self, text: &str, width: u16) {
+        for section in adaptive_sections(self.phase, width) {
             assert!(
                 text.contains(section),
                 "{} missing {section}:\n{text}",
                 self.slug
             );
         }
-        for priority in self.priority_atoms() {
+    }
+
+    fn assert_priority_atoms(self, text: &str, width: u16) {
+        for priority in self.priority_atoms(width) {
             assert!(
-                text.contains(&priority),
+                contains_contract_atom(text, &priority),
                 "{} missing {priority}:\n{text}",
                 self.slug
             );
         }
-        assert!(!text.contains("[object Object]"), "{text}");
-        assert!(!text.contains("undefined"), "{text}");
+    }
+
+    fn assert_compact_content(self, text: &str, width: u16) {
+        if width >= 78 {
+            return;
+        }
+        for atom in self.critical_compact_atoms() {
+            assert!(
+                contains_contract_atom(text, atom),
+                "{} compact view missing {atom}:\n{text}",
+                self.slug
+            );
+        }
+        if self.phase == kuzushi_core::WorkflowPhase::Prove {
+            assert!(
+                text.contains("1src") || text.contains("source(s)"),
+                "prove compact view lost the unique source count:\n{text}"
+            );
+        }
     }
 
     fn assert_navigation_controls(self, text: &str) {
         let flattened = collapse_whitespace(text);
-        for control in ["Ctrl+C request abort", "Esc prompt", "NAVIGATION MODE"] {
+        for control in [
+            "Ctrl+C request abort",
+            "Esc prompt",
+            "NAVIGATE",
+            "Shift+Tab mode",
+        ] {
             assert!(
                 flattened.contains(control),
                 "{} navigation projection lost {:?}:\n{text}",
@@ -77,14 +110,47 @@ impl PhaseCompositionContract {
         }
     }
 
-    fn priority_atoms(self) -> [String; 4] {
-        [
-            "KUZUSHI".to_string(),
-            format!("view {}", self.phase.word()),
-            "LIVE".to_string(),
-            "NEXT".to_string(),
-        ]
+    fn priority_atoms(self, width: u16) -> Vec<String> {
+        let mut atoms = vec!["KUZUSHI".to_string(), "NEXT".to_string()];
+        if width >= 50 {
+            atoms.push(format!("VIEW {}", self.slug.to_ascii_uppercase()));
+        }
+        atoms
     }
+
+    fn critical_compact_atoms(self) -> &'static [&'static str] {
+        match self.phase {
+            kuzushi_core::WorkflowPhase::Map => &["VIEW MAP", "context:present"],
+            kuzushi_core::WorkflowPhase::Scan => &["VIEW SCAN", "complete", "scan-phase"],
+            kuzushi_core::WorkflowPhase::Review => &["FINDINGS", "[●●●]", "s1"],
+            kuzushi_core::WorkflowPhase::Prove => &["F-0001", "STATUS", "NEXT", "[●●●]"],
+            kuzushi_core::WorkflowPhase::Fix => &["REMEDIATION", "Staged", "report"],
+        }
+    }
+}
+
+fn adaptive_sections(phase: kuzushi_core::WorkflowPhase, width: u16) -> &'static [&'static str] {
+    use kuzushi_core::WorkflowPhase;
+    match (phase, width >= 120, width >= 78) {
+        (WorkflowPhase::Map, true, _) => &["PROJECT CONTEXT", "ATTACK SURFACE", "HOT MODULES"],
+        (WorkflowPhase::Map, false, true) => &["PROJECT CONTEXT", "ATTACK SURFACE"],
+        (WorkflowPhase::Map, false, false) => &["PROJECT CONTEXT"],
+        (WorkflowPhase::Scan, true, _) => &["ENGINE OUTCOMES", "SCAN RECEIPT", "SCOPE / PLAN"],
+        (WorkflowPhase::Scan, false, true) => &["ENGINE OUTCOMES", "SCAN RECEIPT"],
+        (WorkflowPhase::Scan, false, false) => &["ENGINE OUTCOMES"],
+        (WorkflowPhase::Review, _, true) => &["FINDINGS", "SELECTED FINDING"],
+        (WorkflowPhase::Review, _, false) => &["FINDINGS"],
+        (WorkflowPhase::Prove, true, _) => &["STATUS / NEXT", "EVIDENCE", "PROOF LADDER"],
+        (WorkflowPhase::Prove, false, true) => &["STATUS / NEXT", "EVIDENCE"],
+        (WorkflowPhase::Prove, false, false) => &["STATUS / NEXT"],
+        (WorkflowPhase::Fix, true, _) => &["REMEDIATION", "BREAKDOWN REPORT", "ATTACK TREE"],
+        (WorkflowPhase::Fix, false, true) => &["REMEDIATION", "BREAKDOWN REPORT"],
+        (WorkflowPhase::Fix, false, false) => &["REMEDIATION"],
+    }
+}
+
+fn contains_contract_atom(text: &str, atom: &str) -> bool {
+    text.contains(atom) || (atom == "[●●●]" && text.contains("[***]"))
 }
 
 fn collapse_whitespace(text: &str) -> String {

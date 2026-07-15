@@ -14,19 +14,78 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
-        if self.input_mode() != InputMode::Navigate || !self.input().is_empty() {
+        if !self.view_key_navigation_is_active() {
             return InputUpdate::ignored();
         }
-        // First view-specific handler that claims the key wins; the hotkey
-        // fallback is last so per-view keys take precedence.
-        let config_update = self.handle_config_view_key(key, modifiers);
-        if config_update.handled {
-            return config_update;
-        }
-        if self.handle_scene_view_key(key, modifiers) {
-            return InputUpdate::handled();
+        if let Some(update) = self.handle_specialized_view_key(key, modifiers) {
+            return update;
         }
         self.handle_view_hotkey_fallback(key, modifiers)
+    }
+
+    fn view_key_navigation_is_active(&self) -> bool {
+        self.input_mode() == InputMode::Navigate && self.input().is_empty()
+    }
+
+    fn handle_specialized_view_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> Option<InputUpdate> {
+        // First view-specific handler that claims the key wins; the hotkey
+        // fallback is last so per-view keys take precedence.
+        let report_update = self.handle_report_view_key(key, modifiers);
+        if report_update.handled {
+            return Some(report_update);
+        }
+        let config_update = self.handle_config_view_key(key, modifiers);
+        if config_update.handled {
+            return Some(config_update);
+        }
+        if self.handle_scene_view_key(key, modifiers) {
+            return Some(InputUpdate::handled());
+        }
+        None
+    }
+
+    fn handle_report_view_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> InputUpdate {
+        if !modifiers.plain || !matches!(self.shell_view(), ShellView::Report) {
+            return InputUpdate::ignored();
+        }
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.router.report_mut().move_format(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.router.report_mut().move_format(1),
+            KeyCode::Char('c') => self.router.report_mut().cycle_completeness(),
+            KeyCode::Char('e') => self.router.report_mut().set_editing_path(true),
+            KeyCode::Char('q') => self.close_report_to_origin(),
+            KeyCode::Enter => {
+                let route = self.router.report();
+                let output = route.path_draft().trim();
+                if output.is_empty() {
+                    self.log("report", "destination must not be empty");
+                    return InputUpdate::handled();
+                }
+                return InputUpdate::handled_with_effects(vec![ShellEffect::ExportReport(
+                    ReportExport {
+                        format: route.format(),
+                        completeness: route.completeness(),
+                        output: PathBuf::from(output),
+                        target: self.target_owned(),
+                    },
+                )]);
+            }
+            KeyCode::Char('o') => {
+                return InputUpdate::handled_with_effects(vec![
+                    ShellEffect::RevealReportDestination,
+                ]);
+            }
+            _ => return InputUpdate::ignored(),
+        }
+        InputUpdate::handled()
     }
 
     /// Arrow-key / single-key view hotkeys, tried after the per-view handlers.

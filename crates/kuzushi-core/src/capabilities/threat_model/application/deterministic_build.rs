@@ -271,20 +271,33 @@ fn deterministic_response(
     persisted: bool,
 ) -> Value {
     let threat_count = array_len(document.pointer("/threats"));
+    let has_concrete_content =
+        crate::workflow_attempts::threat_model_has_concrete_content(&document);
+    let target = input.target.clone();
     let persistent_artifact = persistent_threat_model_path(&input.target);
     let artifacts = threat_model_artifacts(&normalized_artifact, &persistent_artifact, persisted);
     let summary = deterministic_summary(&input.repo_name);
     let output = deterministic_output(flavor, &input.repo_name, threat_count);
-    let data = deterministic_response_data(input, document, normalized_artifact, persistent_artifact, persisted);
-    let mut result = crate::module_result::partial_output_result(
-        summary,
-        output,
-        vec![json!("agent runtime unavailable; generated artifact-review-only threat model")],
-        data,
+    let data = deterministic_response_data(
+        input,
+        document,
+        normalized_artifact,
+        persistent_artifact,
+        persisted,
     );
+    let warning = deterministic_warning(&target, has_concrete_content);
+    let mut result =
+        crate::module_result::partial_output_result(summary, output, vec![json!(warning)], data);
     result["artifacts"] = json!(artifacts);
     result["costUsd"] = json!(0.0);
     result
+}
+
+fn deterministic_warning(target: &Path, has_concrete_content: bool) -> String {
+    if !has_concrete_content {
+        return crate::workflow_attempts::insufficient_map_evidence_message(target);
+    }
+    "agent runtime unavailable; generated artifact-review-only threat model".to_string()
 }
 
 fn deterministic_summary(repo_name: &str) -> String {

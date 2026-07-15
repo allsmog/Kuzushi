@@ -78,11 +78,12 @@ fn contextual_overlay_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ShellView::QuitConfirm => quit_confirm_lines(app, body_area),
         ShellView::ThemePicker => theme_picker_lines(app, body_area),
         ShellView::Keymap => keymap_lines(app, body_area),
+        ShellView::Help => help_lines(app, body_area),
         ShellView::UpdateAvailable => update_available_lines(app, body_area),
         _ => return Vec::new(),
     };
     let lines = strip_full_screen_chrome(lines);
-    if app.shell_view() == ShellView::Keymap {
+    if matches!(app.shell_view(), ShellView::Keymap | ShellView::Help) {
         return keymap_overlay_viewport(lines, area, app.router.default_scroll().offset() as usize);
     }
     lines
@@ -378,6 +379,7 @@ fn overlay_title(app: &ShellApp) -> &'static str {
         ShellView::QuitConfirm => " QUIT ",
         ShellView::ThemePicker => " THEME ",
         ShellView::Keymap => " KEYMAP ",
+        ShellView::Help => " HELP ",
         ShellView::UpdateAvailable if update_available_model(app).release_available => {
             " UPDATE AVAILABLE "
         }

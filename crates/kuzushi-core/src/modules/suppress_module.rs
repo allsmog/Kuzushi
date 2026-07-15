@@ -9,7 +9,7 @@ pub(crate) fn suppress_module() -> BuiltinModule {
         vec![
             tool_with_options("suppress:add", "Add a suppression rule.", suppress_add_options())
                 .with_policy(workspace_policy(
-                    ToolPhase::Hunt,
+                    ToolPhase::Review,
                     RuntimeRequirement::Never,
                     FindingStoreRequirement::Optional,
                 )),
@@ -19,7 +19,7 @@ pub(crate) fn suppress_module() -> BuiltinModule {
                 vec![],
             )
             .with_policy(read_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Review,
                 WorkspaceRequirement::Required,
             )),
             tool_with_options(
@@ -28,7 +28,7 @@ pub(crate) fn suppress_module() -> BuiltinModule {
                 vec![opt("id", OptionType::String, "Suppression rule id to remove.")],
             )
             .with_policy(workspace_policy(
-                ToolPhase::Hunt,
+                ToolPhase::Review,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             )),

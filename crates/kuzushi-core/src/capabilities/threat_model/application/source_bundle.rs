@@ -13,7 +13,12 @@ pub(crate) struct ThreatModelSourceBundle {
 
 impl ThreatModelSourceBundle {
     pub(crate) fn metadata_json(&self) -> Value {
-        Value::Array(self.records.iter().map(ThreatModelSourceRecord::metadata_json).collect())
+        Value::Array(
+            self.records
+                .iter()
+                .map(ThreatModelSourceRecord::metadata_json)
+                .collect(),
+        )
     }
 
     pub(crate) fn prompt_blocks(&self) -> String {
@@ -52,7 +57,13 @@ struct ThreatModelSourceRecord {
 }
 
 impl ThreatModelSourceRecord {
-    fn loaded(kind: &str, label: &str, path: Option<PathBuf>, content: String, limit: usize) -> Self {
+    fn loaded(
+        kind: &str,
+        label: &str,
+        path: Option<PathBuf>,
+        content: String,
+        limit: usize,
+    ) -> Self {
         let bytes = content.len();
         let sha256 = Some(crate::options::prompt_content_sha256(&content));
         let (content, truncated) = truncate_source_content(content, limit);
@@ -187,11 +198,11 @@ fn load_context_source(
         }
         "require" => {
             emit_source_step(ctx, "source:context require");
-            read_json_source(&input.target, &path, "context snapshot")?
+            read_context_json_source(&input.target, &path)?
         }
         _ if path.exists() => {
             emit_source_step(ctx, "source:context load");
-            read_json_source(&input.target, &path, "context snapshot")?
+            read_context_json_source(&input.target, &path)?
         }
         _ => {
             emit_source_step(ctx, "source:context build");
@@ -208,9 +219,11 @@ fn load_context_source(
 }
 
 fn build_context_source_content(input: &BuildInput) -> Result<String> {
-    let built =
-        crate::modules::context::build_context_snapshot_for_root(&input.target, input.context_limit)
-            .with_context(|| "Could not build context snapshot for threat-model:build")?;
+    let built = crate::modules::context::build_context_snapshot_for_root(
+        &input.target,
+        input.context_limit,
+    )
+    .with_context(|| "Could not build context snapshot for threat-model:build")?;
     serde_json::to_string_pretty(&built.snapshot).context("Could not render context snapshot JSON")
 }
 
@@ -283,7 +296,11 @@ fn load_design_doc_source(input: &BuildInput, design_doc: &str) -> Result<Threat
     ))
 }
 
-fn load_seed_source(input: &BuildInput, index: usize, seed: &str) -> Result<ThreatModelSourceRecord> {
+fn load_seed_source(
+    input: &BuildInput,
+    index: usize,
+    seed: &str,
+) -> Result<ThreatModelSourceRecord> {
     let label = format!("seed-{index}");
     let path = resolve_source_path(&input.target, seed);
     if looks_like_source_path(seed) || path.exists() {
@@ -306,15 +323,41 @@ fn load_seed_source(input: &BuildInput, index: usize, seed: &str) -> Result<Thre
 }
 
 fn read_json_source(root: &Path, path: &Path, label: &str) -> Result<String> {
-    let raw = read_required_text(root, path, label)?;
-    let value: Value = serde_json::from_str(&raw)
+    read_json_source_with_limit(root, path, label, MAX_SOURCE_BYTES)
+}
+
+fn read_context_json_source(root: &Path, path: &Path) -> Result<String> {
+    read_json_source_with_limit(
+        root,
+        path,
+        "context snapshot",
+        crate::context::MAX_CONTEXT_SNAPSHOT_BYTES,
+    )
+}
+
+fn read_json_source_with_limit(
+    root: &Path,
+    path: &Path,
+    label: &str,
+    max_bytes: usize,
+) -> Result<String> {
+    let raw = read_required_text_with_limit(root, path, label, max_bytes)?;
+    serde_json::from_str::<serde::de::IgnoredAny>(&raw)
         .with_context(|| format!("{label} at {} is not valid JSON", path.display()))?;
-    serde_json::to_string_pretty(&value)
-        .with_context(|| format!("Could not render {label} from {}", path.display()))
+    Ok(raw)
 }
 
 fn read_required_text(root: &Path, path: &Path, label: &str) -> Result<String> {
-    crate::bounded_file::read_utf8_text_within(root, path, MAX_SOURCE_BYTES)
+    read_required_text_with_limit(root, path, label, MAX_SOURCE_BYTES)
+}
+
+fn read_required_text_with_limit(
+    root: &Path,
+    path: &Path,
+    label: &str,
+    max_bytes: usize,
+) -> Result<String> {
+    crate::bounded_file::read_utf8_text_within(root, path, max_bytes)
         .with_context(|| format!("Could not read {label} from {}", path.display()))
 }
 
@@ -364,5 +407,42 @@ fn truncate_source_content(content: String, limit: usize) -> (String, bool) {
 fn emit_source_step(ctx: &ToolExecutionContext<'_>, label: &str) {
     if let Some(trace) = ctx.trace {
         let _ = trace.step("tool-progress", "build", label).emit();
+    }
+}
+
+#[cfg(test)]
+mod source_size_contract_tests {
+    use super::*;
+
+    #[test]
+    fn context_snapshot_may_exceed_the_ordinary_prompt_source_read_limit() {
+        let target = tempfile::tempdir().unwrap();
+        let path = crate::context::context_snapshot_path(target.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let padding = "x".repeat(MAX_SOURCE_BYTES + 1);
+        std::fs::write(&path, serde_json::json!({ "padding": padding }).to_string()).unwrap();
+
+        let content = read_context_json_source(target.path(), &path).unwrap();
+
+        assert!(content.len() > MAX_SOURCE_BYTES);
+    }
+
+    #[test]
+    fn context_snapshot_still_has_a_bounded_artifact_read() {
+        let target = tempfile::tempdir().unwrap();
+        let path = crate::context::context_snapshot_path(target.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len((crate::context::MAX_CONTEXT_SNAPSHOT_BYTES + 1) as u64)
+            .unwrap();
+
+        let error = read_context_json_source(target.path(), &path).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("Could not read context snapshot"),
+            "{error:#}"
+        );
     }
 }

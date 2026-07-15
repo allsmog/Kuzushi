@@ -13,7 +13,24 @@ impl ShellApp {
         changed |= self.advance_spinner(now);
         changed |= self.advance_liveness_clock(now);
         changed |= self.advance_scene(now);
+        changed |= self.reload_operator_keymap(now);
         changed
+    }
+
+    fn reload_operator_keymap(&mut self, now: Instant) -> bool {
+        let Some(result) = self.ui_mut().poll_runtime_keymap(now) else {
+            return false;
+        };
+        match result {
+            Ok(bindings) => {
+                self.config_mut().operator.keybindings = bindings;
+                self.set_info_notice("keymap", "operator keybindings reloaded");
+            }
+            Err(error) => {
+                self.set_error_notice("keymap", format!("operator keybindings unchanged: {error}"))
+            }
+        }
+        true
     }
 
     /// True while the security-viz gallery is on the animated 3D attack-surface
@@ -62,6 +79,9 @@ impl ShellApp {
         let Some(since) = kind.since(self) else {
             return false;
         };
+        if kind.persists(self) {
+            return false;
+        }
         if now.duration_since(since) <= kind.stale_after() {
             return false;
         }
@@ -298,6 +318,16 @@ impl AdvisoryKind {
             AdvisoryKind::Throttle => THROTTLE_STALE_AFTER,
             AdvisoryKind::Notice => NOTICE_STALE_AFTER,
         }
+    }
+
+    fn persists(self, app: &ShellApp) -> bool {
+        matches!(self, AdvisoryKind::Notice)
+            && app
+                .advisory()
+                .notice
+                .as_ref()
+                .is_some_and(|notice| notice.source == "session")
+            && app.session_persistence_is_degraded()
     }
 
     fn clear(self, app: &mut ShellApp) {

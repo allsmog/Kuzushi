@@ -8,8 +8,8 @@ pub(crate) fn section_slot(kind: RenderSection, height: u16) -> Option<RenderSec
     (height > 0).then_some(RenderSectionSlot { kind, height })
 }
 
-pub(crate) fn fixed_chrome_height(sections: &[RenderSectionSlot]) -> u16 {
-    PROMPT_HEIGHT + sections.iter().map(|section| section.height).sum::<u16>()
+pub(crate) fn fixed_chrome_height(sections: &[RenderSectionSlot], prompt_height: u16) -> u16 {
+    prompt_height + sections.iter().map(|section| section.height).sum::<u16>()
 }
 
 /// Smallest primary-view height we refuse to drop below. Without this, a pile-up
@@ -23,10 +23,12 @@ const MIN_PRIMARY_VIEW_HEIGHT: u16 = 3;
 pub(crate) fn fit_sections_to_height(
     mut sections: Vec<RenderSectionSlot>,
     area_height: u16,
+    prompt_height: u16,
 ) -> Vec<RenderSectionSlot> {
     let min_primary_height = min_primary_view_height(&sections);
     while !sections.is_empty()
-        && fixed_chrome_height(&sections).saturating_add(min_primary_height) > area_height
+        && fixed_chrome_height(&sections, prompt_height).saturating_add(min_primary_height)
+            > area_height
     {
         sections.pop();
     }
@@ -47,6 +49,7 @@ fn min_primary_view_height(sections: &[RenderSectionSlot]) -> u16 {
 pub(crate) fn render_constraints(
     view_height: u16,
     sections: &[RenderSectionSlot],
+    prompt_height: u16,
 ) -> Vec<Constraint> {
     let mut constraints = vec![Constraint::Length(view_height), Constraint::Min(0)];
     constraints.extend(
@@ -54,7 +57,7 @@ pub(crate) fn render_constraints(
             .iter()
             .map(|section| Constraint::Length(section.height)),
     );
-    constraints.push(Constraint::Length(PROMPT_HEIGHT));
+    constraints.push(Constraint::Length(prompt_height));
     constraints
 }
 
@@ -63,10 +66,16 @@ pub(crate) fn transcript_height(app: &ShellApp, area: Rect) -> u16 {
 }
 
 pub(crate) fn keybind_footer_height(app: &ShellApp, area: Rect) -> u16 {
+    if compact_guided_question_owns_footer(app, area) {
+        return 0;
+    }
     keybind_footer_chrome_height(app, area.height, area.width)
 }
 
 pub(crate) fn status_footer_height(app: &ShellApp, area: Rect) -> u16 {
+    if compact_guided_question_owns_footer(app, area) {
+        return 0;
+    }
     status_footer_chrome_height(app, area.height)
 }
 
@@ -79,7 +88,10 @@ pub(crate) fn throttle_banner_height(app: &ShellApp, area: Rect) -> u16 {
 }
 
 pub(crate) fn notice_banner_height(app: &ShellApp, area: Rect) -> u16 {
-    if notice_banner_model(app).is_none() || area.height < 5 {
+    if compact_guided_question_owns_footer(app, area)
+        || notice_banner_model(app).is_none()
+        || area.height < 5
+    {
         return 0;
     }
     // Tall terminals get the full wrapped banner; cramped ones one line, so
@@ -90,6 +102,10 @@ pub(crate) fn notice_banner_height(app: &ShellApp, area: Rect) -> u16 {
         1
     };
     notice_banner_line_count(app, area.width, max_lines) as u16
+}
+
+fn compact_guided_question_owns_footer(app: &ShellApp, area: Rect) -> bool {
+    area.height <= 16 && app.guided_scan_question_is_open()
 }
 
 pub(crate) fn cost_cap_halt_height(app: &ShellApp, area: Rect) -> u16 {

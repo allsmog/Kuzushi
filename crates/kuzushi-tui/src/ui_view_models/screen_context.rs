@@ -1,5 +1,5 @@
 use super::findings::projected_visible_findings;
-use crate::app::{PaneFocus, ShellView, WorkbenchPane};
+use crate::app::{PaneFocus, ShellView};
 use crate::ShellApp;
 use kuzushi_core::{
     finding_next_action, runtime_validation_summary, stable_finding_alias, static_proof_summary,
@@ -22,7 +22,7 @@ const SCREEN_CONTEXT_TEXT_LIMIT: usize = 4000;
 
 pub(crate) fn screen_context_model(app: &ShellApp) -> ScreenContext {
     ScreenContext {
-        view: shell_view_label(&app.shell_view()),
+        view: shell_view_label(app),
         focused_pane: focused_pane_label(app),
         selected_item: selected_item(app),
         selected_run: selected_run(app),
@@ -39,15 +39,16 @@ pub(crate) fn screen_context_model(app: &ShellApp) -> ScreenContext {
     }
 }
 
-fn shell_view_label(view: &ShellView) -> String {
-    core_shell_view_label(view)
+fn shell_view_label(app: &ShellApp) -> String {
+    let view = &app.shell_view();
+    core_shell_view_label(app, view)
         .or_else(|| workspace_shell_view_label(view))
         .or_else(|| system_shell_view_label(view))
         .unwrap_or("Unknown")
         .to_string()
 }
 
-fn core_shell_view_label(view: &ShellView) -> Option<&'static str> {
+fn core_shell_view_label(app: &ShellApp, view: &ShellView) -> Option<&'static str> {
     match view {
         ShellView::Home => Some("Home"),
         ShellView::Catalog => Some("Capabilities"),
@@ -55,6 +56,8 @@ fn core_shell_view_label(view: &ShellView) -> Option<&'static str> {
         ShellView::Module => Some("Module"),
         ShellView::ModuleRun => Some("ModuleRun"),
         ShellView::Workbench => Some("Workbench"),
+        ShellView::Setup => Some(setup_screen_label(app)),
+        ShellView::Report => Some("Report"),
         ShellView::Tune => Some("Tune"),
         ShellView::Threat => Some("Threat"),
         ShellView::ThreatEditor => Some("ThreatEditor"),
@@ -109,18 +112,28 @@ fn system_shell_view_label(view: &ShellView) -> Option<&'static str> {
         ShellView::UpdateAvailable => Some("UpdateAvailable"),
         ShellView::Interruption => Some("Interruption"),
         ShellView::CommandPalette => Some("CommandPalette"),
-        ShellView::ModelPicker => Some("ModelPicker"),
-        ShellView::AuthMethodPicker => Some("AuthMethodPicker"),
         ShellView::TargetPicker => Some("TargetPicker"),
         ShellView::PlanningPicker => Some("PlanningPicker"),
         _ => None,
     }
 }
 
+fn setup_screen_label(app: &ShellApp) -> &'static str {
+    match app.router.setup().editor() {
+        Some(crate::app::SetupEditor::Model) => "SetupModel",
+        Some(crate::app::SetupEditor::Credentials) => "SetupCredentials",
+        Some(crate::app::SetupEditor::Plan) => "SetupMapPlan",
+        Some(crate::app::SetupEditor::Prompt) => "SetupPrompt",
+        Some(crate::app::SetupEditor::Budget) => "SetupBudget",
+        Some(crate::app::SetupEditor::Target) => "SetupTarget",
+        None => "Setup",
+    }
+}
+
 fn focused_pane_label(app: &ShellApp) -> Option<String> {
     match app.shell_view() {
         ShellView::Workbench => {
-            Some(workbench_pane_label(app.router.workbench().focus()).to_string())
+            workbench_phase_plan(app).map(|plan| plan.effective_focus.label().to_string())
         }
         ShellView::Activity => app.activity().map(|activity| {
             pane_focus_label(app.activity_route().effective_pane_focus(activity)).to_string()
@@ -129,13 +142,12 @@ fn focused_pane_label(app: &ShellApp) -> Option<String> {
     }
 }
 
-fn workbench_pane_label(pane: WorkbenchPane) -> &'static str {
-    match pane {
-        WorkbenchPane::Source => "Source",
-        WorkbenchPane::Center => "Center",
-        WorkbenchPane::Findings => "Findings",
-        WorkbenchPane::Details => "Details",
-    }
+fn workbench_phase_plan(app: &ShellApp) -> Option<super::PhasePresentationPlan> {
+    let viewport = app.viewport();
+    crate::renderer::workbench_phase_plan_for_app(
+        app,
+        ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
+    )
 }
 
 fn pane_focus_label(pane: PaneFocus) -> &'static str {
@@ -293,7 +305,11 @@ fn selected_revision(app: &ShellApp) -> Option<ScreenRevision> {
 }
 
 fn active_phase(app: &ShellApp) -> Option<String> {
-    super::journey_model(app).map(|journey| journey.current.word().to_string())
+    super::journey_model(app).map(|journey| {
+        crate::app::WorkbenchPage::from_phase(journey.current)
+            .title()
+            .to_ascii_lowercase()
+    })
 }
 
 fn active_filters(app: &ShellApp) -> Vec<String> {
@@ -529,10 +545,16 @@ fn bounded_prompt_list(values: &[String]) -> Vec<String> {
 
 fn active_cursor_row(app: &ShellApp) -> usize {
     match app.shell_view() {
-        ShellView::Workbench => match app.router.workbench().focus() {
-            WorkbenchPane::Findings => app.router.findings().cursor(),
-            pane => app.router.workbench().scroll().get(pane) as usize,
-        },
+        ShellView::Workbench => workbench_phase_plan(app)
+            .and_then(|plan| plan.surface(plan.effective_focus).copied())
+            .map(|surface| match surface.interaction {
+                super::SurfaceInteraction::Selectable => app.router.findings().cursor(),
+                super::SurfaceInteraction::Scrollable => {
+                    app.router.workbench().scroll().get(surface.legacy_slot) as usize
+                }
+                super::SurfaceInteraction::Static | super::SurfaceInteraction::Diagram => 0,
+            })
+            .unwrap_or_default(),
         ShellView::Runs => app.router.default_scroll().offset() as usize,
         ShellView::Activity => app
             .activity()

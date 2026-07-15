@@ -19,6 +19,7 @@ use kuzushi_core::{
 };
 use map_artifacts_cache::MapArtifactsCache;
 use prompt_override_cache::PromptOverrideCache;
+use remediation_projection::FindingPatchTruthCache;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,6 +32,7 @@ mod hydrated_reads;
 mod hydration_state;
 mod map_artifacts_cache;
 mod prompt_override_cache;
+mod remediation_projection;
 #[cfg(test)]
 mod tests;
 mod view_model_fragments;
@@ -70,10 +72,12 @@ pub(crate) struct WorkbenchCache {
     directory_listings: BTreeMap<PathBuf, DirectoryListingCache>,
     run_traces: BTreeMap<(PathBuf, String), RunTraceCache>,
     run_artifact_texts: BTreeMap<(PathBuf, String, String), RunArtifactTextCache>,
+    scan_stage_receipts: BTreeMap<(PathBuf, String), ScanStageReceiptState>,
     map_artifacts: MapArtifactsCache,
     prompt_overrides: PromptOverrideCache,
     health_checks: BTreeMap<String, ViewHealthChecks>,
     finding_aliases: FindingAliasCache,
+    finding_patch_truth: FindingPatchTruthCache,
     view_models: ViewModelFragmentCache,
     hydrating_view_data: BTreeSet<(PathBuf, ViewHydrationKey)>,
 }
@@ -161,6 +165,23 @@ impl WorkbenchCache {
         )
     }
 
+    pub(crate) fn cached_scan_stage_receipt(
+        &self,
+        target: &Path,
+        run_id: &str,
+    ) -> ViewDataState<ScanStageReceiptState> {
+        let map_key = (target.to_path_buf(), run_id.to_string());
+        if let Some(state) = self.scan_stage_receipts.get(&map_key) {
+            return ViewDataState::Ready(state.clone());
+        }
+        self.loading_state(
+            target,
+            &ViewHydrationKey::ScanStageReceipt {
+                run_id: run_id.to_string(),
+            },
+        )
+    }
+
     pub(crate) fn cached_map_artifacts_built(&self, target: Option<&Path>) -> ViewDataState<bool> {
         let Some(target) = target else {
             return ViewDataState::NotRequested;
@@ -201,6 +222,7 @@ impl WorkbenchCache {
         self.run_summary_entries = None;
         self.latest_run_pointer = None;
         self.run_id_completion_values = None;
+        self.scan_stage_receipts.clear();
         self.bump_completion_generation();
     }
 
@@ -321,6 +343,8 @@ impl WorkbenchCache {
         self.bump_completion_generation();
         self.run_traces.clear();
         self.run_artifact_texts.clear();
+        self.scan_stage_receipts.clear();
+        self.finding_patch_truth.invalidate(None);
         self.map_artifacts.invalidate();
         self.prompt_overrides.invalidate();
         self.health_checks.clear();
@@ -352,6 +376,7 @@ impl WorkbenchCache {
         }
         if findings_changed {
             self.finding_completion_values = None;
+            self.finding_patch_truth.invalidate(None);
         }
         self.bump_completion_generation_when(findings_changed | run_summaries_changed);
         self.strategy_queue = None;
@@ -421,6 +446,13 @@ impl WorkbenchCache {
             &path,
             broad,
         );
+        invalidate_cached_scan_stage_receipt(
+            &mut self.scan_stage_receipts,
+            roots.target,
+            &roots.runs,
+            &path,
+            broad,
+        );
     }
 
     fn invalidate_state_root(&mut self, state_root: &Path) {
@@ -431,6 +463,7 @@ impl WorkbenchCache {
         self.directory_listings
             .retain(|cached, _| !cached.starts_with(state_root));
         self.map_artifacts.invalidate();
+        self.finding_patch_truth.invalidate(None);
     }
 
     pub(crate) fn project_scope_tree(
@@ -703,6 +736,28 @@ fn invalidate_cached_run_artifact_text(
         return;
     };
     artifacts.remove(&(target.to_path_buf(), run_id.to_string(), leaf.to_string()));
+}
+
+fn invalidate_cached_scan_stage_receipt(
+    receipts: &mut BTreeMap<(PathBuf, String), ScanStageReceiptState>,
+    target: &Path,
+    runs_root: &Path,
+    path: &Path,
+    broad: bool,
+) {
+    if broad {
+        receipts.retain(|(cached_target, _), _| cached_target != target);
+        return;
+    }
+    let Some(run_id) = path
+        .strip_prefix(runs_root)
+        .ok()
+        .and_then(|relative| relative.components().next())
+        .and_then(|component| component.as_os_str().to_str())
+    else {
+        return;
+    };
+    receipts.remove(&(target.to_path_buf(), run_id.to_string()));
 }
 
 fn run_artifact_identity<'a>(runs_root: &Path, path: &'a Path) -> Option<(&'a str, &'a str)> {
