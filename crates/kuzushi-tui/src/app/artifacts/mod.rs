@@ -181,6 +181,7 @@ fn incomplete_observed_cost(cost: kuzushi_core::runtime::RuntimeCostReport) -> O
     (!cost.is_complete() && !cost.is_unavailable()).then_some(cost.observed_usd())
 }
 
+#[cfg(test)]
 pub fn write_run_failure_handoff(
     target: Option<&std::path::Path>,
     run_id: &str,
@@ -200,6 +201,7 @@ pub fn write_run_failure_handoff(
     .map(|_| ())
 }
 
+#[cfg(test)]
 pub fn append_run_status_event(
     target: Option<&std::path::Path>,
     run_id: &str,
@@ -218,6 +220,7 @@ pub fn append_run_status_event(
     kuzushi_core::run_artifacts::append_run_event(target, run_id, &event).map(|_| ())
 }
 
+#[cfg(test)]
 fn canonical_run_status(status: &str) -> &'static str {
     match status.to_ascii_lowercase().as_str() {
         "complete" | "completed" => "completed",
@@ -287,7 +290,12 @@ mod run_summary_pid_tests {
     }
 }
 
-pub fn append_llm_trace_step(
+/// Append an application-level agent terminal marker.
+///
+/// The runtime already owns the cost-bearing model-call row. This marker is
+/// explicitly not another call, so canonical cost reconciliation cannot count
+/// the same provider settlement twice.
+pub(crate) fn append_agent_terminal_trace_step(
     target: Option<&std::path::Path>,
     run_id: &str,
     kind: &str,
@@ -296,13 +304,10 @@ pub fn append_llm_trace_step(
     audit: &AgentCallAudit,
 ) -> anyhow::Result<()> {
     let Some(target) = target else { return Ok(()) };
-    let mut step = kuzushi_core::RunTraceStep::new(0, kind.to_string(), label.to_string())
+    let step = kuzushi_core::RunTraceStep::new(0, kind.to_string(), label.to_string())
         .with_latency_ms(latency_ms)
-        .with_call_attempted(audit.call_attempted)
+        .with_call_attempted(false)
         .with_model_metadata(&audit.model, &audit.provider, &audit.prompt_hash);
-    if audit.call_attempted {
-        step = step.with_cost_report(audit.settlement_cost());
-    }
     kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step)
         .map(|_| ())
 }

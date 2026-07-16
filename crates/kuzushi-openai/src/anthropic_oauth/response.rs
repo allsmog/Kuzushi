@@ -19,7 +19,12 @@ pub(crate) fn anthropic_response_usage(parsed: &ApiResponse) -> (u32, u32) {
     parsed
         .usage
         .as_ref()
-        .map(|usage| (usage.input_tokens, usage.output_tokens))
+        .map(|usage| {
+            (
+                usage.input_tokens.unwrap_or(0),
+                usage.output_tokens.unwrap_or(0),
+            )
+        })
         .unwrap_or((0, 0))
 }
 
@@ -103,7 +108,7 @@ pub(crate) enum ApiContentBlock {
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub(crate) struct ApiUsage {
     #[serde(default)]
-    pub(crate) input_tokens: u32,
+    pub(crate) input_tokens: Option<u32>,
     #[serde(default)]
-    pub(crate) output_tokens: u32,
+    pub(crate) output_tokens: Option<u32>,
 }

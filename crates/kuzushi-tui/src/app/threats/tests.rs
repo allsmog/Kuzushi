@@ -44,10 +44,9 @@ mod tests {
             error: "boom".to_string(),
             audit: AgentCallAudit::test(),
         });
-        assert!(app
-            .log_lines()
-            .iter()
-            .any(|line| line.body.contains("threats worker failed: boom")));
+        assert!(app.log_lines().iter().any(|line| line
+            .body
+            .contains("threats worker failed: model request failed (runtime_error)")));
 
         app.set_threat_abort_requested(true);
         app.apply_threat_patch_event(ThreatPatchEvent::Answer {

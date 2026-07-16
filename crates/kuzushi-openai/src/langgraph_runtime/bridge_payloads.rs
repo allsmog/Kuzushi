@@ -47,10 +47,18 @@ pub(crate) struct NextStepBridgeResponse {
     /// surfaces correctly through the next-step tool loop too.
     #[serde(default, alias = "cost_usd")]
     pub(crate) cost_usd: Option<f64>,
+    #[serde(default, alias = "input_tokens")]
+    pub(crate) input_tokens: Option<u64>,
+    #[serde(default, alias = "output_tokens")]
+    pub(crate) output_tokens: Option<u64>,
     #[serde(default)]
     pub(crate) call: Option<NextStepBridgeCall>,
     #[serde(default)]
     pub(crate) error: Option<String>,
+    #[serde(default, alias = "error_class")]
+    pub(crate) error_class: Option<String>,
+    #[serde(default)]
+    pub(crate) status: Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +100,10 @@ pub(crate) struct BridgeResponse {
     pub(crate) text: Option<String>,
     pub(crate) structured: Option<Value>,
     pub(crate) error: Option<String>,
+    #[serde(default, alias = "error_class")]
+    pub(crate) error_class: Option<String>,
+    #[serde(default)]
+    pub(crate) status: Option<u16>,
     #[serde(default)]
     pub(crate) truncated: bool,
     #[serde(default)]

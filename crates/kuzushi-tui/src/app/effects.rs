@@ -358,11 +358,41 @@ pub(crate) struct ToolRunRecordEffect {
 }
 
 pub(crate) enum ToolRunRecordOutcome {
-    Complete { result: serde_json::Value },
-    Failed { error: String },
-    Canceled { reason: String },
-    Interrupted { reason: String },
-    Refused { reason: String },
+    Complete {
+        result: serde_json::Value,
+    },
+    Failed {
+        error: String,
+    },
+    ObservedComplete {
+        result: serde_json::Value,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    ObservedFailed {
+        error: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    ObservedCanceled {
+        reason: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    ObservedInterrupted {
+        reason: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    ObservedRefused {
+        reason: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    Canceled {
+        reason: String,
+    },
+    Interrupted {
+        reason: String,
+    },
+    Refused {
+        reason: String,
+    },
 }
 
 pub(crate) struct FindingsRefresh {
@@ -900,7 +930,7 @@ impl ShellApp {
         if self.activity().is_none() {
             let mut session =
                 ActivitySession::new(open.run_id.unwrap_or_else(manual_activity_run_id));
-            session.seed_from_registry(self.registry());
+            session.seed_from_registry_legacy(self.registry());
             self.set_activity(Some(session));
         }
         self.set_shell_view(ShellView::Activity);

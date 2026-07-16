@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI › activity · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › activity · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- RUN FOCUS  run r-snapshot  ·  2/3 done  ·  1 running ---------------------------------------------------------------
 target:none  ·  ctx:not built  ·  execution:none · receipt pending  ·  0 findings
@@ -16,7 +16,7 @@ target:none  ·  ctx:not built  ·  execution:none · receipt pending  ·  0 fin
      + stage1 kept 14/14
      ↳ verdict=likely-tp severity=high
  ⤳ subsystems (1)  active · hidden — V to expand · task-selector ran
- legend: + done · * active · ! fail · x canceled · ⊘ skipped · · queued
+ legend: + done · * active · ⚠ partial · ! fail · x canceled · ⊘ skipped · · queued
  -- OUTPUT -------------------------------------------------------------------------------------------------------------
 22:13:20  ⏵ [context:build] context:build start
 22:13:20  + [context:build] context:build complete · 412 files

@@ -1,5 +1,6 @@
 use super::presentation_copy::*;
 use super::*;
+use kuzushi_core::workflow_attempts::PhaseResultAction;
 
 impl ShellApp {
     pub(crate) fn guided_scan_question_model(&self) -> Option<GuidedScanQuestionModel> {
@@ -7,6 +8,16 @@ impl ShellApp {
             return None;
         }
         let flow = self.engagement.guided_scan()?;
+        if matches!(flow.stage(), GuidedScanStage::Running(_)) {
+            return None;
+        }
+        if let GuidedScanStage::AwaitingResult { phase, attempt_id } = flow.stage() {
+            return self.phase_result_question(flow, phase, &attempt_id);
+        }
+        self.guided_setup_question(flow)
+    }
+
+    fn guided_setup_question(&self, flow: &GuidedScanFlow) -> Option<GuidedScanQuestionModel> {
         match flow.stage() {
             GuidedScanStage::MapRoute => Some(self.map_route_question(flow)),
             GuidedScanStage::ModuleSelection(phase) => {
@@ -14,10 +25,7 @@ impl ShellApp {
             }
             GuidedScanStage::ContextPrerequisite => Some(self.context_question(flow)),
             GuidedScanStage::ConfigureOptions(phase) => self.option_question(flow, phase),
-            GuidedScanStage::Running(_) => None,
-            GuidedScanStage::AwaitingResult { phase, attempt_id } => {
-                self.phase_result_question(flow, phase, &attempt_id)
-            }
+            GuidedScanStage::Running(_) | GuidedScanStage::AwaitingResult { .. } => None,
         }
     }
 
@@ -134,7 +142,8 @@ impl ShellApp {
         let record = self
             .engagement
             .unresolved_phase_attempt_by_id(phase, attempt_id)?;
-        let actions = self.guided_result_actions(phase, attempt_id);
+        let presentation = self.phase_result_presentation_for(&record.completed);
+        let actions = presentation.actions;
         let cursor = self
             .ui()
             .phase_result_cursor_index(&record.completed.attempt_id, actions.len());
@@ -143,19 +152,29 @@ impl ShellApp {
             .enumerate()
             .map(|(index, action)| result_question_option(phase, *action, index == 0))
             .collect();
-        let detail = phase_result_detail(record);
+        let detail = first_detail_line(&presentation.detail_lines);
         let mut model = base_question(
             flow,
             &format!("{} · RESULT READY", phase.label()),
-            &phase_result_prompt(phase, record.completed.outcome),
+            &phase_result_prompt(
+                phase,
+                self.effective_phase_attempt_outcome(&record.completed),
+                actions.contains(&PhaseResultAction::SelectAndReport),
+            ),
             &detail,
             options,
             false,
             None,
         );
+        model.detail_lines = presentation.detail_lines;
+        model.semantic_keys = presentation.semantic_keys;
         model.cursor = cursor;
         Some(model)
     }
+}
+
+fn first_detail_line(lines: &[String]) -> String {
+    lines.first().cloned().unwrap_or_default()
 }
 
 pub(super) fn module_selection_progress(phase: WorkflowPhase, map_context_missing: bool) -> String {
@@ -197,12 +216,4 @@ fn continue_module_label(
         _ => "Configure Scan",
     };
     format!("Continue → {destination} ({selected} selected)")
-}
-
-fn phase_result_detail(record: &kuzushi_core::workflow_attempts::PhaseAttemptRecord) -> String {
-    format!(
-        "{} · attempt {} · evidence is retained even if discarded",
-        format!("{:?}", record.completed.outcome).to_ascii_lowercase(),
-        record.completed.attempt_id
-    )
 }

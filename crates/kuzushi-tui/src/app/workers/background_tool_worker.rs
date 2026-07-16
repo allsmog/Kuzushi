@@ -8,6 +8,7 @@ pub(crate) enum ScanEvent {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)] // Legacy/unobserved variants remain for in-crate compatibility tests.
 pub(crate) enum ToolEvent {
     Finished {
         tool_name: String,
@@ -20,6 +21,16 @@ pub(crate) enum ToolEvent {
     Refused {
         tool_name: String,
         error: String,
+    },
+    ObservedFinished {
+        tool_name: String,
+        result: serde_json::Value,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    ObservedFailed {
+        tool_name: String,
+        error: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
     },
 }
 
@@ -177,7 +188,7 @@ pub(crate) fn background_tool_worker(
         }));
         return;
     }
-    let result = run_background_tool(
+    let result = run_background_tool_observed(
         registry,
         config,
         &workspace,
@@ -196,9 +207,23 @@ fn send_tool_event(sink: &JobEventSink, event: ToolEvent) {
     sink.send(ShellEvent::Tool(event));
 }
 
-fn tool_result_event(tool_name: String, result: Result<serde_json::Value>) -> ToolEvent {
+fn tool_result_event(
+    tool_name: String,
+    result: Result<kuzushi_core::ObservedDispatchOutcome>,
+) -> ToolEvent {
     match result {
-        Ok(result) => ToolEvent::Finished { tool_name, result },
+        Ok(outcome) => match outcome.execution {
+            Ok(result) => ToolEvent::ObservedFinished {
+                tool_name,
+                result,
+                completion: outcome.completion,
+            },
+            Err(error) => ToolEvent::ObservedFailed {
+                tool_name,
+                error: format!("{error:#}"),
+                completion: outcome.completion,
+            },
+        },
         Err(error) => failed_tool_event(tool_name, error),
     }
 }

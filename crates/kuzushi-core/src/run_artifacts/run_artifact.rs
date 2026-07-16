@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunArtifact {
     #[serde(deserialize_with = "deserialize_artifact_label")]

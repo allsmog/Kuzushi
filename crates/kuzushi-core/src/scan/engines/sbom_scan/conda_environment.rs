@@ -36,8 +36,7 @@ pub(super) fn conda_environment_edges(
 ) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value =
-        crate::yaml::parse_value(&text).context("sbom-scan: parse Conda environment")?;
+    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse Conda environment")?;
     let source = relative_display(target, path);
     Ok(dependencies(&value)
         .flat_map(conda_dependency_names)

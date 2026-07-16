@@ -32,7 +32,13 @@ pub(crate) fn workbench_phase_plan_for_app(
     if question_visible {
         header.result_card = None;
     }
-    let lines = workbench_header_lines(app, &chrome, &header, area.width as usize);
+    let lines = workbench_header_lines(
+        app,
+        &chrome,
+        &header,
+        area.width as usize,
+        area.height as usize,
+    );
     let displayed_zoom = displayed_zoom(area, lines.len(), app.router.workbench().zoom().pane());
     let header_rows = lines.len() + usize::from(displayed_zoom.is_some());
     let body = workbench_body_area(area, header_rows);
@@ -55,12 +61,8 @@ fn render_phase_presentation(
     chrome: &WorkbenchChromeModel,
     phase: &PhaseCockpitModel,
 ) {
-    let question = app.guided_scan_question_model();
-    let mut phase_header = phase.header.clone();
-    if question.is_some() {
-        phase_header.result_card = None;
-    }
-    let top_lines = workbench_header_lines(app, chrome, &phase_header, area.width as usize);
+    let question_visible = app.guided_scan_question_model().is_some();
+    let top_lines = presentation_header_lines(area, app, chrome, phase, question_visible);
     let requested_zoom = app.router.workbench().zoom().pane();
     let displayed_zoom = displayed_zoom(area, top_lines.len(), requested_zoom);
     let header_rows = top_lines.len() + usize::from(displayed_zoom.is_some());
@@ -69,7 +71,7 @@ fn render_phase_presentation(
         render_workbench_header(frame, area, chrome.page, top_lines, None);
         return;
     }
-    let attention = phase_attention_mode(question.is_some(), phase);
+    let attention = phase_attention_mode(question_visible, phase);
     let route = app.router.workbench();
     let plan = phase_presentation_plan(
         &phase.body,
@@ -85,6 +87,26 @@ fn render_phase_presentation(
     }
     let phase_state = super::phase_pages::PhaseRenderState::workbench(app, &plan);
     super::phase_pages::render_phase_cockpit_body(frame, body, app, phase, &plan, phase_state);
+}
+
+fn presentation_header_lines(
+    area: Rect,
+    app: &ShellApp,
+    chrome: &WorkbenchChromeModel,
+    phase: &PhaseCockpitModel,
+    question_visible: bool,
+) -> Vec<Line<'static>> {
+    let mut header = phase.header.clone();
+    if question_visible {
+        header.result_card = None;
+    }
+    workbench_header_lines(
+        app,
+        chrome,
+        &header,
+        area.width as usize,
+        area.height as usize,
+    )
 }
 
 fn displayed_zoom(
@@ -147,11 +169,12 @@ fn workbench_header_lines(
     chrome: &WorkbenchChromeModel,
     phase_header: &EngagementHeaderModel,
     width: usize,
+    height: usize,
 ) -> Vec<Line<'static>> {
     if app.target().is_none() {
         return top_bar_lines(&chrome.top_bar, &chrome.command_bar_hints, width);
     }
-    super::phase_pages::phase_header_lines(phase_header, &chrome.command_bar_hints, width)
+    super::phase_pages::phase_header_lines(phase_header, &chrome.command_bar_hints, width, height)
 }
 
 fn zoom_status_line(page: WorkbenchPage, pane: WorkbenchPane) -> Line<'static> {
@@ -385,7 +408,8 @@ fn phase_workbench_lines(
     chrome: &WorkbenchChromeModel,
     phase: &PhaseCockpitModel,
 ) -> Vec<Line<'static>> {
-    let mut lines = workbench_header_lines(app, chrome, &phase.header, area.width as usize);
+    let mut lines =
+        workbench_header_lines(app, chrome, &phase.header, area.width as usize, usize::MAX);
     lines.push(blank());
     lines.extend(super::phase_pages::phase_cockpit_plain_lines(
         phase,

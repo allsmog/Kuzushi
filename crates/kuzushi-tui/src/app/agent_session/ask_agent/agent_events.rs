@@ -58,17 +58,19 @@ impl ShellApp {
         audit: AgentCallAudit,
         state: AgentEventState,
     ) -> Vec<ShellEffect> {
+        let safe_error = kuzushi_core::runtime::safe_model_failure_message(&error);
         if let Some(agent) = self.agent_chat_mut() {
             agent.running = false;
             agent.abort_requested = false;
             agent.answer = None;
-            agent.error = Some(agent_failure_message(&error, state.abort_requested));
+            agent.error = Some(agent_failure_message(&safe_error, state.abort_requested));
         }
         self.record_agent_cost(&audit, state.run_id.as_deref());
         if state.abort_requested {
+            let safe_error = persisted_agent_cancellation(&error);
             self.log(
                 "agent",
-                format!("LangGraph ended after abort request: {error}"),
+                format!("LangGraph ended after abort request: {safe_error}"),
             );
             self.set_refused_activity("agent", "worker ended after abort request");
             return self.agent_canceled_record(
@@ -77,9 +79,9 @@ impl ShellApp {
                 state,
             );
         }
-        self.set_error_notice("ask", error.clone());
+        self.set_error_notice("ask", safe_error.clone());
         self.set_refused_activity("agent", "model request failed");
-        self.agent_failure_record(error, audit, state)
+        self.agent_failure_record(safe_error, audit, state)
     }
 
     fn record_agent_cost(&mut self, audit: &AgentCallAudit, run_id: Option<&str>) {
@@ -190,7 +192,7 @@ impl ShellApp {
 }
 
 fn record_agent_trace_success(record: &AgentRunRecord, answer_chars: usize) -> anyhow::Result<()> {
-    let trace = append_llm_trace_step(
+    let trace = append_agent_terminal_trace_step(
         record.target.as_deref(),
         &record.run_id,
         "llm",
@@ -209,39 +211,48 @@ fn record_agent_trace_success(record: &AgentRunRecord, answer_chars: usize) -> a
 }
 
 fn record_agent_trace_failure(record: &AgentRunRecord, error: &str) -> anyhow::Result<()> {
-    let trace = append_llm_trace_step(
+    let safe_error = kuzushi_core::runtime::safe_model_failure_message(error);
+    let trace = append_agent_terminal_trace_step(
         record.target.as_deref(),
         &record.run_id,
         "refused",
-        &short_label(error, 80),
+        &safe_error,
         record.latency_ms,
         &record.audit,
     );
     let terminal = record_agent_run_failed(
         record.target.as_deref(),
         &record.run_id,
-        error,
+        &safe_error,
         &record.audit,
     );
     trace.and(terminal)
 }
 
 fn record_agent_trace_canceled(record: &AgentRunRecord, reason: &str) -> anyhow::Result<()> {
-    let trace = append_llm_trace_step(
+    let safe_reason = persisted_agent_cancellation(reason);
+    let trace = append_agent_terminal_trace_step(
         record.target.as_deref(),
         &record.run_id,
         "refused",
-        &short_label(reason, 80),
+        &safe_reason,
         record.latency_ms,
         &record.audit,
     );
     let terminal = record_agent_run_canceled(
         record.target.as_deref(),
         &record.run_id,
-        reason,
+        &safe_reason,
         &record.audit,
     );
     trace.and(terminal)
+}
+
+fn persisted_agent_cancellation(reason: &str) -> String {
+    format!(
+        "model request canceled ({})",
+        kuzushi_core::runtime::model_error_class_from_message(reason)
+    )
 }
 
 struct AgentEventState {

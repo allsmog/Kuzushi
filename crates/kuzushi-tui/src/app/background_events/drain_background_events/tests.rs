@@ -133,10 +133,9 @@ fn job_drain_finishes_plan_slot_and_clears_liveness() {
     assert!(!app.planner_running());
     assert!(app.plan_cancel_token().is_none());
     assert!(!app.jobs().is_running(JobKind::Plan));
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| line.body.contains("planner failed")));
+    assert!(app.log_lines().iter().any(|line| line
+        .body
+        .contains("planner failed: model request failed (runtime_error)")));
 }
 
 #[test]
@@ -173,7 +172,7 @@ fn job_drain_finishes_agent_slot_and_clears_liveness() {
     assert!(agent
         .error
         .as_deref()
-        .is_some_and(|error| error.contains("agent failed")));
+        .is_some_and(|error| error == "model request failed (runtime_error)"));
 }
 
 #[test]
@@ -193,10 +192,9 @@ fn job_drain_finishes_threat_slot_and_clears_liveness() {
     assert!(!app.threat_worker_running());
     assert!(app.threat_cancel_token().is_none());
     assert!(!app.jobs().is_running(JobKind::Threat));
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| line.body.contains("threat failed")));
+    assert!(app.log_lines().iter().any(|line| line
+        .body
+        .contains("threats worker failed: model request failed (runtime_error)")));
 }
 
 #[test]

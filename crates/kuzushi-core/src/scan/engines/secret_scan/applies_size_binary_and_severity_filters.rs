@@ -53,7 +53,6 @@ pub(crate) fn tool_input_options_coerce_limits_sets_and_severities() {
 
     let err = SecretScanOptions::from_tool_input(&json!({"severity": ["BAD"]})).unwrap_err();
     assert!(err.to_string().contains("unknown secret-scan severity"));
-
 }
 
 #[test]
@@ -77,8 +76,11 @@ pub(crate) fn tool_input_rejects_limits_instead_of_silently_rewriting_them() {
 pub(crate) fn custom_file_limit_changes_the_executed_scan() {
     let temp = tempfile::tempdir().unwrap();
     let secret = "OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyzABCDEFGH";
-    fs::write(temp.path().join("large.env"), format!("{secret}\n{}", "x".repeat(2_000)))
-        .unwrap();
+    fs::write(
+        temp.path().join("large.env"),
+        format!("{secret}\n{}", "x".repeat(2_000)),
+    )
+    .unwrap();
 
     let limited = SecretScanOptions::from_tool_input(&json!({"maxFileBytes": 1024})).unwrap();
     let limited_report =

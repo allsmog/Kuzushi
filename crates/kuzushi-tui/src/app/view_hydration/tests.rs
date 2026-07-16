@@ -58,6 +58,9 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
             })
         }
         ViewHydrationKey::RunTrace { .. } => ViewHydrationValue::RunTrace(None),
+        ViewHydrationKey::RunProjection { .. } => {
+            ViewHydrationValue::RunProjection(Err("missing fixture projection".to_string()))
+        }
         ViewHydrationKey::ScanStageReceipt { .. } => {
             ViewHydrationValue::ScanStageReceipt(ScanStageReceiptState::Missing)
         }
@@ -184,6 +187,26 @@ fn workbench_hydrates_the_map_artifact_state() {
     app.set_shell_view(ShellView::Workbench);
 
     assert!(active_view_hydration_keys(&app).contains(&ViewHydrationKey::MapArtifacts));
+}
+
+#[test]
+fn contextual_run_views_hydrate_the_visible_surface() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.open_replay_for_test("run-replay");
+    let replay_keys = active_view_hydration_keys(&app);
+    assert!(replay_keys.contains(&ViewHydrationKey::RunProjection {
+        run_id: "run-replay".to_string(),
+    }));
+
+    app.restore_contextual_surface_origin();
+    app.open_trace_for_test("run-trace");
+    let trace_keys = active_view_hydration_keys(&app);
+    assert!(trace_keys.contains(&ViewHydrationKey::RunTrace {
+        run_id: "run-trace".to_string(),
+    }));
 }
 
 #[test]

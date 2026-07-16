@@ -14,6 +14,8 @@ mod build_provenance;
 mod commands;
 mod renderer;
 pub mod scene3d;
+#[cfg(test)]
+mod test_support;
 mod theme;
 pub mod ui_theme;
 pub mod ui_view_models;

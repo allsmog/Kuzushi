@@ -83,9 +83,15 @@ impl UiPrefs {
         view: ShellView,
         key: KeyEvent,
         now: Instant,
+        inactive_action: crate::app::state_transitions::ViewHotkeyAction,
     ) -> ConfiguredKeyResult {
-        self.runtime_keymap
-            .handle_shell_key(view, key, &mut self.pending_key_chord, now)
+        self.runtime_keymap.handle_shell_key(
+            view,
+            key,
+            &mut self.pending_key_chord,
+            now,
+            inactive_action,
+        )
     }
 
     pub(crate) fn handle_configured_context_key(

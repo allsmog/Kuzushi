@@ -193,7 +193,8 @@ pub(crate) struct GuidedQuestionOption {
 pub(crate) struct GuidedScanQuestionModel {
     pub(crate) header: String,
     pub(crate) prompt: String,
-    pub(crate) detail: String,
+    pub(crate) detail_lines: Vec<String>,
+    pub(crate) semantic_keys: std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
     pub(crate) progress: Option<String>,
     pub(crate) options: Vec<GuidedQuestionOption>,
     pub(crate) cursor: usize,

@@ -31,9 +31,10 @@ pub use crate::modules::{
     tool_execution_model, tool_needs_finding_store, tool_needs_runtime, tool_phase,
     tool_requires_agent_runtime, tool_uses_agent_runtime, tool_uses_finding_store,
     tool_wants_runtime, wants_sast_runtime, AgenticSastPersistedRun, AgenticSastReport,
-    AutonomyDecision, AutonomyPosture, BuiltinModule, DynamicModuleInspection,
+    ApplicationToolCall, AutonomyDecision, AutonomyPosture, BuiltinModule, DynamicModuleInspection,
     DynamicModuleLoadOptions, ExecutionAuthorization, ModuleMetadata, ModuleRegistry,
-    PreparedToolInput, ToolDescriptor, ToolExecutionContext, WorkflowPhase,
+    ObservedDispatchOutcome, PendingToolCallCompletion, PreparedToolInput, ToolCallIdentity,
+    ToolDescriptor, ToolExecutionContext, WorkflowPhase,
 };
 pub use crate::options::{
     house_rule_path, house_rules_root, module_prompt_root, prompt_content_sha256,
@@ -68,12 +69,13 @@ pub use crate::run_artifacts::{
 };
 pub use crate::runtime::{
     append_structured_output_contract, mcp_attachment_plan_for_target, model_provider,
-    plan_contains, prompt_pair_hash, run_tool_loop, AgentLoopOutcome, AgentLoopStep,
-    AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
-    AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
-    McpArtifactSpec, McpAttachment, ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler,
-    ToolResult, TracedRuntime, TriageRequest, INTERACTION_REQUIRED_CODE, MCP_ARTIFACT_TABLE,
-    MCP_CONSTANT_NAMES, REQUEST_USER_INPUT_TOOL_NAME,
+    plan_contains, prompt_pair_hash, run_tool_loop, run_tool_loop_observed, AgentLoopOutcome,
+    AgentLoopStep, AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
+    AgentRuntimeOptions, AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy,
+    LoopHistoryEntry, McpArtifactSpec, McpAttachment, ModelTier, ModelTokenUsage, Observed,
+    SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TracedRuntime, TriageRequest,
+    INTERACTION_REQUIRED_CODE, MCP_ARTIFACT_TABLE, MCP_CONSTANT_NAMES,
+    REQUEST_USER_INPUT_TOOL_NAME,
 };
 pub use crate::strategy::{
     append_strategy_correction, append_strategy_proposal, apply_strategy_corrections,

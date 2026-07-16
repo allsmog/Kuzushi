@@ -7,8 +7,20 @@ pub(crate) fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line
     lines.push(blank());
     lines.push(divider("REPLAY", area.width));
     lines.push(detail("run", &model.run_id));
-    append_run_artifacts(&mut lines, &model.artifacts, area.width);
-    append_recon_evidence(&mut lines, model.recon.as_ref(), area.width);
+    let typed = model.presentation.as_ref().is_some_and(|presentation| {
+        presentation.source == kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1
+    });
+    if let Some(presentation) = model.presentation.as_ref() {
+        append_run_presentation(&mut lines, presentation, area.width);
+    } else if let Some(error) = model.projection_error.as_deref() {
+        lines.push(muted(&format!("semantic replay unavailable: {error}")));
+    } else {
+        lines.push(muted("semantic replay loading…"));
+    }
+    if !typed {
+        append_run_artifacts(&mut lines, &model.artifacts, area.width);
+        append_recon_evidence(&mut lines, model.recon.as_ref(), area.width);
+    }
     if model.metadata_missing {
         lines.push(blank());
         lines.push(muted(
@@ -17,6 +29,61 @@ pub(crate) fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line
     }
     lines.extend(alias_reference_lines(app, area));
     lines
+}
+
+fn append_run_presentation(
+    lines: &mut Vec<Line<'static>>,
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    width: u16,
+) {
+    for overview in presentation.overview_lines().into_iter().skip(1) {
+        lines.push(muted(&overview));
+    }
+    append_presentation_summary(lines, presentation, width);
+    append_presentation_timeline(lines, presentation, width);
+}
+
+fn append_presentation_summary(
+    lines: &mut Vec<Line<'static>>,
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    width: u16,
+) {
+    let mut active_section = None;
+    for row in presentation.summary_text_rows() {
+        if row.section != active_section {
+            lines.push(blank());
+            if let Some(section) = row.section.as_ref() {
+                lines.push(divider(section.label(), width));
+            }
+            active_section = row.section.clone();
+        }
+        lines.push(presentation_row_line(row));
+    }
+}
+
+fn append_presentation_timeline(
+    lines: &mut Vec<Line<'static>>,
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    width: u16,
+) {
+    let rows = presentation.timeline_text_rows();
+    if rows.is_empty() {
+        return;
+    }
+    lines.push(blank());
+    lines.push(divider("TIMELINE", width));
+    lines.extend(rows.into_iter().map(presentation_row_line));
+}
+
+fn presentation_row_line(
+    row: kuzushi_core::run_lifecycle::RunPresentationTextRowV1,
+) -> Line<'static> {
+    use kuzushi_core::run_lifecycle::RunCellImportanceV1;
+    let _source_key = row.key;
+    match row.importance {
+        RunCellImportanceV1::Essential => styled(&row.text, theme::primary()),
+        RunCellImportanceV1::Detail | RunCellImportanceV1::Diagnostic => muted(&row.text),
+    }
 }
 
 fn append_recon_evidence(

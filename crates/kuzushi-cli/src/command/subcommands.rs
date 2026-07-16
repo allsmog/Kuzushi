@@ -144,6 +144,16 @@ pub(crate) enum RunsCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Replay one run from its typed semantic lifecycle stream.
+    Replay {
+        /// Run id under the target's `.kuzushi/v3/runs` directory.
+        run_id: String,
+        #[arg(long, help = crate::support::TARGET_HELP)]
+        target: Option<PathBuf>,
+        /// Emit the semantic projection as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Compare finding snapshots from two runs.
     Diff {
         /// Baseline run id.

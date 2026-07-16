@@ -13,7 +13,7 @@ impl Write for PartialThenFailWriter {
     fn write(&mut self, body: &[u8]) -> std::io::Result<usize> {
         self.calls += 1;
         if self.calls == 2 {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "injected"));
+            return Err(std::io::Error::other("injected"));
         }
         let count = if self.calls == 1 {
             body.len().min(3)

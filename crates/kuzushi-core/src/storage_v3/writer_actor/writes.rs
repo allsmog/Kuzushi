@@ -208,6 +208,7 @@ pub struct RunLifecycleWrite {
     pub target: Option<String>,
     pub status: String,
     pub findings_count: Option<u64>,
+    pub terminal_item_hash: Option<String>,
     pub actor: String,
 }
 
@@ -218,6 +219,7 @@ impl RunLifecycleWrite {
             "target": self.target,
             "status": self.status,
             "findingsCount": self.findings_count,
+            "terminalItemHash": self.terminal_item_hash,
         })
     }
 }

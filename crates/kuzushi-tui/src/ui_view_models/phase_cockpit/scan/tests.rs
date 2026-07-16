@@ -194,35 +194,34 @@ fn durable_scan_stage_projects_typed_scope_plan_engine_and_deltas() {
 }
 
 fn write_partial_scan(target: &std::path::Path) -> RunSummary {
-    let mut scan = RunSummary::running(
+    crate::test_support::record_indexed_run(
+        target,
         "scan-partial",
-        "scan",
-        Some("semgrep:scan".to_string()),
-        target.display().to_string(),
-    )
-    .with_findings(Some(2));
-    scan.status = "partial".to_string();
+        "semgrep:scan",
+        serde_json::json!({
+            "ok": true,
+            "status": "partial",
+            "summary": "partial scan",
+            "warnings": ["one scanner was incomplete"],
+            "data": {"count": 2}
+        }),
+    );
+    let mut scan = kuzushi_core::load_run_summary(target, "scan-partial")
+        .unwrap()
+        .with_findings(Some(2));
     scan.completed_at_unix = Some(scan.started_at_unix + 4);
     write_run_summary(target, &scan).unwrap();
     scan
 }
 
 fn select_partial_attempt(target: &std::path::Path, scan: &RunSummary) -> PhaseAttemptCompleted {
-    let completed = PhaseAttemptCompleted::new(
+    let completed = crate::test_support::append_typed_attempt(
+        target,
         WorkflowPhase::Scan,
-        vec![scan.run_id.clone()],
-        PhaseTargetSnapshot::capture(target),
+        &scan.run_id,
         PhaseAttemptOutcome::Partial,
     );
-    append_phase_attempt_completed(target, completed.clone()).unwrap();
-    let disposition = PhaseAttemptDisposition::Selected {
-        acknowledged_partial: true,
-    };
-    append_phase_attempt_disposition(
-        target,
-        PhaseAttemptDispositionRecorded::new(&completed.attempt_id, disposition),
-    )
-    .unwrap();
+    crate::test_support::select_typed_attempt(target, &completed);
     completed
 }
 

@@ -138,6 +138,10 @@ pub struct ToolExecutionContext<'a> {
 }
 
 impl<'a> ToolExecutionContext<'a> {
+    pub fn run_observation(&self) -> Option<crate::run_lifecycle::RunObservationHandle> {
+        self.trace.and_then(TraceHandle::run_observation)
+    }
+
     pub fn run_id(&self) -> Option<String> {
         self.run_artifact_location().map(|(_, run_id)| run_id)
     }

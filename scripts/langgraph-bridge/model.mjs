@@ -251,10 +251,13 @@ function contentPartText(part) {
 
 export function usageFromMessage(message) {
   const usage = message?.usage_metadata ?? message?.response_metadata?.tokenUsage ?? {};
-  const result = {
-    inputTokens: Number(usage.input_tokens ?? usage.promptTokens ?? usage.inputTokens ?? 0) || 0,
-    outputTokens: Number(usage.output_tokens ?? usage.completionTokens ?? usage.outputTokens ?? 0) || 0,
-  };
+  const inputTokens = optionalTokenCount(
+    usage.input_tokens ?? usage.promptTokens ?? usage.inputTokens,
+  );
+  const outputTokens = optionalTokenCount(
+    usage.output_tokens ?? usage.completionTokens ?? usage.outputTokens,
+  );
+  const result = { inputTokens, outputTokens };
   const rawCost =
     usage.cost_usd ??
     usage.costUsd ??
@@ -263,9 +266,18 @@ export function usageFromMessage(message) {
   if (rawCost === undefined || rawCost === null) return result;
   const costUsd = Number(rawCost);
   if (!Number.isFinite(costUsd) || costUsd < 0) {
-    throw new Error(`provider usage cost must be a finite non-negative number, got ${rawCost}`);
+    throw new Error("provider usage cost must be a finite non-negative number");
   }
   return { ...result, costUsd };
+}
+
+function optionalTokenCount(raw) {
+  if (raw === undefined || raw === null) return undefined;
+  const count = Number(raw);
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new Error("provider token usage must be a non-negative safe integer");
+  }
+  return count;
 }
 
 export function isAiMessage(message) {

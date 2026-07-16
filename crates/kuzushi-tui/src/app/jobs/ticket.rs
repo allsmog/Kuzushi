@@ -6,6 +6,9 @@ use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
+#[path = "ticket_lifecycle.rs"]
+mod ticket_lifecycle;
+
 pub(crate) struct JobTicket {
     kind: JobKind,
     generation: WorkerGeneration,
@@ -102,8 +105,29 @@ impl JobEventSink {
         self.generation
     }
 
+    pub(crate) fn publish_run_item_writer_error(
+        &self,
+        run_id: &str,
+        error: &anyhow::Error,
+        execution_may_have_occurred: bool,
+    ) -> bool {
+        let Some(fault) = error.downcast_ref::<kuzushi_core::run_lifecycle::RunItemWriterFault>()
+        else {
+            return false;
+        };
+        self.send(ShellEvent::RunItemsFault {
+            run_id: run_id.to_string(),
+            fault: fault
+                .clone()
+                .annotate_execution(execution_may_have_occurred),
+        })
+    }
+
     pub(crate) fn send(&self, event: ShellEvent) -> bool {
-        if !event.is_operator_interaction() && event.kind() != self.kind {
+        if !event.is_operator_interaction()
+            && !event.is_run_lifecycle()
+            && event.kind() != self.kind
+        {
             return false;
         }
         self.send_unchecked(event)
@@ -119,7 +143,12 @@ impl JobEventSink {
         let reliable = terminal
             || matches!(
                 &stamped.event,
-                ShellEvent::OperatorQuestion(_)
+                ShellEvent::RunItem(_)
+                    | ShellEvent::RunItemsDurable { .. }
+                    | ShellEvent::RunItemsDerivativesApplied { .. }
+                    | ShellEvent::RunItemsFault { .. }
+                    | ShellEvent::RunItemsDeliveryFault { .. }
+                    | ShellEvent::OperatorQuestion(_)
                     | ShellEvent::OperatorQuestionCompleted(_)
                     | ShellEvent::CredentialQuestionRouted { .. }
             );

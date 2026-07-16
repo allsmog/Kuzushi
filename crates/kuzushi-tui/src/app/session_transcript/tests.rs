@@ -51,6 +51,55 @@ fn run_turn_and_answer_events_cross_a_flush_barrier() {
     recorder.shutdown("completed").unwrap();
 }
 
+#[test]
+fn plan_and_threat_failure_logs_never_transcribe_raw_model_content() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = SessionTranscriptStore::from_root(temp.path().join("sessions"));
+    let (mut app, session_id) = transcript_test_app(&store, temp.path());
+    let raw_failure = "invalid response body RAW_WORKER_RESPONSE_SENTINEL";
+
+    app.apply_plan_event(PlanEvent::Failed {
+        error: raw_failure.to_string(),
+        audit: AgentCallAudit::test(),
+    });
+    app.apply_threat_patch_event(ThreatPatchEvent::Failed {
+        error: raw_failure.to_string(),
+        audit: AgentCallAudit::test(),
+    });
+
+    assert!(app
+        .log_lines()
+        .iter()
+        .all(|line| !line.body.contains("RAW_WORKER_RESPONSE_SENTINEL")));
+    assert!(app.log_lines().iter().any(|line| {
+        line.body
+            .contains("planner failed: model request failed (invalid_response)")
+    }));
+    assert!(app.log_lines().iter().any(|line| {
+        line.body
+            .contains("threats worker failed: model request failed (invalid_response)")
+    }));
+
+    app.finish_session_transcript("completed");
+    let transcript = store.read(&session_id).unwrap();
+    assert!(!transcript
+        .raw_jsonl
+        .contains("RAW_WORKER_RESPONSE_SENTINEL"));
+    assert_eq!(
+        transcript
+            .records
+            .iter()
+            .filter(|record| record.event_type == "log_emitted")
+            .filter(|record| {
+                record.payload["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("model request failed"))
+            })
+            .count(),
+        2
+    );
+}
+
 fn transcript_test_app(
     store: &SessionTranscriptStore,
     root: &std::path::Path,

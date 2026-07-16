@@ -164,3 +164,46 @@ fn credential_route_persists_only_the_route_and_never_an_answer() {
     assert!(!interaction.freeform_supplied);
     assert!(resolution.answers.is_empty());
 }
+
+#[test]
+fn operator_decision_requires_the_exact_observed_choice_identity() {
+    let request = question_request("run-choice-identity");
+    let question = observed_operator_question(&request, &request.questions[0], 0);
+    let answer = OperatorQuestionAnswer::Predefined {
+        question_id: "scope".to_string(),
+        choice_id: "choice-stale".to_string(),
+        label: "Changed files".to_string(),
+    };
+
+    let error = operator_decision_value(
+        &question,
+        Some(&answer),
+        OperatorQuestionResolutionKind::Submitted,
+    )
+    .unwrap_err();
+
+    assert!(error.to_string().contains("unknown choice identity"));
+}
+
+#[test]
+fn safe_model_summary_uses_the_coalescible_writer_lane() {
+    let target = tempfile::tempdir().unwrap();
+    let run_id = "agent-summary-settlement";
+    let observation =
+        kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target.path(), run_id)
+            .unwrap()
+            .start_root_task("Answer the operator request")
+            .unwrap();
+    mark_root_task_running(&observation).unwrap();
+
+    emit_safe_model_summary(&observation, "model-backed workflow completed").unwrap();
+    observation.flush().unwrap();
+
+    let projection = kuzushi_core::run_lifecycle::load_run_projection(target.path(), run_id)
+        .unwrap()
+        .projection;
+    assert!(projection.timeline.iter().any(|envelope| matches!(
+        envelope.item,
+        kuzushi_core::run_lifecycle::RunItemV1::SafeReasoningSummary { .. }
+    )));
+}

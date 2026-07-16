@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(crate) fn run_background_tool(
     registry: ModuleRegistry,
     config: V2Config,
@@ -12,6 +13,33 @@ pub(crate) fn run_background_tool(
     trace_handle: Option<TraceHandle>,
     cancel: ScanCancellation,
 ) -> Result<serde_json::Value> {
+    run_background_tool_observed(
+        registry,
+        config,
+        workspace,
+        tool_name,
+        input,
+        run_id,
+        thinking_level,
+        authorization,
+        trace_handle,
+        cancel,
+    )?
+    .settle_without_result_artifact()
+}
+
+pub(crate) fn run_background_tool_observed(
+    registry: ModuleRegistry,
+    config: V2Config,
+    workspace: &WorkspaceTarget,
+    tool_name: &str,
+    input: PreparedToolInput,
+    run_id: &str,
+    thinking_level: Option<String>,
+    authorization: ExecutionAuthorization,
+    trace_handle: Option<TraceHandle>,
+    cancel: ScanCancellation,
+) -> Result<kuzushi_core::ObservedDispatchOutcome> {
     let store = background_findings_store(&registry, tool_name, workspace)?;
     let runtime = background_agent_runtime(
         &registry,
@@ -22,10 +50,7 @@ pub(crate) fn run_background_tool(
         &cancel,
         workspace,
     )?;
-    let trace = trace_handle
-        .unwrap_or_else(|| TraceHandle::jsonl(workspace.root(), run_id))
-        .for_tool(tool_name)
-        .child(1);
+    let trace = background_tool_trace(trace_handle, workspace, run_id, tool_name)?;
     let runtime_ref = runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime);
     let ctx = ToolExecutionContext {
         config: &config,
@@ -36,7 +61,33 @@ pub(crate) fn run_background_tool(
         authorization: Default::default(),
     };
     let prepared = authorize_background_prepared_input(input, authorization)?;
-    registry.dispatch_prepared_input_with_runtime(prepared, &ctx, runtime_ref)
+    mark_background_task_running(&trace)?;
+    registry.dispatch_prepared_input_observed_with_runtime(prepared, &ctx, runtime_ref)
+}
+
+fn mark_background_task_running(trace: &TraceHandle) -> Result<()> {
+    if let Some(task) = trace
+        .run_observation()
+        .and_then(|observation| observation.task_handle())
+    {
+        task.update_and_flush(kuzushi_core::run_lifecycle::RunItemStatus::Running, None)?;
+    }
+    Ok(())
+}
+
+fn background_tool_trace(
+    trace_handle: Option<TraceHandle>,
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+    tool_name: &str,
+) -> Result<TraceHandle> {
+    let trace = match trace_handle {
+        Some(trace) => trace,
+        None => kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(workspace.root(), run_id)?
+            .start_root_task(format!("Run {tool_name}"))?
+            .trace_handle(),
+    };
+    Ok(trace.for_tool(tool_name).child(1))
 }
 
 fn authorize_background_prepared_input(

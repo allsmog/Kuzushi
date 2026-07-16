@@ -69,7 +69,16 @@ fn card_submits_predefined_without_persisting_other_text_itself() {
     assert_eq!(answer.kind, OperatorQuestionResolutionKind::Submitted);
     assert!(matches!(
         &answer.answers[0],
-        OperatorQuestionAnswer::Predefined { label, .. } if label == "Changed files"
+        OperatorQuestionAnswer::Predefined {
+            choice_id,
+            label,
+            ..
+        } if label == "Changed files"
+            && choice_id
+                == &kuzushi_core::run_lifecycle::deterministic_choice_id(
+                    "q-1", "scope", 0, 0
+                )
+                .to_string()
     ));
 }
 

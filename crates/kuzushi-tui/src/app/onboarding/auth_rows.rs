@@ -32,7 +32,7 @@ pub struct AuthMethodRow {
 const OFFLINE_DEMO_ROW: AuthMethodRow = AuthMethodRow {
     kind: AuthMethodRowKind::OfflineDemo,
     label: "Offline demo",
-    hint: "run bundled fixture now; no key, model, or scanner binary",
+    hint: "run bundled offline fixture now; no key, model, or scanner binary",
 };
 
 /// Ordered credential-entry rows for a provider. Every credentialed provider

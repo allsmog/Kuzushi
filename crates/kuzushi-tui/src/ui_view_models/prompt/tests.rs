@@ -116,7 +116,7 @@ fn navigation_prompt_uses_the_default_prompt_binding() {
     let app = ShellApp::new(V2Config::default(), None);
 
     assert_eq!(
-        navigation_prompt_text(&app),
+        navigation_prompt_label(&app),
         "NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt"
     );
 }
@@ -132,7 +132,7 @@ fn navigation_prompt_uses_the_remapped_prompt_binding() {
     let app = ShellApp::new(config, None);
 
     assert_eq!(
-        navigation_prompt_text(&app),
+        navigation_prompt_label(&app),
         "NAVIGATE · Shift+Tab mode · Tab/[/] pane · x prompt"
     );
 }

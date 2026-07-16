@@ -145,12 +145,11 @@ fn append_activity_pane_lines(
             .map(|row| Line::from(Span::styled(row.text, dag_row_style(row.tone)))),
     );
     lines.push(divider("OUTPUT", area.width));
-    lines.extend(
-        activity
-            .feed_pane_rows(width)
-            .into_iter()
-            .map(|row| Line::from(Span::styled(row.text, feed_row_style(row.tone)))),
-    );
+    lines.extend(activity.feed_pane_rows(width).into_iter().map(|row| {
+        let _source_key = &row.key;
+        let _disclosed_source_keys = &row.disclosed_keys;
+        Line::from(Span::styled(row.text, feed_row_style(row.tone)))
+    }));
 }
 
 fn append_activity_footer(

@@ -19,25 +19,6 @@ pub(crate) fn append_started_event(
     Ok(())
 }
 
-pub(crate) fn append_tool_event(
-    record: ToolRunRecord<'_>,
-    status: &str,
-    message: &str,
-) -> Result<()> {
-    if tool_event_exists(record, status)? {
-        return Ok(());
-    }
-    let event = RunEvent::new(
-        next_run_event_number(record.target, record.run_id),
-        record.kind,
-        status,
-        message,
-    )
-    .with_tool(record.tool);
-    append_run_event(record.target, record.run_id, &event)?;
-    Ok(())
-}
-
 pub(crate) fn append_started_trace(record: ToolRunRecord<'_>) -> Result<()> {
     append_run_trace_step_with_next_number(
         record.target,
@@ -112,17 +93,6 @@ pub(crate) fn append_recovered_interruption_trace(
     }
     append_run_trace_step_with_next_number(target, &summary.run_id, &step)?;
     Ok(())
-}
-
-fn tool_event_exists(record: ToolRunRecord<'_>, status: &str) -> Result<bool> {
-    Ok(load_run_events(record.target, record.run_id)?
-        .events
-        .into_iter()
-        .any(|event| {
-            event.kind == record.kind
-                && event.status == status
-                && event.tool.as_deref() == Some(record.tool)
-        }))
 }
 
 fn trace_label_exists(record: ToolRunRecord<'_>, label: &str) -> Result<bool> {

@@ -122,6 +122,9 @@ pub(crate) enum ViewHydrationKey {
     RunTrace {
         run_id: String,
     },
+    RunProjection {
+        run_id: String,
+    },
     ScanStageReceipt {
         run_id: String,
     },
@@ -171,6 +174,7 @@ pub(crate) enum ViewHydrationValue {
     RunSummaryEntries(RunSummaryEntriesState),
     RunArtifactText(RunArtifactTextRead),
     RunTrace(Option<RunTraceRead>),
+    RunProjection(Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>),
     ScanStageReceipt(ScanStageReceiptState),
     FindingPatchTruth(FindingPatchTruthState),
     SourceFile(Result<String, String>),

@@ -54,6 +54,9 @@ impl WorkbenchCache {
             ViewHydrationKey::RunTrace { run_id } => {
                 self.cached_run_trace(target, run_id).is_not_requested()
             }
+            ViewHydrationKey::RunProjection { run_id } => self
+                .cached_run_projection(target, run_id)
+                .is_not_requested(),
             ViewHydrationKey::ScanStageReceipt { run_id } => self
                 .cached_scan_stage_receipt(target, run_id)
                 .is_not_requested(),
@@ -144,34 +147,80 @@ impl WorkbenchCache {
     ) {
         match (key, value) {
             (ViewHydrationKey::LatestRunPointer, ViewHydrationValue::LatestRunPointer(state)) => {
-                self.latest_run_pointer = Some(LatestRunPointerCache { target, state });
+                self.store_latest_run_pointer(target, state)
             }
             (ViewHydrationKey::RunSummaryEntries, ViewHydrationValue::RunSummaryEntries(state)) => {
-                self.run_summary_entries = Some(RunSummaryEntriesCache { target, state });
-                self.invalidate_run_summary_dependents();
+                self.store_run_summary_entries(target, state)
             }
             (
                 ViewHydrationKey::RunArtifactText { run_id, leaf },
                 ViewHydrationValue::RunArtifactText(state),
-            ) => {
-                self.run_artifact_texts
-                    .insert((target, run_id, leaf), RunArtifactTextCache { state });
-            }
+            ) => self.store_run_artifact_text(target, run_id, leaf, state),
             (ViewHydrationKey::RunTrace { run_id }, ViewHydrationValue::RunTrace(read)) => {
-                let state = read
-                    .map(RunTraceCacheState::Ready)
-                    .unwrap_or(RunTraceCacheState::Invalid);
-                self.run_traces
-                    .insert((target, run_id), RunTraceCache { state });
+                self.store_run_trace(target, run_id, read)
             }
+            (
+                ViewHydrationKey::RunProjection { run_id },
+                ViewHydrationValue::RunProjection(state),
+            ) => self.store_run_projection(target, run_id, state),
             (
                 ViewHydrationKey::ScanStageReceipt { run_id },
                 ViewHydrationValue::ScanStageReceipt(state),
-            ) => {
-                self.scan_stage_receipts.insert((target, run_id), state);
-            }
+            ) => self.store_scan_stage_receipt(target, run_id, state),
             _ => {}
         }
+    }
+
+    fn store_latest_run_pointer(&mut self, target: PathBuf, state: LatestRunPointerState) {
+        self.latest_run_pointer = Some(LatestRunPointerCache { target, state });
+    }
+
+    fn store_run_summary_entries(&mut self, target: PathBuf, state: RunSummaryEntriesState) {
+        self.run_summary_entries = Some(RunSummaryEntriesCache { target, state });
+        self.invalidate_run_summary_dependents();
+    }
+
+    fn store_run_artifact_text(
+        &mut self,
+        target: PathBuf,
+        run_id: String,
+        leaf: String,
+        state: kuzushi_core::RunArtifactTextRead,
+    ) {
+        self.run_artifact_texts
+            .insert((target, run_id, leaf), RunArtifactTextCache { state });
+    }
+
+    fn store_run_trace(
+        &mut self,
+        target: PathBuf,
+        run_id: String,
+        read: Option<kuzushi_core::RunTraceRead>,
+    ) {
+        let state = read
+            .map(RunTraceCacheState::Ready)
+            .unwrap_or(RunTraceCacheState::Invalid);
+        self.run_traces
+            .insert((target, run_id), RunTraceCache { state });
+    }
+
+    fn store_run_projection(
+        &mut self,
+        target: PathBuf,
+        run_id: String,
+        state: Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>,
+    ) {
+        self.run_projections
+            .insert((target, run_id), RunProjectionCache { state });
+    }
+
+    fn store_scan_stage_receipt(
+        &mut self,
+        target: PathBuf,
+        run_id: String,
+        state: ScanStageReceiptState,
+    ) {
+        self.scan_stage_receipts.insert((target, run_id), state);
     }
 
     fn apply_project_hydration(
@@ -326,6 +375,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         | ViewHydrationKey::RunSummaryEntries
         | ViewHydrationKey::RunArtifactText { .. }
         | ViewHydrationKey::RunTrace { .. }
+        | ViewHydrationKey::RunProjection { .. }
         | ViewHydrationKey::ScanStageReceipt { .. } => HydrationGroup::Run,
         ViewHydrationKey::GitMetadata
         | ViewHydrationKey::ProjectScopeTree

@@ -21,8 +21,8 @@ const pairedFiles = [
   {
     file: "crates/kuzushi-cli/src/application/scan.rs",
     needles: [
-      "prepare_dispatch_input(SCAN_TOOL, execution.input, execution.ctx, None)",
-      "execution.registry.dispatch_prepared_input_with_runtime(",
+      "prepare_dispatch_input(SCAN_TOOL, execution.input.clone(), execution.ctx, None)",
+      "dispatch_prepared_input_observed_with_runtime(",
     ],
   },
   {
@@ -33,14 +33,14 @@ const pairedFiles = [
     file: "crates/kuzushi-cli/src/application/run_tool.rs",
     needles: [
       "authorize_explicit_cli_tool(run.input.clone())",
-      "dispatch_prepared_input_with_runtime(",
+      "dispatch_prepared_input_observed_with_runtime(",
     ],
     forbidden: ["prepare_dispatch_input(&run.tool"],
   },
   {
     file: "crates/kuzushi-tui/src/app/tool_runner/run_tool/dispatch.rs",
     needles: [
-      "prepare_dispatch_input(",
+      "prepare_background_tool_input(",
       "start_authorized_prepared_background_tool(",
       "authorization: ExecutionAuthorization",
     ],
@@ -49,7 +49,7 @@ const pairedFiles = [
   {
     file: "crates/kuzushi-tui/src/app/tool_runner/run_tool/background.rs",
     needles: [
-      "prepare_dispatch_input(tool_name, input, &ctx, Some(self.option_store()))",
+      "prepare_dispatch_input(tool_name, input.clone(), &ctx, Some(self.option_store()))",
       "start_authorized_prepared_background_tool(",
     ],
   },
@@ -57,7 +57,7 @@ const pairedFiles = [
     file: "crates/kuzushi-tui/src/app/workers/run_background_tool.rs",
     needles: [
       "authorize_background_prepared_input(input, authorization)",
-      "dispatch_prepared_input_with_runtime(prepared, &ctx, runtime_ref)",
+      "dispatch_prepared_input_observed_with_runtime(prepared, &ctx, runtime_ref)",
     ],
     forbidden: ["prepare_dispatch_input(tool_name"],
   },

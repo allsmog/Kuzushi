@@ -1,7 +1,10 @@
 use super::*;
 
+#[path = "tool_run_status/planner_job.rs"]
+mod planner_job;
 #[cfg(test)]
 mod tests;
+use planner_job::PlannerWorkerJob;
 
 pub(crate) fn tool_run_status(tool_name: &str) -> &'static str {
     match tool_name {
@@ -104,6 +107,8 @@ fn run_interactive_agent_worker(
         cwd,
         agent_system_prompt(),
         question,
+        None,
+        RootRunIntent::interactive_answer(),
         run_id,
         sink,
         cancel,
@@ -119,26 +124,354 @@ fn run_root_shell_tool_loop(
     cwd: PathBuf,
     system_prompt: String,
     prompt: String,
+    observation: Option<kuzushi_core::run_lifecycle::RunObservationHandle>,
+    intent: RootRunIntent,
     run_id: String,
     sink: JobEventSink,
     cancel: ScanCancellation,
 ) -> CostedWorkerResult<String> {
+    let prepared = prepare_root_shell_tool_loop(
+        config,
+        model,
+        thinking_level,
+        cwd.clone(),
+        system_prompt,
+        prompt,
+        observation,
+        intent,
+        &run_id,
+        &sink,
+        &cancel,
+    )?;
+    execute_root_shell_tool_loop(prepared, &run_id, &cwd, &sink, &cancel)
+}
+
+struct PreparedRootShellToolLoop {
+    runtime: LangGraphRuntime,
+    request: kuzushi_core::runtime::AgentToolLoopRequest,
+    observation: kuzushi_core::run_lifecycle::RunObservationHandle,
+    terminalize_in_loop: bool,
+}
+
+#[derive(Clone, Copy)]
+struct RootRunIntent {
+    task_title: &'static str,
+    terminalize_in_loop: bool,
+    task_already_running: bool,
+}
+
+impl RootRunIntent {
+    const fn interactive_answer() -> Self {
+        Self {
+            task_title: "Answer the operator request",
+            terminalize_in_loop: true,
+            task_already_running: false,
+        }
+    }
+
+    const fn planner_proposal() -> Self {
+        Self {
+            task_title: "Draft the requested workflow plan",
+            terminalize_in_loop: false,
+            task_already_running: true,
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_root_shell_tool_loop(
+    config: V2Config,
+    model: String,
+    thinking_level: Option<String>,
+    cwd: PathBuf,
+    system_prompt: String,
+    prompt: String,
+    observation: Option<kuzushi_core::run_lifecycle::RunObservationHandle>,
+    intent: RootRunIntent,
+    run_id: &str,
+    sink: &JobEventSink,
+    cancel: &ScanCancellation,
+) -> Result<PreparedRootShellToolLoop, CostedWorkerError> {
+    let observation = match observation {
+        Some(observation) => observation,
+        None => root_run_observation(&cwd, run_id, sink, intent.task_title)
+            .map_err(CostedWorkerError::before_call)?,
+    };
     let runtime = LangGraphRuntime::from_config(&config, &cwd)
         .map_err(CostedWorkerError::before_call)?
         .with_thinking_level(thinking_level)
         .with_cancellation(cancel.clone());
     let request = root_shell_agent_request(model, cwd.clone(), system_prompt, prompt);
-    runtime
-        .preflight_tool_loop_blocking(&request)
-        .map_err(CostedWorkerError::before_call)?;
+    if let Err(error) = runtime.preflight_tool_loop_blocking(&request) {
+        settle_preflight_failure(&observation, run_id, intent.terminalize_in_loop, &error)
+            .map_err(CostedWorkerError::before_call)?;
+        return Err(CostedWorkerError::before_call(error));
+    }
+    if !intent.task_already_running {
+        mark_root_task_running(&observation).map_err(CostedWorkerError::before_call)?;
+    }
+    Ok(PreparedRootShellToolLoop {
+        runtime,
+        request,
+        observation,
+        terminalize_in_loop: intent.terminalize_in_loop,
+    })
+}
+
+fn execute_root_shell_tool_loop(
+    prepared: PreparedRootShellToolLoop,
+    run_id: &str,
+    cwd: &std::path::Path,
+    sink: &JobEventSink,
+    cancel: &ScanCancellation,
+) -> CostedWorkerResult<String> {
+    let PreparedRootShellToolLoop {
+        runtime,
+        request,
+        observation,
+        terminalize_in_loop,
+    } = prepared;
     let mut question_calls = 0usize;
     let mut handler = |call: &kuzushi_core::runtime::ToolCall| {
-        handle_operator_question_call(call, &run_id, &cwd, &sink, &cancel, &mut question_calls)
+        handle_operator_question_call(
+            call,
+            run_id,
+            cwd,
+            sink,
+            cancel,
+            &observation,
+            &mut question_calls,
+        )
     };
-    let outcome = kuzushi_core::runtime::run_tool_loop(&runtime, &request, &mut handler)
-        .map_err(CostedWorkerError::unresolved)?;
+    let traced = kuzushi_core::runtime::TracedRuntime::new(&runtime, observation.trace_handle());
+    run_observed_model_loop(
+        &traced,
+        &request,
+        &mut handler,
+        &observation,
+        run_id,
+        sink,
+        terminalize_in_loop,
+    )
+}
+
+fn run_observed_model_loop(
+    runtime: &dyn AgentRuntime,
+    request: &kuzushi_core::runtime::AgentToolLoopRequest,
+    handler: &mut dyn kuzushi_core::runtime::ToolCallHandler,
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    run_id: &str,
+    sink: &JobEventSink,
+    terminalize_in_loop: bool,
+) -> CostedWorkerResult<String> {
+    let outcome = match kuzushi_core::runtime::run_tool_loop_observed(runtime, request, handler) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            let persisted = settle_root_model_run_if_owned(
+                observation,
+                run_id,
+                terminalize_in_loop,
+                kuzushi_core::run_lifecycle::RunItemStatus::Failed,
+                kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+                "model-backed workflow failed",
+            );
+            if let Err(persistence) = persisted.as_ref() {
+                sink.publish_run_item_writer_error(run_id, persistence, false);
+            }
+            return Err(CostedWorkerError::unresolved(error_with_lifecycle(
+                error, persisted,
+            )));
+        }
+    };
+    finish_root_shell_tool_loop(outcome, observation, run_id, sink, terminalize_in_loop)
+}
+
+fn finish_root_shell_tool_loop(
+    outcome: kuzushi_core::runtime::Observed<kuzushi_core::runtime::AgentLoopOutcome>,
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    run_id: &str,
+    sink: &JobEventSink,
+    terminalize_in_loop: bool,
+) -> CostedWorkerResult<String> {
+    let outcome = outcome.value;
     let cost = agent_loop_cost_report(&outcome).map_err(CostedWorkerError::unresolved)?;
+    let status = usable_agent_outcome_status(&outcome);
+    let summary = model_outcome_summary(status, outcome.steps_used);
+    let settlement = settle_root_model_run_if_owned(
+        observation,
+        run_id,
+        terminalize_in_loop,
+        status,
+        cost,
+        &summary,
+    );
+    preserve_executed_outcome(settlement, sink, run_id, cost)?;
     checked_agent_loop_text(outcome, cost)
+}
+
+fn preserve_executed_outcome(
+    settlement: anyhow::Result<()>,
+    sink: &JobEventSink,
+    run_id: &str,
+    cost: kuzushi_core::runtime::RuntimeCostReport,
+) -> Result<(), CostedWorkerError> {
+    let Err(error) = settlement else {
+        return Ok(());
+    };
+    if sink.publish_run_item_writer_error(run_id, &error, true) {
+        return Ok(());
+    }
+    Err(CostedWorkerError::observed(error, cost))
+}
+
+fn root_run_observation(
+    target: &std::path::Path,
+    run_id: &str,
+    sink: &JobEventSink,
+    task_title: &str,
+) -> anyhow::Result<kuzushi_core::run_lifecycle::RunObservationHandle> {
+    let (item_subscriber, range_subscriber, derivative_subscriber, fault_subscriber) =
+        sink.run_lifecycle_subscribers(run_id);
+    kuzushi_core::run_lifecycle::RunObservationHandle::jsonl_with_derivative_delivery_subscriber(
+        target,
+        run_id,
+        Some(item_subscriber),
+        Some(range_subscriber),
+        Some(derivative_subscriber),
+        Some(fault_subscriber),
+    )?
+    .start_root_task(task_title)
+}
+
+fn error_with_lifecycle(error: anyhow::Error, persisted: anyhow::Result<()>) -> anyhow::Error {
+    match persisted {
+        Ok(()) => error,
+        Err(persistence) => anyhow::anyhow!(
+            "{error:#}; additionally, semantic model-call persistence failed: {persistence:#}"
+        ),
+    }
+}
+
+fn mark_root_task_running(
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+) -> anyhow::Result<()> {
+    observation
+        .task_handle()
+        .ok_or_else(|| anyhow::anyhow!("root model run lacks its semantic task"))?
+        .update_and_flush(kuzushi_core::run_lifecycle::RunItemStatus::Running, None)?;
+    Ok(())
+}
+
+fn settle_preflight_failure(
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    run_id: &str,
+    terminalize_in_loop: bool,
+    error: &anyhow::Error,
+) -> anyhow::Result<()> {
+    settle_root_model_run_if_owned(
+        observation,
+        run_id,
+        terminalize_in_loop,
+        kuzushi_core::run_lifecycle::RunItemStatus::Failed,
+        kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+        &format!(
+            "model runtime refused execution: {}",
+            safe_runtime_error_class(error)
+        ),
+    )
+}
+
+fn settle_root_model_run_if_owned(
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    run_id: &str,
+    terminalize_in_loop: bool,
+    status: kuzushi_core::run_lifecycle::RunItemStatus,
+    cost: kuzushi_core::runtime::RuntimeCostReport,
+    summary: &str,
+) -> anyhow::Result<()> {
+    if !terminalize_in_loop {
+        return Ok(());
+    }
+    emit_safe_model_summary(observation, summary)?;
+    observation
+        .task_handle()
+        .ok_or_else(|| anyhow::anyhow!("root model run lacks its semantic task"))?
+        .update_and_flush(status, None)?;
+    observation.emit_and_flush(kuzushi_core::run_lifecycle::RunItemRecord::new(
+        kuzushi_core::run_lifecycle::RunItemId::new(),
+        kuzushi_core::run_lifecycle::RunItemSource::Workflow,
+        kuzushi_core::run_lifecycle::RunItemV1::TerminalOutcome {
+            status,
+            summary: kuzushi_core::run_lifecycle::SafeText::operator_visible(summary),
+            cost,
+            continuation: root_model_continuation(run_id, status)?,
+        },
+    ))?;
+    Ok(())
+}
+
+fn emit_safe_model_summary(
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    summary: &str,
+) -> anyhow::Result<()> {
+    observation.emit_coalescible(kuzushi_core::run_lifecycle::RunItemRecord::new(
+        kuzushi_core::run_lifecycle::RunItemId::new(),
+        kuzushi_core::run_lifecycle::RunItemSource::Runtime,
+        kuzushi_core::run_lifecycle::RunItemV1::SafeReasoningSummary {
+            text: kuzushi_core::run_lifecycle::SafeText::operator_visible(summary),
+            redaction_policy_version: 1,
+        },
+    ))
+}
+
+fn root_model_continuation(
+    run_id: &str,
+    status: kuzushi_core::run_lifecycle::RunItemStatus,
+) -> anyhow::Result<kuzushi_core::run_lifecycle::WorkflowContinuation> {
+    use kuzushi_core::run_lifecycle::{SafeText, WorkflowContinuation};
+    if status == kuzushi_core::run_lifecycle::RunItemStatus::Completed {
+        return Ok(WorkflowContinuation::NoFurtherAction {
+            reason: SafeText::operator_visible("answer returned to the operator"),
+        });
+    }
+    Ok(WorkflowContinuation::InspectRun {
+        run_id: kuzushi_core::run_lifecycle::RunId::parse(run_id)?,
+        reason: SafeText::operator_visible("inspect the incomplete model workflow before retry"),
+    })
+}
+
+fn usable_agent_outcome_status(
+    outcome: &kuzushi_core::runtime::AgentLoopOutcome,
+) -> kuzushi_core::run_lifecycle::RunItemStatus {
+    if outcome.truncated || outcome.text.trim().is_empty() {
+        kuzushi_core::run_lifecycle::RunItemStatus::Partial
+    } else {
+        kuzushi_core::run_lifecycle::RunItemStatus::Completed
+    }
+}
+
+fn model_outcome_summary(
+    status: kuzushi_core::run_lifecycle::RunItemStatus,
+    steps_used: u32,
+) -> String {
+    if status == kuzushi_core::run_lifecycle::RunItemStatus::Completed {
+        format!("model-backed workflow completed after {steps_used} provider turn(s)")
+    } else {
+        format!(
+            "model-backed workflow produced no complete operator result after {steps_used} provider turn(s)"
+        )
+    }
+}
+
+fn safe_runtime_error_class(error: &anyhow::Error) -> &'static str {
+    let text = error.to_string().to_ascii_lowercase();
+    if text.contains("credential") || text.contains("unauthorized") {
+        "authentication_error"
+    } else if text.contains("model") {
+        "model_configuration_error"
+    } else {
+        "runtime_preflight_error"
+    }
 }
 
 fn root_shell_agent_request(
@@ -165,16 +498,34 @@ fn handle_operator_question_call(
     target: &std::path::Path,
     sink: &JobEventSink,
     cancel: &ScanCancellation,
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
     question_calls: &mut usize,
 ) -> anyhow::Result<kuzushi_core::runtime::ToolResult> {
     if let Some(error) = question_call_preflight(call, question_calls)? {
         return Ok(error);
     }
     let request = OperatorQuestionRequest::from_tool_input(run_id, call.input.clone())?;
+    let observed_questions = persist_operator_questions(observation, &request)?;
     if request.requires_credential_route() {
-        return route_credential_question(call, target, sink, &request);
+        return route_credential_question(
+            call,
+            target,
+            sink,
+            observation,
+            &observed_questions,
+            &request,
+        );
     }
-    complete_operator_question(call, target, run_id, sink, cancel, &request)
+    complete_operator_question(
+        call,
+        target,
+        run_id,
+        sink,
+        cancel,
+        observation,
+        &observed_questions,
+        &request,
+    )
 }
 
 fn question_call_preflight(
@@ -197,13 +548,21 @@ fn complete_operator_question(
     run_id: &str,
     sink: &JobEventSink,
     cancel: &ScanCancellation,
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    observed_questions: &[ObservedOperatorQuestion],
     request: &OperatorQuestionRequest,
 ) -> anyhow::Result<kuzushi_core::runtime::ToolResult> {
-    let resolution = wait_for_operator_resolution(request, sink, cancel).inspect_err(|_| {
-        sink.send(ShellEvent::OperatorQuestionCompleted(
-            OperatorQuestionCompleted::failed(request),
-        ));
-    })?;
+    let resolution = match wait_for_operator_resolution(request, sink, cancel) {
+        Ok(resolution) => resolution,
+        Err(error) => {
+            persist_operator_cancellation(observation, observed_questions)?;
+            sink.send(ShellEvent::OperatorQuestionCompleted(
+                OperatorQuestionCompleted::failed(request),
+            ));
+            return Err(error);
+        }
+    };
+    persist_operator_decisions(observation, observed_questions, &resolution)?;
     if let Err(error) = persist_operator_resolution(target, run_id, request, &resolution) {
         sink.send(ShellEvent::OperatorQuestionCompleted(
             OperatorQuestionCompleted::failed(request),
@@ -227,9 +586,12 @@ fn route_credential_question(
     call: &kuzushi_core::runtime::ToolCall,
     target: &std::path::Path,
     sink: &JobEventSink,
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    observed_questions: &[ObservedOperatorQuestion],
     request: &OperatorQuestionRequest,
 ) -> anyhow::Result<kuzushi_core::runtime::ToolResult> {
     let resolution = OperatorQuestionResolution::routed_to_setup(request.request_id.clone());
+    persist_operator_decisions(observation, observed_questions, &resolution)?;
     persist_operator_resolution(target, &request.run_id, request, &resolution)?;
     anyhow::ensure!(
         sink.send(ShellEvent::OperatorQuestionCompleted(
@@ -253,6 +615,166 @@ fn route_credential_question(
         }),
         is_error: true,
     })
+}
+
+struct ObservedOperatorQuestion {
+    contract_id: String,
+    question_id: kuzushi_core::run_lifecycle::RunQuestionId,
+    item_id: kuzushi_core::run_lifecycle::RunItemId,
+    choice_ids: Vec<kuzushi_core::run_lifecycle::SafeText>,
+}
+
+fn persist_operator_questions(
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    request: &OperatorQuestionRequest,
+) -> anyhow::Result<Vec<ObservedOperatorQuestion>> {
+    let mut observed = Vec::with_capacity(request.questions.len());
+    for (ordinal, question) in request.questions.iter().enumerate() {
+        let item = observed_operator_question(request, question, ordinal);
+        observation.emit(operator_question_record(question, &item))?;
+        observed.push(item);
+    }
+    observation.flush()?;
+    Ok(observed)
+}
+
+fn observed_operator_question(
+    request: &OperatorQuestionRequest,
+    question: &OperatorQuestion,
+    question_ordinal: usize,
+) -> ObservedOperatorQuestion {
+    ObservedOperatorQuestion {
+        contract_id: question.id.clone(),
+        question_id: kuzushi_core::run_lifecycle::deterministic_question_id(
+            &request.request_id,
+            &question.id,
+            question_ordinal,
+        ),
+        item_id: kuzushi_core::run_lifecycle::RunItemId::new(),
+        choice_ids: question
+            .options
+            .iter()
+            .enumerate()
+            .map(|(choice_ordinal, _)| {
+                kuzushi_core::run_lifecycle::deterministic_choice_id(
+                    &request.request_id,
+                    &question.id,
+                    question_ordinal,
+                    choice_ordinal,
+                )
+            })
+            .collect(),
+    }
+}
+
+fn operator_question_record(
+    question: &OperatorQuestion,
+    item: &ObservedOperatorQuestion,
+) -> kuzushi_core::run_lifecycle::RunItemRecord {
+    let choices = question
+        .options
+        .iter()
+        .zip(&item.choice_ids)
+        .map(
+            |(option, choice_id)| kuzushi_core::run_lifecycle::OperatorChoice {
+                id: choice_id.clone(),
+                label: kuzushi_core::run_lifecycle::SafeText::operator_visible(&option.label),
+            },
+        )
+        .collect();
+    kuzushi_core::run_lifecycle::RunItemRecord::new(
+        item.item_id,
+        kuzushi_core::run_lifecycle::RunItemSource::Runtime,
+        kuzushi_core::run_lifecycle::RunItemV1::OperatorQuestion {
+            question_id: item.question_id,
+            prompt: kuzushi_core::run_lifecycle::SafeText::operator_visible(format!(
+                "{}: {}",
+                question.header, question.prompt
+            )),
+            choices,
+            authorization_scope: operator_input_scope(),
+        },
+    )
+}
+
+fn persist_operator_decisions(
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    observed: &[ObservedOperatorQuestion],
+    resolution: &OperatorQuestionResolution,
+) -> anyhow::Result<()> {
+    for question in observed {
+        let answer = resolution
+            .answers
+            .iter()
+            .find(|answer| answer.question_id() == question.contract_id);
+        let decision = operator_decision_value(question, answer, resolution.kind)?;
+        emit_operator_decision(observation, question, decision)?;
+    }
+    observation.flush()
+}
+
+fn persist_operator_cancellation(
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    observed: &[ObservedOperatorQuestion],
+) -> anyhow::Result<()> {
+    for question in observed {
+        emit_operator_decision(
+            observation,
+            question,
+            kuzushi_core::run_lifecycle::OperatorDecisionValue::Denied,
+        )?;
+    }
+    observation.flush()
+}
+
+fn emit_operator_decision(
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    question: &ObservedOperatorQuestion,
+    decision: kuzushi_core::run_lifecycle::OperatorDecisionValue,
+) -> anyhow::Result<()> {
+    observation.emit(kuzushi_core::run_lifecycle::RunItemRecord::new(
+        question.item_id,
+        kuzushi_core::run_lifecycle::RunItemSource::Operator,
+        kuzushi_core::run_lifecycle::RunItemV1::OperatorDecision {
+            question_id: question.question_id,
+            decision,
+            authorization_scope: operator_input_scope(),
+        },
+    ))
+}
+
+fn operator_decision_value(
+    question: &ObservedOperatorQuestion,
+    answer: Option<&OperatorQuestionAnswer>,
+    kind: OperatorQuestionResolutionKind,
+) -> anyhow::Result<kuzushi_core::run_lifecycle::OperatorDecisionValue> {
+    match answer {
+        Some(OperatorQuestionAnswer::Predefined { choice_id, .. }) => {
+            anyhow::ensure!(
+                question
+                    .choice_ids
+                    .iter()
+                    .any(|candidate| candidate.as_str() == choice_id),
+                "operator answer references an unknown choice identity"
+            );
+            Ok(
+                kuzushi_core::run_lifecycle::OperatorDecisionValue::Selected {
+                    choice_id: kuzushi_core::run_lifecycle::SafeText::operator_visible(choice_id),
+                },
+            )
+        }
+        Some(OperatorQuestionAnswer::Freeform { text, .. }) if !text.trim().is_empty() => {
+            Ok(kuzushi_core::run_lifecycle::OperatorDecisionValue::ProvidedFreeform)
+        }
+        _ if kind == OperatorQuestionResolutionKind::Canceled => {
+            Ok(kuzushi_core::run_lifecycle::OperatorDecisionValue::Denied)
+        }
+        _ => Ok(kuzushi_core::run_lifecycle::OperatorDecisionValue::Deferred),
+    }
+}
+
+fn operator_input_scope() -> kuzushi_core::run_lifecycle::SafeText {
+    kuzushi_core::run_lifecycle::SafeText::operator_visible("operator_input_for_current_run")
 }
 
 fn wait_for_operator_resolution(
@@ -508,34 +1030,47 @@ pub(crate) fn planner_worker(
     sink: JobEventSink,
     cancel: ScanCancellation,
 ) {
-    let audit = AgentCallAudit::for_prompt(&model, PLAN_SYSTEM_PROMPT, &goal);
-    let run = ProposalRun {
-        target: &cwd,
-        run_id: &metadata.run_id,
-        kind: "plan",
-        tool: "planner:propose",
-    };
-    let input = planner_input(&goal, phase_intent);
-    let start = run.start(&input, model.clone(), &config, metadata.loaded_modules);
-    if let Err(error) = start {
-        send_plan_start_failure(&sink, error, audit);
-        return;
-    }
-    let event = match run_planner_worker(
+    PlannerWorkerJob {
         config,
         model,
         thinking_level,
-        cwd.clone(),
-        &goal,
+        cwd,
+        goal,
         phase_intent,
-        metadata.run_id.clone(),
-        sink.clone(),
-        cancel.clone(),
-    ) {
-        Ok((plan, cost)) => persisted_plan_event(&run, plan, cost, audit),
-        Err(error) => failed_plan_event(&run, error, audit, cancel.is_cancelled()),
-    };
-    sink.send(ShellEvent::Plan(event));
+        metadata,
+        cancel,
+    }
+    .run(sink);
+}
+
+fn settle_planner_result(
+    run: &ProposalRun<'_>,
+    lifecycle: ProposalRunLifecycle,
+    result: CostedWorkerResult<PlanProposal>,
+    audit: AgentCallAudit,
+    cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
+) -> PlanEvent {
+    match result {
+        Ok((plan, cost)) => persisted_plan_event(run, lifecycle, plan, cost, audit),
+        Err(error) => failed_plan_event(run, lifecycle, error, audit, cancellation),
+    }
+}
+
+fn start_planner_lifecycle(
+    run: &ProposalRun<'_>,
+    input: &serde_json::Value,
+    model: String,
+    config: &V2Config,
+    loaded_modules: Vec<String>,
+    sink: &JobEventSink,
+) -> anyhow::Result<ProposalRunLifecycle> {
+    let observation = proposal_run_observation(
+        run.target,
+        run.run_id,
+        sink,
+        "Draft the requested workflow plan",
+    )?;
+    run.start_observed(input, model, config, loaded_modules, observation)
 }
 
 fn send_plan_start_failure(sink: &JobEventSink, error: anyhow::Error, audit: AgentCallAudit) {
@@ -547,14 +1082,16 @@ fn send_plan_start_failure(sink: &JobEventSink, error: anyhow::Error, audit: Age
 
 fn persisted_plan_event(
     run: &ProposalRun<'_>,
+    lifecycle: ProposalRunLifecycle,
     plan: PlanProposal,
     cost: kuzushi_core::runtime::RuntimeCostReport,
     audit: AgentCallAudit,
 ) -> PlanEvent {
-    match run.complete(
+    match run.complete_observed(
         "planner proposal ready",
         planner_proposal_value(&plan),
         cost,
+        lifecycle,
     ) {
         Ok(()) => PlanEvent::Proposed {
             plan,
@@ -569,29 +1106,29 @@ fn persisted_plan_event(
 
 fn failed_plan_event(
     run: &ProposalRun<'_>,
+    lifecycle: ProposalRunLifecycle,
     error: CostedWorkerError,
     audit: AgentCallAudit,
-    canceled: bool,
+    cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
 ) -> PlanEvent {
     let message = error.error.to_string();
-    let persisted = run.fail(&message, canceled);
+    let safe_message = kuzushi_core::runtime::safe_model_failure_message(&message);
+    let persisted = run.fail_observed(&safe_message, cancellation, error.cost, lifecycle);
     PlanEvent::Failed {
-        error: persistence_aware_failure(message, persisted),
+        error: persistence_aware_failure(safe_message, persisted),
         audit: audit.with_outcome(error.cost, error.call_attempted),
     }
 }
 
 fn terminal_persistence_error(run: &ProposalRun<'_>, error: anyhow::Error) -> String {
-    let message = format!("planner result unavailable because persistence failed: {error:#}");
-    persistence_aware_failure(message.clone(), run.fail(&message, false))
+    let _ = run;
+    format!("planner result unavailable because persistence failed: {error:#}")
 }
 
 fn persistence_aware_failure(message: String, persisted: anyhow::Result<()>) -> String {
     match persisted {
         Ok(()) => message,
-        Err(error) => {
-            format!("{message}; additionally, terminal run persistence failed: {error:#}")
-        }
+        Err(_error) => format!("{message}; additionally, terminal run persistence failed"),
     }
 }
 
@@ -602,6 +1139,7 @@ pub(crate) fn run_planner_worker(
     cwd: PathBuf,
     goal: &str,
     phase_intent: Option<WorkflowPhase>,
+    observation: kuzushi_core::run_lifecycle::RunObservationHandle,
     run_id: String,
     sink: JobEventSink,
     cancel: ScanCancellation,
@@ -616,6 +1154,8 @@ pub(crate) fn run_planner_worker(
         cwd,
         system_prompt,
         goal.to_string(),
+        Some(observation),
+        RootRunIntent::planner_proposal(),
         run_id,
         sink,
         cancel,

@@ -113,6 +113,46 @@ describe("Anthropic OAuth model request options", () => {
   });
 });
 
+describe("OAuth provider error redaction", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ["Anthropic", () => anthropicModel()],
+    ["OpenAI Codex", () => openAiModel([])],
+  ])("does not expose a non-2xx %s response body", async (_provider, createModel) => {
+    const sentinel = "raw-provider-body-and-model-content-sentinel";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(`{"error":"${sentinel}"}`, { status: 503 }) as never,
+    );
+
+    const error = await createModel()
+      .invoke([new HumanMessage("inspect")])
+      .catch((failure: unknown) => failure);
+    const serialized = JSON.stringify(error, Object.getOwnPropertyNames(error));
+
+    expect(String(error)).toBe(
+      "BridgePublicError: Provider is temporarily unavailable (HTTP 503).",
+    );
+    expect(serialized).not.toContain(sentinel);
+  });
+
+  it("does not expose malformed Anthropic success content", async () => {
+    const sentinel = "raw-malformed-provider-response-sentinel";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(`not-json ${sentinel}`, { status: 200 }) as never,
+    );
+
+    const error = await anthropicModel()
+      .invoke([new HumanMessage("inspect")])
+      .catch((failure: unknown) => failure);
+
+    expect(String(error)).toBe("BridgePublicError: Provider returned an invalid response.");
+    expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain(sentinel);
+  });
+});
+
 function stripCacheControl(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripCacheControl);
   if (value && typeof value === "object") {

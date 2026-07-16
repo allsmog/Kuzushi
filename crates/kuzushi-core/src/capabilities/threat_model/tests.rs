@@ -370,6 +370,10 @@ authorization: Default::default(),
     fn repository_scope_placeholder_is_a_partial_result_with_target_guidance() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let previous_model = sample_document();
+        save_persistent_threat_model(workspace.root(), &previous_model, true).unwrap();
+        let persistent_path = persistent_threat_model_path(workspace.root());
+        let previous_bytes = fs::read(&persistent_path).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
@@ -405,6 +409,8 @@ authorization: Default::default(),
         let output = result.get("output").and_then(Value::as_str).unwrap();
         assert!(output.contains(&target));
         assert!(output.contains("partial — inadequate evidence"));
+        assert!(output.contains("previous model preserved"));
+        assert!(output.contains("Cost:     >=$0.0000 (incomplete)"));
         assert!(!output.contains("threat-model:build complete"));
         let trace = fs::read_to_string(crate::run_artifacts::run_dir(
             workspace.root(),
@@ -413,7 +419,29 @@ authorization: Default::default(),
         .unwrap();
         assert!(trace.contains("partial — inadequate evidence"));
         assert!(!trace.contains("threat-model:build complete"));
-        assert!(persistent_threat_model_path(workspace.root()).exists());
+        let terminal = trace
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find(|step| {
+                step.get("label")
+                    .and_then(Value::as_str)
+                    .is_some_and(|label| label.contains("partial — inadequate evidence"))
+            })
+            .expect("partial terminal trace step");
+        assert_eq!(
+            terminal.get("kind").and_then(Value::as_str),
+            Some("tool-progress")
+        );
+        assert_eq!(
+            terminal.get("severity").and_then(Value::as_str),
+            Some("warn")
+        );
+        assert_eq!(
+            result.pointer("/data/persisted").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(!has_artifact_label(&result, "persistent threat model"));
+        assert_eq!(fs::read(persistent_path).unwrap(), previous_bytes);
     }
 
     #[test]

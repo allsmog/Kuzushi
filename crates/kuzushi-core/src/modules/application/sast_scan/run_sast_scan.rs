@@ -1,7 +1,7 @@
 use super::*;
 use crate::run_artifacts::{
-    PhaseStageOutcome, ScanArtifactDelta, ScanEngineStageOutcome, ScanFindingDelta,
-    ScanStageCost, ScanStageData, ScanStageEngine, ScanStagePlan, ScanStageScope,
+    PhaseStageOutcome, ScanArtifactDelta, ScanEngineStageOutcome, ScanFindingDelta, ScanStageCost,
+    ScanStageData, ScanStageEngine, ScanStagePlan, ScanStageScope,
 };
 use crate::WorkspaceTarget;
 use std::collections::BTreeSet;
@@ -19,10 +19,7 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
     let primary_run_id = canonical_sast_run_id(&input, ctx);
     set_canonical_sast_run_id(&mut input, &primary_run_id);
     ensure_sast_run_started(registry, workspace, &primary_run_id, &input, ctx)?;
-    let fallback_trace = ctx
-        .trace
-        .is_none()
-        .then(|| crate::run_artifacts::TraceHandle::jsonl(workspace.root(), &primary_run_id));
+    let fallback_trace = fallback_sast_trace(ctx, workspace, &primary_run_id)?;
     let run_ctx = sast_run_context(ctx, fallback_trace.as_ref());
     let result = run_started_sast_scan(
         registry,
@@ -41,11 +38,36 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
                 workspace,
                 &primary_run_id,
                 &error,
-                sast_execution_was_canceled(ctx),
+                sast_cancellation_disposition(ctx),
+                run_ctx.run_observation().as_ref(),
             );
             Err(error_with_persistence(error, persistence))
         }
     }
+}
+
+fn fallback_sast_trace(
+    ctx: &ToolExecutionContext<'_>,
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+) -> Result<Option<crate::run_artifacts::TraceHandle>> {
+    ctx.trace
+        .is_none()
+        .then(|| fallback_sast_observation(workspace, run_id))
+        .transpose()
+}
+
+fn fallback_sast_observation(
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+) -> Result<crate::run_artifacts::TraceHandle> {
+    let observation = crate::run_lifecycle::RunObservationHandle::jsonl(workspace.root(), run_id)?
+        .start_root_task("Run the accepted Scan plan")?;
+    observation
+        .task_handle()
+        .context("fallback Scan observation lacks its semantic task")?
+        .update_and_flush(crate::run_lifecycle::RunItemStatus::Running, None)?;
+    Ok(observation.trace_handle())
 }
 
 fn sast_run_context<'a>(
@@ -62,23 +84,46 @@ fn sast_run_context<'a>(
     }
 }
 
-fn sast_execution_was_canceled(ctx: &ToolExecutionContext<'_>) -> bool {
+fn sast_cancellation_disposition(
+    ctx: &ToolExecutionContext<'_>,
+) -> Option<crate::scan::CancellationDisposition> {
     ctx.cancellation
-        .is_some_and(crate::scan::ScanCancellation::is_cancelled)
+        .and_then(crate::scan::ScanCancellation::disposition)
 }
 
 fn persist_sast_terminal_error(
     workspace: &WorkspaceTarget,
     run_id: &str,
     error: &anyhow::Error,
-    canceled: bool,
+    cancellation: Option<crate::scan::CancellationDisposition>,
+    observation: Option<&crate::run_lifecycle::RunObservationHandle>,
 ) -> Result<()> {
+    if defer_sast_terminal_to_dispatch(workspace.root(), run_id, observation)? {
+        return Ok(());
+    }
     let record =
         crate::run_artifacts::ToolRunRecord::new(workspace.root(), run_id, "scan", "sast:scan");
-    if canceled {
-        return crate::run_artifacts::try_record_tool_run_canceled(record, &error.to_string());
+    match cancellation {
+        Some(crate::scan::CancellationDisposition::Canceled) => {
+            crate::run_artifacts::try_record_tool_run_canceled_observed(
+                record,
+                &error.to_string(),
+                observation,
+            )
+        }
+        Some(crate::scan::CancellationDisposition::Interrupted) => {
+            crate::run_artifacts::try_record_tool_run_interrupted_observed(
+                record,
+                &error.to_string(),
+                observation,
+            )
+        }
+        None => crate::run_artifacts::try_record_tool_run_failed_observed(
+            record,
+            &error.to_string(),
+            observation,
+        ),
     }
-    crate::run_artifacts::try_record_tool_run_failed(record, &error.to_string())
 }
 
 fn run_started_sast_scan(
@@ -109,14 +154,34 @@ fn run_started_sast_scan(
     })?;
     let findings_count = executed.findings_count;
     let (artifacts, result) = executed.into_result(workspace, whitebox_static.as_ref())?;
-    let summary_artifact = write_sast_summary(workspace, &primary_run_id, &artifacts, &result)?;
-    write_sast_run_metadata(
+    persist_sast_scan_result(
+        ctx,
         workspace,
         &primary_run_id,
+        findings_count,
+        artifacts,
+        result,
+    )
+}
+
+fn persist_sast_scan_result(
+    ctx: &ToolExecutionContext<'_>,
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+    findings_count: usize,
+    artifacts: SastRunArtifacts,
+    result: Value,
+) -> Result<Value> {
+    let summary_artifact = write_sast_summary(workspace, run_id, &artifacts, &result)?;
+    let observation = ctx.run_observation();
+    write_sast_run_metadata(
+        workspace,
+        run_id,
         findings_count,
         &artifacts,
         summary_artifact,
         &result,
+        observation.as_ref(),
     )?;
     Ok(result)
 }
@@ -221,6 +286,142 @@ mod terminal_error_tests {
             .to_string()
             .contains("already terminal with status canceled"));
     }
+
+    #[test]
+    fn nested_sast_watchdog_interruption_persists_interrupted() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let cancellation = ScanCancellation::default();
+        cancellation.interrupt();
+        let run_id = "scan-interrupted-shared";
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+            cancellation: Some(&cancellation),
+            authorization: Default::default(),
+        };
+
+        let error = run_sast_scan_with_registry(
+            &registry,
+            serde_json::json!({
+                "runId": run_id,
+                "taskMode": "manual",
+                "tasks": ["secret-scan"]
+            }),
+            &ctx,
+            None,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
+        let summary = load_run_summary(target.path(), run_id).unwrap();
+        assert_eq!(summary.status, "interrupted");
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_task_tests {
+    use super::*;
+    use crate::run_lifecycle::{ProjectionHealth, RunItemStatus, RunObservationHandle};
+    use crate::V2Config;
+
+    #[test]
+    fn production_scan_preserves_accepted_engine_order_and_child_run_identity() {
+        let (output, projection) = execute_production_scan_fixture();
+        assert_accepted_scan_tasks(&output, &projection);
+    }
+
+    fn execute_production_scan_fixture() -> (Value, crate::run_lifecycle::RunProjection) {
+        let target = production_scan_target();
+        let run_id = "scan-lifecycle-task-order";
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let observation = RunObservationHandle::jsonl(target.path(), run_id)
+            .unwrap()
+            .start_root_task("Run the accepted Scan plan")
+            .unwrap();
+        let trace = observation.trace_handle();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: Some(&trace),
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let output = run_sast_scan_with_registry(
+            &registry,
+            serde_json::json!({
+                "runId": run_id,
+                "taskMode": "manual",
+                "tasks": ["dep-hygiene", "secret-scan"]
+            }),
+            &ctx,
+            None,
+        )
+        .unwrap();
+        let projection = crate::run_lifecycle::load_run_projection(target.path(), run_id)
+            .unwrap()
+            .projection;
+        (output, projection)
+    }
+
+    fn production_scan_target() -> tempfile::TempDir {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(
+            target.path().join("package.json"),
+            r#"{"dependencies":{"demo":"latest"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            target.path().join(".env"),
+            "OPENAI_API_KEY=sk-production-scan-lifecycle-sentinel\n",
+        )
+        .unwrap();
+        target
+    }
+
+    fn assert_accepted_scan_tasks(
+        output: &Value,
+        projection: &crate::run_lifecycle::RunProjection,
+    ) {
+        assert_eq!(projection.health, ProjectionHealth::Healthy);
+        let accepted = output["data"]["engines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|engine| engine.as_str().unwrap())
+            .collect::<Vec<_>>();
+        let tasks = projection
+            .task_order
+            .iter()
+            .filter_map(|task_id| projection.tasks.get(task_id))
+            .filter(|task| accepted.contains(&task.title.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tasks
+                .iter()
+                .map(|task| task.title.as_str())
+                .collect::<Vec<_>>(),
+            accepted
+        );
+        let child_run = output["data"]["runIds"]["native"].as_str().unwrap();
+        assert!(tasks.iter().all(|task| {
+            task.status == RunItemStatus::Completed
+                && task
+                    .detail
+                    .as_ref()
+                    .is_some_and(|detail| detail.as_str().contains(child_run))
+        }));
+    }
 }
 
 struct SastScanExecutionInput<'a> {
@@ -267,11 +468,12 @@ impl SastScanExecutionInput<'_> {
         let mut run_refs = vec![self.primary_run_id.to_string()];
         run_refs.extend(run_ids.all().into_iter().map(str::to_string));
         let outcome = scan_stage_outcome(reports);
+        let finding_delta = scan_finding_delta(before_findings, core_findings);
         let scan = ScanStageData {
             scope: scan_stage_scope(self.workspace, self.options),
             plan: scan_stage_plan(self.input, selected),
             engines: scan_stage_engines(reports, &run_ids)?,
-            finding_delta: scan_finding_delta(before_findings, core_findings),
+            finding_delta,
             artifact_delta: scan_artifact_delta(
                 self.workspace.root(),
                 &run_refs,
@@ -281,7 +483,39 @@ impl SastScanExecutionInput<'_> {
             cost: scan_stage_cost(reports)?,
             target_snapshot,
         };
-        record_sast_scan_stage(artifacts, outcome, run_refs, scan)
+        record_sast_scan_stage(artifacts, outcome, run_refs, scan)?;
+        self.emit_finding_delta(finding_delta, core_findings)
+    }
+
+    fn emit_finding_delta(
+        &self,
+        delta: ScanFindingDelta,
+        findings: &[crate::findings::Finding],
+    ) -> Result<()> {
+        let Some(observation) = self.ctx.run_observation() else {
+            return Ok(());
+        };
+        let store_watermark = self.store.projection_meta()?.applied_seq;
+        let finding_id_samples = findings
+            .iter()
+            .take(crate::run_lifecycle::MAX_FINDING_ID_SAMPLES)
+            .map(|finding| crate::run_lifecycle::SafeText::operator_visible(&finding.fingerprint))
+            .collect();
+        observation.emit(crate::run_lifecycle::RunItemRecord::new(
+            crate::run_lifecycle::RunItemId::new(),
+            crate::run_lifecycle::RunItemSource::Persistence,
+            crate::run_lifecycle::RunItemV1::FindingDelta {
+                delta: crate::run_lifecycle::FindingDeltaSummary {
+                    added: delta.added,
+                    updated: delta.updated,
+                    removed: 0,
+                    store_watermark: crate::run_lifecycle::SafeText::operator_visible(
+                        store_watermark.to_string(),
+                    ),
+                    finding_id_samples,
+                },
+            },
+        ))
     }
 
     fn record_failed_scan_stage(
@@ -310,12 +544,7 @@ impl SastScanExecutionInput<'_> {
             cost: None,
             target_snapshot,
         };
-        record_sast_scan_stage(
-            artifacts,
-            PhaseStageOutcome::Failed,
-            vec![run_ref],
-            scan,
-        )
+        record_sast_scan_stage(artifacts, PhaseStageOutcome::Failed, vec![run_ref], scan)
     }
 
     fn whitebox_artifacts(
@@ -386,6 +615,7 @@ struct ExecutedSastScan {
 
 struct ScanStageBaseline {
     selected: SastTaskSelection,
+    lifecycle_tasks: Vec<crate::run_lifecycle::ObservedRunTask>,
     finding_fingerprints: BTreeSet<String>,
     artifacts: BTreeSet<(String, String)>,
     target_snapshot: crate::workflow_attempts::PhaseTargetSnapshot,
@@ -437,13 +667,13 @@ fn scan_stage_baseline(
     input: &SastScanExecutionInput<'_>,
     primary_run_id: &str,
 ) -> Result<ScanStageBaseline> {
+    let selected = prepare_sast_task_selection(input.input)?;
+    let lifecycle_tasks = observe_scan_plan(input.ctx, &selected)?;
     Ok(ScanStageBaseline {
-        selected: prepare_sast_task_selection(input.input)?,
+        selected,
+        lifecycle_tasks,
         finding_fingerprints: current_finding_fingerprints(input.store)?,
-        artifacts: scan_artifact_inventory(
-            input.workspace.root(),
-            &[primary_run_id.to_string()],
-        )?,
+        artifacts: scan_artifact_inventory(input.workspace.root(), &[primary_run_id.to_string()])?,
         target_snapshot: crate::workflow_attempts::PhaseTargetSnapshot::capture(
             input.workspace.root(),
         ),
@@ -456,16 +686,114 @@ fn scan_reports_with_failure_receipt(
     artifacts: &SastRunArtifacts,
     baseline: &ScanStageBaseline,
 ) -> Result<SastPipelineReports> {
-    input.reports(&baseline.selected).map_err(|error| {
-        let persistence = input.record_failed_scan_stage(
-            artifacts,
-            &baseline.selected,
-            baseline.started,
-            baseline.target_snapshot.clone(),
-            &error,
-        );
-        error_with_persistence(error, persistence)
-    })
+    update_scan_tasks(
+        &baseline.lifecycle_tasks,
+        crate::run_lifecycle::RunItemStatus::Running,
+        None,
+    )?;
+    input
+        .reports(&baseline.selected)
+        .and_then(|reports| {
+            finish_scan_tasks(&baseline.lifecycle_tasks, &reports)?;
+            Ok(reports)
+        })
+        .map_err(|error| {
+            let task_persistence = update_scan_tasks(
+                &baseline.lifecycle_tasks,
+                crate::run_lifecycle::RunItemStatus::Interrupted,
+                Some("engine outcomes are unavailable because the scan pipeline stopped"),
+            );
+            let stage_persistence = input.record_failed_scan_stage(
+                artifacts,
+                &baseline.selected,
+                baseline.started,
+                baseline.target_snapshot.clone(),
+                &error,
+            );
+            error_with_persistence(error, task_persistence.and(stage_persistence))
+        })
+}
+
+fn observe_scan_plan(
+    ctx: &ToolExecutionContext<'_>,
+    selected: &SastTaskSelection,
+) -> Result<Vec<crate::run_lifecycle::ObservedRunTask>> {
+    let Some(observation) = ctx.run_observation() else {
+        return Ok(Vec::new());
+    };
+    let mut plan = observation
+        .plan_handle()?
+        .context("Scan observation has no application-owned plan")?;
+    plan.extend_tasks(selected.planned_engine_ids())
+}
+
+fn update_scan_tasks(
+    tasks: &[crate::run_lifecycle::ObservedRunTask],
+    status: crate::run_lifecycle::RunItemStatus,
+    detail: Option<&str>,
+) -> Result<()> {
+    for task in tasks {
+        task.update(status, detail)?;
+    }
+    Ok(())
+}
+
+fn finish_scan_tasks(
+    tasks: &[crate::run_lifecycle::ObservedRunTask],
+    reports: &SastPipelineReports,
+) -> Result<()> {
+    let run_ids = reports.run_ids("parent".to_string());
+    let outcomes = tasks
+        .iter()
+        .map(|task| scan_task_outcome(reports, task.title()))
+        .collect::<Result<Vec<_>>>()?;
+    for (task, outcome) in tasks.iter().zip(outcomes) {
+        task.update(
+            scan_task_status(outcome),
+            scan_task_outcome_detail(task.title(), outcome, &run_ids).as_deref(),
+        )?;
+    }
+    Ok(())
+}
+
+fn scan_task_outcome_detail(
+    engine: &str,
+    outcome: ScanEngineStageOutcome,
+    run_ids: &SastRunIds,
+) -> Option<String> {
+    let detail = scan_engine_outcome_detail(outcome);
+    match (scan_engine_run_ref(engine, run_ids), detail) {
+        (Some(run_ref), Some(detail)) => Some(format!("child run {run_ref}: {detail}")),
+        (Some(run_ref), None) => Some(format!("child run {run_ref}: completed")),
+        (None, detail) => detail,
+    }
+}
+
+fn scan_task_outcome(
+    reports: &SastPipelineReports,
+    engine: &str,
+) -> Result<ScanEngineStageOutcome> {
+    if reports
+        .skipped_engines
+        .iter()
+        .any(|skipped| skipped.id == engine)
+    {
+        return Ok(ScanEngineStageOutcome::Skipped);
+    }
+    reports
+        .engine_outcomes
+        .get(engine)
+        .copied()
+        .with_context(|| format!("Scan engine {engine} did not record an outcome"))
+}
+
+fn scan_task_status(outcome: ScanEngineStageOutcome) -> crate::run_lifecycle::RunItemStatus {
+    match outcome {
+        ScanEngineStageOutcome::Complete => crate::run_lifecycle::RunItemStatus::Completed,
+        ScanEngineStageOutcome::Partial => crate::run_lifecycle::RunItemStatus::Partial,
+        ScanEngineStageOutcome::Skipped => crate::run_lifecycle::RunItemStatus::Skipped,
+        ScanEngineStageOutcome::Failed => crate::run_lifecycle::RunItemStatus::Failed,
+    }
 }
 
 fn current_finding_fingerprints(store: &FindingStore) -> Result<BTreeSet<String>> {
@@ -736,15 +1064,18 @@ fn sast_scan_warnings(reports: &SastPipelineReports) -> Vec<Value> {
         .iter()
         .map(|skipped| json!(skipped.warning))
         .collect::<Vec<_>>();
-    warnings.extend(reports.engine_outcomes.iter().filter_map(|(engine, outcome)| {
-        match outcome {
-            ScanEngineStageOutcome::Partial => {
-                Some(json!(format!("{engine} returned a usable partial result")))
-            }
-            ScanEngineStageOutcome::Skipped => Some(json!(format!("{engine} was skipped"))),
-            ScanEngineStageOutcome::Complete | ScanEngineStageOutcome::Failed => None,
-        }
-    }));
+    warnings.extend(
+        reports
+            .engine_outcomes
+            .iter()
+            .filter_map(|(engine, outcome)| match outcome {
+                ScanEngineStageOutcome::Partial => {
+                    Some(json!(format!("{engine} returned a usable partial result")))
+                }
+                ScanEngineStageOutcome::Skipped => Some(json!(format!("{engine} was skipped"))),
+                ScanEngineStageOutcome::Complete | ScanEngineStageOutcome::Failed => None,
+            }),
+    );
     warnings
 }
 
@@ -1002,8 +1333,13 @@ mod scan_result_outcome_tests {
         let reports = reports_with_outcomes(&[("agentic", ScanEngineStageOutcome::Partial)]);
 
         let warnings = sast_scan_warnings(&reports);
-        let result =
-            sast_scan_result_envelope("partial".into(), "partial".into(), warnings, json!({}), true);
+        let result = sast_scan_result_envelope(
+            "partial".into(),
+            "partial".into(),
+            warnings,
+            json!({}),
+            true,
+        );
 
         assert_eq!(scan_stage_outcome(&reports), PhaseStageOutcome::Partial);
         assert_eq!(tool_result_status(&result), ToolResultStatus::Partial);

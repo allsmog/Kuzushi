@@ -14,6 +14,7 @@ pub struct EngagementState {
     planning_run_queue: VecDeque<PlanningTaskId>,
     planning_expanded_queue: VecDeque<PlanningRunStep>,
     planning_running_tool: Option<String>,
+    planning_running_task: Option<PlanningTaskId>,
     planning_paused: bool,
     planning_picker_route: PlanningPickerRouteState,
     pending_chain: Option<PrereqChain>,
@@ -40,6 +41,7 @@ pub struct EngagementState {
     latest_phase_attempt: Option<kuzushi_core::workflow_attempts::PhaseAttemptRecord>,
     phase_attempt_ledger: kuzushi_core::workflow_attempts::PhaseAttemptLedger,
     phase_target_snapshot: Option<kuzushi_core::workflow_attempts::PhaseTargetSnapshot>,
+    phase_attempt_projection_degraded: bool,
     pending_attempt_lineage: Option<(
         WorkflowPhase,
         String,
@@ -86,6 +88,15 @@ impl EngagementState {
         snapshot: Option<kuzushi_core::workflow_attempts::PhaseTargetSnapshot>,
         ledger: kuzushi_core::workflow_attempts::PhaseAttemptLedger,
     ) {
+        self.set_phase_attempt_projection_health(snapshot, ledger, false);
+    }
+
+    pub(crate) fn set_phase_attempt_projection_health(
+        &mut self,
+        snapshot: Option<kuzushi_core::workflow_attempts::PhaseTargetSnapshot>,
+        ledger: kuzushi_core::workflow_attempts::PhaseAttemptLedger,
+        degraded: bool,
+    ) {
         self.durable_skipped_phases = snapshot
             .as_ref()
             .map(|snapshot| ledger.skipped_phases_for(snapshot))
@@ -96,6 +107,11 @@ impl EngagementState {
             .cloned();
         self.phase_target_snapshot = snapshot;
         self.phase_attempt_ledger = ledger;
+        self.phase_attempt_projection_degraded = degraded;
+    }
+
+    pub(crate) fn phase_attempt_projection_is_degraded(&self) -> bool {
+        self.phase_attempt_projection_degraded
     }
 
     pub(crate) fn selected_phase_attempt(
@@ -307,7 +323,7 @@ impl EngagementState {
 
     pub(crate) fn pause_planning_queue(&mut self) {
         self.planning_paused = true;
-        self.planning_running_tool = None;
+        self.clear_running_tool();
     }
 
     pub(crate) fn planning_paused(&self) -> bool {
@@ -319,30 +335,33 @@ impl EngagementState {
     }
 
     pub(crate) fn planning_tool_sequence(&self) -> Vec<String> {
-        self.planning_running_tool
+        self.planning_running_task
             .iter()
-            .cloned()
+            .map(|task| task.activity_task_id())
             .chain(
                 self.planning_expanded_queue
                     .iter()
-                    .map(|step| step.tool_name.clone()),
+                    .map(|step| step.task.activity_task_id()),
             )
             .chain(
                 self.planning_run_queue
                     .iter()
-                    .map(|task| task.tool_name().to_string()),
+                    .map(|task| task.activity_task_id()),
             )
             .collect()
+    }
+
+    pub(crate) fn planning_task_pending_after_current(&self, task: PlanningTaskId) -> bool {
+        self.planning_expanded_queue
+            .iter()
+            .any(|step| step.task == task)
+            || self.planning_run_queue.contains(&task)
     }
 
     pub(crate) fn planning_tool_pending_after_current(&self, tool_name: &str) -> bool {
         self.planning_expanded_queue
             .iter()
             .any(|step| step.tool_name == tool_name)
-            || self
-                .planning_run_queue
-                .iter()
-                .any(|task| task.tool_name() == tool_name)
     }
 
     pub(crate) fn planning_queues_empty(&self) -> bool {
@@ -383,6 +402,10 @@ impl EngagementState {
         self.planning_running_tool.as_deref()
     }
 
+    pub(crate) fn running_planning_task(&self) -> Option<PlanningTaskId> {
+        self.planning_running_task
+    }
+
     pub(crate) fn running_tool_is(&self, tool_name: &str) -> bool {
         self.running_tool() == Some(tool_name)
     }
@@ -391,12 +414,20 @@ impl EngagementState {
         self.planning_running_tool.is_some()
     }
 
+    #[cfg(test)]
     pub(crate) fn set_running_tool(&mut self, tool_name: String) {
         self.planning_running_tool = Some(tool_name);
+        self.planning_running_task = None;
+    }
+
+    pub(crate) fn set_running_planning_step(&mut self, task: PlanningTaskId, tool_name: String) {
+        self.planning_running_tool = Some(tool_name);
+        self.planning_running_task = Some(task);
     }
 
     pub(crate) fn clear_running_tool(&mut self) {
         self.planning_running_tool = None;
+        self.planning_running_task = None;
     }
 
     pub(crate) fn planning_picker(&self) -> &PlanningPickerRouteState {

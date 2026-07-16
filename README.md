@@ -46,6 +46,19 @@ This snapshot tightens the path from scanner output to human review:
 - Workspace persistence is v3-first: append-only event log segments under
   `.kuzushi/v3/log/`, the projection DB at `.kuzushi/v3/index.sqlite3`, and
   replayable run artifacts under `.kuzushi/v3/runs/<runId>/`.
+- Each run records an authoritative typed, hash-chained lifecycle stream at
+  `.kuzushi/v3/runs/<runId>/items.jsonl`. One reducer projects it, so live Run
+  Focus, `runs replay`, plain output, and the JSON projection are the same
+  answer rather than four hand-maintained renderings; cross-surface equivalence
+  is test-enforced.
+- Run integrity is disclosed, not assumed. A stream that fails its hash chain,
+  sequence, or text policy stops at the last valid prefix and reports the
+  degradation. A recorded completion whose evidence is degraded or whose
+  durability failed is quarantined to `partial` and offers only run inspection,
+  so a damaged log can never route an operator to a Report it did not earn.
+- Every operator-visible lifecycle string is redacted, control-escaped, and
+  bounded by construction, and that policy is re-validated on read rather than
+  trusted from the writer.
 - Shell causality is recorded separately as redacted semantic JSONL under
   `~/.kuzushi/v3/sessions/`; `kuzushi sessions list|show|export|prune` inspects
   that global operator-owned history without treating it as target evidence.
@@ -78,6 +91,13 @@ configs such as `auto` still fetch rules. `kuzushi demo` and the fully bundled
 task list in Quick Start are the zero-network paths. Model and runtime selection
 is explicit: Kuzushi never silently falls back to a different provider or
 model.
+
+Operator-visible run lifecycle text is redacted by construction rather than by
+convention: every such string is routed through the shared redaction policy,
+control-escaped, and length-bounded before it is written, and the same policy is
+re-applied when the stream is read back. Bridge failures surface as a fixed set
+of error classes instead of raw provider or subprocess output, and `trace.jsonl`
+carries no prompts or model-response previews.
 
 ## Install
 
@@ -216,7 +236,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--vuln-source sarif,...] [--limit 50] [--json]` | List persisted findings. |
 | `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, verification summary, patch result, and next action. |
 | `kuzushi decision <F-0001\|fingerprint-prefix> --target <repo> --verdict confirmed\|rejected_false_positive\|suppressed\|deferred\|accepted_risk\|needs_review --reason <text> [--json]` | Append a human review decision for a persisted finding. This carries forward by durable identity and does not mutate scanner triage. |
-| `kuzushi runs list [--status completed,failed]\|show <runId>\|trace <runId>\|diff <a> <b>\|prune --target <repo>` | Inspect, compare, or prune replayable summaries, result artifacts, and trace JSONL under `.kuzushi/v3/runs/<runId>/`. |
+| `kuzushi runs list [--status completed,failed]\|show <runId>\|replay <runId> [--json]\|trace <runId>\|diff <a> <b>\|prune --target <repo>` | Inspect, replay, compare, or prune runs under `.kuzushi/v3/runs/<runId>/`. `replay` reduces the authoritative typed `items.jsonl` lifecycle and reports projection health; `--json` emits the machine-readable projection. `trace` prints non-authoritative diagnostics. |
 | `kuzushi export --target <repo> --out <path> [--format json\|jsonl\|sarif\|csv\|markdown-bundle] [--completeness all\|open\|complete] [--preview] [--allow-empty]` | Export or preview the canonical persisted findings projection with review state and provenance. |
 | `kuzushi suppress <F-0001> --target <repo> --reason <text> [--days 90]` | Record an expiring, evidence-backed suppression; findings remain visible in audit/report output. |
 | `kuzushi suppressions --target <repo>` | List suppression memory and the audit store path. |
@@ -243,6 +263,8 @@ kuzushi finding F-0001 --target .
 kuzushi decision F-0001 --target . --verdict confirmed --reason "reviewed scanner signal and source"
 kuzushi runs list --target .
 kuzushi runs list --target . --status failed,partial
+kuzushi runs replay <runId> --target .
+kuzushi runs replay <runId> --target . --json
 kuzushi runs diff run-a run-b --target . --json
 kuzushi runs prune --target . --older-than-days 30 --keep-last 20 --dry-run
 kuzushi export --target . --out findings.json --format json --completeness all
@@ -337,7 +359,7 @@ Piped shell output automatically uses the same strict plain renderer as
 | `/kb [module]`, `attachments`, `attach <path-or-url>`, `detach <id>`, `reparse <id>` | Manage local `.kuzushi/v3/` KB attachments; URL attachments are metadata-only. |
 | `/workspace`, `workspace export findings <path> [format] [--allow-empty]`, `findings export <path>` | Show workspace state and export findings as JSON, JSONL, SARIF, CSV, or markdown bundle. |
 | `/findings`, `/open <alias-or-fingerprint>`, `/show aliases [prefix]` | Load findings and open deterministic aliases such as `F-0001`. |
-| `/show runs`, `/replay <runId>`, `/trace <runId>`, `/since <git-ref>` | Inspect replayable run artifacts and diff-scoped findings. |
+| `/show runs`, `/replay <runId>`, `/trace <runId>`, `/since <git-ref>` | Inspect replayable run artifacts and diff-scoped findings. `/replay` reduces the run's typed lifecycle projection; `/trace` shows non-authoritative diagnostics. |
 | `/threats [dfd\|stride\|stories\|scope\|summary\|1..4]`, `/threats edit`, `/threats regen`, `/threats apply`, `/threats reject`, `/threats ask <question>` | Switch threat-model views or request and review a threat-model patch. |
 | `/auth`, `/auth login <provider>`, `/provider`, `/backend`, `/model [choice]`, `/cost`, `/config`, `/permissions` | Show credential status without secrets, select explicit models, and report known cost/config/approval state. |
 | `/session`, `/history`, `/clear`, `/load <specifier>`, `/pause`, `/resume [runId]`, `/story` | Show durable transcript health plus session utilities and precise replacement messages for unsupported legacy live-control paths. |
@@ -479,19 +501,22 @@ not silently succeed and they do not substitute a different model.
 | `~/.kuzushi/v3/options.json` | persisted global tool options from shell `setg` |
 | `.kuzushi/v3/options.json` | optional project/workspace tool option overrides |
 | `.kuzushi/v3/index.sqlite3` | scan, shell, and run-mode tool persistence |
-| `.kuzushi/v3/log/events-*.jsonl` | append-only event log for v3 projection, review decisions, run lifecycle, verification, patch attempts, and audit events |
+| `.kuzushi/v3/log/events-*.jsonl` | append-only event log for v3 projection, review decisions, verification, patch attempts, audit events, and idempotently bridged terminal run facts. Per-run lifecycle lives in `runs/<runId>/items.jsonl`; run replay reduces that per-run stream and never reconstructs from this log |
 | `.kuzushi/v3/objects/blake3/` | content-addressed blobs, JSON objects, snapshots, and derived payloads referenced by artifacts/events |
 | `.kuzushi/v3/scene-taint-flow.json` | persisted attack-path snapshot for `/scene`, Activity, and workbench views |
 | `.kuzushi/v3/scene-exploit-chains.json` | persisted exploit-chain snapshot for `/scene`, Activity, and workbench views |
 | `.kuzushi/v3/strategy-queue.jsonl` | persisted strategy proposals, status, outcome, cost, and correction history |
+| `.kuzushi/v3/workflow/phase-attempts.jsonl` | workflow-v1 phase attempt ledger; still written for compatibility |
+| `.kuzushi/v3/workflow/phase-attempts.v2.jsonl` | schema-v2 phase attempt ledger. Reference-only: attempts point at runs by id instead of duplicating run facts, and a receipt is refused rather than built from a degraded projection |
 | `.kuzushi/v3/attachments.json` | Rust shell KB attachments |
 | `.kuzushi/v3/artifact-kb.sqlite3` | Local artifact knowledge search index |
 | `.kuzushi/context-snapshot.json` | `context:build` |
 | `.kuzushi/threat-model.json` | `threat-model:*`, `randori:*`, and threat-model readers |
 | `.kuzushi/v3/latest` | latest completed, partial, failed, skipped, or running run id |
 | `.kuzushi/v3/runs/<runId>/run.json` | canonical run metadata, status, cost, LLM audit, and artifact list |
-| `.kuzushi/v3/runs/<runId>/events.jsonl` | tool lifecycle events |
-| `.kuzushi/v3/runs/<runId>/trace.jsonl` | ordered trace steps for replay and activity views |
+| `.kuzushi/v3/runs/<runId>/items.jsonl` | authoritative typed, hash-linked run lifecycle for new runs; live Run Focus, replay, plain output, and APIs reduce this stream |
+| `.kuzushi/v3/runs/<runId>/events.jsonl` | compatibility projection of typed lifecycle items during the migration window; authoritative only for legacy runs |
+| `.kuzushi/v3/runs/<runId>/trace.jsonl` | non-authoritative bounded diagnostics and model/tool audit during the migration window |
 | `.kuzushi/v3/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
 | `.kuzushi/v3/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown` and `data.reportMarkdown` output fields |
 | `.kuzushi/v3/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
@@ -510,6 +535,18 @@ through the npm subpath `kuzushi/schemas/*`. They document the canonical
 camelCase run metadata/event/failure fields such as `runId` and
 `startedAtUnix`, plus canonical snake_case trace fields. Obsolete compatibility
 aliases are rejected instead of normalized.
+
+`items.jsonl` does not yet have a published JSON Schema. Until it does, consume
+it through `kuzushi runs replay --json` or the `kuzushi_core::run_lifecycle`
+Rust types rather than parsing the stream directly.
+
+Typed run lifecycle and phase attempts are in a compatibility window: new runs
+write authoritative `items.jsonl` while dual-writing the compatibility
+`events.jsonl` and diagnostic `trace.jsonl`, and new phase attempts write
+`phase-attempts.v2.jsonl` alongside the unchanged workflow-v1 record. Readers
+prefer the typed and v2 data and disclose lossy fallback for legacy runs that
+predate it. Nothing is rewritten in place. See
+[RELEASING.md](./RELEASING.md) for the migration plan.
 
 Current implementation boundaries are documented in
 [docs/modules.md](docs/modules.md),
@@ -538,6 +575,8 @@ Useful package scripts:
 | `pnpm test:rust` | Run `cargo test --workspace`. |
 | `pnpm test:e2e` | Run the native smoke test. |
 | `pnpm quality:crap-risk` | Gate changed production Rust/JS/TS code with the CRAP-risk < 7 proxy. |
+| `pnpm quality:architecture` | Gate DDD boundaries, artifact/result-envelope contracts, env discipline, and the dispatch and run-lifecycle boundaries. |
+| `pnpm quality:model-safety` | Gate the no-silent-fallback model/runtime policy. |
 | `pnpm doctor` | Run source-checkout development diagnostics; use `kuzushi doctor` for Rust CLI preflight. |
 | `pnpm check:docs` | Guard port-contract docs, public docs/workflows, stale Rust CLI command examples, and retired TS runtime imports. |
 | `pnpm export:source [path]` | Create a clean source tarball from tracked files with local state excluded. |

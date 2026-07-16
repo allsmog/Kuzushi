@@ -67,6 +67,10 @@ fn worker_handle_registry_cancels_timed_out_handles_once() {
     assert_eq!(timed_out.len(), 1);
     assert_eq!(timed_out[0].label, "blocked");
     assert!(cancel.is_cancelled());
+    assert_eq!(
+        cancel.disposition(),
+        Some(kuzushi_core::scan::CancellationDisposition::Interrupted)
+    );
     assert_eq!(registry.active_count(), 1);
     assert!(registry.cancel_timed_out(Instant::now()).is_empty());
     drop(tx);

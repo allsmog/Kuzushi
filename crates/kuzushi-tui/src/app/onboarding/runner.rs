@@ -100,7 +100,7 @@ impl ShellApp {
                         "error",
                         format!("{} input invalid: {error:#}", task.tool_name()),
                     );
-                    return Err(self.fail_planning_task(task.tool_name(), &format!("{error:#}")));
+                    return Err(self.fail_planning_task_id(task, &format!("{error:#}")));
                 }
             }
         }
@@ -111,13 +111,14 @@ impl ShellApp {
         step: PlanningRunStep,
         workspace: WorkspaceTarget,
     ) -> Vec<ShellEffect> {
+        self.engagement
+            .set_running_planning_step(step.task, step.tool_name.clone());
         if let Some(error) =
             self.langgraph_background_tool_launch_blocker(&step.tool_name, &step.input)
         {
             self.log("error", error.clone());
             return self.fail_planning_task(&step.tool_name, &error);
         }
-        self.engagement.set_running_tool(step.tool_name.clone());
         self.log(
             "planning",
             format!(
@@ -386,6 +387,11 @@ impl ShellApp {
         self.resume_or_advance_planning_queue()
     }
 
+    fn fail_planning_task_id(&mut self, task: PlanningTaskId, error: &str) -> Vec<ShellEffect> {
+        self.record_planning_task_failure_for(task, error);
+        self.resume_or_advance_planning_queue()
+    }
+
     pub(crate) fn pause_planning_task_after_failure(&mut self, tool_name: &str, error: &str) {
         self.record_planning_task_failure(tool_name, error);
         self.engagement.pause_planning_queue();
@@ -396,10 +402,18 @@ impl ShellApp {
     }
 
     fn record_planning_task_failure(&mut self, tool_name: &str, error: &str) {
+        let task = self
+            .engagement
+            .running_planning_task()
+            .or_else(|| unambiguous_planning_task_for_tool(tool_name));
         self.engagement.clear_running_tool();
-        let Some(task) = planning_task_for_tool(tool_name) else {
+        let Some(task) = task else {
             return;
         };
+        self.record_planning_task_failure_for(task, error);
+    }
+
+    fn record_planning_task_failure_for(&mut self, task: PlanningTaskId, error: &str) {
         let skipped = self.skip_queued_dependents(task);
         self.log_skipped_dependents(task, &skipped);
         self.engagement.record_failed_task(FailedPlanningTask {
@@ -911,9 +925,16 @@ fn is_reverse_engineering_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Resolve a tool name back to its planning task. STRIDE/PASTA share a tool
-/// name; the first match (STRIDE) is fine for failure bookkeeping.
-fn planning_task_for_tool(tool_name: &str) -> Option<PlanningTaskId> {
+fn unambiguous_planning_task_for_tool(tool_name: &str) -> Option<PlanningTaskId> {
+    let mut matches = PlanningTaskId::ALL
+        .iter()
+        .copied()
+        .filter(|task| task.tool_name() == tool_name);
+    let task = matches.next()?;
+    matches.next().is_none().then_some(task)
+}
+
+fn recommended_planning_task_for_tool(tool_name: &str) -> Option<PlanningTaskId> {
     PlanningTaskId::ALL
         .iter()
         .copied()
@@ -963,7 +984,7 @@ fn model_tasks_from_recommendation_result(result: &Value) -> BTreeSet<PlanningTa
     recommendations
         .iter()
         .filter_map(|rec| rec.get("tool").and_then(Value::as_str))
-        .filter_map(planning_task_for_tool)
+        .filter_map(recommended_planning_task_for_tool)
         .collect()
 }
 
@@ -972,6 +993,33 @@ mod tests {
     use super::*;
     use kuzushi_core::{Severity, TriageOutcome, V2Config};
     use PlanningTaskId::*;
+
+    #[test]
+    fn shared_threat_model_tool_records_the_running_methodology() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.engagement
+            .set_running_planning_step(BuildPastaThreatModel, "threat-model:build".to_string());
+
+        app.pause_planning_task_after_failure("threat-model:build", "no topology");
+
+        assert_eq!(app.engagement.failed_tasks()[0].task, BuildPastaThreatModel);
+    }
+
+    #[test]
+    fn shared_threat_model_tool_keeps_distinct_activity_identity() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.engagement.queue_plan(vec![BuildPastaThreatModel]);
+        app.engagement
+            .set_running_planning_step(BuildStrideThreatModel, "threat-model:build".to_string());
+
+        assert_eq!(
+            app.engagement.planning_tool_sequence(),
+            vec![
+                "threat-model:build[stride]".to_string(),
+                "threat-model:build[pasta]".to_string(),
+            ]
+        );
+    }
 
     #[test]
     fn planning_activity_view_waits_until_run_attachment_captures_setup_origin() {

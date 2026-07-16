@@ -275,7 +275,7 @@ fn seed_from_registry_pre_populates_dag_pane() {
     let mut session = ActivitySession::new("scan-pending");
     assert!(session.tasks.is_empty());
 
-    session.seed_from_registry(&registry);
+    session.seed_from_registry_legacy(&registry);
 
     assert!(
         !session.tasks.is_empty(),

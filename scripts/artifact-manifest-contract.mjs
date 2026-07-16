@@ -2001,7 +2001,9 @@ function threatModelBuildSummaryStatusFailures(root) {
   const source = readFileSync(sourcePath, "utf8");
   const productionSource = source.split("#[cfg(test)]")[0];
   return [
-    source.includes("saved_threat_model_status(persisted, &input.target)")
+    source.includes(
+      "saved_threat_model_status(persisted, has_concrete_content, &input.target)",
+    )
       ? null
       : "threat-model build summary saved label must pass the target",
     source.includes("persistent_threat_model_path(target)")

@@ -150,11 +150,14 @@ impl SubsystemAggregate {
 #[derive(Debug, Clone)]
 pub struct ActivitySession {
     pub run_id: String,
+    pub run_projection: kuzushi_core::run_lifecycle::RunProjection,
+    pub run_presentation_hydration: kuzushi_core::run_lifecycle::RunPresentationHydrationV1,
     /// Engagement phase at the moment this run started. This is transient
     /// presentation state: it keeps a live/finished Activity composition on
     /// the phase that launched it even when newly persisted artifacts advance
     /// the workspace-derived journey underneath the operator.
     pub origin_phase: Option<WorkflowPhase>,
+    pub phase_attempt_id: Option<kuzushi_core::run_lifecycle::RunAttemptId>,
     /// Exact shell destination captured before a foreground run opens. Route-
     /// local state (Workbench pane/page/scroll and pinned finding) stays in the
     /// router, so restoring this view restores the full operator context.
@@ -180,11 +183,31 @@ pub struct ActivitySession {
     pub events: VecDeque<RecordedTraceEvent>,
     runtime_cost: RuntimeCostReport,
     cost_accounting_error: Option<String>,
+    durable_run_item_seq: u64,
+    run_item_writer_fault: Option<kuzushi_core::run_lifecycle::RunItemWriterFault>,
+    run_item_delivery_failure: Option<kuzushi_core::run_lifecycle::RunItemDeliveryFault>,
+    run_item_derivative_tracking: bool,
+    run_item_derivative_seq: u64,
+    run_item_derivative_failure: Option<kuzushi_core::run_lifecycle::RunItemDeliveryFault>,
 }
 
 struct VisibleStepTask {
     task_id: String,
     rolled_up_child: bool,
+}
+
+fn derivative_range_fault(
+    applied_seq: u64,
+    durable_seq: u64,
+) -> kuzushi_core::run_lifecycle::RunItemDeliveryFault {
+    kuzushi_core::run_lifecycle::RunItemDeliveryFault {
+        stage: kuzushi_core::run_lifecycle::RunItemDeliveryFailureStage::DerivativeSubscriber,
+        applied_seq,
+        durable_seq,
+        detail: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+            "invalid derivative run-item range notification",
+        ),
+    }
 }
 
 /// Route-local UI state for the Activity surface. The paired `ActivitySession`
@@ -226,6 +249,7 @@ pub struct RunFocusReceipt {
     pub run_refs: Vec<String>,
     pub changed_findings: u64,
     pub changed_artifacts: Vec<String>,
+    pub result_summaries: Vec<kuzushi_core::run_artifacts::RunResultSummary>,
     pub interaction_count: usize,
     pub rerun_specification: Option<String>,
     pub actions: Vec<RunFocusResultAction>,
@@ -302,7 +326,11 @@ impl ActivitySession {
         let run_id = run_id.into();
         Self {
             run_id: run_id.clone(),
+            run_projection: kuzushi_core::run_lifecycle::RunProjection::default(),
+            run_presentation_hydration:
+                kuzushi_core::run_lifecycle::RunPresentationHydrationV1::default(),
             origin_phase: None,
+            phase_attempt_id: None,
             run_focus_origin: None,
             run_focus_backgrounded: false,
             run_focus_terminal_pending: false,
@@ -325,12 +353,26 @@ impl ActivitySession {
             events: VecDeque::with_capacity(ACTIVITY_FEED_RING_CAPACITY),
             runtime_cost: RuntimeCostReport::known(RuntimeCost::ZERO),
             cost_accounting_error: None,
+            durable_run_item_seq: 0,
+            run_item_writer_fault: None,
+            run_item_delivery_failure: None,
+            run_item_derivative_tracking: false,
+            run_item_derivative_seq: 0,
+            run_item_derivative_failure: None,
         }
     }
 
     /// Capture the workflow phase that launched this activity session.
     pub fn with_origin_phase(mut self, phase: WorkflowPhase) -> Self {
         self.origin_phase = Some(phase);
+        self
+    }
+
+    pub(crate) fn with_phase_attempt_id(
+        mut self,
+        attempt_id: kuzushi_core::run_lifecycle::RunAttemptId,
+    ) -> Self {
+        self.phase_attempt_id = Some(attempt_id);
         self
     }
 
@@ -350,9 +392,12 @@ impl ActivitySession {
 
     pub(crate) fn continue_run_focus_sequence_from(&mut self, prior: &ActivitySession) {
         self.origin_phase = prior.origin_phase.or(self.origin_phase);
+        self.phase_attempt_id = prior.phase_attempt_id.or(self.phase_attempt_id);
         self.run_focus_origin = prior.run_focus_origin;
         self.run_focus_backgrounded = prior.run_focus_backgrounded;
         self.run_focus_pending_viz = prior.run_focus_pending_viz;
+        self.run_presentation_hydration
+            .merge(prior.run_presentation_hydration.clone());
         self.sequence_run_refs = prior.sequence_run_refs.clone();
         if !self.sequence_run_refs.contains(&self.run_id) {
             self.sequence_run_refs.push(self.run_id.clone());
@@ -397,13 +442,13 @@ impl ActivitySession {
                 },
             ),
             origin_phase: self.origin_phase,
-            // A phase origin is presentation context, not evidence. The
-            // completion publisher assigns an attempt id only after it proves
-            // this sequence contains a terminal, phase-aligned descriptor run.
-            attempt_id: None,
+            attempt_id: self
+                .phase_attempt_id
+                .map(|attempt_id| attempt_id.to_string()),
             run_refs: self.sequence_run_refs.clone(),
             changed_findings: 0,
             changed_artifacts: Vec::new(),
+            result_summaries: Vec::new(),
             interaction_count: self.interaction_count,
             rerun_specification: self.rerun_specification.clone(),
             actions: policy.actions,
@@ -550,6 +595,184 @@ impl ActivitySession {
 
     pub fn apply_step(&mut self, step: RunTraceStep) {
         self.apply_step_with_cost(step);
+    }
+
+    pub fn apply_run_item(
+        &mut self,
+        item: kuzushi_core::run_lifecycle::RunItemEnvelopeV1,
+    ) -> anyhow::Result<()> {
+        self.durable_run_item_seq = self.durable_run_item_seq.max(item.seq);
+        let delta = self.run_projection.apply_committed(item)?;
+        self.apply_projection_delta(&delta);
+        Ok(())
+    }
+
+    pub(crate) fn observe_committed_range(
+        &mut self,
+        range: kuzushi_core::run_lifecycle::CommittedRange,
+    ) {
+        if range.first_seq == 0 || range.first_seq > range.through_seq {
+            self.run_item_delivery_failure =
+                Some(kuzushi_core::run_lifecycle::RunItemDeliveryFault {
+                    stage:
+                        kuzushi_core::run_lifecycle::RunItemDeliveryFailureStage::RangeSubscriber,
+                    applied_seq: self.run_projection.last_committed_seq,
+                    durable_seq: self.durable_run_item_seq,
+                    detail: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                        "invalid durable run-item range notification",
+                    ),
+                });
+            return;
+        }
+        self.run_item_derivative_tracking = true;
+        self.durable_run_item_seq = self.durable_run_item_seq.max(range.through_seq);
+    }
+
+    pub(crate) fn observe_derivative_range(
+        &mut self,
+        range: kuzushi_core::run_lifecycle::CommittedRange,
+    ) {
+        self.run_item_derivative_tracking = true;
+        if range.first_seq == 0 || range.first_seq > range.through_seq {
+            self.run_item_derivative_failure = Some(derivative_range_fault(
+                self.run_item_derivative_seq,
+                self.durable_run_item_seq,
+            ));
+            return;
+        }
+        self.run_item_derivative_seq = self.run_item_derivative_seq.max(range.through_seq);
+        self.run_item_derivative_failure = None;
+    }
+
+    pub(crate) fn record_run_item_writer_fault(
+        &mut self,
+        fault: kuzushi_core::run_lifecycle::RunItemWriterFault,
+    ) {
+        self.durable_run_item_seq = self.durable_run_item_seq.max(fault.last_durable_seq);
+        self.run_item_writer_fault = Some(fault);
+    }
+
+    pub(crate) fn record_run_item_delivery_fault(
+        &mut self,
+        fault: kuzushi_core::run_lifecycle::RunItemDeliveryFault,
+    ) {
+        self.durable_run_item_seq = self.durable_run_item_seq.max(fault.durable_seq);
+        if fault.is_derivative() {
+            self.run_item_derivative_tracking = true;
+            self.run_item_derivative_failure = Some(fault);
+        } else {
+            self.run_item_delivery_failure = Some(fault);
+        }
+    }
+
+    pub fn effective_run_lifecycle_health(
+        &self,
+    ) -> kuzushi_core::run_lifecycle::RunLifecycleHealth {
+        use kuzushi_core::run_lifecycle::RunLifecycleHealth;
+        let RunLifecycleHealth {
+            integrity,
+            progress,
+            ..
+        } = self.run_projection.lifecycle_health();
+        let applied_seq = self.run_projection.last_committed_seq;
+        let durable_seq = self.durable_run_item_seq.max(applied_seq);
+        RunLifecycleHealth {
+            integrity,
+            durability: self.effective_durability_health(durable_seq),
+            progress,
+            delivery: self.effective_delivery_health(applied_seq, durable_seq),
+            derivative_delivery: self.effective_derivative_health(durable_seq),
+        }
+    }
+
+    fn effective_durability_health(
+        &self,
+        durable_seq: u64,
+    ) -> kuzushi_core::run_lifecycle::RunDurabilityHealth {
+        use kuzushi_core::run_lifecycle::RunDurabilityHealth;
+        self.run_item_writer_fault.as_ref().map_or(
+            RunDurabilityHealth::Durable {
+                through_seq: durable_seq,
+            },
+            |fault| RunDurabilityHealth::Failed {
+                last_durable_seq: fault.last_durable_seq,
+                stage: fault.stage,
+                detail: fault.detail.clone(),
+                execution_may_have_occurred: fault.execution_may_have_occurred,
+            },
+        )
+    }
+
+    fn effective_delivery_health(
+        &self,
+        applied_seq: u64,
+        durable_seq: u64,
+    ) -> kuzushi_core::run_lifecycle::RunDeliveryHealth {
+        use kuzushi_core::run_lifecycle::RunDeliveryHealth;
+        if let Some(fault) = self.run_item_delivery_failure.as_ref() {
+            return RunDeliveryHealth::Failed {
+                applied_seq,
+                stage: fault.stage,
+                detail: fault.detail.clone(),
+            };
+        }
+        if applied_seq < durable_seq {
+            RunDeliveryHealth::CatchingUp {
+                applied_seq,
+                durable_seq,
+            }
+        } else {
+            RunDeliveryHealth::Current {
+                through_seq: applied_seq,
+            }
+        }
+    }
+
+    fn effective_derivative_health(
+        &self,
+        durable_seq: u64,
+    ) -> kuzushi_core::run_lifecycle::RunDerivativeDeliveryHealth {
+        use kuzushi_core::run_lifecycle::RunDerivativeDeliveryHealth;
+        if !self.run_item_derivative_tracking {
+            return RunDerivativeDeliveryHealth::NotObserved;
+        }
+        if let Some(fault) = self.run_item_derivative_failure.as_ref() {
+            return RunDerivativeDeliveryHealth::Failed {
+                applied_seq: fault.applied_seq,
+                durable_seq: durable_seq.max(fault.durable_seq),
+                stage: fault.stage,
+                detail: fault.detail.clone(),
+            };
+        }
+        if self.run_item_derivative_seq < durable_seq {
+            return RunDerivativeDeliveryHealth::CatchingUp {
+                applied_seq: self.run_item_derivative_seq,
+                durable_seq,
+            };
+        }
+        RunDerivativeDeliveryHealth::Current {
+            through_seq: self.run_item_derivative_seq,
+        }
+    }
+
+    fn apply_projection_delta(&mut self, delta: &kuzushi_core::run_lifecycle::ProjectionDelta) {
+        self.runtime_cost = self.run_projection.effective_cost();
+        self.cost_accounting_error = None;
+        if self.run_projection.tasks.is_empty() {
+            return;
+        }
+        if delta.plan_changed || !delta.task_ids.is_empty() {
+            self.task_order = typed_task_order(&self.run_projection);
+        }
+        for task_id in &delta.task_ids {
+            let Some(task) = self.run_projection.tasks.get(task_id) else {
+                continue;
+            };
+            let key = task_id.to_string();
+            let prior = self.tasks.get(&key);
+            let row = typed_task_row(&self.run_projection, key.clone(), task, prior);
+            self.tasks.insert(key, row);
+        }
     }
 
     pub(crate) fn apply_step_with_cost(&mut self, step: RunTraceStep) -> Option<RuntimeCostReport> {
@@ -732,13 +955,10 @@ impl ActivitySession {
         }
     }
 
-    /// Pre-populate `tasks` with `Queued` rows for every visible DAG node in
-    /// the registry, plus seed `subsystem_aggregate.total_count` from hidden
-    /// modules. Used at scan start so the DAG pane has rows from the first
-    /// frame instead of "(no DAG tasks yet)" while we wait for the first
-    /// trace event. Idempotent: existing rows aren't overwritten, so calling
-    /// this after some events have already arrived preserves their state.
-    pub fn seed_from_registry(&mut self, registry: &ModuleRegistry) {
+    /// Legacy adapter for pre-typed manual Activity sessions. New run-backed
+    /// sessions receive runtime task instances from `RunProjection` and must
+    /// never turn capability descriptors into pretend work items.
+    pub fn seed_from_registry_legacy(&mut self, registry: &ModuleRegistry) {
         let hidden_total = registry
             .all_modules()
             .map(|module| self.seed_registry_module(module))
@@ -1359,6 +1579,163 @@ fn format_latency(ms: u64) -> String {
     }
 }
 
+fn typed_task_order(projection: &kuzushi_core::run_lifecycle::RunProjection) -> Vec<String> {
+    let mut order = projection
+        .plan
+        .iter()
+        .flat_map(|plan| plan.task_ids.iter())
+        .filter(|task_id| projection.tasks.contains_key(task_id))
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    for task_id in &projection.task_order {
+        let task_id = task_id.to_string();
+        if !order.contains(&task_id) {
+            order.push(task_id);
+        }
+    }
+    order
+}
+
+fn typed_task_row(
+    projection: &kuzushi_core::run_lifecycle::RunProjection,
+    task_id: String,
+    task: &kuzushi_core::run_lifecycle::TaskProjection,
+    prior: Option<&DagTaskRow>,
+) -> DagTaskRow {
+    let title = task.title.as_str();
+    let mut row = DagTaskRow::queued(task_id.clone(), title.to_string(), Vec::new());
+    row.state = typed_task_state(task.status);
+    row.started_at = typed_started_at(task.status, prior);
+    row.completed_at = typed_completed_at(task.status, prior);
+    row.last_label = task.detail.as_ref().map_or_else(
+        || typed_status_label(task.status).to_string(),
+        ToString::to_string,
+    );
+    row.details = typed_call_details(projection, &task_id);
+    row.steps_done = row
+        .details
+        .iter()
+        .filter(|detail| detail.state != DagTaskDetailState::Active)
+        .count();
+    row.cost_usd = typed_task_cost(projection, &task_id);
+    row.severity = typed_task_severity(task.status);
+    row
+}
+
+fn typed_started_at(
+    status: kuzushi_core::run_lifecycle::RunItemStatus,
+    prior: Option<&DagTaskRow>,
+) -> Option<Instant> {
+    if status == kuzushi_core::run_lifecycle::RunItemStatus::Pending {
+        return prior.and_then(|row| row.started_at);
+    }
+    prior
+        .and_then(|row| row.started_at)
+        .or_else(|| Some(Instant::now()))
+}
+
+fn typed_completed_at(
+    status: kuzushi_core::run_lifecycle::RunItemStatus,
+    prior: Option<&DagTaskRow>,
+) -> Option<Instant> {
+    status.is_terminal().then(|| {
+        prior
+            .and_then(|row| row.completed_at)
+            .unwrap_or_else(Instant::now)
+    })
+}
+
+fn typed_call_details(
+    projection: &kuzushi_core::run_lifecycle::RunProjection,
+    task_id: &str,
+) -> Vec<DagTaskDetail> {
+    projection
+        .calls
+        .values()
+        .filter(|call| call.task_id.is_some_and(|id| id.to_string() == task_id))
+        .rev()
+        .take(ACTIVITY_TASK_DETAIL_CAPACITY)
+        .map(|call| DagTaskDetail {
+            label: call.label.to_string(),
+            kind: match call.kind {
+                kuzushi_core::run_lifecycle::CallKind::Tool => "tool",
+                kuzushi_core::run_lifecycle::CallKind::Model => "model",
+            }
+            .to_string(),
+            state: typed_detail_state(call.status),
+            meta: typed_cost_meta(call.cost),
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+fn typed_task_cost(projection: &kuzushi_core::run_lifecycle::RunProjection, task_id: &str) -> f64 {
+    projection
+        .calls
+        .values()
+        .filter(|call| call.task_id.is_some_and(|id| id.to_string() == task_id))
+        .filter_map(|call| call.cost.observed_usd_if_available())
+        .sum()
+}
+
+fn typed_cost_meta(cost: RuntimeCostReport) -> String {
+    if cost.is_unavailable() {
+        return "cost unavailable".to_string();
+    }
+    if cost.is_complete() {
+        return format!("${:.4}", cost.observed_usd());
+    }
+    format!(">=${:.4} incomplete", cost.observed_usd())
+}
+
+fn typed_task_state(status: kuzushi_core::run_lifecycle::RunItemStatus) -> DagTaskState {
+    use kuzushi_core::run_lifecycle::RunItemStatus::*;
+    match status {
+        Pending => DagTaskState::Queued,
+        Running => DagTaskState::Active,
+        Completed => DagTaskState::Done,
+        Partial => DagTaskState::Partial,
+        Skipped => DagTaskState::Skipped,
+        Failed | Interrupted => DagTaskState::Failing,
+        Canceled => DagTaskState::Canceled,
+    }
+}
+
+fn typed_detail_state(status: kuzushi_core::run_lifecycle::RunItemStatus) -> DagTaskDetailState {
+    use kuzushi_core::run_lifecycle::RunItemStatus::*;
+    match status {
+        Pending | Running => DagTaskDetailState::Active,
+        Completed | Skipped => DagTaskDetailState::Done,
+        Partial | Failed | Interrupted => DagTaskDetailState::Failing,
+        Canceled => DagTaskDetailState::Canceled,
+    }
+}
+
+fn typed_status_label(status: kuzushi_core::run_lifecycle::RunItemStatus) -> &'static str {
+    use kuzushi_core::run_lifecycle::RunItemStatus::*;
+    match status {
+        Pending => "pending",
+        Running => "running",
+        Completed => "completed",
+        Partial => "partial",
+        Skipped => "skipped",
+        Failed => "failed",
+        Canceled => "canceled",
+        Interrupted => "interrupted",
+    }
+}
+
+fn typed_task_severity(status: kuzushi_core::run_lifecycle::RunItemStatus) -> Option<String> {
+    use kuzushi_core::run_lifecycle::RunItemStatus::*;
+    match status {
+        Partial => Some("warn".to_string()),
+        Failed | Interrupted => Some("danger".to_string()),
+        _ => None,
+    }
+}
+
 fn trim_activity_row_details(row: &mut DagTaskRow) {
     let excess = row
         .details
@@ -1566,6 +1943,163 @@ mod tests {
     use kuzushi_core::RunTraceStep;
 
     #[test]
+    fn live_delivery_health_moves_from_catching_up_to_replay_equivalent() {
+        use kuzushi_core::run_lifecycle::{CommittedRange, RunDeliveryHealth};
+        let first = lifecycle_notice("run-catchup", 1, None, "first");
+        let second = lifecycle_notice("run-catchup", 2, Some(first.event_hash.clone()), "second");
+        let mut session = ActivitySession::new("run-catchup");
+        session.observe_committed_range(CommittedRange {
+            first_seq: 1,
+            through_seq: 2,
+        });
+
+        assert_eq!(
+            session.effective_run_lifecycle_health().delivery,
+            RunDeliveryHealth::CatchingUp {
+                applied_seq: 0,
+                durable_seq: 2,
+            }
+        );
+        session.apply_run_item(first.clone()).unwrap();
+        assert_eq!(
+            session.effective_run_lifecycle_health().delivery,
+            RunDeliveryHealth::CatchingUp {
+                applied_seq: 1,
+                durable_seq: 2,
+            }
+        );
+        session.apply_run_item(second.clone()).unwrap();
+        assert_eq!(
+            session.effective_run_lifecycle_health().delivery,
+            RunDeliveryHealth::Current { through_seq: 2 }
+        );
+        assert_eq!(
+            session.run_projection,
+            kuzushi_core::run_lifecycle::reduce_run_items([first, second])
+        );
+    }
+
+    #[test]
+    fn catchup_and_integrity_corruption_remain_distinct_health_axes() {
+        use kuzushi_core::run_lifecycle::{CommittedRange, ProjectionHealth, RunDeliveryHealth};
+        let mut session = ActivitySession::new("run-corrupt");
+        session.observe_committed_range(CommittedRange {
+            first_seq: 1,
+            through_seq: 1,
+        });
+        let gap = lifecycle_notice("run-corrupt", 2, None, "gap");
+
+        assert!(session.apply_run_item(gap).is_err());
+        let health = session.effective_run_lifecycle_health();
+        assert!(matches!(
+            health.integrity,
+            ProjectionHealth::Degraded { .. }
+        ));
+        assert_eq!(
+            health.delivery,
+            RunDeliveryHealth::CatchingUp {
+                applied_seq: 0,
+                durable_seq: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn structured_writer_fault_is_exposed_on_the_durability_axis() {
+        use kuzushi_core::run_lifecycle::{
+            PersistenceFailureStage, RunDurabilityHealth, RunItemWriterFault, SafeText,
+        };
+        let mut session = ActivitySession::new("run-fault");
+        session.record_run_item_writer_fault(RunItemWriterFault {
+            stage: PersistenceFailureStage::Sync,
+            last_durable_seq: 4,
+            detail: SafeText::operator_visible("disk sync failed"),
+            execution_may_have_occurred: true,
+        });
+
+        assert!(matches!(
+            session.effective_run_lifecycle_health().durability,
+            RunDurabilityHealth::Failed {
+                last_durable_seq: 4,
+                stage: PersistenceFailureStage::Sync,
+                execution_may_have_occurred: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn derivative_fault_never_forges_canonical_delivery_failure() {
+        use kuzushi_core::run_lifecycle::{
+            CommittedRange, RunDeliveryHealth, RunDerivativeDeliveryHealth,
+            RunItemDeliveryFailureStage, RunItemDeliveryFault, SafeText,
+        };
+        let item = lifecycle_notice("run-derivative", 1, None, "committed");
+        let mut session = ActivitySession::new("run-derivative");
+        session.observe_committed_range(CommittedRange {
+            first_seq: 1,
+            through_seq: 1,
+        });
+        session.apply_run_item(item).unwrap();
+        session.record_run_item_delivery_fault(RunItemDeliveryFault {
+            stage: RunItemDeliveryFailureStage::CompatibilityProjection,
+            applied_seq: 0,
+            durable_seq: 1,
+            detail: SafeText::operator_visible("compatibility write failed"),
+        });
+
+        let failed = session.effective_run_lifecycle_health();
+        assert_eq!(
+            failed.delivery,
+            RunDeliveryHealth::Current { through_seq: 1 }
+        );
+        assert!(matches!(
+            failed.derivative_delivery,
+            RunDerivativeDeliveryHealth::Failed { applied_seq: 0, .. }
+        ));
+        session.observe_derivative_range(CommittedRange {
+            first_seq: 1,
+            through_seq: 1,
+        });
+        assert_eq!(
+            session.effective_run_lifecycle_health().derivative_delivery,
+            RunDerivativeDeliveryHealth::Current { through_seq: 1 }
+        );
+    }
+
+    fn lifecycle_notice(
+        run_id: &str,
+        seq: u64,
+        previous_hash: Option<String>,
+        message: &str,
+    ) -> kuzushi_core::run_lifecycle::RunItemEnvelopeV1 {
+        use kuzushi_core::run_lifecycle::{
+            DiagnosticLevel, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource, RunItemV1,
+            SafeText,
+        };
+        RunItemEnvelopeV1::new(
+            seq,
+            RunId::parse(run_id).unwrap(),
+            RunItemId::new(),
+            RunItemSource::Persistence,
+            RunItemV1::DiagnosticNotice {
+                level: DiagnosticLevel::Info,
+                message: SafeText::operator_visible(message),
+            },
+            previous_hash,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn phase_origin_does_not_mint_an_effectful_attempt_identity() {
+        let session = ActivitySession::for_phase("advisory", WorkflowPhase::Scan);
+
+        assert_eq!(session.origin_phase, Some(WorkflowPhase::Scan));
+        assert!(session.phase_attempt_id.is_none());
+    }
+
+    #[test]
     fn continued_run_focus_sequence_accumulates_cost_and_run_count() {
         let mut first = ActivitySession::new("run-1");
         first.apply_step(
@@ -1652,7 +2186,7 @@ mod tests {
     #[test]
     fn step_with_tool_name_as_module_id_updates_seeded_row() {
         let mut session = ActivitySession::new("r-1");
-        // Seed a node keyed by its tool name (as `seed_from_registry` does).
+        // Seed a node keyed by its tool name (as the legacy adapter does).
         session.tasks.insert(
             "sast:scan".to_string(),
             DagTaskRow::queued("sast:scan".to_string(), "sast".to_string(), Vec::new()),

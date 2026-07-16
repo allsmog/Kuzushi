@@ -26,6 +26,8 @@ pub(crate) struct AliasReferenceRow {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ReplayModel {
     pub(crate) run_id: String,
+    pub(crate) presentation: Option<kuzushi_core::run_lifecycle::RunPresentationV1>,
+    pub(crate) projection_error: Option<String>,
     pub(crate) artifacts: Vec<RunArtifactDetail>,
     pub(crate) metadata_missing: bool,
     pub(crate) recon: Option<ReconSnapshot>,
@@ -61,19 +63,50 @@ pub(crate) struct TraceStep {
 }
 
 pub(crate) fn replay_model(app: &ShellApp, run_id: &str) -> ReplayModel {
+    let (projection, projection_error) = replay_projection(app, run_id);
+    let typed = projection.as_ref().is_some_and(|read| {
+        read.source == kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1
+    });
     let metadata = run_metadata_artifact_detail(app, run_id);
     let result = run_artifact_detail(app, run_id, "result", RUN_RESULT_FILE);
     let triage = run_artifact_detail(app, run_id, "triage", RUN_TRIAGE_FILE);
     let metadata_missing = metadata.artifact_state() == RunArtifactState::Missing;
     ReplayModel {
         run_id: run_id.to_string(),
+        presentation: projection
+            .as_ref()
+            .map(kuzushi_core::run_lifecycle::present_run),
+        projection_error,
         metadata_missing,
         artifacts: vec![
             metadata.into_display(),
             result.into_display(),
             triage.into_display(),
         ],
-        recon: replay_recon_snapshot(app, run_id),
+        recon: (!typed)
+            .then(|| replay_recon_snapshot(app, run_id))
+            .flatten(),
+    }
+}
+
+fn replay_projection(
+    app: &ShellApp,
+    run_id: &str,
+) -> (
+    Option<kuzushi_core::run_lifecycle::RunProjectionRead>,
+    Option<String>,
+) {
+    let Some(target) = app.target() else {
+        return (None, Some("no active target".to_string()));
+    };
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_run_projection(target, run_id)
+    {
+        ViewDataState::Ready(Ok(read)) => (Some(read), None),
+        ViewDataState::Ready(Err(error)) => (None, Some(error)),
+        ViewDataState::NotRequested | ViewDataState::Loading => (None, None),
     }
 }
 

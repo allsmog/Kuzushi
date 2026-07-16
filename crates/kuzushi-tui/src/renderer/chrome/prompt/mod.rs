@@ -73,7 +73,7 @@ fn navigation_prompt_line(app: &ShellApp) -> Line<'static> {
             prompt_prefix_style(Some(page)),
         ),
         Span::styled(
-            crate::ui_view_models::navigation_prompt_text(app),
+            crate::ui_view_models::navigation_prompt_label(app),
             theme::disabled(),
         ),
     ])

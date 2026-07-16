@@ -1,11 +1,13 @@
 use anyhow::{Context, Result};
-use kuzushi_core::{AgentLoopStep, AgentToolLoopRequest, LoopHistoryEntry, ToolCall};
+use kuzushi_core::{
+    AgentLoopStep, AgentToolLoopRequest, LoopHistoryEntry, ModelTokenUsage, Observed, ToolCall,
+};
 
 use super::bridge_payloads::{
     BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
 };
 use super::bridge_process::{
-    public_bridge_error, run_next_step_bridge, run_next_step_preflight_bridge,
+    public_bridge_failure, run_next_step_bridge, run_next_step_preflight_bridge,
 };
 use super::runtime_config::LangGraphRuntime;
 use crate::messages::build_messages_for_anthropic;
@@ -15,6 +17,14 @@ pub(crate) fn next_step_blocking(
     request: &AgentToolLoopRequest,
     history: &[LoopHistoryEntry],
 ) -> Result<AgentLoopStep> {
+    next_step_observed_blocking(runtime, request, history).map(Observed::into_value)
+}
+
+pub(crate) fn next_step_observed_blocking(
+    runtime: &LangGraphRuntime,
+    request: &AgentToolLoopRequest,
+    history: &[LoopHistoryEntry],
+) -> Result<Observed<AgentLoopStep>> {
     validate_runtime_model(runtime, &request.model)?;
     let bridge_request = next_step_bridge_request(runtime, request, history);
     // Same transient-retry policy as query_blocking: without it, one 429 or
@@ -112,15 +122,16 @@ fn next_step_bridge_request(
     }
 }
 
-fn ensure_next_step_response_ok(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {
+fn ensure_next_step_response_ok(
+    response: NextStepBridgeResponse,
+) -> Result<Observed<AgentLoopStep>> {
     if !response.ok {
-        let message = response
-            .error
-            .unwrap_or_else(|| "unknown error".to_string());
-        anyhow::bail!(
-            "LangGraph next-step bridge failed: {}",
-            public_bridge_error(&message)
+        let message = public_bridge_failure(
+            response.error_class.as_deref(),
+            response.status,
+            response.error.as_deref(),
         );
+        anyhow::bail!("LangGraph next-step bridge failed: {message}");
     }
     step_from_bridge_response(response)
 }
@@ -129,16 +140,17 @@ fn ensure_next_step_preflight_ok(response: NextStepBridgeResponse) -> Result<()>
     if response.ok {
         return Ok(());
     }
-    let message = response
-        .error
-        .unwrap_or_else(|| "unknown error".to_string());
-    anyhow::bail!(
-        "LangGraph next-step preflight failed: {}",
-        public_bridge_error(&message)
-    )
+    let message = public_bridge_failure(
+        response.error_class.as_deref(),
+        response.status,
+        response.error.as_deref(),
+    );
+    anyhow::bail!("LangGraph next-step preflight failed: {message}")
 }
 
-fn step_from_bridge_response(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {
+fn step_from_bridge_response(response: NextStepBridgeResponse) -> Result<Observed<AgentLoopStep>> {
+    let usage =
+        ModelTokenUsage::from_reported_options(response.input_tokens, response.output_tokens);
     let step = match response.step.as_deref() {
         Some("tool_call") => tool_call_step(response),
         Some("final") => Ok(AgentLoopStep::Final {
@@ -154,6 +166,7 @@ fn step_from_bridge_response(response: NextStepBridgeResponse) -> Result<AgentLo
         ),
     }?;
     step.validate_cost()
+        .map(|value| Observed::new(value, usage))
 }
 
 fn tool_call_step(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {
@@ -171,4 +184,36 @@ fn tool_call_step(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {
         // so the driver settles spend incrementally instead of only at Final.
         cost_usd,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn final_response(input: Option<u64>, output: Option<u64>) -> NextStepBridgeResponse {
+        serde_json::from_value(serde_json::json!({
+            "ok": true,
+            "step": "final",
+            "text": "done",
+            "input_tokens": input,
+            "output_tokens": output
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn reported_zero_usage_is_not_treated_as_unavailable() {
+        let observed = step_from_bridge_response(final_response(Some(0), Some(0))).unwrap();
+
+        assert_eq!(observed.usage.observed_counts(), (Some(0), Some(0)));
+        assert!(observed.usage.is_complete());
+    }
+
+    #[test]
+    fn missing_usage_stays_unavailable() {
+        let observed = step_from_bridge_response(final_response(None, None)).unwrap();
+
+        assert_eq!(observed.usage.observed_counts(), (None, None));
+        assert!(observed.usage.is_unavailable());
+    }
 }

@@ -5,7 +5,7 @@
 
 mod model;
 mod process_identity;
-mod redaction;
+pub(crate) mod redaction;
 mod store;
 mod time;
 mod writer;

@@ -22,11 +22,7 @@ pub struct PhaseTargetSnapshot {
 impl PhaseTargetSnapshot {
     pub fn capture(target: impl AsRef<Path>) -> Self {
         let target = target.as_ref();
-        let identity = target
-            .canonicalize()
-            .unwrap_or_else(|_| target.to_path_buf())
-            .display()
-            .to_string();
+        let identity = canonical_target_identity(target);
         let git = crate::workspace::target_git_metadata(target);
         Self {
             target: identity,
@@ -34,6 +30,25 @@ impl PhaseTargetSnapshot {
             dirty: git.is_some_and(|metadata| metadata.dirty),
         }
     }
+
+    pub(crate) fn equivalent_to(&self, other: &Self) -> bool {
+        target_identities_match(&self.target, &other.target)
+            && self.revision == other.revision
+            && self.dirty == other.dirty
+    }
+}
+
+pub(crate) fn canonical_target_identity(target: impl AsRef<Path>) -> String {
+    let target = target.as_ref();
+    target
+        .canonicalize()
+        .unwrap_or_else(|_| target.to_path_buf())
+        .display()
+        .to_string()
+}
+
+pub(crate) fn target_identities_match(left: &str, right: &str) -> bool {
+    canonical_target_identity(left) == canonical_target_identity(right)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,10 +86,6 @@ pub enum PhaseResultAction {
     Discard,
 }
 
-/// Reference-only metadata for the Run Focus receipt associated with a phase
-/// attempt. Canonical run artifacts remain the payload truth; this record only
-/// preserves the result-review facts needed to reconstruct the card after a
-/// restart.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PhaseAttemptReceipt {
@@ -99,10 +110,7 @@ impl PhaseAttemptReceipt {
         truncate_utf8(&mut self.cost, MAX_RECEIPT_COST_BYTES);
         bound_artifact_preview(&mut self.changed_artifacts);
         bound_optional_text(&mut self.rerun_specification, MAX_RECEIPT_RERUN_BYTES);
-        bound_optional_text(
-            &mut self.recommended_next,
-            MAX_RECEIPT_RECOMMENDATION_BYTES,
-        );
+        bound_optional_text(&mut self.recommended_next, MAX_RECEIPT_RECOMMENDATION_BYTES);
         deduplicate_actions(&mut self.actions);
     }
 }
@@ -155,6 +163,11 @@ impl PhaseAttemptCompleted {
     ) -> Self {
         self.parent_attempt_id = Some(parent_attempt_id.into());
         self.derivation = derivation;
+        self
+    }
+
+    pub fn with_attempt_id(mut self, attempt_id: impl Into<String>) -> Self {
+        self.attempt_id = attempt_id.into();
         self
     }
 

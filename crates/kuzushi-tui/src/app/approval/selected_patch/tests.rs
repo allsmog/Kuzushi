@@ -81,16 +81,13 @@ fn durable_selection_rejects_non_sound_patch_results() {
 
 #[test]
 fn durable_selection_rejects_incomplete_detector_provenance() {
-    let mut fixture = patch_fixture(true, PatchStatus::Sound);
-    fixture
-        .patch
-        .provenance
-        .as_mut()
-        .expect("provenance")
-        .detector_input_digest = None;
-    let store = FindingStore::open(fixture.workspace.findings_db_path()).unwrap();
-    store.insert_patch_result(&fixture.patch).unwrap();
-    persist_patch_run(&fixture.workspace, &fixture.patch);
+    let fixture = patch_fixture_with(true, PatchStatus::Sound, |patch| {
+        patch
+            .provenance
+            .as_mut()
+            .expect("provenance")
+            .detector_input_digest = None;
+    });
 
     let error = load_durable_fix_selection(fixture.workspace.root())
         .unwrap_err()
@@ -103,16 +100,9 @@ fn durable_selection_rejects_incomplete_detector_provenance() {
 
 #[test]
 fn incomplete_provenance_cannot_cross_the_select_action() {
-    let mut fixture = patch_fixture(false, PatchStatus::Sound);
-    fixture
-        .patch
-        .provenance
-        .as_mut()
-        .expect("provenance")
-        .detector_tool = None;
-    let store = FindingStore::open(fixture.workspace.findings_db_path()).unwrap();
-    store.insert_patch_result(&fixture.patch).unwrap();
-    persist_patch_run(&fixture.workspace, &fixture.patch);
+    let fixture = patch_fixture_with(false, PatchStatus::Sound, |patch| {
+        patch.provenance.as_mut().expect("provenance").detector_tool = None;
+    });
     let mut app = ShellApp::new(V2Config::default(), Some(&fixture.workspace));
     app.refresh_phase_attempt_projection();
     app.set_shell_view(ShellView::Workbench);
@@ -168,11 +158,21 @@ fn assert_demo_file_unchanged(fixture: &PatchFixture) {
 }
 
 fn patch_fixture(selected: bool, status: PatchStatus) -> PatchFixture {
+    patch_fixture_with(selected, status, |_| {})
+}
+
+fn patch_fixture_with(
+    selected: bool,
+    status: PatchStatus,
+    mutate: impl FnOnce(&mut PatchResult),
+) -> PatchFixture {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join("demo.txt"), "before\n").unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
     let (store, finding) = persisted_finding(&workspace);
-    let patch = persisted_patch(&workspace, &store, &finding, status);
+    let mut patch = persisted_patch(&workspace, &store, &finding, status);
+    mutate(&mut patch);
+    store.insert_patch_result(&patch).unwrap();
     let completed = persisted_fix_attempt(&workspace, &patch, selected);
     PatchFixture {
         _temp: temp,
@@ -245,13 +245,12 @@ fn persisted_fix_attempt(
     selected: bool,
 ) -> PhaseAttemptCompleted {
     persist_patch_run(workspace, patch);
-    let completed = PhaseAttemptCompleted::new(
+    let completed = crate::test_support::append_typed_attempt(
+        workspace.root(),
         WorkflowPhase::Fix,
-        vec!["patch-tool-run".to_string()],
-        PhaseTargetSnapshot::capture(workspace.root()),
+        "patch-tool-run",
         PhaseAttemptOutcome::Completed,
     );
-    append_phase_attempt_completed(workspace.root(), completed.clone()).unwrap();
     if selected {
         select_attempt(workspace, &completed);
     }
@@ -259,14 +258,12 @@ fn persisted_fix_attempt(
 }
 
 fn persist_patch_run(workspace: &WorkspaceTarget, patch: &PatchResult) {
-    let record = kuzushi_core::run_artifacts::ToolRunRecord::new(
+    crate::test_support::record_indexed_run(
         workspace.root(),
         "patch-tool-run",
-        "tool",
         "patch:finding",
+        patch_output(patch),
     );
-    kuzushi_core::run_artifacts::record_tool_run_started(record, &serde_json::json!({}));
-    kuzushi_core::run_artifacts::record_tool_run_complete(record, &patch_output(patch));
 }
 
 fn select_attempt(workspace: &WorkspaceTarget, completed: &PhaseAttemptCompleted) {

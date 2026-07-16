@@ -149,22 +149,9 @@ impl ShellApp {
         input: Option<String>,
         workspace: &WorkspaceTarget,
     ) -> Option<PreparedToolInput> {
-        let input = self.parse_run_input_for_tool(tool_name, input)?;
+        let input = self.parse_run_input_for_tool(tool_name, input, workspace)?;
         let input = force_shell_discovery_only_sast_input(tool_name, input);
-        let ctx = ToolExecutionContext {
-            config: self.config(),
-            workspace: Some(workspace),
-            findings_store: None,
-            trace: None,
-            cancellation: None,
-            authorization: Default::default(),
-        };
-        match self.registry().prepare_dispatch_input(
-            tool_name,
-            input,
-            &ctx,
-            Some(self.option_store()),
-        ) {
+        match self.prepare_background_tool_input(tool_name, input, workspace) {
             Ok(input) => Some(input),
             Err(error) => {
                 self.log(
@@ -180,24 +167,31 @@ impl ShellApp {
         &mut self,
         tool_name: &str,
         input: Option<String>,
+        workspace: &WorkspaceTarget,
     ) -> Option<serde_json::Value> {
         match input {
-            Some(raw) if !raw.trim().is_empty() => self.parse_run_input(Some(raw)),
+            Some(raw) if !raw.trim().is_empty() => self.parse_run_input(tool_name, workspace, &raw),
             _ => Some(self.default_run_input_for_tool(tool_name)),
         }
     }
 
-    fn parse_run_input(&mut self, input: Option<String>) -> Option<serde_json::Value> {
-        let Some(raw) = input.filter(|raw| !raw.trim().is_empty()) else {
-            return Some(serde_json::json!({}));
-        };
-        match serde_json::from_str(&raw) {
+    fn parse_run_input(
+        &mut self,
+        tool_name: &str,
+        workspace: &WorkspaceTarget,
+        raw: &str,
+    ) -> Option<serde_json::Value> {
+        match serde_json::from_str(raw) {
             Ok(input) => Some(input),
             Err(error) => {
-                self.log(
-                    "error",
-                    format!("run input must be JSON: {error}. Next: run <tool> {{}}"),
+                let error = anyhow::Error::new(error).context("run input must be JSON");
+                let error = self.background_tool_preparation_error(
+                    workspace,
+                    tool_name,
+                    &serde_json::json!({"inputState": "invalid_json"}),
+                    error,
                 );
+                self.log("error", format!("{error}. Next: run <tool> {{}}"));
                 None
             }
         }

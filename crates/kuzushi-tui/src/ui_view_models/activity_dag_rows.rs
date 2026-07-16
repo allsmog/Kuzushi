@@ -211,7 +211,7 @@ fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant, selected: bool) ->
     let marker = if selected { "▌" } else { " " };
     let right_reserve: usize = 9;
     let task_pad = width.saturating_sub(right_reserve + 3).max(8);
-    let task_label = fit(&row.task_id, task_pad);
+    let task_label = fit(task_display_label(row), task_pad);
     let elapsed = elapsed_label(row, now);
     let body = format!(
         "{marker} {symbol} {task:<task_pad$} {elapsed:>8}",
@@ -222,6 +222,13 @@ fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant, selected: bool) ->
         elapsed = elapsed,
     );
     fit(&body, width)
+}
+
+fn task_display_label(row: &DagTaskRow) -> &str {
+    if kuzushi_core::run_lifecycle::RunTaskId::parse(&row.task_id).is_ok() {
+        return &row.module_id;
+    }
+    &row.task_id
 }
 
 /// A task's row, plus — under a running task — a sub-line showing what it's
@@ -413,6 +420,17 @@ mod tests {
         assert!(rows[1].text.contains("expanded"));
         assert_eq!(rows[1].tone, ActivityDagRowTone::Muted);
         assert!(rows[2].text.contains("legend:"));
+    }
+
+    #[test]
+    fn typed_task_rows_render_operator_label_instead_of_internal_uuid() {
+        let task_id = "018f47a6-b893-7d8b-8018-7d63adf3c972";
+        let row = DagTaskRow::queued(task_id.to_string(), "context:build".to_string(), Vec::new());
+
+        let text = dag_row_text(&row, 60, Instant::now(), false);
+
+        assert!(text.contains("context:build"));
+        assert!(!text.contains(task_id));
     }
 
     #[test]

@@ -3,8 +3,31 @@ use super::*;
 use crate::module_result::tool_result_status;
 use crate::modules::autonomy::WorkflowPhase;
 
+mod lifecycle_observation;
 mod prompt_input_limits;
+use lifecycle_observation::DispatchLifecycle;
+pub use lifecycle_observation::{ApplicationToolCall, PendingToolCallCompletion, ToolCallIdentity};
 use prompt_input_limits::validate_tool_prompt_inputs;
+
+#[must_use = "observed dispatches must settle their pending tool call"]
+pub struct ObservedDispatchOutcome {
+    pub execution: Result<Value>,
+    pub completion: PendingToolCallCompletion,
+}
+
+impl ObservedDispatchOutcome {
+    pub fn settle_without_result_artifact(self) -> Result<Value> {
+        let settlement = self.completion.finish(None);
+        match (self.execution, settlement) {
+            (Ok(output), Ok(_)) => Ok(output),
+            (Ok(output), Err(error)) => Ok(output_after_settlement_failure(output, &error)),
+            (Err(execution), Ok(_)) => Err(execution),
+            (Err(execution), Err(settlement)) => Err(execution.context(format!(
+                "semantic lifecycle settlement also failed after execution: {settlement}; do not retry automatically"
+            ))),
+        }
+    }
+}
 
 /// Opaque proof that canonical option, prompt, and workspace validation ran
 /// for one specific operation and registry snapshot.
@@ -226,38 +249,87 @@ impl ModuleRegistry {
         ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
     ) -> Result<Value> {
+        self.dispatch_prepared_input_with_lifecycle(prepared, ctx, runtime, false)?
+            .settle_without_result_artifact()
+    }
+
+    pub fn dispatch_prepared_input_observed_with_runtime(
+        &self,
+        prepared: PreparedToolInput,
+        ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
+    ) -> Result<ObservedDispatchOutcome> {
+        self.dispatch_prepared_input_with_lifecycle(prepared, ctx, runtime, true)
+    }
+
+    fn dispatch_prepared_input_with_lifecycle(
+        &self,
+        prepared: PreparedToolInput,
+        ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
+        require_observation: bool,
+    ) -> Result<ObservedDispatchOutcome> {
         let name = prepared.tool_name.as_str();
         let descriptor = self
             .resolve_tool(name)
             .with_context(|| format!("{name:?} has no dispatch descriptor"))?;
         self.verify_prepared_dispatch_binding(&prepared, descriptor, ctx)?;
         verify_repository_execution_input(name, &prepared.value, ctx)?;
+        let lifecycle = DispatchLifecycle::requested(
+            ctx,
+            name,
+            prepared.binding.operation_fingerprint,
+            &prepared.value,
+            runtime.is_some(),
+            require_observation,
+        )?;
         let authorization = prepared.authorization;
         let operation_binding = prepared.binding.operation_fingerprint;
         let mut input = prepared.value;
         let authorized_ctx = tool_context_with_authorization(ctx, authorization);
-        authorized_ctx.ensure_active()?;
-        enforce_descriptor_context(descriptor, &authorized_ctx, &operation_binding)?;
-        normalize_workspace_path_options(
+        if let Err(error) = authorize_prepared_execution(
             self,
+            descriptor,
             name,
             &mut input,
             &authorized_ctx,
-            true,
-            Some(&operation_binding),
-        )?;
-        enforce_autonomy_posture(descriptor, &input, authorized_ctx.config.autonomy)?;
-        enforce_descriptor_approval(descriptor, &authorized_ctx, &operation_binding)?;
-        self.enforce_runtime_requirement(name, &input, runtime)?;
-        enforce_descriptor_finding_store(descriptor, &authorized_ctx)?;
-        let result = self.invoke_prepared_executor(name, &input, &authorized_ctx, runtime);
+            runtime,
+            &operation_binding,
+        ) {
+            return lifecycle.rejected(error);
+        }
+        self.execute_authorized_prepared_observed(name, input, &authorized_ctx, runtime, lifecycle)
+    }
+
+    fn execute_authorized_prepared_observed(
+        &self,
+        name: &str,
+        input: Value,
+        authorized_ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
+        lifecycle: DispatchLifecycle,
+    ) -> Result<ObservedDispatchOutcome> {
+        lifecycle.started(&input, &authorized_ctx)?;
+        let execution_trace = lifecycle.execution_trace();
+        let execution_ctx;
+        let execution_ctx = if let Some(trace) = execution_trace.as_ref() {
+            execution_ctx = scoped_tool_context(authorized_ctx, trace);
+            &execution_ctx
+        } else {
+            authorized_ctx
+        };
+        let result = self.invoke_prepared_executor(name, &input, execution_ctx, runtime);
+        let completion = lifecycle.pending_completion(&result);
         if result
             .as_ref()
             .is_ok_and(|output| tool_result_status(output).is_completed())
         {
-            self.record_recent_tool_use(name, &authorized_ctx);
+            self.record_recent_tool_use(name, authorized_ctx);
         }
-        result
+        Ok(ObservedDispatchOutcome {
+            execution: result,
+            completion,
+        })
     }
 
     fn prepared_dispatch_binding(
@@ -372,6 +444,53 @@ impl ModuleRegistry {
             "{name} requires an agent runtime; configure a model/runtime before running it"
         )
     }
+}
+
+fn output_after_settlement_failure(mut output: Value, error: &anyhow::Error) -> Value {
+    let message = format!(
+        "semantic lifecycle settlement failed after execution: {error}; side effects may have occurred; do not retry automatically"
+    );
+    let Some(object) = output.as_object_mut() else {
+        return serde_json::json!({
+            "ok": false,
+            "status": "partial",
+            "summary": "execution finished but lifecycle settlement failed",
+            "output": output,
+            "warnings": [],
+            "errors": [message],
+            "artifacts": [],
+        });
+    };
+    object.insert("ok".to_string(), Value::Bool(false));
+    object.insert("status".to_string(), Value::String("partial".to_string()));
+    object.entry("summary".to_string()).or_insert_with(|| {
+        Value::String("execution finished but lifecycle settlement failed".to_string())
+    });
+    let errors = object
+        .entry("errors".to_string())
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if let Some(errors) = errors.as_array_mut() {
+        errors.push(Value::String(message));
+    }
+    output
+}
+
+fn authorize_prepared_execution(
+    registry: &ModuleRegistry,
+    descriptor: &ToolDescriptor,
+    name: &str,
+    input: &mut Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    operation_binding: &[u8; 32],
+) -> Result<()> {
+    ctx.ensure_active()?;
+    enforce_descriptor_context(descriptor, ctx, operation_binding)?;
+    normalize_workspace_path_options(registry, name, input, ctx, true, Some(operation_binding))?;
+    enforce_autonomy_posture(descriptor, input, ctx.config.autonomy)?;
+    enforce_descriptor_approval(descriptor, ctx, operation_binding)?;
+    registry.enforce_runtime_requirement(name, input, runtime)?;
+    enforce_descriptor_finding_store(descriptor, ctx)
 }
 
 fn bind_repository_execution_input(

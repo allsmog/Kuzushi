@@ -13,8 +13,13 @@ impl ShellApp {
     }
 
     fn reduce_command_without_effect_execution(&mut self, command: ShellCommand) -> CommandUpdate {
+        let rejected = matches!(command, ShellCommand::Unknown(_));
         if let Some(effects) = self.reduce_command_effects(&command) {
-            return CommandUpdate::handled(effects);
+            return if rejected {
+                CommandUpdate::rejected(effects)
+            } else {
+                CommandUpdate::handled(effects)
+            };
         }
         CommandUpdate::unhandled()
     }
@@ -52,7 +57,9 @@ impl ShellApp {
         }
         let mut command_update = self.reduce_command_message(parsed);
         effects.append(&mut command_update.effects);
-        CommandUpdate::handled(effects)
+        command_update.effects = effects;
+        command_update.handled = true;
+        command_update
     }
 
     fn phase_intent_or_parsed_command(&self, raw: &str) -> ShellCommand {
@@ -185,6 +192,7 @@ fn is_steerable_submission(command: &ShellCommand) -> bool {
 
 pub(crate) struct CommandUpdate {
     pub(crate) handled: bool,
+    pub(crate) rejected: bool,
     pub(crate) effects: Vec<ShellEffect>,
 }
 
@@ -192,6 +200,15 @@ impl CommandUpdate {
     fn handled(effects: Vec<ShellEffect>) -> Self {
         Self {
             handled: true,
+            rejected: false,
+            effects,
+        }
+    }
+
+    fn rejected(effects: Vec<ShellEffect>) -> Self {
+        Self {
+            handled: true,
+            rejected: true,
             effects,
         }
     }
@@ -199,6 +216,7 @@ impl CommandUpdate {
     fn unhandled() -> Self {
         Self {
             handled: false,
+            rejected: false,
             effects: Vec::new(),
         }
     }

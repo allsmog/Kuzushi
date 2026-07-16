@@ -129,6 +129,59 @@ fn jobhub_preserves_send_order_for_current_generation() {
 }
 
 #[test]
+fn job_sink_publishes_only_structured_run_item_writer_faults() {
+    let mut hub = JobHub::default();
+    let ticket = hub.start(JobKind::Run, "scan");
+    let fault = kuzushi_core::run_lifecycle::RunItemWriterFault {
+        stage: kuzushi_core::run_lifecycle::PersistenceFailureStage::Sync,
+        last_durable_seq: 3,
+        detail: kuzushi_core::run_lifecycle::SafeText::operator_visible("sync failed"),
+        execution_may_have_occurred: false,
+    };
+    let error = anyhow::Error::new(fault.clone()).context("terminal settlement failed");
+
+    assert!(ticket
+        .sink()
+        .publish_run_item_writer_error("run-3", &error, true));
+    assert!(!ticket.sink().publish_run_item_writer_error(
+        "run-3",
+        &anyhow::anyhow!("unrelated"),
+        false
+    ));
+    ticket.complete();
+
+    assert!(matches!(
+        hub.drain(2).as_slice(),
+        [ShellEvent::RunItemsFault { run_id, fault: delivered }]
+            if run_id == "run-3"
+                && delivered.execution_may_have_occurred
+                && delivered.detail.as_str().contains("do not retry automatically")
+    ));
+}
+
+#[test]
+fn job_sink_routes_structured_delivery_faults_as_reliable_lifecycle_events() {
+    let mut hub = JobHub::default();
+    let ticket = hub.start(JobKind::Run, "scan");
+    let (_, _, _, report_fault) = ticket.sink().run_lifecycle_subscribers("run-delivery");
+    report_fault(kuzushi_core::run_lifecycle::RunItemDeliveryFault {
+        stage: kuzushi_core::run_lifecycle::RunItemDeliveryFailureStage::ReadStream,
+        applied_seq: 2,
+        durable_seq: 4,
+        detail: kuzushi_core::run_lifecycle::SafeText::operator_visible("read failed"),
+    });
+    ticket.complete();
+
+    assert!(matches!(
+        hub.drain(1).as_slice(),
+        [ShellEvent::RunItemsDeliveryFault { run_id, fault }]
+            if run_id == "run-delivery"
+                && fault.applied_seq == 2
+                && fault.durable_seq == 4
+    ));
+}
+
+#[test]
 fn jobhub_drops_non_terminal_events_when_channel_is_full() {
     let mut hub = JobHub::default();
     let ticket = hub.start(JobKind::Run, "scan");

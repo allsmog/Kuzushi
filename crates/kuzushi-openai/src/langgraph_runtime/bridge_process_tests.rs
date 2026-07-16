@@ -3,8 +3,8 @@ use super::bridge_payloads::{
 };
 use super::bridge_process::{
     bridge_near_executable, configure_bridge_process_group, default_langgraph_bridge_command,
-    mcp_binary_env_defaults, public_bridge_error, read_bounded_pipe, run_next_step_bridge,
-    wait_with_output_deadline_limits,
+    mcp_binary_env_defaults, public_bridge_error, public_bridge_failure, read_bounded_pipe,
+    run_next_step_bridge, wait_with_output_deadline_limits,
 };
 use kuzushi_core::AgentToolPolicy;
 use serde_json::json;
@@ -149,21 +149,20 @@ fn public_bridge_error_rewrites_internal_provider_tokens() {
 
 #[test]
 fn bridge_stderr_failure_rewrites_internal_provider_tokens() {
+    let sentinel = "raw-provider-stderr-sentinel";
     let request = test_next_step_request();
     let command = vec![
         "sh".to_string(),
         "-c".to_string(),
-        "printf '%s' 'no credentials for openai-codex; run auth login openai-codex' >&2; exit 1"
-            .to_string(),
+        format!("printf '%s' '{sentinel}' >&2; exit 1"),
     ];
 
     let error = run_next_step_bridge(&command, &request, None)
         .unwrap_err()
         .to_string();
 
-    assert!(error.contains("OpenAI OAuth"));
-    assert!(error.contains("auth login openai"));
-    assert!(!error.contains("openai-codex"));
+    assert!(error.contains("stdout/stderr details were suppressed"));
+    assert!(!error.contains(sentinel));
 }
 
 #[test]
@@ -179,8 +178,31 @@ fn bridge_parse_failure_rewrites_internal_provider_tokens() {
         .unwrap_err()
         .to_string();
 
-    assert!(error.contains("OpenAI OAuth"));
+    assert!(error.contains("could not parse next-step bridge JSON response"));
     assert!(!error.contains("openai-codex"));
+}
+
+#[test]
+fn public_bridge_error_suppresses_arbitrary_provider_content() {
+    let sentinel = "raw-provider-body-and-model-response-sentinel";
+
+    let public = public_bridge_error(sentinel);
+
+    assert_eq!(
+        public,
+        "Bridge operation failed; raw error details were suppressed."
+    );
+    assert!(!public.contains(sentinel));
+}
+
+#[test]
+fn structured_bridge_failure_ignores_arbitrary_fallback_content() {
+    let sentinel = "raw-provider-body-sentinel";
+
+    let public = public_bridge_failure(Some("rate_limited"), Some(429), Some(sentinel));
+
+    assert_eq!(public, "Provider rate limited the request (HTTP 429).");
+    assert!(!public.contains(sentinel));
 }
 
 #[test]

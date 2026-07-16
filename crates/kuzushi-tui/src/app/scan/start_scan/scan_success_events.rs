@@ -490,10 +490,40 @@ fn try_record_scan_result_artifacts(
     result: &serde_json::Value,
 ) -> anyhow::Result<()> {
     let target = target.ok_or_else(|| anyhow::anyhow!("scan target snapshot was unavailable"))?;
-    kuzushi_core::run_artifacts::try_record_tool_run_complete(
+    if scan_result_is_already_durable(target, run_id, result)? {
+        return Ok(());
+    }
+    let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target, run_id)?;
+    kuzushi_core::run_artifacts::try_record_tool_run_complete_observed(
         kuzushi_core::run_artifacts::ToolRunRecord::new(target, run_id, "scan", "sast:scan"),
         result,
+        Some(&observation),
     )
+}
+
+fn scan_result_is_already_durable(
+    target: &std::path::Path,
+    run_id: &str,
+    result: &serde_json::Value,
+) -> anyhow::Result<bool> {
+    let Ok(summary) = kuzushi_core::load_run_summary(target, run_id) else {
+        return Ok(false);
+    };
+    if summary.status == "running" {
+        return Ok(false);
+    }
+    let expected_status = scan_status_label(kuzushi_core::tool_result_status(result));
+    anyhow::ensure!(
+        summary.status == expected_status,
+        "scan run {run_id} is already terminal as {}; refusing {expected_status}",
+        summary.status
+    );
+    let expected_digest = kuzushi_core::run_artifacts::tool_run_terminal_digest(result);
+    anyhow::ensure!(
+        summary.terminal_result_sha256.as_deref() == Some(expected_digest.as_str()),
+        "scan run {run_id} is terminal with different result content"
+    );
+    Ok(true)
 }
 
 fn scan_result_followup_effects(
@@ -542,86 +572,90 @@ fn scan_status_label(status: kuzushi_core::ToolResultStatus) -> &'static str {
 fn record_scan_failure_artifacts(
     target: Option<&std::path::Path>,
     run_id: &str,
-    target_label: &str,
+    _target_label: &str,
     error: &str,
 ) -> anyhow::Result<()> {
-    append_trace_step(
-        target,
-        run_id,
-        "refused",
-        &short_label(error, 80),
-        None,
-        None,
-    );
-    scan_lifecycle_persistence_result([
-        (
-            "terminal summary",
-            write_scan_terminal_summary(target, run_id, target_label, "failed", Some(error), None),
-        ),
-        (
-            "status event",
-            append_run_status_event(target, run_id, "sast:scan", "failed", "sast:scan failed"),
-        ),
-        (
-            "failure handoff",
-            write_run_failure_handoff(target, run_id, "sast:scan", "failed", error),
-        ),
-    ])
+    let Some(target) = target else { return Ok(()) };
+    if scan_terminal_is_already_durable(target, run_id, "failed")? {
+        return Ok(());
+    }
+    let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target, run_id)?;
+    kuzushi_core::run_artifacts::try_record_tool_run_failed_observed(
+        kuzushi_core::run_artifacts::ToolRunRecord::new(target, run_id, "scan", "sast:scan"),
+        error,
+        Some(&observation),
+    )
 }
 
 fn record_scan_canceled_artifacts(
     target: Option<&std::path::Path>,
     run_id: &str,
-    target_label: &str,
+    _target_label: &str,
     reason: &str,
     findings_count: Option<usize>,
 ) -> anyhow::Result<()> {
-    append_trace_step(target, run_id, "tool", "scan canceled", None, None);
-    scan_lifecycle_persistence_result([
-        (
-            "terminal summary",
-            write_scan_terminal_summary(
-                target,
-                run_id,
-                target_label,
-                "canceled",
-                Some(reason),
-                findings_count,
-            ),
-        ),
-        (
-            "status event",
-            append_run_status_event(target, run_id, "sast:scan", "canceled", reason),
-        ),
-    ])
+    let Some(target) = target else { return Ok(()) };
+    if !scan_terminal_is_already_durable(target, run_id, "canceled")? {
+        let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target, run_id)?;
+        kuzushi_core::run_artifacts::try_record_tool_run_canceled_observed(
+            kuzushi_core::run_artifacts::ToolRunRecord::new(target, run_id, "scan", "sast:scan"),
+            reason,
+            Some(&observation),
+        )?;
+    }
+    if let Some(findings_count) = findings_count {
+        let summary = kuzushi_core::load_run_summary(target, run_id)?
+            .with_findings(Some(findings_count as u64));
+        kuzushi_core::write_run_summary(target, &summary)?;
+    }
+    Ok(())
 }
 
 fn record_scan_interrupted_artifacts(
     target: Option<&std::path::Path>,
     run_id: &str,
-    target_label: &str,
+    _target_label: &str,
     reason: &str,
 ) -> anyhow::Result<()> {
-    append_trace_step(target, run_id, "refused", "scan interrupted", None, None);
-    scan_lifecycle_persistence_result([
-        (
-            "terminal summary",
-            write_scan_terminal_summary(
-                target,
-                run_id,
-                target_label,
-                "interrupted",
-                Some(reason),
-                None,
-            ),
-        ),
-        (
-            "status event",
-            append_run_status_event(target, run_id, "sast:scan", "interrupted", reason),
-        ),
-    ])
+    let Some(target) = target else { return Ok(()) };
+    if scan_terminal_is_already_durable(target, run_id, "interrupted")? {
+        return Ok(());
+    }
+    let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target, run_id)?;
+    kuzushi_core::run_artifacts::try_record_tool_run_interrupted_observed(
+        kuzushi_core::run_artifacts::ToolRunRecord::new(target, run_id, "scan", "sast:scan"),
+        reason,
+        Some(&observation),
+    )
 }
 
+fn scan_terminal_is_already_durable(
+    target: &std::path::Path,
+    run_id: &str,
+    expected_status: &str,
+) -> anyhow::Result<bool> {
+    let Ok(summary) = kuzushi_core::load_run_summary(target, run_id) else {
+        return Ok(false);
+    };
+    if summary.status == "running" {
+        return Ok(false);
+    }
+    anyhow::ensure!(
+        summary.status == expected_status,
+        "scan run {run_id} is already terminal as {}; refusing to rewrite it as {expected_status}",
+        summary.status
+    );
+    anyhow::ensure!(
+        summary
+            .error
+            .as_deref()
+            .is_some_and(|reason| !reason.is_empty()),
+        "scan run {run_id} is already terminal as {expected_status} without a canonical reason"
+    );
+    Ok(true)
+}
+
+#[cfg(test)]
 fn write_scan_terminal_summary(
     target: Option<&std::path::Path>,
     run_id: &str,
@@ -656,20 +690,6 @@ fn write_scan_terminal_summary(
     }
     .with_cost_report(cost);
     kuzushi_core::write_run_summary(target, &summary).map(|_| ())
-}
-
-fn scan_lifecycle_persistence_result<const N: usize>(
-    results: [(&str, anyhow::Result<()>); N],
-) -> anyhow::Result<()> {
-    let errors = results
-        .into_iter()
-        .filter_map(|(artifact, result)| result.err().map(|error| format!("{artifact}: {error}")))
-        .collect::<Vec<_>>();
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        anyhow::bail!(errors.join("; "))
-    }
 }
 
 fn completed_task_durations(session: &crate::app::ActivitySession) -> Vec<(String, u64)> {
@@ -911,6 +931,121 @@ mod tests {
     }
 
     #[test]
+    fn already_terminal_failed_scan_preserves_canonical_result_and_digest() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_id = "scan-core-failed";
+        seed_test_scan_run(temp.path(), run_id);
+        let record = kuzushi_core::run_artifacts::ToolRunRecord::new(
+            temp.path(),
+            run_id,
+            "scan",
+            "sast:scan",
+        );
+        kuzushi_core::run_artifacts::try_record_tool_run_failed(record, "scanner crashed").unwrap();
+        let before = kuzushi_core::load_run_summary(temp.path(), run_id).unwrap();
+        let result_path =
+            kuzushi_core::run_artifacts::run_artifact_path(temp.path(), run_id, "result.json");
+        let result_before = std::fs::read_to_string(&result_path).unwrap();
+        let terminal_events_before = terminal_scan_event_count(temp.path(), run_id, "failed");
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let effects = app.record_scan_run_effect(ScanRunRecord {
+            target: Some(temp.path().to_path_buf()),
+            run_id: run_id.to_string(),
+            target_label: temp.path().display().to_string(),
+            outcome: ScanRunOutcome::Failed {
+                error: "scanner crashed\n\nNext: choose another engine".to_string(),
+            },
+        });
+
+        let after = kuzushi_core::load_run_summary(temp.path(), run_id).unwrap();
+        assert!(effects.is_empty());
+        assert_eq!(after.error.as_deref(), Some("scanner crashed"));
+        assert_eq!(after.terminal_result_sha256, before.terminal_result_sha256);
+        assert_eq!(std::fs::read_to_string(result_path).unwrap(), result_before);
+        assert_eq!(
+            terminal_scan_event_count(temp.path(), run_id, "failed"),
+            terminal_events_before
+        );
+        assert!(app.advisory().notice.is_none());
+    }
+
+    #[test]
+    fn already_terminal_canceled_scan_only_adds_retained_finding_count() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_id = "scan-core-canceled";
+        seed_test_scan_run(temp.path(), run_id);
+        let record = kuzushi_core::run_artifacts::ToolRunRecord::new(
+            temp.path(),
+            run_id,
+            "scan",
+            "sast:scan",
+        );
+        kuzushi_core::run_artifacts::try_record_tool_run_canceled(record, "scan cancelled")
+            .unwrap();
+        let before = kuzushi_core::load_run_summary(temp.path(), run_id).unwrap();
+        let terminal_events_before = terminal_scan_event_count(temp.path(), run_id, "canceled");
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let effects = app.record_scan_run_effect(ScanRunRecord {
+            target: Some(temp.path().to_path_buf()),
+            run_id: run_id.to_string(),
+            target_label: temp.path().display().to_string(),
+            outcome: ScanRunOutcome::Canceled {
+                reason: "operator cancel: scan cancelled".to_string(),
+                findings_count: Some(2),
+            },
+        });
+
+        let after = kuzushi_core::load_run_summary(temp.path(), run_id).unwrap();
+        assert!(effects.is_empty());
+        assert_eq!(after.status, "canceled");
+        assert_eq!(after.error.as_deref(), Some("scan cancelled"));
+        assert_eq!(after.findings, Some(2));
+        assert_eq!(after.terminal_result_sha256, before.terminal_result_sha256);
+        assert_eq!(
+            terminal_scan_event_count(temp.path(), run_id, "canceled"),
+            terminal_events_before
+        );
+        assert!(app.advisory().notice.is_none());
+    }
+
+    #[test]
+    fn conflicting_terminal_scan_status_is_visible_without_rewriting_truth() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_id = "scan-core-terminal-conflict";
+        seed_test_scan_run(temp.path(), run_id);
+        let record = kuzushi_core::run_artifacts::ToolRunRecord::new(
+            temp.path(),
+            run_id,
+            "scan",
+            "sast:scan",
+        );
+        kuzushi_core::run_artifacts::try_record_tool_run_canceled(record, "scan cancelled")
+            .unwrap();
+        let before = kuzushi_core::load_run_summary(temp.path(), run_id).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let effects = app.record_scan_run_effect(ScanRunRecord {
+            target: Some(temp.path().to_path_buf()),
+            run_id: run_id.to_string(),
+            target_label: temp.path().display().to_string(),
+            outcome: ScanRunOutcome::Failed {
+                error: "late failure".to_string(),
+            },
+        });
+
+        let after = kuzushi_core::load_run_summary(temp.path(), run_id).unwrap();
+        assert!(effects.is_empty());
+        assert_eq!(after.status, "canceled");
+        assert_eq!(after.terminal_result_sha256, before.terminal_result_sha256);
+        assert!(app.advisory().notice.as_ref().is_some_and(|notice| {
+            notice.message.contains("already terminal as canceled")
+                && notice.message.contains("refusing to rewrite it as failed")
+        }));
+    }
+
+    #[test]
     fn partial_scan_result_stays_partial_and_does_not_finalize() {
         let mut app = running_scan_app("scan-partial");
         let result = scan_result("scan-partial", "partial", true, &["one scanner failed"]);
@@ -1109,5 +1244,16 @@ mod tests {
             .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:scan");
         kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step)
             .unwrap();
+    }
+
+    fn terminal_scan_event_count(target: &std::path::Path, run_id: &str, status: &str) -> usize {
+        let events = std::fs::read_to_string(kuzushi_core::run_artifacts::run_artifact_path(
+            target,
+            run_id,
+            "events.jsonl",
+        ))
+        .unwrap();
+        let needle = format!(r#""status":"{status}""#);
+        events.lines().filter(|line| line.contains(&needle)).count()
     }
 }

@@ -38,6 +38,12 @@ fn partial_result_card() -> crate::ui_view_models::PhaseResultCardModel {
         attempt_id: "attempt-partial".to_string(),
         outcome: "partial".to_string(),
         detail: "partial canonical result retained".to_string(),
+        detail_rows: vec![crate::app::PhaseResultDetailRow {
+            key: None,
+            disclosed_keys: std::collections::BTreeSet::new(),
+            text: "partial canonical result retained".to_string(),
+        }],
+        semantic_keys: std::collections::BTreeSet::new(),
         actions: vec![kuzushi_core::workflow_attempts::PhaseResultAction::Select],
         control_hint: "F2 Navigate to resolve this result".to_string(),
         recommended: "acknowledge the partial Scan".to_string(),
@@ -58,7 +64,7 @@ fn scan_hints() -> Vec<WorkbenchHint> {
 }
 
 fn rendered_header_text(header: &EngagementHeaderModel) -> String {
-    phase_header_lines(header, &scan_hints(), 80)
+    phase_header_lines(header, &scan_hints(), 80, 40)
         .into_iter()
         .map(line_text)
         .collect::<Vec<_>>()
@@ -108,12 +114,18 @@ fn compact_result_card_keeps_prompt_draft_navigation_instruction_visible() {
         attempt_id: "attempt-1".to_string(),
         outcome: "completed".to_string(),
         detail: "completed without interaction".to_string(),
+        detail_rows: vec![crate::app::PhaseResultDetailRow {
+            key: None,
+            disclosed_keys: std::collections::BTreeSet::new(),
+            text: "completed without interaction".to_string(),
+        }],
+        semantic_keys: std::collections::BTreeSet::new(),
         actions: vec![kuzushi_core::workflow_attempts::PhaseResultAction::Select],
         control_hint: "F2 Navigate after finishing or clearing prompt draft".to_string(),
         recommended: "use the result".to_string(),
     };
 
-    let text = result_card_lines(Some(&card), 40)
+    let text = result_card_lines(Some(&card), 40, 32)
         .into_iter()
         .map(line_text)
         .collect::<Vec<_>>()
@@ -121,6 +133,70 @@ fn compact_result_card_keeps_prompt_draft_navigation_instruction_visible() {
 
     assert!(text.contains("F2 Navigate after finishing"), "{text}");
     assert!(!text.contains("u Use"), "{text}");
+}
+
+#[test]
+fn narrow_result_card_discloses_every_viewport_omission_with_source_keys() {
+    let card = keyed_result_card();
+
+    let rows = result_card_render_rows(&card, 34, 10);
+    let text = rows
+        .iter()
+        .map(|row| row.line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let accounted = accounted_render_keys(&rows);
+
+    assert_eq!(accounted, card.semantic_keys);
+    assert!(rows.len() <= 10, "viewport budget exceeded: {}", rows.len());
+    assert!(text.contains("omitted"), "{text}");
+    assert!(text.contains("replay"), "{text}");
+    assert!(rows.iter().all(|row| row.line.width() <= 34));
+}
+
+#[test]
+fn ultra_compact_result_card_reserves_the_phase_truth_body() {
+    let card = keyed_result_card();
+
+    let rows = result_card_render_rows(&card, 40, 3);
+    let text = rows
+        .iter()
+        .map(|row| row.line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(accounted_render_keys(&rows), card.semantic_keys);
+    assert!(text.contains("replay"), "{text}");
+    assert!(rows.iter().all(|row| row.line.width() <= 40));
+}
+
+fn keyed_result_card() -> crate::ui_view_models::PhaseResultCardModel {
+    use kuzushi_core::run_lifecycle::{RunCellKey, RunCellRoleV1, RunCellSourceV1, RunItemId};
+    let keys = (0..6)
+        .map(|ordinal| RunCellKey {
+            source: RunCellSourceV1::Item(RunItemId::new()),
+            role: RunCellRoleV1::ResultSummary,
+            ordinal,
+        })
+        .collect::<Vec<_>>();
+    crate::ui_view_models::PhaseResultCardModel {
+        attempt_id: "attempt-with-a-long-stable-identity".to_string(),
+        outcome: "partial".to_string(),
+        detail: "source-backed detail".to_string(),
+        detail_rows: keys
+            .iter()
+            .map(|key| crate::app::PhaseResultDetailRow {
+                key: Some(key.clone()),
+                disclosed_keys: std::collections::BTreeSet::new(),
+                text: "bounded source-backed result detail remains inspectable".to_string(),
+            })
+            .collect(),
+        semantic_keys: keys.into_iter().collect(),
+        actions: vec![kuzushi_core::workflow_attempts::PhaseResultAction::Open],
+        control_hint: "o Open the canonical result".to_string(),
+        recommended: "inspect replay before selecting this partial result".to_string(),
+    }
 }
 
 #[test]

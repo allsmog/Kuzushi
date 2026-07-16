@@ -294,14 +294,11 @@ fn dispatch_scan_engine_with_run(
         .workspace
         .context("sast:scan child engine requires an active workspace")?;
     let run_id = crate::run_artifacts::new_run_id("scan-engine");
-    let record = crate::run_artifacts::ToolRunRecord::new(
-        workspace.root(),
-        &run_id,
-        "tool",
-        tool_name,
-    );
+    let record =
+        crate::run_artifacts::ToolRunRecord::new(workspace.root(), &run_id, "tool", tool_name);
     start_scan_engine_run(registry, record, &input, ctx)?;
-    let trace = crate::run_artifacts::TraceHandle::jsonl(workspace.root(), &run_id);
+    let observation = start_scan_engine_observation(workspace.root(), &run_id, tool_name)?;
+    let trace = observation.trace_handle();
     let child_ctx = ToolExecutionContext {
         config: ctx.config,
         workspace: ctx.workspace,
@@ -310,15 +307,26 @@ fn dispatch_scan_engine_with_run(
         cancellation: ctx.cancellation,
         authorization: ctx.authorization.clone(),
     };
-    let dispatched = dispatch_sast_subtool(
-        registry,
-        tool_name,
-        input,
-        &child_ctx,
-        runtime,
-        option_store,
-    );
-    finish_scan_engine_run(record, dispatched)
+    let prepared = registry
+        .prepare_dispatch_input(tool_name, input, &child_ctx, Some(option_store))?
+        .authorize_delegated(&child_ctx.authorization);
+    let dispatched =
+        registry.dispatch_prepared_input_observed_with_runtime(prepared, &child_ctx, runtime)?;
+    finish_scan_engine_run(record, dispatched, &observation)
+}
+
+fn start_scan_engine_observation(
+    target: &std::path::Path,
+    run_id: &str,
+    tool_name: &str,
+) -> Result<crate::run_lifecycle::RunObservationHandle> {
+    let observation = crate::run_lifecycle::RunObservationHandle::jsonl(target, run_id)?
+        .start_root_task(format!("Scan with {tool_name}"))?;
+    observation
+        .task_handle()
+        .context("scan engine dispatch lacks its semantic task")?
+        .update_and_flush(crate::run_lifecycle::RunItemStatus::Running, None)?;
+    Ok(observation)
 }
 
 fn start_scan_engine_run(
@@ -342,16 +350,24 @@ fn start_scan_engine_run(
 
 fn finish_scan_engine_run(
     record: crate::run_artifacts::ToolRunRecord<'_>,
-    dispatched: Result<Value>,
+    dispatched: crate::modules::ObservedDispatchOutcome,
+    observation: &crate::run_lifecycle::RunObservationHandle,
 ) -> Result<Value> {
-    match dispatched {
+    match dispatched.execution {
         Ok(output) => {
-            crate::run_artifacts::try_record_tool_run_complete(record, &output)?;
+            crate::run_artifacts::try_record_tool_run_complete_settled(
+                record,
+                &output,
+                observation,
+                dispatched.completion,
+            )?;
             Ok(output)
         }
-        Err(error) => match crate::run_artifacts::try_record_tool_run_failed(
+        Err(error) => match crate::run_artifacts::try_record_tool_run_failed_settled(
             record,
             &error.to_string(),
+            observation,
+            dispatched.completion,
         ) {
             Ok(()) => Err(error),
             Err(persistence) => Err(anyhow::anyhow!(

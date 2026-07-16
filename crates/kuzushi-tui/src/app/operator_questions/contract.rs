@@ -75,7 +75,12 @@ impl OperatorQuestionRequest {
         OperatorQuestionResolution {
             request_id: self.request_id.clone(),
             kind: OperatorQuestionResolutionKind::AutoResolved,
-            answers: self.questions.iter().map(recommended_answer).collect(),
+            answers: self
+                .questions
+                .iter()
+                .enumerate()
+                .map(|(ordinal, question)| recommended_answer(&self.request_id, ordinal, question))
+                .collect(),
         }
     }
 
@@ -148,14 +153,26 @@ fn validate_options(options: &[OperatorQuestionOption]) -> Result<()> {
     Ok(())
 }
 
-fn recommended_answer(question: &OperatorQuestion) -> OperatorQuestionAnswer {
-    let option = question
+fn recommended_answer(
+    request_id: &str,
+    question_ordinal: usize,
+    question: &OperatorQuestion,
+) -> OperatorQuestionAnswer {
+    let (choice_ordinal, option) = question
         .options
         .iter()
-        .find(|option| option.recommended)
+        .enumerate()
+        .find(|(_, option)| option.recommended)
         .expect("checked question has a recommendation");
     OperatorQuestionAnswer::Predefined {
         question_id: question.id.clone(),
+        choice_id: kuzushi_core::run_lifecycle::deterministic_choice_id(
+            request_id,
+            &question.id,
+            question_ordinal,
+            choice_ordinal,
+        )
+        .to_string(),
         label: option.label.clone(),
     }
 }
@@ -163,8 +180,15 @@ fn recommended_answer(question: &OperatorQuestion) -> OperatorQuestionAnswer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum OperatorQuestionAnswer {
-    Predefined { question_id: String, label: String },
-    Freeform { question_id: String, text: String },
+    Predefined {
+        question_id: String,
+        choice_id: String,
+        label: String,
+    },
+    Freeform {
+        question_id: String,
+        text: String,
+    },
 }
 
 impl OperatorQuestionAnswer {

@@ -303,6 +303,7 @@ fn load_optional_text_artifact(
 fn optional_text_summary(file: &str, body: &str) -> String {
     match file {
         "report.sarif" => sarif_summary(body),
+        "items.jsonl" => crate::report::artifact_summary::summarize_text_artifact(file, body),
         _ => "artifact present".to_string(),
     }
 }

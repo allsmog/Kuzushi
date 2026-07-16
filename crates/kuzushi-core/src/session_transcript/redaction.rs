@@ -205,7 +205,7 @@ fn secret_key(key: &str) -> bool {
     .any(|needle| normalized.contains(needle))
 }
 
-fn redact_text(text: &str) -> String {
+pub(crate) fn redact_text(text: &str) -> String {
     redaction_patterns()
         .iter()
         .fold(text.to_string(), |body, pattern| {

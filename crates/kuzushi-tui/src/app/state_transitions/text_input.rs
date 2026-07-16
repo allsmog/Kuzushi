@@ -113,7 +113,7 @@ impl ShellApp {
             return true;
         }
         self.router.auth_picker_mut().push_key_str(key);
-        self.clear_onboarding_credential_notice();
+        self.clear_credential_notice();
         if text.contains('\n') {
             self.set_warn_notice(
                 "paste",

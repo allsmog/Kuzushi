@@ -253,6 +253,7 @@ pub(crate) fn terminal_shell_loop(
 pub(crate) struct TerminalLoopState {
     pub(crate) needs_redraw: bool,
     pub(crate) last_title: Option<String>,
+    run_focus_hold: RunFocusVisibilityHold,
 }
 
 impl Default for TerminalLoopState {
@@ -260,6 +261,7 @@ impl Default for TerminalLoopState {
         Self {
             needs_redraw: true,
             last_title: None,
+            run_focus_hold: RunFocusVisibilityHold::default(),
         }
     }
 }
@@ -272,9 +274,22 @@ pub(crate) fn terminal_shell_step(
     wake: &TerminalLoopWake,
     watcher: Option<&mut WorkspaceWatcherRuntime>,
 ) -> Result<()> {
+    if let Some(input_changed) = state.run_focus_hold.intercept_input(app, input)? {
+        state.needs_redraw |= input_changed;
+        state.needs_redraw = draw_terminal_if_needed(terminal, app, state.needs_redraw)?;
+        return Ok(());
+    }
     let work_tail_may_remain = refresh_terminal_redraw_state(terminal, app, state, watcher)?;
     rearm_work_tail(wake, work_tail_may_remain);
-    state.needs_redraw |= wait_for_terminal_loop_event(app, input)?;
+    let view_before_input = app.shell_view();
+    let input_changed = wait_for_terminal_loop_event(app, input)?;
+    state.needs_redraw |= input_changed;
+    if input_changed {
+        state.needs_redraw = draw_terminal_if_needed(terminal, app, state.needs_redraw)?;
+        state
+            .run_focus_hold
+            .begin_after_transition(view_before_input, app);
+    }
     Ok(())
 }
 

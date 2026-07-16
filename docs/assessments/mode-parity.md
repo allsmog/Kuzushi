@@ -34,7 +34,7 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 | Prompt override files | ◐ | ◐ | ◐ | Direct prompt-aware tools load `.kuzushi/prompts/<module>/<verb>.md` when the matching `_PROMPT` option is unset; `sast:scan` forwards its `sast/triage.md` and `sast/verify.md` overrides to internal stages. |
 | Runtime no-silent-fallback policy | ✓ | ✓ | ✓ | Runtime-backed tools resolve a configured or explicit input model and fail on incompatible provider/runtime pairs; project-local model steering is rejected. |
 | Findings store support | ✓ | ✓ | ✓ | Tools that require a store use the shared `tool_needs_finding_store` predicate before mode dispatch. Verification proof is attached by durable finding identity, not a scan-local row id. |
-| Trace/run artifacts | ✓ | ✓ | ✓ | Tool dispatch writes the canonical run bundle plus prepared `input.json` and normalized `result.json`. A running summary exists before dispatch; completed, partial, skipped, failed, canceled, and interrupted remain distinct terminal outcomes. |
+| Typed run lifecycle/artifacts | ✓ | ✓ | ✓ | Shared dispatch writes stable task/call identities to authoritative `items.jsonl`, plus prepared `input.json` and normalized `result.json`. One reducer drives live/replay/plain projections; terminal states and cost completeness remain distinct. |
 | Verification provenance | ✓ | ✓ | ✓ | Persisted proof carries both the verification run id and the discovery scan it verified. A later observation may reuse proof by durable identity, but is marked for revalidation; shell replay opens the verification run only. |
 | Workspace target consent | ✓ | ✓ | ✓ | Workspace-backed commands require an explicit target such as `--target <path>` or `--target .`; modes must not silently substitute cwd. A live shell run keeps the target captured at launch even if ambient app state later changes. |
 | Cancellation | ◐ | ✓ | ◐ | Shell/TUI work has live cancellation controls. Core scan engines accept cancellation tokens, but headless CLI scan/run do not currently install a dedicated SIGINT handler. |
@@ -158,6 +158,11 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   origin with one accumulated receipt; background and manually inspected work
   never auto-navigate. Run trace schema and chain → plan → steer ordering remain
   shared and unchanged.
+- **Lifecycle semantics are mode-shared.** Scan, shell, and run all reach the
+  typed stream through the shared preparation/dispatch boundary. Shell alone
+  subscribes to committed items for Run Focus and operator questions.
+  `events.jsonl` and `trace.jsonl` are compatibility/diagnostic projections,
+  not alternative semantic sources.
 - **Contextual surfaces are shell-only.** Help, Controls, and Capabilities are
   modal; Jobs, Replay, Trace, and visualizations are scrollable full-frame
   decks. Replacing one utility retains the original workflow origin; Esc

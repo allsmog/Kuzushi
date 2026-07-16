@@ -62,6 +62,10 @@ fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydration
         ViewHydrationKey::RunTrace { run_id } => Some(ViewHydrationValue::RunTrace(
             kuzushi_core::load_run_trace(target, run_id).ok(),
         )),
+        ViewHydrationKey::RunProjection { run_id } => Some(ViewHydrationValue::RunProjection(
+            kuzushi_core::run_lifecycle::load_run_projection(target, run_id)
+                .map_err(|error| error.to_string()),
+        )),
         ViewHydrationKey::ScanStageReceipt { run_id } => {
             let state = match kuzushi_core::run_artifacts::load_scan_stage_data(target, run_id) {
                 Ok(Some(receipt)) => ScanStageReceiptState::Ready(receipt),

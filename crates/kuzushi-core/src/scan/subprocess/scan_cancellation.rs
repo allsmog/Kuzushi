@@ -1,8 +1,17 @@
 use super::*;
 
+const CANCELLATION_ACTIVE: u8 = 0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CancellationDisposition {
+    Canceled = 1,
+    Interrupted = 2,
+}
+
 #[derive(Debug, Clone)]
 pub struct ScanCancellation {
-    pub(in crate::scan) cancelled: Arc<AtomicBool>,
+    pub(in crate::scan) disposition: Arc<AtomicU8>,
     pub(in crate::scan) paused: Arc<AtomicBool>,
     pub(in crate::scan) next_child_id: Arc<AtomicU64>,
     pub(in crate::scan) children: Arc<Mutex<HashMap<u64, ManagedChild>>>,
@@ -11,7 +20,7 @@ pub struct ScanCancellation {
 impl Default for ScanCancellation {
     fn default() -> Self {
         Self {
-            cancelled: Arc::new(AtomicBool::new(false)),
+            disposition: Arc::new(AtomicU8::new(CANCELLATION_ACTIVE)),
             paused: Arc::new(AtomicBool::new(false)),
             next_child_id: Arc::new(AtomicU64::new(1)),
             children: Arc::new(Mutex::new(HashMap::new())),
@@ -21,8 +30,33 @@ impl Default for ScanCancellation {
 
 impl ScanCancellation {
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
-        // Cancel implies resume so any wait_if_paused() loops can see the cancel flag.
+        self.request(CancellationDisposition::Canceled);
+    }
+
+    pub fn interrupt(&self) {
+        self.request(CancellationDisposition::Interrupted);
+    }
+
+    pub fn disposition(&self) -> Option<CancellationDisposition> {
+        match self.disposition.load(Ordering::SeqCst) {
+            value if value == CancellationDisposition::Canceled as u8 => {
+                Some(CancellationDisposition::Canceled)
+            }
+            value if value == CancellationDisposition::Interrupted as u8 => {
+                Some(CancellationDisposition::Interrupted)
+            }
+            _ => None,
+        }
+    }
+
+    fn request(&self, disposition: CancellationDisposition) {
+        let _ = self.disposition.compare_exchange(
+            CANCELLATION_ACTIVE,
+            disposition as u8,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
+        // Cancellation implies resume so paused loops can observe the terminal disposition.
         self.paused.store(false, Ordering::SeqCst);
         if let Ok(mut children) = self.children.lock() {
             for child in children.values_mut() {
@@ -32,11 +66,11 @@ impl ScanCancellation {
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        self.disposition().is_some()
     }
 
     pub fn pause(&self) {
-        if !self.cancelled.load(Ordering::SeqCst) {
+        if !self.is_cancelled() {
             self.paused.store(true, Ordering::SeqCst);
         }
     }
@@ -52,7 +86,7 @@ impl ScanCancellation {
     /// Block the current thread until either resume() or cancel() is called.
     /// Returns immediately if not paused.
     pub fn wait_if_paused(&self) {
-        while self.paused.load(Ordering::SeqCst) && !self.cancelled.load(Ordering::SeqCst) {
+        while self.paused.load(Ordering::SeqCst) && !self.is_cancelled() {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
@@ -146,6 +180,25 @@ mod tests {
 
     #[cfg(unix)]
     const OWNER_TEST_PATH_ENV: &str = "KUZUSHI_SCANNER_OWNER_TEST_PATH";
+
+    #[test]
+    fn first_cancellation_disposition_wins() {
+        let operator_cancel = ScanCancellation::default();
+        operator_cancel.cancel();
+        operator_cancel.interrupt();
+        assert_eq!(
+            operator_cancel.disposition(),
+            Some(CancellationDisposition::Canceled)
+        );
+
+        let watchdog_interrupt = ScanCancellation::default();
+        watchdog_interrupt.interrupt();
+        watchdog_interrupt.cancel();
+        assert_eq!(
+            watchdog_interrupt.disposition(),
+            Some(CancellationDisposition::Interrupted)
+        );
+    }
 
     #[test]
     fn child_registered_after_cancellation_is_killed_and_rejected() {

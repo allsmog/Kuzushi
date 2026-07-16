@@ -41,6 +41,42 @@ mod tests {
     }
 
     #[test]
+    fn langgraph_triage_parse_error_does_not_echo_model_response() {
+        let sentinel = "raw-model-response-sentinel";
+        let error = crate::langgraph_runtime::triage_outcome_from_response(
+            kuzushi_core::AgentQueryResponse {
+                text: sentinel.to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("not valid triage JSON"));
+        assert!(!error.contains(sentinel));
+    }
+
+    #[test]
+    fn langgraph_triage_schema_error_does_not_echo_model_value() {
+        let sentinel = "raw-model-response-sentinel";
+        let error = crate::langgraph_runtime::triage_outcome_from_response(
+            kuzushi_core::AgentQueryResponse {
+                structured: Some(serde_json::json!({
+                    "verdict": sentinel,
+                    "confidence": 0.8,
+                    "rationale": "reachable"
+                })),
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("violated schema"));
+        assert!(!error.contains(sentinel));
+    }
+
+    #[test]
     fn uses_configured_bridge_command() {
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
@@ -95,7 +131,7 @@ mod tests {
         std::fs::write(
             &bridge,
             r#"#!/bin/sh
-printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234}'
+printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234,"input_tokens":0,"output_tokens":0}'
 "#,
         )
         .unwrap();
@@ -118,18 +154,20 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
 
-        let response = bridge
-            .query_blocking(AgentQueryRequest::new(
+        let observed = bridge
+            .query_observed_blocking(AgentQueryRequest::new(
                 "openai:gpt-5.5".to_string(),
                 ".",
                 "sys".to_string(),
                 "prompt".to_string(),
             ))
             .unwrap();
+        let response = observed.value;
 
         assert_eq!(response.text, "done");
         assert_eq!(response.structured.unwrap()["ok"], serde_json::json!(true));
         assert!((response.cost_usd - 0.1234).abs() < 1e-9);
+        assert_eq!(observed.usage.observed_counts(), (Some(0), Some(0)));
     }
 
     #[test]
@@ -505,7 +543,7 @@ fi
     }
 
     #[test]
-    fn next_step_bridge_surfaces_error_payload() {
+    fn next_step_bridge_surfaces_classified_error_without_raw_payload() {
         use kuzushi_core::{AgentTool, AgentToolLoopRequest};
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
@@ -515,7 +553,7 @@ fi
             langgraph_bridge_command: Some(vec![
                 "sh".to_string(),
                 "-c".to_string(),
-                "printf '%s' '{\"ok\":false,\"error\":\"no Anthropic credentials\"}'; exit 1"
+                "printf '%s' '{\"ok\":false,\"error\":\"raw-provider-body-sentinel\",\"errorClass\":\"authentication\",\"status\":401}'; exit 1"
                     .to_string(),
             ]),
             worker_watchdog_timeout_ms: Some(
@@ -543,7 +581,8 @@ fi
             .unwrap_err()
             .to_string();
         assert!(err.contains("next-step"));
-        assert!(err.contains("no Anthropic credentials"));
+        assert!(err.contains("Provider authentication failed (HTTP 401)"));
+        assert!(!err.contains("raw-provider-body-sentinel"));
     }
 
     #[test]
@@ -589,7 +628,7 @@ fi
     }
 
     #[test]
-    fn tool_loop_preflight_surfaces_openai_scope_errors_before_first_step() {
+    fn tool_loop_preflight_surfaces_classified_rejection_before_first_step() {
         use kuzushi_core::{AgentTool, AgentToolLoopRequest};
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
@@ -599,7 +638,7 @@ fi
             langgraph_bridge_command: Some(vec![
                 "sh".to_string(),
                 "-c".to_string(),
-                "REQ=$(cat); case \"$REQ\" in *next-step-preflight*) printf '%s' '{\"ok\":false,\"error\":\"missing api.responses.write\"}' ;; *) printf '%s' '{\"ok\":true,\"step\":\"final\",\"text\":\"unexpected\"}' ;; esac"
+                "REQ=$(cat); case \"$REQ\" in *next-step-preflight*) printf '%s' '{\"ok\":false,\"error\":\"raw-provider-scope-sentinel\",\"errorClass\":\"provider_rejected\",\"status\":403}' ;; *) printf '%s' '{\"ok\":true,\"step\":\"final\",\"text\":\"unexpected\"}' ;; esac"
                     .to_string(),
             ]),
             worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
@@ -624,11 +663,14 @@ fi
         let err = bridge.preflight_tool_loop_blocking(&req).unwrap_err();
 
         assert!(err.to_string().contains("next-step preflight"));
-        assert!(err.to_string().contains("api.responses.write"));
+        assert!(err
+            .to_string()
+            .contains("Provider rejected the request (HTTP 403)"));
+        assert!(!err.to_string().contains("raw-provider-scope-sentinel"));
     }
 
     #[test]
-    fn bridge_failure_json_is_returned_as_actionable_error() {
+    fn bridge_failure_json_suppresses_arbitrary_error_content() {
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
             api_key_env: "OPENAI_API_KEY".to_string(),
@@ -637,10 +679,12 @@ fi
             langgraph_bridge_command: Some(vec![
                 "sh".to_string(),
                 "-c".to_string(),
-                "printf '%s' '{\"ok\":false,\"error\":\"install @earendil-works/LangGraph\"}'; exit 1"
+                "printf '%s' '{\"ok\":false,\"error\":\"raw-model-response-sentinel\"}'; exit 1"
                     .to_string(),
             ]),
-            worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -663,7 +707,8 @@ fi
             .to_string();
 
         assert!(err.contains("LangGraph bridge failed"));
-        assert!(err.contains("install @earendil-works/LangGraph"));
+        assert!(err.contains("raw error details were suppressed"));
+        assert!(!err.contains("raw-model-response-sentinel"));
     }
 
     #[test]

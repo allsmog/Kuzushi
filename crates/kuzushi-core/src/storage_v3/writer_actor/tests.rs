@@ -121,6 +121,7 @@ fn run_lifecycle(event_kind: EventKind, status: &str) -> RunLifecycleWrite {
         target: Some("/repo".to_string()),
         status: status.to_string(),
         findings_count: (event_kind != EventKind::RunStarted).then_some(3),
+        terminal_item_hash: None,
         actor: "runner".to_string(),
     }
 }

@@ -54,6 +54,7 @@ pub(crate) struct WorkbenchPresentationSnapshot {
 }
 
 pub(crate) const WORKBENCH_REPORT_COMMAND: &str = "report";
+const WORKBENCH_REVERIFY_ACTION_KEY: &str = "v";
 
 static PROVE_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint("v", "verify displayed"),
@@ -85,7 +86,7 @@ static REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 
 static FIX_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint("run patch:finding", "patch displayed"),
-    hint("v", "reverify applied patch"),
+    hint(WORKBENCH_REVERIFY_ACTION_KEY, "reverify applied patch"),
     hint("z", "chain / DFD"),
     hint("report", "open Report"),
 ];
@@ -141,7 +142,7 @@ fn chrome_model(
     WorkbenchChromeModel {
         page,
         top_bar: top_bar_model(app, page, journey),
-        command_bar_hints: command_bar_hints(page, report_cta, has_detail, fingerprint),
+        command_bar_hints: command_bar_hints(app, page, report_cta, has_detail, fingerprint),
         zoom: app.router.workbench().zoom().pane(),
     }
 }
@@ -214,6 +215,7 @@ where
 }
 
 fn command_bar_hints(
+    app: &ShellApp,
     page: WorkbenchPage,
     report_cta: Option<WorkbenchHint>,
     has_detail: bool,
@@ -222,12 +224,41 @@ fn command_bar_hints(
     let mut hints = page_command_bar_hint_slice(page).to_vec();
     if page == WorkbenchPage::Fix {
         replace_patch_hint(&mut hints, fingerprint);
+        replace_reverify_hint(&mut hints, app);
     }
     if page == WorkbenchPage::Prove && !has_detail {
         hints[0] = hint("2", "choose a finding in Review");
     }
     append_report_hint(&mut hints, report_cta);
     hints
+}
+
+pub(crate) fn workbench_reverify_control_hint(app: &ShellApp) -> String {
+    if app.input_mode() == crate::InputMode::Navigate {
+        return WORKBENCH_REVERIFY_ACTION_KEY.to_string();
+    }
+    let bindings = app
+        .ui()
+        .keymap_binding_labels("composer", "navigate_mode", &["F2"]);
+    if bindings.is_empty() {
+        return "Navigate unbound".to_string();
+    }
+    let prefix = (!app.input().is_empty()).then_some("clear prompt then ");
+    format!(
+        "{}{bindings} then {WORKBENCH_REVERIFY_ACTION_KEY}",
+        prefix.unwrap_or_default(),
+        bindings = bindings.join("/")
+    )
+}
+
+fn replace_reverify_hint(hints: &mut [WorkbenchHint], app: &ShellApp) {
+    let Some(hint) = hints
+        .iter_mut()
+        .find(|hint| hint.label == "reverify applied patch")
+    else {
+        return;
+    };
+    hint.verb = Cow::Owned(workbench_reverify_control_hint(app));
 }
 
 fn append_report_hint(hints: &mut Vec<WorkbenchHint>, report_cta: Option<WorkbenchHint>) {
@@ -357,11 +388,49 @@ fn derive_state(inputs: WorkbenchStateInputs) -> WorkbenchState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use kuzushi_core::{V2Config, WorkflowPhase};
     use std::cell::Cell;
 
     fn app() -> ShellApp {
         ShellApp::new(V2Config::default(), None)
+    }
+
+    #[test]
+    fn reverify_control_names_the_active_input_mode_contract() {
+        let mut app = app();
+
+        assert_eq!(workbench_reverify_control_hint(&app), "F2 then v");
+        assert!(
+            app.reduce_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+                .handled
+        );
+        assert_eq!(app.input(), "v");
+        app.set_input("unfinished draft".to_string());
+        assert_eq!(
+            workbench_reverify_control_hint(&app),
+            "clear prompt then F2 then v"
+        );
+        app.set_input(String::new());
+        app.set_input_mode(crate::InputMode::Navigate);
+        assert_eq!(workbench_reverify_control_hint(&app), "v");
+    }
+
+    #[test]
+    fn reverify_control_uses_the_resolved_navigate_mode_binding() {
+        let mut config = V2Config::default();
+        config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+            context: "composer".to_string(),
+            action: "navigate_mode".to_string(),
+            bindings: vec!["ctrl+x".to_string()],
+        }];
+        let app = ShellApp::new(config, None);
+
+        assert_eq!(workbench_reverify_control_hint(&app), "ctrl+x then v");
+        let hints = command_bar_hints(&app, WorkbenchPage::Fix, None, false, None);
+        assert!(hints.iter().any(|hint| {
+            hint.verb == "ctrl+x then v" && hint.label == "reverify applied patch"
+        }));
     }
 
     #[test]

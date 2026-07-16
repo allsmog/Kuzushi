@@ -19,6 +19,7 @@ const requiredContexts = [
   "patch",
   "report",
   "run_trace",
+  "run_lifecycle",
   "failure",
   "ui_*",
 ];

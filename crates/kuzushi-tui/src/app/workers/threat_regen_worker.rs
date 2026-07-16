@@ -1,6 +1,10 @@
 use super::*;
 use serde_json::json;
 
+#[path = "threat_regen_worker/job.rs"]
+mod job;
+use job::ThreatWorkerJob;
+
 pub(crate) fn threat_regen_worker(
     config: V2Config,
     model: String,
@@ -11,47 +15,43 @@ pub(crate) fn threat_regen_worker(
     sink: JobEventSink,
     cancel: ScanCancellation,
 ) {
-    let prompt = threat_regen_prompt(&existing);
-    let audit = AgentCallAudit::for_prompt(&model, THREAT_PATCH_SYSTEM_PROMPT, &prompt);
-    let run = ProposalRun {
-        target: &cwd,
-        run_id: &metadata.run_id,
-        kind: "threat",
-        tool: "threat-model:propose",
-    };
-    let input = threat_regen_input(&existing);
-    let start = run.start(&input, model.clone(), &config, metadata.loaded_modules);
-    if let Err(error) = start {
-        sink.send(ShellEvent::Threat(ThreatPatchEvent::Failed {
-            error: error.to_string(),
-            audit,
-        }));
-        return;
-    }
-    let event = match run_threat_regen_worker(
+    ThreatWorkerJob {
         config,
         model,
         thinking_level,
-        cwd.clone(),
+        cwd,
         existing,
-        cancel.clone(),
-    ) {
-        Ok((patch, cost)) => persisted_threat_patch_event(&run, patch, cost, audit),
-        Err(error) => failed_threat_event(&run, error, audit, cancel.is_cancelled()),
-    };
-    sink.send(ShellEvent::Threat(event));
+        metadata,
+        cancel,
+    }
+    .run_regen(sink);
+}
+
+fn settle_threat_regen_result(
+    run: &ProposalRun<'_>,
+    lifecycle: ProposalRunLifecycle,
+    result: CostedWorkerResult<ThreatPatch>,
+    audit: AgentCallAudit,
+    cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
+) -> ThreatPatchEvent {
+    match result {
+        Ok((patch, cost)) => persisted_threat_patch_event(run, lifecycle, patch, cost, audit),
+        Err(error) => failed_threat_event(run, lifecycle, error, audit, cancellation),
+    }
 }
 
 fn persisted_threat_patch_event(
     run: &ProposalRun<'_>,
+    lifecycle: ProposalRunLifecycle,
     patch: ThreatPatch,
     cost: kuzushi_core::runtime::RuntimeCostReport,
     audit: AgentCallAudit,
 ) -> ThreatPatchEvent {
-    match run.complete(
+    match run.complete_observed(
         "threat-model proposal ready",
         threat_patch_value(&patch),
         cost,
+        lifecycle,
     ) {
         Ok(()) => ThreatPatchEvent::Proposed {
             patch,
@@ -70,6 +70,7 @@ pub(crate) fn run_threat_regen_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     existing: serde_json::Value,
+    observation: kuzushi_core::run_lifecycle::RunObservationHandle,
     cancel: ScanCancellation,
 ) -> CostedWorkerResult<ThreatPatch> {
     let runtime = worker_runtime(&config, &cwd, thinking_level, cancel)
@@ -82,6 +83,7 @@ pub(crate) fn run_threat_regen_worker(
         THREAT_PATCH_SYSTEM_PROMPT.to_string(),
         prompt,
         "threat regen returned no content",
+        &observation,
     )?;
     let patch = parse_threat_patch_json(THREAT_REGEN_PROMPT, &body)
         .map_err(|error| CostedWorkerError::observed(error, cost))?;
@@ -107,33 +109,29 @@ pub(crate) fn threat_ask_worker(
     sink: JobEventSink,
     cancel: ScanCancellation,
 ) {
-    let prompt = threat_ask_prompt(&question, &existing);
-    let audit = AgentCallAudit::for_prompt(&model, ASK_SYSTEM_PROMPT, &prompt);
-    let run = ProposalRun {
-        target: &cwd,
-        run_id: &metadata.run_id,
-        kind: "threat",
-        tool: "threat-model:ask",
-    };
-    let input = threat_ask_input(&existing, &question);
-    let start = run.start(&input, model.clone(), &config, metadata.loaded_modules);
-    if let Err(error) = start {
-        send_threat_start_failure(&sink, error, audit);
-        return;
-    }
-    let event = match run_threat_ask_worker(
+    ThreatWorkerJob {
         config,
         model,
         thinking_level,
-        cwd.clone(),
+        cwd,
         existing,
-        &question,
-        cancel.clone(),
-    ) {
-        Ok((answer, cost)) => persisted_threat_answer_event(&run, answer, cost, audit),
-        Err(error) => failed_threat_event(&run, error, audit, cancel.is_cancelled()),
-    };
-    sink.send(ShellEvent::Threat(event));
+        metadata,
+        cancel,
+    }
+    .run_ask(question, sink);
+}
+
+fn settle_threat_ask_result(
+    run: &ProposalRun<'_>,
+    lifecycle: ProposalRunLifecycle,
+    result: CostedWorkerResult<String>,
+    audit: AgentCallAudit,
+    cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
+) -> ThreatPatchEvent {
+    match result {
+        Ok((answer, cost)) => persisted_threat_answer_event(run, lifecycle, answer, cost, audit),
+        Err(error) => failed_threat_event(run, lifecycle, error, audit, cancellation),
+    }
 }
 
 fn send_threat_start_failure(sink: &JobEventSink, error: anyhow::Error, audit: AgentCallAudit) {
@@ -145,14 +143,16 @@ fn send_threat_start_failure(sink: &JobEventSink, error: anyhow::Error, audit: A
 
 fn persisted_threat_answer_event(
     run: &ProposalRun<'_>,
+    lifecycle: ProposalRunLifecycle,
     answer: String,
     cost: kuzushi_core::runtime::RuntimeCostReport,
     audit: AgentCallAudit,
 ) -> ThreatPatchEvent {
-    match run.complete(
+    match run.complete_observed(
         "threat-model answer ready",
         json!({ "answer": answer.clone() }),
         cost,
+        lifecycle,
     ) {
         Ok(()) => ThreatPatchEvent::Answer {
             text: answer,
@@ -167,29 +167,29 @@ fn persisted_threat_answer_event(
 
 fn failed_threat_event(
     run: &ProposalRun<'_>,
+    lifecycle: ProposalRunLifecycle,
     error: CostedWorkerError,
     audit: AgentCallAudit,
-    canceled: bool,
+    cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
 ) -> ThreatPatchEvent {
     let message = error.error.to_string();
-    let persisted = run.fail(&message, canceled);
+    let safe_message = kuzushi_core::runtime::safe_model_failure_message(&message);
+    let persisted = run.fail_observed(&safe_message, cancellation, error.cost, lifecycle);
     ThreatPatchEvent::Failed {
-        error: threat_persistence_aware_failure(message, persisted),
+        error: threat_persistence_aware_failure(safe_message, persisted),
         audit: audit.with_outcome(error.cost, error.call_attempted),
     }
 }
 
 fn threat_terminal_persistence_error(run: &ProposalRun<'_>, error: anyhow::Error) -> String {
-    let message = format!("threat result unavailable because persistence failed: {error:#}");
-    threat_persistence_aware_failure(message.clone(), run.fail(&message, false))
+    let _ = run;
+    format!("threat result unavailable because persistence failed: {error:#}")
 }
 
 fn threat_persistence_aware_failure(message: String, persisted: anyhow::Result<()>) -> String {
     match persisted {
         Ok(()) => message,
-        Err(error) => {
-            format!("{message}; additionally, terminal run persistence failed: {error:#}")
-        }
+        Err(_error) => format!("{message}; additionally, terminal run persistence failed"),
     }
 }
 
@@ -200,6 +200,7 @@ pub(crate) fn run_threat_ask_worker(
     cwd: PathBuf,
     existing: serde_json::Value,
     question: &str,
+    observation: kuzushi_core::run_lifecycle::RunObservationHandle,
     cancel: ScanCancellation,
 ) -> CostedWorkerResult<String> {
     let runtime = worker_runtime(&config, &cwd, thinking_level, cancel)
@@ -212,6 +213,7 @@ pub(crate) fn run_threat_ask_worker(
         ASK_SYSTEM_PROMPT.to_string(),
         prompt,
         "threat-ask returned no content",
+        &observation,
     )?;
     Ok((answer.0.to_string(), answer.1))
 }
@@ -245,9 +247,11 @@ fn worker_response_text(
     system_prompt: String,
     prompt: String,
     empty_message: &str,
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
 ) -> CostedWorkerResult<String> {
+    let traced = kuzushi_core::runtime::TracedRuntime::new(&runtime, observation.trace_handle());
     let response = kuzushi_core::runtime::query_blocking_checked(
-        &runtime,
+        &traced,
         AgentQueryRequest::new(model, cwd, system_prompt, prompt),
     )
     .map_err(CostedWorkerError::unresolved)?;
@@ -257,6 +261,19 @@ fn worker_response_text(
     let body = non_empty_worker_response(response.text.trim(), empty_message)
         .map_err(|error| CostedWorkerError::observed(error, cost))?;
     Ok((body, cost))
+}
+
+fn start_threat_lifecycle(
+    run: &ProposalRun<'_>,
+    input: &serde_json::Value,
+    model: String,
+    config: &V2Config,
+    loaded_modules: Vec<String>,
+    sink: &JobEventSink,
+    task_title: &str,
+) -> anyhow::Result<ProposalRunLifecycle> {
+    let observation = proposal_run_observation(run.target, run.run_id, sink, task_title)?;
+    run.start_observed(input, model, config, loaded_modules, observation)
 }
 
 fn non_empty_worker_response(text: &str, empty_message: &str) -> Result<String> {

@@ -80,12 +80,22 @@ fn lifecycle_lines(model: &RemediationLifecycleModel, width: usize) -> Vec<Line<
     append_optional_detail(&mut lines, "updated", model.updated_at.as_deref(), width);
     append_optional_detail(&mut lines, "error", model.load_error.as_deref(), width);
     if let Some(command) = model.reverify_command.as_deref() {
-        lines.push(Line::from(vec![
-            Span::styled("▸ v  re-verify · ", theme::warn()),
-            Span::styled(fit(command, width.saturating_sub(16)), theme::accent()),
-        ]));
+        lines.push(reverify_line(model, command, width));
     }
     lines
+}
+
+fn reverify_line(model: &RemediationLifecycleModel, command: &str, width: usize) -> Line<'static> {
+    let lead = model
+        .reverify_control_hint
+        .as_deref()
+        .map(|hint| format!("▸ {hint} re-verify · "))
+        .unwrap_or_else(|| "▸ re-verify · ".to_string());
+    let command_width = width.saturating_sub(display_width(&lead));
+    Line::from(vec![
+        Span::styled(lead, theme::warn()),
+        Span::styled(fit(command, command_width), theme::accent()),
+    ])
 }
 
 fn append_receipt_identity(
@@ -271,6 +281,7 @@ mod tests {
             detail: None,
             updated_at: None,
             reverify_command: None,
+            reverify_control_hint: None,
             load_error: load_error.map(str::to_string),
         }
     }
@@ -315,5 +326,22 @@ mod tests {
 
         assert!(rendered.contains("remediation truth unavailable"));
         assert!(rendered.contains("database is unavailable"));
+    }
+
+    #[test]
+    fn reverify_line_discloses_mode_entry_before_the_navigation_key() {
+        let mut model = remediation_model(RemediationLoadState::Ready, None);
+        model.reverify_command =
+            Some("run patch:reverify {\"applicationId\":\"application-1\"}".to_string());
+        model.reverify_control_hint = Some("F2 then v".to_string());
+
+        let rendered = lifecycle_lines(&model, 120)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("▸ F2 then v re-verify · run patch:reverify"));
+        assert!(!rendered.contains("▸ v  re-verify"));
     }
 }

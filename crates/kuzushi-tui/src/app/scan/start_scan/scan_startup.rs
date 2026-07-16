@@ -79,16 +79,21 @@ impl ShellApp {
             return;
         };
         let trace_budget = self.jobs().trace_budget();
-        let trace_handle = scan_trace_handle(
-            &request.target_root,
-            &request.run_id,
-            ticket.sink(),
-            trace_budget.clone(),
-        );
+        let attempt_id = kuzushi_core::run_lifecycle::RunAttemptId::new();
+        let task_id = kuzushi_core::run_lifecycle::RunTaskId::new();
+        let trace_handle =
+            match prepare_scan_launch(&request, &ticket, trace_budget, Some(attempt_id), task_id) {
+                Ok(trace) => trace,
+                Err(error) => {
+                    ticket.fail(format!("could not start scan: {error:#}"));
+                    ticket.complete();
+                    return;
+                }
+            };
         let cancel = ticket.cancel.clone();
 
         self.begin_run_cost_tracking(&request.run_id, runtime_backed);
-        self.begin_scan_state(&request, cancel.clone());
+        self.begin_scan_state(&request, cancel.clone(), attempt_id);
         self.spawn_scan_worker(request, ticket, trace_handle, cancel);
     }
 
@@ -126,7 +131,12 @@ impl ShellApp {
             .unwrap_or_default()
     }
 
-    fn begin_scan_state(&mut self, request: &ScanStartRequest, cancel: ScanCancellation) {
+    fn begin_scan_state(
+        &mut self,
+        request: &ScanStartRequest,
+        cancel: ScanCancellation,
+        attempt_id: kuzushi_core::run_lifecycle::RunAttemptId,
+    ) {
         self.set_target(Some(request.target_root.clone()));
         self.set_scan_panel(Some(queued_scan_panel(
             &request.target_root,
@@ -141,7 +151,9 @@ impl ShellApp {
             &request.input,
             self.config(),
         ));
-        self.set_activity(Some(self.pending_scan_activity(&request.run_id)));
+        self.set_activity(Some(
+            self.pending_scan_activity(&request.run_id, attempt_id),
+        ));
         self.record_session_event(kuzushi_core::session_transcript::SessionEvent::RunStarted {
             run_id: request.run_id.clone(),
             tool_name: "sast:scan".to_string(),
@@ -153,9 +165,13 @@ impl ShellApp {
         self.log_scan_start(&request.target_root, &request.effective_options);
     }
 
-    fn pending_scan_activity(&self, run_id: &str) -> ActivitySession {
-        let mut session = ActivitySession::for_phase(run_id, crate::app::WorkflowPhase::Scan);
-        session.seed_from_registry(self.registry());
+    fn pending_scan_activity(
+        &self,
+        run_id: &str,
+        attempt_id: kuzushi_core::run_lifecycle::RunAttemptId,
+    ) -> ActivitySession {
+        let session = ActivitySession::for_phase(run_id, crate::app::WorkflowPhase::Scan)
+            .with_phase_attempt_id(attempt_id);
         self.capture_run_focus_origin(session)
     }
 
@@ -312,6 +328,57 @@ fn initialized_scan_workspace(target: &PathBuf) -> Result<WorkspaceTarget> {
     Ok(workspace)
 }
 
+fn prepare_scan_launch(
+    request: &ScanStartRequest,
+    ticket: &JobTicket,
+    trace_budget: LiveTraceBudget,
+    attempt_id: Option<kuzushi_core::run_lifecycle::RunAttemptId>,
+    task_id: kuzushi_core::run_lifecycle::RunTaskId,
+) -> Result<TraceHandle> {
+    persist_scan_run_start(request)?;
+    let trace = scan_trace_handle(
+        &request.target_root,
+        &request.run_id,
+        ticket.sink(),
+        trace_budget,
+        attempt_id,
+        task_id,
+    );
+    trace.map_err(|error| fail_persisted_scan_launch(request, error))
+}
+
+fn fail_persisted_scan_launch(request: &ScanStartRequest, error: anyhow::Error) -> anyhow::Error {
+    let message = format!("typed scan trace could not start: {error:#}");
+    let record = kuzushi_core::run_artifacts::ToolRunRecord::new(
+        &request.target_root,
+        &request.run_id,
+        "scan",
+        "sast:scan",
+    );
+    match kuzushi_core::run_artifacts::try_record_tool_run_failed(record, &message) {
+        Ok(()) => anyhow::anyhow!(message),
+        Err(finalization) => anyhow::anyhow!(
+            "{message}; additionally, scan start failure finalization reported: {finalization:#}"
+        ),
+    }
+}
+
+fn persist_scan_run_start(request: &ScanStartRequest) -> Result<()> {
+    let record = kuzushi_core::run_artifacts::ToolRunRecord::new(
+        &request.target_root,
+        &request.run_id,
+        "scan",
+        "sast:scan",
+    );
+    kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
+        record,
+        &request.input,
+        kuzushi_core::tool_execution_model("sast:scan", &request.input, &request.config),
+        kuzushi_core::config_hash(&request.config).ok(),
+        request.registry.loaded_module_specifiers(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,10 +386,12 @@ mod tests {
     #[test]
     fn pending_scan_activity_captures_scan_as_its_launch_phase() {
         let app = ShellApp::new(V2Config::default(), None);
+        let attempt_id = kuzushi_core::run_lifecycle::RunAttemptId::new();
 
-        let session = app.pending_scan_activity("scan-origin");
+        let session = app.pending_scan_activity("scan-origin", attempt_id);
 
         assert_eq!(session.origin_phase, Some(crate::app::WorkflowPhase::Scan));
+        assert_eq!(session.phase_attempt_id, Some(attempt_id));
     }
 
     #[test]
@@ -333,5 +402,106 @@ mod tests {
 
         assert!(workspace.root().join(".kuzushi/.gitignore").is_file());
         assert!(workspace.state_dir().is_dir());
+    }
+
+    #[test]
+    fn scan_launch_persists_exact_input_and_execution_model_before_dispatch() {
+        let target = tempfile::tempdir().unwrap();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-test".to_string());
+        let input = serde_json::json!({
+            "runId": "scan-launch",
+            "triage": true,
+            "model": "openai:gpt-test"
+        });
+        let request = ScanStartRequest {
+            run_id: "scan-launch".to_string(),
+            target_root: target.path().to_path_buf(),
+            db_path: target.path().join("findings.sqlite"),
+            input: input.clone(),
+            effective_options: Vec::new(),
+            registry: ModuleRegistry::with_v2_builtins(),
+            config,
+            thinking_level: None,
+        };
+
+        persist_scan_run_start(&request).unwrap();
+
+        let summary = kuzushi_core::load_run_summary(target.path(), "scan-launch").unwrap();
+        assert_eq!(summary.status, "running");
+        assert_eq!(summary.tool.as_deref(), Some("sast:scan"));
+        assert_eq!(summary.model.as_deref(), Some("openai:gpt-test"));
+        let kuzushi_core::RunArtifactRead::Ready { value, .. } =
+            kuzushi_core::read_run_artifact_text(target.path(), "scan-launch", "input.json")
+        else {
+            panic!("canonical scan input must be readable before dispatch");
+        };
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&value).unwrap(),
+            input
+        );
+    }
+
+    #[test]
+    fn failed_scan_start_does_not_emit_a_typed_stream_without_run_metadata() {
+        let target = tempfile::tempdir().unwrap();
+        let request = test_scan_start_request(target.path(), "scan-start-failed");
+        let metadata = kuzushi_core::run_artifacts::run_artifact_path(
+            target.path(),
+            "scan-start-failed",
+            "run.json",
+        );
+        std::fs::create_dir_all(&metadata).unwrap();
+        let mut jobs = JobHub::default();
+        let ticket = jobs.start(JobKind::Run, "scan");
+
+        let launched = prepare_scan_launch(
+            &request,
+            &ticket,
+            LiveTraceBudget::new(),
+            Some(kuzushi_core::run_lifecycle::RunAttemptId::new()),
+            kuzushi_core::run_lifecycle::RunTaskId::new(),
+        );
+
+        assert!(launched.is_err());
+        assert!(!kuzushi_core::run_dir(target.path(), "scan-start-failed")
+            .join("items.jsonl")
+            .exists());
+        assert!(jobs.drain(8).is_empty());
+    }
+
+    #[test]
+    fn trace_initialization_failure_terminalizes_seeded_run_without_activating_scan() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "scan-trace-start-failed";
+        let request = test_scan_start_request(target.path(), run_id);
+        let items_path =
+            kuzushi_core::run_artifacts::run_artifact_path(target.path(), run_id, "items.jsonl");
+        std::fs::create_dir_all(items_path).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        app.start_prepared_scan(request);
+
+        let summary = kuzushi_core::load_run_summary(target.path(), run_id).unwrap();
+        assert_eq!(summary.status, "failed");
+        assert!(summary
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("typed scan trace could not start")));
+        assert!(app.scan().is_none());
+        assert!(app.activity().is_none());
+    }
+
+    fn test_scan_start_request(target: &std::path::Path, run_id: &str) -> ScanStartRequest {
+        ScanStartRequest {
+            run_id: run_id.to_string(),
+            target_root: target.to_path_buf(),
+            db_path: target.join("findings.sqlite"),
+            input: serde_json::json!({"runId": run_id}),
+            effective_options: Vec::new(),
+            registry: ModuleRegistry::with_v2_builtins(),
+            config: V2Config::default(),
+            thinking_level: None,
+        }
     }
 }

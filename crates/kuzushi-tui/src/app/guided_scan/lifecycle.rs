@@ -19,17 +19,15 @@ impl ShellApp {
     }
 
     pub(crate) fn guided_scan_is_awaiting(&self, phase: WorkflowPhase) -> bool {
-        self.engagement
-            .guided_scan()
-            .is_some_and(|flow| {
-                matches!(
-                    flow.stage(),
-                    GuidedScanStage::AwaitingResult {
-                        phase: result_phase,
-                        ..
-                    } if result_phase == phase
-                )
-            })
+        self.engagement.guided_scan().is_some_and(|flow| {
+            matches!(
+                flow.stage(),
+                GuidedScanStage::AwaitingResult {
+                    phase: result_phase,
+                    ..
+                } if result_phase == phase
+            )
+        })
     }
 
     pub(crate) fn bind_guided_phase_result(
@@ -111,9 +109,15 @@ impl ShellApp {
     }
 
     pub(super) fn has_accepted_map(&self) -> bool {
+        if self.engagement.phase_attempt_projection_is_degraded() {
+            return false;
+        }
         self.engagement
             .selected_phase_attempt(WorkflowPhase::Map)
-            .is_some()
+            .is_some_and(|record| {
+                self.effective_phase_attempt_blocker(&record.completed)
+                    .is_none()
+            })
     }
 
     pub(super) fn has_prior_map_artifacts(&self) -> bool {

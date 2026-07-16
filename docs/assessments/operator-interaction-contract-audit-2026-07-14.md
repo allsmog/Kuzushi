@@ -1,18 +1,46 @@
 # Kuzushi Operator-Interaction Contract Audit — 2026-07-14
 
-Status: remediation complete for the reproduced defects. Final aggregate gates
-and the clean final-7 Prove/Fix replay are running; until those finish, this
-report does not claim the completion gate.
+Status: completion gate met for all forty-five reproduced operator-contract
+failures. Frozen final12 provides compiled detached-terminal closure for the
+compact Map matrix, authoritative Prove/Fix lifecycle, and shell SAST path;
+canonical artifacts agree with each visible result. Its immutable manifest,
+formatting, diff, documentation, CRAP-risk, full TUI/core/CLI suites, and
+touched-crate Clippy all pass. The earlier final11 Prove/Fix and core-suite
+failures remain recorded as historical negative evidence rather than being
+rewritten as passes.
 
 ## Executive summary
 
-The audit reproduced twenty-six material operator-contract failures in the
-compiled Rust/Ratatui shell. Frozen pre-fix and post-fix binaries prove them
-through real Warp and detached-tmux journeys. Aggregate testing of the
-concurrent adaptive Workbench work exposed zoom and compact-layout defects,
-executor tracing found an accepted integer silently rewritten after descriptor
-preparation, and later cancellation, Jobs, Prove/Fix, and key-remap replays
-found eleven more attention, identity, and durable-lineage failures that focused
+The audit reproduced forty-five material operator-contract failures in the compiled
+Rust/Ratatui shell. Frozen pre-fix and post-fix binaries prove F-01 through F-24
+through real Warp and detached-tmux journeys. Final7 Prove/Fix, approval,
+credential, and picker replays reproduced F-25 through F-38; a provisional
+replay then reproduced F-39. Frozen final8 closes F-27 through F-39 and proves
+the bottom Map/question contract at 40x12, 60x20, 80x24, 120x36, and 160x48.
+Its honest Prove replay exposed F-40 instead: canonical verification completed,
+but the typed lifecycle projection rejected a model call shape that the schema
+itself emits, degraded the stream, and refused the phase receipt. Frozen final9
+closes that reducer defect, then proves `Use proof set` materialized durable
+proof before selection and that restart derived Fix. The same journey reached
+reviewed patch application before finding F-41: Prompt mode advertised literal
+`v` even though only Navigate owned reverify. A diagnostic Navigate replay then
+found F-42: the nested detector reused its parent task identity, degraded a
+contiguous successful run, and suppressed the Fix receipt. Current shell SAST
+integration also exposed F-43's missing plan scope, while the core run-artifact
+suite exposed F-44's second-writer `flock` self-deadlock. Frozen final11 then
+proved the mode-aware reverify control and distinct nested task identity, but
+exposed F-45: a new `patch:reverify` run reused the already-selected Fix attempt
+ID, so persistence rejected its receipt as a
+`divergent duplicate phase-attempt v2 event`. Frozen final12 mints a fresh
+attempt for every new phase run while
+preserving the existing attempt only for an active Run Focus continuation. Its
+authoritative detached replay now reaches the verified acknowledgement and
+reconstructs `STATE  Verified` after restart. Aggregate testing of
+the concurrent adaptive Workbench work
+exposed zoom and compact-layout defects, executor tracing found an accepted
+integer silently rewritten after descriptor preparation, and later
+cancellation, Jobs, Prove/Fix, approval, onboarding, and typed-run replays found
+attention, identity, authorization, and durable-lineage failures that focused
 unit tests had missed.
 
 The highest-impact failure was value loss across the guided Scan boundary. The
@@ -83,22 +111,52 @@ the same boundary. An unresolved result's advertised Esc also did nothing, and
 a remapped Prompt key produced contradictory footer/composer hints; final-7
 uses the runtime keymap consistently and retains result-card first ownership.
 
-That clean replay then found two final semantic gaps above the now-correct
-lineage: choosing the advertised `Use proof set` recorded a selected attempt
-without materializing proof on the finding, and a durably verified/restarted
-patch still carried generic unresolved-candidate copy. Both fixes are in
-progress and require a successor binary/replay before this report can close.
+That clean replay then found two semantic gaps above the now-correct lineage:
+choosing the advertised `Use proof set` recorded a selected attempt without
+materializing proof on the finding, and a durably verified/restarted patch still
+carried generic unresolved-candidate copy. The current implementation now
+materializes and validates proof reality before recording selection, and binds
+the verified acknowledgement card to the exact `patch:reverify` run and patch
+lifecycle.
+
+The final7 approval and credential matrix added twelve more failures. Approval
+cards leaked printable, history, and paste input into the hidden composer;
+remembered denial was not enforced; and descriptor approval advertised a
+remembered allow that policy intentionally rejects. Credential and target
+pickers advertised controls they did not honor, let shortcut letters preempt
+valid secret input, hid OAuth failure causes, retained stale errors after valid
+input, omitted word deletion, leaked Ctrl/Alt chords into the hidden composer,
+and described the wrong `q`/Esc destinations. Frozen final8 proves the repaired
+first-key ownership and decision capability, secret-safe editing and
+acknowledgements, exact OAuth failure causes, stored-OAuth and environment-ready
+branches, modifier ownership, and focus-specific footer copy across 52 isolated
+detached sessions. The manifests verify 356 credential evidence files and 604
+approval evidence files; five secret scans and all 24 modifier/cursor
+comparisons pass.
+
+Final9 aggregate evidence remains historically non-green: its full TUI suite
+finished with 2,104 passed and five failed, and CRAP-risk reported four
+violations across three functions. Final11 improved that result—TUI passed
+2,115/2,115 and CLI passed 285/285—but its core suite failed 3,351/1 on a
+deterministic stale privacy-label assertion, and its Prove/Fix replay exposed
+F-45. Final12 static gates pass, its compact Map matrix passes 5/5, and its
+authoritative Prove/Fix journey closes F-25/F-26/F-41/F-42/F-45. The positive
+shell SAST journey closes F-43 and exercises F-44 through the exact manual
+`secret-scan` plan without plan-scope loss, projection degradation, receipt
+loss, or writer deadlock. The frozen aggregate passes 5,754/5,754 tests, the
+post-suite manifest recheck passes 57,933/57,933 entries, and the combined
+core/TUI/CLI Clippy invocation passes with warnings denied.
 
 ## Provenance and safety record
 
 | Item | Recorded value |
 |---|---|
 | Repository | `/Users/operator/vibe-code/Kuzushi` |
-| Branch | `codex/atlas-native-cockpit` |
-| HEAD / upstream | `76974ccf5ce94f2cc099489ab4dcadfb1f5cb440` / same |
+| Branch | code&#120;/atlas-native-cockpit |
+| HEAD / upstream | `ed5e6db27c4aebd7b7ef9397d0de7ebdd5223f88` / origin/code&#120;/atlas-native-cockpit at the same commit |
 | Version | `0.24.0-alpha.8` |
 | Initial worktree | 396 tracked changes and 89 untracked paths; none staged; all treated as user-owned |
-| Current worktree | Concurrently changing during the audit; unrelated changes were neither discarded nor normalized |
+| Final12 freeze worktree | 175 tracked changes and 9 untracked paths; all preserved without cleanup in `final12-provenance/worktree-status.txt` |
 | Baseline binary | `/private/tmp/kuzushi-operator-contract-audit-019f621b/bin/kuzushi-baseline` |
 | Baseline SHA-256 | `98439483511b797452cfeed34c376781b1c936ddc696e7ad12aec651bd99068a` |
 | Baseline size/time | 157,172,472 bytes; 2026-07-14 12:19:09 -0700 |
@@ -123,6 +181,27 @@ progress and require a successor binary/replay before this report can close.
 | Frozen fixed binary 7 | `/private/tmp/kuzushi-operator-contract-audit-019f621b/bin/kuzushi-fixed-final7` |
 | Fixed-7 SHA-256 | `500cedf2b1b21d1bd59d0338ca23ebeed3a01ace09d9d04a4e3876ca805bf7c2` |
 | Fixed-7 size/time | 158,528,696 bytes; 2026-07-14 17:46:21 -0700 |
+| Frozen fixed binary 8 | `/private/tmp/kuzushi-operator-contract-audit-019f621b/bin/kuzushi-fixed-final8` |
+| Fixed-8 SHA-256 / size | `ca2fb5937f99edb1b4a757a7c377a59e67dadc87d43059a7d8d4dbf39a886a02`; 162,667,240 bytes |
+| Fixed-8 source snapshot | `/private/tmp/kuzushi-operator-contract-audit-019f621b/source-final8-snapshot-1` |
+| Fixed-8 source fingerprint | `e606aab7e44863410c1595b0282bf4c1ffa683c6b844fa6610143b521c75b05c` |
+| Frozen fixed binary 9 | `/private/tmp/kuzushi-operator-contract-audit-019f621b/bin/kuzushi-fixed-final9` |
+| Fixed-9 SHA-256 / size | `4964fa1bcb0b7beb109824ac7ad2b97f46681665052d806c1b5706491d529a74`; 163,076,504 bytes |
+| Fixed-9 version | `kuzushi 0.24.0-alpha.8 (ed5e6db27+dirty · debug)` |
+| Fixed-9 source snapshot | `/private/tmp/kuzushi-operator-contract-audit-019f621b/source-final9-snapshot-1`; finished `2026-07-15T04:36:18Z` |
+| Fixed-9 source fingerprint | `cfc70d5fbce16d33e91dc4e3bc7c56304eba454a9f7d3398de66a361becab829` |
+| Fixed-9 provenance | `/private/tmp/kuzushi-operator-contract-audit-019f621b/final9-provenance`; 19,345-entry immutable source manifest |
+| Frozen fixed binary 11 | `/private/tmp/kuzushi-operator-contract-audit-019f621b/bin/kuzushi-fixed-final11` |
+| Fixed-11 SHA-256 / size | `b2ba075ec4004edaaca81d8271ddf12c78435bc257c0b896d980ec019b46fdca`; 163,133,560 bytes |
+| Fixed-11 source snapshot / fingerprint | `/private/tmp/kuzushi-operator-contract-audit-019f621b/source-final11-snapshot-1`; `08d17a759787d584a4ae2d3003ebcd676d0698ef222af1c44b081063551bfec6` |
+| Frozen fixed binary 12 | `/private/tmp/kuzushi-operator-contract-audit-019f621b/bin/kuzushi-fixed-final12` |
+| Fixed-12 SHA-256 / size | `36b1d090cb8adac3a05c2558f35d18c142fea866b9efa5e438d43951c8183109`; 163,116,760 bytes |
+| Fixed-12 version / frozen UTC | `kuzushi 0.24.0-alpha.8 (ed5e6db27+dirty · debug)`; `2026-07-15T05:46:07Z` |
+| Fixed-12 source snapshot | `/private/tmp/kuzushi-operator-contract-audit-019f621b/source-final12-snapshot-1` |
+| Fixed-12 source fingerprint / manifest | `2105459073c958123818de362527acd6e5f7e97acd98036be42635791ca08b7b`; 57,933 entries |
+| Fixed-12 compact evidence | 5/5 terminal sizes; 696/696 checksum entries verified |
+| Fixed-12 aggregate evidence | 5,754/5,754 tests; 522.33 s real; record SHA-256 `e8db512bf318f7933dfb68bd01a19c287df4275a11f962c9a3f7f537517d3943` |
+| Fixed-12 Clippy evidence | core/TUI/CLI all targets with warnings denied; 54.21 s real; log SHA-256 `c0e4dadea667290c2bbe82b07ecccbcd4f723930caa5ef9fad7a82dfcacb131f` |
 | Interactive terminals | Dedicated Warp window for physical-key/paste proof; detached tmux for all later work |
 | Alternate-screen capture | `alternate_on=1`; current screen captured with `tmux capture-pane -p -e`, never inferred from an empty normal-pane capture |
 | Desktop-focus policy | After the operator requested no focus stealing, no AppleScript, click, raise, or Warp focus operation was used |
@@ -147,7 +226,9 @@ operator configuration.
    value through planning, preparation, dispatch, run input, receipt, and
    restart projection where that value is durable.
 7. Advance Map/Scan/Review/Prove/Fix only from canonical target/revision
-   evidence. Page visits and focus changes never forge reality.
+   evidence. Every newly dispatched phase run gets a fresh attempt identity;
+   only an active Run Focus continuation retains its existing attempt. Page
+   visits and focus changes never forge reality.
 8. Preserve the exact workflow origin through Run Focus, backgrounding, Jobs,
    Replay, Trace, Activity, Report, and modal replacement.
 9. On restart, reconstruct only from canonical run, phase-attempt, finding,
@@ -182,9 +263,20 @@ means a bounded branch was proven but the full requested matrix was not.
 | Live cancel → Jobs → stable queued work → canceled result | F16, 80×24 detached tmux | FAIL for Jobs state, selector identity, and result label | PASS | [Final-6 record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/F16-cancel-jobs-final6/AUDIT-RECORD.md); scoped cancellation, process cleanup, stable `queued-2`, one drain, durable canceled identity |
 | Waiting agent canceled by the exact Jobs display ID | F20, 120×36 detached tmux | FAIL | PASS | [Final-6 record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/F20-jobs-agent-display-id-final6/AUDIT-RECORD.md); `WAITING INPUT → canceling → canceled`, restart agrees |
 | Remapped result-card Prompt key and advertised hints | F21, 80×24 detached tmux | FAIL for hardcoded composer hint | PASS | [Final-7 record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/F21-phase-result-remap-final7/AUDIT-RECORD.md); footer/composer both say `x prompt`, Esc/a owned, x enters Prompt |
-| Native finding → Prove → Fix → apply → reverify → restart | Fresh deterministic target, 120×36 detached tmux | FAIL for verification and detector identity | PASS for required lineage/lifecycle; two new semantic failures | [Final-7 record](/private/tmp/kuzushi-operator-contract-audit-019f621b/prove-fix-final7/AUDIT-RECORD.md): all required assertions pass without synthetic binding; proof-selection reality and verified-card copy are now being remediated |
+| Native finding → Prove → Fix → apply → reverify → acknowledge → restart | Fresh deterministic target, 120×36 detached tmux | FAIL across F-20/F-25/F-26/F-40/F-41/F-42/F-45 | PASS in final12 | [Final12 authoritative record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-authoritative-f25-f26-f41-f42-f45/AUDIT-RECORD.md): 23/23 detached alternate-screen captures, five canonical runs, exact proof/patch/application/reverify lineage, verified acknowledgement, and final restart |
+| Prove `Use proof set` → durable finding proof → restart | Fresh native final12 target | FAIL in final7: selected disposition without finding proof | PASS | Verification run `tool-1784094869-027db6743013`; proof event precedes selected disposition `e79a2c67-0bc5-4b1d-8282-ca3ae802aef9`; restart derives Fix |
+| Applied Fix → advertised reverify control | Same native final12 target, Prompt then Navigate | FAIL in final9: Prompt advertised `v`, but literal `v` entered the composer | PASS | Captures 13–14b show Prompt `F2 then v`, Navigate-owned `v`, and the exact canonical `patch:reverify` draft |
+| Reverify nested detector → typed Fix receipt | Same native final12 target, Navigate | FAIL in final9: successful stream degraded on nested task identity reuse | PASS | Run `tool-1784094895-a47b85fc9f4b` uses distinct parent/nested task IDs, remains gap-free and non-degraded, and produces the Fix receipt |
+| New Fix run after selected patch attempt | Final11 then final12 native target | FAIL in final11: reverify reused selected attempt and persistence rejected a divergent duplicate | PASS | Final12 patch attempt `902cb5b6-17b2-4b0e-9202-e3e930d2b273` and reverify attempt `f8625687-43fd-4644-ac30-00c12d3300b6` are distinct |
+| Verified Fix result → acknowledge → restart | Same native final12 target | FAIL in final7; blocked by later defects in final9/final11 | PASS | Capture 17 advertises `u Acknowledge verified`; selection persists the reverify attempt; capture 19 reconstructs `STATE  Verified` without reopening the result |
+| Shell SAST dispatch → accepted plan → deterministic engines | Manual `secret-scan` fixture, 120×36 detached tmux | FAIL: `run observation has no plan scope`; deterministic paths produced 0 findings | PASS | [Final12 positive shell SAST record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-positive-shell-sast/README.md): literal `taskMode=manual`, `tasks=[secret-scan]`, `maxFindings=5`; canonical run `tool-1784095019-3295287ba435`; one finding; distinct parent/engine tasks; healthy seq 1–13 |
+| SAST terminal metadata with a live run-item writer | Same final12 shell run plus frozen aggregate | FAIL: pre-fix integration executable remained hung after 17 minutes | PASS | The positive shell run completes without receipt loss or deadlock; final12 core suite passes 3,352/3,352 and full aggregate passes 5,754/5,754 |
+| Approval ownership and y/Y/n/N scope matrix | Copied final7 Prove target, isolated HOME/TMPDIR, 120×36 detached tmux | FAIL for first-key ownership, remembered deny, and descriptor-Y copy | PASS | [Final-8 approval record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/approvals/AUDIT-RECORD.md): exclusive ownership, enforced `N`, truthful no-`Y`, 604/604 evidence hashes |
+| Credential API/OAuth/Offline editor and recovery matrix | Fresh isolated Git targets/HOME/TMPDIR/XDG, 40×12/60×20/120×36 detached tmux | FAIL for command focus, notice ownership, shortcut collisions, OAuth visibility, acknowledgement, deletion, and chord ownership | PASS | [Final-8 credential record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/credentials/FINAL-AUDIT-RECORD.md): 49/49 provenance assertions, 24/24 chord checks, 5/5 secret scans, 356/356 evidence hashes |
+| Prompt-focused Target picker → first Esc → targetless browse | Fresh isolated Git target, 40×12/60×20/120×36 detached tmux | FAIL: footer advertised browse on the first Esc | PASS | [Final-8 umbrella record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/FINAL-AUDIT-RECORD.md), F-38; first Esc restores list focus, second browses targetless |
+| Remapped Prompt-mode `x` → literal command → descriptor validation | Fresh isolated Git target/config, 120×36 detached tmux | FAIL: `maxIterations` became `maIterations` | PASS | [Final-8 F39 record](/private/tmp/kuzushi-operator-contract-audit-019f621b/FINAL8-AUTHORITATIVE-F25-F26-F39-RECORD.md): visible draft, transcript, and shell history retain exact `maxIterations` |
 | Plain/non-TTY target truth | J16 | — | PASS | `scripts/devex/artifacts/20260714-134942/J16` — 5 pass, 0 fail |
-| Compact Prove normal → zoom → Map bottom composer → restart ResultReady | Final-3 demo plus final-5 Map repeat, 40×12 detached tmux | FAIL for compact clipping | PASS | Final-3 `01` through `04`; final-5 bottom row is `◇ MAP › map-bottom-final5`; all captures `alternate_on=1` |
+| Compact Map-bottom question, literal BackTab, and mode ownership | Selected-current-Map fixture, 40×12/60×20/80×24/120×36/160×48 detached tmux | FAIL for earlier compact clipping | PASS at all five sizes | [Final12 compact matrix](/private/tmp/kuzushi-operator-contract-audit-019f621b/compact-map-final12-matrix/AUDIT-RECORD.md): detached `attached=0`, alternate screen active, composer on the last row, question/progress/default/NEXT/Enter visible, and literal `ESC[Z` card-owned |
 
 ## Fixture matrix
 
@@ -207,7 +299,15 @@ means a bounded branch was proven but the full requested matrix was not.
 | F15 | Contextual origin and Activity input | Hydrated Review fixture with canonical run `scan-1784070138-0a32bfe8df97`; phase/run hashes inventoried before and after | PASS after composer/history fixes; no durable mutation |
 | F16 | Stable pending-work identity | Live Semgrep plus `queued-1` secret and `queued-2` license; first row removed before a delayed retry | PASS; license remains `queued-2`, stale `queued-1` cannot hit it, then drains once after the live run terminates |
 | F17 | Background work waiting for input | Agent run `agent-1784075953-05e2b2cfa0f2`, full ID compacted to `b2cfa0f2` in Jobs | PASS; the literal displayed ID targets the same generation and persists canceled through restart |
-| F18 | Native detector finding and patch lifecycle | Fresh git target `e9fe4dfa…`, real Secret Scan, deterministic triage/verify/patch bridges, reviewed source mutation | PASS for native detector binding, strict verification, approval/apply/reverify, and restart; follow-up defects F-25/F-26 remain in remediation |
+| F18 | Native detector finding and patch lifecycle | Fresh git target `e9fe4dfa…`, real Secret Scan, deterministic triage/verify/patch bridges, reviewed source mutation | PASS for native detector binding, strict verification, approval/apply/reverify, and restart; final7 reproduced F-25/F-26 above that lineage |
+| F19 | Approval decision and memory scope | Three independent copies of the eight-run F18 seed; source hash `43136769…`; isolated HOME/TMPDIR/XDG; exact descriptor target scope | PASS in final8: card owns hostile keys/paste; `N` blocks exact redispatch with 8 → 8 runs; unsupported `Y` is a no-op and lowercase `y` executes once before fresh redispatch approval |
+| F20 | Credential missing / editor / OAuth failure/ready | 49 fresh empty Git targets with isolated HOME/TMPDIR/XDG; no real credentials; false/missing bridge plus synthetic API-env and stored-OAuth ready fixtures | PASS in final8 at 40×12/60×20/120×36; 49/49 binary assertions, 24/24 chord comparisons, 5/5 secret scans |
+| F21 | Prompt-focused Target picker | Fresh empty Git target; no selected target; target-picker list opened, `:` focused shared prompt, draft visible before Esc | PASS in final8: first Esc returns to picker, second list-focused Esc browses targetless; no target/state mutation |
+| F22 | Final9 native proof and remediation lifecycle | Fresh Git target at `8589f732ddc837bdbcd41af60c47a4c2d055979e`; one real Secret Scan finding; deterministic triage/verify/patch; isolated HOME; 120×36 detached tmux | PASS through proof materialization, restart-derived Fix, explicit patch selection, and application; F-41/F-42 block verified acknowledgement |
+| F23 | Shell SAST deterministic-finding integration | Frozen-final9 focused failures plus final12 compiled shell at fixture commit `295a1837…`, literal manual Secret Scan, `maxFindings=5` | PASS in final12: canonical prepared input preserved, one finding, seq 1–13 hash-linked, distinct parent/engine task identity, and no plan-scope or degradation error |
+| F24 | Live SAST observation writer | Pre-fix sampled core deadlock; final12 positive shell completion and frozen core aggregate | PASS in final12: shell receipt completes without deadlock; focused writer tests remain green; core aggregate passes 3,352/3,352 |
+| F25 | Final11 phase-attempt reuse | Fresh Git target `bfd5bbac…`; native detector, deterministic triage/verify/patch, selected Fix attempt, applied patch, then reverify in detached 120×36 tmux | FAIL as required for pre-fix proof: reverify completed but receipt persistence rejected `divergent duplicate phase-attempt v2 event`; no selectable verified result |
+| F26 | Final12 authoritative Prove/Fix lifecycle | Fresh Git target `86bb3ce9…`; isolated environment; five canonical runs; 23 detached 120×36 alternate-screen captures | PASS for F-25/F-26/F-41/F-42/F-45: distinct Fix attempts, verified acknowledgement, restart reconstruction, gap-free projection, and secret-safe logs |
 
 Full F10 fixture commands, hashes, and canonical-artifact inventory are in
 [`AUDIT-RECORD.md`](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/F10-clean-zero/AUDIT-RECORD.md).
@@ -220,7 +320,7 @@ Full F10 fixture commands, hashes, and canonical-artifact inventory are in
 | Guided module selection | Runnable phase tasks loaded | Continue row focused; Space/Enter toggle module; `c` Continue; Tab Other | Configure exact runnable tasks | None until launch | Other lookup failure stays open; valid match is additive, acknowledged, and does not advance automatically |
 | Guided Context prerequisite | Selected Map task requires missing context | Recommended Build Context; Enter or explicit alternative | Context build then same generation resumes | Context artifacts only after successful build | Cached context removes this stage; Esc preserves selection |
 | Descriptor option choice | Exact execution-plan task has visible `OptionSpec` | Prepared/default value; Enter keep, arrows/numbers, Tab Other, `a` remaining defaults | Next descriptor option or Run Focus | Scoped planning override only | Invalid type or range keeps the exact draft plus a precise error; accepted value names canonical option; cached/skipped tasks cannot create questions |
-| Guided Other editor | Supported Other explicitly opened | Visible `EditorState` cursor; printable/Shift, paste, arrows, Backspace, Ctrl+W/Alt+Backspace, Enter, Esc | Validated parent state or same editor with error | No raw draft event/log | Esc returns to prior selection; multiline paste stays one explicit placeholder/submission; long drafts keep the cursor-centered tail visible |
+| Guided Other editor | Supported Other explicitly opened | Visible `EditorState` cursor; printable/Shift, paste, arrows, Backspace, Ctrl+W/Alt+Backspace, Enter, Esc | Accepted parent state or same editor with error | No raw draft event/log | Esc returns to prior selection; multiline paste stays one explicit placeholder/submission; long drafts keep the cursor-centered tail visible |
 | Phase result — Prompt | Unresolved completed/partial/failed attempt while composer owns input | Composer; `F2 Navigate` (or resolved override) is the only result control advertised; global NEXT repeats the card recommendation | Navigate mode | None | Literal result letters remain composer input; draft-blocked and unbound states are disclosed; generic phase-run hints are suppressed |
 | Phase result — Navigate | Same card with Navigate active | Only allowed result actions (`u/n/o/f/r/d` by outcome) plus the runtime-keymap Prompt binding; result card retains sole next-action ownership | Select/continue, Replay, rerun, discard, or Prompt mode | Typed attempt disposition only for resolving actions | Default Esc or remapped `x` enters Prompt without resolving; an unbound/remapped Esc is a scoped no-op; footer and composer disclose the same binding; ordinary printable input cannot leak |
 | Dynamic choice | Live worker emits matching run/request/generation | Bottom Activity card; Enter, Esc, `b`, arrows, `j/k`, numbers, Tab only with Other | Submitting, backgrounded, canceled, or Other | No answer text persisted by UI | Card owns keys first; background never steals focus; stale IDs are refused by worker boundary |
@@ -230,8 +330,31 @@ Full F10 fixture commands, hashes, and canonical-artifact inventory are in
 | Activity — Prompt | Esc from Activity Navigate | Visible bottom composer; printable/Shift/paste and commands | Command target or F2 back to Navigate | Only the submitted command's normal effects | Draft is visible at 40×12, 100×30, and 120×36; Jobs Esc restores Activity/Prompt exactly |
 | Contextual deck replacement | Jobs/Replay/Trace/Scene opens over a workflow origin | Deck owns its controls; replacements retain one origin; Esc closes | Exact original view and input mode | None for navigation alone | Decks are history-transparent; a later `back` continues beneath the restored origin instead of reopening a departed deck |
 | Clean Scan Report destination | Accepted current Scan has zero candidates | `next` advertised as Report | Report, then Esc/`q` restores exact Scan/Prompt origin | None | PASS in fixed-2; restart preserves the same run/reality |
+| Prove result selection | Completed current-target Prove attempt is unresolved | Navigate owns `u Use proof set` / `n Use & Fix`; canonical proof runs must validate first | Finding proof becomes durable, then disposition resolves and journey derives Fix | Verification event plus selected attempt disposition, in that order | Any stale generation, target/revision mismatch, unsupported tool, incomplete run, or digest mismatch leaves the result unresolved with a precise visible error; restart derives from finding proof, not page navigation |
+| Verified Fix result | Exact attempt run ref is the verified lifecycle's `patch:reverify` run | Navigate owns `u Acknowledge verified`, Open, Run again, Discard | Verified remediation acknowledgement or retained result | Selected disposition only; no patch is restaged | Unrelated lifecycle/run/tool cannot relabel a candidate; final12 capture 17 acknowledges the exact reverify attempt and capture 19 reconstructs Verified without reopening the card |
+| Applied Fix — Prompt | Selected reviewed patch is durably applied and requires reverify | Composer retains focus; the remediation action says `F2 then v`, the remapped Navigate binding, or `clear prompt then ...` when a draft blocks transfer | Navigate mode, or unchanged editable Prompt draft | None | Literal `v` remains composer text; final12 capture 13 visibly advertises mode entry beside the Prompt composer |
+| Applied Fix — Navigate | Same lifecycle with Navigate active | `v re-verify` is visibly actionable and owns the first key | `patch:reverify` Run Focus / receipt | A fresh Fix attempt and new run are created only after dispatch | Esc returns to Prompt without mutation; final12 uses distinct parent/nested task IDs and a reverify attempt different from the selected patch attempt |
+| Approval pending | Descriptor or input gate requests explicit approval | Card owns every key/paste first; applicable `y`, optional `Y`, `n`, `N`, Esc; Ctrl+C remains global | Dispatch once, remember exact scoped decision, deny, or remain pending | Session allow/deny set only when supported; dispatch creates normal run artifacts | Unsupported `Y` is consumed without resolving; remembered deny blocks before a run; different scope and restart ask again; no composer mutation |
+| Credential API-key editor | Setup Credentials opens with API row selected | API editor owns every unmodified printable from the first character, paste, Backspace/Delete, Ctrl+W/Alt+Backspace; `:` explicitly moves focus to shared prompt | Same hidden editor, aggregate Setup after accept/back, or prompt focus | Accepted value becomes session environment only; success notice is redacted | Empty/whitespace stays for correction with precise notice; first Esc dismisses a notice; editing clears stale auth notices; restart has no session secret |
+| Credential OAuth/Offline list | Operator moves off the API editor | Arrows and `j/k` move; Enter confirms; `d` is an advertised offline action; `q` returns to Setup; non-global Ctrl/Alt chords are swallowed by the picker | OAuth, offline demo, or aggregate Setup | OAuth credential only through the auth adapter; demo does not forge target state | OAuth exit/spawn failure returns to the same credential surface with exact visible cause; `q` destination copy matches aggregate Setup |
+| Target picker — Prompt focus | Literal `:` from the target list | Shared composer owns text/paste; footer says `Esc return to picker · Enter run` | First Esc clears draft and returns list focus; second list-focused Esc browses targetless | None | Focus-specific footer prevents the first Esc from advertising targetless browsing; target identity remains unset until explicit consent |
+
+Final12 terminal proof covers the compact question transition at all five
+required dimensions and the Applied/Verified Fix rows; final8 covers every
+approval, credential, and target-picker row above. The [final12 compact matrix](/private/tmp/kuzushi-operator-contract-audit-019f621b/compact-map-final12-matrix/AUDIT-RECORD.md)
+proves literal `ESC[Z` retains question ownership and a byte-identical card;
+the [approval/credential matrix](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/FINAL-AUDIT-RECORD.md)
+proves 12/12 interrupting-surface findings across 52 isolated detached
+sessions. The [final12 authoritative record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-authoritative-f25-f26-f41-f42-f45/AUDIT-RECORD.md)
+proves the Applied and Verified transitions, distinct attempt identities, and
+restart reconstruction in 23 detached alternate-screen captures.
 
 ## Keystroke and input matrix
+
+The first table is limited to guided questions, dynamic questions, result
+cards, and ordinary views. Approval and onboarding pickers are split into the
+second table because final7 reproduced different ownership failures there;
+their post-fix cells now carry frozen final8 compiled-terminal proof.
 
 | Input | Guided cards | Dynamic card | Result card / views | Verdict / evidence |
 |---|---|---|---|---|
@@ -246,8 +369,9 @@ Full F10 fixture commands, hashes, and canonical-artifact inventory are in
 | `c` | Explicit module Continue | — | — | PASS |
 | `a` | Accept remaining prepared defaults | — | — | PASS |
 | `b` | — | Background without cancellation | Run Focus background | PASS |
-| `o` / `u` | — | — | Open evidence / select Map | PASS in detached tmux |
+| `o` / `u` | — | — | Open evidence / select Map, canonical proof set, patch result, or verified remediation | PASS in detached tmux, including final12 proof selection, patch selection, and verified acknowledgement |
 | `r` / `d` / `f` | — | — | Result rerun/dismiss and Prove/Fix actions exercised across deterministic journeys | PASS for applicable cards; destructive apply still requires explicit approval |
+| `v` | — | — | Applied Fix reverify is Navigate-owned; Prompt advertises mode entry | FINAL9 FAIL preserved; FINAL12 PASS for `F2 then v`, Navigate-owned dispatch, exact draft, and approval |
 | Ctrl+C | Releases to shared two-stage cancellation | Releases to shared cancellation | Long-running cancel, canceling cleanup, durable canceled result, and two-stage exit | PASS in final-6 detached terminal |
 | Lowercase | Visible editor draft | Visible editor draft | Composer | PASS |
 | Shift uppercase / punctuation | Accepted by `EditorState` | Physical Warp `customA!` | Composer | PASS |
@@ -259,6 +383,26 @@ Full F10 fixture commands, hashes, and canonical-artifact inventory are in
 | Whitespace | Descriptor coercion/lookup trims only at validation boundary | Free-form remains an answer category | Composer preserves draft | PARTIAL; no exhaustive live leading/trailing matrix |
 | Long input | 512-character draft keeps tail and cursor visible without submit | Same editor implementation | Same shared prompt viewport | PASS for 512 ASCII and focused double-width Unicode; unbounded/O(n) remains a performance risk |
 | Unicode | Guided paste/editor accepted Unicode | Editor path uses Rust chars | Composer | PASS for editor path; not all descriptors permit arbitrary Unicode |
+
+### Approval, credential, and target-picker keys
+
+`FINAL8 PASS` means the frozen binary, active framebuffer, and mutation/privacy
+checks agree. The umbrella record reports 12/12 findings passed, 356/356
+credential and 604/604 approval evidence hashes, and no remaining dedicated
+tmux sessions.
+
+| Input | Frozen final7 approval | Frozen final7 Credentials / Target | Current fixed contract | Status |
+|---|---|---|---|---|
+| `y` / `n` / Esc | Allow/deny once and Esc-deny passed | Credential Esc navigated before dismissing a visible warning | Approval remains card-owned; credential notice consumes first Esc and remains in picker | FINAL8 PASS |
+| Shift `Y` / `N` | `N` recorded but did not enforce deny; descriptor `Y` was advertised despite mandatory fresh approval | Shift printable text was hidden correctly in API draft | Descriptor `Y` is unadvertised and inert; `N` blocks exact scope; Shift printable remains literal secret input | FINAL8 PASS; 8 → 8 runs on remembered deny, fresh card after once-allow |
+| Unrelated lowercase / Shift punctuation | Shift `A`, `!`, and ordinary printable input mutated the hidden composer | API `j/k/d/q` triggered picker actions; `q` could discard a nonempty draft | Pending approval consumes unrelated text; API row owns every printable from character one | FINAL8 PASS; approval frame byte-identical, API `j/k/d/q` retained |
+| `:` | — | API row stored it as one secret character; aggregate Setup ignored it | Opens shared prompt focus from API/OAuth/Offline/Setup without changing secret draft | FINAL8 PASS |
+| Up/Down and `j/k` | Up/Down loaded shared history behind approval | Navigation worked, but API `j/k` could not be typed | Approval consumes history keys; arrows/`j/k` navigate only non-editor auth rows | FINAL8 PASS |
+| Ctrl/Alt editor/history chords | Approval ownership failure included history mutation | Ctrl+U/K/A/E/P/W and Alt-Backspace could mutate the hidden shared composer; API word deletion was a no-op | Credential list owns all non-global modified chords; API editor handles Ctrl+W/real Meta-Backspace; prompt focus alone edits composer | FINAL8 PASS; 24/24 ANSI cursor comparisons, zero row-selection failures |
+| Normal / multiline paste | Both leaked into shared composer and multiline paste raised a composer notice | Secret paste was hidden, non-submitting, first-line-bounded, trimmed, and absent from durable searches | Approval consumes paste without mutation; credential paste stays secret/session-only with redacted acknowledgement | FINAL8 PASS; five secret scans pass |
+| Enter | Inert unless an explicit decision key was pressed | Empty API stayed for correction; OAuth failure reset silently; valid key had no visible success | Same safe empty behavior; exact OAuth cause stays visible; pasted/API-env/stored-OAuth acceptance gets a redacted DONE receipt | FINAL8 PASS, including compact ready branches |
+| Target Prompt Esc | — | Footer said browse targetless, but first Esc only restored list focus | Prompt footer advertises first-Esc return; list footer alone advertises targetless browse | FINAL8 PASS |
+| Long / Unicode secret | — | 512-character and Unicode hidden-count/editing paths passed without persistence | Contract retained; fixes do not render or log secret content | PASS in final7 lineage; final8 privacy scans pass for acceptance branches |
 
 ## Value-lineage report
 
@@ -356,9 +500,53 @@ Semgrep/CodeQL/IaC, UAF Hunt, Variant NDiff, Chrome RCE, Prompt Armor, plugin
 and Shinsa adapters, Exploit Chain, Full Mode, and Offense. Registry-level
 tests assert that prepared/dispatched execution, returned `runId`, stored
 `Finding.scan_id`, detector input path, proof `verification_run_id`, and replay
-lookup all name the same canonical run. The final-7 journey must pass without
-the synthetic copied run bundle used only to continue the pre-fix final-5
+lookup all name the same canonical run. The final7 journey passed without the
+synthetic copied run bundle used only to continue the pre-fix final5
 reproduction.
+
+### Session API key: hidden editor to runtime environment
+
+| Boundary | Proof / contract |
+|---|---|
+| Terminal event → focused editor | Final8 proves API-key printable, normal paste, multiline paste, `j/k/d/q`, Ctrl+W, and real Meta-Backspace remain owned by the hidden editor; only the count is rendered and paste does not auto-submit. `:` explicitly transfers focus to the shared prompt. |
+| Draft → validation/correction | Leading/trailing whitespace is trimmed at acceptance; whitespace-only input remains on the card with a precise error. Editing clears that warning, and Ctrl+W/Meta-Backspace reduce `alpha beta` from 10 to 6 hidden characters. |
+| Submission → session effect | `accept_pasted_auth_api_key` removes the trimmed draft, marks provider readiness, and emits one `SetSessionEnv { key: <provider env>, value: <secret> }` effect. The raw value is not copied into `V2Config`, findings, phase attempts, or a target run. |
+| Immediate acknowledgement | Final8 renders `DONE · ANTHROPIC_API_KEY accepted for this session; value hidden`; process-environment readiness renders `already available; value hidden`; stored OAuth renders `OAuth already stored; credentials hidden`. The ready receipts remain visible at 40×12 and 60×20. |
+| Durable privacy / restart | Five final8 sentinel scans find no API/OAuth value in captures, transcripts, target state, TMPDIR, or XDG state outside the intentional synthetic credential fixture. Session credentials are not serialized into target artifacts. |
+| Post-fix terminal status | FINAL8 PASS: 49/49 binary provenance assertions, 151 nonempty active captures, 24/24 modifier/cursor comparisons, and 356/356 evidence hashes. |
+
+### Approval decision: literal key to scoped authorization
+
+| Boundary | Proof / contract |
+|---|---|
+| Terminal event → attention owner | Frozen final7 proved unrelated printable/history/paste could escape the card. Final8 keeps the active card byte-identical across lowercase/Shift punctuation, Up/Down, Ctrl+P/N, normal paste, and multiline paste; Ctrl+C alone remains a global quit chord. |
+| Key → typed decision | Lowercase `y`/`n` mean once; uppercase `Y` is valid only when `ConfirmKind::allows_remembered_yes`; uppercase `N` means remembered denial; Esc is deny once. Unsupported keys remain consumed without resolving. |
+| Canonical scope | `confirm_allowlist_key(tool, target)` is the one session key. `remembered_confirm_decision` gives deny precedence and lets remembered allow bypass only allowlistable kinds, never descriptor-mandatory fresh approval. |
+| Dispatch / refusal | Final8 lowercase `y` emits exactly one run (8 → 9) and exact redispatch asks fresh; uppercase `N` blocks exact redispatch with no run (8 → 8); unsupported descriptor `Y` is unadvertised and inert. |
+| Durable privacy / restart | Memory remains in-process only. Approval paste sentinels are absent from target, HOME, TMPDIR, XDG, captures, and transcripts; the seed source hash remains unchanged. |
+| Post-fix terminal status | FINAL8 PASS: F-28/F-29/F-30 all pass and the 604-entry approval manifest verifies. Different-target/restart scope remains covered by focused tests and the earlier final7 restart journey. |
+
+### Selected proof set: result artifact to finding reality
+
+| Boundary | Proof / contract |
+|---|---|
+| Terminal action | On an unresolved completed Prove result, Navigate `u` or `n` invokes `record_phase_result_selection`. Frozen final7 recorded the disposition before creating proof reality, reproducing F-25. |
+| Canonical attempt/run checks | `materialize_selected_proof_attempt` now requires Prove/completed/current target+revision, nonempty unique run refs, completed run summaries, matching target snapshot, and a `terminal_result_sha256` matching `result.json`. |
+| Finding identity and generation | The proof input reference, result fingerprint, stable identity, and `verifiedScanId` must all name the same current finding generation. Model proof sets stage every candidate before writing any; empirical proofs must already belong to the selected run. |
+| Durable mutation ordering | Valid proof is saved in `FindingStore`, findings are refreshed, and only then is the selected attempt disposition appended. Any failure leaves both proof and disposition unresolved and presents the precise blocker. |
+| Journey / restart | Frozen final12 proves immediate Fix derivation and a reopened process reconstructing Fix from persisted verification. Run `tool-1784094869-027db6743013` remained unresolved until `Use proof set`, then the proof event and selected disposition `e79a2c67-0bc5-4b1d-8282-ca3ae802aef9` materialized in the required order. Core proof-selection tests pass 5/5. |
+| Post-fix terminal status | FINAL12 PASS for F-25: captures 04–06 and the canonical verification event prove selection, durable finding proof, and restart-derived Fix without synthetic mutation. |
+
+### Reverify result: application identity to verified acknowledgement
+
+| Boundary | Proof / contract |
+|---|---|
+| Prepared/dispatched input | Final7 canonical `patch:reverify` input carries the exact `applicationId`; the resulting run ID is recorded into the same patch lifecycle that moved `applying → applied → reverify_running → verified`. |
+| Attempt generation | Final11 reused selected Fix attempt `a2eb0747-39a2-429d-8baf-7df93ed8c11f` for reverify and receipt persistence rejected the divergent duplicate. Final12 assigns patch attempt `902cb5b6-17b2-4b0e-9202-e3e930d2b273` and reverify attempt `f8625687-43fd-4644-ac30-00c12d3300b6`; only an active Run Focus continuation may preserve an attempt ID. |
+| Durable result correlation | Current `matching_verified_reverify_run` requires an unresolved Fix attempt run ref to equal the verified lifecycle's `reverify_run_id`; cached run metadata must identify `patch:reverify` when available. Unrelated lifecycles and matching IDs from non-reverify tools cannot relabel a candidate. |
+| Visible acknowledgement | The result policy becomes `u Acknowledge verified` with `re-verification passed; acknowledge this verified remediation`, replacing the stale `Select patch` / candidate-review copy reproduced in F-26. |
+| Selection and restart | Acknowledgement records only the result disposition; it does not stage or reapply a patch. Restart reconstructs the same verified policy from run summary plus lifecycle state. |
+| Post-fix proof | FINAL12 PASS: run `tool-1784094895-a47b85fc9f4b` completes gap-free and non-degraded, capture 17 offers `u Acknowledge verified`, the disposition selects attempt `f8625687-43fd-4644-ac30-00c12d3300b6`, and a fresh process reconstructs `STATE  Verified` without reopening the result. The `verified_` focused TUI group also passes 6/6. |
 
 ## Findings ranked by severity and operator impact
 
@@ -831,27 +1019,681 @@ reproduction.
 - Root cause / owner:
   `renderer/chrome/prompt/mod.rs::navigation_prompt_line` hardcoded Esc instead
   of consuming the runtime keymap already used by dispatch/footer.
-- Fix: `ui_view_models/prompt.rs::navigation_prompt_text` resolves the live
+- Fix: `ui_view_models/prompt.rs::navigation_prompt_label` resolves the live
   composer binding, including default, remapped, and unbound states.
 - Regression: two keymap view-model tests and the final-7 detached journey;
   Map-bottom geometry was not changed.
+
+### F-25 — P1 — `Use proof set` selected an attempt without materializing proof reality — FIXED
+
+- Reproduce: complete a current-generation `verify:finding` run, open its
+  unresolved Prove result, press `u Use proof set` or `n Use & Fix`, then
+  inspect the finding, phase ledger, journey destination, and a restarted shell.
+- Expected: canonical proof is checked and written to the exact finding
+  before the attempt becomes selected; restart derives Fix from that proof.
+- Actual in frozen final7: the selected disposition persisted while
+  `verification_events` stayed empty, F-0001 remained `UNV`, and durable
+  reality remained Prove. The shell could nevertheless enter Fix and patch.
+- Evidence: additional finding 1 in the
+  [final7 Prove/Fix record](/private/tmp/kuzushi-operator-contract-audit-019f621b/prove-fix-final7/AUDIT-RECORD.md), captures
+  [`04-omitted-fingerprint-canonicalized-result.txt`](/private/tmp/kuzushi-operator-contract-audit-019f621b/prove-fix-final7/captures/04-omitted-fingerprint-canonicalized-result.txt) and
+  [`08-exact-fingerprint-result-card-navigate.txt`](/private/tmp/kuzushi-operator-contract-audit-019f621b/prove-fix-final7/captures/08-exact-fingerprint-result-card-navigate.txt), plus its finding DB and phase ledger.
+- Root cause / owner:
+  `app/state_transitions/key_dispatch.rs::record_phase_result_selection`
+  appended the disposition without an application boundary that promoted the
+  selected proof run into finding reality.
+- Fix: `materialize_phase_result_reality` calls
+  `verification/application/selected_proof.rs::materialize_selected_proof_attempt`
+  before disposition. It validates phase, target/revision, run completion,
+  terminal digest, input/result finding identity, and current generation;
+  multi-run proof sets stage completely before writing. Any error leaves the
+  result unresolved and visible.
+- Regression: core
+  `selected_model_proof_materializes_and_survives_reopen`, stale-generation,
+  multi-run atomicity, and changed-digest tests pass 5/5; TUI
+  `selecting_proof_materializes_reality_and_restart_reconstructs_fix` and
+  `blocked_proof_selection_is_visible_and_keeps_reality_unresolved` pass.
+  Frozen final9 then completed canonical verification run
+  `tool-1784090461-dd427d523759`, left it unresolved until `Use proof set`,
+  materialized the proof and selected attempt
+  `6ce774b7-6cd9-4555-990c-234f952ab763`, and reconstructed Fix after process
+  restart. Captures 04–06 and `artifacts/assertions.txt` in the
+  [final9 journey](/private/tmp/kuzushi-operator-contract-audit-019f621b/final9-authoritative-f25-f26-retry2/AUDIT-RECORD.md)
+  are the compiled-terminal proof.
+
+### F-26 — P2 — Verified remediation retained unresolved patch-candidate copy — FIXED
+
+- Reproduce: create/select/apply a patch, run advertised `v` reverify to
+  `Verified`, leave the resulting Fix attempt unresolved, and restart.
+- Expected: the exact verified result says to acknowledge verified remediation;
+  it must not offer to select or refine an already-applied patch.
+- Actual in frozen final7: `STATE Verified` appeared beside `u Select patch`
+  and `next: review the candidate; Apply remains separately authorized`, both
+  before and after restart.
+- Evidence: additional finding 2 in the final7 Prove/Fix record and captures
+  [`19-reverify-verified-before-restart.txt`](/private/tmp/kuzushi-operator-contract-audit-019f621b/prove-fix-final7/captures/19-reverify-verified-before-restart.txt) and
+  [`20-restart-verified-remapped-hint-navigate.txt`](/private/tmp/kuzushi-operator-contract-audit-019f621b/prove-fix-final7/captures/20-restart-verified-remapped-hint-navigate.txt).
+- Root cause / owner: `app/phase_results.rs` and
+  `ui_view_models/phase_cockpit/mod.rs::phase_result_card` used generic
+  Fix/completed policy and did not correlate attempt run refs with a verified
+  patch lifecycle and its `patch:reverify` run.
+- Fix: `verified_remediation_run_refs` requires the exact lifecycle reverify
+  run and tool identity. The special policy advertises `u Acknowledge verified`
+  and cannot restage a patch; unrelated lifecycle/run/tool combinations retain
+  candidate copy.
+- Regression: `restart_projects_matching_verified_reverify_as_acknowledgement`,
+  `unrelated_verified_lifecycle_does_not_relabel_a_patch_candidate`,
+  `non_reverify_run_cannot_inherit_a_matching_verified_lifecycle_id`, and
+  `terminal_receipt_uses_verified_policy_only_for_the_matching_reverify_run`;
+  current `verified_` group passes 6/6. Frozen final12 supplies the missing
+  compiled-terminal proof: capture 16 presents the verified Fix result, capture
+  17 advertises `u Acknowledge verified`, attempt
+  `f8625687-43fd-4644-ac30-00c12d3300b6` is selected, and capture 19 shows a
+  fresh process reconstructing `STATE  Verified` without reopening the
+  acknowledged card. See the
+  [authoritative record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-authoritative-f25-f26-f41-f42-f45/AUDIT-RECORD.md).
+
+### F-27 — P1 — Advertised `:` command focus became secret input or a no-op — FIXED
+
+- Reproduce: open Setup Credentials on the API-key row and press literal `:`;
+  return to aggregate Setup and press `:` again.
+- Expected: both advertised paths focus the shared command prompt without
+  changing the hidden API-key draft.
+- Actual in frozen final7: Credentials changed to `1 chars entered`; aggregate
+  Setup was byte-identical.
+- Evidence: [F27 baseline record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/F27-credential-colon-final7/AUDIT-RECORD.md)
+  and its captures 01–07.
+- Root cause / owner:
+  `app/state_transitions/picker_keys.rs::{is_picker_view,handle_picker_capture_override}`
+  excluded Setup from prompt-focus routing, so credential draft/control
+  handling won first ownership.
+- Fix: Setup participates in the shared picker focus state; `:` is intercepted
+  before auth controls, and prompt-focused paste/text goes to the composer, not
+  the secret draft.
+- Regression: `colon_opens_the_command_prompt_from_aggregate_setup`,
+  `advertised_colon_opens_prompt_without_editing_the_api_key`, and
+  `credential_prompt_focus_routes_paste_to_composer_not_secret_draft`.
+  [Final8 terminal proof](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/credentials/FINAL-AUDIT-RECORD.md)
+  passes API, OAuth, Offline, and aggregate Setup, then restores the exact row.
+
+### F-28 — P1 — Approval cards leaked printable, history, and paste input — FIXED
+
+- Reproduce: hold a pending approval and send Shift `A`, `!`, Up/Down, normal
+  paste, and multiline bracketed paste.
+- Expected: the approval card owns every key and paste until resolved, except
+  the explicit global Ctrl+C contract.
+- Actual in frozen final7: the hidden shared composer/history changed while the
+  approval remained pending; multiline paste also raised the composer notice.
+- Evidence: final7 approval record directories
+  `approval-ownership/captures/`, `approval-paste-normal/captures/`, and
+  `approval-paste-multiline-v2/captures/`.
+- Root cause / owner:
+  `app/state_transitions/key_dispatch.rs::handle_confirm_key` handled only
+  decision keys and let unrelated keys fall through; paste had a separate
+  fallthrough in `state_transitions/text_input.rs`.
+- Fix: pending confirmation is the first modal owner and consumes every
+  non-Ctrl+C key. Normal and multiline paste are consumed before composer
+  mutation or paste notices.
+- Regression: `pending_confirm_owns_unrelated_keys_before_composer`,
+  `pending_confirm_still_yields_ctrl_c_to_the_global_quit_chord`,
+  `pending_confirm_consumes_ctrl_modified_uppercase_choices`, and
+  `pending_confirm_owns_normal_and_multiline_paste_before_composer`.
+  [Final8 terminal proof](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/approvals/AUDIT-RECORD.md)
+  keeps active plain/ANSI frames byte-identical across every hostile probe;
+  runs remain 8 → 8 and paste sentinels are absent.
+
+### F-29 — P1 — Remembered approval denial was recorded but not enforced — FIXED
+
+- Reproduce: press `N` on a descriptor or allowlistable input gate, then submit
+  the identical tool/target scope again in the same session.
+- Expected: the exact scope is visibly blocked before dispatch, creates no run,
+  and does not affect another target; restart asks again.
+- Actual in frozen final7: the identical request displayed another approval
+  card even though the denylist decision had been recorded.
+- Evidence: final7 `approval-N-remember/captures/` and
+  `approval-allowlist-pwn/captures/05`–`07`.
+- Root cause / owners: `app/approval/label.rs` wrote the in-process denylist,
+  but `app/tool_runner/run_tool/dispatch.rs` did not consult it before prompting.
+- Fix: `remembered_confirm_decision` evaluates the canonical `tool target` key,
+  with denial precedence. `apply_run_confirmation` blocks exact remembered
+  denial with a scoped notice and no run mutation; a different target and a
+  restarted process still ask.
+- Regression: contradictory allow/deny precedence, exact descriptor denial,
+  different-target isolation, input-gate denial, and same-scope remembered-allow
+  tests. Final8 uppercase `N` blocks byte-identical redispatch with a scoped
+  notice, no export, and 8 → 8 runs in the
+  [approval record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/approvals/AUDIT-RECORD.md).
+
+### F-30 — P2 — Descriptor approval advertised a remembered allow that policy forbids — FIXED
+
+- Reproduce: on a descriptor-declared effect card press uppercase `Y`, then
+  submit the identical dispatch again.
+- Expected: because descriptor effects require a fresh affirmative, the card
+  must advertise only `y allow once`; unsupported `Y` must not resolve it.
+- Actual in frozen final7: the first action executed, then the same card
+  immediately reappeared. Runtime policy was fresh-approval-safe, but the card
+  promised `allow + remember`.
+- Evidence: final7 `approval-Y-remember/captures/` and the approval record's
+  comparison with a genuinely allowlistable `pwn:run-candidates` gate.
+- Root cause / owners: confirmation rendering and key dispatch did not expose
+  `ConfirmKind` decision capabilities and advertised `Y` universally.
+- Fix: `ConfirmKind::{allows_remembered_yes,allows_action}` is shared by
+  dispatch, card, and footer. Descriptor `Y` stays card-owned but unresolved;
+  lowercase `y` allows once and `N` remembered denial remains supported.
+- Regression: descriptor Shift-Y consumption, once-allow/remembered-deny,
+  direct-resolver rejection, launch prevention, and
+  `descriptor_confirm_card_omits_unsupported_remembered_allow`.
+  Final8 omits `Y`, treats literal uppercase `Y` as a byte-identical no-op,
+  executes lowercase `y` exactly once, and asks fresh on exact redispatch in the
+  [approval record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/approvals/AUDIT-RECORD.md).
+
+### F-31 — P2 — Credential warning advertised Esc dismissal but navigation consumed it — FIXED
+
+- Reproduce: press Enter on an empty API-key row, then press Esc repeatedly.
+- Expected: the first advertised Esc dismisses the warning and remains in the
+  credential picker; later Esc performs back navigation.
+- Actual in frozen final7: first Esc returned to Setup with the warning, second
+  moved to Map with the warning, and only the third dismissed it.
+- Evidence: final7 `credential-baseline/captures/02`–`05` and follow-up
+  `esc-notice/captures/` in the
+  [control-ownership record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final7/followup-control-ownership-final7/AUDIT-RECORD.md).
+- Root cause / owner: picker Esc dispatch ran before
+  `key_dispatch.rs::handle_notice_dismiss_key`; the footer simultaneously
+  advertised notice dismissal.
+- Fix: visible notice dismissal preempts picker navigation. Auth footers show
+  only `Esc dismiss notice · remain in picker` while the notice exists.
+- Regression: `credential_warning_esc_dismisses_before_back_navigation` and
+  `visible_notice_footer_advertises_dismissal_before_auth_navigation` both pass.
+  Final8 first Esc clears the empty-key notice in place and remains in
+  Credentials; see `f31-notice/captures/` in the
+  [credential record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/credentials/FINAL-AUDIT-RECORD.md).
+
+### F-32 — P1 — Credential shortcuts stole valid secret characters and discarded drafts — FIXED
+
+- Reproduce: on an empty API row type literal `j`, `k`, `d`, or `q`; in a
+  separate run type `xq`, leave, and reopen Credentials.
+- Expected: the API editor owns every valid printable from the first character;
+  list navigation/demo/return shortcuts apply only when a non-editor row owns
+  focus.
+- Actual in frozen final7: `j/k` moved selection, `d` launched the demo, and
+  `q` returned to Setup. After `x`, `q` discarded the one-character draft and
+  reopening was empty.
+- Evidence: final7 `credential-start-{j,k,q}/captures/`,
+  `credential-start-d-offline/captures/`, and
+  `credential-q-after-draft/captures/`.
+- Root cause / owner:
+  `app/state_transitions/picker_keys.rs::handle_auth_picker_key` applied row
+  shortcuts before API-editor ownership.
+- Fix: `handle_auth_api_key_edit_key` runs first and owns every unmodified
+  printable on the API row. `j/k/d/q` remain controls only on OAuth/Offline;
+  offline guidance uses explicit move plus Enter.
+- Regression: `auth_picker_api_key_editor_owns_shortcut_letters_from_first_character`,
+  `auth_picker_q_after_existing_text_remains_literal_secret_input`,
+  nonconflicting guidance, and both inside/outside-editor `d` tests.
+  Final8 proves `j`, `k`, `d`, and `q` each become one-character drafts and
+  `xq` remains a two-character draft; see `f32-shortcuts/captures/` in the
+  [credential record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/credentials/FINAL-AUDIT-RECORD.md).
+
+### F-33 — P1 — OAuth failures were transcript-only and reset the active card silently — FIXED
+
+- Reproduce: select OAuth with `/usr/bin/false`, then with a configured missing
+  executable; wait on the returned credential card.
+- Expected: the active card retains the exact nonzero-exit or spawn-error cause
+  and offers API key, OAuth retry, Offline demo, and auth-status recovery.
+- Actual in frozen final7: the card silently reset to API with no error after
+  both three and ten seconds. Only the session transcript contained exit status
+  1 or `os error 2`.
+- Evidence: final7 `credential-oauth-false-bridge/captures/` and follow-up
+  `oauth-missing-bridge/captures/` plus their session JSONL.
+- Root cause / owners:
+  `app/settings/handle_model_command/auth_login.rs` and
+  `normalize_thinking_level/auth_process.rs` logged failure, then reopened the
+  picker without projecting or preserving an error notice.
+- Fix: auth failure uses a visible error notice with the exact process/spawn
+  cause and actionable alternatives. `report_incomplete_picker_oauth` preserves
+  that more precise auth notice when reopening Credentials.
+- Regression: missing bridge reopen, nonzero picker failure, missing executable
+  cause, and auth status-message branch tests. Final8 visibly retains exit
+  status 1 and missing-bridge `os error 2` with matching recovery actions in
+  `f33-{false,missing}/captures/` in the
+  [credential record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/credentials/FINAL-AUDIT-RECORD.md).
+
+### F-34 — P2 — Valid credential acceptance lacked acknowledgement and retained stale error copy — FIXED
+
+- Reproduce: submit an empty key, correct it with a valid typed or pasted value,
+  submit, and inspect Setup; reopen and restart.
+- Expected: correction clears the stale warning immediately, acceptance shows a
+  redacted success acknowledgement, and the value remains session-only.
+- Actual in frozen final7: success existed only in the transcript. Setup showed
+  no positive acknowledgement, and `API key is empty` could survive successful
+  acceptance.
+- Evidence: final7 `credential-secret-paste/captures/01`–`04`,
+  `credential-whitespace-only/captures/`, and follow-up
+  `oauth-failure-then-api-ready/captures/03`–`04`; sentinel searches found no
+  secret persistence.
+- Root cause / owner: `accept_pasted_auth_api_key` relied on logging and notice
+  clearing recognized only a subset of credential notice sources.
+- Fix: acceptance emits `<ENV> accepted for this session; value hidden` and
+  keeps the raw value only in `SetSessionEnv`. `clear_credential_notice` clears
+  auth/onboarding warnings as editing or paste begins.
+- Regression: corrected-warning acknowledgement, pasted-key redaction, and
+  session-env-without-process-secret tests. Final8 renders redacted DONE
+  receipts for pasted API, process-environment API, and stored OAuth readiness,
+  including 40×12/60×20 compact projections; all five secret scans pass in
+  the [credential record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/credentials/FINAL-AUDIT-RECORD.md).
+
+### F-35 — P2 — Credential word deletion was advertised by the audit contract but unavailable — FIXED
+
+- Reproduce: type a multiword hidden API-key draft and send Ctrl+W, tmux
+  Alt-Backspace, or literal contiguous `ESC`+Backspace.
+- Expected: delete the previous word within the secret editor without touching
+  the shared composer or revealing content.
+- Actual in frozen final7: every encoding was safely intercepted but was a
+  no-op; the hidden character count did not change.
+- Evidence: final7 `credential-editing/captures/08`, `09`, `12`, and `13`, plus
+  the API-row control probes in the follow-up record.
+- Root cause / owners: modifier routing did not deliver terminal word-delete
+  encodings to `AuthPicker` draft editing.
+- Fix: `auth_key_word_delete_requested` recognizes Ctrl+W and Ctrl/Alt
+  Backspace; the API editor calls `AuthPicker::delete_key_word_left` and leaves
+  the composer unchanged.
+- Regression: `credential_key_editor_owns_ctrl_w_and_terminal_alt_backspace`
+  and `word_edited_api_key_draft_renders_only_the_remaining_length`.
+  Final8 Ctrl+W and real Meta-Backspace each reduce `alpha beta` from 10 to 6
+  hidden characters without composer mutation in the
+  [credential record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/credentials/FINAL-AUDIT-RECORD.md).
+
+### F-36 — P1 — Credential list leaked Ctrl/Alt chords into the hidden shared composer — FIXED
+
+- Reproduce: seed shared composer text and history, open each API/OAuth/Offline
+  row, send Ctrl+U/K/A/E/P/N/W and Alt-Backspace in isolated processes, then
+  escape until the composer is visible.
+- Expected: list-focused Credentials owns non-global modified chords; no
+  invisible composer mutation occurs. Explicit global chords and deliberate
+  prompt focus retain their documented behavior.
+- Actual in frozen final7: chords cleared text, moved the hidden cursor, loaded
+  history, or deleted a word behind the visible modal, depending on row and
+  cursor position.
+- Evidence: the exact three-row matrix and
+  `control-{api,oauth,offline}-*/captures/` in the follow-up record.
+- Root cause / owner:
+  `app/state_transitions/picker_keys.rs::picker_should_capture_key` yielded
+  nearly all Ctrl/Alt events to the shared composer.
+- Fix: `credential_picker_owns_shell_chord` captures every non-global modified
+  chord on all credential rows while list-focused;
+  `auth_picker_control_code` prevents modifiers becoming row actions. Ctrl+C,
+  Ctrl+D, Ctrl+G, and Ctrl+Up/Down remain explicit globals, while prompt focus
+  intentionally edits the composer.
+- Regression: `credential_list_owns_non_global_modifier_chords_on_every_row`,
+  `credential_prompt_focus_keeps_shared_composer_editing`, and
+  `credential_list_preserves_explicit_global_chords`. Final8's 24 isolated
+  API/OAuth/Offline chord journeys match their ANSI cursor controls with zero
+  cursor or row-selection failures in the
+  [credential record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/credentials/FINAL-AUDIT-RECORD.md).
+
+### F-37 — P2 — Auth picker advertised `q leave setup` but returned to aggregate Setup — FIXED
+
+- Reproduce: focus OAuth and Offline in Credentials and press literal `q`.
+- Expected: the advertised destination and actual destination use the same
+  aggregate-Setup wording.
+- Actual in frozen final7: the footer said `q leave setup`; the handler returned
+  to aggregate Setup.
+- Evidence: follow-up `q-oauth/captures/` and `q-offline/captures/`.
+- Root cause / owner:
+  `renderer/views/onboarding/auth_method_picker.rs` used stale copy that
+  disagreed with `defer_auth_picker`.
+- Fix: wide and compact hints say `q return to Setup` / `q Setup`; the existing
+  return behavior and draft clearing remain explicit.
+- Regression: `auth_picker_q_returns_to_setup_and_clears_the_draft` and
+  `non_editor_footer_truthfully_labels_q_as_return_to_setup`. Final8 OAuth and
+  Offline both advertise and perform `q return to Setup`; see
+  `f37-q-{oauth,offline}/captures/` in the
+  [credential record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/credentials/FINAL-AUDIT-RECORD.md).
+
+### F-38 — P1 — Prompt-focused Target picker advertised the wrong first-Esc destination — FIXED
+
+- Reproduce: open Target picker, press `:` to focus the shared prompt, type a
+  draft, and press Esc once; then press Esc again from list focus.
+- Expected: prompt focus advertises first Esc as return to picker; only the
+  list-focused footer advertises targetless browsing.
+- Actual in frozen final7: both states advertised `Esc/q browse without a
+  target`; the first Esc only cleared the draft and restored list focus, while
+  the second entered targetless Capabilities.
+- Evidence: follow-up `esc-target-prompt-focus/captures/01`–`05`.
+- Root cause / owner:
+  `renderer/views/onboarding/target_picker.rs::target_picker_footer` ignored
+  `PickerFocus` and always rendered list controls.
+- Fix: wide and compact target footers consume `ShellApp` focus and reuse the
+  shared prompt footer `Esc return to picker · Enter run`; list focus retains
+  browse copy.
+- Regression: `target_picker_prompt_first_escape_returns_to_picker_before_browsing`
+  and `target_picker_prompt_footer_matches_first_escape_at_compact_and_wide_sizes`.
+  Final8 prompt focus advertises/performs `Esc return to picker`, then the
+  second list-focused Esc browses targetless; see
+  `f38-target-prompt/captures/` in the
+  [credential record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/credentials/FINAL-AUDIT-RECORD.md).
+
+### F-39 — P1 — Remapped Prompt-mode key stole printable text from the active composer — FIXED
+
+- Reproduce: in an isolated config, bind composer `prompt_mode` to literal
+  `x`; start the frozen provisional binary against a fresh Git target; enter
+  Prompt mode; then send literal
+  `run patch:finding {"maxIterations":1}` without Enter.
+- Expected: because Prompt mode is already active, every printable character
+  reaches the line editor and the visible draft retains `maxIterations`.
+- Actual in the provisional compiled replay: before Enter, the visible draft
+  already read `run patch:finding {"maIterations":1}`. Submission persisted
+  the corrupted command, after which descriptor validation correctly rejected
+  the unknown `maIterations` option.
+- Operator impact: a printable mode remap could silently alter commands,
+  option names, paths, or free-form answers. This instance failed safely at
+  descriptor validation, but another corrupted value could remain valid and
+  change operator intent.
+- Evidence: [F-39 record](/private/tmp/kuzushi-operator-contract-audit-019f621b/f39-provisional/F39-RECORD.md),
+  `captures/03-draft-before-enter.{txt,ansi,meta.txt}`, the durable
+  `artifacts/session-transcript.jsonl`, and the fixture shell history. The
+  detached 120×36 replay used `alternate=1`, fixture revision
+  `a3c45ca0b69b1748f523f3776e2d98a9c7ff33e5`, and provisional binary SHA-256
+  `192a0fe14394c356028898c8196e307b16c10380820a9e5b8f8c0163bee68337`.
+- Root cause / owner:
+  `app/state_transitions/key_dispatch.rs::reduce_configured_shell_or_mode_cycle`
+  evaluated configured composer actions before the active Prompt line editor.
+  The already-satisfied `EnterPromptMode` action consumed its trigger. The
+  descriptor boundary behaved correctly after that earlier corruption.
+- Fix: runtime keymap resolution filters the mode action whose destination is
+  already active, including its chord prefixes; the same remap still performs
+  Navigate → Prompt, while Prompt-owned printable input remains editable.
+- Regression: `remapped_prompt_mode_key_only_owns_input_while_navigating` and
+  `inactive_prompt_mode_chord_prefix_remains_editable_text` pass. The
+  [authoritative final8 replay](/private/tmp/kuzushi-operator-contract-audit-019f621b/FINAL8-AUTHORITATIVE-F25-F26-F39-RECORD.md)
+  retains exact `maxIterations` in the pre-Enter active frame, submitted
+  transcript, and shell history; descriptor validation then truthfully reports
+  the next missing `fingerprint` option rather than corrupted `maIterations`.
+
+### F-40 — P1 — Valid model-call lifecycle degraded the run and suppressed its phase receipt — FIXED
+
+- Reproduce: on a fresh native finding, submit exact
+  `run verify:finding {"fingerprint":"secret-scan:openai-api-key:f6b53ab3ed35c342","model":"openai:gpt-4.1","VERIFY_PASSES":1,"mcps":false}`
+  in frozen final8, then inspect the result card, phase-attempt ledger, finding
+  proof, and canonical `items.jsonl`; repeat from a fresh process.
+- Expected: the schema-valid `ModelCallStarted → ModelCallFinished` pair keeps
+  the typed projection healthy, the successful verification records its Prove
+  receipt, and the operator receives `Use proof set` without any synthetic
+  mutation.
+- Actual in frozen final8: both verification runs completed successfully and
+  retained the exact canonical input and proof result, but the projection
+  reported `call start without request`, then sequence gaps `expected 6, got
+  7/8/9`. It refused the phase receipt; no phase-attempt ledger or verification
+  event appeared and the journey remained Prove.
+- Evidence: the
+  [authoritative final8 record](/private/tmp/kuzushi-operator-contract-audit-019f621b/FINAL8-AUTHORITATIVE-F25-F26-F39-RECORD.md),
+  active captures `03-verify-result-prompt` and `12-retry-after-run`, degraded
+  session transcripts, and the hash-complete seq-1-through-10 streams for runs
+  `tool-1784087005-11ca538f39a5` and
+  `tool-1784087247-0c4d2d5e1c3f`.
+- Root cause / owner:
+  `crates/kuzushi-core/src/run_lifecycle/application/reducer.rs::apply_item`
+  sent `ModelCallStarted` through the tool-call request/start invariant even
+  though `RunItemV1` defines no `ModelCallRequested` variant. The producer's
+  first legal model item was therefore impossible for the typed reducer to
+  accept.
+- Fix: `ModelCallStarted` now uses the dedicated `start_model_call`, which
+  inserts one running model call directly and still rejects a duplicate start.
+  Tool calls retain their strict request-before-start invariant; no lifecycle
+  policy is weakened across call kinds.
+- Regression:
+  `run_lifecycle::tests::reducer_accepts_model_start_as_the_first_model_call_item`
+  covers the schema's actual model-call shape;
+  `cargo test -p kuzushi-core run_lifecycle::tests:: -- --nocapture` passes 7/7.
+  Frozen final9 canonical verification run
+  `tool-1784090461-dd427d523759` remained projection-healthy, produced the Prove
+  result card, and allowed F-25 to be proven through restart. Later F-42 is a
+  distinct nested-task identity failure in `patch:reverify`, not a recurrence
+  of the model-call reducer defect.
+
+### F-41 — P2 — Applied Fix advertised a reverify key that Prompt mode could not execute — FIXED
+
+- Reproduce: in frozen final9, select and apply the reviewed patch
+  `patch-application-1784090491-ac334c24ec2b`; remain in Prompt mode on the
+  Applied Fix page; verify the remediation card says `v re-verify`; send
+  literal lowercase `v`.
+- Expected: either `v` launches the displayed `patch:reverify` action, or the
+  card truthfully tells the operator to enter Navigate before pressing it.
+- Actual in frozen final9: the card advertised `v`, but the composer retained
+  first ownership and accepted `v` as draft text. The journey timed out waiting
+  for reverify. A diagnostic Navigate replay proved `v` itself dispatches when
+  the correct mode owns it.
+- Screenshot / evidence: the
+  [active Applied frame](/private/tmp/kuzushi-operator-contract-audit-019f621b/final9-authoritative-f25-f26-retry2/captures/13-applied-reverify-required.active.txt)
+  simultaneously shows `▸ v re-verify`, `F2 nav mode`, and the Prompt composer.
+  The [literal-key log](/private/tmp/kuzushi-operator-contract-audit-019f621b/final9-authoritative-f25-f26-retry2/artifacts/literal-keys.log)
+  ends with `fix v`. The dedicated
+  [diagnostic record](/private/tmp/kuzushi-operator-contract-audit-019f621b/f26-advertised-v-diagnostic/README.md)
+  and active captures
+  [`01 Prompt v`](/private/tmp/kuzushi-operator-contract-audit-019f621b/f26-advertised-v-diagnostic/01-prompt-v-goes-to-composer.active-joined.txt)
+  and
+  [`02 F2 then v`](/private/tmp/kuzushi-operator-contract-audit-019f621b/f26-advertised-v-diagnostic/02-f2-v-drafts-command.active-joined.txt)
+  prove Prompt ownership and the exact canonical draft in Navigate. Both are
+  detached `120×36` alternate-screen captures with `attached=0`.
+- Root cause / owner:
+  `crates/kuzushi-tui/src/renderer/views/workbench/phase_pages/fix/remediation.rs::lifecycle_lines`
+  and the static Fix command-bar hint rendered the Navigate-only action without
+  `InputMode` or the runtime Navigate binding. Dispatch ownership was correct;
+  presentation advertised the wrong contract.
+- Fix: `crates/kuzushi-tui/src/ui_view_models/workbench.rs::workbench_reverify_control_hint`
+  now projects `v` only in Navigate, `F2 then v` in an empty Prompt composer,
+  `clear prompt then F2 then v` with a blocking draft, and the configured
+  Navigate chord when remapped. `RemediationLifecycleModel` carries the same
+  projection into the card, so the command bar and remediation panel cannot
+  diverge.
+- Regression: `cargo test -p kuzushi-tui reverify_control -- --nocapture`
+  passes 2/2; the mode-entry rendering test and literal Prompt-`v` composer test
+  pass; the 30-buffer truecolor phase reference remains unchanged. Frozen
+  final12 captures 13–14b close the real interaction: Prompt visibly says
+  `F2 then v`, Navigate owns literal `v`, and the resulting composer draft is the
+  exact canonical `run patch:reverify {"applicationId":...}` command before
+  approval and dispatch.
+
+### F-42 — P1 — Nested reverify dispatch reused its parent task identity and erased a successful receipt — FIXED
+
+- Reproduce: from the final9 Applied state, enter Navigate and press `v`; allow
+  `patch:reverify` to invoke its canonical nested `secret-scan:scan`; inspect
+  Activity, the Fix result card, `items.jsonl`, `run.json`, `failures.json`, and
+  the session transcript for run `tool-1784090911-3050f0ff4595`.
+- Expected: the parent reverify keeps the planned root task, the nested detector
+  receives a distinct task identity parented to the outer call, and the healthy
+  completed stream produces the typed Fix receipt used by F-26.
+- Actual in frozen final9: seq 1–14 are contiguous and terminal-completed with
+  no recorded failures, but parent `patch:reverify` and nested
+  `secret-scan:scan` both use task ID
+  `2c7edd54-30dd-43da-a800-ce03dd6b7234`. The nested pending update follows the
+  already-running parent task, so projection reports `task regressed to
+  pending`, degrades the run, and suppresses the Fix result card despite a
+  successful detector and terminal result.
+- Screenshot / evidence:
+  [`items.jsonl`](/private/tmp/kuzushi-operator-contract-audit-019f621b/final9-authoritative-f25-f26-retry2/target/.kuzushi/v3/runs/tool-1784090911-3050f0ff4595/items.jsonl)
+  proves the shared task ID, nested `parentItemId`, and contiguous terminal
+  stream. The
+  [session transcript](/private/tmp/kuzushi-operator-contract-audit-019f621b/final9-authoritative-f25-f26-retry2/home/.kuzushi/v3/sessions/2026/07/15/session-2026-07-15T04-47-27-713Z-e1439eaa-c917-467c-88c6-0d5409a0710f.jsonl)
+  records the degradation and later `run_finished completed`; the run bundle's
+  `failures.json` is empty and `run.json` is completed.
+- Root cause / owner:
+  `crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution/lifecycle_observation.rs::DispatchLifecycle::requested`
+  inherited any observation task ID, including an observation already parented
+  to the outer tool call. That let a nested lifecycle mutate its parent's task
+  state.
+- Fix:
+  `RunObservationHandle::inheritable_dispatch_task_id` returns the caller task
+  only for an unparented root dispatch. Nested dispatches mint a distinct task
+  while preserving their `parent_item_id`; top-level preplanned dispatch still
+  preserves the operator's task identity, and unscoped dispatch still seeds a
+  plan for executor extensions.
+- Regression:
+  `nested_dispatch_uses_distinct_task_identity_without_weakening_projection`
+  proves a healthy nested stream, while
+  `task_regression_detection_still_rejects_nested_identity_reuse` proves the
+  reducer was not weakened. Frozen final12 reverify run
+  `tool-1784094895-a47b85fc9f4b` assigns root task
+  `5a4ca8ec-81ac-40ea-a213-e12b9f97e2cb` and nested task
+  `720056db-bdb4-476c-9501-ef5773e56880`, retains a gap-free non-degraded
+  stream, emits the typed Fix receipt, and reaches F-26 acknowledgement and
+  restart.
+
+### F-43 — P1 — Shell SAST dispatch created a visible plan without usable plan scope — FIXED
+
+- Reproduce: launch SAST through each of the three deterministic shell entry
+  paths covered by `recommend_enter_runs_selected_component_scoped_scan`,
+  `run_command_dispatches_sast_scan_through_registry_and_persists`, and
+  `run_dot_from_catalog_dispatches_sast_scan`; use the isolated fixtures with
+  expected deterministic finding counts 1/2/2.
+- Expected: the shell's accepted Scan plan and task identity remain attached to
+  the observation returned to `sast:scan`; engine-plan extension runs and the
+  same canonical run records the selected engines and actual finding result.
+- Actual in frozen final9: all three paths produce zero findings and diagnostics
+  abort with `run observation has no plan scope`. The final9 aggregate suite
+  records the same three deterministic tests failing on 0-versus-expected
+  finding/run counts.
+- Screenshot / evidence: immutable aggregate output is
+  [`final9-quality/tui-tests.txt`](/private/tmp/kuzushi-operator-contract-audit-019f621b/final9-quality/tui-tests.txt).
+  A clean APFS clone of the frozen final9 source then reproduced the exact
+  operator-visible error and failed status in the
+  [F-43 audit record](/private/tmp/kuzushi-operator-contract-audit-019f621b/f43-shell-sast-plan-scope/AUDIT-RECORD.md)
+  and
+  [pre-fix focused log](/private/tmp/kuzushi-operator-contract-audit-019f621b/f43-shell-sast-plan-scope/pre-fix-focused-test.log)
+  (SHA-256 `0221bed8...11d8331`). The post-fix compiled evidence is the
+  [final12 positive shell SAST record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-positive-shell-sast/README.md)
+  and its detached 120×36 captures, literal-key log, canonical run bundle, and
+  119-entry evidence manifest.
+- Root cause / owner:
+  frozen final9's
+  `crates/kuzushi-tui/src/app/tool_runner/run_tool/background/dispatch.rs::background_tool_trace_handle`
+  scopes only with `for_task`, while its helper writes a raw `PlanUpdated`.
+  The parallel Scan producer in
+  `crates/kuzushi-tui/src/app/scan/start_scan/scan_trace.rs::scan_trace_handle`
+  has the same shape. Those events are visible on disk but do not populate the
+  private `plan_item_id` required by
+  `crates/kuzushi-core/src/run_lifecycle/application/observation.rs::extend_plan`.
+- Fix: current source introduces `start_root_task_with_id` plus
+  `scope_dispatch_task`, and the shell producer now seeds `single-tool run`
+  through that scoped API instead of the raw lookalike event. The first TUI
+  compile attempt reused an incoherent stale link and was discarded. A fresh
+  relink now proves the coherent core/TUI source.
+- Regression: `cargo test -p kuzushi-core lifecycle_observation --lib --
+  --nocapture` passes 4/4, and the three exact shell SAST tests pass 3/3 with
+  2,114 filtered. The
+  [post-fix log](/private/tmp/kuzushi-operator-contract-audit-019f621b/f43-shell-sast-plan-scope/post-fix-focused-tests.log)
+  has SHA-256
+  `db1f907b2eafadeb8e6aba8e427cef8ef22ec5c0b463eac83916392fa9a0c709`.
+  Frozen final12 then submits literal
+  `run sast:scan {"taskMode":"manual","tasks":["secret-scan"],"maxFindings":5}`.
+  Canonical run `tool-1784095019-3295287ba435` preserves those exact prepared
+  values, emits one finding, and records hash-linked seq 1–13 with root task
+  `41da7fd9-73e4-4559-b70e-4568a4759d03` and engine task
+  `e9f8758c-bc64-4897-a85a-9775eea88eb6`. No plan-scope or degradation error
+  appears.
+
+### F-44 — P1 — SAST completion opened a second run-item writer and self-deadlocked — FIXED
+
+- Reproduce: before the current fix, run
+  `cargo test --offline -p kuzushi-core run_artifacts -- --nocapture`. The
+  compiled test executable reaches
+  `sast_scan_runs_verify_patch_and_writes_run_artifacts` and remains hung; the
+  captured process was sampled after more than 17 minutes.
+- Expected: SAST terminal metadata is emitted through the already-live
+  observation writer, the writer flushes one ordered terminal stream, and the
+  integration test completes.
+- Actual: the test thread calls `write_sast_run_metadata` →
+  `try_record_tool_run_complete` → `RunItemWriter::open` and blocks acquiring
+  `flock` on the same items file. The live `run-items-*` background writer owns
+  that lock while waiting for more messages, producing a self-deadlock rather
+  than a timeout or recoverable terminal result.
+- Screenshot / evidence: the
+  [macOS process sample](/private/tmp/kuzushi-operator-contract-audit-019f621b/f44-terminal-writer-self-deadlock/sample.txt)
+  has SHA-256
+  `9de6ce23b35d48176f720623ec8cba271099009e6c65b6cb220abe230d4a5ea5`
+  and shows both the blocked test-thread `flock` stack and the live background
+  writer thread.
+- Root cause / owner:
+  `crates/kuzushi-core/src/modules/sast_run/write_sast_run_summary.rs::write_sast_run_metadata`
+  called the unobserved terminal helper, whose
+  `crates/kuzushi-core/src/run_artifacts/tool_run_record.rs::try_record_tool_run_complete`
+  opened a second observation instead of reusing the one already carried by
+  the executor context.
+- Fix: `run_sast_scan` threads `ctx.run_observation()` into
+  `write_sast_run_metadata`, which calls
+  `try_record_tool_run_complete_observed` with that handle. The existing writer
+  now owns ordering and terminal emission; no second file lock is requested.
+- Regression: `write_sast_run_metadata_reuses_live_observation_writer` exercises
+  the exact ownership boundary and asserts a completed typed projection; it
+  passes 1/1 in 0.85 s. The formerly hanging
+  `sast_scan_runs_verify_patch_and_writes_run_artifacts` passes 1/1 in 6.32 s.
+  Frozen final12 shell SAST reaches its visible completed result and durable
+  receipt with no deadlock, while the full core suite passes 3,352/3,352 and
+  the full sequential aggregate passes 5,754/5,754. This exercises the live
+  writer path in a compiled shell and closes the aggregate reliability gate.
+
+### F-45 — P1 — A new Fix run reused a completed attempt and lost its selectable receipt — FIXED
+
+- Reproduce: in frozen final11, create and select Fix attempt
+  `a2eb0747-39a2-429d-8baf-7df93ed8c11f`, apply its reviewed patch, enter
+  Navigate, use the now-truthful `v re-verify` action, approve
+  `patch:reverify`, and wait for run `tool-1784093189-8c1dd6016cbc` to finish.
+- Expected: the new reverify dispatch gets a new Fix attempt ID, persists its
+  own completed receipt, and presents the verified result for explicit
+  acknowledgement. Returning to an already-active Run Focus may retain that
+  active run's attempt, but a later phase run may not inherit a completed one.
+- Actual in frozen final11: reverify and its nested detector complete
+  successfully with distinct task identities, `run.json` is `completed`,
+  `failures.json` is empty, and the patch lifecycle is `Verified`. Receipt
+  persistence then reports `divergent duplicate phase-attempt v2 event`
+  because the reverify reused the already-completed selected patch attempt.
+  `phase-attempts.jsonl` contains no new reverify attempt, so the shell cannot
+  offer the selectable F-26 acknowledgement card.
+- Screenshot / evidence: the failed
+  [final11 record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final11-authoritative-f25-f26-f41-f42/AUDIT-RECORD.md),
+  [`99-fix-degraded-projection.active.txt`](/private/tmp/kuzushi-operator-contract-audit-019f621b/final11-authoritative-f25-f26-f41-f42/captures/99-fix-degraded-projection.active.txt),
+  its session transcript sequence 45, and the two-entry Fix ledger preserve the
+  pre-fix failure without relabeling it as a pass.
+- Root cause / owner:
+  `crates/kuzushi-tui/src/app/tool_runner/run_tool/background.rs::initialize_background_tool_run`
+  (lines 164–185) derived the new seed's attempt from any Activity session with
+  the same origin phase. After patch selection and application, that Activity
+  still carried the completed Fix attempt, so an unrelated later reverify
+  inherited it.
+- Fix: every newly initialized phase-backed background tool run now receives a
+  fresh `RunAttemptId`. Legitimate live-run continuity remains owned by
+  `capture_run_focus_origin`, which preserves the attempt only when Activity is
+  already the active Run Focus.
+- Regression: `new_phase_run_does_not_reuse_a_completed_activity_attempt_id`
+  proves two new phase launches differ from the stale completed attempt and
+  from each other;
+  `active_run_focus_continuation_preserves_its_attempt_id` protects the valid
+  continuation path. Frozen final12 supplies end-to-end proof: patch attempt
+  `902cb5b6-17b2-4b0e-9202-e3e930d2b273` and reverify attempt
+  `f8625687-43fd-4644-ac30-00c12d3300b6` are distinct, acknowledgement selects
+  the latter, and restart reconstructs Verified.
 
 ## Terminal, size, palette, and projection matrix
 
 | Cell | Result | Evidence |
 |---|---:|---|
-| 40×12 | PASS | Final-3 normal/zoom/ResultReady Prove retains identity, proof meter, STATUS, NEXT; final-4 Activity renders its draft; final-5 Map ends with `◇ MAP › map-bottom-final5` |
-| 60×20 | PASS | `size-60x20.ansi`; J14 complete journey |
-| 80×24 | PASS | `size-80x24.ansi`; final-5 partial acknowledgement; final-6 long editor/cancellation/stable queue; final-7 remapped result-key journey |
+| 40×12 | PASS | Final12 Map/question/progress/default/NEXT/Enter and last-row composer pass; compact API-ready acknowledgement passes |
+| 60×20 | PASS | Final12 Map-bottom matrix and compact stored-OAuth acknowledgement pass; J14 complete journey remains preserved |
+| 80×24 | PASS | Final12 Map-bottom matrix; final-5 partial acknowledgement; final-6 long editor/cancellation/stable queue; final-7 remapped result-key journey |
 | 100×30 | PASS | Final-4 Activity composer and Replay → Trace → Jobs origin replacement journey |
-| 120×36 | PASS | `size-120x36.ansi`; F03/F09/F10 journeys; final-4 Activity draft; final-6 waiting-agent cancellation/restart |
-| 160×48 | PASS | `size-160x48.ansi` |
+| 120×36 | PASS | Final12 compact Map, authoritative F-25/F-26/F-41/F-42/F-45 Prove/Fix lifecycle, and positive F-43/F-44 shell SAST path pass |
+| 160×48 | PASS | Final12 question and bottom Map composer matrix passes |
 | Physical Warp Shift / BackTab / Cmd+V | PASS after paste fix | `Warp-F11` baseline and `Warp-F11-fixed` post-fix artifacts |
 | `xterm-256color` | PASS | J15 uses indexed SGR, no RGB SGR |
 | Truecolor | PASS | J15 truecolor capture uses RGB SGR and a non-color selection marker |
 | High contrast | PASS | J15 high-contrast target/palette captures |
 | Reduced motion | REVIEW | Captured; spinner freeze remains a visual comparison rather than an automated assertion |
 | Plain / non-TTY | PASS | J16 summary/findings/tools/explicit-target matrix |
+| Frozen final8 terminal matrix | PARTIAL | Compact all-five-size, F-27–F-38, and F-39 pass; F-40 fails twice and honestly blocks F-25/F-26 |
+| Frozen final9 terminal matrix | PARTIAL | All-five-size Map-bottom matrix, F-40, F-25, restart-derived Fix, patch selection, and reviewed application pass; F-41/F-42 fail before F-26 |
+| Frozen final11 terminal matrix | FAIL preserved | Compact Map passes 5/5 and reverify completes with distinct nested task identity, but F-45 reuses the selected Fix attempt and prevents the selectable F-26 receipt |
+| Frozen final12 terminal matrix | PASS for completed matrix | Compact Map passes 5/5; authoritative F-25/F-26/F-41/F-42/F-45 Prove/Fix journey passes with 23/23 detached alternate-screen captures and restart |
+| Final12 shell SAST terminal matrix | PASS | Literal manual Secret Scan preserves canonical `maxFindings=5`, yields one finding, completes seq 1–13 with distinct tasks, and has no plan/degraded/receipt/deadlock failure |
 
 ## Performance and reliability observations
 
@@ -870,34 +1712,72 @@ reproduction.
   editor flow. It is still evidence that a synthetic key-event storm can starve
   the final bytes behind redraw/background work.
 - No p95 measurement under an event storm was completed.
+- Final12's three sequential aggregate suites complete in 522.33 s real:
+  TUI 2,117 tests in 259.09 s, core 3,352 tests in 199.27 s, and CLI 285 tests
+  in 63.97 s. The aggregate therefore covers 5,754 tests without concurrent
+  Cargo-suite contention.
+- Before the F-44 source fix, the core SAST run-artifact integration executable
+  remained hung for more than 17 minutes. A 1 ms macOS process sample showed
+  the test thread blocked in a second `flock` while the live run-item writer
+  retained ownership. Post-fix, the formerly hung test finishes in 6.32 s and
+  the focused writer-reuse regression in 0.85 s. Final12 positive shell SAST
+  completes in the real terminal without a deadlock, and the 3,352-test core
+  suite is green within the 522.33 s full sequential aggregate.
 
 ### Source-backed risks
 
-1. **P1: synchronous UI-thread durability and workspace refresh.** The update
-   loop immediately executes effects; phase result handling can append/reload
-   ledgers, call `sync_all`, run three Git subprocesses, and load up to 500
-   SQLite rows before the next render. One background event can exceed the
-   nominal 3 ms drain slice.
-2. **P1: unbounded render projection before viewport slicing.** Workbench,
-   recommendation, home, run-diff, trace, and Replay paths clone or parse full
-   artifacts—up to 64 MiB—and build all rows before slicing the viewport.
-3. **P2: target-picker worker storm.** Every cursor move can start a detached
-   facts worker with Git/file scans. Generation checks reject stale results but
-   do not cancel stale computation.
-4. **P2: file-picker/completion cloning.** Up to 5,000 paths / 8 MiB can be
-   cloned, deduplicated, and sorted repeatedly per keystroke/render.
-5. **P2: hydration starvation.** Two stale non-cancellable workers can occupy
-   both slots and delay the current target even though stale results cannot
-   corrupt state.
-6. **P3: unbounded editors.** Cursor/string operations and paste payloads are
-   O(n) with no descriptor/surface-specific upper bound.
+1. **High: synchronous effects can block the UI thread.**
+   `app/update.rs:45-49` and `app/effect_runtime.rs:6-12` execute effects inline.
+   Phase selection performs synchronous proof/finding/disposition/reload work
+   (`state_transitions/key_dispatch.rs:276-337,442-457`); export, reindex,
+   review, and patch effects perform filesystem/domain work inline
+   (`app/effects.rs:535-639,673-758`); reviewed patch application reaches core
+   filesystem mutation (`remediation/patch/apply_reviewed_patch.rs:50`); and
+   completion receipt handling can read/persist during background draining
+   (`runtime_event_drains.rs:182`). These paths can exceed the nominal drain
+   slice before another key is rendered.
+2. **High: typed Activity projection can become superlinear and unbounded.**
+   The core projection retains an unbounded timeline and applies each item
+   through the reducer (`run_lifecycle/application/projection.rs:72`,
+   `run_lifecycle/application/reducer.rs:27`). TUI Activity then rebuilds task
+   rows/projections as items arrive (`app/view_state/activity.rs:569,1408`). A
+   viewport cap does not bound the work already performed on the full history.
+3. **High: Trace can clone, project, and render the full capped artifact.**
+   Cache, view-model, and replay paths can each transform the complete trace
+   (`workbench_cache.rs:152`, `ui_view_models/run_trace.rs:212`,
+   `renderer/views/runs/replay_lines.rs:208`) up to the reader's 64 MiB cap
+   (`kuzushi-core/src/run_artifacts/run_artifact_reader.rs:18`) before viewport
+   slicing.
+4. **Moderate-high: the terminal input queue is unbounded.**
+   `terminal_loop_event.rs:34` uses an unbounded MPSC lane, and
+   `run_shell.rs:267` processes one terminal event per draw cycle. The measured
+   18-second literal-key burst is consistent with starvation under an event
+   storm, although no p95 event-storm benchmark was completed.
+5. **Moderate-high: OAuth subprocess stdin can race the detached terminal
+   reader.** `auth_login.rs:207` launches the auth process while
+   `auth_process.rs:13` inherits process streams; the detached crossterm reader
+   remains active (`terminal_loop_event.rs:42`). An interactive OAuth child can
+   therefore compete with the shell for terminal input.
+6. **Moderate: cancellation can remain pending through unbounded post-scan
+   work.** `run_scan_engines_with_options.rs:25,208` checks cancellation around
+   engine orchestration, but large indexing/insertion work after engine output
+   does not prove bounded cancellation checkpoints throughout.
 
 ### Verified strengths
 
-- One authoritative `JobHub` live slot, bounded event capacity, and generation
-  filtering.
-- Reliable blocking delivery for question/credential/terminal events; only
-  nonterminal progress is explicitly droppable.
+- No full `ShellApp` clone occurs per keystroke; update mutates the owned state
+  and executes explicit effects.
+- One authoritative `JobHub` live slot uses a bounded capacity of 4,096,
+  generation filtering, and quarantine/exclusive-slot ownership.
+- Question, completion, credential, run, and terminal delivery uses the
+  lossless lane; only explicitly nonterminal progress is droppable.
+- Background draining is capped at 256 job events plus 512 runtime events and a
+  roughly 3 ms slice, limiting one drain pass even though an individual inline
+  effect can still exceed it.
+- Hydration is limited to two workers with cancellation and target/generation
+  rejection; watcher delivery is bounded, coalesced, and overflow-signaled.
+- Visible retention caps exist for logs (500), fallback Activity (2,000), and
+  findings (500), although the typed timeline risk above remains unbounded.
 - Durable trace write precedes the capped live trace copy.
 - Background questions do not take key focus after F-06.
 - Waiting questions poll cancellation every 50 ms.
@@ -907,6 +1787,16 @@ reproduction.
 - Final terminal replays prove explicit partial-result acknowledgement and
   restart, the unchanged 40×12 bottom Map composer, visible Activity drafts,
   and history-safe contextual replacement.
+- Frozen final12 proves the complete audited Prove/Fix lineage: proof selection
+  before disposition, restart-derived Fix, explicit patch selection, reviewed
+  application, mode-aware reverify, distinct nested task and Fix-attempt
+  identities, verified acknowledgement, and restart reconstruction.
+- Final12's positive shell SAST stream is contiguous and hash-linked from seq
+  1 through 13, separates parent and engine task identity, emits one canonical
+  finding/receipt, and completes without the prior plan-scope or writer failure.
+- The frozen aggregate is green at 5,754/5,754, the post-suite source manifest
+  remains 57,933/57,933, compact evidence verifies 696/696 checksums, and the
+  combined touched-crate/all-target Clippy run is warning-free.
 - Controlled cancellation proves Jobs/Run Focus state agreement, process-group
   cleanup, stable queued selectors, exact-once successor drain, terminal
   canceled identity, compact agent-ID targeting, and restart reconstruction.
@@ -915,11 +1805,34 @@ reproduction.
   patch state can mutate.
 - Watcher debounce/overflow signaling, worker panic guards, watchdog generation
   checks, and terminal-session Drop restoration are present.
-- Startup reconstructs workflow attempts, findings, context, scene, scope, and
-  job summaries; orphan disk runs render as uncertain `running?`, not live.
+- Startup/restart reconstruction is source- and test-backed across
+  `construction.rs:126`, `ui_view_models/journey.rs:194`,
+  `ui_view_models/workbench.rs:173`, `key_dispatch.rs:2030`,
+  `ui_view_models/phase_cockpit/tests.rs:586`, and
+  `runtime_event_drains.rs:170`; orphan disk runs render as uncertain
+  `running?`, not live.
 
 ## Remaining risk and untested behavior
 
+- No reproduced operator-contract finding remains open. Final12 closes the
+  final F-26/F-41/F-42/F-43/F-44/F-45 cluster through detached-terminal and
+  canonical-artifact proof, passes 5,754/5,754 aggregate tests, rechecks all
+  57,933 source-manifest entries, and passes combined touched-crate Clippy.
+- Historical negative evidence remains intentionally visible. Final9's full
+  TUI suite was not green: 2,104 tests passed and five failed
+  (`mouse_click_focuses_activity_panes`, the three shell SAST tests, and
+  `restarted_result_card_restores_durable_metadata_and_typed_actions`). Its
+  CRAP-risk gate also reports four violations across three functions. Final11
+  later passes TUI 2,115/2,115 and CLI 285/285 but fails core 3,351/1 on a
+  deterministic stale privacy-label expectation and reproduces F-45. These
+  records are superseded by, not erased from, the final12 closure evidence.
+- Stored-OAuth-ready and process-environment-API-ready now pass visibly in
+  final8 without opening a browser. The audit used synthetic isolated
+  credentials; it did not perform a live browser OAuth grant.
+- Approval session memory is intentionally not durable. Final8 proves exact
+  same-scope deny and fresh descriptor affirmative; different-target isolation
+  and restart remain covered by focused tests and the earlier final7 restart
+  journey rather than one combined final8 terminal session.
 - The final Prove/Fix terminal journey uses deterministic model bridges so it
   can assert exact value lineage without spending credentials. It does not
   prove a live paid-provider transport or provider-side retry behavior.
@@ -935,46 +1848,130 @@ reproduction.
   conditionally require it for a hand-constructed terminal artifact. This is a
   low-severity persistence-hardening gap, not a reproduced operator mismatch.
 - Warp was used for terminal-dependent input proof before the operator asked
-  for zero focus stealing; all subsequent journeys were detached tmux. No
-  further GUI automation is planned.
+  for zero focus stealing; all final8/final9/final11/final12 matrix journeys
+  were detached tmux. Remaining audits can run without refocusing the desktop
+  by using detached tmux and alternate-screen-aware capture; a new
+  physical Warp input replay would require explicit coordination.
 
 ## Verification commands and current results
 
-All commands below ran from the recorded repository/HEAD unless an absolute
-frozen-binary path is shown.
+Rows labeled `CURRENT` ran against the then-current recorded HEAD plus
+worktree. Rows labeled `HISTORICAL` preserve earlier frozen-binary proof.
+`FINAL8`, `FINAL9`, `FINAL11`, and `FINAL12` rows are immutable snapshot
+evidence. Final11 failures remain negative evidence. Final12 closes the static,
+compact Map, authoritative Prove/Fix, shell SAST, aggregate, and touched-crate
+Clippy gates explicitly marked PASS.
 
 | Command | Result |
 |---|---|
-| `cargo fmt --all -- --check` | PASS |
-| `cargo test -p kuzushi-core secret_scan -- --nocapture` | PASS — 12 passed, 0 failed |
-| `cargo test -p kuzushi-core dynamic_integer_ranges -- --nocapture` | PASS — 2 passed, 0 failed |
-| `cargo test -p kuzushi-tui --lib guided_scan -- --nocapture` | PASS — 40 passed, 0 failed |
-| `cargo test -p kuzushi-tui --lib operator_question` | PASS — 18 passed, 0 failed |
-| `cargo test -p kuzushi-tui --lib older_operator_question_generation_cannot_control_matching_run_and_request` | PASS — stale resolve/snooze/cancel all refused |
-| `cargo test -p kuzushi-tui --lib stale_operator_completion_cannot_clear_matching_current_question` | PASS |
-| `cargo test -p kuzushi-tui --lib ui_view_models::journey::tests` | PASS — 15 passed, 0 failed |
-| `cargo test -p kuzushi-tui --lib renderer::views::workbench::phase_pages::header::tests` | PASS — 6 passed, 0 failed |
-| `cargo test -p kuzushi-tui --lib contextual_` | PASS — 9 passed, 0 failed |
-| `cargo test -p kuzushi-tui --lib run_focus_prompt_tests` | PASS — 4 passed, 0 failed |
-| `cargo test -p kuzushi-tui --lib ultra_compact_ -- --nocapture` | PASS — 6 passed, 0 failed |
-| `cargo test -p kuzushi-tui --lib phase_presentation` | PASS — 7 passed, 0 failed |
-| `cargo test -p kuzushi-tui --lib phase_composition_contract` | PASS — 5 passed, 0 failed; 120 profile buffers, 30 truecolor snapshots, 30 plain cases |
-| `/usr/bin/time -p cargo test -p kuzushi-tui --lib --quiet` | PASS — 2,012 passed, 0 failed; 152.31 s test time, 152.51 s wall |
-| `cargo clippy -p kuzushi-tui --lib -- -D warnings` | PASS |
-| `cargo clippy -p kuzushi-core --lib -- -D warnings` | PASS |
-| `pnpm exec vitest run tests/modules/kwp-host.test.ts` | PASS — 2 tests |
-| `pnpm typecheck` | PASS |
-| `pnpm exec biome check src/modules/types.ts scripts/kuzushi-dynamic-module-host.mjs tests/modules/kwp-host.test.ts` | PASS |
-| `/usr/bin/time -p pnpm quality:crap-risk` | PASS — 365 changed code files; 20.76 s wall |
-| `git diff --check` | PASS |
+| `cargo fmt --all -- --check` | FINAL12 PASS — 1.28 s real |
+| `cargo test -p kuzushi-core verification::application::selected_proof::tests --lib -- --nocapture` | CURRENT PASS — 5 passed, 0 failed |
+| `cargo test -p kuzushi-tui selecting_proof_materializes_reality_and_restart_reconstructs_fix --lib -- --nocapture` | CURRENT PASS — 1 passed, 0 failed |
+| `cargo test -p kuzushi-tui blocked_proof_selection_is_visible_and_keeps_reality_unresolved --lib -- --nocapture` | CURRENT PASS — 1 passed, 0 failed |
+| `cargo test -p kuzushi-tui verified_ --lib -- --nocapture` | CURRENT PASS — 6 passed, 0 failed |
+| `cargo test -p kuzushi-tui auth_picker --lib -- --nocapture` | CURRENT PASS — 18 passed, 0 failed |
+| `cargo test -p kuzushi-tui credential_ --lib -- --nocapture` | CURRENT PASS — 17 passed, 0 failed |
+| `cargo test -p kuzushi-tui auth_footer --lib -- --nocapture` | CURRENT PASS — 1 passed, 0 failed |
+| `cargo test -p kuzushi-tui visible_notice_footer_advertises_dismissal_before_auth_navigation --lib -- --nocapture` | CURRENT PASS — 1 passed, 0 failed |
+| `cargo test -p kuzushi-tui corrected_api_key_replaces_empty_warning_with_secret_safe_acknowledgement --lib -- --nocapture` | CURRENT PASS — 1 passed, 0 failed |
+| `cargo test -p kuzushi-tui next_command_opens_phase_picker_at_derived_phase --lib -- --nocapture` | CURRENT PASS — 1 passed, 0 failed after the test-only fixture recorded canonical adequate Map evidence |
+| `cargo test -p kuzushi-tui picker_ --lib -- --nocapture` | HISTORICAL focused run was 83 passed, 1 failed before fixture correction; superseded by FINAL12 full TUI PASS 2,117/2,117 |
+| `cargo test -p kuzushi-core run_lifecycle::tests:: -- --nocapture` | CURRENT PASS — 7 passed, 0 failed; includes F-40 model-start-as-first-model-item regression |
+| `cargo test -p kuzushi-tui reverify_control -- --nocapture` | CURRENT PASS — 2 passed, 0 failed; covers Prompt/Navigate/remapped F-41 copy |
+| `cargo test -p kuzushi-tui reverify_line_discloses_mode_entry_before_the_navigation_key -- --nocapture` | CURRENT PASS — 1 passed, 0 failed |
+| `cargo test -p kuzushi-tui fix_model_projects_every_durable_patch_lifecycle_receipt -- --nocapture` | CURRENT PASS — 1 passed, 0 failed |
+| `cargo test -p kuzushi-tui truecolor_phase_reference_has_30_canonical_buffer_snapshots -- --nocapture` | CURRENT PASS — 1 passed, 0 failed; 30 canonical buffers retained |
+| `cargo test -p kuzushi-core lifecycle_observation --lib -- --nocapture` | CURRENT PASS — 4 passed, 0 failed; covers F-42 nested identity, preserved top-level task, unscoped plan seeding, and retained regression rejection |
+| `cargo test -p kuzushi-tui app::tests::run_command_dispatches_sast_scan_through_registry_and_persists --lib -- --exact --nocapture` on a clean frozen-final9 clone | EXPECTED PRE-FIX FAIL — exact visible `run observation has no plan scope`, failed SAST handoff, 0 findings versus 2; log SHA-256 `0221bed8...11d8331` |
+| Fresh-linked current F-43 SAST shell regression set | CURRENT PASS — recommended component, literal `run`, and catalog `run .` pass 3/3 with 2,114 filtered; log SHA-256 `db1f907b...0c709` |
+| `cargo test --offline -p kuzushi-core run_artifacts -- --nocapture` before F-44 fix | FAIL/HUNG — sampled after more than 17 minutes in `sast_scan_runs_verify_patch_and_writes_run_artifacts`; process sample SHA-256 `9de6ce23...a5ea5` |
+| `cargo test --offline -p kuzushi-core sast_scan_runs_verify_patch_and_writes_run_artifacts -- --nocapture` after F-44 fix | CURRENT PASS — 1/1 in 6.32 s |
+| `cargo test --offline -p kuzushi-core write_sast_run_metadata_reuses_live_observation_writer -- --nocapture` after F-44 fix | CURRENT PASS — 1/1 in 0.85 s |
+| `pnpm quality:crap-risk` | FINAL12 PASS — mapping 5/5; 150 changed code files accepted; 10.93 s real |
+| `git diff --check` | FINAL12 PASS — 0.16 s real |
+| `pnpm check:docs` | FINAL12 PASS — release, port, public identity (2,461 files), command drift, and retired-runtime guards; 2.41 s real |
+| `cargo test -p kuzushi-core secret_scan -- --nocapture` | HISTORICAL PASS — 12 passed, 0 failed |
+| `cargo test -p kuzushi-core dynamic_integer_ranges -- --nocapture` | HISTORICAL PASS — 2 passed, 0 failed |
+| `cargo test -p kuzushi-tui --lib guided_scan -- --nocapture` | HISTORICAL PASS — 40 passed, 0 failed |
+| `cargo test -p kuzushi-tui --lib operator_question` | HISTORICAL PASS — 18 passed, 0 failed |
+| `cargo test -p kuzushi-tui --lib older_operator_question_generation_cannot_control_matching_run_and_request` | HISTORICAL PASS — stale resolve/snooze/cancel all refused |
+| `cargo test -p kuzushi-tui --lib stale_operator_completion_cannot_clear_matching_current_question` | HISTORICAL PASS |
+| `cargo test -p kuzushi-tui --lib ui_view_models::journey::tests` | HISTORICAL PASS — 15 passed, 0 failed |
+| `cargo test -p kuzushi-tui --lib renderer::views::workbench::phase_pages::header::tests` | HISTORICAL PASS — 6 passed, 0 failed |
+| `cargo test -p kuzushi-tui --lib contextual_` | HISTORICAL PASS — 9 passed, 0 failed |
+| `cargo test -p kuzushi-tui --lib run_focus_prompt_tests` | HISTORICAL PASS — 4 passed, 0 failed |
+| `cargo test -p kuzushi-tui --lib ultra_compact_ -- --nocapture` | HISTORICAL PASS — 6 passed, 0 failed |
+| `cargo test -p kuzushi-tui --lib phase_presentation` | HISTORICAL PASS — 7 passed, 0 failed |
+| `cargo test -p kuzushi-tui --lib phase_composition_contract` | HISTORICAL PASS — 5 passed, 0 failed; 120 profile buffers, 30 truecolor snapshots, 30 plain cases |
+| `/usr/bin/time -p cargo test -p kuzushi-tui --lib --quiet` | HISTORICAL PASS — 2,012 passed, 0 failed; does not cover current F-25–F-38 fixes |
+| `cargo clippy -p kuzushi-tui --lib -- -D warnings` | HISTORICAL PASS; superseded by combined FINAL12 all-targets Clippy PASS |
+| `cargo clippy -p kuzushi-core --lib -- -D warnings` | HISTORICAL PASS; superseded by combined FINAL12 all-targets Clippy PASS |
+| `pnpm exec vitest run tests/modules/kwp-host.test.ts` | HISTORICAL PASS — 2 tests |
+| `pnpm typecheck` | HISTORICAL PASS |
+| `pnpm exec biome check src/modules/types.ts scripts/kuzushi-dynamic-module-host.mjs tests/modules/kwp-host.test.ts` | HISTORICAL PASS |
 | `cargo rustc -p kuzushi-cli --bin kuzushi -- --emit=link=.../kuzushi-fixed-final5` | PASS — frozen hash `9ca0f5be…8e102` |
 | `run-final3-compact-journey.sh` | PASS — normal/zoom Prove, Map bottom composer, restart ResultReady at 40×12 |
 | Final-5 bottom Map composer replay | PASS — 40×12, `alternate_on=1`, `attached=0`, bottom row `◇ MAP › map-bottom-final5` |
 | Final-5 F14 partial-result replay | PASS — aligned guidance, no conflicting hints, one acknowledgement, byte-identical restart ledger |
 | Final-4 F15 Activity/modal-origin replay | PASS — visible drafts at 40×12/100×30/120×36; exact Esc/back origin; no durable mutation |
 | Final-3 F13 `maxFileBytes=1` replay | Expected refusal — exit 1, precise lower-bound error, durable failed/refused run, no scanner result |
+| Build and freeze `kuzushi-fixed-final8`; record path/hash/size/source | FINAL8 PASS — `ca2fb593…a886a02`, 162,667,240 bytes, source fingerprint `e606aab7…05b05c` |
+| `run-compact-map-matrix.sh` against frozen final8 | FINAL8 PASS — all five sizes, Map composer last row, active question/NEXT/default/progress/Enter visible, literal `ESC[Z` owned, every capture `alternate=1 attached=0` |
+| Build/freeze `kuzushi-fixed-final9`; verify immutable source manifest | FINAL9 PASS — `4964fa1b...529a74`, 163,076,504 bytes, source fingerprint `cfc70d5f...b829`, 19,345 manifest entries |
+| `run-compact-map-matrix.sh` against frozen final9 | FINAL9 PASS — all five required sizes, bottom composer/question/NEXT/default/progress visible, literal `ESC[Z` owned, every session detached and alternate-screen active |
+| Replay F-25/F-26 Prove selection and verified acknowledgement through restart | FINAL9 PARTIAL — F-40 and F-25 pass through restart, patch selection/application pass; F-41 then F-42 reproduce before F-26, which was not synthetically bypassed |
+| Replay F-27–F-37 approval and Credentials matrices with isolated HOME/TMPDIR/XDG | FINAL8 PASS — 11/11 findings, including API-env and stored-OAuth ready; credential 356/356 and approval 604/604 manifests verify |
+| Replay F-38 prompt-focused Target picker at compact and wide sizes | FINAL8 PASS — first Esc returns to picker, second browses targetless |
+| Replay F-39 remapped Prompt-mode printable key | FINAL8 PASS — visible/submitted `maxIterations` remains byte-exact through descriptor validation |
+| Final9 exact ten regression set | FINAL9 PASS — 10/10 |
+| Full `cargo test -p kuzushi-tui --lib --quiet` on final9 source | FINAL9 FAIL — 2,104 passed, 5 failed, 281.66 s libtest / 283.00 s real; exact output in `final9-quality/tui-tests.txt` |
+| Final9 `cargo fmt --all -- --check` | FINAL9 PASS — 1.69 s |
+| Final9 `pnpm quality:crap-risk` | FINAL9 FAIL — `run_root_shell_tool_loop` 64 lines, `persist_operator_questions` 48, `typed_item_rows` 160 and CRAP-risk 7 |
+| Final9 `git diff --check` / `pnpm check:docs` / source-manifest verification | FINAL9 PASS / PASS / PASS |
+| FINAL11 authoritative Prove/Fix replay | FINAL11 FAIL — reverify completed, but receipt persistence rejected `divergent duplicate phase-attempt v2 event`; F-45 reproduced before F-26 acknowledgement |
+| FINAL11 aggregate `kuzushi-tui --lib` / `kuzushi-cli --all-targets` | FINAL11 PASS — 2,115/2,115 and 285/285 respectively |
+| FINAL11 aggregate `kuzushi-core --lib` | FINAL11 FAIL — 3,351 passed, 1 failed; isolated rerun deterministically reproduced stale `checking SQL injection` expectation against privacy-safe `triage · checking finding` |
+| Build/freeze `kuzushi-fixed-final12`; verify immutable source manifest | FINAL12 PASS — `36b1d090...8183109`, 163,116,760 bytes, source fingerprint `21054590...908b7b`, 57,933/57,933 entries; frozen `2026-07-15T05:46:07Z` |
+| FINAL12 `cargo fmt --all -- --check` / `git diff --check` / `pnpm check:docs` / `pnpm quality:crap-risk` | FINAL12 PASS / PASS / PASS / PASS; [static record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-quality/static-gates-AUDIT-RECORD.md) |
+| `run-compact-map-matrix.sh` against frozen final12 | FINAL12 PASS — 5/5 sizes; bottom composer/question/NEXT/default/progress/Enter visible; literal `ESC[Z` owned; all sessions detached and alternate-screen active |
+| Replay F-25/F-26/F-41/F-42/F-45 through restart | FINAL12 PASS — five canonical runs, distinct Fix attempts, gap-free non-degraded reverify, verified acknowledgement, final restart, and 23/23 detached alternate-screen captures |
+| Literal `run sast:scan {"taskMode":"manual","tasks":["secret-scan"],"maxFindings":5}` in frozen final12 | FINAL12 PASS — run `tool-1784095019-3295287ba435`, exact canonical input, one finding, hash-linked seq 1–13, distinct tasks, no plan/degraded/receipt/deadlock failure |
+| `CARGO_TARGET_DIR=/private/tmp/kuzushi-operator-contract-audit-019f621b/cargo-final12-snapshot-target /usr/bin/time -p cargo test -p kuzushi-tui --lib --quiet` | FINAL12 PASS — 2,117/2,117; 259.09 s real |
+| `CARGO_TARGET_DIR=/private/tmp/kuzushi-operator-contract-audit-019f621b/cargo-final12-snapshot-target /usr/bin/time -p cargo test -p kuzushi-core --lib --quiet` | FINAL12 PASS — 3,352/3,352; 199.27 s real |
+| `CARGO_TARGET_DIR=/private/tmp/kuzushi-operator-contract-audit-019f621b/cargo-final12-snapshot-target /usr/bin/time -p cargo test -p kuzushi-cli --all-targets --quiet` | FINAL12 PASS — 285/285 across seven binaries; 63.97 s real |
+| Final12 full sequential aggregate | FINAL12 PASS — 5,754/5,754; 522.33 s real; record SHA-256 `e8db512bf318f7933dfb68bd01a19c287df4275a11f962c9a3f7f537517d3943` |
+| Post-suite `shasum -a 256 -c /private/tmp/kuzushi-operator-contract-audit-019f621b/final12-provenance/source-manifest.sha256` | FINAL12 PASS — 57,933/57,933 entries |
+| Compact-final12 `shasum -a 256 -c` evidence manifest | FINAL12 PASS — 696/696 entries |
+| `CARGO_TARGET_DIR=/private/tmp/kuzushi-operator-contract-audit-019f621b/cargo-final12-snapshot-target cargo clippy -p kuzushi-core -p kuzushi-tui -p kuzushi-cli --all-targets -- -D warnings` | FINAL12 PASS — 54.21 s real; log SHA-256 `c0e4dadea667290c2bbe82b07ecccbcd4f723930caa5ef9fad7a82dfcacb131f` |
 
-The durable full-suite record is
+The historical full-suite record is
 `/private/tmp/kuzushi-operator-contract-audit-019f621b/full-tui-test.result`;
-final compact provenance is
+final compact provenance through F-24 is
 `/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/F11-final5-map-bottom/provenance.txt`.
+Final8 provenance and terminal closure are in the
+[compact Map matrix](/private/tmp/kuzushi-operator-contract-audit-019f621b/compact-map-final8-matrix/AUDIT-RECORD.md),
+[approval/credential record](/private/tmp/kuzushi-operator-contract-audit-019f621b/captures/approval-credential-final8/FINAL-AUDIT-RECORD.md),
+and [F25/F26/F39 record](/private/tmp/kuzushi-operator-contract-audit-019f621b/FINAL8-AUTHORITATIVE-F25-F26-F39-RECORD.md).
+Final9 provenance is in
+[`final9-provenance`](/private/tmp/kuzushi-operator-contract-audit-019f621b/final9-provenance),
+its compact proof is in the
+[final9 Map matrix](/private/tmp/kuzushi-operator-contract-audit-019f621b/compact-map-final9-matrix/AUDIT-RECORD.md),
+its native journey is in the
+[F25/F26 retry2 record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final9-authoritative-f25-f26-retry2/AUDIT-RECORD.md),
+and its aggregate output is in
+[`final9-quality`](/private/tmp/kuzushi-operator-contract-audit-019f621b/final9-quality).
+Final11's negative aggregate and F-45 reproduction remain in
+[`final11-quality`](/private/tmp/kuzushi-operator-contract-audit-019f621b/final11-quality)
+and the
+[failed authoritative record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final11-authoritative-f25-f26-f41-f42/AUDIT-RECORD.md).
+Final12 completed evidence is in
+[`final12-provenance`](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-provenance),
+the [static-gate record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-quality/static-gates-AUDIT-RECORD.md),
+the [compact Map matrix](/private/tmp/kuzushi-operator-contract-audit-019f621b/compact-map-final12-matrix/AUDIT-RECORD.md),
+the [authoritative Prove/Fix record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-authoritative-f25-f26-f41-f42-f45/AUDIT-RECORD.md),
+the [positive shell SAST record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-positive-shell-sast/README.md),
+and the [aggregate-suite record](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-quality/aggregate-suites-AUDIT-RECORD.md).
+The combined Clippy log is
+[`clippy-core-tui-cli-all-targets.log`](/private/tmp/kuzushi-operator-contract-audit-019f621b/final12-quality/clippy-core-tui-cli-all-targets.log).
+With those records, all forty-five reproduced findings and every stated
+completion gate are closed.

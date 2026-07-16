@@ -54,7 +54,7 @@ pub(crate) fn workbench_prompt_mode(app: &ShellApp) -> Option<WorkbenchPage> {
     (app.shell_view() == ShellView::Workbench).then(|| super::active_workbench_page(app))
 }
 
-pub(crate) fn navigation_prompt_text(app: &ShellApp) -> String {
+pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
     let mut text = "NAVIGATE · Shift+Tab mode · Tab/[/] pane".to_string();
     let keys = app
         .ui()

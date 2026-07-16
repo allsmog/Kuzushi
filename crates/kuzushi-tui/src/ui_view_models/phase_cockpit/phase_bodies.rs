@@ -32,8 +32,12 @@ pub(super) fn fix_phase_model(app: &ShellApp) -> FixPhaseModel {
         .and_then(|finding| finding.alias.as_deref())
         .and_then(|alias| patch_review_model(app, alias));
     let remediation_finding = current_finding_for_detail(app).map(|(_, finding)| finding);
-    let remediation =
+    let mut remediation =
         remediation_lifecycle_model(app, remediation_finding.as_ref(), patch.is_some());
+    if remediation.reverify_command.is_some() {
+        remediation.reverify_control_hint =
+            Some(crate::ui_view_models::workbench_reverify_control_hint(app));
+    }
     FixPhaseModel {
         selection_disclosure: actionable_selection_disclosure(app, &findings, finding.as_ref()),
         findings,
@@ -152,6 +156,7 @@ fn remediation_model_from_record(record: PatchLifecycleRecord) -> RemediationLif
         detail: record.detail,
         updated_at: Some(record.updated_at),
         reverify_command,
+        reverify_control_hint: None,
         load_error: None,
     }
 }
@@ -206,6 +211,7 @@ fn empty_remediation_model(stage: RemediationLifecycleStage) -> RemediationLifec
         detail: None,
         updated_at: None,
         reverify_command: None,
+        reverify_control_hint: None,
         load_error: None,
     }
 }

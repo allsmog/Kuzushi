@@ -73,7 +73,12 @@ impl SecretScanOptions {
     }
 
     fn apply_limits(&mut self, input: &Value) -> Result<()> {
-        if let Some(value) = bounded_u64(input, "maxFileBytes", MIN_FILE_BYTES, MAX_SUPPORTED_FILE_BYTES)? {
+        if let Some(value) = bounded_u64(
+            input,
+            "maxFileBytes",
+            MIN_FILE_BYTES,
+            MAX_SUPPORTED_FILE_BYTES,
+        )? {
             self.max_file_bytes = value;
         }
         if let Some(value) = bounded_u64(input, "maxFindings", 1, MAX_SUPPORTED_FINDINGS)? {

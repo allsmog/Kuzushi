@@ -3,7 +3,8 @@ use crate::dispatch::load_dynamic_modules;
 use crate::tool_requirements::{reject_shell_only_run_dot, run_tool_workspace_for_invocation};
 use anyhow::Result;
 use kuzushi_core::run_artifacts::{
-    try_record_tool_run_failed, try_record_tool_run_started_with_reproducibility, ToolRunRecord,
+    try_record_tool_run_failed_settled, try_record_tool_run_started_with_reproducibility,
+    ToolRunRecord,
 };
 use kuzushi_core::{
     config_hash, load_config_for_target, new_run_id, AutonomyPosture, FindingStore, ModuleRegistry,
@@ -13,6 +14,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) struct PreparedCliToolRun {
     pub(crate) tool: String,
+    pub(crate) task_title: String,
     pub(crate) workspace: Option<WorkspaceTarget>,
     pub(crate) config: kuzushi_core::V2Config,
     pub(crate) store: Option<FindingStore>,
@@ -52,7 +54,7 @@ pub(crate) fn prepare_cli_tool_run(
 ) -> Result<PreparedCliToolRun> {
     let bootstrap = CliToolRunBootstrap::new(tool, target, &input, &options, &load)?;
     let mut config = bootstrap.load_config_or_record_failure(&input)?;
-    config.autonomy = resolve_cli_autonomy(&config, autonomy)?;
+    config.autonomy = bootstrap.resolve_autonomy_or_record_failure(&config, autonomy, &input)?;
     let setup = bootstrap.with_config(config, load, &input)?;
     let input = setup.parse_input(&input)?;
     let option_store = setup.option_store(&input, &options)?;
@@ -155,6 +157,21 @@ impl CliToolRunBootstrap {
         )
     }
 
+    fn resolve_autonomy_or_record_failure(
+        &self,
+        config: &kuzushi_core::V2Config,
+        autonomy: Option<String>,
+        raw_input: &str,
+    ) -> Result<AutonomyPosture> {
+        resolve_cli_autonomy(config, autonomy).map_err(|error| {
+            let message = error.to_string();
+            error_with_persistence(
+                error,
+                self.record_failure_with_config(raw_input, config, &message),
+            )
+        })
+    }
+
     fn reject_shell_only_or_record_failure(self, raw_input: &str) -> Result<Self> {
         if let Err(error) = reject_shell_only_run_dot(&self.tool) {
             let message = error.to_string();
@@ -167,16 +184,29 @@ impl CliToolRunBootstrap {
     }
 
     fn record_pre_config_failure(&self, raw_input: &str, error: &str) -> Result<()> {
+        self.record_failure_with_config(raw_input, &kuzushi_core::V2Config::default(), error)
+    }
+
+    fn record_failure_with_config(
+        &self,
+        raw_input: &str,
+        config: &kuzushi_core::V2Config,
+        error: &str,
+    ) -> Result<()> {
+        let input = serde_json::json!({ "rawInput": raw_input });
         record_cli_tool_run_started(
             &self.artifact_target,
             &self.run_id,
             &self.tool,
-            &serde_json::json!({ "rawInput": raw_input }),
-            &kuzushi_core::V2Config::default(),
+            &input,
+            config,
             self.registry.loaded_module_specifiers(),
         )?;
-        try_record_tool_run_failed(
-            ToolRunRecord::new(&self.artifact_target, &self.run_id, "run", &self.tool),
+        record_cli_preparation_rejection(
+            &self.artifact_target,
+            &self.run_id,
+            &self.tool,
+            &input,
             error,
         )
     }
@@ -309,8 +339,11 @@ impl CliToolRunSetup {
 
     fn record_prepare_failure(&self, input: &serde_json::Value, error: &str) -> Result<()> {
         self.start(input)?;
-        try_record_tool_run_failed(
-            ToolRunRecord::new(&self.artifact_target, &self.run_id, "run", &self.tool),
+        record_cli_preparation_rejection(
+            &self.artifact_target,
+            &self.run_id,
+            &self.tool,
+            input,
             error,
         )
     }
@@ -320,8 +353,10 @@ impl CliToolRunSetup {
         input: PreparedToolInput,
         store: Option<FindingStore>,
     ) -> PreparedCliToolRun {
+        let task_title = direct_tool_intent(&self.registry, &self.tool);
         PreparedCliToolRun {
             tool: self.tool,
+            task_title,
             workspace: self.workspace,
             config: self.config,
             store,
@@ -331,6 +366,15 @@ impl CliToolRunSetup {
             run_id: self.run_id,
         }
     }
+}
+
+fn direct_tool_intent(registry: &ModuleRegistry, tool: &str) -> String {
+    registry
+        .resolve_tool(tool)
+        .map(|descriptor| descriptor.description.trim())
+        .filter(|description| !description.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "Execute the operator-selected security capability".to_string())
 }
 
 fn open_cli_tool_finding_store(
@@ -371,6 +415,30 @@ fn record_cli_tool_run_started(
     )
 }
 
+fn record_cli_preparation_rejection(
+    target: &Path,
+    run_id: &str,
+    tool: &str,
+    input: &serde_json::Value,
+    error: &str,
+) -> Result<()> {
+    let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target, run_id)?;
+    let rejection = kuzushi_core::run_lifecycle::observe_preparation_rejection(
+        &observation,
+        tool,
+        input,
+        "preparation_policy",
+        error,
+    )?;
+    let (observation, completion) = rejection.into_parts();
+    try_record_tool_run_failed_settled(
+        ToolRunRecord::new(target, run_id, "run", tool),
+        error,
+        &observation,
+        completion,
+    )
+}
+
 fn error_with_persistence(error: anyhow::Error, persistence: Result<()>) -> anyhow::Error {
     match persistence {
         Ok(()) => error,
@@ -383,8 +451,8 @@ fn error_with_persistence(error: anyhow::Error, persistence: Result<()>) -> anyh
 #[cfg(test)]
 mod resolve_cli_autonomy_tests {
     use super::{
-        error_with_persistence, prepare_cli_tool_run, record_cli_tool_run_started,
-        require_headless_run_tool, resolve_cli_autonomy,
+        direct_tool_intent, error_with_persistence, prepare_cli_tool_run,
+        record_cli_tool_run_started, require_headless_run_tool, resolve_cli_autonomy,
     };
     use kuzushi_core::{
         approve_dynamic_module, worker_protocol::Grant, AutonomyPosture, DynamicModuleLoadOptions,
@@ -409,6 +477,22 @@ mod resolve_cli_autonomy_tests {
         assert_eq!(
             resolve_cli_autonomy(&config, None).unwrap(),
             config.autonomy
+        );
+    }
+
+    #[test]
+    fn direct_run_task_uses_descriptor_intent_instead_of_tool_identity() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let title = direct_tool_intent(&registry, "workspace:status");
+
+        assert_ne!(title, "Run workspace:status");
+        assert_eq!(
+            title,
+            registry
+                .resolve_tool("workspace:status")
+                .unwrap()
+                .description
+                .trim()
         );
     }
 
@@ -559,6 +643,95 @@ export default {
             run.input.value()["target"],
             canonical_target.display().to_string()
         );
+    }
+
+    #[test]
+    fn prepare_failure_persists_a_typed_rejected_call_and_failed_terminal() {
+        let target = tempfile::tempdir().unwrap();
+        let error = reject_unknown_cli_option(target.path());
+        assert!(error.to_string().contains("unknown"));
+
+        let (run_id, read) = load_latest_preparation_rejection(target.path());
+        assert_failed_preparation_projection(&read);
+        assert_rejection_artifact_correlation(&read);
+        assert_items_redact_raw_input(target.path(), &run_id);
+    }
+
+    fn reject_unknown_cli_option(target: &std::path::Path) -> anyhow::Error {
+        prepare_cli_tool_run(
+            "workspace:status".to_string(),
+            serde_json::json!({"unknownOption": "raw-option-sentinel"}).to_string(),
+            Vec::new(),
+            None,
+            Some(target.to_path_buf()),
+            Vec::new(),
+        )
+        .err()
+        .expect("unknown option should be rejected")
+    }
+
+    fn load_latest_preparation_rejection(
+        target: &std::path::Path,
+    ) -> (String, kuzushi_core::run_lifecycle::RunProjectionRead) {
+        let entry = kuzushi_core::list_recent_run_summary_entries(target, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let read = kuzushi_core::run_lifecycle::load_run_projection(target, &entry.run_id).unwrap();
+        (entry.run_id, read)
+    }
+
+    fn assert_failed_preparation_projection(read: &kuzushi_core::run_lifecycle::RunProjectionRead) {
+        assert_eq!(
+            read.source,
+            kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1
+        );
+        assert_eq!(read.projection.tasks.len(), 1);
+        assert_eq!(read.projection.calls.len(), 1);
+        let call = read.projection.calls.values().next().unwrap();
+        assert_eq!(
+            call.status,
+            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+        );
+        assert_eq!(
+            read.projection
+                .terminal
+                .as_ref()
+                .map(|terminal| terminal.status),
+            Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+        );
+    }
+
+    fn assert_rejection_artifact_correlation(
+        read: &kuzushi_core::run_lifecycle::RunProjectionRead,
+    ) {
+        let call = read.projection.calls.values().next().unwrap();
+        assert!(!read.projection.artifacts.is_empty());
+        assert!(read
+            .projection
+            .artifacts
+            .values()
+            .all(|artifact| artifact.producing_item_id == call.item_id));
+        assert_eq!(
+            call.related_artifact_ids.len(),
+            read.projection.artifacts.len()
+        );
+        assert_eq!(
+            call.result_artifact
+                .as_ref()
+                .map(|artifact| artifact.path.as_str()),
+            Some("result.json")
+        );
+    }
+
+    fn assert_items_redact_raw_input(target: &std::path::Path, run_id: &str) {
+        let items = std::fs::read_to_string(kuzushi_core::run_artifacts::run_artifact_path(
+            target,
+            run_id,
+            "items.jsonl",
+        ))
+        .unwrap();
+        assert!(!items.contains("raw-option-sentinel"));
     }
 
     #[test]

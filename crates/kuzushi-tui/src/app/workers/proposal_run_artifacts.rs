@@ -1,9 +1,13 @@
-use super::{PlanChange, PlanProposal, ThreatPatch};
+use super::{JobEventSink, PlanChange, PlanProposal, ThreatPatch};
 use anyhow::{Context, Result};
 use kuzushi_core::run_artifacts::ToolRunRecord;
 use kuzushi_core::{V2Config, WorkflowPhase};
 use serde_json::{json, Value};
 use std::path::Path;
+
+#[path = "proposal_run_artifacts/lifecycle.rs"]
+mod lifecycle;
+pub(super) use lifecycle::ProposalRunLifecycle;
 
 pub(crate) struct ProposalRunMetadata {
     pub(crate) run_id: String,
@@ -15,6 +19,25 @@ pub(super) struct ProposalRun<'a> {
     pub run_id: &'a str,
     pub kind: &'a str,
     pub tool: &'a str,
+}
+
+pub(super) fn proposal_run_observation(
+    target: &Path,
+    run_id: &str,
+    sink: &JobEventSink,
+    task_title: &str,
+) -> Result<kuzushi_core::run_lifecycle::RunObservationHandle> {
+    let (item_subscriber, range_subscriber, derivative_subscriber, fault_subscriber) =
+        sink.run_lifecycle_subscribers(run_id);
+    kuzushi_core::run_lifecycle::RunObservationHandle::jsonl_with_derivative_delivery_subscriber(
+        target,
+        run_id,
+        Some(item_subscriber),
+        Some(range_subscriber),
+        Some(derivative_subscriber),
+        Some(fault_subscriber),
+    )?
+    .start_root_task(task_title)
 }
 
 impl ProposalRun<'_> {
@@ -39,6 +62,7 @@ impl ProposalRun<'_> {
         .context("could not persist the proposal run before model execution")
     }
 
+    #[cfg(test)]
     pub(super) fn complete(
         &self,
         summary: &str,
@@ -50,11 +74,19 @@ impl ProposalRun<'_> {
             .context("could not persist the proposal result")
     }
 
-    pub(super) fn fail(&self, error: &str, canceled: bool) -> Result<()> {
-        if canceled {
-            kuzushi_core::run_artifacts::try_record_tool_run_canceled(self.record(), error)
-        } else {
-            kuzushi_core::run_artifacts::try_record_tool_run_failed(self.record(), error)
+    pub(super) fn fail(
+        &self,
+        error: &str,
+        cancellation: Option<kuzushi_core::scan::CancellationDisposition>,
+    ) -> Result<()> {
+        match cancellation {
+            Some(kuzushi_core::scan::CancellationDisposition::Canceled) => {
+                kuzushi_core::run_artifacts::try_record_tool_run_canceled(self.record(), error)
+            }
+            Some(kuzushi_core::scan::CancellationDisposition::Interrupted) => {
+                kuzushi_core::run_artifacts::try_record_tool_run_interrupted(self.record(), error)
+            }
+            None => kuzushi_core::run_artifacts::try_record_tool_run_failed(self.record(), error),
         }
     }
 }

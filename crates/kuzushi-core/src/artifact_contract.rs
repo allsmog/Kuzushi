@@ -37,12 +37,18 @@ pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 6] = [
     },
 ];
 
-pub(crate) const OPTIONAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 1] =
-    [CanonicalRunArtifactSpec {
+pub(crate) const OPTIONAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 2] = [
+    CanonicalRunArtifactSpec {
         leaf: "report.sarif",
         label: "SARIF report",
         kind: "sarif",
-    }];
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "items.jsonl",
+        label: "semantic run items",
+        kind: "jsonl",
+    },
+];
 
 pub(crate) const TOOL_RESULT_ARTIFACTS: [CanonicalRunArtifactSpec; 1] =
     [CanonicalRunArtifactSpec {

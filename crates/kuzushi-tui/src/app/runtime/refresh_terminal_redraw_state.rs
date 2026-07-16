@@ -175,7 +175,7 @@ fn run_plain_shell_session(
 
     let report = execute_plain_scripted_session(app, &commands, 80);
     print!("{}", report.output);
-    if report.failed {
+    if report.outcome.exit_code() != 0 {
         anyhow::bail!("plain scripted session failed; see the result above");
     }
     Ok(())

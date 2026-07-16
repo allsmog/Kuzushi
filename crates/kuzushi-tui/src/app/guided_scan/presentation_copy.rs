@@ -13,7 +13,8 @@ pub(super) fn base_question(
     GuidedScanQuestionModel {
         header: header.to_string(),
         prompt: prompt.to_string(),
-        detail: detail.to_string(),
+        detail_lines: vec![detail.to_string()],
+        semantic_keys: std::collections::BTreeSet::new(),
         progress,
         cursor: flow.cursor().min(options.len().saturating_sub(1)),
         options,
@@ -133,8 +134,7 @@ pub(super) fn question_option(
 pub(super) fn other_option() -> GuidedQuestionOption {
     GuidedQuestionOption {
         label: "Other…".to_string(),
-        description: "Type a free-form answer; it is validated before changing the plan."
-            .to_string(),
+        description: "Type a free-form answer; it is checked before changing the plan.".to_string(),
         selected: false,
         recommended: false,
         other: true,
@@ -178,23 +178,34 @@ pub(super) fn humanize_option_name(name: &str) -> String {
 pub(super) fn phase_result_prompt(
     phase: WorkflowPhase,
     outcome: kuzushi_core::workflow_attempts::PhaseAttemptOutcome,
+    routes_to_report: bool,
 ) -> String {
     use kuzushi_core::workflow_attempts::PhaseAttemptOutcome::*;
 
-    match (phase, outcome) {
-        (WorkflowPhase::Map, Completed) => {
-            "Map modules completed. Use these results and continue to Scan?".to_string()
-        }
-        (WorkflowPhase::Scan, Completed) => {
-            "Scan modules completed. Use these candidates and continue to Review?".to_string()
-        }
-        (_, Partial) => format!(
+    match outcome {
+        Completed => completed_phase_result_prompt(phase, routes_to_report),
+        Partial => format!(
             "{} returned partial evidence. Review it and choose a recovery action.",
             phase.label()
         ),
-        (_, Failed) => format!("{} failed. Open the run or try again.", phase.label()),
-        (_, Canceled) => format!("{} was canceled. Open the run or try again.", phase.label()),
-        (_, Completed) => format!("{} completed. What should Kuzushi do next?", phase.label()),
+        Failed => format!("{} failed. Open the run or try again.", phase.label()),
+        Canceled => format!("{} was canceled. Open the run or try again.", phase.label()),
+    }
+}
+
+fn completed_phase_result_prompt(phase: WorkflowPhase, routes_to_report: bool) -> String {
+    match (phase, routes_to_report) {
+        (WorkflowPhase::Map, _) => {
+            "Map modules completed. Use these results and continue to Scan?".to_string()
+        }
+        (WorkflowPhase::Scan, false) => {
+            "Scan modules completed. Use these candidates and continue to Review?".to_string()
+        }
+        (WorkflowPhase::Scan, true) => {
+            "Scan completed with no reviewable findings. Use this result and open Report?"
+                .to_string()
+        }
+        _ => format!("{} completed. What should Kuzushi do next?", phase.label()),
     }
 }
 

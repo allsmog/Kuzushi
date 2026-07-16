@@ -232,9 +232,17 @@ impl PendingOperatorQuestion {
                 text: editor.expanded_input().trim().to_string(),
             };
         }
-        let option = &question.options[self.selected_option_index()];
+        let choice_ordinal = self.selected_option_index();
+        let option = &question.options[choice_ordinal];
         OperatorQuestionAnswer::Predefined {
             question_id: question.id.clone(),
+            choice_id: kuzushi_core::run_lifecycle::deterministic_choice_id(
+                &self.request.request_id,
+                &question.id,
+                self.active_question,
+                choice_ordinal,
+            )
+            .to_string(),
             label: option.label.clone(),
         }
     }
@@ -281,7 +289,7 @@ fn recommended_option_index(question: &OperatorQuestion) -> usize {
         .options
         .iter()
         .position(|option| option.recommended)
-        .unwrap_or(0)
+        .expect("operator question contract requires one recommended choice")
 }
 
 fn wrap_index(current: usize, delta: isize, len: usize) -> usize {

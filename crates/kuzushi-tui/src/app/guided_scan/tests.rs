@@ -4,6 +4,19 @@ use kuzushi_core::workflow_attempts::{
     append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseTargetSnapshot,
 };
 
+fn persist_adequate_map_result(target: &std::path::Path, run_id: &str) {
+    crate::test_support::record_indexed_run(
+        target,
+        run_id,
+        "context:build",
+        serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "data": { "snapshot": { "filesIndexed": 1 } }
+        }),
+    );
+}
+
 fn app_with_open_guided_other() -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
     let mut flow = GuidedScanFlow::new(GuidedScanStage::MapRoute);
@@ -604,14 +617,14 @@ fn selecting_map_result_continues_into_scan_module_questions() {
     let target = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(target.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    let completed = PhaseAttemptCompleted::new(
+    persist_adequate_map_result(target.path(), "run-map-1");
+    let completed = crate::test_support::append_typed_attempt(
+        target.path(),
         WorkflowPhase::Map,
-        vec!["run-map-1".to_string()],
-        PhaseTargetSnapshot::capture(target.path()),
+        "run-map-1",
         PhaseAttemptOutcome::Completed,
     );
     let attempt_id = completed.attempt_id.clone();
-    append_phase_attempt_completed(target.path(), completed).unwrap();
     app.refresh_phase_attempt_projection();
     app.engagement
         .set_guided_scan(GuidedScanFlow::new(GuidedScanStage::Running(
@@ -742,6 +755,7 @@ fn running_map_does_not_project_an_older_unresolved_attempt() {
 fn bound_result_projects_only_its_exact_persisted_attempt() {
     let target = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    persist_adequate_map_result(target.path(), "run-map-exact");
     let exact = PhaseAttemptCompleted::new(
         WorkflowPhase::Map,
         vec!["run-map-exact".to_string()],
@@ -758,8 +772,14 @@ fn bound_result_projects_only_its_exact_persisted_attempt() {
     app.show_guided_phase(WorkflowPhase::Map);
 
     assert!(app.bind_guided_phase_result(WorkflowPhase::Map, exact_id.clone()));
-    let question = app.guided_scan_question_model().unwrap();
-    assert!(question.detail.contains(&exact_id));
+    assert_eq!(
+        app.engagement.guided_scan().map(GuidedScanFlow::stage),
+        Some(GuidedScanStage::AwaitingResult {
+            phase: WorkflowPhase::Map,
+            attempt_id: exact_id,
+        })
+    );
+    assert!(app.guided_scan_question_model().is_some());
 }
 
 #[test]
@@ -778,6 +798,7 @@ fn partial_map_result_copy_never_claims_modules_finished() {
     let prompt = presentation_copy::phase_result_prompt(
         WorkflowPhase::Map,
         PhaseAttemptOutcome::Partial,
+        false,
     );
 
     assert!(prompt.contains("partial evidence"));

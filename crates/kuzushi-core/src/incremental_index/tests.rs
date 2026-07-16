@@ -6,6 +6,20 @@ use notify::{
 use std::process::Command;
 
 #[test]
+fn current_tree_hash_matches_indexed_snapshot_without_creating_state() {
+    let target = tempfile::tempdir().unwrap();
+    fs::create_dir_all(target.path().join("src")).unwrap();
+    fs::write(target.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+
+    let current = current_workspace_tree_hash(target.path()).unwrap();
+
+    assert!(!target.path().join(".kuzushi").exists());
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let indexed = index_workspace_snapshot(&workspace).unwrap();
+    assert_eq!(current, indexed.tree_hash);
+}
+
+#[test]
 fn repeated_file_changes_keep_latest_state() {
     let changes = coalesce_changes([
         WorkspaceChange::FileChanged("src/main.rs".into()),

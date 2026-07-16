@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A provider-reported USD amount that is safe to aggregate and persist.
 ///
@@ -24,6 +25,21 @@ enum RuntimeCostState {
     Exact,
     IncompleteObserved,
     Unavailable,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RuntimeCostCompleteness {
+    Exact,
+    IncompleteObserved,
+    Unavailable,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimeCostWire {
+    observed_usd: f64,
+    completeness: RuntimeCostCompleteness,
 }
 
 impl RuntimeCostReport {
@@ -104,6 +120,60 @@ impl RuntimeCostReport {
 
     fn is_exact_zero(self) -> bool {
         self.state == RuntimeCostState::Exact && self.observed.0 == 0.0
+    }
+}
+
+impl Serialize for RuntimeCostReport {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        RuntimeCostWire::from(*self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for RuntimeCostReport {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = RuntimeCostWire::deserialize(deserializer)?;
+        wire.into_report().map_err(serde::de::Error::custom)
+    }
+}
+
+impl From<RuntimeCostReport> for RuntimeCostWire {
+    fn from(report: RuntimeCostReport) -> Self {
+        let completeness = if report.is_unavailable() {
+            RuntimeCostCompleteness::Unavailable
+        } else if report.is_complete() {
+            RuntimeCostCompleteness::Exact
+        } else {
+            RuntimeCostCompleteness::IncompleteObserved
+        };
+        Self {
+            observed_usd: report.observed_usd(),
+            completeness,
+        }
+    }
+}
+
+impl RuntimeCostWire {
+    fn into_report(self) -> Result<RuntimeCostReport> {
+        let observed = RuntimeCost::from_usd(self.observed_usd, "persisted runtime cost")?;
+        match self.completeness {
+            RuntimeCostCompleteness::Exact => Ok(RuntimeCostReport::known(observed)),
+            RuntimeCostCompleteness::IncompleteObserved => {
+                Ok(RuntimeCostReport::incomplete(observed))
+            }
+            RuntimeCostCompleteness::Unavailable => {
+                anyhow::ensure!(
+                    observed == RuntimeCost::ZERO,
+                    "unavailable cost must be zero"
+                );
+                Ok(RuntimeCostReport::UNAVAILABLE)
+            }
+        }
     }
 }
 

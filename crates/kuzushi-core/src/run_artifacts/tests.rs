@@ -3935,6 +3935,7 @@ mod tests {
         assert!(fs::read_to_string(dir.join("report.sarif"))
             .unwrap()
             .contains("\"version\": \"2.1.0\""));
+        assert!(dir.join("items.jsonl").exists());
         assert_retired_snapshot_artifacts_absent(tmp.path(), run_id);
 
         let summary = load_run_summary(tmp.path(), run_id).unwrap();
@@ -4280,6 +4281,7 @@ mod tests {
         assert!(report.contains("No report was recorded for this run."));
         assert!(!report.contains("Snake Report"));
         assert!(!dir.join("report.sarif").exists());
+        assert!(dir.join("items.jsonl").exists());
 
         let summary = load_run_summary(tmp.path(), run_id).unwrap();
         assert!(!summary

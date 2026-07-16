@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
     runtime::RuntimeCostReport, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
-    AgentStructuredOutput, ModelTier, TriageOutcome, TriageRequest,
+    AgentStructuredOutput, ModelTier, Observed, TriageOutcome, TriageRequest,
 };
 use serde_json::Value;
 
@@ -20,39 +20,73 @@ impl AgentRuntime for AnthropicOAuthRuntime {
     }
 
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+        self.query_observed_blocking(request)
+            .map(Observed::into_value)
+    }
+
+    fn query_observed_blocking(
+        &self,
+        request: AgentQueryRequest,
+    ) -> Result<Observed<AgentQueryResponse>> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .context("AnthropicOAuthRuntime: could not start a tokio runtime")?;
         runtime
-            .block_on(self.send_messages(request))?
-            .validate_cost()
+            .block_on(self.send_messages_observed(request))?
+            .try_map(AgentQueryResponse::validate_cost)
     }
 
     async fn query(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-        self.send_messages(request).await?.validate_cost()
+        self.query_observed(request).await.map(Observed::into_value)
+    }
+
+    async fn query_observed(
+        &self,
+        request: AgentQueryRequest,
+    ) -> Result<Observed<AgentQueryResponse>> {
+        self.send_messages_observed(request)
+            .await?
+            .try_map(AgentQueryResponse::validate_cost)
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
+        self.triage_finding_observed_blocking(request)
+            .map(Observed::into_value)
+    }
+
+    fn triage_finding_observed_blocking(
+        &self,
+        request: TriageRequest,
+    ) -> Result<Observed<TriageOutcome>> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .context("AnthropicOAuthRuntime: could not start a tokio runtime")?;
-        runtime.block_on(self.triage_finding(request))
+        runtime.block_on(self.triage_finding_observed(request))
     }
 
     async fn triage_finding(&self, request: TriageRequest) -> Result<TriageOutcome> {
+        self.triage_finding_observed(request)
+            .await
+            .map(Observed::into_value)
+    }
+
+    async fn triage_finding_observed(
+        &self,
+        request: TriageRequest,
+    ) -> Result<Observed<TriageOutcome>> {
         let prompt = build_triage_prompt(&request)?;
         let response = self
-            .send_messages(
+            .send_messages_observed(
                 AgentQueryRequest::new(request.model, request.cwd, TRIAGE_SYSTEM_PROMPT, prompt)
                     .with_structured_output(triage_structured_output())
                     .with_temperature(0.0),
             )
             .await?
-            .validate_cost()?;
+            .try_map(AgentQueryResponse::validate_cost)?;
 
-        triage_outcome_from_response(response)
+        response.try_map(triage_outcome_from_response)
     }
 }
 
@@ -70,7 +104,7 @@ pub(crate) fn structured_triage_outcome(
     call_cost: RuntimeCostReport,
 ) -> Result<TriageOutcome> {
     let mut outcome = serde_json::from_value::<TriageOutcome>(structured)
-        .map_err(|error| anyhow::anyhow!("Anthropic OAuth triage JSON violated schema: {error}"))?;
+        .map_err(|_| anyhow::anyhow!("Anthropic OAuth triage JSON violated schema"))?;
     apply_call_cost(&mut outcome, call_cost);
     clamp_outcome(outcome).validate_cost()
 }
@@ -89,11 +123,9 @@ pub(crate) fn text_triage_outcome(
     if text.is_empty() {
         anyhow::bail!("AnthropicOAuthRuntime returned no triage content");
     }
-    let mut outcome = serde_json::from_str::<TriageOutcome>(strip_whole_json_fence(text))
-        .map_err(|error| {
-            anyhow::anyhow!(
-                "Anthropic OAuth triage response was not valid triage JSON: {error}; raw response: {text}"
-            )
+    let mut outcome =
+        serde_json::from_str::<TriageOutcome>(strip_whole_json_fence(text)).map_err(|_| {
+            anyhow::anyhow!("Anthropic OAuth triage response was not valid triage JSON")
         })?;
     apply_call_cost(&mut outcome, call_cost);
     clamp_outcome(outcome).validate_cost()

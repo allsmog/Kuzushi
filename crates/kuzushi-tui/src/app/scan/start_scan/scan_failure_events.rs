@@ -266,6 +266,17 @@ mod tests {
         }
     }
 
+    fn seed_scan_run_start(target: &std::path::Path, run_id: &str) {
+        kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
+            kuzushi_core::run_artifacts::ToolRunRecord::new(target, run_id, "scan", "sast:scan"),
+            &serde_json::json!({"runId": run_id}),
+            None,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+    }
+
     fn assert_quiet_canceled_scan(app: &ShellApp) {
         assert!(app.advisory().notice.is_none());
         assert!(!app
@@ -312,6 +323,7 @@ mod tests {
     #[test]
     fn abort_caused_scan_failure_records_canceled_run_not_failed() {
         let tmp = tempfile::tempdir().unwrap();
+        seed_scan_run_start(tmp.path(), "scan-canceled");
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(tmp.path().to_path_buf()));
         app.set_scan_panel(Some(canceled_scan_panel(tmp.path(), "scan-canceled")));
@@ -334,6 +346,7 @@ mod tests {
     #[test]
     fn abort_caused_scan_failure_surfaces_retained_partial_findings() {
         let tmp = tempfile::tempdir().unwrap();
+        seed_scan_run_start(tmp.path(), "scan-canceled");
         seed_partial_findings(tmp.path(), "scan-canceled", 2);
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(tmp.path().to_path_buf()));
@@ -357,6 +370,38 @@ mod tests {
         );
         let summary = kuzushi_core::load_run_summary(tmp.path(), "scan-canceled").unwrap();
         assert_eq!(summary.findings, Some(2));
+    }
+
+    #[test]
+    fn watchdog_scan_failure_keeps_tui_and_durable_status_interrupted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "scan-watchdog-interrupted";
+        seed_scan_run_start(tmp.path(), run_id);
+        let record = kuzushi_core::run_artifacts::ToolRunRecord::new(
+            tmp.path(),
+            run_id,
+            "scan",
+            "sast:scan",
+        );
+        kuzushi_core::run_artifacts::try_record_tool_run_interrupted(record, "scan cancelled")
+            .unwrap();
+        let before = kuzushi_core::load_run_summary(tmp.path(), run_id).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(tmp.path().to_path_buf()));
+        app.set_scan_panel(Some(canceled_scan_panel(tmp.path(), run_id)));
+        app.set_scan_abort_reason(Some(AbortReason::Watchdog));
+
+        let effects = app.apply_scan_failed("scan cancelled".to_string());
+        EffectRuntime::execute(&mut app, effects);
+
+        let after = kuzushi_core::load_run_summary(tmp.path(), run_id).unwrap();
+        assert_eq!(app.scan().unwrap().stage, "interrupted");
+        assert_eq!(after.status, "interrupted");
+        assert_eq!(after.terminal_result_sha256, before.terminal_result_sha256);
+        assert!(!app.log_lines().iter().any(|line| {
+            line.body.contains("terminal state could not be persisted")
+                || line.body.contains("refusing to rewrite")
+        }));
     }
 
     #[test]

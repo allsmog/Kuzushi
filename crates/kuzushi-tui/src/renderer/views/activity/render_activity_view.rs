@@ -74,8 +74,7 @@ fn render_active_activity_view(frame: &mut Frame<'_>, area: Rect, activity: &Run
 fn render_activity_panes(frame: &mut Frame<'_>, area: Rect, activity: &RunFocusModel<'_>) {
     let pane_chrome = activity.pane_chrome();
     if activity.collapse_dag_pane() {
-        let output_lines = feed_pane_lines(activity, inner_width(area));
-        render_feed_pane_widget(frame, area, activity, &pane_chrome.feed, output_lines);
+        render_feed_pane_widget(frame, area, activity, &pane_chrome.feed);
         return;
     }
     let now = Instant::now();
@@ -117,9 +116,8 @@ fn render_stacked_activity_panes(
         .split(area);
     let task_lines =
         task_lines.unwrap_or_else(|| dag_pane_lines(activity, inner_width(panes[0]), now));
-    let output_lines = feed_pane_lines(activity, inner_width(panes[1]));
     render_dag_pane_widget(frame, panes[0], activity, &pane_chrome.dag, task_lines);
-    render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed, output_lines);
+    render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed);
 }
 
 fn render_side_by_side_activity_panes(
@@ -135,9 +133,8 @@ fn render_side_by_side_activity_panes(
         .constraints([Constraint::Length(task_width), Constraint::Min(48)])
         .split(area);
     let task_lines = dag_pane_lines(activity, inner_width(panes[0]), now);
-    let output_lines = feed_pane_lines(activity, inner_width(panes[1]));
     render_dag_pane_widget(frame, panes[0], activity, &pane_chrome.dag, task_lines);
-    render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed, output_lines);
+    render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed);
 }
 
 fn render_focused_activity_pane(
@@ -151,8 +148,7 @@ fn render_focused_activity_pane(
         let task_lines = dag_pane_lines(activity, inner_width(area), now);
         render_dag_pane_widget(frame, area, activity, &chrome.dag, task_lines);
     } else {
-        let output_lines = feed_pane_lines(activity, inner_width(area));
-        render_feed_pane_widget(frame, area, activity, &chrome.feed, output_lines);
+        render_feed_pane_widget(frame, area, activity, &chrome.feed);
     }
 }
 
@@ -270,7 +266,6 @@ fn render_feed_pane_widget(
     area: Rect,
     activity: &RunFocusModel<'_>,
     title: &ActivityPaneTitle,
-    lines: Vec<Line<'static>>,
 ) {
     let block = cockpit_pane_block(
         Line::from(Span::styled(
@@ -282,10 +277,12 @@ fn render_feed_pane_widget(
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let scroll = activity.feed_scroll_offset(lines.len(), inner_area.height as usize);
-    let para = Paragraph::new(lines)
-        .scroll((scroll as u16, 0))
-        .wrap(Wrap { trim: false });
+    let lines = feed_pane_lines(
+        activity,
+        inner_area.width as usize,
+        inner_area.height as usize,
+    );
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, inner_area);
 }
 
@@ -296,11 +293,19 @@ fn pane_title_style(title: &ActivityPaneTitle) -> ratatui::style::Style {
     theme::muted()
 }
 
-fn feed_pane_lines(activity: &RunFocusModel<'_>, inner_width: usize) -> Vec<Line<'static>> {
+fn feed_pane_lines(
+    activity: &RunFocusModel<'_>,
+    inner_width: usize,
+    inner_height: usize,
+) -> Vec<Line<'static>> {
     activity
-        .feed_pane_rows(inner_width)
+        .feed_pane_viewport_rows(inner_width, inner_height)
         .into_iter()
-        .map(|row| Line::from(vec![Span::styled(row.text, feed_row_style(row.tone))]))
+        .map(|row| {
+            let _source_key = &row.key;
+            let _disclosed_source_keys = &row.disclosed_keys;
+            Line::from(vec![Span::styled(row.text, feed_row_style(row.tone))])
+        })
         .collect()
 }
 

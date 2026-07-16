@@ -127,23 +127,119 @@ impl RegistryScanInvocation {
             cancellation: Some(&cancellation),
             authorization: Default::default(),
         };
-        let prepared = registry.prepare_dispatch_input("sast:scan", input, &ctx, None)?;
-        let prepared = if prepared
-            .value()
-            .get("autoPatch")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
-            prepared.authorize_interactive_with_delegated_tools(&["patch:finding"])
-        } else {
-            prepared
-        };
-        registry.dispatch_prepared_input_with_runtime(
+        let prepared = prepare_interactive_scan_input(&registry, input, &ctx)?;
+        let (observation, run_id) = start_interactive_scan_observation(&ctx)?;
+        let outcome = registry.dispatch_prepared_input_observed_with_runtime(
             prepared,
             &ctx,
             runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
+        )?;
+        settle_interactive_scan(
+            workspace.root(),
+            &run_id,
+            &observation,
+            &cancellation,
+            outcome,
         )
     }
+}
+
+fn start_interactive_scan_observation(
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<(kuzushi_core::run_lifecycle::RunObservationHandle, String)> {
+    let observation = ctx
+        .run_observation()
+        .context("interactive scan lacks its semantic observation")?;
+    observation
+        .task_handle()
+        .context("interactive scan lacks its semantic task")?
+        .update_and_flush(kuzushi_core::run_lifecycle::RunItemStatus::Running, None)?;
+    let run_id = ctx
+        .run_id()
+        .context("interactive scan lacks its run identity")?;
+    Ok((observation, run_id))
+}
+
+fn prepare_interactive_scan_input(
+    registry: &ModuleRegistry,
+    input: serde_json::Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<kuzushi_core::PreparedToolInput> {
+    let prepared = registry.prepare_dispatch_input("sast:scan", input, ctx, None)?;
+    let auto_patch = prepared
+        .value()
+        .get("autoPatch")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if auto_patch {
+        return Ok(prepared.authorize_interactive_with_delegated_tools(&["patch:finding"]));
+    }
+    Ok(prepared)
+}
+
+fn settle_interactive_scan(
+    target: &std::path::Path,
+    run_id: &str,
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    cancellation: &ScanCancellation,
+    outcome: kuzushi_core::ObservedDispatchOutcome,
+) -> Result<serde_json::Value> {
+    let record =
+        kuzushi_core::run_artifacts::ToolRunRecord::new(target, run_id, "scan", "sast:scan");
+    match outcome.execution {
+        Ok(output) => {
+            kuzushi_core::run_artifacts::try_record_tool_run_complete_settled(
+                record,
+                &output,
+                observation,
+                outcome.completion,
+            )?;
+            Ok(output)
+        }
+        Err(error) => settle_interactive_scan_error(
+            record,
+            observation,
+            cancellation,
+            outcome.completion,
+            error,
+        ),
+    }
+}
+
+fn settle_interactive_scan_error(
+    record: kuzushi_core::run_artifacts::ToolRunRecord<'_>,
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    cancellation: &ScanCancellation,
+    completion: kuzushi_core::PendingToolCallCompletion,
+    error: anyhow::Error,
+) -> Result<serde_json::Value> {
+    match cancellation.disposition() {
+        Some(kuzushi_core::scan::CancellationDisposition::Canceled) => {
+            kuzushi_core::run_artifacts::try_record_tool_run_canceled_settled(
+                record,
+                &error.to_string(),
+                observation,
+                completion,
+            )?;
+        }
+        Some(kuzushi_core::scan::CancellationDisposition::Interrupted) => {
+            kuzushi_core::run_artifacts::try_record_tool_run_interrupted_settled(
+                record,
+                &error.to_string(),
+                observation,
+                completion,
+            )?;
+        }
+        None => {
+            kuzushi_core::run_artifacts::try_record_tool_run_failed_settled(
+                record,
+                &error.to_string(),
+                observation,
+                completion,
+            )?;
+        }
+    }
+    Err(error)
 }
 
 fn prepare_registry_scan_invocation(

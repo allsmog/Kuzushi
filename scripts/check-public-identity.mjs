@@ -1,7 +1,11 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  createPublicIdentitySourceScanner,
+  repoRoot,
+  requiredIdentityReferenceFailures,
+} from "./public-identity-source-scanner.mjs";
 
 const root = repoRoot();
 const publicSurfaces = [
@@ -111,13 +115,32 @@ const requiredIdentityReferences = [
     needles: ["OpenAI device code flow", "browser PKCE flow with localhost callback"],
   },
   {
-    label: "OpenAI bridge public error identity",
+    label: "OpenAI bridge safe public failure boundary",
     file: "crates/kuzushi-openai/src/langgraph_runtime/bridge_process.rs",
     needles: [
-      "public_bridge_bytes(stdout)",
-      "bridge_error_detail(&output.stdout, &output.stderr)",
-      '.replace("auth login openai-codex", "auth login openai")',
-      '.replace("openai-codex", "OpenAI OAuth")',
+      "public_bridge_failure(",
+      ".and_then(allowed_error_class)",
+      'fn allowed_error_class(class: &str) -> Option<&str>',
+      '"authentication"\n            | "bridge_internal"',
+      '| "cancelled"',
+      '| "provider_rejected"',
+      '| "provider_response_invalid"',
+      '| "provider_unavailable"',
+      '| "rate_limited"',
+      '| "timeout"',
+      '| "transport"',
+      ".then_some(class)",
+      "Bridge operation failed; raw error details were suppressed",
+      "bridge stdout/stderr details were suppressed",
+      "OpenAI OAuth authentication failed; run `kuzushi auth login openai`.",
+    ],
+    forbidden: [
+      "public_bridge_bytes(",
+      "bridge_error_detail(",
+      '.replace("auth login openai-codex"',
+      '.replace("openai-codex"',
+      "String::from_utf8_lossy(&output.stdout)",
+      "String::from_utf8_lossy(&output.stderr)",
     ],
   },
   {
@@ -165,11 +188,21 @@ const expectedBinEntries = {
   kz: "./bin/kuzushi-rs.mjs",
 };
 
+const { publicFiles, scanFile } = createPublicIdentitySourceScanner({
+  root,
+  publicSurfaces,
+  forbidden,
+  publicDocForbidden,
+  publicSourceForbidden,
+  renderedUiForbidden,
+});
 const files = publicFiles();
 const failures = [
   ...identityFailures(),
   ...bridgePublicWordingFailures(),
-  ...requiredIdentityReferences.flatMap(requiredIdentityReferenceFailures),
+  ...requiredIdentityReferences.flatMap((contract) =>
+    requiredIdentityReferenceFailures(root, contract),
+  ),
   ...files.flatMap(scanFile),
 ];
 
@@ -180,35 +213,6 @@ if (failures.length > 0) {
 }
 
 console.log(`Public identity check passed for ${files.length} file(s).`);
-
-function repoRoot() {
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8",
-    }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
-
-function publicFiles() {
-  return [
-    ...new Set([
-      ...gitLines(["ls-files"]),
-      ...gitLines(["ls-files", "--others", "--exclude-standard"]),
-    ]),
-  ]
-    .filter(isPublicSurface)
-    .filter((file) => !isIgnored(file))
-    .filter((file) => existsSync(path.join(root, file)))
-    .sort();
-}
-
-function scanFile(file) {
-  return readFileSync(path.join(root, file), "utf8")
-    .split(/\r?\n/)
-    .flatMap((line, index) => lineFailures(file, line, index + 1));
-}
 
 function identityFailures() {
   const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
@@ -228,23 +232,6 @@ function packageIdentityFailures(pkg) {
     failures.push("package.json: description must present Kuzushi as the product");
   }
   return failures;
-}
-
-function requiredIdentityReferenceFailures({
-  label,
-  file,
-  needles,
-  forbidden: forbiddenNeedles = [],
-}) {
-  const source = readFileSync(path.join(root, file), "utf8");
-  return [
-    ...needles
-      .filter((needle) => !source.includes(needle))
-      .map((needle) => `${file}: missing ${label} reference ${needle}`),
-    ...forbiddenNeedles
-      .filter((needle) => source.includes(needle))
-      .map((needle) => `${file}: forbidden ${label} reference ${needle}`),
-  ];
 }
 
 function binEntryFailures(bin) {
@@ -329,60 +316,4 @@ function bridgePublicWordingRules() {
         "scripts/langgraph-bridge.mjs: OpenAI credential errors must not expose auth login openai-codex",
     },
   ];
-}
-
-function lineFailures(file, line, lineNumber) {
-  const checks = [
-    ...forbidden,
-    ...(isPublicDoc(file) ? publicDocForbidden : []),
-    ...(isProductionPublicSource(file) ? publicSourceForbidden : []),
-    ...(isRenderedTuiSnapshot(file) ? renderedUiForbidden : []),
-  ];
-  return checks
-    .filter(([, pattern]) => pattern.test(line))
-    .map(([label]) => `${file}:${lineNumber} ${label}`);
-}
-
-function gitLines(args) {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8" })
-    .split(/\r?\n/)
-    .map((file) => file.trim())
-    .filter(Boolean);
-}
-
-function isPublicSurface(file) {
-  return publicSurfaces.some((candidate) => file === candidate || file.startsWith(`${candidate}/`));
-}
-
-function isIgnored(file) {
-  return (
-    file === "scripts/check-public-identity.mjs" ||
-    // Historical working notes; they describe the upstream port and old
-    // TypeScript-era state, so identity wording rules do not apply.
-    file.startsWith("docs/notes/") ||
-    // The upstream-port plan legitimately names the upstream project; its
-    // identity contract is still enforced via requiredIdentityReferences.
-    file === "docs/PORT_PLAN.md" ||
-    file.startsWith("target/") ||
-    file.startsWith("node_modules/") ||
-    file.startsWith("dist/") ||
-    file.startsWith("coverage/")
-  );
-}
-
-function isPublicDoc(file) {
-  // docs/quality/ holds archived point-in-time audits that quote
-  // historical UI wording verbatim; they are not public-facing docs.
-  // docs/PORT_PLAN.md is the upstream-port identity contract and
-  // legitimately names the upstream project, so it is not operator-facing.
-  if (file.startsWith("docs/quality/") || file === "docs/PORT_PLAN.md") return false;
-  return file === "README.md" || file.startsWith("docs/");
-}
-
-function isProductionPublicSource(file) {
-  return file.includes("/src/") && !file.endsWith("/tests.rs") && !file.endsWith("_tests.rs");
-}
-
-function isRenderedTuiSnapshot(file) {
-  return file.startsWith("crates/kuzushi-tui/tests/snapshots/") && file.endsWith(".snap");
 }

@@ -16,7 +16,7 @@ pub const CONTEXT_SNAPSHOT_FILE: &str = "context-snapshot.json";
 /// Context snapshots intentionally carry inventory and attack-surface data and
 /// can exceed ordinary prompt-source limits on large repositories. Producers
 /// and consumers must share this artifact bound; prompt construction applies
-/// its smaller, operator-configured limit after the JSON is validated.
+/// its smaller, operator-configured limit after the JSON is parsed.
 pub const MAX_CONTEXT_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
 pub fn context_snapshot_path(target: impl AsRef<Path>) -> PathBuf {

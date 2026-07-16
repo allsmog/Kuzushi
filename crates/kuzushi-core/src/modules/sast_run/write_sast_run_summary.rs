@@ -23,6 +23,7 @@ pub(in crate::modules) fn write_sast_run_metadata(
     artifacts: &SastRunArtifacts,
     summary_artifact: crate::run_artifacts::RunArtifact,
     result: &Value,
+    observation: Option<&crate::run_lifecycle::RunObservationHandle>,
 ) -> Result<()> {
     let mut recorded_artifacts = vec![summary_artifact];
     recorded_artifacts.extend(record_pipeline_artifacts(workspace, run_id, artifacts)?);
@@ -36,11 +37,30 @@ pub(in crate::modules) fn write_sast_run_metadata(
     crate::run_artifacts::write_run_summary(workspace.root(), &summary)?;
     append_sast_run_started_event_if_empty(workspace, run_id)?;
     append_sast_started_trace_if_empty(workspace, run_id)?;
-    crate::run_artifacts::try_record_tool_run_complete(
+    if defer_sast_terminal_to_dispatch(workspace.root(), run_id, observation)? {
+        return Ok(());
+    }
+    crate::run_artifacts::try_record_tool_run_complete_observed(
         crate::run_artifacts::ToolRunRecord::new(workspace.root(), run_id, "scan", "sast:scan"),
         result,
+        observation,
     )?;
     Ok(())
+}
+
+pub(in crate::modules) fn defer_sast_terminal_to_dispatch(
+    target: &std::path::Path,
+    run_id: &str,
+    observation: Option<&crate::run_lifecycle::RunObservationHandle>,
+) -> Result<bool> {
+    if observation.is_none() {
+        return Ok(false);
+    }
+    let projection = crate::run_lifecycle::load_run_projection(target, run_id)?.projection;
+    Ok(projection.calls.values().any(|call| {
+        call.kind == crate::run_lifecycle::CallKind::Tool
+            && call.status == crate::run_lifecycle::RunItemStatus::Running
+    }))
 }
 
 fn load_or_seed_sast_run_summary(
@@ -124,6 +144,24 @@ fn record_pipeline_artifacts(
 mod tests {
     use super::*;
 
+    fn metadata_fixture(
+        workspace: &WorkspaceTarget,
+        run_id: &str,
+        result: &Value,
+    ) -> (SastRunArtifacts, crate::run_artifacts::RunArtifact) {
+        let summary = crate::run_artifacts::write_run_artifact_json(
+            workspace.root(),
+            run_id,
+            SAST_SUMMARY_FILE,
+            "sast summary",
+            result,
+        )
+        .unwrap();
+        let artifacts = SastRunArtifacts::create(workspace, run_id).unwrap();
+        write_sast_scan_input(workspace, run_id, &artifacts, &json!({"runId": run_id})).unwrap();
+        (artifacts, summary)
+    }
+
     fn record_status(status: &str, ok: bool) -> (crate::run_artifacts::RunSummary, String, String) {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
@@ -135,16 +173,7 @@ mod tests {
             "errors": if status == "completed" { json!([]) } else { json!([format!("scan {status}")]) },
             "data": {"findingsCount": 2}
         });
-        let summary_artifact = crate::run_artifacts::write_run_artifact_json(
-            workspace.root(),
-            &run_id,
-            SAST_SUMMARY_FILE,
-            "sast summary",
-            &result,
-        )
-        .unwrap();
-        let artifacts = SastRunArtifacts::create(&workspace, &run_id).unwrap();
-        write_sast_scan_input(&workspace, &run_id, &artifacts, &json!({"runId": run_id})).unwrap();
+        let (artifacts, summary_artifact) = metadata_fixture(&workspace, &run_id, &result);
         write_sast_run_metadata(
             &workspace,
             &run_id,
@@ -152,6 +181,7 @@ mod tests {
             &artifacts,
             summary_artifact,
             &result,
+            None,
         )
         .unwrap();
         let summary = crate::run_artifacts::load_run_summary(workspace.root(), &run_id).unwrap();
@@ -175,19 +205,17 @@ mod tests {
             "status": "completed",
             "data": {"findingsCount": 2}
         });
-        let summary_artifact = crate::run_artifacts::write_run_artifact_json(
-            workspace.root(),
+        let (artifacts, summary_artifact) = metadata_fixture(&workspace, run_id, &result);
+        write_sast_run_metadata(
+            &workspace,
             run_id,
-            SAST_SUMMARY_FILE,
-            "sast summary",
+            2,
+            &artifacts,
+            summary_artifact,
             &result,
+            None,
         )
         .unwrap();
-
-        let artifacts = SastRunArtifacts::create(&workspace, run_id).unwrap();
-        write_sast_scan_input(&workspace, run_id, &artifacts, &json!({"runId": run_id})).unwrap();
-        write_sast_run_metadata(&workspace, run_id, 2, &artifacts, summary_artifact, &result)
-            .unwrap();
 
         let events = std::fs::read_to_string(crate::run_artifacts::run_artifact_path(
             workspace.root(),
@@ -226,6 +254,46 @@ mod tests {
         assert_eq!(summary.error.as_deref(), Some("scan failed"));
         assert_eq!(events.matches("\"status\":\"failed\"").count(), 1);
         assert!(trace.contains("sast:scan failed"), "{trace}");
+    }
+
+    #[test]
+    fn write_sast_run_metadata_reuses_live_observation_writer() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let run_id = "scan-observed";
+        let result = json!({
+            "ok": true,
+            "status": "completed",
+            "summary": "scan completed",
+            "data": {"findingsCount": 0}
+        });
+        let (artifacts, summary_artifact) = metadata_fixture(&workspace, run_id, &result);
+        let observation = crate::run_lifecycle::RunObservationHandle::jsonl(
+            workspace.root(),
+            run_id,
+        )
+        .unwrap()
+        .start_root_task("sast:scan")
+        .unwrap();
+
+        write_sast_run_metadata(
+            &workspace,
+            run_id,
+            0,
+            &artifacts,
+            summary_artifact,
+            &result,
+            Some(&observation),
+        )
+        .unwrap();
+
+        let projection = crate::run_lifecycle::load_run_projection(workspace.root(), run_id)
+            .unwrap()
+            .projection;
+        assert_eq!(
+            projection.terminal.map(|terminal| terminal.status),
+            Some(crate::run_lifecycle::RunItemStatus::Completed)
+        );
     }
 
     #[test]

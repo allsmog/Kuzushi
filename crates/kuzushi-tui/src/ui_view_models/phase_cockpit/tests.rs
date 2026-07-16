@@ -45,17 +45,29 @@ fn result_action_labels_follow_phase_result_key_overrides() {
 
 fn unresolved_map_result_app(config: V2Config) -> (tempfile::TempDir, ShellApp) {
     let target = tempfile::tempdir().expect("temp target");
-    let completed = PhaseAttemptCompleted::new(
+    seed_indexed_map_run(target.path(), "map-run");
+    crate::test_support::append_typed_attempt(
+        target.path(),
         WorkflowPhase::Map,
-        vec!["map-run".to_string()],
-        PhaseTargetSnapshot::capture(target.path()),
+        "map-run",
         PhaseAttemptOutcome::Completed,
     );
-    append_phase_attempt_completed(target.path(), completed).unwrap();
     let mut app = ShellApp::new(config, None);
     app.set_target(Some(target.path().to_path_buf()));
     app.refresh_phase_attempt_projection();
     (target, app)
+}
+
+fn seed_indexed_map_run(target: &std::path::Path, run_id: &str) {
+    crate::test_support::record_indexed_run(
+        target,
+        run_id,
+        "context:build",
+        serde_json::json!({
+            "ok": true,
+            "data": {"snapshot": {"filesIndexed": 1}}
+        }),
+    );
 }
 
 fn map_result_control_hint(app: &ShellApp) -> String {
@@ -489,6 +501,10 @@ fn fix_model_projects_every_durable_patch_lifecycle_receipt() {
                 fix.remediation.reverify_command.as_deref(),
                 Some("run patch:reverify {\"applicationId\":\"application-1\"}")
             );
+            assert_eq!(
+                fix.remediation.reverify_control_hint.as_deref(),
+                Some("F2 then v")
+            );
         }
     }
 
@@ -617,6 +633,34 @@ fn restarted_result_card_restores_durable_metadata_and_typed_actions() {
     assert_eq!(card.control_hint, "F2 Navigate to resolve this result");
 }
 
+#[test]
+fn phase_result_card_retains_canonical_keys_until_rendering() {
+    use kuzushi_core::run_lifecycle::{RunCellKey, RunCellRoleV1, RunCellSourceV1, RunItemId};
+    let key = RunCellKey {
+        source: RunCellSourceV1::Item(RunItemId::new()),
+        role: RunCellRoleV1::TerminalOutcome,
+        ordinal: 0,
+    };
+    let presentation = crate::app::PhaseResultPresentation {
+        attempt_id: "attempt-keyed".to_string(),
+        outcome: "completed".to_string(),
+        detail_lines: vec!["Outcome · completed".to_string()],
+        detail_rows: vec![crate::app::PhaseResultDetailRow {
+            key: Some(key.clone()),
+            disclosed_keys: std::collections::BTreeSet::new(),
+            text: "Outcome · completed".to_string(),
+        }],
+        semantic_keys: std::collections::BTreeSet::from([key.clone()]),
+        actions: vec![PhaseResultAction::Select],
+        recommended_next: "inspect the result".to_string(),
+    };
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let card = phase_result_card_model(&app, WorkflowPhase::Scan, presentation);
+
+    assert_eq!(card.semantic_keys, std::collections::BTreeSet::from([key]));
+}
+
 fn persist_imported_scan_attempt(target: &std::path::Path) {
     let snapshot = PhaseTargetSnapshot::capture(target);
     append_phase_checkpoint_skipped(
@@ -624,21 +668,22 @@ fn persist_imported_scan_attempt(target: &std::path::Path) {
         PhaseCheckpointSkipped::new(WorkflowPhase::Map, snapshot.clone()),
     )
     .unwrap();
-    let completed = PhaseAttemptCompleted::new(
+    crate::test_support::record_indexed_run(
+        target,
+        "imported-findings",
+        "findings:import",
+        serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "summary": "findings imported",
+            "data": {"count": 1}
+        }),
+    );
+    let completed = crate::test_support::append_typed_attempt(
+        target,
         WorkflowPhase::Scan,
-        vec!["imported-findings".to_string()],
-        snapshot,
+        "imported-findings",
         PhaseAttemptOutcome::Completed,
     );
-    append_phase_attempt_completed(target, completed.clone()).unwrap();
-    append_phase_attempt_disposition(
-        target,
-        PhaseAttemptDispositionRecorded::new(
-            completed.attempt_id,
-            PhaseAttemptDisposition::Selected {
-                acknowledged_partial: false,
-            },
-        ),
-    )
-    .unwrap();
+    crate::test_support::select_typed_attempt(target, &completed);
 }

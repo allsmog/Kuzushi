@@ -129,6 +129,7 @@ async fn compact_run_focus_capture_is_stacked(
     {
         return;
     }
+    let captured_run_focus = world.last_run_focus_capture.clone();
     let session = world.require_session();
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -138,7 +139,8 @@ async fn compact_run_focus_capture_is_stacked(
         }
         assert!(
             Instant::now() < deadline,
-            "compact Run Focus never showed `{first_task}` then `{second_task}` with `{upper}` above `{lower}` and no shell prompt:\n{snapshot}"
+            "compact Run Focus never showed `{first_task}` then `{second_task}` with `{upper}` above `{lower}` and no shell prompt. Last captured Run Focus:\n{}\nFinal frame:\n{snapshot}",
+            captured_run_focus.as_deref().unwrap_or("<none>"),
         );
         std::thread::sleep(Duration::from_millis(50));
     }

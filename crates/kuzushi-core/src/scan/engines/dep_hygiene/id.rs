@@ -17,10 +17,7 @@ impl ScanEngine for CargoAuditScanner {
     }
 }
 
-fn cargo_audit_lockfile(
-    target: &Path,
-    cancellation: &ScanCancellation,
-) -> Result<Option<PathBuf>> {
+fn cargo_audit_lockfile(target: &Path, cancellation: &ScanCancellation) -> Result<Option<PathBuf>> {
     if cancellation.is_cancelled() {
         anyhow::bail!("cargo-audit scan cancelled");
     }

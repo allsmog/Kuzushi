@@ -256,6 +256,9 @@ struct LegacyCheckpoints {
 }
 
 fn legacy_checkpoints(app: &ShellApp, map_artifacts_built: bool) -> LegacyCheckpoints {
+    if app.engagement.phase_attempt_projection_is_degraded() {
+        return LegacyCheckpoints::default();
+    }
     let durable_finding_scan = app
         .domain()
         .finding_ledger_counts()
@@ -276,8 +279,11 @@ fn legacy_checkpoints(app: &ShellApp, map_artifacts_built: bool) -> LegacyCheckp
 /// acknowledged by the operator. Failed/canceled attempts are never selected
 /// by the ledger validator and therefore cannot advance reality.
 fn selected_attempt_counts(app: &ShellApp, phase: WorkflowPhase) -> Option<bool> {
+    if app.engagement.phase_attempt_projection_is_degraded() {
+        return None;
+    }
     let record = app.engagement.selected_phase_attempt(phase)?;
-    match record.completed.outcome {
+    match app.effective_phase_attempt_outcome(&record.completed) {
         PhaseAttemptOutcome::Completed => Some(false),
         PhaseAttemptOutcome::Partial => {
             match record.disposition.as_ref().map(|value| &value.disposition) {
@@ -1290,22 +1296,29 @@ mod tests {
             PhaseCheckpointSkipped::new(WorkflowPhase::Map, snapshot.clone()),
         )
         .unwrap();
-        let completed = PhaseAttemptCompleted::new(
+        let status = if outcome == PhaseAttemptOutcome::Partial {
+            "partial"
+        } else {
+            "completed"
+        };
+        crate::test_support::record_indexed_run(
+            target,
+            "scan-clean",
+            "sast:scan",
+            serde_json::json!({
+                "ok": true,
+                "status": status,
+                "summary": "clean scan",
+                "warnings": if status == "partial" { vec!["incomplete engine"] } else { Vec::<&str>::new() },
+                "data": {"count": 0}
+            }),
+        );
+        let completed = crate::test_support::append_typed_attempt(
+            target,
             WorkflowPhase::Scan,
-            vec!["scan-clean".to_string()],
-            snapshot,
+            "scan-clean",
             outcome,
         );
-        append_phase_attempt_completed(target, completed.clone()).unwrap();
-        append_phase_attempt_disposition(
-            target,
-            PhaseAttemptDispositionRecorded::new(
-                completed.attempt_id,
-                PhaseAttemptDisposition::Selected {
-                    acknowledged_partial: outcome == PhaseAttemptOutcome::Partial,
-                },
-            ),
-        )
-        .unwrap();
+        crate::test_support::select_typed_attempt(target, &completed);
     }
 }

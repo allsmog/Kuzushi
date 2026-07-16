@@ -1653,8 +1653,21 @@ fn compact_recon_module_page_down_reaches_recent_evidence() {
             crossterm::event::KeyModifiers::empty(),
         ),
     );
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let second_page = format!("{:?}", terminal.backend().buffer());
+    let mut second_page = String::new();
+    for _ in 0..4 {
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        second_page = format!("{:?}", terminal.backend().buffer());
+        if second_page.contains("ALIASES") {
+            break;
+        }
+        press_key(
+            &mut app,
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::PageDown,
+                crossterm::event::KeyModifiers::empty(),
+            ),
+        );
+    }
     assert!(
         second_page.contains("RECENT RECON ACTIVITY"),
         "{second_page}"
@@ -4823,6 +4836,35 @@ fn ultra_compact_target_picker_keeps_selection_consent_and_controls_visible() {
 }
 
 #[test]
+fn target_picker_prompt_footer_matches_first_escape_at_compact_and_wide_sizes() {
+    for (width, height) in [(40, 12), (120, 36)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.router
+            .target_picker_mut()
+            .open(vec![crate::app::TargetCandidate {
+                path: std::path::PathBuf::from("/work/acme"),
+                label: ".".to_string(),
+                hint: "git repo",
+                scope: None,
+            }]);
+        app.router
+            .target_picker_mut()
+            .set_focus(crate::app::PickerFocus::Prompt);
+        app.set_shell_view(ShellView::TargetPicker);
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        assert!(rendered.contains("command prompt active"), "{rendered}");
+        assert!(rendered.contains("Esc return to picker"), "{rendered}");
+        assert!(rendered.contains("Enter run"), "{rendered}");
+        assert!(!rendered.contains("Esc browse"), "{rendered}");
+    }
+}
+
+#[test]
 fn model_picker_renders_offline_demo_escape_hatch() {
     let backend = TestBackend::new(110, 24);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -4881,7 +4923,7 @@ fn auth_picker_renders_selectable_offline_demo_row() {
 }
 
 #[test]
-fn ultra_compact_auth_picker_keeps_selected_method_and_demo_actions_visible() {
+fn ultra_compact_auth_picker_keeps_selected_method_and_valid_actions_visible() {
     for cursor in [0, 2] {
         let backend = TestBackend::new(40, 12);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -4897,20 +4939,20 @@ fn ultra_compact_auth_picker_keeps_selected_method_and_demo_actions_visible() {
             rendered.contains("Offline demo"),
             "cursor {cursor}: {rendered}"
         );
-        assert!(rendered.contains("d demo"), "cursor {cursor}: {rendered}");
-        assert!(
-            rendered.contains("q leave setup"),
-            "cursor {cursor}: {rendered}"
-        );
         if cursor == 0 {
             assert!(rendered.contains("▸ API key"), "{rendered}");
             assert!(rendered.contains("Paste OPENAI_API_KEY"), "{rendered}");
+            assert!(rendered.contains("type/paste key"), "{rendered}");
+            assert!(!rendered.contains("d demo"), "{rendered}");
+            assert!(!rendered.contains("q Setup"), "{rendered}");
         } else {
             assert!(rendered.contains("▸ Offline demo"), "{rendered}");
             assert!(
                 rendered.contains("Enter runs the offline demo"),
                 "{rendered}"
             );
+            assert!(rendered.contains("d demo"), "{rendered}");
+            assert!(rendered.contains("q Setup"), "{rendered}");
         }
     }
 }
@@ -5344,21 +5386,26 @@ fn compact_replay_page_down_reaches_aliases() {
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let first_page = format!("{:?}", terminal.backend().buffer());
-    assert!(first_page.contains("RECON EVIDENCE"), "{first_page}");
+    assert!(first_page.contains("REPLAY"), "{first_page}");
     assert!(!first_page.contains("ALIASES"), "{first_page}");
 
     app.set_input_mode(crate::InputMode::Navigate);
-    press_key(
-        &mut app,
-        crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::PageDown,
-            crossterm::event::KeyModifiers::empty(),
-        ),
-    );
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let second_page = format!("{:?}", terminal.backend().buffer());
-    assert!(second_page.contains("ALIASES"), "{second_page}");
-    assert!(second_page.contains("F-0001"), "{second_page}");
+    let mut pages = vec![first_page];
+    for _ in 0..6 {
+        press_key(
+            &mut app,
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::PageDown,
+                crossterm::event::KeyModifiers::empty(),
+            ),
+        );
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        pages.push(format!("{:?}", terminal.backend().buffer()));
+    }
+    let all_pages = pages.join("\n");
+    assert!(all_pages.contains("RECON EVIDENCE"), "{all_pages}");
+    assert!(all_pages.contains("ALIASES"), "{all_pages}");
+    assert!(all_pages.contains("F-0001"), "{all_pages}");
 }
 
 fn seed_compact_scroll_findings(app: &mut ShellApp) {

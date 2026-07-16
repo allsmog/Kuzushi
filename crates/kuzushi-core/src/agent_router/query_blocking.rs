@@ -10,6 +10,16 @@ impl AgentRuntime for RoutedRuntime<'_> {
             .and_then(AgentQueryResponse::validate_cost)
     }
 
+    fn query_observed_blocking(
+        &self,
+        request: AgentQueryRequest,
+    ) -> Result<Observed<AgentQueryResponse>> {
+        validate_routed_request_model("query", &request.model)?;
+        self.inner
+            .query_observed_blocking(request)
+            .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost))
+    }
+
     fn query_blocking_controlled(
         &self,
         request: AgentQueryRequest,
@@ -21,11 +31,54 @@ impl AgentRuntime for RoutedRuntime<'_> {
             .and_then(AgentQueryResponse::validate_cost)
     }
 
+    fn query_observed_blocking_controlled(
+        &self,
+        request: AgentQueryRequest,
+        control: AgentQueryControl,
+    ) -> Result<Observed<AgentQueryResponse>> {
+        validate_routed_request_model("query", &request.model)?;
+        self.inner
+            .query_observed_blocking_controlled(request, control)
+            .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost))
+    }
+
+    async fn query_observed(
+        &self,
+        request: AgentQueryRequest,
+    ) -> Result<Observed<AgentQueryResponse>> {
+        validate_routed_request_model("query", &request.model)?;
+        self.inner
+            .query_observed(request)
+            .await
+            .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost))
+    }
+
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
         validate_routed_request_model("triage", &request.model)?;
         self.inner
             .triage_finding_blocking(request)
             .and_then(TriageOutcome::validate_cost)
+    }
+
+    fn triage_finding_observed_blocking(
+        &self,
+        request: TriageRequest,
+    ) -> Result<Observed<TriageOutcome>> {
+        validate_routed_request_model("triage", &request.model)?;
+        self.inner
+            .triage_finding_observed_blocking(request)
+            .and_then(|observed| observed.try_map(TriageOutcome::validate_cost))
+    }
+
+    async fn triage_finding_observed(
+        &self,
+        request: TriageRequest,
+    ) -> Result<Observed<TriageOutcome>> {
+        validate_routed_request_model("triage", &request.model)?;
+        self.inner
+            .triage_finding_observed(request)
+            .await
+            .and_then(|observed| observed.try_map(TriageOutcome::validate_cost))
     }
 
     fn supports_tools(&self) -> bool {
@@ -41,6 +94,28 @@ impl AgentRuntime for RoutedRuntime<'_> {
         self.inner
             .next_step_blocking(request, history)
             .and_then(AgentLoopStep::validate_cost)
+    }
+
+    fn next_step_observed_blocking(
+        &self,
+        request: &AgentToolLoopRequest,
+        history: &[LoopHistoryEntry],
+    ) -> Result<Observed<AgentLoopStep>> {
+        validate_routed_request_model("tool-loop", &request.model)?;
+        self.inner
+            .next_step_observed_blocking(request, history)
+            .and_then(|observed| observed.try_map(AgentLoopStep::validate_cost))
+    }
+
+    fn spawn_subagent_observed_blocking(
+        &self,
+        role: crate::runtime::SubagentRole,
+        request: AgentQueryRequest,
+    ) -> Result<Observed<AgentQueryResponse>> {
+        validate_routed_request_model("subagent", &request.model)?;
+        self.inner
+            .spawn_subagent_observed_blocking(role, request)
+            .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost))
     }
 }
 

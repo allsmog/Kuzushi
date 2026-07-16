@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "../ui_view_models/tests/run_lifecycle_semantic_equivalence.rs"]
+mod run_lifecycle_semantic_equivalence_tests;
+
 use super::approval::{confirm_gate_for_tool, parse_pending_patch, ConfirmKind};
 use super::artifacts::{
     append_run_status_event, append_trace_step, record_agent_run_started,
@@ -4363,28 +4366,43 @@ fn persist_review_ready_import(target: &Path, run_id: &str) {
 }
 
 fn persist_selected_test_phase_attempt(target: &Path, phase: WorkflowPhase, run_id: &str) {
-    use kuzushi_core::workflow_attempts::{
-        append_phase_attempt_completed, append_phase_attempt_disposition, PhaseAttemptCompleted,
-        PhaseAttemptDisposition, PhaseAttemptDispositionRecorded, PhaseAttemptOutcome,
-        PhaseTargetSnapshot,
-    };
-    let completed = PhaseAttemptCompleted::new(
+    use kuzushi_core::workflow_attempts::PhaseAttemptOutcome;
+    if kuzushi_core::run_lifecycle::read_run_items(target, run_id)
+        .unwrap()
+        .is_none()
+    {
+        crate::test_support::record_indexed_run(
+            target,
+            run_id,
+            "findings:import",
+            serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "summary": "test phase run completed",
+                "data": {"count": 0}
+            }),
+        );
+    }
+    let completed = crate::test_support::append_typed_attempt(
+        target,
         phase,
-        vec![run_id.to_string()],
-        PhaseTargetSnapshot::capture(target),
+        run_id,
         PhaseAttemptOutcome::Completed,
     );
-    append_phase_attempt_completed(target, completed.clone()).unwrap();
-    append_phase_attempt_disposition(
+    crate::test_support::select_typed_attempt(target, &completed);
+}
+
+fn persist_adequate_test_map_result(target: &Path, run_id: &str) {
+    crate::test_support::record_indexed_run(
         target,
-        PhaseAttemptDispositionRecorded::new(
-            completed.attempt_id,
-            PhaseAttemptDisposition::Selected {
-                acknowledged_partial: false,
-            },
-        ),
-    )
-    .unwrap();
+        run_id,
+        "context:build",
+        serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "data": { "snapshot": { "filesIndexed": 1 } }
+        }),
+    );
 }
 
 #[cfg(unix)]
@@ -6476,9 +6494,87 @@ fn auth_login_effect_with_missing_bridge_reopens_credential_entry() {
         "bridge-missing OAuth should reopen credential entry, not dead-end on Auth"
     );
     assert_eq!(app.router.auth_picker().provider(), "openai-codex");
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "onboarding" && line.body.contains("OAuth bridge unavailable")
-    }));
+    let notice = app.advisory().notice.as_ref().expect("bridge error notice");
+    assert_eq!(notice.source, "auth");
+    assert_eq!(notice.severity, NoticeSeverity::Error);
+    assert!(notice.message.contains("OAuth bridge unavailable"));
+    assert!(notice
+        .message
+        .contains("move to Offline demo and press Enter"));
+    assert!(!notice.message.contains("press d"));
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_picker_oauth_reopens_credentials_with_precise_visible_recovery() {
+    let _env_lock = env_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    let _home = EnvVarGuard::set("HOME", tmp.path().to_string_lossy().as_ref());
+    let _key = EnvVarGuard::unset("ANTHROPIC_API_KEY");
+    let mut config = V2Config::default();
+    config.runtime.langgraph_bridge_command = Some(vec!["/usr/bin/false".to_string()]);
+    let mut app = ShellApp::new(config, None);
+    app.open_credential_entry("anthropic".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+    assert_eq!(app.router.auth_picker().provider(), "anthropic");
+    let notice = app
+        .advisory()
+        .notice
+        .as_ref()
+        .expect("OAuth failure notice");
+    assert_eq!(notice.source, "auth");
+    assert_eq!(notice.severity, NoticeSeverity::Error);
+    assert!(notice
+        .message
+        .contains("anthropic OAuth login exited with exit status: 1"));
+    assert!(notice.message.contains("choose API key, retry OAuth"));
+    assert!(notice
+        .message
+        .contains("move to Offline demo and press Enter"));
+    assert!(!notice.message.contains("press d"));
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_picker_oauth_executable_keeps_spawn_cause_visible_at_credentials() {
+    let _env_lock = env_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    let _home = EnvVarGuard::set("HOME", tmp.path().to_string_lossy().as_ref());
+    let _key = EnvVarGuard::unset("ANTHROPIC_API_KEY");
+    let mut config = V2Config::default();
+    config.runtime.langgraph_bridge_command =
+        Some(vec!["/definitely/missing/kuzushi-oauth-bridge".to_string()]);
+    let mut app = ShellApp::new(config, None);
+    app.open_credential_entry("anthropic".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+    let notice = app
+        .advisory()
+        .notice
+        .as_ref()
+        .expect("OAuth spawn failure notice");
+    assert_eq!(notice.source, "auth");
+    assert_eq!(notice.severity, NoticeSeverity::Error);
+    assert!(notice
+        .message
+        .contains("could not start anthropic OAuth login"));
+    assert!(notice.message.contains("os error 2"), "{}", notice.message);
+    assert!(notice.message.contains("choose API key, retry OAuth"));
 }
 
 #[test]
@@ -6674,6 +6770,9 @@ fn auth_login_status_messages_cover_success_failure_and_spawn_error() {
     assert_eq!(prefix, "error");
     assert!(failed.contains("exited"));
     assert!(failed.contains("openai OAuth"));
+    assert!(failed.contains("choose API key, retry OAuth"));
+    assert!(failed.contains("move to Offline demo and press Enter"));
+    assert!(!failed.contains("press d"));
 
     let (prefix, spawn) = auth_login_status_message(
         "openai-codex",
@@ -6682,6 +6781,7 @@ fn auth_login_status_messages_cover_success_failure_and_spawn_error() {
     );
     assert_eq!(prefix, "error");
     assert!(spawn.contains("could not start"));
+    assert!(spawn.contains("move to Offline demo and press Enter"));
 }
 
 #[test]
@@ -7079,12 +7179,13 @@ fn config_view_onboards_with_keyboard_model_selection() {
 }
 
 #[test]
-fn auth_picker_navigation_keys_work_with_text_in_prompt() {
+fn auth_picker_navigation_keys_work_outside_key_editor_with_text_in_prompt() {
     // Regression: the picker used to bail whenever the input buffer was
     // non-empty, so a stray character silently stole j/k/Enter. As a true
     // modal it now captures navigation regardless of prompt contents.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_auth_method_picker("openai".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
     app.set_input("leftover");
 
     press_key(
@@ -7093,7 +7194,7 @@ fn auth_picker_navigation_keys_work_with_text_in_prompt() {
     );
     assert_eq!(
         app.router.auth_picker().cursor(),
-        1,
+        2,
         "j must move the picker cursor"
     );
     assert_eq!(
@@ -7141,6 +7242,183 @@ fn auth_picker_swallows_shifted_typed_characters() {
 }
 
 #[test]
+fn auth_picker_api_key_editor_owns_shortcut_letters_from_first_character() {
+    let _fixture_lock = demo_fixture_test_lock();
+    for ch in ['j', 'k', 'd', 'q'] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.open_credential_entry("openai".to_string());
+
+        press_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()),
+        );
+
+        assert_eq!(app.shell_view(), ShellView::Setup, "literal {ch:?}");
+        assert_eq!(
+            app.router.setup().editor(),
+            Some(SetupEditor::Credentials),
+            "literal {ch:?} must not leave credential entry"
+        );
+        assert_eq!(app.router.auth_picker().cursor(), 0, "literal {ch:?}");
+        assert_eq!(
+            app.router.auth_picker().key_draft(),
+            ch.to_string(),
+            "literal {ch:?} must enter the hidden draft"
+        );
+        assert!(app.target().is_none(), "literal {ch:?} must not run demo");
+    }
+}
+
+#[test]
+fn credential_entry_guidance_uses_nonconflicting_offline_demo_control() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    app.open_credential_entry("openai".to_string());
+
+    let guidance = app
+        .log_lines()
+        .iter()
+        .rev()
+        .find(|line| line.prefix == "onboarding")
+        .expect("credential entry guidance");
+    assert!(guidance
+        .body
+        .contains("move to OAuth or Offline demo and press Enter"));
+    assert!(!guidance.body.contains("press d"));
+}
+
+#[test]
+fn auth_picker_q_after_existing_text_remains_literal_secret_input() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_credential_entry("openai".to_string());
+    paste_text(&mut app, "x");
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.router.auth_picker().key_draft(), "xq");
+    assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+}
+
+#[test]
+fn credential_key_editor_owns_ctrl_w_and_terminal_alt_backspace() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_credential_entry("openai".to_string());
+    app.set_input("shared-composer");
+    paste_text(&mut app, "alpha beta");
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
+    );
+
+    assert_eq!(app.router.auth_picker().key_draft(), "alpha ");
+    assert_eq!(app.input(), "shared-composer");
+    assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT),
+    );
+
+    assert!(app.router.auth_picker().key_draft().is_empty());
+    assert_eq!(app.input(), "shared-composer");
+    assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+}
+
+#[test]
+fn credential_list_owns_non_global_modifier_chords_on_every_row() {
+    let sentinel = "ABCDEFGHIJ-KLMNOPQRST";
+    let keys = [
+        KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+        KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL),
+        KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
+        KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT),
+    ];
+    for cursor in 0..3 {
+        for &key in &keys {
+            let mut app = ShellApp::new(V2Config::default(), None);
+            app.open_credential_entry("openai".to_string());
+            app.router.auth_picker_mut().set_cursor(cursor);
+            app.set_command_history(vec!["history-must-not-load".to_string()]);
+            app.set_input(sentinel);
+            app.editor_mut().set_cursor(10);
+            if cursor == 0 {
+                app.router.auth_picker_mut().push_key_str("alpha beta");
+            }
+
+            press_key(&mut app, key);
+
+            assert_eq!(app.input(), sentinel, "cursor {cursor}, key {key:?}");
+            assert_eq!(app.editor().cursor(), 10, "cursor {cursor}, key {key:?}");
+            assert_eq!(app.shell_view(), ShellView::Setup, "key {key:?}");
+            assert_eq!(
+                app.router.setup().editor(),
+                Some(SetupEditor::Credentials),
+                "cursor {cursor}, key {key:?}"
+            );
+            assert_eq!(app.router.auth_picker().cursor(), cursor, "key {key:?}");
+        }
+    }
+}
+
+#[test]
+fn credential_prompt_focus_keeps_shared_composer_editing() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_credential_entry("openai".to_string());
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char(':'), KeyModifiers::empty()),
+    );
+    app.set_input("ABCDEFGHIJ-KLMNOPQRST");
+    app.editor_mut().set_cursor(10);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
+    );
+
+    assert_eq!(app.input(), "ABCDEFGHIJ");
+    assert!(app.picker_prompt_focused());
+}
+
+#[test]
+fn credential_list_preserves_explicit_global_chords() {
+    use kuzushi_core::AutonomyPosture;
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_credential_entry("openai".to_string());
+    app.set_autonomy(AutonomyPosture::ReconOnly);
+    press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL));
+    assert_eq!(app.autonomy(), AutonomyPosture::Scan);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL),
+    );
+    assert_eq!(app.autonomy(), AutonomyPosture::ReconOnly);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL),
+    );
+    assert_eq!(app.shell_view(), ShellView::CommandPalette);
+
+    for ch in ['c', 'd'] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.open_credential_entry("openai".to_string());
+        press_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL),
+        );
+        assert!(app.ctrl_c_armed(), "Ctrl+{ch} must reach quit handling");
+    }
+}
+
+#[test]
 fn auth_picker_empty_api_key_submission_surfaces_inline_warning() {
     let _env_lock = env_test_lock();
     let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
@@ -7158,6 +7436,129 @@ fn auth_picker_empty_api_key_submission_surfaces_inline_warning() {
     assert!(notice.message.contains("OPENAI_API_KEY"));
     assert_eq!(app.shell_view(), ShellView::Setup);
     assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+}
+
+#[test]
+fn credential_warning_esc_dismisses_before_back_navigation() {
+    let _env_lock = env_test_lock();
+    let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_credential_entry("openai".to_string());
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert!(app.advisory().notice.is_none());
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    assert_eq!(app.router.setup().editor(), None);
+}
+
+#[test]
+fn corrected_api_key_replaces_empty_warning_with_secret_safe_acknowledgement() {
+    let _env_lock = env_test_lock();
+    let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_credential_entry("openai".to_string());
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+    assert!(app.advisory().notice.is_some());
+
+    paste_text(&mut app, "sk-corrected-secret");
+
+    assert!(app.advisory().notice.is_none(), "stale warning must clear");
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    assert!(result.changed);
+    assert_eq!(app.router.setup().editor(), None);
+    let notice = app
+        .advisory()
+        .notice
+        .as_ref()
+        .expect("accepted-key acknowledgement");
+    assert_eq!(notice.source, "onboarding");
+    assert_eq!(notice.severity, NoticeSeverity::Success);
+    assert!(notice
+        .message
+        .contains("OPENAI_API_KEY accepted for this session; value hidden"));
+    assert!(!notice.message.contains("sk-corrected-secret"));
+    assert!(app
+        .log_lines()
+        .iter()
+        .all(|line| !line.body.contains("sk-corrected-secret")));
+}
+
+#[test]
+fn ready_environment_api_key_gets_visible_secret_safe_acknowledgement() {
+    let _env_lock = env_test_lock();
+    let home = tempfile::tempdir().unwrap();
+    let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
+    let _key = EnvVarGuard::set("ANTHROPIC_API_KEY", "sk-ready-secret");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_credential_entry("anthropic".to_string());
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.router.setup().editor(), None);
+    let notice = app.advisory().notice.as_ref().expect("ready-key notice");
+    assert_eq!(notice.severity, NoticeSeverity::Success);
+    assert!(notice
+        .message
+        .contains("ANTHROPIC_API_KEY already available; value hidden"));
+    assert!(!notice.message.contains("sk-ready-secret"));
+}
+
+#[test]
+fn stored_oauth_gets_visible_secret_safe_acknowledgement() {
+    let _env_lock = env_test_lock();
+    let home = tempfile::tempdir().unwrap();
+    let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
+    let _key = EnvVarGuard::unset("ANTHROPIC_API_KEY");
+    let credentials_dir = home.path().join(".kuzushi");
+    fs::create_dir_all(&credentials_dir).unwrap();
+    fs::write(
+        credentials_dir.join("oauth-credentials.json"),
+        serde_json::json!({
+            "anthropic": { "access": "oauth-access-secret", "refresh": "oauth-refresh-secret" }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_credential_entry("anthropic".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.router.setup().editor(), None);
+    let notice = app.advisory().notice.as_ref().expect("stored-OAuth notice");
+    assert_eq!(notice.severity, NoticeSeverity::Success);
+    assert!(notice
+        .message
+        .contains("anthropic OAuth already stored; credentials hidden"));
+    assert!(!notice.message.contains("oauth-access-secret"));
+    assert!(!notice.message.contains("oauth-refresh-secret"));
 }
 
 #[test]
@@ -7333,6 +7734,36 @@ fn picker_footer_omits_tab_complete_hint() {
             .any(|binding| binding.key == "demo" && binding.label == "offline"),
         "picker footer should advertise the offline demo escape hatch"
     );
+}
+
+#[test]
+fn target_picker_prompt_first_escape_returns_to_picker_before_browsing() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router
+        .target_picker_mut()
+        .open(vec![crate::app::TargetCandidate {
+            path: std::path::PathBuf::from("/work/acme"),
+            label: ".".to_string(),
+            hint: "git repo",
+            scope: None,
+        }]);
+    app.set_shell_view(ShellView::TargetPicker);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char(':'), KeyModifiers::empty()),
+    );
+    app.set_input("target /work/other");
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::TargetPicker);
+    assert_eq!(app.router.target_picker().focus(), PickerFocus::List);
+    assert!(app.input().is_empty());
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::Catalog);
+    assert!(app.target().is_none());
 }
 
 #[test]
@@ -7736,11 +8167,31 @@ fn ask_dispatches_agent_question_through_explicit_runtime() {
     );
     let run_id = agent.run_id.as_deref().unwrap();
     let summary = load_run_summary(tmp.path(), run_id).unwrap();
-    assert_eq!(summary.llm_calls.len(), 1);
-    assert_eq!(summary.llm_calls[0].model, "openai:gpt-4.1");
-    assert_eq!(summary.llm_calls[0].provider, "openai");
-    assert!(summary.llm_calls[0].prompt_hash.starts_with("fnv1a64:"));
-    assert_eq!(summary.llm_calls[0].cost_usd, Some(0.034));
+    assert_eq!(
+        summary.status,
+        "completed",
+        "logs={:?}; notice={:?}",
+        app.log_lines(),
+        app.advisory().notice
+    );
+    let projection = kuzushi_core::run_lifecycle::load_run_projection(tmp.path(), run_id)
+        .unwrap()
+        .projection;
+    let model_calls = projection
+        .calls
+        .values()
+        .filter(|call| call.kind == kuzushi_core::run_lifecycle::CallKind::Model)
+        .collect::<Vec<_>>();
+    assert_eq!(model_calls.len(), 1);
+    assert_eq!(
+        model_calls[0].model.as_ref().map(|value| value.as_str()),
+        Some("openai:gpt-4.1")
+    );
+    assert_eq!(
+        model_calls[0].provider.as_ref().map(|value| value.as_str()),
+        Some("openai")
+    );
+    assert_eq!(model_calls[0].cost.exact_usd(), Some(0.034));
     assert!(app
         .log_lines()
         .iter()
@@ -10045,6 +10496,7 @@ fn next_command_opens_phase_picker_at_derived_phase() {
     assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
 
+    persist_adequate_test_map_result(dir.path(), "map-current");
     persist_selected_test_phase_attempt(dir.path(), WorkflowPhase::Map, "map-current");
     app.refresh_phase_attempt_projection();
     app.engagement.clear_phase();
@@ -10521,11 +10973,15 @@ fn auth_picker_esc_returns_to_aggregate_setup() {
 }
 
 #[test]
-fn auth_picker_q_explicitly_defers_and_clears_the_draft() {
+fn auth_picker_q_returns_to_setup_and_clears_the_draft() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.config_mut().model = Some("openai:gpt-5.5".to_string());
     app.open_credential_entry("openai".to_string());
     paste_text(&mut app, "draft-secret");
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+    );
 
     press_key(
         &mut app,
@@ -10557,10 +11013,11 @@ fn auth_picker_selected_kind_tracks_the_row_model() {
 }
 
 #[test]
-fn auth_picker_d_runs_the_offline_fixture_with_empty_draft() {
+fn auth_picker_d_runs_the_offline_fixture_outside_key_editor() {
     let _fixture_lock = demo_fixture_test_lock();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_auth_method_picker("anthropic".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
 
     press_key(
         &mut app,
@@ -10576,9 +11033,9 @@ fn auth_picker_d_runs_the_offline_fixture_with_empty_draft() {
 }
 
 #[test]
-fn auth_picker_d_types_into_a_nonempty_key_draft() {
-    // Once the operator starts pasting a key, `d` is literal key text again —
-    // it must not trigger the fixture mid-paste.
+fn auth_picker_d_remains_literal_inside_the_api_key_editor() {
+    // The API-key editor owns every printable from the first character onward;
+    // `d` must never trigger the fixture while that editor is focused.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_auth_method_picker("openai".to_string());
 
@@ -12187,6 +12644,8 @@ fn mouse_wheel_scrolls_focused_workbench_pane_by_one_line() {
 #[test]
 fn mouse_click_focuses_activity_panes() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    let viewport = TerminalViewport::new(120, 36);
+    app.set_viewport(viewport);
     app.set_shell_view(ShellView::Activity);
     let mut session = ActivitySession::new("run-live");
     session.tasks.insert(
@@ -12206,14 +12665,11 @@ fn mouse_click_focuses_activity_panes() {
     );
     assert_eq!(app.router.activity().pane_focus, PaneFocus::Left);
 
-    let width = crossterm::terminal::size()
-        .map(|(width, _)| width)
-        .unwrap_or(160);
     mouse_event(
         &mut app,
         crossterm::event::MouseEvent {
             kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-            column: width.saturating_sub(1),
+            column: viewport.columns.saturating_sub(1),
             row: 4,
             modifiers: KeyModifiers::empty(),
         },
@@ -14318,7 +14774,7 @@ fn agent_response_after_abort_request_is_ignored() {
 }
 
 #[test]
-fn agent_answer_event_records_llm_audit_metadata() {
+fn agent_answer_event_does_not_duplicate_the_runtime_model_call() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
@@ -14394,11 +14850,7 @@ fn agent_answer_event_records_llm_audit_metadata() {
         .artifacts
         .iter()
         .any(|artifact| artifact.path.ends_with("result.json")));
-    assert_eq!(summary.llm_calls.len(), 1);
-    assert_eq!(summary.llm_calls[0].model, "openai:gpt-test");
-    assert_eq!(summary.llm_calls[0].provider, "openai");
-    assert!(summary.llm_calls[0].prompt_hash.starts_with("fnv1a64:"));
-    assert_eq!(summary.llm_calls[0].cost_usd, Some(0.012));
+    assert!(summary.llm_calls.is_empty());
     let events =
         fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "agent-answer").join("events.jsonl"))
             .unwrap();
@@ -14409,7 +14861,22 @@ fn agent_answer_event_records_llm_audit_metadata() {
 #[test]
 fn agent_failure_event_records_bounded_failure_handoff() {
     let tmp = tempfile::tempdir().unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
+    let transcript_store = kuzushi_core::session_transcript::SessionTranscriptStore::from_root(
+        tmp.path().join("sessions"),
+    );
+    let recorder = transcript_store
+        .start(kuzushi_core::session_transcript::SessionMetadata::new(
+            "scripted",
+            tmp.path(),
+        ))
+        .unwrap();
+    let session_id = recorder.session_id().to_string();
+    let mut app = ShellApp::with_registry_and_transcript(
+        V2Config::default(),
+        None,
+        ModuleRegistry::with_v2_builtins(),
+        Some(recorder),
+    );
     app.set_target(Some(tmp.path().to_path_buf()));
     app.set_agent_chat(Some(AgentChatView {
         question: "what changed?".to_string(),
@@ -14438,8 +14905,9 @@ fn agent_failure_event_records_bounded_failure_handoff() {
         .unwrap()
         .started_at_unix;
 
+    let raw_failure = "bridge denied the model request RAW_RESPONSE_SENTINEL";
     let effects = app.apply_agent_event(AgentEvent::Failed {
-        error: "bridge denied the model request".to_string(),
+        error: raw_failure.to_string(),
         audit: test_agent_audit(),
     });
 
@@ -14449,6 +14917,14 @@ fn agent_failure_event_records_bounded_failure_handoff() {
         effects.as_slice(),
         [ShellEffect::RecordAgentRun(_)]
     ));
+    assert_eq!(
+        app.agent_chat().and_then(|agent| agent.error.as_deref()),
+        Some("model request failed (runtime_error)")
+    );
+    assert!(app
+        .log_lines()
+        .iter()
+        .all(|line| !line.body.contains("RAW_RESPONSE_SENTINEL")));
     let started_events =
         fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "agent-failed").join("events.jsonl"))
             .unwrap();
@@ -14465,7 +14941,7 @@ fn agent_failure_event_records_bounded_failure_handoff() {
     assert!(summary
         .error
         .as_deref()
-        .is_some_and(|error| error.contains("bridge denied")));
+        .is_some_and(|error| error == "model request failed (runtime_error)"));
     let failures = load_run_failures(tmp.path(), "agent-failed").unwrap();
     assert_eq!(failures.status, "failed");
     let failure = failures.failures.first().unwrap();
@@ -14473,12 +14949,24 @@ fn agent_failure_event_records_bounded_failure_handoff() {
     assert!(failure
         .agent_thread_context
         .fallback_prompt
-        .contains("bridge denied"));
+        .contains("model request failed (runtime_error)"));
+    for artifact in ["items.jsonl", "trace.jsonl", "result.json", "failures.json"] {
+        let contents =
+            fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "agent-failed").join(artifact))
+                .unwrap();
+        assert!(!contents.contains("RAW_RESPONSE_SENTINEL"), "{artifact}");
+    }
     let events =
         fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "agent-failed").join("events.jsonl"))
             .unwrap();
     assert!(events.contains(r#""status":"failed""#));
     assert!(events.contains(r#""tool":"agent:ask""#));
+    app.finish_session_transcript("completed");
+    let transcript = transcript_store.read(&session_id).unwrap();
+    assert!(!transcript.raw_jsonl.contains("RAW_RESPONSE_SENTINEL"));
+    assert!(transcript
+        .raw_jsonl
+        .contains("model request failed (runtime_error)"));
 }
 
 #[test]
@@ -14503,10 +14991,7 @@ fn agent_attempt_without_receipt_persists_incomplete_cost_truth() {
     assert_eq!(summary.cost_usd, None);
     assert_eq!(summary.observed_cost_usd, Some(0.0));
     assert!(summary.provider_spend_unresolved);
-    assert_eq!(summary.llm_calls.len(), 1);
-    assert_eq!(summary.llm_calls[0].call_attempted, Some(true));
-    assert_eq!(summary.llm_calls[0].observed_cost_usd, Some(0.0));
-    assert!(summary.llm_calls[0].provider_spend_unresolved);
+    assert!(summary.llm_calls.is_empty());
 
     let result: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(
@@ -14604,10 +15089,9 @@ fn aborted_agent_run_terminalizes_the_running_seed_as_canceled() {
     assert!(summary.completed_at_unix.is_some());
     assert_eq!(summary.model.as_deref(), Some("openai:gpt-test"));
     assert_eq!(summary.cost_usd, Some(0.012));
-    assert!(summary
-        .error
-        .as_deref()
-        .is_some_and(|error| error.contains("abort request")));
+    assert!(summary.error.as_deref().is_some_and(
+        |error| error.contains("model request canceled") && error.contains("canceled")
+    ));
 }
 
 fn test_agent_audit() -> AgentCallAudit {
@@ -14644,6 +15128,7 @@ fn seeded_agent_test_app(target: &std::path::Path, run_id: &str) -> ShellApp {
 #[test]
 fn scan_failure_event_records_bounded_failure_handoff() {
     let tmp = tempfile::tempdir().unwrap();
+    seed_run_artifact_start(tmp.path(), "scan-failed", "scan", "sast:scan");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
     app.set_scan_panel(Some(ScanPanelState {
@@ -14658,9 +15143,9 @@ fn scan_failure_event_records_bounded_failure_handoff() {
 
     let effects = app.apply_scan_failed("semgrep binary missing".to_string());
 
-    assert!(!kuzushi_core::run_dir(tmp.path(), "scan-failed")
-        .join("failures.json")
-        .exists());
+    let pending = load_run_failures(tmp.path(), "scan-failed").unwrap();
+    assert_eq!(pending.status, "running");
+    assert!(pending.failures.is_empty());
     EffectRuntime::execute(&mut app, effects);
     let failures = load_run_failures(tmp.path(), "scan-failed").unwrap();
     assert_eq!(failures.status, "failed");
@@ -15114,7 +15599,7 @@ fn terminal_tool_artifact_failure_retains_result_and_marks_activity_partial() {
     );
     assert_eq!(
         app.activity().unwrap().tasks["context:build"].state,
-        DagTaskState::Failing
+        DagTaskState::Partial
     );
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "error"
@@ -15273,7 +15758,7 @@ fn partial_tool_result_retains_snapshot_without_success_or_continuation() {
     );
     assert_eq!(
         app.activity().unwrap().tasks["taint-iris:hunt"].state,
-        DagTaskState::Failing
+        DagTaskState::Partial
     );
     assert_eq!(
         app.live_activity().map(|activity| activity.phase),
@@ -17328,23 +17813,24 @@ fn selected_clean_scan_ignores_findings_from_older_generations() {
         PhaseCheckpointSkipped::new(WorkflowPhase::Map, snapshot.clone()),
     )
     .unwrap();
-    let scan = PhaseAttemptCompleted::new(
+    crate::test_support::record_indexed_run(
+        dir.path(),
+        "scan-clean",
+        "findings:import",
+        serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "summary": "clean scan",
+            "data": {"count": 0}
+        }),
+    );
+    let scan = crate::test_support::append_typed_attempt(
+        dir.path(),
         WorkflowPhase::Scan,
-        vec!["scan-clean".to_string()],
-        snapshot,
+        "scan-clean",
         PhaseAttemptOutcome::Completed,
     );
-    append_phase_attempt_completed(dir.path(), scan.clone()).unwrap();
-    append_phase_attempt_disposition(
-        dir.path(),
-        PhaseAttemptDispositionRecorded::new(
-            scan.attempt_id,
-            PhaseAttemptDisposition::Selected {
-                acknowledged_partial: false,
-            },
-        ),
-    )
-    .unwrap();
+    crate::test_support::select_typed_attempt(dir.path(), &scan);
 
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.refresh_findings(false);
@@ -17722,6 +18208,145 @@ fn job_tool_completion_returns_planning_dispatch_effect_without_inline_launch() 
             ShellEffect::DispatchNextPlanningTask(_)
         ]
     ));
+}
+
+#[test]
+fn observed_tool_completion_settles_before_planning_continuation() {
+    let (target, mut app, completion) = observed_context_completion_fixture();
+    let mut result = update(
+        &mut app,
+        Msg::Job(ShellEvent::Tool(ToolEvent::ObservedFinished {
+            tool_name: "context:build".to_string(),
+            result: completed_context_result(),
+            completion,
+        })),
+    );
+
+    assert!(matches!(
+        result.effects.as_slice(),
+        [
+            ShellEffect::RecordToolRun(_),
+            ShellEffect::RefreshContextView,
+            ShellEffect::DispatchNextPlanningTask(_)
+        ]
+    ));
+    let ShellEffect::RecordToolRun(record) = result.effects.remove(0) else {
+        unreachable!("matched terminal persistence effect above")
+    };
+    settle_observed_record_with_timeout(record);
+    assert_eq!(
+        load_run_summary(target.path(), "observed-context-plan")
+            .unwrap()
+            .status,
+        "completed"
+    );
+}
+
+fn observed_context_completion_fixture() -> (
+    tempfile::TempDir,
+    ShellApp,
+    kuzushi_core::PendingToolCallCompletion,
+) {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let run_id = "observed-context-plan";
+    seed_observed_context_run(&workspace, run_id);
+    let completion = observed_context_call(&workspace, run_id);
+    let app = observed_context_plan_app(&workspace, run_id);
+    (target, app, completion)
+}
+
+fn seed_observed_context_run(workspace: &WorkspaceTarget, run_id: &str) {
+    kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
+        kuzushi_core::run_artifacts::ToolRunRecord::new(
+            workspace.root(),
+            run_id,
+            "tool",
+            "context:build",
+        ),
+        &serde_json::json!({}),
+        None,
+        None,
+        Vec::new(),
+    )
+    .unwrap();
+}
+
+fn observed_context_call(
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+) -> kuzushi_core::PendingToolCallCompletion {
+    let observation =
+        kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(workspace.root(), run_id)
+            .unwrap()
+            .start_root_task("Build repository context")
+            .unwrap();
+    observation
+        .task_handle()
+        .unwrap()
+        .update_and_flush(kuzushi_core::run_lifecycle::RunItemStatus::Running, None)
+        .unwrap();
+    let call = kuzushi_core::ApplicationToolCall::start(
+        observation,
+        "context:build",
+        &serde_json::json!({}),
+        None,
+        None,
+    )
+    .unwrap();
+    call.completion(
+        kuzushi_core::run_lifecycle::RunItemStatus::Completed,
+        kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+        Vec::new(),
+        0,
+        0,
+    )
+}
+
+fn observed_context_plan_app(workspace: &WorkspaceTarget, run_id: &str) -> ShellApp {
+    let mut app = ShellApp::new(V2Config::default(), Some(workspace));
+    app.set_active_tool_run_id_for_test(run_id);
+    app.set_running_tool_for_test("context:build");
+    app.engagement.set_running_tool("context:build".to_string());
+    app.engagement
+        .queue_plan(vec![PlanningTaskId::MapEntryPoints]);
+    app
+}
+
+fn completed_context_result() -> serde_json::Value {
+    serde_json::json!({
+        "ok": true,
+        "status": "completed",
+        "summary": "context ready",
+        "output": "context ready",
+        "artifacts": []
+    })
+}
+
+fn settle_observed_record_with_timeout(record: ToolRunRecordEffect) {
+    let target = record.target.expect("observed record target");
+    let run_id = record.run_id.expect("observed record run ID");
+    let ToolRunRecordOutcome::ObservedComplete { result, completion } = record.outcome else {
+        panic!("observed completion must retain its pending settlement")
+    };
+    let tool_name = record.tool_name;
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let worker = std::thread::spawn(move || {
+        let settled = crate::app::tool_runner::record_tool_run_complete_settled(
+            Some(&target),
+            Some(&run_id),
+            &tool_name,
+            &result,
+            completion,
+        )
+        .map(drop)
+        .map_err(|error| error.to_string());
+        tx.send(settled).unwrap();
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(2))
+        .expect("terminal settlement deadlocked on the live run writer")
+        .unwrap();
+    worker.join().unwrap();
 }
 
 #[test]

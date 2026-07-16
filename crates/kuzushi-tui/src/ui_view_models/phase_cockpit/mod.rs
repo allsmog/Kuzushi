@@ -44,6 +44,8 @@ pub(crate) struct PhaseResultCardModel {
     pub(crate) attempt_id: String,
     pub(crate) outcome: String,
     pub(crate) detail: String,
+    pub(crate) detail_rows: Vec<crate::app::PhaseResultDetailRow>,
+    pub(crate) semantic_keys: std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
     pub(crate) actions: Vec<kuzushi_core::workflow_attempts::PhaseResultAction>,
     pub(crate) control_hint: String,
     pub(crate) recommended: String,
@@ -257,6 +259,7 @@ pub(crate) struct RemediationLifecycleModel {
     pub(crate) detail: Option<String>,
     pub(crate) updated_at: Option<String>,
     pub(crate) reverify_command: Option<String>,
+    pub(crate) reverify_control_hint: Option<String>,
     pub(crate) load_error: Option<String>,
 }
 
@@ -342,34 +345,32 @@ fn engagement_header_model(
 }
 
 fn phase_result_card(app: &ShellApp, phase: WorkflowPhase) -> Option<PhaseResultCardModel> {
-    let record = app.engagement.unresolved_phase_attempt(phase)?;
-    let live_receipt = app
-        .activity()
-        .and_then(|session| session.run_focus_receipt.as_ref())
-        .filter(|receipt| receipt.attempt_id.as_deref() == Some(&record.completed.attempt_id));
-    let outcome = format!("{:?}", record.completed.outcome).to_ascii_lowercase();
-    let detail = result_receipt_detail(&record.completed, live_receipt, &outcome);
-    let policy = app.projected_phase_result_policy(phase)?;
-    let actions =
-        crate::app::ordered_phase_result_actions(phase, record.completed.outcome, &policy.actions);
+    let presentation = app.phase_result_presentation(phase)?;
+    Some(phase_result_card_model(app, phase, presentation))
+}
+
+fn phase_result_card_model(
+    app: &ShellApp,
+    phase: WorkflowPhase,
+    presentation: crate::app::PhaseResultPresentation,
+) -> PhaseResultCardModel {
     let verified_remediation = app.verified_remediation_result_is_open(phase);
-    let recommended = policy
-        .recommended_next
-        .unwrap_or_else(|| "open the result and choose a disposition".to_string());
-    Some(PhaseResultCardModel {
-        attempt_id: record.completed.attempt_id.clone(),
-        outcome: outcome.clone(),
-        detail,
+    PhaseResultCardModel {
+        attempt_id: presentation.attempt_id,
+        outcome: presentation.outcome.clone(),
+        detail: presentation.detail_lines.join("\n"),
+        detail_rows: presentation.detail_rows,
+        semantic_keys: presentation.semantic_keys,
         control_hint: phase_result_control_hint(
             app,
-            &actions,
+            &presentation.actions,
             phase,
-            &outcome,
+            &presentation.outcome,
             verified_remediation,
         ),
-        actions,
-        recommended,
-    })
+        actions: presentation.actions,
+        recommended: presentation.recommended_next,
+    }
 }
 
 fn phase_result_control_hint(
@@ -398,38 +399,6 @@ fn prompt_result_control_hint(app: &ShellApp) -> String {
     } else {
         format!("{binding} Navigate after finishing or clearing prompt draft")
     }
-}
-
-fn result_receipt_detail(
-    completed: &kuzushi_core::workflow_attempts::PhaseAttemptCompleted,
-    live: Option<&crate::app::RunFocusReceipt>,
-    outcome: &str,
-) -> String {
-    if let Some(receipt) = live {
-        return format!(
-            "{} · {} finding delta · {} artifact delta · {} interaction(s)",
-            receipt.summary(),
-            receipt.changed_findings,
-            receipt.changed_artifacts.len(),
-            receipt.interaction_count
-        );
-    }
-    let Some(receipt) = completed.receipt.as_ref() else {
-        return format!(
-            "{} canonical run reference(s) · legacy receipt metadata unavailable",
-            completed.run_refs.len()
-        );
-    };
-    format!(
-        "{outcome} · {} run{} · {}s · {} · {} finding delta · {} artifact delta · {} interaction(s)",
-        receipt.run_count,
-        if receipt.run_count == 1 { "" } else { "s" },
-        receipt.elapsed_secs,
-        receipt.cost,
-        receipt.changed_findings,
-        receipt.changed_artifacts.len(),
-        receipt.interaction_count
-    )
 }
 
 #[cfg(test)]

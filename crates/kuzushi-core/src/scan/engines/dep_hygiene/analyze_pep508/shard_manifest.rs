@@ -75,12 +75,9 @@ fn shard_finding(
 }
 
 fn dependency_version(value: &YamlValue) -> Option<&str> {
-    value.as_str().or_else(|| {
-        value
-            .as_object()?
-            .get("version")?
-            .as_str()
-    })
+    value
+        .as_str()
+        .or_else(|| value.as_object()?.get("version")?.as_str())
 }
 
 fn is_floating_shard_constraint(constraint: &str) -> bool {

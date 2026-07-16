@@ -130,10 +130,7 @@ impl ShellApp {
     }
 
     fn move_guided_result_cursor(&mut self, delta: isize, count: usize) -> bool {
-        let Some(GuidedScanStage::AwaitingResult {
-            phase,
-            attempt_id,
-        }) =
+        let Some(GuidedScanStage::AwaitingResult { phase, attempt_id }) =
             self.engagement.guided_scan().map(GuidedScanFlow::stage)
         else {
             return false;
@@ -323,8 +320,8 @@ impl ShellApp {
         else {
             return Vec::new();
         };
-        let actions = guided_attempt_actions(record);
-        ordered_phase_result_actions(phase, record.completed.outcome, &actions)
+        self.phase_result_presentation_for(&record.completed)
+            .actions
     }
 
     fn dismiss_guided_questions(&mut self) {
@@ -332,22 +329,6 @@ impl ShellApp {
         self.set_input_mode(InputMode::Prompt);
         self.log("scan", "guided scan questions dismissed; draft preserved");
     }
-}
-
-fn guided_attempt_actions(
-    record: &kuzushi_core::workflow_attempts::PhaseAttemptRecord,
-) -> Vec<PhaseResultAction> {
-    use kuzushi_core::workflow_attempts::PhaseResultAction::{Discard, Open, RunAgain};
-
-    if record.completed.selection_blocked_reason.is_some() {
-        return vec![Open, RunAgain, Discard];
-    }
-    record.completed.receipt.as_ref().map_or_else(
-        || {
-            phase_result_policy(Some(record.completed.phase), record.completed.outcome, false).actions
-        },
-        |receipt| receipt.actions.clone(),
-    )
 }
 
 fn guided_direct_choice_index(code: KeyCode) -> Option<usize> {

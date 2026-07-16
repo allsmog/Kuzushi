@@ -11,6 +11,12 @@ use super::bridge_payloads::{
     BridgeRequest, BridgeResponse, NextStepBridgeRequest, NextStepBridgeResponse,
 };
 
+const LEGACY_ERROR_PATTERNS: &[(&[&str], &str)] = &[
+    (&["timed out", "timeout"], "timeout"),
+    (&["cancelled", "canceled"], "cancelled"),
+    (&["fetch failed", "econnreset"], "transport"),
+];
+
 pub(crate) fn run_next_step_bridge(
     command: &[String],
     request: &NextStepBridgeRequest,
@@ -70,9 +76,97 @@ fn mcp_artifact_env_for_attachments(
 }
 
 pub(crate) fn public_bridge_error(message: &str) -> String {
-    message
-        .replace("auth login openai-codex", "auth login openai")
-        .replace("openai-codex", "OpenAI OAuth")
+    let class = legacy_error_class(message);
+    if class == "openai_authentication" {
+        return "OpenAI OAuth authentication failed; run `kuzushi auth login openai`.".to_string();
+    }
+    public_failure_message(class, None)
+}
+
+pub(crate) fn public_bridge_failure(
+    error_class: Option<&str>,
+    status: Option<u16>,
+    fallback: Option<&str>,
+) -> String {
+    let class = error_class
+        .and_then(allowed_error_class)
+        .or_else(|| status.map(error_class_for_status));
+    match class {
+        Some(class) => public_failure_message(class, status),
+        None => public_bridge_error(fallback.unwrap_or_default()),
+    }
+}
+
+fn public_failure_message(class: &str, status: Option<u16>) -> String {
+    let base = match class {
+        "authentication" => "Provider authentication failed",
+        "cancelled" => "Bridge operation was cancelled",
+        "provider_rejected" => "Provider rejected the request",
+        "provider_response_invalid" => "Provider returned an invalid response",
+        "provider_unavailable" => "Provider is temporarily unavailable",
+        "rate_limited" => "Provider rate limited the request",
+        "timeout" => "Provider request timed out",
+        "transport" => "Provider request failed before a response was received",
+        _ => "Bridge operation failed; raw error details were suppressed",
+    };
+    match status.filter(|status| (100..=599).contains(status)) {
+        Some(status) => format!("{base} (HTTP {status})."),
+        None => format!("{base}."),
+    }
+}
+
+fn allowed_error_class(class: &str) -> Option<&str> {
+    matches!(
+        class,
+        "authentication"
+            | "bridge_internal"
+            | "cancelled"
+            | "provider_rejected"
+            | "provider_response_invalid"
+            | "provider_unavailable"
+            | "rate_limited"
+            | "timeout"
+            | "transport"
+    )
+    .then_some(class)
+}
+
+fn error_class_for_status(status: u16) -> &'static str {
+    match status {
+        401 | 403 => "authentication",
+        408 => "timeout",
+        425 | 429 => "rate_limited",
+        500..=599 => "provider_unavailable",
+        _ => "provider_rejected",
+    }
+}
+
+fn legacy_error_class(message: &str) -> &'static str {
+    let lower = message
+        .chars()
+        .take(512)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if lower.contains("openai-codex") || lower.contains("auth login openai") {
+        return "openai_authentication";
+    }
+    if lower.contains("429") || lower.contains("rate limit") {
+        return "rate_limited";
+    }
+    legacy_error_class_non_rate_limited(&lower)
+}
+
+fn legacy_error_class_non_rate_limited(lower: &str) -> &'static str {
+    let parsed =
+        (lower.contains("parse") && lower.contains("json")).then_some("provider_response_invalid");
+    parsed
+        .or_else(|| {
+            LEGACY_ERROR_PATTERNS
+                .iter()
+                .find(|(needles, _)| needles.iter().any(|needle| lower.contains(needle)))
+                .map(|(_, class)| *class)
+        })
+        .unwrap_or("bridge_internal")
 }
 
 fn run_json_bridge<T, R>(
@@ -357,12 +451,8 @@ fn parse_bridge_output<R: DeserializeOwned>(output: Output, label: &str) -> Resu
 }
 
 fn parse_successful_bridge_output<R: DeserializeOwned>(stdout: &[u8], label: &str) -> Result<R> {
-    serde_json::from_slice::<R>(stdout).with_context(|| {
-        format!(
-            "could not parse {label} JSON: {}",
-            public_bridge_bytes(stdout)
-        )
-    })
+    serde_json::from_slice::<R>(stdout)
+        .map_err(|_| anyhow::anyhow!("could not parse {label} JSON response"))
 }
 
 fn parse_failed_bridge_output<R: DeserializeOwned>(output: Output, label: &str) -> Result<R> {
@@ -370,9 +460,8 @@ fn parse_failed_bridge_output<R: DeserializeOwned>(output: Output, label: &str) 
         return Ok(response);
     }
     anyhow::bail!(
-        "{label} exited with {}: {}",
-        output.status,
-        bridge_error_detail(&output.stdout, &output.stderr)
+        "{label} exited with {}; bridge stdout/stderr details were suppressed",
+        output.status
     );
 }
 
@@ -381,18 +470,6 @@ fn parse_error_response<R: DeserializeOwned>(stdout: &[u8]) -> Option<R> {
         return None;
     }
     serde_json::from_slice::<R>(stdout).ok()
-}
-
-fn bridge_error_detail(stdout: &[u8], stderr: &[u8]) -> String {
-    if stderr.is_empty() {
-        return public_bridge_bytes(stdout);
-    }
-    public_bridge_bytes(stderr)
-}
-
-fn public_bridge_bytes(bytes: &[u8]) -> String {
-    let raw = String::from_utf8_lossy(bytes);
-    public_bridge_error(raw.as_ref())
 }
 
 fn write_bridge_request<T: Serialize>(
@@ -517,4 +594,27 @@ pub(super) fn bridge_near_executable(exe: &Path) -> Option<PathBuf> {
         dir = parent.parent();
     }
     None
+}
+
+#[cfg(test)]
+mod telemetry_safety_tests {
+    use super::*;
+
+    #[derive(Debug, serde::Deserialize)]
+    struct ExpectedResponse {
+        _ok: bool,
+    }
+
+    #[test]
+    fn successful_bridge_parse_error_does_not_echo_stdout() {
+        let sentinel = br#"{"_ok":"raw-model-response-sentinel"}"#;
+
+        let error = format!(
+            "{:#}",
+            parse_successful_bridge_output::<ExpectedResponse>(sentinel, "bridge").unwrap_err()
+        );
+
+        assert!(error.contains("could not parse bridge JSON response"));
+        assert!(!error.contains("raw-model-response-sentinel"));
+    }
 }

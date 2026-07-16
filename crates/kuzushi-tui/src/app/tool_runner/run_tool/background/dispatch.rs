@@ -6,12 +6,18 @@ pub(super) struct BackgroundToolRun {
     pub(super) run_id: String,
     pub(super) target_label: String,
     pub(super) trace_handle: TraceHandle,
+    pub(super) phase: Option<crate::app::WorkflowPhase>,
+    pub(super) attempt_id: Option<kuzushi_core::run_lifecycle::RunAttemptId>,
 }
 
 pub(super) struct BackgroundToolRunSeed {
     target: PathBuf,
     pub(super) run_id: String,
     target_label: String,
+    pub(super) phase: Option<crate::app::WorkflowPhase>,
+    pub(super) attempt_id: Option<kuzushi_core::run_lifecycle::RunAttemptId>,
+    pub(super) task_id: kuzushi_core::run_lifecycle::RunTaskId,
+    task_title: String,
 }
 
 pub(super) struct BackgroundToolDispatch {
@@ -154,16 +160,23 @@ pub(super) fn prepare_background_tool_dispatch(
     seed: BackgroundToolRunSeed,
     ticket: JobTicket,
     trace_budget: LiveTraceBudget,
-) -> BackgroundToolDispatch {
+) -> Option<BackgroundToolDispatch> {
     let registry = registry.clone();
     let config = config.clone();
-    let run = prepare_background_tool_run(seed, ticket.sink(), trace_budget.clone());
-    BackgroundToolDispatch {
+    let run = match prepare_background_tool_run(seed, ticket.sink(), trace_budget.clone()) {
+        Ok(run) => run,
+        Err(error) => {
+            ticket.fail(format!("could not start typed run observation: {error:#}"));
+            ticket.complete();
+            return None;
+        }
+    };
+    Some(BackgroundToolDispatch {
         registry,
         config,
         run,
         ticket,
-    }
+    })
 }
 
 pub(super) fn persist_background_tool_run_start(
@@ -189,21 +202,79 @@ pub(super) fn persist_background_tool_run_start(
         target,
         run_id,
         target_label,
+        phase: None,
+        attempt_id: None,
+        task_id: kuzushi_core::run_lifecycle::RunTaskId::new(),
+        task_title: direct_tool_intent(registry, tool_name),
     })
+}
+
+pub(super) fn persist_background_tool_preparation_rejection(
+    registry: &ModuleRegistry,
+    config: &V2Config,
+    workspace: &WorkspaceTarget,
+    tool_name: &str,
+    input: &serde_json::Value,
+    detail: &str,
+) -> anyhow::Result<String> {
+    let seed = persist_background_tool_run_start(registry, config, workspace, tool_name, input)?;
+    let observation =
+        kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(&seed.target, &seed.run_id)?
+            .start_root_task(&seed.task_title)?;
+    let rejection = kuzushi_core::run_lifecycle::observe_preparation_rejection(
+        &observation,
+        tool_name,
+        input,
+        "preparation_policy",
+        detail,
+    )?;
+    let (observation, completion) = rejection.into_parts();
+    kuzushi_core::run_artifacts::try_record_tool_run_failed_settled(
+        kuzushi_core::run_artifacts::ToolRunRecord::new(
+            &seed.target,
+            &seed.run_id,
+            "tool",
+            tool_name,
+        ),
+        detail,
+        &observation,
+        completion,
+    )?;
+    Ok(seed.run_id)
+}
+
+fn direct_tool_intent(registry: &ModuleRegistry, tool_name: &str) -> String {
+    registry
+        .resolve_tool(tool_name)
+        .map(|descriptor| descriptor.description.trim())
+        .filter(|description| !description.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("Run the selected {tool_name} capability"))
 }
 
 fn prepare_background_tool_run(
     seed: BackgroundToolRunSeed,
     sink: JobEventSink,
     trace_budget: LiveTraceBudget,
-) -> BackgroundToolRun {
-    let trace_handle = background_tool_trace_handle(&seed.target, &seed.run_id, sink, trace_budget);
-    BackgroundToolRun {
+) -> anyhow::Result<BackgroundToolRun> {
+    let trace_handle = background_tool_trace_handle(
+        &seed.target,
+        &seed.run_id,
+        sink,
+        trace_budget,
+        seed.attempt_id,
+        seed.phase,
+        seed.task_id,
+        &seed.task_title,
+    )?;
+    Ok(BackgroundToolRun {
         target: seed.target,
         run_id: seed.run_id,
         target_label: seed.target_label,
         trace_handle,
-    }
+        phase: seed.phase,
+        attempt_id: seed.attempt_id,
+    })
 }
 
 fn background_tool_trace_handle(
@@ -211,17 +282,77 @@ fn background_tool_trace_handle(
     run_id: &str,
     sink: JobEventSink,
     trace_budget: LiveTraceBudget,
-) -> TraceHandle {
+    attempt_id: Option<kuzushi_core::run_lifecycle::RunAttemptId>,
+    phase: Option<crate::app::WorkflowPhase>,
+    task_id: kuzushi_core::run_lifecycle::RunTaskId,
+    task_title: &str,
+) -> anyhow::Result<TraceHandle> {
+    let mut observation = background_tool_observation(target, run_id, sink, trace_budget)?;
+    if let (Some(attempt_id), Some(phase)) = (attempt_id, phase) {
+        observation = observation.for_attempt(attempt_id, phase);
+    }
+    observation = observation.start_root_task_with_id(task_id, task_title)?;
+    Ok(observation.trace_handle())
+}
+
+fn background_tool_observation(
+    target: &std::path::Path,
+    run_id: &str,
+    sink: JobEventSink,
+    trace_budget: LiveTraceBudget,
+) -> anyhow::Result<kuzushi_core::run_lifecycle::RunObservationHandle> {
     let inner_sink: Arc<dyn TraceSink> = Arc::new(JsonlSink::new(target.to_path_buf(), run_id));
-    let broadcast_sink: Arc<dyn TraceSink> =
-        Arc::new(StampedTraceSink::new(inner_sink, sink, trace_budget));
+    let broadcast_sink: Arc<dyn TraceSink> = Arc::new(StampedTraceSink::new(
+        inner_sink,
+        sink.clone(),
+        trace_budget,
+    ));
     let initial_step_number = next_run_trace_step_number(target, run_id).saturating_sub(1);
-    TraceHandle::with_initial_step_number(broadcast_sink, initial_step_number)
+    let (item_subscriber, range_subscriber, derivative_subscriber, fault_subscriber) =
+        sink.run_lifecycle_subscribers(run_id);
+    kuzushi_core::run_lifecycle::RunObservationHandle::with_trace_sink_and_derivative_delivery_subscriber(
+        target,
+        run_id,
+        broadcast_sink,
+        initial_step_number,
+        Some(item_subscriber),
+        Some(range_subscriber),
+        Some(derivative_subscriber),
+        Some(fault_subscriber),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn background_trace_carries_plan_scope_into_nested_scan_plans() {
+        let target = tempfile::tempdir().unwrap();
+        let mut jobs = JobHub::default();
+        let ticket = jobs.try_start(JobKind::Run, "sast:scan").unwrap();
+        let trace = background_tool_trace_handle(
+            target.path(),
+            "tool-plan-scope",
+            ticket.sink(),
+            LiveTraceBudget::new(),
+            None,
+            None,
+            kuzushi_core::run_lifecycle::RunTaskId::new(),
+            "Run the accepted Scan plan",
+        )
+        .unwrap();
+
+        let mut plan = trace
+            .run_observation()
+            .unwrap()
+            .plan_handle()
+            .unwrap()
+            .unwrap();
+        let tasks = plan.extend_tasks(["secret-scan".to_string()]).unwrap();
+
+        assert_eq!(tasks.len(), 1);
+    }
 
     #[test]
     fn background_run_receipt_records_the_execution_model_not_the_profile_model() {

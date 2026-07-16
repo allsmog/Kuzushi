@@ -62,7 +62,7 @@ impl ShellApp {
         self.log(
             "onboarding",
             format!(
-                "{label} needs credentials — paste an API key, pick OAuth, or press d for the offline demo"
+                "{label} needs credentials — paste an API key, or move to OAuth or Offline demo and press Enter"
             ),
         );
         self.set_shell_view(ShellView::Setup);

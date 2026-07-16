@@ -111,9 +111,9 @@ impl ShellApp {
     /// the read-only Auth view with no exit — the exact keyless dead-end
     /// this onboarding surface exists to remove.
     fn recover_from_missing_auth_login_bridge(&mut self, provider: &str) -> Vec<ShellEffect> {
-        self.log(
-            "onboarding",
-            "OAuth bridge unavailable — pick another method, or press d for the offline demo",
+        self.set_error_notice(
+            "auth",
+            "OAuth bridge unavailable — choose API key, retry OAuth after fixing the bridge, or move to Offline demo and press Enter",
         );
         self.open_credential_entry(provider.to_string());
         Vec::new()
@@ -125,19 +125,28 @@ impl ShellApp {
             // it errored). Reopen the inline credential-entry step instead of
             // stranding them on the read-only Auth view — the reopen is
             // one-shot per Enter, and Esc always exits.
-            self.log(
-                "onboarding",
-                format!(
-                    "OAuth not completed for {} — pick another method, or press d for the offline demo",
-                    auth_provider_label(provider)
-                ),
-            );
+            self.report_incomplete_picker_oauth(provider);
             self.open_credential_entry(provider.to_string());
             return Vec::new();
         }
         let effects = self.select_oauth_model_for_provider(provider);
         self.transition_after_auth_ready();
         effects
+    }
+
+    fn report_incomplete_picker_oauth(&mut self, provider: &str) {
+        let message = format!(
+            "OAuth not completed for {} — choose API key, retry OAuth, or move to Offline demo and press Enter",
+            auth_provider_label(provider)
+        );
+        let precise_failure_is_visible = self.advisory().notice.as_ref().is_some_and(|notice| {
+            notice.source == "auth" && notice.severity == crate::app::NoticeSeverity::Error
+        });
+        if precise_failure_is_visible {
+            self.log("onboarding", message);
+        } else {
+            self.set_error_notice("onboarding", message);
+        }
     }
 
     pub(crate) fn auth_login_provider_and_method(
@@ -232,7 +241,11 @@ impl ShellApp {
             };
         }
         let (prefix, message) = auth_login_status_message(provider, method, status);
-        self.log(prefix, message);
+        if success {
+            self.log(prefix, message);
+        } else {
+            self.set_error_notice("auth", message);
+        }
     }
 }
 

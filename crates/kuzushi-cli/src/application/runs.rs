@@ -24,6 +24,9 @@ pub(crate) fn runs_command(command: RunsCommand, global_target: Option<PathBuf>)
         RunsCommand::Trace { run_id, target, json } => {
             runs_trace_command(require_cli_target("runs trace", target, global_target)?, &run_id, json)
         }
+        RunsCommand::Replay { run_id, target, json } => {
+            runs_replay_command(require_cli_target("runs replay", target, global_target)?, &run_id, json)
+        }
         RunsCommand::Diff { base_run_id, compare_run_id, target, json } => {
             runs_diff_command(require_cli_target("runs diff", target, global_target)?, &base_run_id, &compare_run_id, json)
         }
@@ -31,6 +34,17 @@ pub(crate) fn runs_command(command: RunsCommand, global_target: Option<PathBuf>)
             runs_prune_command(require_cli_target("runs prune", target, global_target)?, older_than_days, keep_last, dry_run, json)
         }
     }
+}
+
+pub(crate) fn runs_replay_command(target: PathBuf, run_id: &str, json: bool) -> Result<()> {
+    let workspace = WorkspaceTarget::new(target)?;
+    let read = kuzushi_core::run_lifecycle::load_run_projection(workspace.root(), run_id)?;
+    if json {
+        println!("{}", crate::presentation::runs_replay_json(&read)?);
+    } else {
+        print!("{}", crate::presentation::runs_replay_plain(&read));
+    }
+    Ok(())
 }
 
 pub(crate) fn runs_list_command(target: PathBuf, status: Vec<String>, json: bool) -> Result<()> {

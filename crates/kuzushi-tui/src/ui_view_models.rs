@@ -196,7 +196,10 @@ pub(crate) use knowledge_base::{
     PlainKnowledgeBaseArtifactRow, PlainKnowledgeBaseArtifacts, PlainKnowledgeBaseAttachmentRow,
     PlainKnowledgeBaseAttachments, PlainKnowledgeBaseModel,
 };
-pub(crate) use live_activity::{plain_live_activity_model, PlainLiveActivityModel};
+pub(crate) use live_activity::{
+    plain_live_activity_model, plain_run_projection_model, PlainLiveActivityModel,
+    PlainRunProjectionModel,
+};
 pub(crate) use module_detail::{
     focused_module_detail_model, module_detail_model, ModuleDetailModel, ModuleKeyValueSection,
 };
@@ -238,7 +241,7 @@ pub(crate) use prereq_prompt::{
 };
 pub(crate) use project_model::{project_model, ProjectModel, ProjectModelOrigin, ProjectModelRow};
 pub(crate) use prompt::{
-    navigation_prompt_text, prompt_model, prompt_text, workbench_prompt_mode,
+    navigation_prompt_label, prompt_model, prompt_text, workbench_prompt_mode,
     workbench_prompt_token,
 };
 pub(crate) use prompt_tuning::{
@@ -336,8 +339,8 @@ pub(crate) use viz_data::{
 };
 pub(crate) use workbench::{
     active_review_queue_mode, active_workbench_page, workbench_presentation_snapshot,
-    workbench_report_command, WorkbenchChromeModel, WorkbenchHint, WorkbenchPresentationSnapshot,
-    WorkbenchState, WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
+    workbench_report_command, workbench_reverify_control_hint, WorkbenchChromeModel, WorkbenchHint,
+    WorkbenchPresentationSnapshot, WorkbenchState, WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
 };
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_projection, workspace_model,

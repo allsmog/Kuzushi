@@ -450,6 +450,12 @@ Headless `kuzushi run` creates a JSONL trace handle for run artifacts. Some
 test/eval or compatibility contexts may still leave `ctx.trace` as `None`; the
 `if let Some(...)` guard should always short-circuit cleanly.
 
+The trace handle is the compatibility facade over a `RunObservationHandle`.
+Shared dispatch emits versioned task/tool/model items to `items.jsonl`; trace
+labels remain bounded diagnostics and are not a semantic replay protocol. Tool
+inputs persist only an operation fingerprint and safe option names, and model
+items never persist prompts or response text.
+
 See `crates/kuzushi-core/src/run_artifacts/trace_handle.rs` for the
 implementation and
 `crates/kuzushi-tui/tests/activity_dag_fixture.rs` for end-to-end

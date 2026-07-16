@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI › capabilities · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › capabilities · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
 CAPABILITIES · MAP · 3 actions
 [!] target required; Enter opens picker · `target <path>` · `demo` offline

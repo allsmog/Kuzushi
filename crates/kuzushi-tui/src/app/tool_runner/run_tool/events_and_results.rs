@@ -8,11 +8,21 @@ struct ToolEventState {
     abort_reason: Option<AbortReason>,
     run_id: Option<String>,
     target: Option<PathBuf>,
+    completion: Option<kuzushi_core::PendingToolCallCompletion>,
+}
+
+struct NamedToolTerminal {
+    label: &'static str,
+    reason: String,
+    kind: ToolRunTerminalKind,
+    completion: Option<kuzushi_core::PendingToolCallCompletion>,
 }
 
 fn tool_run_outcome_has_usable_result(outcome: &ToolRunRecordOutcome) -> bool {
-    let ToolRunRecordOutcome::Complete { result } = outcome else {
-        return false;
+    let result = match outcome {
+        ToolRunRecordOutcome::Complete { result }
+        | ToolRunRecordOutcome::ObservedComplete { result, .. } => result,
+        _ => return false,
     };
     matches!(
         kuzushi_core::tool_result_status(result),
@@ -20,31 +30,125 @@ fn tool_run_outcome_has_usable_result(outcome: &ToolRunRecordOutcome) -> bool {
     )
 }
 
+fn with_tool_completion(
+    mut state: ToolEventState,
+    completion: kuzushi_core::PendingToolCallCompletion,
+) -> ToolEventState {
+    state.completion = Some(completion);
+    state
+}
+
+fn named_tool_terminal(outcome: ToolRunRecordOutcome) -> NamedToolTerminal {
+    match outcome {
+        ToolRunRecordOutcome::Canceled { reason } => canceled_terminal(reason, None),
+        ToolRunRecordOutcome::Interrupted { reason } => interrupted_terminal(reason, None),
+        ToolRunRecordOutcome::Refused { reason } => refused_terminal(reason, None),
+        ToolRunRecordOutcome::ObservedCanceled { reason, completion } => {
+            canceled_terminal(reason, Some(completion))
+        }
+        ToolRunRecordOutcome::ObservedInterrupted { reason, completion } => {
+            interrupted_terminal(reason, Some(completion))
+        }
+        ToolRunRecordOutcome::ObservedRefused { reason, completion } => {
+            refused_terminal(reason, Some(completion))
+        }
+        ToolRunRecordOutcome::Complete { .. }
+        | ToolRunRecordOutcome::Failed { .. }
+        | ToolRunRecordOutcome::ObservedComplete { .. }
+        | ToolRunRecordOutcome::ObservedFailed { .. } => {
+            unreachable!("result-bearing outcome handled before terminal persistence")
+        }
+    }
+}
+
+fn canceled_terminal(
+    reason: String,
+    completion: Option<kuzushi_core::PendingToolCallCompletion>,
+) -> NamedToolTerminal {
+    NamedToolTerminal {
+        label: "canceled",
+        reason,
+        kind: ToolRunTerminalKind::Canceled,
+        completion,
+    }
+}
+
+fn interrupted_terminal(
+    reason: String,
+    completion: Option<kuzushi_core::PendingToolCallCompletion>,
+) -> NamedToolTerminal {
+    NamedToolTerminal {
+        label: "interrupted",
+        reason,
+        kind: ToolRunTerminalKind::Interrupted,
+        completion,
+    }
+}
+
+fn refused_terminal(
+    reason: String,
+    completion: Option<kuzushi_core::PendingToolCallCompletion>,
+) -> NamedToolTerminal {
+    NamedToolTerminal {
+        label: "blocked",
+        reason,
+        kind: ToolRunTerminalKind::Refused,
+        completion,
+    }
+}
+
 impl ShellApp {
     pub(crate) fn apply_tool_event(&mut self, event: ToolEvent) -> Vec<ShellEffect> {
         let state = self.take_tool_event_state();
         match event {
             ToolEvent::Finished { tool_name, result } => {
-                match kuzushi_core::tool_result_status(&result) {
-                    kuzushi_core::ToolResultStatus::Completed => {
-                        self.apply_finished_tool_event(state, tool_name, result)
-                    }
-                    kuzushi_core::ToolResultStatus::Partial => {
-                        self.apply_partial_tool_result(state, tool_name, result)
-                    }
-                    kuzushi_core::ToolResultStatus::Skipped => {
-                        self.apply_skipped_tool_result(state, tool_name, result)
-                    }
-                    kuzushi_core::ToolResultStatus::Failed => {
-                        self.apply_failed_result_envelope(state, tool_name, result)
-                    }
-                }
+                self.apply_result_tool_event(state, tool_name, result)
             }
             ToolEvent::Failed { tool_name, error } => {
                 self.apply_failed_tool_event(state, tool_name, error)
             }
             ToolEvent::Refused { tool_name, error } => {
                 self.apply_refused_tool_event(state, tool_name, error)
+            }
+            ToolEvent::ObservedFinished {
+                tool_name,
+                result,
+                completion,
+            } => self.apply_result_tool_event(
+                with_tool_completion(state, completion),
+                tool_name,
+                result,
+            ),
+            ToolEvent::ObservedFailed {
+                tool_name,
+                error,
+                completion,
+            } => self.apply_failed_tool_event(
+                with_tool_completion(state, completion),
+                tool_name,
+                error,
+            ),
+        }
+    }
+
+    fn apply_result_tool_event(
+        &mut self,
+        state: ToolEventState,
+        tool_name: String,
+        result: serde_json::Value,
+    ) -> Vec<ShellEffect> {
+        match kuzushi_core::tool_result_status(&result) {
+            kuzushi_core::ToolResultStatus::Completed => {
+                self.apply_finished_tool_event(state, tool_name, result)
+            }
+            kuzushi_core::ToolResultStatus::Partial => {
+                self.apply_partial_tool_result(state, tool_name, result)
+            }
+            kuzushi_core::ToolResultStatus::Skipped => {
+                self.apply_skipped_tool_result(state, tool_name, result)
+            }
+            kuzushi_core::ToolResultStatus::Failed => {
+                self.apply_failed_result_envelope(state, tool_name, result)
             }
         }
     }
@@ -54,6 +158,7 @@ impl ShellApp {
             abort_reason: self.tool_abort_reason(),
             run_id: self.take_active_tool_run_id(),
             target: self.take_active_tool_target(),
+            completion: None,
         };
         self.finish_tool_run();
         state
@@ -61,7 +166,7 @@ impl ShellApp {
 
     fn apply_finished_tool_event(
         &mut self,
-        state: ToolEventState,
+        mut state: ToolEventState,
         tool_name: String,
         result: serde_json::Value,
     ) -> Vec<ShellEffect> {
@@ -72,7 +177,7 @@ impl ShellApp {
             );
         }
         let mut effects = vec![tool_run_record_effect(
-            &state,
+            &mut state,
             &tool_name,
             ToolRunRecordOutcome::Complete {
                 result: result.clone(),
@@ -86,7 +191,7 @@ impl ShellApp {
 
     fn apply_partial_tool_result(
         &mut self,
-        state: ToolEventState,
+        mut state: ToolEventState,
         tool_name: String,
         result: serde_json::Value,
     ) -> Vec<ShellEffect> {
@@ -95,7 +200,7 @@ impl ShellApp {
             return self.apply_aborted_tool_event(state, tool_name, message, reason);
         }
         let mut effects = vec![tool_run_record_effect(
-            &state,
+            &mut state,
             &tool_name,
             ToolRunRecordOutcome::Complete {
                 result: result.clone(),
@@ -114,7 +219,7 @@ impl ShellApp {
 
     fn apply_failed_result_envelope(
         &mut self,
-        state: ToolEventState,
+        mut state: ToolEventState,
         tool_name: String,
         result: serde_json::Value,
     ) -> Vec<ShellEffect> {
@@ -123,7 +228,7 @@ impl ShellApp {
             return self.apply_aborted_tool_event(state, tool_name, message, reason);
         }
         let mut effects = vec![tool_run_record_effect(
-            &state,
+            &mut state,
             &tool_name,
             ToolRunRecordOutcome::Complete {
                 result: result.clone(),
@@ -147,7 +252,7 @@ impl ShellApp {
 
     fn apply_skipped_tool_result(
         &mut self,
-        state: ToolEventState,
+        mut state: ToolEventState,
         tool_name: String,
         result: serde_json::Value,
     ) -> Vec<ShellEffect> {
@@ -160,7 +265,7 @@ impl ShellApp {
             );
         }
         let mut effects = vec![tool_run_record_effect(
-            &state,
+            &mut state,
             &tool_name,
             ToolRunRecordOutcome::Complete {
                 result: result.clone(),
@@ -234,9 +339,13 @@ impl ShellApp {
     fn mark_tool_activity_complete(&mut self, tool_name: &str) {
         let planning_continues =
             self.engagement.running_tool_is(tool_name) && !self.engagement.planning_queues_empty();
-        let same_task_continues = self
-            .engagement
-            .planning_tool_pending_after_current(tool_name);
+        let same_task_continues = self.engagement.running_planning_task().map_or_else(
+            || {
+                self.engagement
+                    .planning_tool_pending_after_current(tool_name)
+            },
+            |task| self.engagement.planning_task_pending_after_current(task),
+        );
         if let Some(session) = self.activity_mut() {
             if !same_task_continues {
                 session.mark_task_done(tool_name);
@@ -250,7 +359,6 @@ impl ShellApp {
     fn mark_tool_activity_partial(&mut self, tool_name: &str, message: &str) {
         if let Some(session) = self.activity_mut() {
             session.mark_task_partial(tool_name, message);
-            session.mark_incomplete_tasks_after_failure();
         }
     }
 
@@ -292,7 +400,7 @@ impl ShellApp {
 
     fn apply_failed_tool_event(
         &mut self,
-        state: ToolEventState,
+        mut state: ToolEventState,
         tool_name: String,
         error: String,
     ) -> Vec<ShellEffect> {
@@ -300,7 +408,7 @@ impl ShellApp {
             return self.apply_aborted_tool_event(state, tool_name, error, reason);
         }
         let mut effects = vec![tool_run_record_effect(
-            &state,
+            &mut state,
             &tool_name,
             ToolRunRecordOutcome::Failed {
                 error: error.clone(),
@@ -327,7 +435,7 @@ impl ShellApp {
 
     fn apply_aborted_tool_event(
         &mut self,
-        state: ToolEventState,
+        mut state: ToolEventState,
         tool_name: String,
         error: String,
         reason: AbortReason,
@@ -344,7 +452,7 @@ impl ShellApp {
                 format!("{tool_name} canceled ({}) — {error}", reason.label()),
             );
             return vec![tool_run_record_effect(
-                &state,
+                &mut state,
                 &tool_name,
                 ToolRunRecordOutcome::Canceled {
                     reason: format!("{}: {error}", reason.label()),
@@ -358,7 +466,7 @@ impl ShellApp {
             format!("{tool_name} interrupted by {}: {error}", reason.label()),
         );
         vec![tool_run_record_effect(
-            &state,
+            &mut state,
             &tool_name,
             ToolRunRecordOutcome::Interrupted {
                 reason: format!("{}: {error}", reason.label()),
@@ -368,7 +476,7 @@ impl ShellApp {
 
     fn apply_refused_tool_event(
         &mut self,
-        state: ToolEventState,
+        mut state: ToolEventState,
         tool_name: String,
         error: String,
     ) -> Vec<ShellEffect> {
@@ -390,7 +498,7 @@ impl ShellApp {
             self.engagement.pause_planning_queue();
         }
         vec![tool_run_record_effect(
-            &state,
+            &mut state,
             &tool_name,
             ToolRunRecordOutcome::Refused { reason: error },
         )]
@@ -508,6 +616,7 @@ impl ShellApp {
 
     pub(crate) fn record_tool_run_effect(&mut self, record: ToolRunRecordEffect) {
         let usable_result = tool_run_outcome_has_usable_result(&record.outcome);
+        let run_id = record.run_id.clone();
         let persistence = self.persist_tool_run_outcome(
             record.target.as_deref(),
             record.run_id.as_deref(),
@@ -515,7 +624,12 @@ impl ShellApp {
             record.outcome,
         );
         if let Err(error) = persistence {
-            self.report_tool_terminal_persistence_failure(&record.tool_name, usable_result, error);
+            self.report_tool_terminal_persistence_failure(
+                &record.tool_name,
+                run_id.as_deref(),
+                usable_result,
+                error,
+            );
         }
         self.invalidate_view_hydration();
         let mut cache = self.workbench_cache().borrow_mut();
@@ -538,6 +652,11 @@ impl ShellApp {
             ToolRunRecordOutcome::Failed { error } => {
                 self.record_failed_tool_run(target, run_id, tool_name, &error)
             }
+            ToolRunRecordOutcome::ObservedComplete { result, completion } => self
+                .record_completed_tool_run_settled(target, run_id, tool_name, result, completion),
+            ToolRunRecordOutcome::ObservedFailed { error, completion } => {
+                self.record_failed_tool_run_settled(target, run_id, tool_name, &error, completion)
+            }
             terminal => self.persist_terminal_tool_run(target, run_id, tool_name, terminal),
         }
     }
@@ -549,48 +668,19 @@ impl ShellApp {
         tool_name: &str,
         outcome: ToolRunRecordOutcome,
     ) -> anyhow::Result<()> {
-        match outcome {
-            ToolRunRecordOutcome::Canceled { reason } => self.persist_named_tool_terminal(
-                target,
-                run_id,
-                tool_name,
-                "canceled",
-                reason,
-                record_tool_run_canceled,
-            ),
-            ToolRunRecordOutcome::Interrupted { reason } => self.persist_named_tool_terminal(
-                target,
-                run_id,
-                tool_name,
-                "interrupted",
-                reason,
-                record_tool_run_interrupted,
-            ),
-            ToolRunRecordOutcome::Refused { reason } => self.persist_named_tool_terminal(
-                target,
-                run_id,
-                tool_name,
-                "blocked",
-                reason,
-                record_tool_run_refused,
-            ),
-            ToolRunRecordOutcome::Complete { .. } | ToolRunRecordOutcome::Failed { .. } => {
-                unreachable!("result-bearing outcome handled before terminal persistence")
-            }
-        }
-    }
-
-    fn persist_named_tool_terminal(
-        &mut self,
-        target: Option<&Path>,
-        run_id: Option<&str>,
-        tool_name: &str,
-        label: &str,
-        reason: String,
-        persist: fn(Option<&Path>, Option<&str>, &str, &str) -> anyhow::Result<()>,
-    ) -> anyhow::Result<()> {
-        let persistence = persist(target, run_id, tool_name, &reason);
-        self.log("result", format!("{label} · {tool_name} · {reason}"));
+        let terminal = named_tool_terminal(outcome);
+        let persistence = record_tool_run_terminal(
+            target,
+            run_id,
+            tool_name,
+            terminal.kind,
+            &terminal.reason,
+            terminal.completion,
+        );
+        self.log(
+            "result",
+            format!("{} · {tool_name} · {}", terminal.label, terminal.reason),
+        );
         persistence
     }
 
@@ -602,6 +692,28 @@ impl ShellApp {
         result: serde_json::Value,
     ) -> anyhow::Result<()> {
         match record_tool_run_complete(target, run_id, tool_name, &result) {
+            Ok(context) => {
+                let result = result_with_fallback_context(target, run_id, result);
+                self.log_tool_result(&result);
+                self.capture_failure_context(context);
+                Ok(())
+            }
+            Err(error) => {
+                self.log_tool_result(&result);
+                Err(error)
+            }
+        }
+    }
+
+    fn record_completed_tool_run_settled(
+        &mut self,
+        target: Option<&Path>,
+        run_id: Option<&str>,
+        tool_name: &str,
+        result: serde_json::Value,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    ) -> anyhow::Result<()> {
+        match record_tool_run_complete_settled(target, run_id, tool_name, &result, completion) {
             Ok(context) => {
                 let result = result_with_fallback_context(target, run_id, result);
                 self.log_tool_result(&result);
@@ -634,12 +746,35 @@ impl ShellApp {
         }
     }
 
+    fn record_failed_tool_run_settled(
+        &mut self,
+        target: Option<&Path>,
+        run_id: Option<&str>,
+        tool_name: &str,
+        error: &str,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    ) -> anyhow::Result<()> {
+        let persistence =
+            record_tool_run_failed_settled(target, run_id, tool_name, error, completion);
+        let result = failed_tool_result(target, run_id, tool_name, error);
+        self.log_tool_result(&result);
+        match persistence {
+            Ok(context) => {
+                self.log_failure_context(context);
+                Ok(())
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn report_tool_terminal_persistence_failure(
         &mut self,
         tool_name: &str,
+        run_id: Option<&str>,
         usable_result: bool,
         error: anyhow::Error,
     ) {
+        self.record_tool_writer_fault(run_id, usable_result, &error);
         let message = format!(
             "{tool_name} result retained, but run artifacts could not be finalized: {error}"
         );
@@ -658,6 +793,29 @@ impl ShellApp {
                 "tool did not produce a usable result and terminal artifacts are incomplete",
             );
         }
+    }
+
+    fn record_tool_writer_fault(
+        &mut self,
+        run_id: Option<&str>,
+        execution_may_have_occurred: bool,
+        error: &anyhow::Error,
+    ) {
+        let Some(fault) = error.downcast_ref::<kuzushi_core::run_lifecycle::RunItemWriterFault>()
+        else {
+            return;
+        };
+        let Some(activity) = self
+            .activity_mut()
+            .filter(|activity| Some(activity.run_id.as_str()) == run_id)
+        else {
+            return;
+        };
+        activity.record_run_item_writer_fault(
+            fault
+                .clone()
+                .annotate_execution(execution_may_have_occurred),
+        );
     }
 
     fn log_tool_result(&mut self, result: &serde_json::Value) {
@@ -746,10 +904,30 @@ fn failure_like_result_message(result: &serde_json::Value) -> String {
 }
 
 fn tool_run_record_effect(
-    state: &ToolEventState,
+    state: &mut ToolEventState,
     tool_name: &str,
-    outcome: ToolRunRecordOutcome,
+    mut outcome: ToolRunRecordOutcome,
 ) -> ShellEffect {
+    if let Some(completion) = state.completion.take() {
+        outcome = match outcome {
+            ToolRunRecordOutcome::Complete { result } => {
+                ToolRunRecordOutcome::ObservedComplete { result, completion }
+            }
+            ToolRunRecordOutcome::Failed { error } => {
+                ToolRunRecordOutcome::ObservedFailed { error, completion }
+            }
+            ToolRunRecordOutcome::Canceled { reason } => {
+                ToolRunRecordOutcome::ObservedCanceled { reason, completion }
+            }
+            ToolRunRecordOutcome::Interrupted { reason } => {
+                ToolRunRecordOutcome::ObservedInterrupted { reason, completion }
+            }
+            ToolRunRecordOutcome::Refused { reason } => {
+                ToolRunRecordOutcome::ObservedRefused { reason, completion }
+            }
+            observed => observed,
+        };
+    }
     ShellEffect::RecordToolRun(ToolRunRecordEffect {
         target: state.target.clone(),
         run_id: state.run_id.clone(),
@@ -840,6 +1018,36 @@ mod tests {
                     .with_model_metadata("test:model", "test", format!("prompt-{n}")),
             );
         }
+    }
+
+    #[test]
+    fn tool_writer_fault_annotation_tracks_usable_execution() {
+        use kuzushi_core::run_lifecycle::{
+            PersistenceFailureStage, RunDurabilityHealth, RunItemWriterFault, SafeText,
+        };
+        let fault = RunItemWriterFault {
+            stage: PersistenceFailureStage::Sync,
+            last_durable_seq: 4,
+            detail: SafeText::operator_visible("terminal sync failed"),
+            execution_may_have_occurred: false,
+        };
+        let mut app = app_with_tool_session("triage:run", "run-post-exec");
+
+        app.report_tool_terminal_persistence_failure(
+            "triage:run",
+            Some("run-post-exec"),
+            true,
+            anyhow::Error::new(fault),
+        );
+
+        assert!(matches!(
+            app.activity().unwrap().effective_run_lifecycle_health().durability,
+            RunDurabilityHealth::Failed {
+                execution_may_have_occurred: true,
+                ref detail,
+                ..
+            } if detail.as_str().contains("do not retry automatically")
+        ));
     }
 
     #[test]

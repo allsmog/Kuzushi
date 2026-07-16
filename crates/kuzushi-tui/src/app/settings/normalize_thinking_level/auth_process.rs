@@ -61,13 +61,23 @@ pub(in crate::app) fn auth_login_status_message(
         ),
         Ok(status) => (
             "error",
-            format!("{display_provider} OAuth login exited with {status}. Next: auth status"),
+            format!(
+                "{display_provider} OAuth login exited with {status}. {}",
+                auth_login_failure_next_step()
+            ),
         ),
         Err(error) => (
             "error",
-            format!("could not start {display_provider} OAuth login: {error}. Next: auth status"),
+            format!(
+                "could not start {display_provider} OAuth login: {error}. {}",
+                auth_login_failure_next_step()
+            ),
         ),
     }
+}
+
+fn auth_login_failure_next_step() -> &'static str {
+    "Next: choose API key, retry OAuth, move to Offline demo and press Enter, or run auth status"
 }
 
 pub(in crate::app) fn auth_provider_display_name(provider: &str) -> &str {

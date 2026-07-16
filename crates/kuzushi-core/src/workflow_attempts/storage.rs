@@ -1,6 +1,6 @@
 use super::{
-    PhaseAttemptCompleted, PhaseAttemptDispositionRecorded, PhaseAttemptEvent,
-    PhaseAttemptLedger, PhaseCheckpointSkipped, ProofDeferralRecorded,
+    PhaseAttemptCompleted, PhaseAttemptDispositionRecorded, PhaseAttemptEvent, PhaseAttemptLedger,
+    PhaseCheckpointSkipped, ProofDeferralRecorded,
 };
 use anyhow::{Context, Result};
 use std::fs;
@@ -29,11 +29,12 @@ impl RecoveredPhaseAttemptEvents {
 pub struct RecoveredPhaseAttemptLedger {
     pub ledger: PhaseAttemptLedger,
     pub malformed_line: Option<usize>,
+    pub degraded_reason: Option<String>,
 }
 
 impl RecoveredPhaseAttemptLedger {
     pub const fn is_degraded(&self) -> bool {
-        self.malformed_line.is_some()
+        self.malformed_line.is_some() || self.degraded_reason.is_some()
     }
 }
 
@@ -67,11 +68,18 @@ pub fn load_phase_attempt_events_recovering(
 pub fn load_phase_attempt_ledger_recovering(
     target: impl AsRef<Path>,
 ) -> Result<RecoveredPhaseAttemptLedger> {
+    super::load_phase_attempt_ledger_prefer_v2_recovering(target)
+}
+
+pub(super) fn load_phase_attempt_ledger_v1_recovering(
+    target: impl AsRef<Path>,
+) -> Result<RecoveredPhaseAttemptLedger> {
     let recovered = load_phase_attempt_events_recovering(target)?;
     let ledger = PhaseAttemptLedger::from_events(recovered.events)?;
     Ok(RecoveredPhaseAttemptLedger {
         ledger,
         malformed_line: recovered.malformed_line,
+        degraded_reason: None,
     })
 }
 
@@ -126,13 +134,23 @@ fn ledger_read_error(path: &Path) -> String {
 }
 
 pub fn load_phase_attempt_ledger(target: impl AsRef<Path>) -> Result<PhaseAttemptLedger> {
-    PhaseAttemptLedger::from_events(load_phase_attempt_events(target)?)
+    let recovered = load_phase_attempt_ledger_recovering(target)?;
+    anyhow::ensure!(
+        !recovered.is_degraded(),
+        "workflow attempt ledger is degraded: {}",
+        recovered
+            .degraded_reason
+            .as_deref()
+            .unwrap_or("malformed event")
+    );
+    Ok(recovered.ledger)
 }
 
 pub fn append_phase_attempt_completed(
     target: impl AsRef<Path>,
-    completed: PhaseAttemptCompleted,
+    mut completed: PhaseAttemptCompleted,
 ) -> Result<PathBuf> {
+    completed.bound_receipt_metadata();
     append_validated_event(
         target.as_ref(),
         PhaseAttemptEvent::PhaseAttemptCompleted(completed),
@@ -143,6 +161,7 @@ pub fn append_phase_attempt_disposition(
     target: impl AsRef<Path>,
     disposition: PhaseAttemptDispositionRecorded,
 ) -> Result<PathBuf> {
+    super::append_phase_attempt_disposition_v2_if_present(target.as_ref(), &disposition)?;
     append_validated_event(
         target.as_ref(),
         PhaseAttemptEvent::PhaseAttemptDispositionRecorded(disposition),
@@ -171,9 +190,15 @@ pub fn append_proof_deferral(
 
 fn append_validated_event(target: &Path, event: PhaseAttemptEvent) -> Result<PathBuf> {
     let path = phase_attempt_ledger_path(target);
-    let parent = path.parent().context("workflow attempt ledger has no parent")?;
-    fs::create_dir_all(parent)
-        .with_context(|| format!("Could not create workflow state directory {}", parent.display()))?;
+    let parent = path
+        .parent()
+        .context("workflow attempt ledger has no parent")?;
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "Could not create workflow state directory {}",
+            parent.display()
+        )
+    })?;
     let _guard = crate::file_lock::ExclusiveFileLock::acquire(&parent.join(ATTEMPT_LEDGER_LOCK))?;
     reject_unsafe_target(&path)?;
     validate_appended_event(target, &event)?;
@@ -193,8 +218,12 @@ fn append_event_line(path: &Path, event: &PhaseAttemptEvent) -> Result<()> {
     validate_append_size(path, line.len())?;
     let mut file = open_append_file(path)
         .with_context(|| format!("Could not open workflow attempt ledger {}", path.display()))?;
-    file.write_all(line.as_bytes())
-        .with_context(|| format!("Could not append workflow attempt ledger {}", path.display()))?;
+    file.write_all(line.as_bytes()).with_context(|| {
+        format!(
+            "Could not append workflow attempt ledger {}",
+            path.display()
+        )
+    })?;
     file.sync_all()
         .with_context(|| format!("Could not fsync workflow attempt ledger {}", path.display()))
 }
@@ -217,7 +246,10 @@ fn validate_append_size(path: &Path, line_len: usize) -> Result<()> {
 fn reject_unsafe_target(path: &Path) -> Result<()> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => {
-            anyhow::bail!("Workflow attempt ledger must not be a symlink: {}", path.display())
+            anyhow::bail!(
+                "Workflow attempt ledger must not be a symlink: {}",
+                path.display()
+            )
         }
         Ok(metadata) if metadata.is_file() => Ok(()),
         Ok(_) => anyhow::bail!("Workflow attempt ledger is not a file: {}", path.display()),

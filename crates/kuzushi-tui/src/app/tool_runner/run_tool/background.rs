@@ -1,6 +1,7 @@
 use self::dispatch::{
-    persist_background_tool_run_start, prepare_background_tool_dispatch, BackgroundToolDispatch,
-    BackgroundToolRun, BackgroundToolRunSeed, BackgroundToolWorkerLaunch,
+    persist_background_tool_preparation_rejection, persist_background_tool_run_start,
+    prepare_background_tool_dispatch, BackgroundToolDispatch, BackgroundToolRun,
+    BackgroundToolRunSeed, BackgroundToolWorkerLaunch,
 };
 use self::preflight::langgraph_bridge_preflight_error;
 use super::*;
@@ -126,7 +127,9 @@ impl ShellApp {
             return;
         };
         self.begin_run_cost_tracking(&run_id, runtime_backed);
-        let dispatch = self.background_tool_dispatch(seed, ticket);
+        let Some(dispatch) = self.background_tool_dispatch(seed, ticket) else {
+            return;
+        };
         self.launch_prepared_background_tool(
             dispatch,
             workspace,
@@ -165,13 +168,21 @@ impl ShellApp {
         tool_name: &str,
         input: &PreparedToolInput,
     ) -> Option<BackgroundToolRunSeed> {
-        let seed = match self.background_tool_run_seed(workspace, tool_name, input.value()) {
+        let mut seed = match self.background_tool_run_seed(workspace, tool_name, input.value()) {
             Ok(seed) => seed,
             Err(error) => {
                 self.report_tool_launch_persistence_failure(tool_name, error);
                 return None;
             }
         };
+        seed.phase = background_tool_origin_phase(
+            tool_name,
+            self.engagement.current_phase(),
+            self.engagement.running_tool(),
+        );
+        seed.attempt_id = seed
+            .phase
+            .map(|_| kuzushi_core::run_lifecycle::RunAttemptId::new());
         Some(seed)
     }
 
@@ -221,7 +232,7 @@ impl ShellApp {
         &self,
         seed: BackgroundToolRunSeed,
         ticket: JobTicket,
-    ) -> BackgroundToolDispatch {
+    ) -> Option<BackgroundToolDispatch> {
         prepare_background_tool_dispatch(
             self.registry(),
             self.config(),
@@ -295,7 +306,33 @@ impl ShellApp {
             authorization: Default::default(),
         };
         self.registry()
-            .prepare_dispatch_input(tool_name, input, &ctx, Some(self.option_store()))
+            .prepare_dispatch_input(tool_name, input.clone(), &ctx, Some(self.option_store()))
+            .map_err(|error| {
+                self.background_tool_preparation_error(workspace, tool_name, &input, error)
+            })
+    }
+
+    pub(super) fn background_tool_preparation_error(
+        &self,
+        workspace: &WorkspaceTarget,
+        tool_name: &str,
+        input: &serde_json::Value,
+        error: anyhow::Error,
+    ) -> anyhow::Error {
+        let detail = error.to_string();
+        match persist_background_tool_preparation_rejection(
+            self.registry(),
+            self.config(),
+            workspace,
+            tool_name,
+            input,
+            &detail,
+        ) {
+            Ok(_) => error,
+            Err(persistence) => error.context(format!(
+                "also could not persist the rejected shell run: {persistence:#}"
+            )),
+        }
     }
 
     fn reject_pending_prompt_mutation(
@@ -405,15 +442,17 @@ impl ShellApp {
         tool_name: &str,
     ) -> ActivitySession {
         let mut session = ActivitySession::new(run.run_id.clone());
-        if let Some(phase) = background_tool_origin_phase(
-            tool_name,
-            self.engagement.current_phase(),
-            self.engagement.running_tool(),
-        ) {
+        if let Some(phase) = run.phase {
             session = session.with_origin_phase(phase);
+        }
+        if let Some(attempt_id) = run.attempt_id {
+            session = session.with_phase_attempt_id(attempt_id);
         }
         session = self.capture_run_focus_origin(session);
         session.seed_task_sequence(self.engagement.planning_tool_sequence());
+        if let Some(task) = self.engagement.running_planning_task() {
+            session.bind_tool_task(tool_name, task.activity_task_id());
+        }
         session
     }
 }
@@ -526,6 +565,61 @@ mod tests {
             ),
             Some(crate::app::WorkflowPhase::Prove)
         );
+    }
+
+    #[test]
+    fn new_phase_run_does_not_reuse_a_completed_activity_attempt_id() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let stale_attempt_id = kuzushi_core::run_lifecycle::RunAttemptId::new();
+        let mut completed =
+            ActivitySession::for_phase("prior-scan", crate::app::WorkflowPhase::Scan)
+                .with_phase_attempt_id(stale_attempt_id);
+        completed.mark_run_focus_terminal_pending("completed");
+        completed.run_focus_terminal_pending = false;
+        app.set_activity(Some(completed));
+        let prepared = app
+            .prepare_background_tool_input(
+                "secret-scan:scan",
+                serde_json::json!({ "target": target.path() }),
+                &workspace,
+            )
+            .unwrap();
+
+        let first = app
+            .initialize_background_tool_run(&workspace, "secret-scan:scan", &prepared)
+            .unwrap();
+        let second = app
+            .initialize_background_tool_run(&workspace, "secret-scan:scan", &prepared)
+            .unwrap();
+
+        assert_eq!(first.phase, Some(crate::app::WorkflowPhase::Scan));
+        assert_ne!(first.attempt_id, Some(stale_attempt_id));
+        assert_ne!(first.attempt_id, second.attempt_id);
+    }
+
+    #[test]
+    fn active_run_focus_continuation_preserves_its_attempt_id() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let attempt_id = kuzushi_core::run_lifecycle::RunAttemptId::new();
+        let prior = app.capture_run_focus_origin(
+            ActivitySession::for_phase("prior-scan", crate::app::WorkflowPhase::Scan)
+                .with_phase_attempt_id(attempt_id),
+        );
+        app.set_activity(Some(prior));
+        app.set_shell_view(ShellView::Activity);
+
+        let continued = app.capture_run_focus_origin(
+            ActivitySession::for_phase("continued-scan", crate::app::WorkflowPhase::Scan)
+                .with_phase_attempt_id(kuzushi_core::run_lifecycle::RunAttemptId::new()),
+        );
+
+        assert_eq!(
+            continued.origin_phase,
+            Some(crate::app::WorkflowPhase::Scan)
+        );
+        assert_eq!(continued.phase_attempt_id, Some(attempt_id));
     }
 
     #[test]

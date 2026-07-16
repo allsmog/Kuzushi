@@ -159,12 +159,13 @@ impl RuntimeKeymap {
         key: KeyEvent,
         pending: &mut Option<PendingKeyChord>,
         now: Instant,
+        inactive_action: ViewHotkeyAction,
     ) -> ConfiguredKeyResult {
         let mut contexts = vec!["global", "composer"];
         if let Some(context) = view_context(view) {
             contexts.push(context);
         }
-        self.handle_contexts(&contexts, key, pending, now)
+        self.handle_contexts(&contexts, key, pending, now, Some(inactive_action))
     }
 
     pub(crate) fn handle_context_key(
@@ -174,7 +175,7 @@ impl RuntimeKeymap {
         pending: &mut Option<PendingKeyChord>,
         now: Instant,
     ) -> ConfiguredKeyResult {
-        self.handle_contexts(&[context], key, pending, now)
+        self.handle_contexts(&[context], key, pending, now, None)
     }
 
     fn handle_contexts(
@@ -183,13 +184,16 @@ impl RuntimeKeymap {
         key: KeyEvent,
         pending: &mut Option<PendingKeyChord>,
         now: Instant,
+        inactive_action: Option<ViewHotkeyAction>,
     ) -> ConfiguredKeyResult {
         let stroke = KeyStroke::from_event(key);
-        if let Some(action) = self.take_chord_action(contexts, stroke, pending, now) {
+        if let Some(action) =
+            self.take_chord_action(contexts, stroke, pending, now, inactive_action)
+        {
             return ConfiguredKeyResult::Action(action);
         }
         for context in contexts {
-            let result = self.context_key_result(context, stroke, pending, now);
+            let result = self.context_key_result(context, stroke, pending, now, inactive_action);
             if result != ConfiguredKeyResult::NoMatch {
                 return result;
             }
@@ -203,11 +207,12 @@ impl RuntimeKeymap {
         stroke: KeyStroke,
         pending: &mut Option<PendingKeyChord>,
         now: Instant,
+        inactive_action: Option<ViewHotkeyAction>,
     ) -> ConfiguredKeyResult {
-        if let Some(action) = self.single_action(context, stroke) {
+        if let Some(action) = self.single_action(context, stroke, inactive_action) {
             return ConfiguredKeyResult::Action(action);
         }
-        if !self.is_chord_prefix(context, stroke) {
+        if !self.is_chord_prefix(context, stroke, inactive_action) {
             return ConfiguredKeyResult::NoMatch;
         }
         *pending = Some(PendingKeyChord {
@@ -224,33 +229,41 @@ impl RuntimeKeymap {
         stroke: KeyStroke,
         pending: &mut Option<PendingKeyChord>,
         now: Instant,
+        inactive_action: Option<ViewHotkeyAction>,
     ) -> Option<ViewHotkeyAction> {
         let chord = pending.take()?;
         let current_context = contexts.contains(&chord.context.as_str());
         let current_time = now.duration_since(chord.started_at) <= CHORD_TIMEOUT;
-        (current_context && current_time)
-            .then(|| self.chord_action(&chord.context, chord.first, stroke))
-            .flatten()
+        (current_context && current_time).then_some(())?;
+        self.chord_action(&chord.context, chord.first, stroke, inactive_action)
     }
 
     fn matching_overrides<'a>(
         &'a self,
         context: &'a str,
+        inactive_action: Option<ViewHotkeyAction>,
     ) -> impl Iterator<Item = &'a RuntimeBindingOverride> + 'a {
         self.overrides
             .iter()
             .filter(move |((candidate, _), _)| candidate == context)
             .map(|(_, override_)| override_)
+            .filter(move |override_| Some(override_.action) != inactive_action)
     }
 
-    fn single_action(&self, context: &str, stroke: KeyStroke) -> Option<ViewHotkeyAction> {
-        self.matching_overrides(context).find_map(|override_| {
-            override_
-                .sequences
-                .iter()
-                .any(|sequence| sequence.strokes.as_slice() == [stroke])
-                .then_some(override_.action)
-        })
+    fn single_action(
+        &self,
+        context: &str,
+        stroke: KeyStroke,
+        inactive_action: Option<ViewHotkeyAction>,
+    ) -> Option<ViewHotkeyAction> {
+        self.matching_overrides(context, inactive_action)
+            .find_map(|override_| {
+                override_
+                    .sequences
+                    .iter()
+                    .any(|sequence| sequence.strokes.as_slice() == [stroke])
+                    .then_some(override_.action)
+            })
     }
 
     fn chord_action(
@@ -258,22 +271,30 @@ impl RuntimeKeymap {
         context: &str,
         first: KeyStroke,
         second: KeyStroke,
+        inactive_action: Option<ViewHotkeyAction>,
     ) -> Option<ViewHotkeyAction> {
-        self.matching_overrides(context).find_map(|override_| {
-            override_
-                .sequences
-                .iter()
-                .any(|sequence| sequence.strokes.as_slice() == [first, second])
-                .then_some(override_.action)
-        })
+        self.matching_overrides(context, inactive_action)
+            .find_map(|override_| {
+                override_
+                    .sequences
+                    .iter()
+                    .any(|sequence| sequence.strokes.as_slice() == [first, second])
+                    .then_some(override_.action)
+            })
     }
 
-    fn is_chord_prefix(&self, context: &str, stroke: KeyStroke) -> bool {
-        self.matching_overrides(context).any(|override_| {
-            override_.sequences.iter().any(|sequence| {
-                sequence.strokes.len() == 2 && sequence.strokes.first() == Some(&stroke)
+    fn is_chord_prefix(
+        &self,
+        context: &str,
+        stroke: KeyStroke,
+        inactive_action: Option<ViewHotkeyAction>,
+    ) -> bool {
+        self.matching_overrides(context, inactive_action)
+            .any(|override_| {
+                override_.sequences.iter().any(|sequence| {
+                    sequence.strokes.len() == 2 && sequence.strokes.first() == Some(&stroke)
+                })
             })
-        })
     }
 }
 

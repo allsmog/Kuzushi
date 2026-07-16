@@ -39,6 +39,27 @@ fn accepted_other_value_is_confirmed_in_the_question_card() {
 }
 
 #[test]
+fn phase_result_card_preserves_multiple_semantic_detail_lines() {
+    let mut model = question_fixture();
+    model.detail_lines = vec![
+        "threat-model:build · partial".to_string(),
+        "inadequate evidence; previous model preserved".to_string(),
+        "artifact · normalized-threat-model.json".to_string(),
+    ];
+
+    let rendered = guided_question_lines(&model, 100)
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(rendered.contains("threat-model:build · partial"));
+    assert!(rendered.contains("previous model preserved"));
+    assert!(rendered.contains("normalized-threat-model.json"));
+}
+
+#[test]
 fn other_editor_renders_the_cursor_and_multiline_paste_placeholder() {
     let mut model = question_fixture();
     model.other_open = true;
@@ -133,7 +154,8 @@ fn question_fixture() -> GuidedScanQuestionModel {
     GuidedScanQuestionModel {
         header: "MAP · ROUTE".to_string(),
         prompt: "What should Kuzushi do?".to_string(),
-        detail: "detail".to_string(),
+        detail_lines: vec!["detail".to_string()],
+        semantic_keys: std::collections::BTreeSet::new(),
         progress: Some("step 1 of 4".to_string()),
         options: Vec::new(),
         cursor: 0,

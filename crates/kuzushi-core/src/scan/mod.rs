@@ -68,7 +68,7 @@ use subprocess::{
     wait_for_scanner_process, ProcessOutput,
 };
 pub(crate) use subprocess::{configure_scanner_process_group, PreparedProcessGroup};
-pub use subprocess::{RegisteredChild, ScanCancellation};
+pub use subprocess::{CancellationDisposition, RegisteredChild, ScanCancellation};
 
 pub(crate) fn completed_scan_tool_json(output: String, data: Value) -> Value {
     let summary = output_summary(&output);

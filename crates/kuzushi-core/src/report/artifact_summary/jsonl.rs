@@ -9,7 +9,31 @@ pub(super) fn jsonl_summary(file: &str, body: &str) -> Option<String> {
     if file == run_trace_artifact_leaf() {
         return trace_summary(body);
     }
+    if file == "items.jsonl" {
+        return run_items_summary(body);
+    }
     None
+}
+
+fn run_items_summary(body: &str) -> Option<String> {
+    let lines = json_lines(body);
+    if lines.values.iter().any(|item| item.get("schemaVersion") == Some(&Value::from(1))) {
+        let mut parts = vec![format!("{} semantic item(s)", lines.values.len())];
+        parts.extend(count_segment("types", nested_item_type_counts(&lines.values)));
+        parts.extend(malformed_line_segment(&lines));
+        return Some(parts.join(", "));
+    }
+    malformed_jsonl_summary(&lines)
+}
+
+fn nested_item_type_counts(items: &[Value]) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for item in items {
+        if let Some(kind) = item.pointer("/item/type").and_then(Value::as_str) {
+            *counts.entry(kind.to_string()).or_insert(0) += 1;
+        }
+    }
+    counts
 }
 
 fn run_events_artifact_leaf() -> &'static str {

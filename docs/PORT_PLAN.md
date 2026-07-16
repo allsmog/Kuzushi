@@ -33,6 +33,7 @@ and `docs/architecture/kuzushi-artifacts.md`.
 - `patch`
 - `report`
 - `run_trace`
+- `run_lifecycle`
 - `failure`
 - `ui_*`
 
@@ -59,7 +60,8 @@ truth is in Rust application state and the v3 architecture docs:
 - the append-only event log owns human decisions, rekeys, verification, patch
   attempts, and audit events;
 - SQLite is a disposable projection with an applied-sequence watermark;
-- run directories are replay/export bundles with a small canonical file set;
+- run directories are replay/export bundles whose per-run lifecycle source is
+  the versioned, hash-linked `items.jsonl` stream;
 - domain sidecars such as context, attack-surface, findings, recommendations,
   strategy, or proof are producer-declared artifacts, not synthesized
   canonical snapshot leaves.

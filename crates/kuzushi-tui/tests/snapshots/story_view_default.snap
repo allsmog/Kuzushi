@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 289
 ---
- KUZUSHI › story · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › story · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- SESSION STORY · event log (refresh with /story) --------------------------------------------------------------------
 

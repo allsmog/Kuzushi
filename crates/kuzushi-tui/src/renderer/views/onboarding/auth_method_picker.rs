@@ -1,6 +1,32 @@
 use super::*;
 use crate::app::{auth_method_rows, auth_provider_label, AuthMethodRow, AuthMethodRowKind};
 
+type HintBinding = (&'static str, &'static str);
+
+const API_KEY_WIDE_HINTS: &[HintBinding] = &[
+    ("↑/↓", "move"),
+    (":", "type a command"),
+    ("Enter", "accept key"),
+    ("Esc", "back"),
+];
+const API_KEY_NARROW_HINTS: &[HintBinding] =
+    &[("↑/↓", "move"), ("Enter", "accept"), ("Esc", "back")];
+const AUTH_METHOD_WIDE_HINTS: &[HintBinding] = &[
+    ("↑/↓/j/k", "move"),
+    ("d", "offline fixture"),
+    (":", "type a command"),
+    ("Enter", "confirm"),
+    ("Esc", "back"),
+    ("q", "return to Setup"),
+];
+const AUTH_METHOD_NARROW_HINTS: &[HintBinding] = &[
+    ("↑/↓", "move"),
+    ("Enter", "select"),
+    ("d", "demo"),
+    ("Esc", "back"),
+    ("q", "Setup"),
+];
+
 pub(crate) fn auth_method_picker_lines(
     app: &ShellApp,
     area: Rect,
@@ -74,6 +100,12 @@ fn compact_auth_intro(app: &ShellApp, provider: &str, width: u16) -> Vec<Line<'s
 }
 
 fn compact_auth_footer(app: &ShellApp) -> Vec<Line<'static>> {
+    if app.advisory().notice.is_some() {
+        return picker_notice_footer_lines(false);
+    }
+    if app.picker_prompt_focused() {
+        return picker_prompt_footer_lines(false);
+    }
     if app.router.auth_picker().is_api_key_row() {
         return vec![
             muted(" type/paste key · ↑/↓ move · Enter accept"),
@@ -82,7 +114,7 @@ fn compact_auth_footer(app: &ShellApp) -> Vec<Line<'static>> {
     }
     vec![
         muted(" ↑/↓/j/k move · Enter select · d demo"),
-        muted(" Esc back · q leave setup · : command"),
+        muted(" Esc back · q Setup · : command"),
     ]
 }
 
@@ -171,40 +203,24 @@ fn offline_demo_lead(width: u16) -> Vec<Line<'static>> {
 }
 
 fn auth_picker_footer(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
-    let (wide, narrow): (&[(&str, &str)], &[(&str, &str)]) =
-        if app.router.auth_picker().is_api_key_row() {
-            (
-                &[
-                    ("↑/↓", "move"),
-                    (":", "type a command"),
-                    ("Enter", "accept key"),
-                    ("Esc", "back"),
-                ],
-                &[("↑/↓", "move"), ("Enter", "accept"), ("Esc", "back")],
-            )
-        } else {
-            (
-                &[
-                    ("↑/↓/j/k", "move"),
-                    ("d", "offline fixture"),
-                    (":", "type a command"),
-                    ("Enter", "confirm"),
-                    ("Esc", "back"),
-                    ("q", "leave setup"),
-                ],
-                &[
-                    ("↑/↓", "move"),
-                    ("Enter", "select"),
-                    ("d", "demo"),
-                    ("Esc", "back"),
-                    ("q", "leave setup"),
-                ],
-            )
-        };
+    if app.advisory().notice.is_some() {
+        return picker_notice_footer_lines(true);
+    }
+    if app.picker_prompt_focused() {
+        return picker_prompt_footer_lines(true);
+    }
+    let (wide, narrow) = auth_picker_footer_bindings(app);
     vec![
         blank(),
         responsive_keybind_hint_line(width as usize, wide, narrow),
     ]
+}
+
+fn auth_picker_footer_bindings(app: &ShellApp) -> (&'static [HintBinding], &'static [HintBinding]) {
+    if app.router.auth_picker().is_api_key_row() {
+        return (API_KEY_WIDE_HINTS, API_KEY_NARROW_HINTS);
+    }
+    (AUTH_METHOD_WIDE_HINTS, AUTH_METHOD_NARROW_HINTS)
 }
 
 fn api_key_draft_lines(app: &ShellApp, provider: &str, width: u16) -> Vec<Line<'static>> {
@@ -251,6 +267,14 @@ fn auth_row_line(app: &ShellApp, idx: usize, row: &AuthMethodRow, width: u16) ->
 mod tests {
     use super::*;
 
+    fn footer_text(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
     #[test]
     fn api_key_footer_uses_only_non_conflicting_controls() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
@@ -269,7 +293,38 @@ mod tests {
     }
 
     #[test]
-    fn non_editor_footer_distinguishes_back_from_leaving_setup() {
+    fn visible_notice_footer_advertises_dismissal_before_auth_navigation() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.open_auth_method_picker("anthropic".to_string());
+        app.set_warn_notice("onboarding", "API key is empty");
+        app.router
+            .auth_picker_mut()
+            .set_focus(crate::app::PickerFocus::Prompt);
+
+        let text = footer_text(&compact_auth_footer(&app));
+
+        assert!(text.contains("Esc dismiss notice"), "{text}");
+        assert!(!text.contains("Esc return to picker"), "{text}");
+        assert!(!text.contains("Esc back"), "{text}");
+    }
+
+    #[test]
+    fn prompt_focused_auth_footer_advertises_first_escape_behavior() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.open_auth_method_picker("anthropic".to_string());
+        app.router
+            .auth_picker_mut()
+            .set_focus(crate::app::PickerFocus::Prompt);
+
+        let text = footer_text(&auth_picker_footer(&app, 120));
+
+        assert!(text.contains("Esc return to picker"), "{text}");
+        assert!(text.contains("Enter run"), "{text}");
+        assert!(!text.contains("Esc back"), "{text}");
+    }
+
+    #[test]
+    fn non_editor_footer_truthfully_labels_q_as_return_to_setup() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.open_auth_method_picker("anthropic".to_string());
         app.router.auth_picker_mut().set_cursor(1);
@@ -280,8 +335,27 @@ mod tests {
             .collect::<String>();
 
         assert!(text.contains("Esc back"), "{text}");
-        assert!(text.contains("q leave setup"), "{text}");
+        assert!(text.contains("q return to Setup"), "{text}");
+        assert!(!text.contains("q leave setup"), "{text}");
         assert!(!text.contains("Esc/q leave setup"), "{text}");
+    }
+
+    #[test]
+    fn word_edited_api_key_draft_renders_only_the_remaining_length() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.open_auth_method_picker("anthropic".to_string());
+        app.router.auth_picker_mut().push_key_str("alpha beta");
+        app.router.auth_picker_mut().delete_key_word_left();
+
+        let text = api_key_draft_lines(&app, "anthropic", 120)
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains("6 chars entered · value hidden"), "{text}");
+        assert!(!text.contains("alpha"), "{text}");
+        assert!(!text.contains("beta"), "{text}");
     }
 
     #[test]

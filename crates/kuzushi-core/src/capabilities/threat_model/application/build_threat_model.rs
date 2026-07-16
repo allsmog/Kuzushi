@@ -25,11 +25,24 @@ fn build_agentic_threat_model(
     emit_threat_model_start(ctx, verb, flavor, &input);
     let source_bundle = load_threat_model_source_bundle(ctx, &input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
-    let mut generated =
+    let generated =
         generate_threat_model_document(runtime, ctx, flavor, verb, &input, &source_bundle)?;
+    finish_agentic_threat_model(ctx, flavor, verb, input, generated, source_bundle)
+}
+
+fn finish_agentic_threat_model(
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+    verb: &str,
+    input: BuildInput,
+    mut generated: GeneratedThreatModel,
+    source_bundle: ThreatModelSourceBundle,
+) -> Result<Value> {
     let has_concrete_content =
         crate::workflow_attempts::threat_model_has_concrete_content(&generated.document);
-    let artifacts = write_threat_model_outputs(flavor, &input, &generated.document)?;
+    let cost = generated_threat_model_cost(&generated)?;
+    let artifacts =
+        write_threat_model_outputs(flavor, &input, &generated.document, has_concrete_content)?;
     emit_artifact_write(ctx, verb, &artifacts);
     let findings = take_threat_model_findings(&input, &mut generated);
     let summary = threat_model_summary(&generated.document);
@@ -40,6 +53,7 @@ fn build_agentic_threat_model(
         findings.len(),
         artifacts.persisted,
         has_concrete_content,
+        cost,
     );
     emit_threat_model_terminal(ctx, verb, flavor, &summary, has_concrete_content);
     threat_model_response(
@@ -49,6 +63,7 @@ fn build_agentic_threat_model(
         artifacts,
         findings,
         has_concrete_content,
+        cost,
         lines,
         source_bundle,
     )
@@ -58,11 +73,7 @@ fn take_threat_model_findings(
     input: &BuildInput,
     generated: &mut GeneratedThreatModel,
 ) -> Vec<Value> {
-    threat_model_findings(
-        input,
-        generated.bridge_findings.take(),
-        &generated.document,
-    )
+    threat_model_findings(input, generated.bridge_findings.take(), &generated.document)
 }
 
 fn should_build_deterministically(
@@ -73,7 +84,10 @@ fn should_build_deterministically(
     runtime.is_none() || (read_string(input, &["model"]).is_none() && ctx.config.model.is_none())
 }
 
-fn reject_source_options_without_runtime(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<()> {
+fn reject_source_options_without_runtime(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<()> {
     if has_runtime_only_source_option(input, ctx) {
         anyhow::bail!(
             "threat-model:build seed/design/source prompt options require a configured model/runtime; deterministic no-runtime threat modeling cannot consume them"
@@ -116,11 +130,10 @@ fn nondefault_context_controls_requested(input: &Value) -> bool {
     read_string(input, &["contextMode", "context_mode"]).is_some_and(|mode| {
         let mode = mode.to_ascii_lowercase();
         mode != "auto" && mode != "off"
-    })
-        || input
-            .get("contextLimit")
-            .and_then(Value::as_u64)
-            .is_some_and(|limit| limit != 200)
+    }) || input
+        .get("contextLimit")
+        .and_then(Value::as_u64)
+        .is_some_and(|limit| limit != 200)
         || input
             .get("maxSourceBytes")
             .and_then(Value::as_u64)
@@ -265,7 +278,10 @@ fn generate_threat_model_document(
     Ok(generated)
 }
 
-fn threat_model_prompt(input: &BuildInput, source_bundle: &ThreatModelSourceBundle) -> Result<String> {
+fn threat_model_prompt(
+    input: &BuildInput,
+    source_bundle: &ThreatModelSourceBundle,
+) -> Result<String> {
     let previous_model = try_load_persistent_threat_model(&input.target)?;
     build_agent_prompt(input, previous_model.as_ref(), source_bundle)
 }
@@ -341,10 +357,11 @@ fn write_threat_model_outputs(
     flavor: BuildFlavor,
     input: &BuildInput,
     document: &Value,
+    has_concrete_content: bool,
 ) -> Result<ThreatModelArtifacts> {
     let normalized_artifact =
         write_normalized_artifact(&input.target, &input.output_dir, document)?;
-    let persisted = persist_threat_model_document(flavor, input, document)?;
+    let persisted = persist_threat_model_document(flavor, input, document, has_concrete_content)?;
     Ok(ThreatModelArtifacts {
         normalized_artifact,
         persisted,
@@ -355,8 +372,9 @@ fn persist_threat_model_document(
     flavor: BuildFlavor,
     input: &BuildInput,
     document: &Value,
+    has_concrete_content: bool,
 ) -> Result<bool> {
-    if !flavor.persists_document() {
+    if !flavor.persists_document() || !has_concrete_content {
         return Ok(false);
     }
     save_persistent_threat_model(&input.target, document, !input.preserve_user_edits)
@@ -381,6 +399,7 @@ fn threat_model_response(
     artifacts: ThreatModelArtifacts,
     findings: Vec<Value>,
     has_concrete_content: bool,
+    cost: crate::runtime::RuntimeCostReport,
     mut lines: Vec<String>,
     source_bundle: ThreatModelSourceBundle,
 ) -> Result<Value> {
@@ -392,7 +411,6 @@ fn threat_model_response(
         &persistent_artifact,
         artifacts.persisted,
     );
-    let cost = generated_threat_model_cost(&generated)?;
     let data = threat_model_result_data(
         input,
         flavor,
@@ -436,10 +454,8 @@ fn threat_model_result_envelope(
 fn generated_threat_model_cost(
     generated: &GeneratedThreatModel,
 ) -> Result<crate::runtime::RuntimeCostReport> {
-    let observed = crate::runtime::RuntimeCost::from_usd(
-        generated.cost_usd,
-        "threat-model generated cost",
-    )?;
+    let observed =
+        crate::runtime::RuntimeCost::from_usd(generated.cost_usd, "threat-model generated cost")?;
     Ok(if generated.cost_usd_exact {
         crate::runtime::RuntimeCostReport::known(observed)
     } else {

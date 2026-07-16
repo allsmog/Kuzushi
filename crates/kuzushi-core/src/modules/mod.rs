@@ -26,13 +26,13 @@ pub(in crate::modules) use recon_module::*;
 pub(in crate::modules) use report_module::*;
 pub(in crate::modules) use resolve_tool_model::*;
 pub(in crate::modules) use router_module::*;
-pub(in crate::modules) use suppress_module::*;
-pub(in crate::modules) use suppress_run::*;
 pub(in crate::modules) use router_show_tool::*;
 pub(in crate::modules) use run_deep_audit_tool::*;
 pub(in crate::modules) use sast_run::*;
 use serde_json::{json, Value};
 pub(in crate::modules) use support::*;
+pub(in crate::modules) use suppress_module::*;
+pub(in crate::modules) use suppress_run::*;
 pub(in crate::modules) use taint_iris::*;
 pub(in crate::modules) use taint_iris_next::*;
 pub(in crate::modules) use threat_intel_module::*;
@@ -108,27 +108,30 @@ mod verify_module;
 mod workspace_module;
 
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
-pub use catalog_query::{RuntimeFilter, ToolQuery};
 pub use autonomy::{
     gate as autonomy_gate, tool_phase, AutonomyDecision, AutonomyPosture, AutonomyRefusal,
     WorkflowPhase,
 };
-pub use contracts::{ExecutionAuthorization, ToolExecutionContext};
+pub use builtins::{
+    ApplicationToolCall, ObservedDispatchOutcome, PendingToolCallCompletion, PreparedToolInput,
+    ToolCallIdentity,
+};
+pub use catalog_query::{RuntimeFilter, ToolQuery};
 pub use contracts::{
-    canonical_tool_phase, ApprovalPolicy, BuiltinModule, DagNodeDescriptor, ModuleKind,
-    FileReferenceSemantics, FindingStoreRequirement, ModuleMetadata, OptionSpec, OptionType,
-    PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor, ToolEffect, ToolPhase, ToolPolicy,
+    canonical_tool_phase, ApprovalPolicy, BuiltinModule, DagNodeDescriptor, FileReferenceSemantics,
+    FindingStoreRequirement, ModuleKind, ModuleMetadata, OptionSpec, OptionType, PathSemantics,
+    PromptSpec, RuntimeRequirement, ToolDescriptor, ToolEffect, ToolPhase, ToolPolicy,
     WorkspaceRequirement,
 };
+pub use contracts::{ExecutionAuthorization, ToolExecutionContext};
 pub use dynamic_loader::{
     approve_dynamic_module, default_dynamic_lockfile_path, inspect_dynamic_module,
     revoke_dynamic_module, DynamicModuleInspection, DynamicModuleLoadOptions,
 };
-pub use builtins::PreparedToolInput;
 pub use options::coerce_option_value;
 pub use registry::ModuleRegistry;
 pub use runtime_requirements::{
     agent_runtime_tool_names, tool_defaults_to_workspace, tool_execution_model,
-    tool_needs_finding_store, tool_needs_runtime, tool_requires_agent_runtime, tool_uses_agent_runtime,
-    tool_uses_finding_store, tool_wants_runtime, wants_sast_runtime,
+    tool_needs_finding_store, tool_needs_runtime, tool_requires_agent_runtime,
+    tool_uses_agent_runtime, tool_uses_finding_store, tool_wants_runtime, wants_sast_runtime,
 };

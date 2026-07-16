@@ -1,8 +1,9 @@
 use super::*;
 use crate::ui_view_models::{
     plain_command_result_model, plain_live_activity_model, plain_prereq_plan_model,
-    plain_render_mode, retry_card_model, PlainCommandResultModel, PlainInteractiveOnlyModel,
-    PlainLiveActivityModel, PlainPrereqPlanModel, PlainRenderMode, RetryCardModel,
+    plain_render_mode, plain_run_projection_model, retry_card_model, PlainCommandResultModel,
+    PlainInteractiveOnlyModel, PlainLiveActivityModel, PlainPrereqPlanModel, PlainRenderMode,
+    PlainRunProjectionModel, RetryCardModel,
 };
 
 pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
@@ -115,23 +116,55 @@ fn plain_prereq_plan_lines(plan: PlainPrereqPlanModel, width: usize) -> Vec<Stri
 }
 
 fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>) -> Vec<String> {
-    let mut prefix = Vec::new();
-    if let Some(model) = retry_card_model(app) {
-        prefix.extend(plain_retry_card_lines(model, width));
-        prefix.push(String::new());
-    }
-    if let Some(model) = plain_live_activity_model(app) {
-        prefix.extend(plain_live_activity_lines(model, width));
-        prefix.push(String::new());
-    }
-    if let Some(plan) = plain_prereq_plan_model(app) {
-        prefix.extend(plain_prereq_plan_lines(plan, width));
-        prefix.push(String::new());
-    }
+    let prefix = plain_activity_prefix(app, width);
     if prefix.is_empty() {
         return lines;
     }
     prefix.into_iter().chain(lines).collect()
+}
+
+fn plain_activity_prefix(app: &ShellApp, width: usize) -> Vec<String> {
+    [
+        optional_plain_retry_lines(app, width),
+        optional_plain_run_lines(app, width),
+        optional_plain_prereq_lines(app, width),
+    ]
+    .concat()
+}
+
+fn optional_plain_retry_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    retry_card_model(app)
+        .map(|model| with_trailing_blank(plain_retry_card_lines(model, width)))
+        .unwrap_or_default()
+}
+
+fn optional_plain_run_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    if let Some(model) = plain_run_projection_model(app) {
+        return with_trailing_blank(plain_run_projection_lines(model, width));
+    }
+    plain_live_activity_model(app)
+        .map(|model| with_trailing_blank(plain_live_activity_lines(model, width)))
+        .unwrap_or_default()
+}
+
+fn optional_plain_prereq_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    plain_prereq_plan_model(app)
+        .map(|model| with_trailing_blank(plain_prereq_plan_lines(model, width)))
+        .unwrap_or_default()
+}
+
+fn with_trailing_blank(mut lines: Vec<String>) -> Vec<String> {
+    lines.push(String::new());
+    lines
+}
+
+fn plain_run_projection_lines(model: PlainRunProjectionModel, width: usize) -> Vec<String> {
+    let mut lines = vec![plain_section_divider(model.title, width)];
+    lines.extend(model.rows.into_iter().map(|row| {
+        let _source_key = row.key;
+        row.text
+    }));
+    lines
 }
 
 fn plain_retry_card_lines(model: RetryCardModel, width: usize) -> Vec<String> {

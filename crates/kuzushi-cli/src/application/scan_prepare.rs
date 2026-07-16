@@ -3,7 +3,8 @@ use crate::command::ScanModeArg;
 use crate::scan_budget::apply_scan_budget_caps;
 use anyhow::Result;
 use kuzushi_core::run_artifacts::{
-    try_record_tool_run_failed, try_record_tool_run_started_with_reproducibility, ToolRunRecord,
+    try_record_tool_run_failed_settled, try_record_tool_run_started_with_reproducibility,
+    ToolRunRecord,
 };
 use kuzushi_core::{
     config_hash, load_config_for_target, new_run_id, FindingStore, ModuleRegistry,
@@ -268,7 +269,17 @@ fn record_scan_prepare_failure(
         config_hash(config).ok(),
         registry.loaded_module_specifiers(),
     )?;
-    try_record_tool_run_failed(record, &error.to_string())
+    let observation =
+        kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(workspace.root(), run_id)?;
+    let rejection = kuzushi_core::run_lifecycle::observe_preparation_rejection(
+        &observation,
+        SCAN_TOOL,
+        input,
+        "preparation_policy",
+        &error.to_string(),
+    )?;
+    let (observation, completion) = rejection.into_parts();
+    try_record_tool_run_failed_settled(record, &error.to_string(), &observation, completion)
 }
 
 fn error_with_persistence(error: anyhow::Error, persistence: Result<()>) -> anyhow::Error {
@@ -332,6 +343,47 @@ mod tests {
         assert_eq!(
             events[1].event_kind,
             kuzushi_core::event_log::EventKind::FileIndexed
+        );
+    }
+
+    #[test]
+    fn scan_prepare_rejection_has_failed_task_call_and_exact_artifacts() {
+        let target = tempfile::tempdir().unwrap();
+        let error = prepare_scan_command_with_requested_input(
+            &target.path().to_path_buf(),
+            serde_json::json!({"unknownOption": true}),
+            true,
+            true,
+        )
+        .err()
+        .expect("unknown option must be rejected");
+        assert!(error.to_string().contains("unknown"));
+
+        let entry = kuzushi_core::list_recent_run_summary_entries(target.path(), 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let read =
+            kuzushi_core::run_lifecycle::load_run_projection(target.path(), &entry.run_id).unwrap();
+        let call = read.projection.calls.values().next().unwrap();
+        assert_eq!(
+            call.status,
+            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+        );
+        assert_eq!(
+            read.projection.terminal.as_ref().map(|item| item.status),
+            Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+        );
+        assert!(read
+            .projection
+            .artifacts
+            .values()
+            .all(|artifact| artifact.producing_item_id == call.item_id));
+        assert_eq!(
+            call.result_artifact
+                .as_ref()
+                .map(|artifact| artifact.path.as_str()),
+            Some("result.json")
         );
     }
 }

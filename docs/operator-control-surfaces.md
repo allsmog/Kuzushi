@@ -150,6 +150,12 @@ The interactive route is
 `Target → Setup → Map ↔ Run Focus → Scan ↔ Run Focus → Review → Prove ↔ Run
 Focus → Fix ↔ Run Focus → Report`:
 
+Run Focus task rows, status, cost, artifacts/findings, questions, terminal
+outcome, and `NEXT` action are source-backed projections of committed typed run
+items. A replayed run and a live run use the same reducer. Legacy runs disclose
+lossy reconstruction instead of presenting inferred catalog tasks as runtime
+truth.
+
 - `setup` opens the aggregate readiness surface. Its Model, Credentials,
   Prompt, and Budget blockers are derived from the selected Map plan. A
   deterministic runtime-free plan needs no model; any model-backed task must

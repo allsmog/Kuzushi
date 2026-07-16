@@ -37,7 +37,8 @@ impl ShellApp {
                 self.set_completed_activity("plan", "proposal ready for review");
             }
             PlanEvent::Failed { error, .. } => {
-                self.log("error", format!("planner failed: {error}"));
+                let safe_error = kuzushi_core::runtime::safe_model_failure_message(&error);
+                self.log("error", format!("planner failed: {safe_error}"));
                 self.set_refused_activity("plan", "planner failed");
             }
         }

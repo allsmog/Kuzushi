@@ -21,6 +21,7 @@ mod run_history_index;
 mod run_ledger;
 mod run_paths;
 mod run_reproducibility_metadata;
+mod run_result_summary;
 mod run_summary_store;
 mod running;
 mod scan_stage;
@@ -36,6 +37,7 @@ mod trace_step_builder;
 mod write_run_artifact_json;
 mod write_run_artifact_text;
 
+pub(crate) use artifact_manifest::record_run_artifact;
 pub use artifact_manifest::{load_run_artifacts, RunArtifactManifest};
 pub(crate) use jsonl_append::append_run_artifact_jsonl_value;
 pub use run_artifact::RunArtifact;
@@ -43,6 +45,7 @@ pub use run_artifact_reader::{
     read_run_artifact_bytes, read_run_artifact_text, resolve_run_artifact_path,
     RunArtifactBytesRead, RunArtifactRead, RunArtifactTextRead, MAX_RUN_ARTIFACT_READ_BYTES,
 };
+pub(crate) use run_events::append_compat_run_item_events;
 pub use run_events::{
     append_run_event, load_run_events, next_run_event_number, RunEvent, RunEventRead,
     RunInteractionAudit,
@@ -60,6 +63,10 @@ pub(crate) use run_paths::{
 };
 pub use run_paths::{
     latest_run_path, new_run_id, run_artifact_path, run_dir, runs_root, ArtifactPath, RunId,
+};
+pub(crate) use run_result_summary::load_correlated_run_result_value;
+pub use run_result_summary::{
+    load_correlated_run_result_summary, load_run_result_summary, RunResultSummary,
 };
 pub(crate) use run_summary_store::{list_current_run_summary_prefix, CurrentRunSummaryPrefix};
 pub use run_summary_store::{
@@ -84,9 +91,17 @@ pub use tool_run_record::{
     record_tool_run_canceled, record_tool_run_complete, record_tool_run_failed,
     record_tool_run_interrupted, record_tool_run_refused, record_tool_run_started,
     record_tool_run_started_with_metadata, record_tool_run_started_with_reproducibility,
-    tool_run_output_cost_usd, tool_run_output_findings_count, try_record_tool_run_canceled,
-    try_record_tool_run_complete, try_record_tool_run_failed, try_record_tool_run_interrupted,
-    try_record_tool_run_refused, try_record_tool_run_started_with_reproducibility, ToolRunRecord,
+    tool_run_output_cost_usd, tool_run_output_findings_count, tool_run_terminal_digest,
+    try_record_tool_run_canceled, try_record_tool_run_canceled_observed,
+    try_record_tool_run_canceled_settled,
+    try_record_tool_run_complete, try_record_tool_run_complete_observed,
+    try_record_tool_run_complete_settled, try_record_tool_run_failed,
+    try_record_tool_run_failed_observed, try_record_tool_run_failed_observed_with_execution,
+    try_record_tool_run_failed_settled, try_record_tool_run_interrupted,
+    try_record_tool_run_interrupted_observed, try_record_tool_run_interrupted_settled,
+    try_record_tool_run_refused, try_record_tool_run_refused_observed,
+    try_record_tool_run_refused_settled, try_record_tool_run_started_with_reproducibility,
+    ToolRunRecord,
 };
 pub use trace_cost::{
     reconcile_terminal_cost_reports, terminal_model_call_cost_report, trace_cost_report,

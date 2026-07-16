@@ -243,6 +243,71 @@ mod tests {
     }
 
     #[test]
+    fn observed_driver_preserves_partial_token_lower_bound() {
+        struct UsageRuntime {
+            steps: Mutex<Vec<Observed<AgentLoopStep>>>,
+        }
+
+        impl AgentRuntime for UsageRuntime {
+            fn triage_finding_blocking(&self, _: TriageRequest) -> Result<TriageOutcome> {
+                unreachable!("not used in this test")
+            }
+
+            fn supports_tools(&self) -> bool {
+                true
+            }
+
+            fn next_step_observed_blocking(
+                &self,
+                _request: &AgentToolLoopRequest,
+                _history: &[LoopHistoryEntry],
+            ) -> Result<Observed<AgentLoopStep>> {
+                Ok(self.steps.lock().unwrap().remove(0))
+            }
+        }
+
+        let runtime = UsageRuntime {
+            steps: Mutex::new(vec![
+                Observed::new(
+                    AgentLoopStep::ToolCall {
+                        call: ToolCall {
+                            name: "read_source".to_string(),
+                            input: serde_json::Value::Null,
+                            call_id: "c1".to_string(),
+                        },
+                        cost_usd: None,
+                    },
+                    ModelTokenUsage::reported(12, 3),
+                ),
+                Observed::new(
+                    AgentLoopStep::Final {
+                        text: "done".to_string(),
+                        structured: None,
+                        cost_usd: None,
+                    },
+                    ModelTokenUsage::unavailable_call(),
+                ),
+            ]),
+        };
+        let mut toolbox = ToolBox::new();
+        toolbox.register("read_source", |call| {
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                output: serde_json::Value::Null,
+                is_error: false,
+            })
+        });
+
+        let observed = run_tool_loop_observed(&runtime, &req(), &mut toolbox).unwrap();
+
+        assert_eq!(observed.value.text, "done");
+        assert_eq!(observed.usage.observed_counts(), (Some(12), Some(3)));
+        assert_eq!(observed.usage.fully_reported_calls(), 1);
+        assert_eq!(observed.usage.total_calls, 2);
+        assert!(!observed.usage.is_complete());
+    }
+
+    #[test]
     fn driver_keeps_observed_subtotal_but_marks_mixed_cost_unknown() {
         let runtime = ScriptedRuntime::new(vec![
             AgentLoopStep::ToolCall {

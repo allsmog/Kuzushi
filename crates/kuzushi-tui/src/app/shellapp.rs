@@ -514,21 +514,53 @@ impl ShellApp {
             return;
         };
         let snapshot = kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(&target);
-        match kuzushi_core::workflow_attempts::load_phase_attempt_ledger(&target) {
-            Ok(ledger) => self
-                .engagement
-                .set_phase_attempt_projection(Some(snapshot), ledger),
-            Err(error) => {
-                self.engagement.set_phase_attempt_projection(
-                    Some(snapshot),
-                    kuzushi_core::workflow_attempts::PhaseAttemptLedger::default(),
-                );
-                self.log(
-                    "workflow",
-                    format!("phase result ledger is unreadable: {error}"),
-                );
-            }
+        match kuzushi_core::workflow_attempts::load_phase_attempt_ledger_recovering(&target) {
+            Ok(recovered) => self.apply_recovered_phase_attempts(snapshot, recovered),
+            Err(error) => self.apply_unreadable_phase_attempts(snapshot, error),
         }
+    }
+
+    fn apply_recovered_phase_attempts(
+        &mut self,
+        snapshot: kuzushi_core::workflow_attempts::PhaseTargetSnapshot,
+        recovered: kuzushi_core::workflow_attempts::RecoveredPhaseAttemptLedger,
+    ) {
+        let degraded = recovered.is_degraded();
+        self.engagement.set_phase_attempt_projection_health(
+            Some(snapshot),
+            recovered.ledger,
+            degraded,
+        );
+        if let Some(line) = recovered.malformed_line {
+            self.log(
+                "workflow",
+                format!(
+                    "phase result ledger is degraded at line {line}; advancement is blocked until repaired"
+                ),
+            );
+        }
+        if let Some(reason) = recovered.degraded_reason {
+            self.log(
+                "workflow",
+                format!("typed phase receipt validation is degraded: {reason}"),
+            );
+        }
+    }
+
+    fn apply_unreadable_phase_attempts(
+        &mut self,
+        snapshot: kuzushi_core::workflow_attempts::PhaseTargetSnapshot,
+        error: impl std::fmt::Display,
+    ) {
+        self.engagement.set_phase_attempt_projection_health(
+            Some(snapshot),
+            kuzushi_core::workflow_attempts::PhaseAttemptLedger::default(),
+            true,
+        );
+        self.log(
+            "workflow",
+            format!("phase result ledger is unreadable: {error}"),
+        );
     }
 
     pub(crate) fn record_current_phase_skip(&mut self) {
@@ -1332,6 +1364,13 @@ mod tests {
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
         app.set_shell_view(ShellView::Workbench);
+        let expected_title = app
+            .registry()
+            .resolve_tool("semgrep:scan")
+            .unwrap()
+            .description
+            .trim()
+            .to_string();
 
         let effects = app.prepare_run_tool_launch(RunToolPreparation {
             tool_name: "semgrep:scan".to_string(),
@@ -1344,5 +1383,60 @@ mod tests {
         assert_eq!(notice.severity, NoticeSeverity::Error);
         assert!(notice.message.contains("run input must be JSON"));
         assert!(notice.message.contains("Next: run <tool> {}"));
+        assert_failed_preparation_run(temp.path(), &expected_title);
+    }
+
+    #[test]
+    fn descriptor_rejection_is_persisted_as_a_failed_shell_call() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let expected_title = app
+            .registry()
+            .resolve_tool("workspace:status")
+            .unwrap()
+            .description
+            .trim()
+            .to_string();
+
+        let effects = app.prepare_run_tool_launch(RunToolPreparation {
+            tool_name: "workspace:status".to_string(),
+            input: Some(r#"{"unknownOption":true}"#.to_string()),
+            target: Some(workspace.root().to_path_buf()),
+        });
+
+        assert!(effects.is_empty());
+        assert_failed_preparation_run(temp.path(), &expected_title);
+    }
+
+    fn assert_failed_preparation_run(target: &std::path::Path, expected_title: &str) {
+        let entry = kuzushi_core::list_recent_run_summary_entries(target, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let read = kuzushi_core::run_lifecycle::load_run_projection(target, &entry.run_id).unwrap();
+        assert_eq!(
+            read.projection.terminal.as_ref().map(|item| item.status),
+            Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+        );
+        let task = read.projection.tasks.values().next().unwrap();
+        assert_eq!(task.title.as_str(), expected_title);
+        let call = read.projection.calls.values().next().unwrap();
+        assert_eq!(
+            call.status,
+            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+        );
+        assert!(!read.projection.artifacts.is_empty());
+        assert!(read
+            .projection
+            .artifacts
+            .values()
+            .all(|artifact| artifact.producing_item_id == call.item_id));
+        assert_eq!(
+            call.result_artifact
+                .as_ref()
+                .map(|artifact| artifact.path.as_str()),
+            Some("result.json")
+        );
     }
 }

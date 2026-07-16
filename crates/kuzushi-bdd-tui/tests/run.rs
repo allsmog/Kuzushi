@@ -12,5 +12,11 @@ use kuzushi_bdd_tui::steps::{
 
 fn main() {
     let features = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("features");
-    futures::executor::block_on(OnboardingWorld::run(features));
+    // Every scenario owns a real tmux session and Kuzushi process. The
+    // cucumber default of 64 can starve frame capture on ordinary CI hosts.
+    futures::executor::block_on(
+        OnboardingWorld::cucumber()
+            .max_concurrent_scenarios(4)
+            .run_and_exit(features),
+    );
 }

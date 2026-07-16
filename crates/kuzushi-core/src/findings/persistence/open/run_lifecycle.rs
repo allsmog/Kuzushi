@@ -44,6 +44,7 @@ impl FindingStore {
             target: Some(target.display().to_string()),
             status: status.to_string(),
             findings_count: None,
+            terminal_item_hash: None,
             actor: "finding-store".to_string(),
         })?;
         Ok(())
@@ -60,6 +61,7 @@ impl FindingStore {
             target: None,
             status: status.to_string(),
             findings_count: Some(findings_count as u64),
+            terminal_item_hash: None,
             actor: "finding-store".to_string(),
         })?;
         // Only a fully-completed re-scan can honestly retire a prior finding.

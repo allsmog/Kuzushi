@@ -67,14 +67,17 @@ impl ShellApp {
 
     fn picker_should_capture_key(&self, key: KeyEvent) -> bool {
         self.is_picker_view()
-            && (!picker_shell_chord(key.modifiers) || self.auth_key_editor_owns_word_delete(key))
+            && (!picker_shell_chord(key.modifiers) || self.credential_picker_owns_shell_chord(key))
     }
 
-    fn auth_key_editor_owns_word_delete(&self, key: KeyEvent) -> bool {
+    fn credential_picker_owns_shell_chord(&self, key: KeyEvent) -> bool {
+        self.credential_picker_list_focused() && !credential_picker_global_chord(key)
+    }
+
+    fn credential_picker_list_focused(&self) -> bool {
         self.shell_view() == ShellView::Setup
             && self.router.setup().editor() == Some(SetupEditor::Credentials)
-            && self.router.auth_picker().is_api_key_row()
-            && auth_key_word_delete_requested(key)
+            && !self.picker_prompt_focused()
     }
 
     fn dispatch_picker_control_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -482,16 +485,14 @@ impl ShellApp {
     }
 
     fn handle_auth_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
-        let code = key.code;
+        if self.handle_auth_api_key_edit_key(key) {
+            return InputUpdate::handled();
+        }
+        let Some(code) = auth_picker_control_code(key) else {
+            return InputUpdate::ignored();
+        };
         if code == KeyCode::Esc {
             self.return_to_model_picker();
-            return InputUpdate::handled();
-        }
-        if auth_key_word_delete_requested(key) && self.router.auth_picker().is_api_key_row() {
-            self.router.auth_picker_mut().delete_key_word_left();
-            return InputUpdate::handled();
-        }
-        if self.handle_auth_api_key_draft_key(code) {
             return InputUpdate::handled();
         }
         match code {
@@ -513,6 +514,20 @@ impl ShellApp {
         }
     }
 
+    fn handle_auth_api_key_edit_key(&mut self, key: KeyEvent) -> bool {
+        if !self.router.auth_picker().is_api_key_row() {
+            return false;
+        }
+        if auth_key_word_delete_requested(key) {
+            self.router.auth_picker_mut().delete_key_word_left();
+            return true;
+        }
+        let Some(code) = auth_picker_control_code(key) else {
+            return false;
+        };
+        self.handle_auth_api_key_draft_key(code)
+    }
+
     fn handle_auth_api_key_draft_key(&mut self, code: KeyCode) -> bool {
         if !self.router.auth_picker().is_api_key_row() {
             return false;
@@ -520,7 +535,7 @@ impl ShellApp {
         match code {
             KeyCode::Char(ch) if !ch.is_control() && !ch.is_whitespace() => {
                 self.router.auth_picker_mut().push_key_char(ch);
-                self.clear_onboarding_credential_notice();
+                self.clear_credential_notice();
                 true
             }
             KeyCode::Backspace => {
@@ -571,9 +586,12 @@ impl ShellApp {
         }
         if self.provider_auth_ready_for(api_key_provider) {
             let effects = self.select_api_key_model_for_provider(provider);
-            self.log(
+            self.set_success_notice(
                 "onboarding",
-                format!("{api_key_provider} API key already set; continuing"),
+                format!(
+                    "{} already available; value hidden",
+                    api_key_env_var(api_key_provider)
+                ),
             );
             self.transition_after_auth_ready();
             return effects;
@@ -611,17 +629,17 @@ impl ShellApp {
         let oauth_provider = oauth_credential_provider(provider);
         if auth_ready_for_provider(oauth_provider) {
             let effects = self.select_oauth_model_for_provider(provider);
-            self.log(
+            self.set_success_notice(
                 "onboarding",
                 format!(
-                    "{} OAuth already stored; continuing",
+                    "{} OAuth already stored; credentials hidden",
                     auth_provider_label(provider)
                 ),
             );
             self.transition_after_auth_ready();
             return effects;
         }
-        self.clear_onboarding_credential_notice();
+        self.clear_credential_notice();
         self.log(
             "onboarding",
             format!(
@@ -632,13 +650,13 @@ impl ShellApp {
         self.reduce_picker_auth_login(provider)
     }
 
-    pub(crate) fn clear_onboarding_credential_notice(&mut self) {
-        let is_onboarding = self
+    pub(crate) fn clear_credential_notice(&mut self) {
+        let belongs_to_credential_flow = self
             .advisory()
             .notice
             .as_ref()
-            .is_some_and(|notice| notice.source == "onboarding");
-        if is_onboarding {
+            .is_some_and(|notice| matches!(notice.source.as_str(), "auth" | "onboarding"));
+        if belongs_to_credential_flow {
             self.clear_notice();
         }
     }
@@ -1178,13 +1196,24 @@ fn picker_shell_chord(modifiers: KeyModifiers) -> bool {
     modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::ALT)
 }
 
+fn credential_picker_global_chord(key: KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(
+            key.code,
+            KeyCode::Char('c' | 'd' | 'g') | KeyCode::Up | KeyCode::Down
+        )
+}
+
+fn auth_picker_control_code(key: KeyEvent) -> Option<KeyCode> {
+    (!picker_shell_chord(key.modifiers)).then_some(key.code)
+}
+
 fn auth_key_word_delete_requested(key: KeyEvent) -> bool {
     let modified_backspace = key.code == KeyCode::Backspace
         && key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-    let control_w = key.code == KeyCode::Char('w')
-        && key.modifiers.contains(KeyModifiers::CONTROL);
+    let control_w = key.code == KeyCode::Char('w') && key.modifiers.contains(KeyModifiers::CONTROL);
     modified_backspace || control_w
 }
 

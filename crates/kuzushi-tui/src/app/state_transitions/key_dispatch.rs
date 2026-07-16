@@ -130,9 +130,10 @@ impl ShellApp {
 
     fn reduce_configured_shell_or_mode_cycle(&mut self, key: KeyEvent) -> Option<InputUpdate> {
         let view = self.shell_view();
-        let configured = self
-            .ui_mut()
-            .handle_configured_shell_key(view, key, Instant::now());
+        let inactive_action = inactive_composer_mode_action(self.input_mode());
+        let configured =
+            self.ui_mut()
+                .handle_configured_shell_key(view, key, Instant::now(), inactive_action);
         if let Some(update) = configured_shell_key_update(self, configured) {
             return Some(update);
         }
@@ -1176,6 +1177,13 @@ fn configured_shell_key_update(
     }
 }
 
+fn inactive_composer_mode_action(mode: InputMode) -> ViewHotkeyAction {
+    match mode {
+        InputMode::Prompt => ViewHotkeyAction::EnterPromptMode,
+        InputMode::Navigate => ViewHotkeyAction::EnterNavigateMode,
+    }
+}
+
 struct PhaseRerunDraft {
     phase: WorkflowPhase,
     parent_attempt_id: String,
@@ -1276,19 +1284,16 @@ mod tests {
     }
 
     fn app_with_unresolved_map_result(config: V2Config) -> (tempfile::TempDir, ShellApp, String) {
-        use kuzushi_core::workflow_attempts::{
-            append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome,
-            PhaseTargetSnapshot,
-        };
+        use kuzushi_core::workflow_attempts::PhaseAttemptOutcome;
         let target = tempfile::tempdir().unwrap();
-        let completed = PhaseAttemptCompleted::new(
+        seed_indexed_map_run(target.path(), "map-run");
+        let completed = crate::test_support::append_typed_attempt(
+            target.path(),
             WorkflowPhase::Map,
-            vec!["map-run".to_string()],
-            PhaseTargetSnapshot::capture(target.path()),
+            "map-run",
             PhaseAttemptOutcome::Completed,
         );
         let attempt_id = completed.attempt_id.clone();
-        append_phase_attempt_completed(target.path(), completed).unwrap();
         let mut app = ShellApp::new(config, None);
         app.set_target(Some(target.path().to_path_buf()));
         app.refresh_phase_attempt_projection();
@@ -1298,6 +1303,18 @@ mod tests {
             .set_page(Some(WorkbenchPage::Map));
         app.set_input_mode(InputMode::Navigate);
         (target, app, attempt_id)
+    }
+
+    fn seed_indexed_map_run(target: &std::path::Path, run_id: &str) {
+        crate::test_support::record_indexed_run(
+            target,
+            run_id,
+            "context:build",
+            serde_json::json!({
+                "ok": true,
+                "data": {"snapshot": {"filesIndexed": 1}}
+            }),
+        );
     }
 
     struct FixResultFixture {
@@ -1310,20 +1327,24 @@ mod tests {
         attempt_tool: &str,
         lifecycle_run_id: &str,
     ) -> FixResultFixture {
-        use kuzushi_core::workflow_attempts::{
-            append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome,
-            PhaseAttemptReceipt, PhaseResultAction, PhaseTargetSnapshot,
-        };
-        use kuzushi_core::{
-            Finding, FindingStore, PatchLifecycleRecord, PatchLifecycleState, RunSummary, Severity,
-            WorkspaceTarget,
-        };
-
         let target = tempfile::tempdir().unwrap();
-        let workspace = WorkspaceTarget::new(target.path()).unwrap();
-        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+        let finding = seed_fix_result_findings(&store, workspace.root());
+        seed_verified_patch_lifecycle(&store, &workspace, &finding, lifecycle_run_id);
+        write_completed_fix_run_summary(&workspace, attempt_run_id, attempt_tool);
+        let attempt_id = append_fix_result_attempt(&workspace, attempt_run_id);
+        FixResultFixture { target, attempt_id }
+    }
+
+    fn seed_fix_result_findings(
+        store: &kuzushi_core::FindingStore,
+        target: &std::path::Path,
+    ) -> kuzushi_core::Finding {
+        use kuzushi_core::{Finding, Severity};
+
         store
-            .record_run_started("scan-fix-result", workspace.root(), "completed")
+            .record_run_started("scan-fix-result", target, "completed")
             .unwrap();
         let finding = Finding::new_tool(
             "semgrep",
@@ -1347,10 +1368,20 @@ mod tests {
         store
             .insert_finding("scan-fix-result", &unrelated_finding)
             .unwrap();
-        let finding = store
+        store
             .get_finding_by_fingerprint(&finding.fingerprint)
             .unwrap()
-            .unwrap();
+            .unwrap()
+    }
+
+    fn seed_verified_patch_lifecycle(
+        store: &kuzushi_core::FindingStore,
+        workspace: &kuzushi_core::WorkspaceTarget,
+        finding: &kuzushi_core::Finding,
+        lifecycle_run_id: &str,
+    ) {
+        use kuzushi_core::{PatchLifecycleRecord, PatchLifecycleState};
+
         store
             .insert_patch_lifecycle_record(&PatchLifecycleRecord {
                 application_id: "application-fix-result".to_string(),
@@ -1373,7 +1404,14 @@ mod tests {
                 updated_at: "3".to_string(),
             })
             .unwrap();
-        let mut summary = RunSummary::running(
+    }
+
+    fn write_completed_fix_run_summary(
+        workspace: &kuzushi_core::WorkspaceTarget,
+        attempt_run_id: &str,
+        attempt_tool: &str,
+    ) {
+        let mut summary = kuzushi_core::RunSummary::running(
             attempt_run_id,
             "tool",
             Some(attempt_tool.to_string()),
@@ -1382,13 +1420,33 @@ mod tests {
         summary.status = "complete".to_string();
         summary.completed_at_unix = Some(summary.started_at_unix);
         kuzushi_core::write_run_summary(workspace.root(), &summary).unwrap();
+    }
+
+    fn append_fix_result_attempt(
+        workspace: &kuzushi_core::WorkspaceTarget,
+        attempt_run_id: &str,
+    ) -> String {
+        use kuzushi_core::workflow_attempts::{
+            append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome,
+            PhaseTargetSnapshot,
+        };
+
         let completed = PhaseAttemptCompleted::new(
             WorkflowPhase::Fix,
             vec![attempt_run_id.to_string()],
             PhaseTargetSnapshot::capture(workspace.root()),
             PhaseAttemptOutcome::Completed,
         )
-        .with_receipt(PhaseAttemptReceipt {
+        .with_receipt(fix_result_receipt());
+        let attempt_id = completed.attempt_id.clone();
+        append_phase_attempt_completed(workspace.root(), completed).unwrap();
+        attempt_id
+    }
+
+    fn fix_result_receipt() -> kuzushi_core::workflow_attempts::PhaseAttemptReceipt {
+        use kuzushi_core::workflow_attempts::{PhaseAttemptReceipt, PhaseResultAction};
+
+        PhaseAttemptReceipt {
             run_count: 1,
             elapsed_secs: 1,
             cost: "$0.0000".to_string(),
@@ -1406,10 +1464,7 @@ mod tests {
             recommended_next: Some(
                 "review the candidate; Apply remains separately authorized".to_string(),
             ),
-        });
-        let attempt_id = completed.attempt_id.clone();
-        append_phase_attempt_completed(workspace.root(), completed).unwrap();
-        FixResultFixture { target, attempt_id }
+        }
     }
 
     fn restart_fix_result_app(target: &std::path::Path) -> ShellApp {
@@ -1866,33 +1921,13 @@ mod tests {
 
     #[test]
     fn remapped_phase_result_key_replaces_the_default_in_dispatch() {
-        use kuzushi_core::workflow_attempts::{
-            append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome,
-            PhaseTargetSnapshot,
-        };
-
-        let target = tempfile::tempdir().unwrap();
-        let completed = PhaseAttemptCompleted::new(
-            WorkflowPhase::Map,
-            vec!["map-run".to_string()],
-            PhaseTargetSnapshot::capture(target.path()),
-            PhaseAttemptOutcome::Completed,
-        );
-        append_phase_attempt_completed(target.path(), completed).unwrap();
         let mut config = V2Config::default();
         config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
             context: "phase_result".to_string(),
             action: "select".to_string(),
             bindings: vec!["x".to_string()],
         }];
-        let mut app = ShellApp::new(config, None);
-        app.set_target(Some(target.path().to_path_buf()));
-        app.refresh_phase_attempt_projection();
-        app.set_shell_view(ShellView::Workbench);
-        app.router
-            .workbench_mut()
-            .set_page(Some(WorkbenchPage::Map));
-        app.set_input_mode(InputMode::Navigate);
+        let (_target, mut app, _attempt_id) = app_with_unresolved_map_result(config);
 
         assert!(app.reduce_key(plain_key(KeyCode::Char('u'))).handled);
         assert!(app
@@ -1943,6 +1978,43 @@ mod tests {
                 .map(|record| record.completed.attempt_id.as_str()),
             Some(attempt_id.as_str())
         );
+    }
+
+    #[test]
+    fn remapped_prompt_mode_key_only_owns_input_while_navigating() {
+        let mut config = V2Config::default();
+        config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+            context: "composer".to_string(),
+            action: "prompt_mode".to_string(),
+            bindings: vec!["x".to_string()],
+        }];
+        let mut app = ShellApp::new(config, None);
+        app.set_shell_view(ShellView::Workbench);
+        app.set_input_mode(InputMode::Navigate);
+
+        assert!(app.reduce_key(plain_key(KeyCode::Char('x'))).handled);
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+        for ch in "maxIterations".chars() {
+            assert!(app.reduce_key(plain_key(KeyCode::Char(ch))).handled);
+        }
+        assert_eq!(app.input(), "maxIterations");
+    }
+
+    #[test]
+    fn inactive_prompt_mode_chord_prefix_remains_editable_text() {
+        let mut config = V2Config::default();
+        config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+            context: "composer".to_string(),
+            action: "prompt_mode".to_string(),
+            bindings: vec!["x y".to_string()],
+        }];
+        let mut app = ShellApp::new(config, None);
+        app.set_shell_view(ShellView::Workbench);
+        app.set_input_mode(InputMode::Prompt);
+
+        assert!(app.reduce_key(plain_key(KeyCode::Char('x'))).handled);
+        assert!(app.reduce_key(plain_key(KeyCode::Char('y'))).handled);
+        assert_eq!(app.input(), "xy");
     }
 
     #[test]
@@ -2069,19 +2141,14 @@ mod tests {
         workspace: &kuzushi_core::WorkspaceTarget,
         run_id: &str,
     ) -> String {
-        use kuzushi_core::workflow_attempts::{
-            append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome,
-            PhaseTargetSnapshot,
-        };
-        let completed = PhaseAttemptCompleted::new(
+        use kuzushi_core::workflow_attempts::PhaseAttemptOutcome;
+        let completed = crate::test_support::append_typed_attempt(
+            workspace.root(),
             WorkflowPhase::Prove,
-            vec![run_id.to_string()],
-            PhaseTargetSnapshot::capture(workspace.root()),
+            run_id,
             PhaseAttemptOutcome::Completed,
         );
-        let attempt_id = completed.attempt_id.clone();
-        append_phase_attempt_completed(workspace.root(), completed).unwrap();
-        attempt_id
+        completed.attempt_id.clone()
     }
 
     fn unresolved_proof_app(workspace: &kuzushi_core::WorkspaceTarget) -> ShellApp {
@@ -2114,9 +2181,12 @@ mod tests {
     }
 
     fn assert_selection_left_no_durable_mutation(fixture: &ProofSelectionFixture) {
-        let ledger =
-            kuzushi_core::workflow_attempts::load_phase_attempt_ledger(fixture.workspace.root())
-                .unwrap();
+        let recovered = kuzushi_core::workflow_attempts::load_phase_attempt_ledger_recovering(
+            fixture.workspace.root(),
+        )
+        .unwrap();
+        assert!(recovered.is_degraded());
+        let ledger = recovered.ledger;
         assert!(ledger
             .attempt(&fixture.attempt_id)
             .is_some_and(|record| record.disposition.is_none()));
@@ -2133,14 +2203,6 @@ mod tests {
         run_id: &str,
         finding: &kuzushi_core::Finding,
     ) {
-        use kuzushi_core::run_artifacts::{
-            try_record_tool_run_complete, try_record_tool_run_started_with_reproducibility,
-            ToolRunRecord,
-        };
-        let record = ToolRunRecord::new(workspace.root(), run_id, "tool", "verify:finding");
-        let input = serde_json::json!({"fingerprint": finding.fingerprint.clone()});
-        try_record_tool_run_started_with_reproducibility(record, &input, None, None, Vec::new())
-            .unwrap();
         let candidate = serde_json::json!({
             "fingerprint": finding.fingerprint.clone(),
             "verifiedScanId": "scan-current",
@@ -2153,19 +2215,24 @@ mod tests {
         let mut data = candidate.clone();
         data["verification"] = candidate.clone();
         data["proof"] = candidate.clone();
-        let result = serde_json::json!({
-            "ok": true,
-            "status": "completed",
-            "summary": "verify:finding complete (VULNERABLE)",
-            "output": "verified",
-            "data": data,
-            "proof": candidate,
-            "errors": [],
-            "warnings": [],
-            "artifacts": [],
-            "costUsd": 0.125
-        });
-        try_record_tool_run_complete(record, &result).unwrap();
+        crate::test_support::record_indexed_run_with_input(
+            workspace.root(),
+            run_id,
+            "verify:finding",
+            serde_json::json!({"fingerprint": finding.fingerprint.clone()}),
+            serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "summary": "verify:finding complete (VULNERABLE)",
+                "output": "verified",
+                "data": data,
+                "proof": candidate,
+                "errors": [],
+                "warnings": [],
+                "artifacts": [],
+                "costUsd": 0.125
+            }),
+        );
     }
 
     #[test]

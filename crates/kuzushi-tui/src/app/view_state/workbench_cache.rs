@@ -4,8 +4,8 @@ use cache_entries::{
     project_scope_tree_for_target, run_summary_index_from_entries, CompletionValuesCache,
     DirectoryListingCache, FileCompletionValuesCache, GitMetadataCache, JsonFileCache,
     LatestRunPointerCache, PathStateCache, ProjectModelDocumentCache, PromptMutationsCache,
-    RunArtifactTextCache, RunSummaryEntriesCache, RunTraceCache, ScopeTreeCache, SourceFileCache,
-    StrategyQueueCache, TargetBaseCache, TargetProfileCache,
+    RunArtifactTextCache, RunProjectionCache, RunSummaryEntriesCache, RunTraceCache,
+    ScopeTreeCache, SourceFileCache, StrategyQueueCache, TargetBaseCache, TargetProfileCache,
 };
 #[cfg(test)]
 use cache_entries::{read_json_file, RunSummaryCache, RunSummaryCacheKey};
@@ -71,6 +71,7 @@ pub(crate) struct WorkbenchCache {
     path_states: BTreeMap<PathBuf, PathStateCache>,
     directory_listings: BTreeMap<PathBuf, DirectoryListingCache>,
     run_traces: BTreeMap<(PathBuf, String), RunTraceCache>,
+    run_projections: BTreeMap<(PathBuf, String), RunProjectionCache>,
     run_artifact_texts: BTreeMap<(PathBuf, String, String), RunArtifactTextCache>,
     scan_stage_receipts: BTreeMap<(PathBuf, String), ScanStageReceiptState>,
     map_artifacts: MapArtifactsCache,
@@ -160,6 +161,23 @@ impl WorkbenchCache {
         self.loading_state(
             target,
             &ViewHydrationKey::RunTrace {
+                run_id: run_id.to_string(),
+            },
+        )
+    }
+
+    pub(crate) fn cached_run_projection(
+        &self,
+        target: &Path,
+        run_id: &str,
+    ) -> ViewDataState<Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>> {
+        let map_key = (target.to_path_buf(), run_id.to_string());
+        if let Some(cache) = self.run_projections.get(&map_key) {
+            return ViewDataState::Ready(cache.state.clone());
+        }
+        self.loading_state(
+            target,
+            &ViewHydrationKey::RunProjection {
                 run_id: run_id.to_string(),
             },
         )

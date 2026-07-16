@@ -7,9 +7,10 @@ use crate::presentation::{emit_scan_ci_start, emit_scan_output, scan_result_or_r
 use anyhow::{Context, Result};
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::run_artifacts::{
-    try_record_tool_run_complete, try_record_tool_run_failed,
+    try_record_tool_run_complete_settled, try_record_tool_run_failed_settled,
     try_record_tool_run_started_with_reproducibility, ToolRunRecord,
 };
+use kuzushi_core::run_lifecycle::{RunItemStatus, RunObservationHandle};
 use kuzushi_core::{
     config_hash, load_config_for_target, new_run_id, tool_wants_runtime, AgentRuntime,
     FindingStore, ModuleRegistry, PreparedToolInput, ToolOptionStore, ToolResultStatus,
@@ -184,7 +185,7 @@ fn dispatch_prepared_scan(
     runtime: Option<&LangGraphRuntime>,
     run_id: &str,
 ) -> Result<serde_json::Value> {
-    let trace = scan_trace(workspace, run_id);
+    let trace = scan_trace(workspace, run_id)?;
     let ctx = ToolExecutionContext {
         config,
         workspace: Some(workspace),
@@ -309,8 +310,12 @@ fn scan_semantic_error(result: &serde_json::Value) -> Option<anyhow::Error> {
     Some(anyhow::anyhow!(message.to_string()))
 }
 
-fn scan_trace(workspace: &WorkspaceTarget, run_id: &str) -> TraceHandle {
-    TraceHandle::jsonl(workspace.root(), run_id)
+fn scan_trace(workspace: &WorkspaceTarget, run_id: &str) -> Result<TraceHandle> {
+    Ok(
+        kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(workspace.root(), run_id)?
+            .start_root_task("Run the accepted Scan plan")?
+            .trace_handle(),
+    )
 }
 
 /// Reconcile suppression rules against the current clock before the scan so a
@@ -388,37 +393,87 @@ fn execute_scan_tool(execution: ScanToolExecution<'_>) -> Result<serde_json::Val
     let runtime = execution
         .runtime
         .map(|runtime| runtime as &dyn AgentRuntime);
-    let result = execution
+    let prepared = execution
         .registry
-        .prepare_dispatch_input(SCAN_TOOL, execution.input, execution.ctx, None)
-        .and_then(|prepared| {
-            emit_scan_patch_validation_disclosure(execution.workspace, prepared.value())?;
-            let prepared = authorize_headless_scan(prepared);
-            execution.registry.dispatch_prepared_input_with_runtime(
-                prepared,
-                execution.ctx,
-                runtime,
-            )
-        });
-    match result {
-        Ok(output) => Ok(output),
+        .prepare_dispatch_input(SCAN_TOOL, execution.input.clone(), execution.ctx, None)
+        .map_err(|error| recorded_pre_execution_scan_error(&execution, &failure_input, error))?;
+    emit_scan_patch_validation_disclosure(execution.workspace, prepared.value())
+        .map_err(|error| recorded_pre_execution_scan_error(&execution, &failure_input, error))?;
+    let observation = execution
+        .ctx
+        .run_observation()
+        .context("scan dispatch lacks its semantic observation")?;
+    observation
+        .task_handle()
+        .context("scan dispatch lacks its semantic task")?
+        .update_and_flush(kuzushi_core::run_lifecycle::RunItemStatus::Running, None)?;
+    let dispatched = execution
+        .registry
+        .dispatch_prepared_input_observed_with_runtime(
+            authorize_headless_scan(prepared),
+            execution.ctx,
+            runtime,
+        );
+    let outcome = match dispatched {
+        Ok(outcome) => outcome,
         Err(dispatch_error) => {
-            if let Err(persistence_error) = record_failed_scan_execution(
-                ScanExecutionFailureRecord {
-                    workspace: execution.workspace,
-                    registry: execution.registry,
-                    run_id: execution.run_id,
-                    input: &failure_input,
-                    config: execution.config,
-                },
-                &dispatch_error,
-            ) {
-                return Err(dispatch_error.context(format!(
-                    "also could not persist the failed scan lifecycle: {persistence_error:#}"
-                )));
-            }
-            Err(dispatch_error)
+            return Err(recorded_pre_execution_scan_error(
+                &execution,
+                &failure_input,
+                dispatch_error,
+            ));
         }
+    };
+    settle_scan_dispatch(execution.workspace, execution.run_id, &observation, outcome)
+}
+
+fn settle_scan_dispatch(
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    outcome: kuzushi_core::ObservedDispatchOutcome,
+) -> Result<serde_json::Value> {
+    let record = ToolRunRecord::new(workspace.root(), run_id, "scan", SCAN_TOOL);
+    match outcome.execution {
+        Ok(output) => {
+            try_record_tool_run_complete_settled(record, &output, observation, outcome.completion)?;
+            Ok(output)
+        }
+        Err(error) => match try_record_tool_run_failed_settled(
+            record,
+            &error.to_string(),
+            observation,
+            outcome.completion,
+        ) {
+            Ok(()) => Err(error),
+            Err(persistence) => Err(error.context(format!(
+                "also could not settle the failed scan lifecycle: {persistence:#}"
+            ))),
+        },
+    }
+}
+
+fn recorded_pre_execution_scan_error(
+    execution: &ScanToolExecution<'_>,
+    failure_input: &serde_json::Value,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    let persistence = record_failed_scan_execution(
+        ScanExecutionFailureRecord {
+            workspace: execution.workspace,
+            registry: execution.registry,
+            run_id: execution.run_id,
+            input: failure_input,
+            config: execution.config,
+            observation: execution.ctx.run_observation(),
+        },
+        &error,
+    );
+    match persistence {
+        Ok(()) => error,
+        Err(persistence) => error.context(format!(
+            "also could not persist the pre-execution scan failure: {persistence:#}"
+        )),
     }
 }
 
@@ -456,6 +511,7 @@ struct ScanExecutionFailureRecord<'a> {
     run_id: &'a str,
     input: &'a serde_json::Value,
     config: &'a kuzushi_core::V2Config,
+    observation: Option<RunObservationHandle>,
 }
 
 fn record_failed_scan_execution(
@@ -477,7 +533,19 @@ fn record_failed_scan_execution(
             record.registry.loaded_module_specifiers(),
         )?;
     }
-    try_record_tool_run_failed(tool_run, &error.to_string())
+    let observation = record.observation.map_or_else(
+        || RunObservationHandle::jsonl(record.workspace.root(), record.run_id),
+        Ok,
+    )?;
+    let rejection = kuzushi_core::run_lifecycle::observe_preparation_rejection(
+        &observation,
+        SCAN_TOOL,
+        record.input,
+        "pre_execution_policy",
+        &error.to_string(),
+    )?;
+    let (observation, completion) = rejection.into_parts();
+    try_record_tool_run_failed_settled(tool_run, &error.to_string(), &observation, completion)
 }
 
 pub(crate) fn apply_scan_since_scope(
@@ -576,6 +644,8 @@ async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool, gate: ScanGatePoli
     let store = FindingStore::open(workspace.findings_db_path())?;
     let registry = ModuleRegistry::with_v2_builtins();
     let run_id = new_run_id("scan");
+    let observation = start_apk_scan_observation(&workspace, &run_id, &apk)?;
+    let trace = observation.trace_handle();
     let input = prepare_apk_scan_input(
         &apk,
         &workspace_dir,
@@ -584,13 +654,15 @@ async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool, gate: ScanGatePoli
         &store,
         &registry,
         &run_id,
+        &trace,
     )?;
     let started = std::time::Instant::now();
     emit_scan_ci_start(ci, started, &apk, &config, &[]);
     let record = ToolRunRecord::new(workspace.root(), &run_id, "scan", "android-apk:scan");
     record_apk_scan_started(record, &input, &config, &registry)?;
-    let result = dispatch_apk_scan(&workspace, &store, &config, &registry, input, &run_id);
-    record_apk_scan_result(record, &result)?;
+    mark_apk_scan_running(&observation)?;
+    let outcome = dispatch_apk_scan(&workspace, &store, &config, &registry, input, &trace)?;
+    let result = settle_apk_scan(record, &observation, outcome);
     finish_scan_execution(
         ScanFinish {
             workspace: &workspace,
@@ -603,6 +675,23 @@ async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool, gate: ScanGatePoli
         },
         result,
     )
+}
+
+fn start_apk_scan_observation(
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+    apk: &Path,
+) -> Result<RunObservationHandle> {
+    RunObservationHandle::jsonl(workspace.root(), run_id)?
+        .start_root_task(format!("Scan APK {}", apk.display()))
+}
+
+fn mark_apk_scan_running(observation: &RunObservationHandle) -> Result<()> {
+    observation
+        .task_handle()
+        .context("APK scan lacks its semantic task")?
+        .update_and_flush(RunItemStatus::Running, None)?;
+    Ok(())
 }
 
 fn apk_workspace_dir(apk: &Path) -> Result<PathBuf> {
@@ -623,9 +712,9 @@ fn prepare_apk_scan_input(
     store: &FindingStore,
     registry: &ModuleRegistry,
     run_id: &str,
+    trace: &TraceHandle,
 ) -> Result<serde_json::Value> {
-    let trace = scan_trace(workspace, run_id);
-    let ctx = scan_tool_context(workspace, config, store, &trace);
+    let ctx = scan_tool_context(workspace, config, store, trace);
     registry.prepare_tool_input_for_dispatch(
         "android-apk:scan",
         apk_scan_tool_input(apk, workspace_dir, run_id),
@@ -640,14 +729,13 @@ fn dispatch_apk_scan(
     config: &kuzushi_core::V2Config,
     registry: &ModuleRegistry,
     input: serde_json::Value,
-    run_id: &str,
-) -> Result<serde_json::Value> {
-    let trace = scan_trace(workspace, run_id);
-    let ctx = scan_tool_context(workspace, config, store, &trace);
+    trace: &TraceHandle,
+) -> Result<kuzushi_core::ObservedDispatchOutcome> {
+    let ctx = scan_tool_context(workspace, config, store, trace);
     let prepared = registry
         .prepare_dispatch_input("android-apk:scan", input, &ctx, None)?
         .authorize_explicit_headless();
-    registry.dispatch_prepared_input_with_runtime(prepared, &ctx, None)
+    registry.dispatch_prepared_input_observed_with_runtime(prepared, &ctx, None)
 }
 
 fn scan_tool_context<'a>(
@@ -681,13 +769,27 @@ fn record_apk_scan_started(
     )
 }
 
-fn record_apk_scan_result(
+fn settle_apk_scan(
     record: ToolRunRecord<'_>,
-    result: &Result<serde_json::Value>,
-) -> Result<()> {
-    match result {
-        Ok(output) => try_record_tool_run_complete(record, output),
-        Err(error) => try_record_tool_run_failed(record, &error.to_string()),
+    observation: &RunObservationHandle,
+    outcome: kuzushi_core::ObservedDispatchOutcome,
+) -> Result<serde_json::Value> {
+    match outcome.execution {
+        Ok(output) => {
+            try_record_tool_run_complete_settled(record, &output, observation, outcome.completion)?;
+            Ok(output)
+        }
+        Err(error) => match try_record_tool_run_failed_settled(
+            record,
+            &error.to_string(),
+            observation,
+            outcome.completion,
+        ) {
+            Ok(()) => Err(error),
+            Err(persistence) => Err(error.context(format!(
+                "also could not settle the failed APK scan lifecycle: {persistence:#}"
+            ))),
+        },
     }
 }
 
@@ -745,8 +847,9 @@ pub(crate) fn scan_runtime(
 #[cfg(test)]
 mod tests {
     use super::{
-        emit_scan_patch_validation_disclosure, record_apk_scan_result, scan_gate_ids,
-        scan_scope_body, scan_semantic_error, write_scan_scope_file,
+        emit_scan_patch_validation_disclosure, record_failed_scan_execution, scan_gate_ids,
+        scan_scope_body, scan_semantic_error, settle_apk_scan, write_scan_scope_file,
+        ScanExecutionFailureRecord,
     };
     use kuzushi_core::run_artifacts::{
         try_record_tool_run_started_with_reproducibility, ToolRunRecord,
@@ -856,28 +959,100 @@ mod tests {
     #[test]
     fn apk_partial_envelope_persists_partial_run_status() {
         let target = tempfile::tempdir().unwrap();
+        let input = serde_json::json!({"apk": "app.apk"});
+        let observation = start_partial_apk_observation(target.path(), &input);
+        let outcome = partial_apk_outcome(&observation, &input);
         let record = ToolRunRecord::new(target.path(), "apk-partial", "scan", "android-apk:scan");
-        try_record_tool_run_started_with_reproducibility(
-            record,
-            &serde_json::json!({"apk": "app.apk"}),
+
+        settle_apk_scan(record, &observation, outcome).unwrap();
+
+        let summary = kuzushi_core::load_run_summary(target.path(), "apk-partial").unwrap();
+        assert_eq!(summary.status, "partial");
+        assert_eq!(summary.error.as_deref(), Some("code-scan: failed"));
+    }
+
+    fn start_partial_apk_observation(
+        target: &std::path::Path,
+        input: &serde_json::Value,
+    ) -> kuzushi_core::run_lifecycle::RunObservationHandle {
+        let record = ToolRunRecord::new(target, "apk-partial", "scan", "android-apk:scan");
+        try_record_tool_run_started_with_reproducibility(record, input, None, None, Vec::new())
+            .unwrap();
+        let observation =
+            kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target, "apk-partial")
+                .unwrap()
+                .start_root_task("Scan APK app.apk")
+                .unwrap();
+        observation
+            .task_handle()
+            .unwrap()
+            .update_and_flush(kuzushi_core::run_lifecycle::RunItemStatus::Running, None)
+            .unwrap();
+        observation
+    }
+
+    fn partial_apk_outcome(
+        observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+        input: &serde_json::Value,
+    ) -> kuzushi_core::ObservedDispatchOutcome {
+        let call = kuzushi_core::ApplicationToolCall::start(
+            observation.clone(),
+            "android-apk:scan",
+            input,
             None,
             None,
-            Vec::new(),
         )
         .unwrap();
-        let result = Ok(serde_json::json!({
+        let execution: anyhow::Result<serde_json::Value> = Ok(serde_json::json!({
             "ok": true,
             "status": "partial",
             "summary": "one APK stage failed",
             "errors": ["code-scan: failed"],
             "data": {"runId": "apk-partial", "totals": {"findings": 1}}
         }));
+        let completion = call.completion_from_result(&execution);
+        kuzushi_core::ObservedDispatchOutcome {
+            execution,
+            completion,
+        }
+    }
 
-        record_apk_scan_result(record, &result).unwrap();
+    #[test]
+    fn failed_scan_dispatch_persists_typed_terminal_lifecycle() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
+        let config = kuzushi_core::V2Config::default();
+        let run_id = "scan-dispatch-failed";
 
-        let summary = kuzushi_core::load_run_summary(target.path(), "apk-partial").unwrap();
-        assert_eq!(summary.status, "partial");
-        assert_eq!(summary.error.as_deref(), Some("code-scan: failed"));
+        record_failed_scan_execution(
+            ScanExecutionFailureRecord {
+                workspace: &workspace,
+                registry: &registry,
+                run_id,
+                input: &serde_json::json!({}),
+                config: &config,
+                observation: None,
+            },
+            &anyhow::anyhow!("dispatch failed"),
+        )
+        .unwrap();
+
+        let read = kuzushi_core::run_lifecycle::load_run_projection(target.path(), run_id).unwrap();
+        assert_eq!(
+            read.projection.terminal.map(|terminal| terminal.status),
+            Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+        );
+        let call = read.projection.calls.values().next().unwrap();
+        assert_eq!(
+            call.status,
+            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+        );
+        assert!(read
+            .projection
+            .artifacts
+            .values()
+            .all(|artifact| artifact.producing_item_id == call.item_id));
     }
 
     #[test]

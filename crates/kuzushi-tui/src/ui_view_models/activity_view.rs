@@ -1,6 +1,8 @@
 use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow};
 use super::activity_empty_state::{activity_empty_state_model, ActivityEmptyStateModel};
-use super::activity_feed_rows::{activity_feed_pane_rows, ActivityFeedPaneRow};
+use super::activity_feed_rows::{
+    activity_feed_pane_rows, activity_feed_viewport_rows, ActivityFeedPaneRow,
+};
 use super::activity_footer::{
     activity_footer_model, resolve_activity_footer_bindings, ActivityFooterModel,
 };
@@ -10,7 +12,7 @@ use super::activity_header::{
 use super::activity_layout::{activity_frame_layout, ActivityFrameLayout};
 use super::activity_observability::{activity_heartbeat_model, ActivityHeartbeatModel};
 use super::activity_pane_chrome::{activity_pane_chrome_model, ActivityPaneChromeModel};
-use super::activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
+use super::activity_scroll::activity_task_scroll_offset;
 use crate::app::PendingOperatorQuestion;
 use crate::{ActivityRouteState, ActivitySession, DagTaskState, ShellApp, ViewDataState};
 use kuzushi_core::RunSummary;
@@ -259,12 +261,23 @@ impl<'a> RunFocusModel<'a> {
         )
     }
 
-    pub(crate) fn task_scroll_offset(&self, rows: usize, viewport_rows: usize) -> usize {
-        activity_task_scroll_offset(self.route, rows, viewport_rows)
+    pub(crate) fn feed_pane_viewport_rows(
+        &self,
+        inner_width: usize,
+        inner_height: usize,
+    ) -> Vec<ActivityFeedPaneRow> {
+        activity_feed_viewport_rows(
+            self.session,
+            self.route,
+            inner_width,
+            inner_height,
+            self.app.running_tool_name(),
+            Instant::now(),
+        )
     }
 
-    pub(crate) fn feed_scroll_offset(&self, rows: usize, viewport_rows: usize) -> usize {
-        activity_feed_scroll_offset(self.route, rows, viewport_rows)
+    pub(crate) fn task_scroll_offset(&self, rows: usize, viewport_rows: usize) -> usize {
+        activity_task_scroll_offset(self.route, rows, viewport_rows)
     }
 
     pub(crate) fn footer(&self, width: u16) -> ActivityFooterModel {

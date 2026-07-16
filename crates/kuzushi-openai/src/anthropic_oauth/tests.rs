@@ -123,12 +123,12 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_http_status_helper_reports_error_body() {
+    fn anthropic_http_status_helper_does_not_echo_error_body() {
         ensure_anthropic_success(reqwest::StatusCode::OK, "{}").unwrap();
         let err =
             ensure_anthropic_success(reqwest::StatusCode::UNAUTHORIZED, "bad token").unwrap_err();
         assert!(err.to_string().contains("401 Unauthorized"));
-        assert!(err.to_string().contains("bad token"));
+        assert!(!err.to_string().contains("bad token"));
     }
 
     #[test]
@@ -225,6 +225,7 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(plain.contains("not valid triage JSON"));
+        assert!(!plain.contains("plain rationale"));
 
         let empty = triage_outcome_from_response(AgentQueryResponse {
             cost_usd: 0.05,
@@ -237,10 +238,11 @@ mod tests {
 
     #[test]
     fn triage_outcome_from_response_errors_on_schema_violations() {
+        let sentinel = "raw-model-response-sentinel";
         let err = triage_outcome_from_response(AgentQueryResponse {
             structured: Some(json!({
-                "verdict": "true_positive",
-                "confidence": "high",
+                "verdict": sentinel,
+                "confidence": 0.8,
                 "rationale": "reachable"
             })),
             ..Default::default()
@@ -249,6 +251,7 @@ mod tests {
         .to_string();
 
         assert!(err.contains("violated schema"));
+        assert!(!err.contains(sentinel));
     }
 
     #[test]

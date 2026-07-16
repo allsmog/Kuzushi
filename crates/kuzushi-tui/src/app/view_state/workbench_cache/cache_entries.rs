@@ -98,6 +98,11 @@ pub(crate) enum RunTraceCacheState {
 }
 
 #[derive(Debug)]
+pub(super) struct RunProjectionCache {
+    pub(super) state: Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>,
+}
+
+#[derive(Debug)]
 pub(super) struct TargetBaseCache {
     pub(super) target: PathBuf,
     pub(super) base: String,

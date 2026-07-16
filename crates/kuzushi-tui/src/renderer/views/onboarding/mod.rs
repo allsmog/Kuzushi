@@ -33,3 +33,25 @@ fn confirmed_target_line(app: &ShellApp, width: usize) -> Option<Line<'static>> 
     app.target()
         .map(|path| target_identity_line("Target confirmed", path, width))
 }
+
+fn picker_prompt_footer_lines(leading_blank: bool) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if leading_blank {
+        lines.push(blank());
+    }
+    lines.extend([
+        muted(" command prompt active · type below"),
+        muted(" Esc return to picker · Enter run"),
+        muted(" Tab complete · Ctrl+G palette"),
+    ]);
+    lines
+}
+
+fn picker_notice_footer_lines(leading_blank: bool) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if leading_blank {
+        lines.push(blank());
+    }
+    lines.push(muted(" Esc dismiss notice · remain in picker"));
+    lines
+}

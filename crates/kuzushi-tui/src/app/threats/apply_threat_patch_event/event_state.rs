@@ -30,7 +30,8 @@ impl ShellApp {
                 self.set_completed_activity("threat model", "answer received");
             }
             ThreatPatchEvent::Failed { error, .. } => {
-                self.log("error", format!("threats worker failed: {error}"));
+                let safe_error = kuzushi_core::runtime::safe_model_failure_message(&error);
+                self.log("error", format!("threats worker failed: {safe_error}"));
                 self.set_refused_activity("threat model", "worker failed");
             }
         }

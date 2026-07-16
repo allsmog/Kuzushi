@@ -12,7 +12,8 @@ pub(in crate::renderer) fn guided_question_height(
     model: &GuidedScanQuestionModel,
 ) -> u16 {
     let desired = model.options.len() as u16
-        + 5
+        + 4
+        + model.detail_lines.len() as u16
         + u16::from(model.other_open)
         + u16::from(model.acknowledgement.is_some())
         + u16::from(model.error.is_some());
@@ -55,7 +56,7 @@ pub(super) fn guided_question_lines(
     model: &GuidedScanQuestionModel,
     width: usize,
 ) -> Vec<Line<'static>> {
-    let mut lines = question_intro_lines(model, width, true, true);
+    let mut lines = question_intro_lines(model, width, true, model.detail_lines.len());
     append_option_window(
         &mut lines,
         model,
@@ -76,11 +77,15 @@ fn guided_question_lines_for_height(
     height: usize,
     accent: ratatui::style::Style,
 ) -> Vec<Line<'static>> {
-    let mut lines = question_intro_lines(model, width, false, height >= 5);
     let tail_rows = 1
         + usize::from(model.other_open)
         + usize::from(model.acknowledgement.is_some())
         + usize::from(model.error.is_some());
+    let minimum_option_rows = usize::from(!model.options.is_empty());
+    let detail_budget = height
+        .saturating_sub(1 + tail_rows + minimum_option_rows)
+        .min(model.detail_lines.len());
+    let mut lines = question_intro_lines(model, width, false, detail_budget);
     let option_rows = height.saturating_sub(lines.len() + tail_rows);
     append_option_window(&mut lines, model, width, option_rows, accent);
     append_other_editor(&mut lines, model, width);
@@ -110,17 +115,22 @@ fn question_intro_lines(
     model: &GuidedScanQuestionModel,
     width: usize,
     include_progress: bool,
-    include_detail: bool,
+    detail_budget: usize,
 ) -> Vec<Line<'static>> {
+    // Semantic source keys intentionally terminate at this styling boundary.
+    let _semantic_source_keys = &model.semantic_keys;
     let mut lines = vec![Line::from(Span::styled(
         fit(&model.prompt, width),
         theme::primary().add_modifier(Modifier::BOLD),
     ))];
-    if include_detail && width >= 54 {
-        lines.push(Line::from(Span::styled(
-            fit(&model.detail, width),
-            theme::muted(),
-        )));
+    if width >= 54 {
+        lines.extend(
+            model
+                .detail_lines
+                .iter()
+                .take(detail_budget)
+                .map(|detail| Line::from(Span::styled(fit(detail, width), theme::muted()))),
+        );
     }
     if include_progress {
         if let Some(progress) = model.progress.as_deref() {

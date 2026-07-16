@@ -4,7 +4,7 @@ pub(crate) use super::*;
 pub(crate) use ask_agent::*;
 mod ask_agent;
 use self::artifacts::{
-    append_llm_trace_step, append_trace_step, record_agent_run_canceled,
+    append_agent_terminal_trace_step, append_trace_step, record_agent_run_canceled,
     record_agent_run_completed, record_agent_run_failed, record_agent_run_started, short_label,
 };
 use self::workers::agent_worker;

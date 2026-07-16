@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::env;
 use std::process::{Child, Command, ExitStatus};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -22,5 +22,5 @@ pub(in crate::scan) use is_safe_scanner_env_key::ProcessOutput;
 #[cfg(unix)]
 pub(in crate::scan) use parent_death_guard::ParentDeathGuard;
 pub(crate) use prepared_process_group::PreparedProcessGroup;
-pub use scan_cancellation::{RegisteredChild, ScanCancellation};
+pub use scan_cancellation::{CancellationDisposition, RegisteredChild, ScanCancellation};
 pub(crate) use try_wait::{configure_scanner_process_group, configure_scanner_subprocess_env};

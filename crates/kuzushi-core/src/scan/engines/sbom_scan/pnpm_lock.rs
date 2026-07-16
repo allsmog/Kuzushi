@@ -155,9 +155,7 @@ fn mapping_child_value<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
 }
 
 fn mapping_child<'a>(value: &'a Value, key: &str) -> Option<&'a Mapping> {
-    mapping(value)?
-        .get(key)
-        .and_then(mapping)
+    mapping(value)?.get(key).and_then(mapping)
 }
 
 fn mapping(value: &Value) -> Option<&Mapping> {

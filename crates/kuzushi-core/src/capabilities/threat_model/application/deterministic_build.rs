@@ -14,14 +14,19 @@ pub(crate) fn build_deterministic_threat_model(
     let input = parse_deterministic_build_input(&input, ctx, flavor)?;
     let surface_map = build_attack_surface_map(&input.target)?;
     let document = deterministic_document(&input, &surface_map.surfaces)?;
-    let normalized_artifact = write_normalized_artifact(&input.target, &input.output_dir, &document)?;
-    let persisted = persist_deterministic_document(flavor, &input, &document)?;
+    let has_concrete_content =
+        crate::workflow_attempts::threat_model_has_concrete_content(&document);
+    let normalized_artifact =
+        write_normalized_artifact(&input.target, &input.output_dir, &document)?;
+    let persisted =
+        persist_deterministic_document(flavor, &input, &document, has_concrete_content)?;
     Ok(deterministic_response(
         input,
         flavor,
         document,
         normalized_artifact,
         persisted,
+        has_concrete_content,
     ))
 }
 
@@ -256,8 +261,9 @@ fn persist_deterministic_document(
     flavor: BuildFlavor,
     input: &DeterministicBuildInput,
     document: &Value,
+    has_concrete_content: bool,
 ) -> Result<bool> {
-    if !flavor.persists_document() {
+    if !flavor.persists_document() || !has_concrete_content {
         return Ok(false);
     }
     save_persistent_threat_model(&input.target, document, !input.preserve_user_edits)
@@ -269,10 +275,9 @@ fn deterministic_response(
     document: Value,
     normalized_artifact: PathBuf,
     persisted: bool,
+    has_concrete_content: bool,
 ) -> Value {
     let threat_count = array_len(document.pointer("/threats"));
-    let has_concrete_content =
-        crate::workflow_attempts::threat_model_has_concrete_content(&document);
     let target = input.target.clone();
     let persistent_artifact = persistent_threat_model_path(&input.target);
     let artifacts = threat_model_artifacts(&normalized_artifact, &persistent_artifact, persisted);

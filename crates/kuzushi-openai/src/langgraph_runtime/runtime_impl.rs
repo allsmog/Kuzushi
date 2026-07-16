@@ -3,12 +3,13 @@ use async_trait::async_trait;
 use kuzushi_core::{
     runtime::RuntimeCostReport, AgentLoopStep, AgentQueryControl, AgentQueryRequest,
     AgentQueryResponse, AgentRuntime, AgentStructuredOutput, AgentToolLoopRequest,
-    LoopHistoryEntry, ScanCancellation, TriageOutcome, TriageRequest,
+    LoopHistoryEntry, ModelTokenUsage, Observed, ScanCancellation, TriageOutcome, TriageRequest,
 };
 
 use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
-use super::bridge_process::{public_bridge_error, run_bridge};
+use super::bridge_process::{public_bridge_error, public_bridge_failure, run_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
+use super::next_step_bridge::next_step_observed_blocking as run_next_step_observed_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
 use super::runtime_config::LangGraphRuntime;
 use super::triage::{
@@ -26,6 +27,14 @@ fn clamp_token_count_u32(value: u64) -> u32 {
 #[async_trait]
 impl AgentRuntime for LangGraphRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+        self.query_observed_blocking(request)
+            .map(Observed::into_value)
+    }
+
+    fn query_observed_blocking(
+        &self,
+        request: AgentQueryRequest,
+    ) -> Result<Observed<AgentQueryResponse>> {
         let credential = self.credential_for_model(&request.model)?;
         let bridge_request = bridge_request_from(self, request, credential);
         let response = run_bridge_with_transport_retries(
@@ -33,7 +42,7 @@ impl AgentRuntime for LangGraphRuntime {
             bridge_request,
             self.cancellation.as_ref(),
         )?;
-        agent_response_from_bridge(response).validate_cost()
+        observed_agent_response_from_bridge(response).try_map(AgentQueryResponse::validate_cost)
     }
 
     fn query_blocking_controlled(
@@ -41,6 +50,15 @@ impl AgentRuntime for LangGraphRuntime {
         request: AgentQueryRequest,
         control: AgentQueryControl,
     ) -> Result<AgentQueryResponse> {
+        self.query_observed_blocking_controlled(request, control)
+            .map(Observed::into_value)
+    }
+
+    fn query_observed_blocking_controlled(
+        &self,
+        request: AgentQueryRequest,
+        control: AgentQueryControl,
+    ) -> Result<Observed<AgentQueryResponse>> {
         control.ensure_active()?;
         let local = ScanCancellation::default();
         let done = Arc::new(AtomicBool::new(false));
@@ -53,7 +71,7 @@ impl AgentRuntime for LangGraphRuntime {
         let result = self
             .clone()
             .with_cancellation(local)
-            .query_blocking(request);
+            .query_observed_blocking(request);
         done.store(true, Ordering::SeqCst);
         let _ = watchdog.join();
         control.ensure_active()?;
@@ -61,13 +79,21 @@ impl AgentRuntime for LangGraphRuntime {
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
+        self.triage_finding_observed_blocking(request)
+            .map(Observed::into_value)
+    }
+
+    fn triage_finding_observed_blocking(
+        &self,
+        request: TriageRequest,
+    ) -> Result<Observed<TriageOutcome>> {
         let prompt = triage_prompt(&request.finding, request.prompt_template.as_deref())?;
-        let response = self.query_blocking(
+        let response = self.query_observed_blocking(
             AgentQueryRequest::new(request.model, request.cwd, triage_system_prompt(), prompt)
                 .with_structured_output(triage_structured_output())
                 .with_temperature(0.0),
         )?;
-        triage_outcome_from_response(response)
+        response.try_map(triage_outcome_from_response)
     }
 
     fn supports_tools(&self) -> bool {
@@ -83,6 +109,14 @@ impl AgentRuntime for LangGraphRuntime {
         history: &[LoopHistoryEntry],
     ) -> Result<AgentLoopStep> {
         run_next_step_blocking(self, request, history)
+    }
+
+    fn next_step_observed_blocking(
+        &self,
+        request: &AgentToolLoopRequest,
+        history: &[LoopHistoryEntry],
+    ) -> Result<Observed<AgentLoopStep>> {
+        run_next_step_observed_blocking(self, request, history)
     }
 
     fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
@@ -116,19 +150,24 @@ fn bridge_request_from(
     }
 }
 
-fn agent_response_from_bridge(response: BridgeResponse) -> AgentQueryResponse {
+fn observed_agent_response_from_bridge(response: BridgeResponse) -> Observed<AgentQueryResponse> {
+    let usage =
+        ModelTokenUsage::from_reported_options(response.input_tokens, response.output_tokens);
     let cost_usd_reported = response.cost_usd.is_some();
-    AgentQueryResponse {
-        text: response.text.unwrap_or_default(),
-        structured: response.structured,
-        cost_usd: response.cost_usd.unwrap_or(0.0),
-        cost_usd_reported,
-        estimated_cost_usd: None,
-        input_tokens: clamp_token_count_u32(response.input_tokens.unwrap_or(0)),
-        output_tokens: clamp_token_count_u32(response.output_tokens.unwrap_or(0)),
-        truncated: response.truncated,
-        stop_reason: response.stop_reason,
-    }
+    Observed::new(
+        AgentQueryResponse {
+            text: response.text.unwrap_or_default(),
+            structured: response.structured,
+            cost_usd: response.cost_usd.unwrap_or(0.0),
+            cost_usd_reported,
+            estimated_cost_usd: None,
+            input_tokens: clamp_token_count_u32(response.input_tokens.unwrap_or(0)),
+            output_tokens: clamp_token_count_u32(response.output_tokens.unwrap_or(0)),
+            truncated: response.truncated,
+            stop_reason: response.stop_reason,
+        },
+        usage,
+    )
 }
 
 fn spawn_query_control_watchdog(
@@ -218,16 +257,30 @@ fn bridge_attempt_outcome(
 }
 
 fn bridge_response_error(response: BridgeResponse, final_attempt: bool) -> Result<BridgeAttempt> {
-    let message = response
-        .error
-        .unwrap_or_else(|| "unknown error".to_string());
-    if final_attempt || !is_transient_bridge_error(&message) {
-        anyhow::bail!("LangGraph bridge failed: {}", public_bridge_error(&message));
+    let transient = transient_bridge_response(&response);
+    let message = public_bridge_failure(
+        response.error_class.as_deref(),
+        response.status,
+        response.error.as_deref(),
+    );
+    if final_attempt || !transient {
+        anyhow::bail!("LangGraph bridge failed: {message}");
     }
     Ok(BridgeAttempt::Retry(anyhow::anyhow!(
-        "LangGraph bridge failed: {}",
-        public_bridge_error(&message)
+        "LangGraph bridge failed: {message}"
     )))
+}
+
+fn transient_bridge_response(response: &BridgeResponse) -> bool {
+    matches!(response.status, Some(408 | 425 | 429 | 500..=599))
+        || matches!(
+            response.error_class.as_deref(),
+            Some("rate_limited" | "timeout" | "provider_unavailable" | "transport")
+        )
+        || response
+            .error
+            .as_deref()
+            .is_some_and(is_transient_bridge_error)
 }
 
 fn bridge_transport_error(error: anyhow::Error, final_attempt: bool) -> Result<BridgeAttempt> {
@@ -286,7 +339,7 @@ fn structured_triage_outcome(
 ) -> Result<TriageOutcome> {
     normalize_triage_confidence(&mut structured);
     let mut outcome = serde_json::from_value::<TriageOutcome>(structured)
-        .map_err(|error| anyhow::anyhow!("LangGraph triage JSON violated schema: {error}"))?;
+        .map_err(|_| anyhow::anyhow!("LangGraph triage JSON violated schema"))?;
     apply_call_cost(&mut outcome, call_cost);
     clamp_outcome(outcome).validate_cost()
 }
@@ -306,17 +359,10 @@ fn text_triage_outcome(
         anyhow::bail!("LangGraph bridge returned no triage content");
     }
     let mut value = serde_json::from_str::<serde_json::Value>(strip_whole_json_fence(text))
-        .map_err(|error| {
-            anyhow::anyhow!(
-                "LangGraph triage response was not valid triage JSON: {error}; raw response: {text}"
-            )
-        })?;
+        .map_err(|_| anyhow::anyhow!("LangGraph triage response was not valid triage JSON"))?;
     normalize_triage_confidence(&mut value);
-    let mut outcome = serde_json::from_value::<TriageOutcome>(value).map_err(|error| {
-        anyhow::anyhow!(
-            "LangGraph triage response violated triage schema: {error}; raw response: {text}"
-        )
-    })?;
+    let mut outcome = serde_json::from_value::<TriageOutcome>(value)
+        .map_err(|_| anyhow::anyhow!("LangGraph triage response violated triage schema"))?;
     apply_call_cost(&mut outcome, call_cost);
     clamp_outcome(outcome).validate_cost()
 }

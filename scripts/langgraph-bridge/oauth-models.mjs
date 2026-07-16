@@ -1,4 +1,5 @@
 import { AIMessage } from "@langchain/core/messages";
+import { invalidProviderResponseError, providerHttpError } from "./errors.mjs";
 import { appendStructuredOutputContract, cacheableTextBlock, messageText } from "./model.mjs";
 
 const CLAUDE_CODE_IDENTITY_LINE = "You are Claude Code, Anthropic's official CLI for Claude.";
@@ -33,9 +34,8 @@ class AnthropicOAuthChatModel {
       },
       body: JSON.stringify(this.body(messages)),
     });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`Anthropic OAuth API ${response.status}: ${text.slice(0, 500)}`);
-    return anthropicMessageFromResponse(JSON.parse(text));
+    if (!response.ok) throw providerHttpError(response.status);
+    return anthropicMessageFromResponse(await providerJson(response));
   }
 
   body(messages) {
@@ -82,8 +82,8 @@ class OpenAiCodexOAuthChatModel {
       },
       body: JSON.stringify(this.body(messages)),
     });
+    if (!response.ok) throw providerHttpError(response.status);
     const text = await response.text();
-    if (!response.ok) throw new Error(`OpenAI Codex OAuth API ${response.status}: ${text.slice(0, 500)}`);
     return openAiMessageFromSse(text, this.openAiToolNameMap());
   }
 
@@ -114,6 +114,14 @@ class OpenAiCodexOAuthChatModel {
 
   originalToSafeToolNameMap() {
     return this.openAiToolBindings().originalToSafe;
+  }
+}
+
+async function providerJson(response) {
+  try {
+    return JSON.parse(await response.text());
+  } catch {
+    throw invalidProviderResponseError();
   }
 }
 

@@ -26,6 +26,7 @@ Target-owned state lives under:
   log/checkpoints/checkpoint-000000000123.json
   runs/<runId>/
     run.json
+    items.jsonl
     events.jsonl
     trace.jsonl
     input.json
@@ -35,6 +36,7 @@ Target-owned state lives under:
     artifacts.json
     scan-input.json, triage.jsonl, verify.jsonl, patch.jsonl  # sast:scan only
   latest
+  workflow/phase-attempts.v2.jsonl
 ```
 
 The run directory remains an operator-facing replay/export bundle. It is not a
@@ -63,7 +65,12 @@ start/operation/finish shape.
 | Verification/proof | append-only event | projected proof state |
 | Patch attempt | append-only event plus optional CAS diff | projected audit row |
 | Reports | derived export | optional cached artifact |
+| Per-run task/call/terminal lifecycle | hash-linked `runs/<runId>/items.jsonl` | pure in-memory/live/replay projection |
 | FTS rows | projection data | disposable search index |
+
+The target-wide event log remains canonical for findings and target state. A
+terminal run item is bridged to it idempotently, but run replay reduces the
+per-run typed stream and never reconstructs from the target log.
 
 Direct mutation of projected findings for human decisions is forbidden.
 `record_auto_triage` appends a v3 decision event and lets the projection update

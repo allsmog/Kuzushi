@@ -7,29 +7,40 @@ pub(super) fn active_view_hydration_keys(app: &ShellApp) -> Vec<ViewHydrationKey
         .then(common_target_keys)
         .unwrap_or_default();
     append_project_document_key(app, &mut keys);
-    match rendered_shell_view(app) {
-        ShellView::Home => append_home_keys(app, &mut keys),
-        ShellView::Recommend => append_latest_run_keys(app, &mut keys),
-        ShellView::Module => append_module_keys(app, &mut keys),
-        ShellView::Workbench => append_workbench_keys(app, &mut keys),
-        ShellView::Tune | ShellView::PromptsEditor => append_prompt_keys(app, &mut keys),
-        ShellView::Threat | ShellView::ThreatEditor | ShellView::Scene => {
-            append_threat_model_key(app, &mut keys);
-        }
-        ShellView::RunDiff => append_run_diff_keys(app, &mut keys),
-        ShellView::Replay => append_replay_keys(&mut keys, app.router.replay().run_id()),
-        ShellView::Trace => append_trace_keys(&mut keys, app.router.trace().run_id()),
-        ShellView::Health => append_health_keys(app, &mut keys),
-        ShellView::ProjectModel => append_project_model_keys(app, &mut keys),
-        ShellView::StrategyQueue => keys.push(ViewHydrationKey::StrategyQueue),
-        ShellView::FailureHandoff | ShellView::AgentChat => {
-            append_latest_run_keys(app, &mut keys);
-        }
-        _ => {}
+    append_view_hydration_keys(app, app.shell_view(), &mut keys);
+    if let Some(origin) = app
+        .router
+        .overlay_origin()
+        .filter(|origin| *origin != app.shell_view())
+    {
+        append_view_hydration_keys(app, origin, &mut keys);
     }
     keys.sort();
     keys.dedup();
     keys
+}
+
+fn append_view_hydration_keys(app: &ShellApp, view: ShellView, keys: &mut Vec<ViewHydrationKey>) {
+    match view {
+        ShellView::Home => append_home_keys(app, keys),
+        ShellView::Recommend => append_latest_run_keys(app, keys),
+        ShellView::Module => append_module_keys(app, keys),
+        ShellView::Workbench => append_workbench_keys(app, keys),
+        ShellView::Tune | ShellView::PromptsEditor => append_prompt_keys(app, keys),
+        ShellView::Threat | ShellView::ThreatEditor | ShellView::Scene => {
+            append_threat_model_key(app, keys);
+        }
+        ShellView::RunDiff => append_run_diff_keys(app, keys),
+        ShellView::Replay => append_replay_keys(app, keys, app.router.replay().run_id()),
+        ShellView::Trace => append_trace_keys(keys, app.router.trace().run_id()),
+        ShellView::Health => append_health_keys(app, keys),
+        ShellView::ProjectModel => append_project_model_keys(app, keys),
+        ShellView::StrategyQueue => keys.push(ViewHydrationKey::StrategyQueue),
+        ShellView::FailureHandoff | ShellView::AgentChat => {
+            append_latest_run_keys(app, keys);
+        }
+        _ => {}
+    }
 }
 
 fn common_target_keys() -> Vec<ViewHydrationKey> {
@@ -44,13 +55,6 @@ fn common_target_keys() -> Vec<ViewHydrationKey> {
         ViewHydrationKey::ProjectScopeTree,
         ViewHydrationKey::RunSummaryEntries,
     ]
-}
-
-fn rendered_shell_view(app: &ShellApp) -> ShellView {
-    app.router
-        .overlay_origin()
-        .filter(|origin| *origin != app.shell_view())
-        .unwrap_or_else(|| app.shell_view())
 }
 
 fn append_home_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
@@ -285,13 +289,31 @@ fn append_run_json_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
     keys.push(run_artifact_key(run_id, "findings.json"));
 }
 
-fn append_replay_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
+fn append_replay_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
     if run_id.is_empty() {
         return;
     }
     keys.push(run_artifact_key(run_id, "run.json"));
-    keys.push(run_artifact_key(run_id, "result.json"));
-    keys.push(run_artifact_key(run_id, "triage.jsonl"));
+    keys.push(ViewHydrationKey::RunProjection {
+        run_id: run_id.to_string(),
+    });
+    let Some(target) = app.target() else {
+        return;
+    };
+    let state = app
+        .workbench_cache()
+        .borrow()
+        .cached_run_projection(target, run_id);
+    if matches!(
+        state,
+        ViewDataState::Ready(Ok(kuzushi_core::run_lifecycle::RunProjectionRead {
+            source: kuzushi_core::run_lifecycle::RunProjectionSource::Legacy,
+            ..
+        }))
+    ) {
+        keys.push(run_artifact_key(run_id, "result.json"));
+        keys.push(run_artifact_key(run_id, "triage.jsonl"));
+    }
 }
 
 fn append_trace_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
