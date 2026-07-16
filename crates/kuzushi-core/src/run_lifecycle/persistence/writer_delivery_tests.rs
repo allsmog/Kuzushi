@@ -117,9 +117,7 @@ fn derivative_failure_is_reported_without_blocking_canonical_item_delivery() {
 fn derivative_pump_replays_the_initial_durable_backlog() {
     let target = tempfile::tempdir().unwrap();
     let run_id = crate::run_artifacts::new_run_id("derivative-backlog");
-    let (initial_sender, initial_receiver) = mpsc::channel();
-    let initial_subscriber: DerivativeRangeSubscriber =
-        Arc::new(move |range| initial_sender.send(range).unwrap());
+    let (initial_subscriber, initial_receiver) = derivative_range_channel();
     let writer = super::super::RunItemWriter::open_with_derivative_delivery_subscriber(
         target.path(),
         &run_id,
@@ -136,9 +134,7 @@ fn derivative_pump_replays_the_initial_durable_backlog() {
     writer.shutdown().unwrap();
     let events_path = crate::run_artifacts::run_dir(target.path(), &run_id).join("events.jsonl");
     std::fs::remove_file(&events_path).unwrap();
-    let (derivative_sender, derivative_receiver) = mpsc::channel();
-    let derivative_subscriber: DerivativeRangeSubscriber =
-        Arc::new(move |range| derivative_sender.send(range).unwrap());
+    let (derivative_subscriber, derivative_receiver) = derivative_range_channel();
     let reopened = super::super::RunItemWriter::open_with_derivative_delivery_subscriber(
         target.path(),
         &run_id,
@@ -157,6 +153,15 @@ fn derivative_pump_replays_the_initial_durable_backlog() {
     assert!(std::fs::read_to_string(events_path)
         .unwrap()
         .contains(&format!("[typed:{}]", committed.event_hash)));
+}
+
+fn derivative_range_channel() -> (
+    DerivativeRangeSubscriber,
+    mpsc::Receiver<CommittedRange>,
+) {
+    let (sender, receiver) = mpsc::channel();
+    let subscriber = Arc::new(move |range| sender.send(range).unwrap());
+    (subscriber, receiver)
 }
 
 #[test]

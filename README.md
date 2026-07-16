@@ -57,8 +57,8 @@ This snapshot tightens the path from scanner output to human review:
   durability failed is quarantined to `partial` and offers only run inspection,
   so a damaged log can never route an operator to a Report it did not earn.
 - Every operator-visible lifecycle string is redacted, control-escaped, and
-  bounded by construction, and that policy is re-validated on read rather than
-  trusted from the writer.
+  bounded by construction, and that policy is checked again on read rather
+  than trusted from the writer.
 - Shell causality is recorded separately as redacted semantic JSONL under
   `~/.kuzushi/v3/sessions/`; `kuzushi sessions list|show|export|prune` inspects
   that global operator-owned history without treating it as target evidence.
