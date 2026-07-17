@@ -1070,7 +1070,7 @@ const packagingRequirements = [
   "pnpm build:clean && pnpm build:native",
   'dev: "cargo run -p kuzushi-cli"',
   '"quality:architecture":',
-  '"node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-env-discipline.mjs && node scripts/check-dispatch-boundary-contract.mjs && node scripts/check-workspace-state-writes.mjs && node scripts/check-validated-wording.mjs"',
+  '"node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-env-discipline.mjs && node scripts/check-dispatch-boundary-contract.mjs && node scripts/check-run-lifecycle-boundary.mjs && node scripts/check-workspace-state-writes.mjs && node scripts/check-validated-wording.mjs"',
   '"test:rust": "cargo test --workspace"',
   'codegen: "tsx scripts/codegen/index.ts"',
   "requiredReleaseScripts",
