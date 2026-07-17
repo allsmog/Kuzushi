@@ -4593,10 +4593,8 @@ fn scan_completion_logs_same_stable_alias_used_by_findings() {
     let events_before = std::fs::read_to_string(&events_path).unwrap();
     EffectRuntime::execute(&mut app, effects);
 
-    assert_ne!(
-        std::fs::read_to_string(&events_path).unwrap(),
-        events_before
-    );
+    let events_after = wait_for_file_text(&events_path, r#""status":"completed""#);
+    assert_ne!(events_after, events_before);
 
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "scan" && line.body.contains("top alias F-0001 -> aaaa1111")
@@ -14862,9 +14860,10 @@ fn agent_answer_event_does_not_duplicate_the_runtime_model_call() {
         .iter()
         .any(|artifact| artifact.path.ends_with("result.json")));
     assert!(summary.llm_calls.is_empty());
-    let events =
-        fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "agent-answer").join("events.jsonl"))
-            .unwrap();
+    let events = wait_for_file_text(
+        &kuzushi_core::run_dir(tmp.path(), "agent-answer").join("events.jsonl"),
+        r#""status":"completed""#,
+    );
     assert!(events.contains(r#""status":"completed""#));
     assert!(events.contains(r#""tool":"agent:ask""#));
 }
@@ -18573,10 +18572,8 @@ fn job_scan_completion_returns_record_scan_effect_without_inline_artifacts() {
     assert!(!app.log_lines().iter().any(|line| line.prefix == "result"));
     EffectRuntime::execute(&mut app, result.effects);
     assert!(events_path.exists());
-    assert_ne!(
-        std::fs::read_to_string(&events_path).unwrap(),
-        events_before
-    );
+    let events_after = wait_for_file_text(&events_path, r#""status":"completed""#);
+    assert_ne!(events_after, events_before);
     assert!(app
         .log_lines()
         .iter()
