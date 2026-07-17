@@ -946,7 +946,8 @@ mod tests {
         let result_path =
             kuzushi_core::run_artifacts::run_artifact_path(temp.path(), run_id, "result.json");
         let result_before = std::fs::read_to_string(&result_path).unwrap();
-        let terminal_events_before = terminal_scan_event_count(temp.path(), run_id, "failed");
+        let terminal_events_before =
+            wait_for_terminal_scan_event_count(temp.path(), run_id, "failed", 1);
         let mut app = ShellApp::new(V2Config::default(), None);
 
         let effects = app.record_scan_run_effect(ScanRunRecord {
@@ -984,7 +985,8 @@ mod tests {
         kuzushi_core::run_artifacts::try_record_tool_run_canceled(record, "scan cancelled")
             .unwrap();
         let before = kuzushi_core::load_run_summary(temp.path(), run_id).unwrap();
-        let terminal_events_before = terminal_scan_event_count(temp.path(), run_id, "canceled");
+        let terminal_events_before =
+            wait_for_terminal_scan_event_count(temp.path(), run_id, "canceled", 1);
         let mut app = ShellApp::new(V2Config::default(), None);
 
         let effects = app.record_scan_run_effect(ScanRunRecord {
@@ -1255,5 +1257,25 @@ mod tests {
         .unwrap();
         let needle = format!(r#""status":"{status}""#);
         events.lines().filter(|line| line.contains(&needle)).count()
+    }
+
+    fn wait_for_terminal_scan_event_count(
+        target: &std::path::Path,
+        run_id: &str,
+        status: &str,
+        expected: usize,
+    ) -> usize {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let count = terminal_scan_event_count(target, run_id, status);
+            if count == expected {
+                return count;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for {expected} {status} event(s); found {count}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 }
