@@ -99,8 +99,8 @@ impl Play for PromptInjectionPlay {
     ) -> Result<PlayOutcome, String> {
         let response = transport.send(ctx.target(), &self.request)?;
         let (landed, evidence) = self.classify(&response);
-        let outcome =
-            PlayOutcome::new(self.name(), ctx.target().to_string()).with_observation(response.observe(280));
+        let outcome = PlayOutcome::new(self.name(), ctx.target().to_string())
+            .with_observation(response.observe(280));
         if landed {
             return Ok(outcome.exploited(
                 format!("injection landed on {}", self.request.path),
@@ -112,7 +112,10 @@ impl Play for PromptInjectionPlay {
         let mut missed = outcome.miss(format!(
             "injection on {} did not land ({})",
             self.request.path,
-            evidence.first().map(String::as_str).unwrap_or("no success marker")
+            evidence
+                .first()
+                .map(String::as_str)
+                .unwrap_or("no success marker")
         ));
         missed.evidence = evidence;
         Ok(missed)
@@ -121,9 +124,9 @@ impl Play for PromptInjectionPlay {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::engagement_scope::{EngagementScope, ScopeEntry, ScopeTarget};
     use super::super::play_context::PlayContext;
+    use super::*;
 
     struct CannedTransport {
         body: String,
@@ -151,9 +154,12 @@ mod tests {
     }
 
     fn play() -> PromptInjectionPlay {
-        PromptInjectionPlay::new("system-prompt-leak", PlayRequest::get("/chat").with_method("POST"))
-            .with_canary("KZ-CANARY-9931")
-            .treat_as_refusal("I can't help with that")
+        PromptInjectionPlay::new(
+            "system-prompt-leak",
+            PlayRequest::get("/chat").with_method("POST"),
+        )
+        .with_canary("KZ-CANARY-9931")
+        .treat_as_refusal("I can't help with that")
     }
 
     #[test]
@@ -163,7 +169,9 @@ mod tests {
         };
         let outcome = play().execute(&ctx(), &transport).unwrap();
         assert!(outcome.exploited);
-        assert!(outcome.evidence.contains(&"canary:KZ-CANARY-9931".to_string()));
+        assert!(outcome
+            .evidence
+            .contains(&"canary:KZ-CANARY-9931".to_string()));
     }
 
     #[test]
@@ -194,6 +202,8 @@ mod tests {
         };
         let outcome = play.execute(&ctx(), &transport).unwrap();
         assert!(outcome.exploited);
-        assert!(outcome.evidence.contains(&"leak:BEGIN SYSTEM PROMPT".to_string()));
+        assert!(outcome
+            .evidence
+            .contains(&"leak:BEGIN SYSTEM PROMPT".to_string()));
     }
 }

@@ -5,13 +5,21 @@ pub fn run_tool_loop(
     request: &AgentToolLoopRequest,
     handler: &mut dyn ToolCallHandler,
 ) -> Result<AgentLoopOutcome> {
+    run_tool_loop_observed(runtime, request, handler).map(Observed::into_value)
+}
+
+pub fn run_tool_loop_observed(
+    runtime: &dyn AgentRuntime,
+    request: &AgentToolLoopRequest,
+    handler: &mut dyn ToolCallHandler,
+) -> Result<Observed<AgentLoopOutcome>> {
     ensure_tool_loop_runtime(runtime)?;
 
     let cap = request.max_steps.max(1);
     let mut accumulator = LoopAccumulator::default();
     for step in 0..cap {
         let outcome = next_loop_step(runtime, request, &accumulator.transcript, step)?;
-        if let Some(final_outcome) = accumulator.apply_step(outcome, handler, step + 1) {
+        if let Some(final_outcome) = accumulator.apply_step(outcome, handler, step + 1)? {
             return Ok(final_outcome);
         }
     }
@@ -19,29 +27,44 @@ pub fn run_tool_loop(
     Ok(accumulator.truncated(cap))
 }
 
-#[derive(Default)]
 struct LoopAccumulator {
     transcript: Vec<LoopHistoryEntry>,
-    cost_usd: f64,
+    cost: RuntimeCostReport,
+    usage: ModelTokenUsage,
+}
+
+impl Default for LoopAccumulator {
+    fn default() -> Self {
+        Self {
+            transcript: Vec::new(),
+            cost: RuntimeCostReport::known(RuntimeCost::ZERO),
+            usage: ModelTokenUsage::default(),
+        }
+    }
 }
 
 impl LoopAccumulator {
     fn apply_step(
         &mut self,
-        outcome: AgentLoopStep,
+        outcome: Observed<AgentLoopStep>,
         handler: &mut dyn ToolCallHandler,
         steps_used: u32,
-    ) -> Option<AgentLoopOutcome> {
-        match outcome {
+    ) -> Result<Option<Observed<AgentLoopOutcome>>> {
+        self.usage = self
+            .usage
+            .checked_add(outcome.usage, "agent tool-loop accumulated")?;
+        match outcome.value {
             AgentLoopStep::ToolCall { call, cost_usd } => {
-                self.apply_tool_call(call, cost_usd, handler);
-                None
+                self.apply_tool_call(call, cost_usd, handler)?;
+                Ok(None)
             }
             AgentLoopStep::Final {
                 text,
                 structured,
                 cost_usd,
-            } => Some(self.final_outcome(text, structured, cost_usd, steps_used)),
+            } => self
+                .final_outcome(text, structured, cost_usd, steps_used)
+                .map(Some),
         }
     }
 
@@ -50,14 +73,15 @@ impl LoopAccumulator {
         call: ToolCall,
         cost_usd: Option<f64>,
         handler: &mut dyn ToolCallHandler,
-    ) {
-        self.add_cost(cost_usd);
+    ) -> Result<()> {
+        self.add_cost(cost_usd)?;
         self.transcript
             .push(LoopHistoryEntry::AssistantToolCall(call.clone()));
         let result = handler
             .run(&call)
             .unwrap_or_else(|err| tool_error_result(&call, err));
         self.transcript.push(LoopHistoryEntry::ToolResult(result));
+        Ok(())
     }
 
     fn final_outcome(
@@ -66,37 +90,47 @@ impl LoopAccumulator {
         structured: Option<serde_json::Value>,
         cost_usd: Option<f64>,
         steps_used: u32,
-    ) -> AgentLoopOutcome {
-        self.add_cost(cost_usd);
+    ) -> Result<Observed<AgentLoopOutcome>> {
+        self.add_cost(cost_usd)?;
         if !text.is_empty() {
             self.transcript
                 .push(LoopHistoryEntry::AssistantText(text.clone()));
         }
-        AgentLoopOutcome {
-            text,
-            structured,
-            steps_used,
-            truncated: false,
-            cost_usd: self.cost_usd,
-            transcript: std::mem::take(&mut self.transcript),
-        }
+        Ok(Observed::new(
+            AgentLoopOutcome {
+                text,
+                structured,
+                steps_used,
+                truncated: false,
+                cost_usd: self.cost.observed_usd(),
+                cost_usd_exact: self.cost.is_complete(),
+                transcript: std::mem::take(&mut self.transcript),
+            },
+            self.usage,
+        ))
     }
 
-    fn truncated(mut self, steps_used: u32) -> AgentLoopOutcome {
-        AgentLoopOutcome {
-            text: String::new(),
-            structured: None,
-            steps_used,
-            truncated: true,
-            cost_usd: self.cost_usd,
-            transcript: std::mem::take(&mut self.transcript),
-        }
+    fn truncated(mut self, steps_used: u32) -> Observed<AgentLoopOutcome> {
+        Observed::new(
+            AgentLoopOutcome {
+                text: String::new(),
+                structured: None,
+                steps_used,
+                truncated: true,
+                cost_usd: self.cost.observed_usd(),
+                cost_usd_exact: self.cost.is_complete(),
+                transcript: std::mem::take(&mut self.transcript),
+            },
+            self.usage,
+        )
     }
 
-    fn add_cost(&mut self, cost_usd: Option<f64>) {
-        if let Some(cost) = cost_usd {
-            self.cost_usd += cost;
-        }
+    fn add_cost(&mut self, cost_usd: Option<f64>) -> Result<()> {
+        self.cost = self.cost.checked_add(
+            RuntimeCostReport::from_optional(cost_usd, "agent loop step cost")?,
+            "agent tool-loop accumulated cost",
+        )?;
+        Ok(())
     }
 }
 
@@ -115,10 +149,11 @@ fn next_loop_step(
     request: &AgentToolLoopRequest,
     transcript: &[LoopHistoryEntry],
     step: u32,
-) -> Result<AgentLoopStep> {
+) -> Result<Observed<AgentLoopStep>> {
     runtime
-        .next_step_blocking(request, transcript)
+        .next_step_observed_blocking(request, transcript)
         .with_context(|| format!("agent loop step {step} failed"))
+        .and_then(|observed| observed.try_map(AgentLoopStep::validate_cost))
 }
 
 fn tool_error_result(call: &ToolCall, err: anyhow::Error) -> ToolResult {

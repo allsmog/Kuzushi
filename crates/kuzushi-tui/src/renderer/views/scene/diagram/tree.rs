@@ -48,7 +48,7 @@ impl TreeLayout {
         let col_w = width / chain_count.max(1) as u16;
         Self {
             col_w,
-            box_w: col_w.saturating_sub(2).clamp(12, 30),
+            box_w: col_w.saturating_sub(2).clamp(12, 60),
             root_cx: width / 2,
         }
     }

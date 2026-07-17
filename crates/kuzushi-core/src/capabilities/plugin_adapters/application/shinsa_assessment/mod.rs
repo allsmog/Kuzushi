@@ -14,12 +14,17 @@ pub(crate) fn run_shinsa_assessment(
 ) -> Result<Value> {
     let run = prepare_shinsa_assessment(tool_name, input, ctx, runtime)?;
     let raw = query_shinsa_with_scope(&run, ctx)?;
-    let findings = normalize_agent_json_findings(raw.clone(), &run.target, "shinsa", 100)?;
+    let findings = normalize_agent_json_findings(raw.value.clone(), &run.target, "shinsa", 100)?;
     let persisted = persist_shinsa_findings(&run, &findings, ctx)?;
-    let artifacts = write_shinsa_assessment_artifacts(&run, findings.len(), &raw)?;
+    let artifacts = write_shinsa_assessment_artifacts(&run, findings.len(), &raw.value)?;
     emit_shinsa_done(ctx, &run, findings.len());
+    let cost = raw.cost_report()?;
     Ok(shinsa_assessment_response(
-        &run, artifacts, findings, persisted,
+        &run,
+        artifacts,
+        findings,
+        persisted,
+        cost,
     ))
 }
 
@@ -46,6 +51,7 @@ fn prepare_shinsa_assessment<'tool, 'runtime>(
     let verb = shinsa_assessment_verb(tool_name);
     emit_shinsa_start(ctx, tool_name, verb, &target);
     let execution = resolve_shinsa_execution(tool_name, &input, ctx, runtime)?;
+    artifacts::prepare_shinsa_output_root(&target, &execution.output_dir)?;
     let inventory = collect_agentic_repo_inventory(&target, 100, 4096)?;
     Ok(ShinsaAssessmentRun {
         tool_name,
@@ -108,7 +114,7 @@ fn shinsa_output_dir(input: &Value) -> String {
 fn query_shinsa_with_scope(
     run: &ShinsaAssessmentRun<'_, '_>,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
+) -> Result<CostedStructuredJson<Value>> {
     let _control_scope = begin_shinsa_control_scope(ctx, run.verb);
     let raw = query_shinsa_report(
         run.runtime,
@@ -145,7 +151,7 @@ fn persist_shinsa_findings(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<GenericPersistedRun>> {
     persist_tool_findings(
-        "shinsa",
+        ctx.finding_run_id(),
         &run.target,
         findings,
         ctx.workspace,
@@ -166,6 +172,7 @@ fn shinsa_assessment_response(
     artifacts: artifacts::ShinsaArtifacts,
     findings: Vec<Finding>,
     persisted: Option<GenericPersistedRun>,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Value {
     response::shinsa_response(
         run.tool_name,
@@ -176,6 +183,7 @@ fn shinsa_assessment_response(
         artifacts,
         findings,
         persisted,
+        cost,
     )
 }
 
@@ -224,8 +232,8 @@ fn query_shinsa_report(
     model: String,
     target: &Path,
     prompt: prompt::ShinsaPromptInput<'_>,
-) -> Result<Value> {
-    query_required_structured_json(
+) -> Result<CostedStructuredJson<Value>> {
+    query_required_structured_json_with_cost(
         runtime,
         AgentQueryRequest::new(
             model,

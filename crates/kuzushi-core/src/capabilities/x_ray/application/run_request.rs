@@ -7,6 +7,7 @@ pub(crate) struct XRayRunInput {
     pub(crate) target: PathBuf,
     pub(crate) repo_name: String,
     pub(crate) model: String,
+    pub(crate) system_prompt: String,
     pub(crate) effort: Option<String>,
     pub(crate) max_budget_usd: Option<f64>,
     pub(crate) kb_context: ArtifactKnowledgePromptContext,

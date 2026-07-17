@@ -1,7 +1,7 @@
 use super::{
     active_stage_label, compact_target_path, context_snapshot_state,
-    findings_count_summary_with_total, format_session_cost, journey_footer_segment,
-    routing_mode_segment, scoped_target_path_label, view_status_segment, ShellApp,
+    findings_count_summary_with_total, journey_footer_segment, routing_mode_segment,
+    scoped_target_path_label, view_status_segment, ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,11 +91,22 @@ fn target_segment_value(app: &ShellApp) -> String {
 }
 
 fn model_segment_value(app: &ShellApp) -> String {
-    app.config()
-        .model
-        .as_deref()
-        .map(crate::app::display_model_selector)
-        .unwrap_or_else(|| "unconfigured".to_string())
+    qualified_model_segment(
+        app.config().model.as_deref(),
+        app.configured_model_auth_ready(),
+    )
+}
+
+fn qualified_model_segment(model: Option<&str>, auth_ready: bool) -> String {
+    let Some(model) = model else {
+        return "unconfigured".to_string();
+    };
+    let model = crate::app::display_model_selector(model);
+    if auth_ready {
+        model
+    } else {
+        format!("{model} [auth missing]")
+    }
 }
 
 fn live_activity_segment(app: &ShellApp) -> Option<ContextStripSegment> {
@@ -132,8 +143,10 @@ fn stage_spinner(phase: u8) -> &'static str {
 }
 
 fn cost_segment_value(app: &ShellApp) -> Option<String> {
-    let cost = app.session().session_cost_usd();
-    Some(format_session_cost(cost))
+    Some(super::format_runtime_cost(
+        app.session().session_cost_report(),
+        app.session().cost_accounting_error(),
+    ))
 }
 
 #[cfg(test)]

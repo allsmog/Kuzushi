@@ -159,22 +159,20 @@ fn maven_pom_license(text: &str) -> Result<ManifestLicense> {
 }
 
 fn pubspec_yaml_license(text: &str) -> Result<ManifestLicense> {
-    let value: serde_yaml::Value =
-        serde_yaml::from_str(text).context("license-scan: parse pubspec.yaml")?;
+    let value = crate::yaml::parse_value(text).context("license-scan: parse pubspec.yaml")?;
     Ok(yaml_license_value(&value))
 }
 
 fn shard_yaml_license(text: &str) -> Result<ManifestLicense> {
-    let value: serde_yaml::Value =
-        serde_yaml::from_str(text).context("license-scan: parse shard.yml")?;
+    let value = crate::yaml::parse_value(text).context("license-scan: parse shard.yml")?;
     Ok(yaml_license_value(&value))
 }
 
-fn yaml_license_value(value: &serde_yaml::Value) -> ManifestLicense {
+fn yaml_license_value(value: &serde_json::Value) -> ManifestLicense {
     license_value(
         value
             .get("license")
-            .and_then(serde_yaml::Value::as_str)
+            .and_then(serde_json::Value::as_str)
             .and_then(nonempty_license),
     )
 }
@@ -193,13 +191,15 @@ fn opam_license(text: &str) -> Result<ManifestLicense> {
 
 fn cabal_license(text: &str) -> Result<ManifestLicense> {
     Ok(license_value(
-        text.lines().find_map(|line| colon_line_license(line, "license")),
+        text.lines()
+            .find_map(|line| colon_line_license(line, "license")),
     ))
 }
 
 fn r_description_license(text: &str) -> Result<ManifestLicense> {
     Ok(license_value(
-        text.lines().find_map(|line| colon_line_license(line, "License")),
+        text.lines()
+            .find_map(|line| colon_line_license(line, "License")),
     ))
 }
 
@@ -237,9 +237,8 @@ fn license_elements<'a>(root: Node<'a, 'a>) -> impl Iterator<Item = Node<'a, 'a>
 }
 
 fn is_dotnet_project(path: &Path) -> bool {
-    path_extension(path).is_some_and(|extension| {
-        matches!(extension.as_str(), "csproj" | "fsproj" | "vbproj")
-    })
+    path_extension(path)
+        .is_some_and(|extension| matches!(extension.as_str(), "csproj" | "fsproj" | "vbproj"))
 }
 
 fn is_nimble_file(path: &Path) -> bool {

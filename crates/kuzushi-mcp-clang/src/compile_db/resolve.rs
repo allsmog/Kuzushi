@@ -1,52 +1,59 @@
-use anyhow::Result;
-use kuzushi_mcp_common::doctor::which;
+use anyhow::{Context, Result};
+use kuzushi_mcp_common::{AuthorizedDirectory, BoundedReadFile};
 use std::path::{Path, PathBuf};
 
-use super::generators::{
-    count_entries, generate_with_bear, generate_with_cmake, generate_with_intercept_build,
-};
 use super::{CompileDb, Generator};
 
-pub async fn resolve(repo: &Path) -> Result<CompileDb> {
-    if let Some(path) = find_existing(repo) {
-        let entries = count_entries(&path).await.unwrap_or(0);
-        return Ok(CompileDb {
-            path,
-            generator: Generator::PreExisting,
-            entries,
-        });
-    }
+const MAX_COMPILE_DATABASE_BYTES: usize = 8 * 1024 * 1024;
+const COMPILE_DATABASE_CANDIDATES: &[&str] = &[
+    "compile_commands.json",
+    "build/compile_commands.json",
+    ".vscode/compile_commands.json",
+];
 
-    if which("cmake").is_some() && repo.join("CMakeLists.txt").exists() {
-        if let Ok(db) = generate_with_cmake(repo).await {
-            return Ok(db);
-        }
+pub async fn resolve(repo: &AuthorizedDirectory) -> Result<CompileDb> {
+    if let Some(database) = find_existing(repo)? {
+        return compile_db(database, Generator::PreExisting);
     }
+    Ok(no_compile_db(repo))
+}
 
-    if which("bear").is_some() && repo.join("Makefile").exists() {
-        if let Ok(db) = generate_with_bear(repo).await {
-            return Ok(db);
-        }
-    }
-
-    if which("intercept-build").is_some() && repo.join("Makefile").exists() {
-        if let Ok(db) = generate_with_intercept_build(repo).await {
-            return Ok(db);
-        }
-    }
-
-    Ok(CompileDb {
-        path: repo.to_path_buf(),
+fn no_compile_db(repo: &AuthorizedDirectory) -> CompileDb {
+    CompileDb {
+        path: repo.path().to_path_buf(),
         generator: Generator::None,
         entries: 0,
+    }
+}
+
+pub(crate) fn find_existing(repo: &AuthorizedDirectory) -> Result<Option<BoundedReadFile>> {
+    for candidate in COMPILE_DATABASE_CANDIDATES {
+        match repo.open_file(Path::new(candidate), MAX_COMPILE_DATABASE_BYTES) {
+            Ok(file) => return Ok(Some(file)),
+            Err(_error) if path_is_missing(repo.path().join(candidate)) => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(None)
+}
+
+fn path_is_missing(path: PathBuf) -> bool {
+    std::fs::symlink_metadata(path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn compile_db(file: BoundedReadFile, generator: Generator) -> Result<CompileDb> {
+    let path = file.path().to_path_buf();
+    let entries = count_entries(file)?;
+    Ok(CompileDb {
+        path,
+        generator,
+        entries,
     })
 }
 
-pub(crate) fn find_existing(repo: &Path) -> Option<PathBuf> {
-    let candidates = [
-        repo.join("compile_commands.json"),
-        repo.join("build").join("compile_commands.json"),
-        repo.join(".vscode").join("compile_commands.json"),
-    ];
-    candidates.into_iter().find(|p| p.exists())
+pub(crate) fn count_entries(file: BoundedReadFile) -> Result<usize> {
+    let raw = file.read_utf8()?;
+    let entries: Vec<serde_json::Value> =
+        serde_json::from_str(&raw).context("compile_commands.json is malformed")?;
+    Ok(entries.len())
 }

@@ -7,17 +7,31 @@ pub(crate) fn suppress_module() -> BuiltinModule {
         ModuleKind::Defense,
         "Compose suppression rules (mute false positives, scope, severity, expiry).",
         vec![
-            tool_with_options("suppress:add", "Add a suppression rule.", suppress_add_options()),
+            tool_with_options("suppress:add", "Add a suppression rule.", suppress_add_options())
+                .with_policy(workspace_policy(
+                    ToolPhase::Review,
+                    RuntimeRequirement::Never,
+                    FindingStoreRequirement::Optional,
+                )),
             tool_with_options(
                 "suppress:list",
                 "List suppression rules and their current effect.",
                 vec![],
-            ),
+            )
+            .with_policy(read_policy(
+                ToolPhase::Review,
+                WorkspaceRequirement::Required,
+            )),
             tool_with_options(
                 "suppress:remove",
                 "Remove a suppression rule by id and reopen the findings it muted.",
                 vec![opt("id", OptionType::String, "Suppression rule id to remove.")],
-            ),
+            )
+            .with_policy(workspace_policy(
+                ToolPhase::Review,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Optional,
+            )),
         ],
         vec![],
     )

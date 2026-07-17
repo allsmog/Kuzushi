@@ -87,8 +87,8 @@ Status meanings:
 
 ## Scanner Gap Decisions
 
-The scanner parity gaps in `docs/assessments/scanners-parity.md` are resolved
-for this retirement pass as follows:
+The former scanner-runtime parity gaps are resolved for this retirement pass as
+follows:
 
 | Gap | Decision | Reason |
 | --- | --- | --- |
@@ -99,8 +99,8 @@ for this retirement pass as follows:
 
 ## Prompt Gap Decisions
 
-The prompt parity gaps in `docs/assessments/prompts-parity.md` are resolved for
-this retirement pass as follows:
+The former prompt-runtime parity gaps are resolved for this retirement pass as
+follows:
 
 | Gap | Decision | Reason |
 | --- | --- | --- |

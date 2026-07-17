@@ -35,7 +35,7 @@ fn context_snapshot_model_projects_present_snapshot() {
 
     let model = context_snapshot_model(&app);
 
-    assert_eq!(model.snapshot, "./context-snapshot.json");
+    assert_eq!(model.snapshot, "./.kuzushi/context-snapshot.json");
     assert!(model.snapshot_present);
     assert_eq!(model.state, "present");
     assert_eq!(model.status, "snapshot present; 2 indexed file(s)");

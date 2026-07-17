@@ -11,8 +11,7 @@ pub(crate) enum HotkeyTrigger {
     PageDown,
     Up,
     Down,
-    Left,
-    Right,
+    Never,
 }
 
 impl HotkeyTrigger {
@@ -24,6 +23,11 @@ impl HotkeyTrigger {
             (Self::Char(expected), KeyCode::Char(_)) if expected.is_ascii_uppercase() => {
                 KeyModifiers::SHIFT | KeyModifiers::NONE
             }
+            // Crossterm reports the terminal BackTab sequence (ESC [ Z) as
+            // `KeyCode::BackTab` with SHIFT set. Treat that as the canonical
+            // Shift+Tab event while retaining the modifier-free form used by
+            // a few terminal/test backends.
+            (Self::BackTab, KeyCode::BackTab) => KeyModifiers::SHIFT | KeyModifiers::NONE,
             _ => KeyModifiers::NONE,
         };
         let leftover = key.modifiers - allowed;
@@ -40,8 +44,6 @@ impl HotkeyTrigger {
             (Self::PageDown, KeyCode::PageDown) => true,
             (Self::Up, KeyCode::Up) => true,
             (Self::Down, KeyCode::Down) => true,
-            (Self::Left, KeyCode::Left) => true,
-            (Self::Right, KeyCode::Right) => true,
             _ => false,
         }
     }
@@ -54,22 +56,22 @@ impl HotkeyTrigger {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewHotkeyAction {
     CatalogActivate,
+    CatalogToggleExpert,
     WorkbenchCyclePane,
     WorkbenchCyclePanePrev,
     WorkbenchScrollNext,
     WorkbenchScrollPrev,
     WorkbenchScrollFirst,
     WorkbenchScrollLast,
-    WorkbenchToggleCenter,
-    WorkbenchCenterNext,
-    WorkbenchCenterPrev,
-    WorkbenchZoomCenter,
+    WorkbenchOpenFocusedVisualization,
     WorkbenchTogglePaneZoom,
     WorkbenchOpen,
     WorkbenchPageNext,
     WorkbenchPagePrev,
     WorkbenchPage(WorkbenchPage),
     WorkbenchValidate,
+    WorkbenchDeferProof,
+    WorkbenchReverifyPatch,
     WorkbenchSuppress,
     WorkbenchOrderChain,
     WorkbenchCluster,
@@ -101,24 +103,35 @@ pub(crate) enum ViewHotkeyAction {
     ActivityTogglePause,
     ActivityReset,
     ActivityFocusSelected,
-    ActivityDeckNext,
-    ActivityDeckPrev,
-    ActivityOpenDeckArtifact,
-    ActivityOpenFindings,
     ActivityBackground,
+    ActivitySteer,
     OpenNextPhase,
+    OpenCommandPalette,
+    OpenHelp,
+    EnterNavigateMode,
+    EnterPromptMode,
+    CompleteComposer,
+    PhaseResult(PhaseResultCommand),
+    QuestionSubmit,
+    QuestionCancel,
+    QuestionBackground,
+    QuestionNextOption,
+    QuestionPreviousOption,
+    QuestionNext,
+    QuestionPrevious,
+    QuestionOther,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ViewKeybinding {
     pub trigger: HotkeyTrigger,
-    pub hint: &'static str,
-    pub label: &'static str,
+    pub hint: String,
+    pub label: String,
     pub action: ViewHotkeyAction,
 }
 
 impl ViewKeybinding {
-    pub(crate) fn matches(self, key: KeyEvent) -> bool {
+    pub(crate) fn matches(&self, key: KeyEvent) -> bool {
         self.trigger.matches(key)
     }
 }
@@ -186,6 +199,14 @@ mod tests {
             !trigger.matches(key_shift),
             "lowercase j with SHIFT means a different key"
         );
+    }
+
+    #[test]
+    fn backtab_accepts_the_crossterm_shift_modifier() {
+        let trigger = HotkeyTrigger::BackTab;
+        assert!(trigger.matches(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)));
+        assert!(trigger.matches(KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE)));
+        assert!(!trigger.matches(KeyEvent::new(KeyCode::BackTab, KeyModifiers::ALT)));
     }
 
     #[test]

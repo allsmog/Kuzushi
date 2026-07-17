@@ -60,10 +60,15 @@ fn llm_calls_segment(value: &Value) -> Option<String> {
 }
 
 fn cost_segment(value: &Value) -> Option<String> {
-    value
-        .get("costUsd")
-        .and_then(Value::as_f64)
-        .map(|cost| format!("cost ${cost:.6}"))
+    if let Some(cost) = value.get("costUsd").and_then(Value::as_f64) {
+        return Some(format!("cost ${cost:.6}"));
+    }
+    let observed = value.get("observedCostUsd").and_then(Value::as_f64)?;
+    (value
+        .get("providerSpendUnresolved")
+        .and_then(Value::as_bool)
+        == Some(true))
+    .then(|| format!("observed cost ${observed:.6}, provider spend unresolved"))
 }
 
 fn reproducibility_count_segments(value: &Value) -> Vec<String> {

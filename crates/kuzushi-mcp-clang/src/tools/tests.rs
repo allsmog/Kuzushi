@@ -4,12 +4,14 @@ mod tests {
     use kuzushi_mcp_common::doctor::which;
     use kuzushi_mcp_common::tool::ToolHandler;
     use serde_json::json;
-    use std::path::PathBuf;
     use std::sync::Arc;
 
     #[test]
     fn registry_includes_all_planned_tools() {
-        let r = build_registry();
+        let root = tempfile::tempdir().unwrap();
+        let read =
+            kuzushi_mcp_common::ReadRootCapability::new([root.path().to_path_buf()]).unwrap();
+        let r = build_registry_with_capability(read);
         for name in [
             "clang.health",
             "clang.compile_commands",
@@ -125,6 +127,9 @@ mod tests {
             assert!(
                 err.to_string().starts_with("BackendUnavailable:")
                     || err.to_string().contains("missing required argument")
+                    || err
+                        .to_string()
+                        .contains("could not open authorized MCP path")
             );
         }
     }
@@ -147,20 +152,76 @@ mod tests {
             assert!(
                 err.to_string().starts_with("BackendUnavailable:")
                     || err.to_string().contains("missing required argument")
+                    || err
+                        .to_string()
+                        .contains("could not open authorized MCP path")
             );
         }
     }
 
     #[test]
     fn position_request_requires_column_unless_defaulted() {
-        let args = json!({"repoPath":"/repo","file":"src/a.cc","line":7});
-        assert!(PositionRequest::from_args(&args).is_err());
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("src")).unwrap();
+        std::fs::write(root.path().join("src/a.cc"), "int a;\n").unwrap();
+        let handle = ClangdHandle::new(
+            kuzushi_mcp_common::ReadRootCapability::new([root.path().to_path_buf()]).unwrap(),
+        );
+        let args = json!({"repoPath":root.path(),"file":"src/a.cc","line":7});
+        assert!(PositionRequest::from_args(&args, &handle).is_err());
 
-        let request = PositionRequest::from_args_with_default_column(&args, 1).unwrap();
-        assert_eq!(request.file.repo, PathBuf::from("/repo"));
-        assert_eq!(request.file.file, PathBuf::from("/repo/src/a.cc"));
+        let request = PositionRequest::from_args_with_default_column(&args, 1, &handle).unwrap();
+        assert_eq!(
+            request.file.repo.path(),
+            root.path().canonicalize().unwrap()
+        );
+        assert_eq!(
+            request.file.file,
+            root.path().canonicalize().unwrap().join("src/a.cc")
+        );
         assert_eq!(request.line, 7);
         assert_eq!(request.column, 1);
+    }
+
+    #[test]
+    fn file_request_rejects_absolute_and_parent_child_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source.c");
+        std::fs::write(&source, "int value;\n").unwrap();
+        let handle = ClangdHandle::new(
+            kuzushi_mcp_common::ReadRootCapability::new([root.path().to_path_buf()]).unwrap(),
+        );
+
+        for child in [source.display().to_string(), "../source.c".to_string()] {
+            let error =
+                FileRequest::from_args(&json!({"repoPath": root.path(), "file": child}), &handle)
+                    .err()
+                    .expect("escaping child must fail");
+            assert!(
+                error.to_string().contains("absolute MCP child")
+                    || error.to_string().contains("contains '.' or '..'"),
+                "{error:#}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_request_rejects_a_symlink_child() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("source.c"), "int value;\n").unwrap();
+        symlink(root.path().join("source.c"), root.path().join("link.c")).unwrap();
+        let handle = ClangdHandle::new(
+            kuzushi_mcp_common::ReadRootCapability::new([root.path().to_path_buf()]).unwrap(),
+        );
+
+        assert!(FileRequest::from_args(
+            &json!({"repoPath": root.path(), "file": "link.c"}),
+            &handle,
+        )
+        .is_err());
     }
 
     #[test]

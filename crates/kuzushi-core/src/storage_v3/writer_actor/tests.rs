@@ -12,6 +12,8 @@ fn decision(stable_fp: &str, read_watermark: u64) -> DecisionWrite {
         confidence_millis: 1000,
         read_watermark,
         updates_finding_triage: false,
+        triage_cost_usd: None,
+        triage_cost_usd_exact: true,
         dismiss_reason: None,
         dismissed_by: None,
     }
@@ -62,6 +64,8 @@ fn verification(stable_fp: &str) -> VerificationWrite {
         stable_fp: stable_fp.to_string(),
         finding_id: Some(7),
         identity_id: Some("fi_test".to_string()),
+        verification_run_id: Some("verify-run-1".to_string()),
+        verified_scan_id: Some("scan-run-1".to_string()),
         proof_level: 4,
         proof_verdict: "exploited".to_string(),
         backend: "bwrap".to_string(),
@@ -88,9 +92,12 @@ fn patch_attempt(stable_fp: &str) -> PatchAttemptWrite {
         build_command: Some("cargo build".to_string()),
         test_command: Some("cargo test".to_string()),
         worktree_path: Some("/tmp/worktree".to_string()),
+        cost_usd: Some(0.125),
         cost_usd_micros: Some(125_000),
+        provider_spend_unresolved: false,
         validator_log: Some("tests passed".to_string()),
         history_json: "[]".to_string(),
+        provenance: None,
         actor: "patch-runner".to_string(),
     }
 }
@@ -114,6 +121,7 @@ fn run_lifecycle(event_kind: EventKind, status: &str) -> RunLifecycleWrite {
         target: Some("/repo".to_string()),
         status: status.to_string(),
         findings_count: (event_kind != EventKind::RunStarted).then_some(3),
+        terminal_item_hash: None,
         actor: "runner".to_string(),
     }
 }
@@ -489,18 +497,28 @@ fn storage_writer_records_patch_attempt_event_and_projection() {
     let log = EventLog::open(tmp.path().join("log")).unwrap();
     let events = log.read_all().unwrap();
     assert_eq!(events[0].event_kind, EventKind::PatchAttemptRecorded);
+    assert_eq!(events[0].payload["costUsd"], serde_json::json!(0.125));
     let conn = rusqlite::Connection::open(db_path).unwrap();
-    let projected: (String, String, String, f64) = conn
+    let projected: (String, String, String, f64, bool) = conn
         .query_row(
-            "select stable_fp, patch_run_id, status, cost_usd from patch_attempt_events",
+            "select stable_fp, patch_run_id, status, cost_usd, provider_spend_unresolved from patch_attempt_events",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )
         .unwrap();
     assert_eq!(projected.0, "fp3_patch");
     assert_eq!(projected.1, "patch-run-1");
     assert_eq!(projected.2, "VERIFIED");
     assert!((projected.3 - 0.125).abs() < 1e-9);
+    assert!(!projected.4);
 }
 
 #[test]
@@ -941,4 +959,100 @@ fn executable_watcher_events_are_not_coalesced() {
         path: "src/main.rs".to_string(),
     })
     .can_be_coalesced());
+}
+
+#[test]
+fn concurrent_blocking_writers_keep_one_linear_hash_chain() {
+    const WRITERS: usize = 16;
+    let tmp = tempfile::tempdir().unwrap();
+    let log_dir = std::sync::Arc::new(tmp.path().join("log"));
+    let db_path = std::sync::Arc::new(tmp.path().join("index.sqlite3"));
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(WRITERS));
+    let handles = (0..WRITERS)
+        .map(|writer| {
+            let log_dir = std::sync::Arc::clone(&log_dir);
+            let db_path = std::sync::Arc::clone(&db_path);
+            let barrier = std::sync::Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                StorageWriterActor::commit_blocking(
+                    log_dir.as_path(),
+                    db_path.as_path(),
+                    WriterCommand::Watcher(WatcherCommand::FindingObservation(observation(
+                        &format!("obs3_concurrent_{writer}"),
+                    ))),
+                )
+                .unwrap()
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let mut sequences = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap().committed_seq)
+        .collect::<Vec<_>>();
+    sequences.sort_unstable();
+    assert_eq!(sequences, (1..=WRITERS as u64).collect::<Vec<_>>());
+    let log = EventLog::open(log_dir.as_path()).unwrap();
+    log.verify_chain().unwrap();
+    assert_eq!(log.read_all().unwrap().len(), WRITERS);
+    assert_eq!(
+        ProjectionDb::open(db_path.as_path())
+            .unwrap()
+            .meta()
+            .unwrap()
+            .applied_seq,
+        WRITERS as u64
+    );
+}
+
+#[test]
+fn cross_process_writers_keep_one_linear_hash_chain() {
+    const CHILD_FLAG: &str = "KUZUSHI_STORAGE_WRITER_CHILD";
+    const ROOT: &str = "KUZUSHI_STORAGE_WRITER_ROOT";
+    const CHILD_ID: &str = "KUZUSHI_STORAGE_WRITER_CHILD_ID";
+    if std::env::var_os(CHILD_FLAG).is_some() {
+        let root = std::path::PathBuf::from(std::env::var_os(ROOT).unwrap());
+        let child_id = std::env::var(CHILD_ID).unwrap();
+        StorageWriterActor::commit_blocking(
+            root.join("log"),
+            root.join("index.sqlite3"),
+            WriterCommand::Watcher(WatcherCommand::FindingObservation(observation(&format!(
+                "obs3_process_{child_id}"
+            )))),
+        )
+        .unwrap();
+        return;
+    }
+
+    const WRITERS: usize = 4;
+    let tmp = tempfile::tempdir().unwrap();
+    let module = module_path!().trim_start_matches("kuzushi_core::");
+    let test_name = format!("{module}::cross_process_writers_keep_one_linear_hash_chain");
+    let executable = std::env::current_exe().unwrap();
+    let children = (0..WRITERS)
+        .map(|child_id| {
+            std::process::Command::new(&executable)
+                .arg("--exact")
+                .arg(&test_name)
+                .arg("--nocapture")
+                .env(CHILD_FLAG, "1")
+                .env(ROOT, tmp.path())
+                .env(CHILD_ID, child_id.to_string())
+                .spawn()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    for mut child in children {
+        assert!(child.wait().unwrap().success());
+    }
+
+    let log = EventLog::open(tmp.path().join("log")).unwrap();
+    log.verify_chain().unwrap();
+    let events = log.read_all().unwrap();
+    assert_eq!(events.len(), WRITERS);
+    assert_eq!(
+        events.iter().map(|event| event.seq).collect::<Vec<_>>(),
+        (1..=WRITERS as u64).collect::<Vec<_>>()
+    );
 }

@@ -155,7 +155,7 @@ fn contains_untrusted_pr_context(line: &str) -> bool {
         "github.event.pull_request.body",
     ]
     .iter()
-        .any(|needle| line.contains(needle))
+    .any(|needle| line.contains(needle))
 }
 
 fn github_write_permission_scope(line: &str) -> bool {

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "kuzushi:sast-scan",
+          "informationUri": "https://github.com/allsmog/Kuzushi",
+          "rules": []
+        }
+      },
+      "results": [],
+      "properties": {
+        "kuzushiScanRunId": "scan-empty"
+      }
+    }
+  ],
+  "properties": {
+    "kuzushiBenchmark": {
+      "schemaVersion": 2,
+      "aggregateSpend": {
+        "runId": "scan-empty",
+        "totalCostUsd": 0,
+        "source": "deterministic-fixture",
+        "models": [],
+        "llmCallCount": 0,
+        "llmAuditComplete": true
+      }
+    }
+  }
+}

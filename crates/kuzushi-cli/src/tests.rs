@@ -14,7 +14,7 @@ mod tests {
         apply_option_override, output_with_cli_run_artifacts, parse_option_override,
         run_tool_command, start_cli_tool_run_with_loaded_modules,
     };
-    use crate::application::runs::{filter_runs_by_status, run_trace_path};
+    use crate::application::runs::filter_runs_by_status;
     use crate::application::runs_diff::{runs_diff, runs_diff_output};
     use crate::application::runs_prune::runs_prune_plan;
     use crate::application::scan::{scan_scope_body, scan_tool_input, scan_worktree_suffix};
@@ -22,7 +22,9 @@ mod tests {
         suppress_command, suppressions_command, suppressions_command_output,
         suppressions_plain_lines,
     };
-    use crate::command::{Command, ConfigCommand, McpBackend, ScanModeArg};
+    use crate::command::{
+        Command, ConfigCommand, McpBackend, ScanModeArg, SessionExportFormat, SessionsCommand,
+    };
     use crate::doctor::{
         check_auth_env, check_model_config, deterministic_capability_checks, DoctorStatus,
     };
@@ -94,6 +96,103 @@ mod tests {
     #[test]
     fn cli_target_args_share_help_text() {
         assert_target_args_share_help(&crate::cli::Cli::command(), "kuzushi");
+    }
+
+    #[test]
+    fn sessions_cli_parses_management_subcommands() {
+        let list = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "--target",
+            "/tmp/project",
+            "sessions",
+            "list",
+            "--json",
+        ])
+        .unwrap();
+        let Some(Command::Sessions {
+            command: SessionsCommand::List { json },
+        }) = list.command
+        else {
+            panic!("expected sessions list command");
+        };
+        assert!(json);
+        assert_eq!(list.target, Some(PathBuf::from("/tmp/project")));
+
+        let export = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "sessions",
+            "export",
+            "session-1",
+            "--format",
+            "markdown",
+            "--out",
+            "session.md",
+        ])
+        .unwrap();
+        let Some(Command::Sessions {
+            command:
+                SessionsCommand::Export {
+                    session_id,
+                    format,
+                    output,
+                },
+        }) = export.command
+        else {
+            panic!("expected sessions export command");
+        };
+        assert_eq!(session_id, "session-1");
+        assert_eq!(format, SessionExportFormat::Markdown);
+        assert_eq!(output, PathBuf::from("session.md"));
+    }
+
+    #[test]
+    fn sessions_cli_parses_show_and_prune_options() {
+        let show =
+            crate::cli::Cli::try_parse_from(["kuzushi", "sessions", "show", "session-1", "--json"])
+                .unwrap();
+        assert!(matches!(
+            show.command,
+            Some(Command::Sessions {
+                command: SessionsCommand::Show {
+                    session_id,
+                    json: true,
+                },
+            }) if session_id == "session-1"
+        ));
+
+        let prune = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "sessions",
+            "prune",
+            "--older-than-days",
+            "45",
+            "--dry-run",
+            "--json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            prune.command,
+            Some(Command::Sessions {
+                command: SessionsCommand::Prune {
+                    older_than_days: Some(45),
+                    dry_run: true,
+                    json: true,
+                },
+            })
+        ));
+    }
+
+    #[test]
+    fn shell_session_persistence_opt_out_has_visible_alias() {
+        for flag in ["--no-session-persistence", "--ephemeral"] {
+            let cli = crate::cli::Cli::try_parse_from(["kuzushi", flag, "shell"]).unwrap();
+            assert!(cli.no_session_persistence, "flag {flag} was not applied");
+            assert!(matches!(cli.command, Some(Command::Shell { .. })));
+        }
+
+        let help = crate::cli::Cli::command().render_help().to_string();
+        assert!(help.contains("--no-session-persistence"), "{help}");
+        assert!(help.contains("--ephemeral"), "{help}");
     }
 
     #[test]
@@ -448,8 +547,8 @@ mod tests {
     fn cli_autonomy_flag_refuses_tools_above_the_rung() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-        // triage:run is a confirm action; `--autonomy hunt` must refuse it with
-        // the actionable message rather than silently running or substituting.
+        // triage:run is a Review action; deprecated `--autonomy hunt` resolves
+        // to Scan and must refuse it rather than silently running/substituting.
         let error = run_tool_command(
             "triage:run".to_string(),
             "{}".to_string(),
@@ -458,7 +557,7 @@ mod tests {
             Some(workspace.root().to_path_buf()),
             Vec::new(),
         )
-        .expect_err("triage:run must be refused under --autonomy hunt");
+        .expect_err("triage:run must be refused under deprecated --autonomy hunt alias");
         assert!(error.to_string().contains("raise posture"), "{error}");
     }
 
@@ -732,16 +831,18 @@ mod tests {
     }
 
     #[test]
-    fn shell_startup_progress_names_real_first_finding_commands() {
+    fn shell_startup_progress_names_the_real_interactive_entry_path() {
         let bare = shell_startup_progress_messages(None).join("\n");
         assert!(bare.contains("loading config"));
         assert!(bare.contains("native registry"));
-        assert!(bare.contains("first finding: scan ., then findings"));
+        assert!(bare.contains("choose a target in the picker"));
+        assert!(bare.contains("press d for the offline demo"));
+        assert!(!bare.contains("scan ."));
 
         let targeted = shell_startup_progress_messages(Some(Path::new("."))).join("\n");
         assert!(targeted.contains("target ."));
-        assert!(targeted.contains("first finding: scan, then findings"));
-        assert!(!targeted.contains("scan ."));
+        assert!(targeted.contains("opening operator shell"));
+        assert!(!targeted.contains("first finding"));
     }
 
     #[test]
@@ -887,12 +988,13 @@ mod tests {
                 "costUsd": 0.0,
                 "data": { "findings": [] }
             }),
-        );
+        )
+        .unwrap();
 
         let summary = load_run_summary(tmp.path(), &run_id).unwrap();
         assert_eq!(summary.status, "completed");
         assert_eq!(summary.started_at_unix, started.started_at_unix);
-        assert_eq!(summary.model.as_deref(), Some("openai:gpt-test"));
+        assert_eq!(summary.model.as_deref(), Some("local"));
         assert_eq!(summary.loaded_modules, loaded_modules);
         assert!(summary.config_hash.as_deref().is_some_and(|hash| {
             hash.starts_with("sha256:") && hash.len() == "sha256:".len() + 64
@@ -930,7 +1032,7 @@ mod tests {
         let failed_summary = load_run_summary(tmp.path(), &failed_run_id).unwrap();
         assert_eq!(failed_summary.status, "failed");
         assert_eq!(failed_summary.error.as_deref(), Some("bridge failed"));
-        assert_eq!(failed_summary.model.as_deref(), Some("openai:gpt-test"));
+        assert_eq!(failed_summary.model.as_deref(), Some("local"));
         assert!(failed_summary.config_hash.is_some());
         let failed_labels = failed_summary
             .artifacts
@@ -948,6 +1050,26 @@ mod tests {
                 artifact.path
             );
         }
+    }
+
+    #[test]
+    fn cli_runtime_free_tool_receipt_does_not_claim_the_profile_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = kuzushi_core::V2Config {
+            model: Some("openai:gpt-test".to_string()),
+            ..Default::default()
+        };
+        let run_id = start_cli_tool_run_with_loaded_modules(
+            tmp.path(),
+            "workspace:status",
+            &serde_json::json!({}),
+            &config,
+            Vec::new(),
+        );
+
+        let summary = load_run_summary(tmp.path(), &run_id).unwrap();
+
+        assert_eq!(summary.model, None);
     }
 
     #[test]
@@ -971,7 +1093,8 @@ mod tests {
                 "status": "completed",
                 "artifacts": []
             }),
-        );
+        )
+        .unwrap();
 
         let output = output_with_cli_run_artifacts(
             tmp.path(),
@@ -1033,19 +1156,6 @@ mod tests {
         assert!(plain.contains("143ms"));
         assert!(plain.contains("$0.0021"));
         assert!(plain.contains("sev=info"));
-    }
-
-    #[test]
-    fn run_trace_path_uses_shared_trace_artifact_spec() {
-        let workspace = WorkspaceTarget::new(PathBuf::from(".")).unwrap();
-        let leaf = kuzushi_core::run_artifacts::canonical_run_artifact_spec("trace.jsonl")
-            .expect("trace artifact spec")
-            .leaf;
-
-        assert_eq!(
-            run_trace_path(&workspace, "run-123"),
-            run_dir(workspace.root(), "run-123").join(leaf)
-        );
     }
 
     #[test]
@@ -1138,6 +1248,37 @@ mod tests {
             diff.changed[0].after.verdict.as_deref(),
             Some("true_positive")
         );
+    }
+
+    #[test]
+    fn runs_diff_rejects_run_id_traversal() {
+        let target = tempfile::tempdir().unwrap();
+
+        let error = runs_diff(target.path(), "../outside", "run-safe").unwrap_err();
+
+        assert!(error.to_string().contains("unsafe"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runs_diff_rejects_symlinked_run_directory() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(
+            outside.path().join("result.json"),
+            r#"{"ok":true,"data":{"coreFindings":[]}}"#,
+        )
+        .unwrap();
+        let runs = kuzushi_core::runs_root(target.path());
+        std::fs::create_dir_all(&runs).unwrap();
+        symlink(outside.path(), runs.join("run-link")).unwrap();
+
+        let error = runs_diff(target.path(), "run-link", "run-link").unwrap_err();
+
+        assert!(error.to_string().contains("unsafe"));
+        assert!(outside.path().join("result.json").is_file());
     }
 
     #[test]
@@ -1988,10 +2129,10 @@ mod tests {
         assert!(!tool_needs_finding_store(
             "taint-iris-next:source-sink-trace"
         ));
-        assert!(tool_needs_finding_store("module-recommender:recommend"));
+        assert!(!tool_needs_finding_store("module-recommender:recommend"));
         assert!(tool_needs_finding_store("prompt-armor:scan"));
         assert!(tool_needs_finding_store("cargo-audit:scan"));
-        assert!(tool_needs_finding_store("sbom-scan:scan"));
+        assert!(!tool_needs_finding_store("sbom-scan:scan"));
         assert!(tool_needs_finding_store("secret-scan:scan"));
         assert!(tool_needs_finding_store("android-apk:scan"));
         assert!(!tool_needs_finding_store("context-lite:index"));
@@ -2014,10 +2155,14 @@ mod tests {
             .to_string();
 
         assert!(error.contains("--target <path>"), "{error}");
-        assert!(
-            run_tool_workspace_for_input("iac-scan:scan", None, r#"{"target":"missing"}"#)
-                .unwrap()
-                .is_none()
+        let inline_target = tempfile::tempdir().unwrap();
+        let input = serde_json::json!({"target": inline_target.path()}).to_string();
+        let workspace = run_tool_workspace_for_input("iac-scan:scan", None, &input)
+            .unwrap()
+            .expect("inline target should establish the workspace");
+        assert_eq!(
+            workspace.root(),
+            inline_target.path().canonicalize().unwrap()
         );
         assert!(run_tool_workspace("clang.health", None).unwrap().is_none());
     }
@@ -2062,14 +2207,24 @@ mod tests {
             "whiteboxStatic": true,
             "triage": false,
         });
-        let summary = scan_json_output(&workspace, &data);
+        let result = serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "summary": "scan complete",
+            "warnings": [],
+            "errors": [],
+            "data": data.clone(),
+        });
+        let summary = scan_json_output(&workspace, &result, &data);
         assert_eq!(summary["findingsCount"], serde_json::json!(2));
+        assert_eq!(summary["status"], serde_json::json!("completed"));
         assert!(summary["db"].as_str().unwrap().contains(".kuzushi"));
 
         let footer = scan_plain_artifact_footer(&workspace, &data);
         assert!(footer.contains(".kuzushi/v3/runs/run-1"));
         assert!(footer.contains(".kuzushi/v3/index.sqlite3"));
-        assert!(footer.contains("kuzushi runs show run-1"));
+        assert!(footer.contains("kuzushi --target"));
+        assert!(footer.contains("runs show run-1"));
     }
 
     #[test]

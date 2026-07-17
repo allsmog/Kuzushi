@@ -52,16 +52,29 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         return;
     }
 
-    let sections = fit_sections_to_height(render_sections(app, area), area.height);
-    let fixed_height = fixed_chrome_height(&sections);
+    let prompt_height = prompt_height(app, area);
+    let sections = fit_sections_to_height(render_sections(app, area), area.height, prompt_height);
+    let fixed_height = fixed_chrome_height(&sections, prompt_height);
     let max_view_height = area.height.saturating_sub(fixed_height).max(1);
     let primary = primary_layer(app, area, max_view_height);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(render_constraints(primary.height, &sections))
+        .constraints(render_constraints(primary.height, &sections, prompt_height))
         .split(area);
     render_primary_layer(frame, chunks[0], app, primary);
     render_lower_chrome(frame, app, &chunks, sections);
+}
+
+pub(crate) fn workbench_primary_area(app: &ShellApp, area: Rect) -> Rect {
+    let prompt_height = prompt_height(app, area);
+    let sections = fit_sections_to_height(render_sections(app, area), area.height, prompt_height);
+    Rect {
+        height: area
+            .height
+            .saturating_sub(fixed_chrome_height(&sections, prompt_height))
+            .max(1),
+        ..area
+    }
 }
 
 fn render_primary_layer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, primary: PrimaryLayer) {
@@ -102,7 +115,19 @@ fn render_lower_chrome(
         section.kind.render(frame, chunks[index], app);
         index += 1;
     }
-    render_prompt(frame, chunks[index], app);
+    render_input_surface(frame, chunks[index], app);
+}
+
+fn render_input_surface(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    if let Some(question) = app.guided_scan_question_model() {
+        let page = crate::ui_view_models::active_workbench_page(app);
+        crate::renderer::render_guided_question(frame, area, page, &question);
+        return;
+    }
+    if render_operator_question_input(frame, area, app) {
+        return;
+    }
+    render_prompt(frame, area, app);
 }
 
 fn main_view_layout(
@@ -127,7 +152,10 @@ fn main_view_layout(
 }
 
 fn line_view_height(view: ShellView, line_count: usize, max_view_height: u16) -> u16 {
-    if matches!(view, crate::ShellView::PlanningPicker) {
+    if matches!(
+        view,
+        crate::ShellView::PlanningPicker | crate::ShellView::Setup
+    ) {
         return max_view_height;
     }
     (line_count as u16).clamp(1, max_view_height)
@@ -152,17 +180,26 @@ fn render_primary_view(
 fn render_line_view(
     frame: &mut Frame<'_>,
     area: Rect,
-    view: ShellView,
+    _view: ShellView,
     view_lines: Vec<Line<'static>>,
 ) {
-    if matches!(view, crate::ShellView::PlanningPicker) {
-        render_centered_lines(frame, area, view_lines);
-    } else {
-        render_lines(frame, area, view_lines);
-    }
+    render_lines(frame, area, view_lines);
 }
 
 fn contextual_overlay_origin(app: &ShellApp) -> Option<ShellView> {
+    if !matches!(
+        app.shell_view(),
+        ShellView::Catalog
+            | ShellView::CommandPalette
+            | ShellView::ConfirmDialog
+            | ShellView::QuitConfirm
+            | ShellView::ThemePicker
+            | ShellView::Keymap
+            | ShellView::UpdateAvailable
+            | ShellView::Help
+    ) {
+        return None;
+    }
     app.router
         .overlay_origin()
         .filter(|view| *view != app.shell_view())
@@ -176,24 +213,178 @@ fn render_contextual_overlay(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) 
     render_system_overlay(frame, area, app);
 }
 
-fn render_centered_lines(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
-    if area.height == 0 || lines.is_empty() {
-        return;
+pub(crate) const PROMPT_HEIGHT: u16 = 1;
+
+fn prompt_height(app: &ShellApp, area: Rect) -> u16 {
+    if let Some(question) = app.guided_scan_question_model() {
+        return crate::renderer::guided_question_height(area, &question);
     }
-    let content_height = (lines.len() as u16).min(area.height);
-    let top_padding = area.height.saturating_sub(content_height) / 2;
-    render_lines(
-        frame,
-        Rect {
-            y: area.y.saturating_add(top_padding),
-            height: content_height,
-            ..area
-        },
-        lines,
-    );
+    if let Some(height) = operator_question_input_height(app, area) {
+        return height;
+    }
+    if activity_navigation_owns_input_surface(app) {
+        0
+    } else {
+        PROMPT_HEIGHT
+    }
 }
 
-pub(crate) const PROMPT_HEIGHT: u16 = 1;
+fn activity_navigation_owns_input_surface(app: &ShellApp) -> bool {
+    matches!(
+        (app.shell_view(), app.input_mode()),
+        (ShellView::Activity, crate::InputMode::Navigate)
+    )
+}
+
+#[cfg(test)]
+mod run_focus_prompt_tests {
+    use super::*;
+    use crate::app::{
+        OperatorQuestion, OperatorQuestionEnvelope, OperatorQuestionOption,
+        OperatorQuestionRequest, PendingOperatorQuestion, WorkerGeneration,
+    };
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::sync::mpsc::sync_channel;
+
+    fn app_with_operator_question() -> ShellApp {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let (control, _receiver) = sync_channel(8);
+        let mut session = crate::ActivitySession::new("run-question");
+        session.operator_question = Some(PendingOperatorQuestion::new(OperatorQuestionEnvelope {
+            request: OperatorQuestionRequest {
+                request_id: "question-1".to_string(),
+                run_id: "run-question".to_string(),
+                questions: vec![OperatorQuestion {
+                    id: "scope".to_string(),
+                    header: "Scope".to_string(),
+                    prompt: "What should Scan inspect?".to_string(),
+                    options: vec![
+                        OperatorQuestionOption {
+                            label: "Changed files".to_string(),
+                            description: "Fast focused scan".to_string(),
+                            recommended: true,
+                        },
+                        OperatorQuestionOption {
+                            label: "Repository".to_string(),
+                            description: "Broad scan".to_string(),
+                            recommended: false,
+                        },
+                    ],
+                }],
+                auto_resolution_ms: None,
+            },
+            generation: WorkerGeneration::new(1),
+            control,
+        }));
+        app.set_activity(Some(session));
+        app.set_shell_view(ShellView::Activity);
+        app
+    }
+
+    fn buffer_rows(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    fn render_activity_prompt_rows(width: u16, height: u16, draft: &str) -> Vec<String> {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_activity(Some(crate::ActivitySession::new("run-prompt")));
+        app.set_shell_view(ShellView::Activity);
+        app.set_input_mode(crate::InputMode::Prompt);
+        app.set_input(draft);
+        assert!(matches!(
+            crate::ui_view_models::activity_view_model(&app),
+            crate::ui_view_models::ActivityViewModel::Active(_)
+        ));
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+
+        buffer_rows(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn run_focus_navigation_owns_input_while_prompt_reserves_composer_row() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::Activity);
+        app.set_input_mode(crate::InputMode::Navigate);
+        assert_eq!(prompt_height(&app, Rect::new(0, 0, 80, 24)), 0);
+
+        app.set_input_mode(crate::InputMode::Prompt);
+        assert_eq!(prompt_height(&app, Rect::new(0, 0, 80, 24)), PROMPT_HEIGHT);
+
+        app.set_shell_view(ShellView::Workbench);
+        assert_eq!(prompt_height(&app, Rect::new(0, 0, 80, 24)), PROMPT_HEIGHT);
+    }
+
+    #[test]
+    fn activity_prompt_draft_is_visible_at_compact_and_wide_sizes() {
+        for (width, height) in [(40, 12), (120, 36)] {
+            let rows = render_activity_prompt_rows(width, height, "xyzz");
+            let prompt = rows.last().expect("reserved Activity prompt row");
+
+            assert!(prompt.contains("xyzz"), "{width}x{height}: {rows:?}");
+        }
+    }
+
+    #[test]
+    fn operator_question_renders_beside_bottom_input_locus_at_40x12() {
+        let app = app_with_operator_question();
+        assert!(prompt_height(&app, Rect::new(0, 0, 40, 12)) > PROMPT_HEIGHT);
+        let backend = TestBackend::new(40, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+
+        let rows = buffer_rows(terminal.backend().buffer());
+        let waiting_row = rows
+            .iter()
+            .rposition(|row| row.contains("WAITING INPUT"))
+            .expect("question title");
+        let question = rows[waiting_row..].join("\n");
+        assert!(
+            waiting_row >= 6,
+            "question must occupy bottom rows: {rows:?}"
+        );
+        assert!(question.contains("What should Scan inspect?"), "{question}");
+        assert!(question.contains("Changed files"), "{question}");
+        assert!(question.contains("Enter submit"), "{question}");
+    }
+
+    #[test]
+    fn background_question_preserves_the_workbench_composer_draft() {
+        let mut app = app_with_operator_question();
+        app.activity_mut().unwrap().run_focus_backgrounded = true;
+        app.engagement.set_phase(kuzushi_core::WorkflowPhase::Map);
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(crate::WorkbenchPage::Map));
+        app.set_input_mode(crate::InputMode::Prompt);
+        app.set_input("jobs");
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+
+        let rows = buffer_rows(terminal.backend().buffer());
+        let prompt = rows.last().expect("prompt row");
+        assert!(prompt.contains("MAP"), "{rows:?}");
+        assert!(prompt.contains("jobs"), "{rows:?}");
+        assert!(!prompt.contains("WAITING INPUT"), "{rows:?}");
+        assert!(
+            rows.iter().any(|row| row.contains("1 INPUT")),
+            "background attention must remain visible: {rows:?}"
+        );
+    }
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct RenderSectionSlot {

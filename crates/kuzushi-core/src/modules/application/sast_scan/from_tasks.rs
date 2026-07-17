@@ -1,24 +1,52 @@
 use super::*;
 
 impl SastTaskSelection {
-    pub(in crate::modules) fn from_tasks(tasks: Vec<String>) -> Result<Self> {
-        let (
-            native_tasks,
-            run_agentic,
-            run_carlini,
-            run_taint_iris_next,
-            run_systems_hunt,
-        ) = split_agentic_sast_tasks(tasks);
-        let scanners = selected_native_scanners(
+    pub(in crate::modules) fn planned_engine_ids(&self) -> Vec<String> {
+        let mut engines = self
+            .engine_ids
+            .iter()
+            .map(|engine| (*engine).to_string())
+            .collect::<Vec<_>>();
+        for (selected, engine) in [
+            (self.run_agentic, "agentic"),
+            (self.run_carlini, "offense-review"),
+            (self.run_taint_iris_next, "taint-iris-next"),
+            (self.run_systems_hunt, "systems-hunt"),
+        ] {
+            if selected {
+                engines.push(engine.to_string());
+            }
+        }
+        engines.extend(
+            self.skipped_engines
+                .iter()
+                .map(|engine| engine.id.to_string()),
+        );
+        engines
+    }
+
+    pub(in crate::modules) fn from_tasks(
+        tasks: Vec<String>,
+        source: SastTaskSelectionSource,
+    ) -> Result<Self> {
+        let (native_tasks, run_agentic, run_carlini, run_taint_iris_next, run_systems_hunt) =
+            split_agentic_sast_tasks(tasks);
+        let explicit_native_selection =
+            source == SastTaskSelectionSource::Explicit && !native_tasks.is_empty();
+        let native = selected_native_scanners(
             &native_tasks,
             run_agentic || run_carlini || run_taint_iris_next || run_systems_hunt,
+            source,
         )?;
-        let engine_ids = scanners
+        let engine_ids = native
+            .engines
             .iter()
             .map(|scanner| scanner.id())
             .collect::<Vec<_>>();
         Ok(Self {
-            scanners,
+            scanners: native.engines,
+            skipped_engines: native.skipped,
+            explicit_native_selection,
             run_agentic,
             run_carlini,
             run_taint_iris_next,
@@ -35,10 +63,7 @@ impl SastTaskSelection {
     }
 
     pub(in crate::modules) fn has_agentic_task(&self) -> bool {
-        self.run_agentic
-            || self.run_carlini
-            || self.run_taint_iris_next
-            || self.run_systems_hunt
+        self.run_agentic || self.run_carlini || self.run_taint_iris_next || self.run_systems_hunt
     }
 
     pub(in crate::modules) fn run_native(
@@ -46,29 +71,84 @@ impl SastTaskSelection {
         workspace: &crate::workspace::WorkspaceTarget,
         store: &crate::findings::FindingStore,
         options: &ScanRunOptions,
+        ctx: &ToolExecutionContext<'_>,
     ) -> Result<Option<ScanRun>> {
+        self.ensure_explicit_native_prerequisites(workspace)?;
         if self.scanners.is_empty() {
             Ok(None)
         } else {
-            Ok(Some(run_scan_engines_with_options(
-                workspace,
-                store,
-                &self.scanners,
-                options,
-            )?))
+            ctx.with_cancellation(|cancellation| {
+                run_scan_engines_with_options_and_cancellation(
+                    workspace,
+                    store,
+                    &self.scanners,
+                    options,
+                    cancellation,
+                )
+                .map(Some)
+            })
         }
+    }
+
+    fn ensure_explicit_native_prerequisites(
+        &self,
+        workspace: &crate::workspace::WorkspaceTarget,
+    ) -> Result<()> {
+        if self.explicit_native_selection
+            && self.engine_ids.contains(&"cargo-audit")
+            && !workspace.root().join("Cargo.lock").is_file()
+        {
+            anyhow::bail!(
+                "cargo-audit was explicitly requested, but the target has no Cargo.lock. Run `cargo generate-lockfile` in the target, then rerun the scan"
+            );
+        }
+        Ok(())
     }
 }
 
 pub(in crate::modules) fn selected_native_scanners(
     native_tasks: &[String],
     only_agentic_tasks: bool,
-) -> Result<Vec<Box<dyn ScanEngine>>> {
+    source: SastTaskSelectionSource,
+) -> Result<DefaultScanEngineSelection> {
     if native_tasks.is_empty() && only_agentic_tasks {
-        Ok(Vec::new())
-    } else {
-        scan_engines_for_tasks(native_tasks)
+        return Ok(empty_scan_engine_selection());
     }
+    match source {
+        SastTaskSelectionSource::Automatic => Ok(select_default_scan_engines()),
+        SastTaskSelectionSource::FilteredAutomatic => {
+            Ok(filtered_default_scan_engines(native_tasks))
+        }
+        SastTaskSelectionSource::Explicit => explicit_native_scanners(native_tasks),
+    }
+}
+
+fn explicit_native_scanners(native_tasks: &[String]) -> Result<DefaultScanEngineSelection> {
+    if native_tasks.is_empty() {
+        return Ok(empty_scan_engine_selection());
+    }
+    Ok(DefaultScanEngineSelection {
+        engines: scan_engines_for_tasks(native_tasks)?,
+        skipped: Vec::new(),
+    })
+}
+
+fn empty_scan_engine_selection() -> DefaultScanEngineSelection {
+    DefaultScanEngineSelection {
+        engines: Vec::new(),
+        skipped: Vec::new(),
+    }
+}
+
+fn filtered_default_scan_engines(native_tasks: &[String]) -> DefaultScanEngineSelection {
+    let mut selection = select_default_scan_engines();
+    selection
+        .engines
+        .retain(|scanner| native_tasks.iter().any(|task| task == scanner.id()));
+    selection
+        .skipped
+        .retain(|skipped| native_tasks.iter().any(|task| task == skipped.id));
+    selection
 }
 
 pub(in crate::modules) fn fill_agentic_reports(
@@ -100,7 +180,9 @@ fn fill_agentic_sast_report(
 ) -> Result<()> {
     if selected.run_agentic {
         reports.engine_ids.push("agentic");
-        reports.agentic = Some(dispatch.report_from_data("agentic-sast:scan")?);
+        let (report, outcome) = dispatch.report_from_data("agentic-sast:scan")?;
+        reports.engine_outcomes.insert("agentic", outcome);
+        reports.agentic = Some(report);
     }
     Ok(())
 }
@@ -112,7 +194,9 @@ fn fill_offense_review_report(
 ) -> Result<()> {
     if selected.run_carlini {
         reports.engine_ids.push("offense-review");
-        reports.carlini = Some(dispatch.report_from_data("offense-review:threat-hunt")?);
+        let (report, outcome) = dispatch.report_from_data("offense-review:threat-hunt")?;
+        reports.engine_outcomes.insert("offense-review", outcome);
+        reports.carlini = Some(report);
     }
     Ok(())
 }
@@ -124,7 +208,9 @@ fn fill_taint_iris_next_report(
 ) -> Result<()> {
     if selected.run_taint_iris_next {
         reports.engine_ids.push("taint-iris-next");
-        reports.taint_iris_next = Some(dispatch.taint_iris_next_report()?);
+        let (report, outcome) = dispatch.taint_iris_next_report()?;
+        reports.engine_outcomes.insert("taint-iris-next", outcome);
+        reports.taint_iris_next = Some(report);
     }
     Ok(())
 }
@@ -136,7 +222,9 @@ fn fill_systems_hunt_report(
 ) -> Result<()> {
     if selected.run_systems_hunt {
         reports.engine_ids.push("systems-hunt");
-        reports.systems_hunt = Some(dispatch.report_from_data("systems-hunt:systems-hunt")?);
+        let (report, outcome) = dispatch.report_from_data("systems-hunt:systems-hunt")?;
+        reports.engine_outcomes.insert("systems-hunt", outcome);
+        reports.systems_hunt = Some(report);
     }
     Ok(())
 }
@@ -150,7 +238,10 @@ struct SastSubtoolDispatch<'a> {
 }
 
 impl SastSubtoolDispatch<'_> {
-    fn report_from_data<T>(&self, tool_name: &str) -> Result<T>
+    fn report_from_data<T>(
+        &self,
+        tool_name: &str,
+    ) -> Result<(T, crate::run_artifacts::ScanEngineStageOutcome)>
     where
         T: serde::de::DeserializeOwned,
     {
@@ -159,26 +250,147 @@ impl SastSubtoolDispatch<'_> {
             .get("data")
             .cloned()
             .with_context(|| format!("{tool_name} output did not include data"))?;
-        serde_json::from_value(data)
-            .with_context(|| format!("{tool_name} returned invalid report data"))
+        let report = serde_json::from_value(data)
+            .with_context(|| format!("{tool_name} returned invalid report data"))?;
+        Ok((report, scan_engine_outcome(&output)))
     }
 
-    fn taint_iris_next_report(&self) -> Result<TaintIrisNextReport> {
+    fn taint_iris_next_report(
+        &self,
+    ) -> Result<(
+        TaintIrisNextReport,
+        crate::run_artifacts::ScanEngineStageOutcome,
+    )> {
         let tool_name = "taint-iris-next:hunt";
         let output = self.run(tool_name, &taint_iris_next_hunt_input(self.input))?;
-        taint_iris_next_report_from_tool_output(&output)
+        let outcome = scan_engine_outcome(&output);
+        Ok((taint_iris_next_report_from_tool_output(&output)?, outcome))
     }
 
     fn run(&self, tool_name: &str, input: &Value) -> Result<Value> {
         let input = descriptor_filtered_input(self.registry, tool_name, input)?;
-        run_sast_subtool(
+        let output = dispatch_scan_engine_with_run(
             self.registry,
             tool_name,
             input,
             self.ctx,
             self.runtime,
             self.option_store,
-        )
+        )?;
+        validate_sast_scan_engine_result(tool_name, &output)?;
+        Ok(output)
+    }
+}
+
+fn dispatch_scan_engine_with_run(
+    registry: &ModuleRegistry,
+    tool_name: &str,
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    option_store: &crate::options::ToolOptionStore,
+) -> Result<Value> {
+    let workspace = ctx
+        .workspace
+        .context("sast:scan child engine requires an active workspace")?;
+    let run_id = crate::run_artifacts::new_run_id("scan-engine");
+    let record =
+        crate::run_artifacts::ToolRunRecord::new(workspace.root(), &run_id, "tool", tool_name);
+    start_scan_engine_run(registry, record, &input, ctx)?;
+    let observation = start_scan_engine_observation(workspace.root(), &run_id, tool_name)?;
+    let trace = observation.trace_handle();
+    let child_ctx = ToolExecutionContext {
+        config: ctx.config,
+        workspace: ctx.workspace,
+        findings_store: ctx.findings_store,
+        trace: Some(&trace),
+        cancellation: ctx.cancellation,
+        authorization: ctx.authorization.clone(),
+    };
+    let prepared = registry
+        .prepare_dispatch_input(tool_name, input, &child_ctx, Some(option_store))?
+        .authorize_delegated(&child_ctx.authorization);
+    let dispatched =
+        registry.dispatch_prepared_input_observed_with_runtime(prepared, &child_ctx, runtime)?;
+    finish_scan_engine_run(record, dispatched, &observation)
+}
+
+fn start_scan_engine_observation(
+    target: &std::path::Path,
+    run_id: &str,
+    tool_name: &str,
+) -> Result<crate::run_lifecycle::RunObservationHandle> {
+    let observation = crate::run_lifecycle::RunObservationHandle::jsonl(target, run_id)?
+        .start_root_task(format!("Scan with {tool_name}"))?;
+    observation
+        .task_handle()
+        .context("scan engine dispatch lacks its semantic task")?
+        .update_and_flush(crate::run_lifecycle::RunItemStatus::Running, None)?;
+    Ok(observation)
+}
+
+fn start_scan_engine_run(
+    registry: &ModuleRegistry,
+    record: crate::run_artifacts::ToolRunRecord<'_>,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<()> {
+    let model = registry
+        .tool_needs_runtime(record.tool, input)
+        .then(|| ctx.config.model.clone())
+        .flatten();
+    crate::run_artifacts::try_record_tool_run_started_with_reproducibility(
+        record,
+        input,
+        model,
+        crate::config::config_hash(ctx.config).ok(),
+        registry.loaded_module_specifiers(),
+    )
+}
+
+fn finish_scan_engine_run(
+    record: crate::run_artifacts::ToolRunRecord<'_>,
+    dispatched: crate::modules::ObservedDispatchOutcome,
+    observation: &crate::run_lifecycle::RunObservationHandle,
+) -> Result<Value> {
+    match dispatched.execution {
+        Ok(output) => {
+            crate::run_artifacts::try_record_tool_run_complete_settled(
+                record,
+                &output,
+                observation,
+                dispatched.completion,
+            )?;
+            Ok(output)
+        }
+        Err(error) => match crate::run_artifacts::try_record_tool_run_failed_settled(
+            record,
+            &error.to_string(),
+            observation,
+            dispatched.completion,
+        ) {
+            Ok(()) => Err(error),
+            Err(persistence) => Err(anyhow::anyhow!(
+                "{error:#}; additionally, child run persistence failed: {persistence:#}"
+            )),
+        },
+    }
+}
+
+fn validate_sast_scan_engine_result(name: &str, output: &Value) -> Result<()> {
+    if crate::tool_result_status(output) != crate::ToolResultStatus::Failed {
+        return Ok(());
+    }
+    validate_sast_subtool_result(name, output)
+}
+
+fn scan_engine_outcome(output: &Value) -> crate::run_artifacts::ScanEngineStageOutcome {
+    use crate::run_artifacts::ScanEngineStageOutcome;
+    match crate::tool_result_status(output) {
+        crate::ToolResultStatus::Completed => ScanEngineStageOutcome::Complete,
+        crate::ToolResultStatus::Partial => ScanEngineStageOutcome::Partial,
+        crate::ToolResultStatus::Skipped => ScanEngineStageOutcome::Skipped,
+        crate::ToolResultStatus::Failed => ScanEngineStageOutcome::Failed,
     }
 }
 
@@ -217,6 +429,13 @@ fn taint_iris_next_report_from_tool_output(output: &Value) -> Result<TaintIrisNe
         .context("taint-iris-next:hunt data.persisted was invalid")?;
     let selected_cwes = selected_cwes_from_taint_iris_next_data(&data);
     let count = taint_iris_next_count(&data, &findings, &review_candidates);
+    let exact_cost = output.get("costUsd").and_then(Value::as_f64);
+    let observed_cost = output
+        .get("observedCostUsd")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let cost_usd = exact_cost.unwrap_or(observed_cost);
+    crate::runtime::RuntimeCost::from_usd(cost_usd, "taint-iris-next subtool cost")?;
     Ok(TaintIrisNextReport {
         target: taint_iris_next_string(&data, "target", ""),
         status: taint_iris_next_string(&data, "status", ""),
@@ -226,7 +445,8 @@ fn taint_iris_next_report_from_tool_output(output: &Value) -> Result<TaintIrisNe
         review_candidates,
         selected_cwes,
         persisted,
-        cost_usd: output.get("costUsd").and_then(Value::as_f64).unwrap_or(0.0),
+        cost_usd,
+        cost_usd_exact: exact_cost.is_some(),
         ok: output.get("ok").and_then(Value::as_bool).unwrap_or(true),
         output: taint_iris_next_string(output, "output", ""),
         data,
@@ -273,4 +493,94 @@ fn findings_count_excluding_review_candidates(
     review_candidates: &[crate::findings::Finding],
 ) -> usize {
     findings.len().saturating_sub(review_candidates.len())
+}
+
+#[cfg(test)]
+mod canonical_report_cost_tests {
+    use super::*;
+
+    #[test]
+    fn normalized_incomplete_subtool_reports_rehydrate_observed_cost() {
+        let agentic: AgenticSastReport = serde_json::from_value(json!({
+            "target": "/repo",
+            "count": 0,
+            "findings": [],
+            "observedCostUsd": 0.125,
+            "costUsdExact": false
+        }))
+        .unwrap();
+        let carlini: CarliniThreatHuntReport = serde_json::from_value(json!({
+            "target": "/repo",
+            "count": 0,
+            "actors": 1,
+            "actorRuns": 1,
+            "promptInventoryFiles": 0,
+            "threatFocusedPromptFiles": 0,
+            "findings": [],
+            "observedCostUsd": 0.125,
+            "costUsdExact": false
+        }))
+        .unwrap();
+        let systems: SystemsHuntReport = serde_json::from_value(json!({
+            "target": "/repo",
+            "count": 0,
+            "findings": [],
+            "artifacts": [],
+            "observedCostUsd": 0.125,
+            "costUsdExact": false
+        }))
+        .unwrap();
+
+        for (observed, exact) in [
+            (agentic.cost_usd, agentic.cost_usd_exact),
+            (carlini.cost_usd, carlini.cost_usd_exact),
+            (systems.cost_usd, systems.cost_usd_exact),
+        ] {
+            assert_eq!(observed, 0.125);
+            assert!(!exact);
+        }
+    }
+
+    #[test]
+    fn legacy_exact_subtool_report_defaults_cost_exactness_to_true() {
+        let report: AgenticSastReport = serde_json::from_value(json!({
+            "target": "/repo",
+            "count": 0,
+            "findings": [],
+            "costUsd": 0.25
+        }))
+        .unwrap();
+
+        assert_eq!(report.cost_usd, 0.25);
+        assert!(report.cost_usd_exact);
+        assert!(serde_json::to_value(report)
+            .unwrap()
+            .get("costUsdExact")
+            .is_none());
+    }
+
+    #[test]
+    fn usable_partial_scan_engine_retains_its_partial_status() {
+        let output = json!({"ok": true, "status": "partial", "data": {}});
+
+        validate_sast_scan_engine_result("agentic-sast:scan", &output).unwrap();
+
+        assert_eq!(
+            scan_engine_outcome(&output),
+            crate::run_artifacts::ScanEngineStageOutcome::Partial
+        );
+    }
+
+    #[test]
+    fn failed_scan_engine_aborts_the_composite_report() {
+        let output = json!({
+            "ok": false,
+            "status": "failed",
+            "errors": ["runtime disconnected"]
+        });
+
+        let error = validate_sast_scan_engine_result("agentic-sast:scan", &output).unwrap_err();
+
+        assert!(error.to_string().contains("runtime disconnected"));
+    }
 }

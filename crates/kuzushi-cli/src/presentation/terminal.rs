@@ -12,12 +12,12 @@ pub(crate) fn should_emit_shell_startup_progress(plain: bool) -> bool {
 }
 
 pub(crate) fn shell_startup_progress_messages(target: Option<&Path>) -> Vec<String> {
-    let target_label = target
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "none".to_string());
-    let scan_command = if target.is_some() { "scan" } else { "scan ." };
+    let destination = target.map_or_else(
+        || "kuzushi: choose a target in the picker; press d for the offline demo".to_string(),
+        |path| format!("kuzushi: target {}; opening operator shell", path.display()),
+    );
     vec![
         "kuzushi: loading config and native registry...".to_string(),
-        format!("kuzushi: target {target_label}; first finding: {scan_command}, then findings"),
+        destination,
     ]
 }

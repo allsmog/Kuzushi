@@ -40,18 +40,10 @@ pub(crate) struct ClangMcpClient {
 }
 
 impl ClangMcpClient {
-    /// Spawn `kuzushi-mcp-clang` with the given working directory and
-    /// the path to its compile_commands.json exported as an env var
-    /// (the server reads `KUZUSHI_COMPILE_COMMANDS_PATH` if set,
-    /// otherwise discovers it via clangd's own search).
-    pub(crate) fn spawn(repo_root: &Path, compile_commands_path: &Path) -> Result<Self> {
+    /// Spawn `kuzushi-mcp-clang` with an explicit, canonical read capability.
+    pub(crate) fn spawn(repo_root: &Path, _compile_commands_path: &Path) -> Result<Self> {
         let binary = locate_mcp_clang_binary()?;
-        let mut child = Command::new(&binary)
-            .current_dir(repo_root)
-            .env(
-                "KUZUSHI_COMPILE_COMMANDS_PATH",
-                compile_commands_path.display().to_string(),
-            )
+        let mut child = mcp_clang_command(&binary, repo_root)?
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -183,6 +175,34 @@ impl ClangMcpClient {
             }
         }
     }
+}
+
+fn mcp_clang_command(binary: &Path, repo_root: &Path) -> Result<Command> {
+    let canonical_root = std::fs::canonicalize(repo_root).with_context(|| {
+        format!(
+            "uaf-hunt: could not canonicalize mcp-clang read root {}",
+            repo_root.display()
+        )
+    })?;
+    anyhow::ensure!(
+        canonical_root.is_dir(),
+        "uaf-hunt: mcp-clang read root is not a directory: {}",
+        canonical_root.display()
+    );
+    let read_roots = serde_json::to_string(&[&canonical_root])
+        .context("uaf-hunt: encode mcp-clang read capability")?;
+    let path = std::env::var_os("PATH").context("uaf-hunt: PATH is required to locate clangd")?;
+    let mut command = Command::new(binary);
+    command
+        .current_dir(&canonical_root)
+        .env_clear()
+        .env("PATH", path)
+        .env(kuzushi_mcp_common::MCP_READ_ROOTS_ENV, read_roots);
+    #[cfg(windows)]
+    if let Some(system_root) = std::env::var_os("SystemRoot") {
+        command.env("SystemRoot", system_root);
+    }
+    Ok(command)
 }
 
 impl Drop for ClangMcpClient {
@@ -343,5 +363,42 @@ mod tests {
         std::env::set_var("PATH", temp.path());
         assert_eq!(which_kuzushi_mcp_clang(), Some(binary));
         restore_env("PATH", previous);
+    }
+
+    #[test]
+    fn mcp_clang_command_grants_only_the_canonical_target_read_root() {
+        let root = tempfile::tempdir().unwrap();
+        let command = mcp_clang_command(Path::new("/bin/true"), root.path()).unwrap();
+        let expected_root = std::fs::canonicalize(root.path()).unwrap();
+        let env = command
+            .get_envs()
+            .map(|(name, value)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        assert_eq!(command.get_current_dir(), Some(expected_root.as_path()));
+        assert_eq!(
+            env.get(kuzushi_mcp_common::MCP_READ_ROOTS_ENV),
+            Some(&Some(serde_json::to_string(&[expected_root]).unwrap()))
+        );
+        assert!(env.contains_key("PATH"));
+        assert!(!env.contains_key("KUZUSHI_MCP_WRITE_ROOTS"));
+        assert!(!env.contains_key("KUZUSHI_COMPILE_COMMANDS_PATH"));
+        #[cfg(not(windows))]
+        assert_eq!(env.len(), 2);
+    }
+
+    #[test]
+    fn mcp_clang_command_fails_closed_for_a_missing_read_root() {
+        let root = tempfile::tempdir().unwrap();
+        let missing = root.path().join("missing");
+
+        let error = mcp_clang_command(Path::new("/bin/true"), &missing).unwrap_err();
+
+        assert!(error.to_string().contains("could not canonicalize"));
     }
 }

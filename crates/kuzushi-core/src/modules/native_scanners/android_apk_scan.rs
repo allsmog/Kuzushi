@@ -10,7 +10,11 @@ pub(in crate::modules) fn run_android_apk_scan(
     let target = resolve_tool_target(&input, ctx)?;
     let started = Instant::now();
     emit_android_scan_start(ctx, &target);
-    let plan = match ScanPlan::from_input(&input, &target) {
+    let primary_run_id = ctx
+        .run_id()
+        .or_else(|| string_input_any(&input, &["runId", "run_id"]))
+        .unwrap_or_else(|| crate::run_artifacts::new_run_id("scan"));
+    let plan = match ScanPlan::from_input(&input, &target, primary_run_id) {
         Ok(plan) => plan,
         Err(error) => return Ok(failed_tool_output("android-apk:scan", &target, error)),
     };
@@ -18,13 +22,18 @@ pub(in crate::modules) fn run_android_apk_scan(
     if !stage_ok(&prepare_outcome) {
         return Ok(early_exit_output(
             &target,
+            &plan.primary_run_id,
             "prepare",
             prepare_outcome,
             started,
         ));
     }
     let stage_results = run_scan_stages(&plan, ctx);
-    emit_android_scan_done(ctx, stage_results.len() + 1);
+    let failed_stages = stage_results
+        .iter()
+        .filter(|stage| !stage_ok(stage))
+        .count();
+    emit_android_scan_done(ctx, stage_results.len() + 1, failed_stages);
     Ok(scan_pipeline_output(
         &plan,
         prepare_outcome,
@@ -35,6 +44,7 @@ pub(in crate::modules) fn run_android_apk_scan(
 
 #[derive(Debug)]
 struct ScanPlan {
+    primary_run_id: String,
     apk_input: Value,
     workspace_input: Value,
     skip_native: bool,
@@ -43,7 +53,7 @@ struct ScanPlan {
 }
 
 impl ScanPlan {
-    fn from_input(input: &Value, target: &Path) -> Result<Self> {
+    fn from_input(input: &Value, target: &Path, primary_run_id: String) -> Result<Self> {
         let apk = input
             .get("apk")
             .or_else(|| input.get("apkPath"))
@@ -65,12 +75,20 @@ impl ScanPlan {
         });
         let workspace_input = json!({"target": target.display().to_string()});
         Ok(Self {
+            primary_run_id,
             apk_input,
             workspace_input,
             skip_native: read_skip_flag(input, "skipNative"),
             skip_code: read_skip_flag(input, "skipCode") || read_skip_flag(input, "skipWebview"),
             skip_hybrid: read_skip_flag(input, "skipHybrid"),
         })
+    }
+
+    fn skipped_stage_count(&self) -> usize {
+        [self.skip_code, self.skip_native, self.skip_hybrid]
+            .into_iter()
+            .filter(|skipped| *skipped)
+            .count()
     }
 }
 
@@ -186,12 +204,21 @@ fn emit_android_scan_start(ctx: &ToolExecutionContext<'_>, target: &Path) {
     );
 }
 
-fn emit_android_scan_done(ctx: &ToolExecutionContext<'_>, stage_count: usize) {
+fn emit_android_scan_done(
+    ctx: &ToolExecutionContext<'_>,
+    stage_count: usize,
+    failed_stages: usize,
+) {
+    let outcome = if failed_stages == 0 {
+        "complete".to_string()
+    } else {
+        format!("partial · {failed_stages} failed")
+    };
     emit_step(
         ctx,
-        "done",
+        if failed_stages == 0 { "done" } else { "warn" },
         "scan",
-        &format!("android-apk:scan complete · {stage_count} stages"),
+        &format!("android-apk:scan {outcome} · {stage_count} stages"),
     );
 }
 
@@ -202,36 +229,110 @@ fn scan_pipeline_output(
     started: Instant,
 ) -> Value {
     let all_stages: Vec<StageOutcome> = std::iter::once(prepare).chain(scans).collect();
+    let projection = project_pipeline_output(plan, &all_stages, started);
+    pipeline_output_json(plan, all_stages.len(), projection)
+}
+
+struct PipelineOutputProjection {
+    stages: Vec<Value>,
+    warnings: Vec<Value>,
+    errors: Vec<Value>,
+    run_ids: Vec<String>,
+    findings: usize,
+    failures: usize,
+    skipped: usize,
+    summary: String,
+}
+
+fn project_pipeline_output(
+    plan: &ScanPlan,
+    all_stages: &[StageOutcome],
+    started: Instant,
+) -> PipelineOutputProjection {
     let totals = aggregate_totals(&all_stages);
+    let run_ids = pipeline_run_ids(&all_stages);
     let stages_value: Vec<Value> = all_stages.iter().map(stage_to_json).collect();
     let warnings: Vec<Value> = all_stages
         .iter()
         .filter(|stage| !stage_ok(stage))
         .map(stage_warning)
         .collect();
+    let errors = all_stages
+        .iter()
+        .filter(|stage| !stage_ok(stage))
+        .flat_map(stage_error_messages)
+        .map(Value::String)
+        .collect();
+    let skipped = plan.skipped_stage_count();
     let summary = format!(
-        "android-apk:scan: {} stages, {} findings, {} skipped, {}ms",
+        "android-apk:scan: {} stages, {} findings, {} failed, {} skipped, {}ms",
         stages_value.len(),
         totals.findings,
-        warnings.len(),
+        totals.failures,
+        skipped,
         started.elapsed().as_millis()
     );
+    PipelineOutputProjection {
+        stages: stages_value,
+        warnings,
+        errors,
+        run_ids,
+        findings: totals.findings,
+        failures: totals.failures,
+        skipped,
+        summary,
+    }
+}
+
+fn pipeline_output_json(
+    plan: &ScanPlan,
+    stage_count: usize,
+    output: PipelineOutputProjection,
+) -> Value {
+    let status = if output.failures == 0 {
+        "completed"
+    } else {
+        "partial"
+    };
     json!({
         "ok": true,
-        "summary": summary,
-        "output": summary,
+        "status": status,
+        "summary": output.summary,
+        "output": output.summary,
         "data": {
+            "runId": plan.primary_run_id,
+            "runIds": output.run_ids,
             "apk": plan.apk_input.get("apk"),
-            "stages": stages_value,
+            "stages": output.stages,
             "totals": {
-                "stagesRun": all_stages.len(),
-                "skipped": warnings.len(),
-                "findings": totals.findings,
+                "stagesRun": stage_count,
+                "failed": output.failures,
+                "skipped": output.skipped,
+                "findings": output.findings,
             },
         },
-        "warnings": warnings,
-        "errors": [],
+        "warnings": output.warnings,
+        "errors": output.errors,
     })
+}
+
+fn stage_error_messages(stage: &StageOutcome) -> Vec<String> {
+    let messages = stage
+        .value
+        .get("errors")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|message| !message.is_empty())
+        .map(|message| format!("{}: {message}", stage.name))
+        .collect::<Vec<_>>();
+    if messages.is_empty() {
+        vec![format!("{} did not produce results", stage.name)]
+    } else {
+        messages
+    }
 }
 
 fn stage_warning(stage: &StageOutcome) -> Value {
@@ -250,6 +351,7 @@ fn stage_warning(stage: &StageOutcome) -> Value {
 
 fn early_exit_output(
     target: &Path,
+    run_id: &str,
     failed_stage: &str,
     prepare: StageOutcome,
     started: Instant,
@@ -262,12 +364,15 @@ fn early_exit_output(
     let _ = target;
     json!({
         "ok": false,
+        "status": "failed",
         "summary": format!(
             "android-apk:scan aborted at {failed_stage} ({}ms)",
             started.elapsed().as_millis()
         ),
         "output": format!("android-apk:scan aborted at {failed_stage}"),
         "data": {
+            "runId": run_id,
+            "runIds": [],
             "stages": [stage_to_json(&prepare)],
             "failedStage": failed_stage,
         },
@@ -301,8 +406,46 @@ fn stage_to_json(stage: &StageOutcome) -> Value {
         "summary": stage.value.get("summary").cloned().unwrap_or(Value::Null),
         "findings": stage_findings.len(),
         "findingItems": stage_findings,
+        "runIds": stage_run_ids(stage),
         "errors": stage.value.get("errors").cloned().unwrap_or(json!([])),
     })
+}
+
+fn pipeline_run_ids(stages: &[StageOutcome]) -> Vec<String> {
+    let mut run_ids = std::collections::BTreeSet::new();
+    for stage in stages {
+        run_ids.extend(stage_run_ids(stage));
+    }
+    run_ids.into_iter().collect()
+}
+
+fn stage_run_ids(stage: &StageOutcome) -> Vec<String> {
+    let mut run_ids = std::collections::BTreeSet::new();
+    for pointer in ["/data/runId", "/data/persisted/runId", "/data/runIds"] {
+        if let Some(value) = stage.value.pointer(pointer) {
+            collect_run_id_values(value, &mut run_ids);
+        }
+    }
+    run_ids.into_iter().collect()
+}
+
+fn collect_run_id_values(value: &Value, run_ids: &mut std::collections::BTreeSet<String>) {
+    match value {
+        Value::String(run_id) if !run_id.trim().is_empty() => {
+            run_ids.insert(run_id.trim().to_string());
+        }
+        Value::Array(values) => {
+            for value in values {
+                collect_run_id_values(value, run_ids);
+            }
+        }
+        Value::Object(values) => {
+            for value in values.values() {
+                collect_run_id_values(value, run_ids);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn stage_findings_array(value: &Value) -> Vec<Value> {
@@ -355,9 +498,68 @@ mod tests {
     }
 
     #[test]
+    fn failed_child_stage_makes_pipeline_partial_not_completed() {
+        let plan = ScanPlan::from_input(
+            &json!({"apk": "./app.apk", "skipNative": true}),
+            Path::new("/tmp/ws"),
+            "scan-apk".to_string(),
+        )
+        .unwrap();
+        let output = scan_pipeline_output(
+            &plan,
+            stage("prepare", true, 0),
+            vec![
+                stage("manifest-scan", true, 2),
+                stage("code-scan", false, 0),
+            ],
+            Instant::now(),
+        );
+
+        assert_eq!(output["ok"], true);
+        assert_eq!(output["status"], "partial");
+        assert_eq!(output["data"]["totals"]["failed"], 1);
+        assert_eq!(output["data"]["totals"]["skipped"], 1);
+        assert!(output["errors"][0]
+            .as_str()
+            .unwrap()
+            .contains("code-scan: boom"));
+        assert_eq!(
+            crate::module_result::tool_result_status(&output),
+            crate::module_result::ToolResultStatus::Partial
+        );
+    }
+
+    #[test]
+    fn intentional_skips_do_not_count_as_failures() {
+        let plan = ScanPlan::from_input(
+            &json!({
+                "apk": "./app.apk",
+                "skipNative": true,
+                "skipCode": true,
+                "skipHybrid": true,
+            }),
+            Path::new("/tmp/ws"),
+            "scan-apk".to_string(),
+        )
+        .unwrap();
+        let output = scan_pipeline_output(
+            &plan,
+            stage("prepare", true, 0),
+            vec![stage("manifest-scan", true, 1)],
+            Instant::now(),
+        );
+
+        assert_eq!(output["status"], "completed");
+        assert_eq!(output["data"]["totals"]["failed"], 0);
+        assert_eq!(output["data"]["totals"]["skipped"], 3);
+        assert!(output["errors"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
     fn plan_rejects_missing_apk() {
         let target = std::path::PathBuf::from("/tmp/ws");
-        let error = ScanPlan::from_input(&json!({}), &target).expect_err("missing apk rejected");
+        let error = ScanPlan::from_input(&json!({}), &target, "scan-apk".to_string())
+            .expect_err("missing apk rejected");
         assert!(error.to_string().contains("requires 'apk'"));
     }
 
@@ -370,7 +572,7 @@ mod tests {
             "skipNative": true,
             "skipCode": true,
         });
-        let plan = ScanPlan::from_input(&input, &target).unwrap();
+        let plan = ScanPlan::from_input(&input, &target, "scan-apk".to_string()).unwrap();
         assert_eq!(
             plan.apk_input.get("apk"),
             Some(&Value::String("./app.apk".into()))
@@ -388,7 +590,7 @@ mod tests {
     fn plan_skip_webview_alias_still_works() {
         let target = std::path::PathBuf::from("/tmp/ws");
         let input = json!({"apk": "./app.apk", "skipWebview": true});
-        let plan = ScanPlan::from_input(&input, &target).unwrap();
+        let plan = ScanPlan::from_input(&input, &target, "scan-apk".to_string()).unwrap();
         assert!(plan.skip_code);
     }
 }

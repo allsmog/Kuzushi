@@ -13,7 +13,24 @@ impl ShellApp {
         changed |= self.advance_spinner(now);
         changed |= self.advance_liveness_clock(now);
         changed |= self.advance_scene(now);
+        changed |= self.reload_operator_keymap(now);
         changed
+    }
+
+    fn reload_operator_keymap(&mut self, now: Instant) -> bool {
+        let Some(result) = self.ui_mut().poll_runtime_keymap(now) else {
+            return false;
+        };
+        match result {
+            Ok(bindings) => {
+                self.config_mut().operator.keybindings = bindings;
+                self.set_info_notice("keymap", "operator keybindings reloaded");
+            }
+            Err(error) => {
+                self.set_error_notice("keymap", format!("operator keybindings unchanged: {error}"))
+            }
+        }
+        true
     }
 
     /// True while the security-viz gallery is on the animated 3D attack-surface
@@ -62,6 +79,9 @@ impl ShellApp {
         let Some(since) = kind.since(self) else {
             return false;
         };
+        if kind.persists(self) {
+            return false;
+        }
         if now.duration_since(since) <= kind.stale_after() {
             return false;
         }
@@ -101,7 +121,8 @@ impl ShellApp {
         let scan_running = self.scan().is_some_and(|scan| scan.running);
         let tool_running = self.tool_is_running();
         let agent_running = self.agent_chat().is_some_and(|agent| agent.running);
-        scan_running
+        self.jobs().has_running_job()
+            || scan_running
             || tool_running
             || agent_running
             || self.planner_running()
@@ -144,6 +165,10 @@ impl ShellApp {
         self.set_notice(NoticeSeverity::Warn, source, message);
     }
 
+    pub fn set_info_notice(&mut self, source: impl Into<String>, message: impl Into<String>) {
+        self.set_notice(NoticeSeverity::Info, source, message);
+    }
+
     /// Surface a transient completion banner (green) and keep the transcript
     /// record — how background work announces itself when the operator is
     /// on another view.
@@ -161,7 +186,9 @@ impl ShellApp {
         let message = message.into();
         let prefix = match severity {
             NoticeSeverity::Error => "error",
-            NoticeSeverity::Warn | NoticeSeverity::Success => source.as_str(),
+            NoticeSeverity::Warn | NoticeSeverity::Info | NoticeSeverity::Success => {
+                source.as_str()
+            }
         };
         self.log(prefix, message.clone());
         self.advisory_mut().notice = Some(Notice {
@@ -181,7 +208,91 @@ impl ShellApp {
     }
 
     pub fn record_cost(&mut self, cost_usd: f64) {
-        self.session_mut().record_cost(cost_usd);
+        if let Err(error) = self.session_mut().record_cost(cost_usd) {
+            self.report_cost_accounting_error(error);
+            return;
+        }
+        self.maybe_trigger_budget_halt();
+    }
+
+    pub(crate) fn record_cost_report(&mut self, cost: kuzushi_core::runtime::RuntimeCostReport) {
+        if let Err(error) = self.session_mut().record_cost_report(cost) {
+            self.report_cost_accounting_error(error);
+            return;
+        }
+        self.maybe_trigger_budget_halt();
+    }
+
+    pub(crate) fn begin_run_cost_tracking(&mut self, run_id: &str, runtime_backed: bool) {
+        self.session_mut()
+            .begin_run_cost_tracking(run_id, runtime_backed);
+    }
+
+    pub(crate) fn observe_run_cost_report(
+        &mut self,
+        run_id: &str,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+    ) {
+        if let Err(error) = self.session_mut().observe_run_cost_report(run_id, cost) {
+            self.report_cost_accounting_error(error);
+            return;
+        }
+        self.maybe_trigger_budget_halt();
+    }
+
+    pub(crate) fn settle_run_cost_report(
+        &mut self,
+        run_id: &str,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+    ) {
+        let report = match self.session_mut().settle_run_cost_report(run_id, cost) {
+            Ok(report) => report,
+            Err(error) => {
+                self.report_cost_accounting_error(error);
+                return;
+            }
+        };
+        if let Some(activity) = self
+            .activity_mut()
+            .filter(|activity| activity.run_id == run_id)
+        {
+            activity.settle_runtime_cost(report);
+        }
+        self.maybe_trigger_budget_halt();
+    }
+
+    pub(crate) fn settle_active_run_cost_report(
+        &mut self,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+    ) {
+        let run_id = self.activity().map(|activity| activity.run_id.clone());
+        if let Some(run_id) = run_id {
+            self.begin_run_cost_tracking(&run_id, true);
+            self.settle_run_cost_report(&run_id, cost);
+        } else {
+            self.record_cost_report(cost);
+        }
+    }
+
+    pub(crate) fn mark_run_cost_incomplete(&mut self, run_id: &str) {
+        if let Err(error) = self.session_mut().mark_run_cost_incomplete(run_id) {
+            self.report_cost_accounting_error(error);
+            return;
+        }
+        if let Some(activity) = self
+            .activity_mut()
+            .filter(|activity| activity.run_id == run_id)
+        {
+            activity.mark_runtime_cost_incomplete();
+        }
+        self.maybe_trigger_budget_halt();
+    }
+
+    pub(crate) fn report_cost_accounting_error(&mut self, error: impl std::fmt::Display) {
+        let message = format!("runtime cost accounting failed closed: {error}");
+        self.session_mut()
+            .mark_cost_accounting_error(message.clone());
+        self.set_error_notice("cost", message);
         self.maybe_trigger_budget_halt();
     }
 }
@@ -207,6 +318,16 @@ impl AdvisoryKind {
             AdvisoryKind::Throttle => THROTTLE_STALE_AFTER,
             AdvisoryKind::Notice => NOTICE_STALE_AFTER,
         }
+    }
+
+    fn persists(self, app: &ShellApp) -> bool {
+        matches!(self, AdvisoryKind::Notice)
+            && app
+                .advisory()
+                .notice
+                .as_ref()
+                .is_some_and(|notice| notice.source == "session")
+            && app.session_persistence_is_degraded()
     }
 
     fn clear(self, app: &mut ShellApp) {

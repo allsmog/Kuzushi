@@ -54,38 +54,103 @@ pub fn rank_static_findings_with_threats(
     evidence_store: Option<&StaticEvidenceStore>,
     threat_model: Option<&Value>,
 ) -> Result<Vec<StaticRankedFinding>> {
+    rank_static_findings_internal(
+        findings,
+        attack_surface,
+        evidence_store,
+        threat_model,
+        false,
+    )
+    .map(|(ranked, _)| ranked)
+}
+
+pub(crate) fn rank_static_findings_with_threats_degraded(
+    findings: &[Finding],
+    attack_surface: Option<&AttackSurfaceMap>,
+    evidence_store: Option<&StaticEvidenceStore>,
+    threat_model: Option<&Value>,
+) -> Result<(Vec<StaticRankedFinding>, Vec<String>)> {
+    rank_static_findings_internal(findings, attack_surface, evidence_store, threat_model, true)
+}
+
+fn rank_static_findings_internal(
+    findings: &[Finding],
+    attack_surface: Option<&AttackSurfaceMap>,
+    evidence_store: Option<&StaticEvidenceStore>,
+    threat_model: Option<&Value>,
+    tolerate_evidence_errors: bool,
+) -> Result<(Vec<StaticRankedFinding>, Vec<String>)> {
     let mut ranked = Vec::new();
+    let mut warnings = Vec::new();
     for finding in findings {
-        let evidence_nodes = match evidence_store {
-            Some(store) => store.list_nodes_for_finding(&finding.fingerprint)?,
-            None => Vec::new(),
-        };
-        ranked.push(StaticRankedFinding {
-            rank: 0,
-            fingerprint: finding.fingerprint.clone(),
-            rule_id: finding.rule_id.clone(),
-            title: finding.title.clone(),
-            tool: finding.tool.clone(),
-            file_path: finding.file_path.clone(),
-            start_line: finding.start_line,
-            severity: finding.severity.as_str().to_string(),
-            static_proof_state: finding
-                .static_proof_state
-                .map(|state| state.as_str().to_string()),
-            impact: score_static_finding_with_threats(
-                finding,
-                attack_surface,
-                &evidence_nodes,
-                threat_model,
-            ),
-        });
+        let evidence_nodes = evidence_nodes_for_ranking(
+            evidence_store,
+            finding,
+            tolerate_evidence_errors,
+            &mut warnings,
+        )?;
+        ranked.push(project_ranked_finding(
+            finding,
+            attack_surface,
+            threat_model,
+            &evidence_nodes,
+        ));
     }
 
     ranked.sort_by(compare_ranked_findings);
     for (index, finding) in ranked.iter_mut().enumerate() {
         finding.rank = index + 1;
     }
-    Ok(ranked)
+    Ok((ranked, warnings))
+}
+
+fn project_ranked_finding(
+    finding: &Finding,
+    attack_surface: Option<&AttackSurfaceMap>,
+    threat_model: Option<&Value>,
+    evidence_nodes: &[StaticEvidenceNode],
+) -> StaticRankedFinding {
+    StaticRankedFinding {
+        rank: 0,
+        fingerprint: finding.fingerprint.clone(),
+        rule_id: finding.rule_id.clone(),
+        title: finding.title.clone(),
+        tool: finding.tool.clone(),
+        file_path: finding.file_path.clone(),
+        start_line: finding.start_line,
+        severity: finding.severity.as_str().to_string(),
+        static_proof_state: finding
+            .static_proof_state
+            .map(|state| state.as_str().to_string()),
+        impact: score_static_finding_with_threats(
+            finding,
+            attack_surface,
+            evidence_nodes,
+            threat_model,
+        ),
+    }
+}
+
+fn evidence_nodes_for_ranking(
+    evidence_store: Option<&StaticEvidenceStore>,
+    finding: &Finding,
+    tolerate_errors: bool,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<StaticEvidenceNode>> {
+    let Some(store) = evidence_store else {
+        return Ok(Vec::new());
+    };
+    match store.list_nodes_for_finding(&finding.fingerprint) {
+        Ok(nodes) => Ok(nodes),
+        Err(error) if tolerate_errors => {
+            warnings.push(format!(
+                "static evidence unavailable for {}: {error:#}",
+                finding.fingerprint
+            ));
+            Ok(Vec::new())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub fn score_static_finding(

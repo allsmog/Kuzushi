@@ -47,7 +47,9 @@ impl EffectRuntime {
                 | ShellEffect::FireNextApprovedStrategy(_)
                 | ShellEffect::OpenFinding(_)
                 | ShellEffect::OpenGuidedScan(_)
+                | ShellEffect::RecordScanRun(_)
                 | ShellEffect::RecordReviewDecision(_)
+                | ShellEffect::RecordProofDeferral(_)
                 | ShellEffect::RecordSuppression(_)
                 | ShellEffect::RecordStrategyCorrection(_)
                 | ShellEffect::SelectComponent(_)
@@ -79,6 +81,7 @@ impl EffectRuntime {
             }
             ShellEffect::OpenFinding(open) => app.resolve_open_finding_effect(open),
             ShellEffect::OpenGuidedScan(open) => app.open_guided_scan(open.target),
+            ShellEffect::RecordScanRun(record) => app.record_scan_run_effect(record),
             remaining => Self::execute_remaining_chained_effect(app, remaining),
         }
     }
@@ -92,6 +95,7 @@ impl EffectRuntime {
                 app.fire_next_approved_strategy_effect(fire)
             }
             ShellEffect::RecordReviewDecision(apply) => app.record_review_decision_effect(apply),
+            ShellEffect::RecordProofDeferral(apply) => app.record_proof_deferral_effect(apply),
             ShellEffect::RecordSuppression(apply) => app.record_suppression_effect(apply),
             ShellEffect::RecordStrategyCorrection(record) => {
                 app.record_strategy_correction_effect(record)
@@ -140,7 +144,8 @@ impl EffectRuntime {
             | ShellEffect::ShowPromptOverride(_)
             | ShellEffect::UpdatePromptMutationStatus(_)
             | ShellEffect::WriteHouseRules(_)
-            | ShellEffect::WritePromptOverride(_)) => Self::execute_content_effect(app, effect),
+            | ShellEffect::WritePromptOverride(_)
+            | ShellEffect::OpenPromptDocument(_)) => Self::execute_content_effect(app, effect),
             other => Self::execute_shell_effect(app, other),
         }
     }
@@ -192,6 +197,7 @@ impl EffectRuntime {
         match effect {
             ShellEffect::DiffPromptOverride(diff) => app.diff_prompt_override_effect(diff),
             ShellEffect::EditPromptOverride(edit) => app.edit_prompt_override_effect(edit),
+            ShellEffect::OpenPromptDocument(open) => app.open_prompt_document_effect(open),
             ShellEffect::ListPromptOverrides(list) => app.list_prompt_overrides_effect(list),
             ShellEffect::RecordPromptMutation(record) => app.record_prompt_mutation_effect(record),
             ShellEffect::RefreshHouseRules(refresh) => app.refresh_house_rules_effect(refresh),
@@ -224,7 +230,6 @@ impl EffectRuntime {
             | ShellEffect::PersistPlanningOptionOverride(_)
             | ShellEffect::PersistOptions(_)
             | ShellEffect::RecordAgentRun(_)
-            | ShellEffect::RecordScanRun(_)
             | ShellEffect::RecordScanStageTrace(_)
             | ShellEffect::RecordToolRun(_)) => Self::execute_persistence_effect(app, effect),
             ShellEffect::ResumeSession(resume) => app.resume_session_effect(resume),
@@ -251,9 +256,9 @@ impl EffectRuntime {
             ShellEffect::StartOfflineDemoFixtureScan => {
                 unreachable!("handled before terminal effects")
             }
-            effect @ ShellEffect::WorkspaceExportFindings(_) => {
-                Self::execute_workspace_effect(app, effect)
-            }
+            effect @ (ShellEffect::WorkspaceExportFindings(_)
+            | ShellEffect::ExportReport(_)
+            | ShellEffect::RevealReportDestination) => Self::execute_workspace_effect(app, effect),
             effect @ ShellEffect::WorkspaceReindex(_) => {
                 Self::execute_workspace_effect(app, effect)
             }
@@ -266,6 +271,8 @@ impl EffectRuntime {
             ShellEffect::WorkspaceExportFindings(export) => {
                 app.export_workspace_findings_effect(export)
             }
+            ShellEffect::ExportReport(export) => app.export_report_effect(export),
+            ShellEffect::RevealReportDestination => app.reveal_report_destination_effect(),
             ShellEffect::WorkspaceReindex(reindex) => app.reindex_workspace_effect(reindex),
             _ => unreachable!("workspace effect dispatch"),
         }
@@ -278,7 +285,9 @@ impl EffectRuntime {
             }
             ShellEffect::RefreshFindings(refresh) => match refresh.filter {
                 Some(expression) => app.refresh_findings_filtered(&expression),
-                None => app.refresh_findings(refresh.announce),
+                // `None` means reload the current projection. The explicit
+                // `findings` command clears route state before issuing it.
+                None => app.refresh_findings_preserving_active_filter(refresh.announce),
             },
             ShellEffect::ReportFilteredFindingMovement(notice) => {
                 app.report_filtered_finding_movement_effect(notice)
@@ -317,7 +326,6 @@ impl EffectRuntime {
         match effect {
             ShellEffect::PersistCommandHistory => app.persist_command_history(),
             ShellEffect::RecordAgentRun(record) => app.record_agent_run_effect(record),
-            ShellEffect::RecordScanRun(record) => app.record_scan_run_effect(record),
             ShellEffect::RecordScanStageTrace(record) => app.record_scan_stage_trace_effect(record),
             ShellEffect::RecordToolRun(record) => app.record_tool_run_effect(record),
             ShellEffect::PersistGlobalModelSelection(selection) => {

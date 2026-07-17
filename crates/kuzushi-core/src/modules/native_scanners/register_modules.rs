@@ -53,10 +53,11 @@ pub(in crate::modules) fn run_semgrep_scan(
         return Ok(failed_tool_output("semgrep:scan", &target, error));
     }
     emit_scan_start(ctx, "semgrep", &target);
-    let mut findings = match scanner.scan_with_cancel(&target, &ScanCancellation::default()) {
-        Ok(findings) => findings,
-        Err(error) => return Ok(failed_tool_output("semgrep:scan", &target, error)),
-    };
+    let mut findings =
+        match ctx.with_cancellation(|cancel| scanner.scan_with_cancel(&target, cancel)) {
+            Ok(findings) => findings,
+            Err(error) => return Ok(failed_tool_output("semgrep:scan", &target, error)),
+        };
     let index_static_evidence = whitebox_static_profile_requested(&input)?;
     if index_static_evidence {
         let static_proof_state =
@@ -78,10 +79,11 @@ pub(in crate::modules) fn run_codeql_scan(
         return Ok(failed_tool_output("codeql:scan", &target, error));
     }
     emit_scan_start(ctx, "codeql", &target);
-    let mut output = match scanner.scan_with_artifacts(&target, &ScanCancellation::default()) {
-        Ok(output) => output,
-        Err(error) => return Ok(failed_tool_output("codeql:scan", &target, error)),
-    };
+    let mut output =
+        match ctx.with_cancellation(|cancel| scanner.scan_with_artifacts(&target, cancel)) {
+            Ok(output) => output,
+            Err(error) => return Ok(failed_tool_output("codeql:scan", &target, error)),
+        };
     let index_static_evidence = whitebox_static_profile_requested(&input)?;
     if index_static_evidence {
         let static_proof_state =
@@ -137,7 +139,7 @@ pub(in crate::modules) fn run_iac_scan(
     let target = resolve_tool_target(&input, ctx)?;
     emit_scan_start(ctx, "iac-scan", &target);
     let options = IacScanOptions::from_tool_input(&input)?;
-    let report = match scan_iac(&target, &options, &ScanCancellation::default()) {
+    let report = match ctx.with_cancellation(|cancel| scan_iac(&target, &options, cancel)) {
         Ok(report) => report,
         Err(error) => return Ok(failed_tool_output("iac-scan:scan", &target, error)),
     };
@@ -163,7 +165,7 @@ pub(in crate::modules) fn run_cargo_audit_scan(
     let target = resolve_tool_target(&input, ctx)?;
     emit_scan_start(ctx, "cargo-audit", &target);
     let scanner = CargoAuditScanner;
-    let findings = match scanner.scan(&target, &ScanCancellation::default()) {
+    let findings = match ctx.with_cancellation(|cancel| scanner.scan(&target, cancel)) {
         Ok(findings) => findings,
         Err(error) => return Ok(failed_tool_output("cargo-audit:scan", &target, error)),
     };
@@ -182,7 +184,7 @@ pub(in crate::modules) fn run_govulncheck_scan(
         return Ok(failed_tool_output("govulncheck:scan", &target, error));
     }
     emit_scan_start(ctx, "govulncheck", &target);
-    let findings = match scanner.scan(&target, &ScanCancellation::default()) {
+    let findings = match ctx.with_cancellation(|cancel| scanner.scan(&target, cancel)) {
         Ok(findings) => findings,
         Err(error) => return Ok(failed_tool_output("govulncheck:scan", &target, error)),
     };
@@ -239,7 +241,7 @@ pub(in crate::modules) fn run_sbom_scan(
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
     emit_scan_start(ctx, "sbom-scan", &target);
-    let report = match scan_sbom(&target, &ScanCancellation::default()) {
+    let report = match ctx.with_cancellation(|cancel| scan_sbom(&target, cancel)) {
         Ok(report) => report,
         Err(error) => return Ok(failed_tool_output("sbom-scan:scan", &target, error)),
     };
@@ -254,7 +256,9 @@ pub(in crate::modules) fn run_license_scan(
     let target = resolve_tool_target(&input, ctx)?;
     let options = license_scan_options_from_input(&input)?;
     emit_scan_start(ctx, "license-scan", &target);
-    let report = match scan_licenses_with_options(&target, &ScanCancellation::default(), options) {
+    let report = match ctx
+        .with_cancellation(|cancel| scan_licenses_with_options(&target, cancel, options))
+    {
         Ok(report) => report,
         Err(error) => return Ok(failed_tool_output("license-scan:scan", &target, error)),
     };
@@ -309,13 +313,15 @@ pub(in crate::modules) fn run_exploit_chain_scan(
     let scanner = ExploitChainScanner::from_tool_input(&input)?;
     let runtime = require_exploit_chain_runtime(runtime)?;
     let model = require_exploit_chain_model(&input, ctx)?;
-    let report: ExploitChainReport = scan_exploit_chains_with_runtime(
-        &target,
-        &ScanCancellation::default(),
-        scanner.max_evidence,
-        Some(runtime),
-        Some(model.as_str()),
-    )?;
+    let report: ExploitChainReport = ctx.with_cancellation(|cancel| {
+        scan_exploit_chains_with_runtime(
+            &target,
+            cancel,
+            scanner.max_evidence,
+            Some(runtime),
+            Some(model.as_str()),
+        )
+    })?;
     let persisted = persist_exploit_chain_findings(&target, &report, ctx)?;
     emit_scan_done(ctx, "exploit-chain", report.findings.len());
     Ok(exploit_chain_output(report, &target, persisted))
@@ -339,7 +345,7 @@ fn persist_exploit_chain_findings(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<GenericPersistedRun>> {
     persist_tool_findings(
-        "exploit-chain",
+        ctx.finding_run_id(),
         target,
         &report.findings,
         ctx.workspace,

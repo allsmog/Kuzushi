@@ -1,6 +1,10 @@
 # PRD — Kuzushi as a control room for non-deterministic security scans
 
 > **Status:** proposal, awaiting review. **Owner:** operator experience.
+> **Current-state reconciliation:** 2026-07-12. Items marked Exists or Partial
+> below reflect the live Rust tree; the remaining proposal is the sweep/harness
+> composition layer, not the already-shipped onboarding, strategy queue,
+> evidence-list, triage, or headless contracts.
 > **Companion docs:** screen/interaction behavior in
 > [`docs/design/product-flow-design-spec.md`](../design/product-flow-design-spec.md);
 > code seams in [`docs/plans/cannon-port-plan.md`](./cannon-port-plan.md).
@@ -85,11 +89,11 @@ it presents the **parts** but not the **control room**, so the operator cannot
 actually govern a non-deterministic scan. Symptoms, each traceable to an audit
 or the current-state map:
 
-**A. You can't steer where the non-determinism spends.** Phase *execution* is a
-static 22-entry `PlanningTaskId` walker (`app/shellapp.rs`), not a signal-driven,
-priced **sweep**. There is no `focus × strategy × model × runs` matrix, no queue
-of proposed permutations you approve under a budget. The `COVERAGE MATRIX` in the
-Workbench is display-only (`workbench/panes.rs`).
+**A. Steering exists, but a sampled sweep does not.** The live Strategy Queue
+persists proposals with expected cost/runtime, yield, rounds, preflight, risk,
+approval, correction, and outcome; approved proposals can be fired from the
+shell. What is still absent is the `focus × strategy × model × runs` matrix and
+one sweep object that unions those sampled runs into a governed result.
 
 **B. You can't shape the scan itself — the harness is frozen.** The engine
 wiring, detector set, and tool graph are compile-time
@@ -112,34 +116,39 @@ and a non-deterministic LLM hunt are different kinds of evidence that should
 `vuln_source` — but nothing lets you **ingest an external SARIF/Semgrep file** as
 a seed, and nothing surfaces or steers the two planes as first-class surfaces.
 
-**E. You can't compose or save a strategy.** There is no named, replayable
-recipe (`deep = pattern + iris-taint + review×2 + invariant`). The parts exist —
-`variant`, `ndiff`, prompt overrides, phases — but they don't compose into a
-stored strategy object you can pick, edit, and re-fire.
+**E. Strategy proposals are persistent, but reusable recipes remain partial.**
+`StrategyProposal` and `StrategyCorrection` provide a durable approved/corrected
+queue with runnable tool input and result lineage. They are not yet a named
+recipe catalog such as `deep = pattern + iris-taint + review×2 + invariant`
+that can be selected as the variant axis of a sampled sweep.
 
-**F. You can't fully trust or fully see the output.** Confirmed-vs-guess is
-detail-only, not in the findings list; a canceled task can flip to `✓ done`; the
-Workbench fabricates a phase chip with no target and tracks the *viewed page*
-rather than engagement reality; the DAG legend names a state rows can't show.
-When the product's promise is *evidence*, a dishonest signifier is a defect.
+**F. The trust signifiers now follow persisted reality.** Findings and review
+queues surface proof/confidence state; canceled/interrupted runs stay terminal;
+journey state derives from workspace artifacts; and targetless views omit phase
+chrome. The remaining visual-plane work is sweep-level aggregation: sampled-run
+variance, cost, and corroboration are not yet one live control-room projection.
 
-**G. It reads as an inventory.** 42 modules / ~67 tools surfaced as a phase-
-bucketed catalog is better than a flat wall, but the *default* is still "pick a
-tool" rather than "aim, then fire a sweep." Codenames stay opaque; tab-completion
-is implemented but its ghost-text preview never renders.
+**G. The default is now a phase cockpit, not the catalog.** Workbench and the
+planning picker drive the target through Map/Hunt/Confirm/Fix, while the module
+catalog remains an advanced discovery surface. The missing step is to make the
+approved Strategy Queue feed a visible sampled sweep instead of firing one
+proposal at a time.
 
-**H. The keyless first run is broken.** The offline `demo` win is invisible in
-the shell; the model picker offers only credentialed models; deferring the target
-picker lands in a bare Workbench whose empty states point at `scan`/`next` (which
-need a key and a target). A stranger hits an auth wall before a single finding.
+**H. Keyless first-run value exists.** Target and credential onboarding both
+offer the offline fixture; it activates through the canonical target transition,
+clears stale target state, and runs the deterministic demo without a model,
+credential, network call, or external scanner.
 
-**I. Runs waste tokens.** Triage re-triages duplicates with no verdict-skip and
-no latest-scan scope (one fingerprint triaged 10–11× in an observed 222-call
-run, then canceled). No prompt caching on the shipping path.
+**I. Duplicate triage is fixed; prompt caching remains.** Triage defaults to the
+latest scan, collapses duplicate fingerprints, and skips persisted verdicts
+unless the operator explicitly requests re-triage. The shipping model path still
+lacks a proven prompt-cache contract for unchanged large context.
 
-**J. Headless has CI-blocking edges.** `recon:import` is advertised but
-unreachable; `--target` behaves three ways; `run` prepare-errors emit empty
-stdout; the friendly export verb drops the format and refuses directories.
+**J. The earlier headless blockers are closed.** `recon:import` is registered and
+tested through the real registry; workspace-backed tools require an explicit
+target; run preparation failures remain machine-readable; and export preserves
+the requested format/path contract. These are regression invariants now, not
+open product requirements.
 
 **K. Detection quality is a claim, not a number.** `baseline.json` is `{}`;
 `kuzushi-eval` exists but is recall-centric, standalone, and not a `kuzushi`
@@ -173,16 +182,20 @@ gap is composition and control, not greenfield capability.
 | Prompts-as-files (`.kuzushi/prompts/<module>/<verb>.md`) + mutation ledger | **Exists** | `options/prompt_paths.rs`, prompt-mutation ledger |
 | Phase derivation 組→崩→作→掛 from workspace reality | **Exists** | `ui_view_models/journey.rs` |
 | Phase-bucketed module catalog (42 modules, ~67 tools) | **Exists** | `builtins/.../builtin_registration.rs` |
+| Persistent strategy proposals, approval/correction/fire, cost/runtime/preflight/outcome lineage | **Exists** | `strategy/`, `app/strategy/`, `ui_view_models/strategy_queue.rs` |
+| Keyless offline demo through canonical target activation | **Exists** | `demo.rs`, `app/effects.rs`, `navigation_target_story.rs` |
+| Latest-scan, verdict-aware, fingerprint-deduped triage | **Exists** | `modules/triage/` |
+| Reachable `recon:import`, explicit target policy, machine-readable run errors, format-preserving export | **Exists** | `recon_module.rs`, CLI run/export tests |
 
 | Missing connective tissue | Status |
 | --- | --- |
-| Signal-driven, priced, budget-gated **sweep** (`focus × strategy × model × runs`) | **New** (only a static walker today) |
+| Signal-driven, priced, budget-gated **sweep** (`focus × strategy × model × runs`) | **Partial** (priced proposal queue exists; sampled matrix/union does not) |
 | A mutable, recon-seeded, operator-steerable **harness** object | **New** |
-| Named, saveable, replayable **strategies** | **New** |
+| Named, saveable, replayable **strategies** | **Partial** (durable proposals/corrections exist; reusable recipe catalog does not) |
 | Per-scan **engine enablement** UI (CPG/MCP/LSP toggle + cost estimate) | **New** (artifact-gated only) |
 | **Deterministic seed ingest** (external SARIF/Semgrep file → ledger) | **New** (live-run only) |
 | Engagement-scoped **cross-run merge** (corroborate one row across `scan_id`) | **New** (per-`scan_id` today) |
-| Confirmed-vs-guess **in the findings list**; cost/corroboration always visible | **New** (detail-only today) |
+| Confirmed-vs-guess **in the findings list**; cost/corroboration always visible | **Partial** (proof/confidence exists; sweep cost/corroboration rollup does not) |
 | LLM-authored **fuzz harness** build-and-fix loop (PoV proof) | **New** |
 | Detection as a **number** (F1 + head-to-head-vs-SARIF + gate + tune) | **New** (`kuzushi-eval` standalone) |
 
@@ -321,9 +334,9 @@ Three ways it mutates — this is the product's differentiator:
 
 | Persona | Wants | Fails them today |
 | --- | --- | --- |
-| **Bug-bounty hunter** | Aim at an in-scope repo, fire a cheap sweep, get confirmed reportable findings, export a bundle. | Auth wall before first finding; no sweep/budget control; confirmed-vs-guess not in the list; bundle unreachable via the friendly verb. |
-| **AppSec engineer (CI)** | Seed with the team's Semgrep/CodeQL, corroborate with an AI hunt, gate PRs on high-severity, keep FP rate *known*. | No external SARIF/Semgrep ingest; `--target` inconsistency + empty-stdout errors; verify all-or-nothing; no published FP number. |
-| **Security researcher** | Compose a deep strategy, enable a CPG + symbolic tier, steer by typed focus, mutate a fuzz harness, measure the run. | No composable strategy; engine enablement is hidden/artifact-gated; no "focus" steering; static walker; no measure/tune. |
+| **Bug-bounty hunter** | Aim at an in-scope repo, fire a cheap sweep, get confirmed reportable findings, export a bundle. | Offline value and export work; sampled sweep/budget governance is not yet one flow. |
+| **AppSec engineer (CI)** | Seed with the team's Semgrep/CodeQL, corroborate with an AI hunt, gate PRs on high-severity, keep FP rate *known*. | CI gating works; external SARIF/Semgrep seed ingest and a published FP number remain. |
+| **Security researcher** | Compose a deep strategy, enable a CPG + symbolic tier, steer by typed focus, mutate a fuzz harness, measure the run. | Durable proposals/corrections exist; reusable recipes, explicit engine-cost controls, typed focus, and measure/tune remain. |
 
 Shared need: **govern a non-deterministic scan — sample it, steer it,
 corroborate it, see it — cheaply and defensibly.**
@@ -355,8 +368,11 @@ corroborate it, see it — cheaply and defensibly.**
 8. **Human judgment is sticky.** Manual FP/confirm survives every re-run.
 9. **No silent fallback.** Model/provider/runtime never change without consent;
    every path resolves models through `resolve_tool_model` / `ctx.config.model`.
-10. **Local-first.** The only bytes that leave the machine go to the operator's
-    model provider; deterministic detectors (secrets, Semgrep) run offline.
+10. **Local-first, with explicit network boundaries.** Bundled detectors run
+    locally. External scanners and model providers follow their selected
+    configuration: Semgrep registry configs such as `auto` fetch rules, while
+    Kuzushi disables Semgrep metrics. Operators who require an offline run must
+    select only bundled detectors or provide already-local scanner rules.
 
 ---
 
@@ -416,7 +432,8 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
 - G6. Confirmed-vs-guess (evidence tier + oracle + votes) visible in every list.
 - G7. Delegate cheap work to weak models, hard work to strong; cost-per-confirmed
   surfaced; budget enforced per-call.
-- G8. Keyless first run reaches a real finding in ~60s via `demo`.
+- G8. Keyless first run records real deterministic scanner signals as
+  `signal_only` findings in ~60s via `demo`.
 - G9. Every phase reachable identically in shell, `scan --until`, and `run`.
 - G10. Detection quality is a reproducible number (F1 + head-to-head + gate).
 
@@ -542,30 +559,31 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
   strategy, live cost, agent tree, tool calls, latency, and coverage growth.
   *Accept:* a running sweep shows spend and per-step confidence live.
 
-### 12.9 Surface, first-run, discoverability (Partial)
+### 12.9 Surface, first-run, discoverability (Exists → protect and compose)
 - **[R28] Home is the control room, not a catalog.** Landing is the aim→fire
   cockpit; the 42-module catalog is one advanced, phase-grouped view with human
   names and rendered tab-completion. *Accept:* default is aim/fire; completion
   ghost-text renders.
-- **[R29] Keyless first run reaches value.** `demo` is first-class on the landing
+- **[R29] Keyless first run reaches value.** `demo` is first-class in onboarding
   and every empty state; the model picker offers an offline choice; typed
   `target` runs the same onboarding as the picker. *Accept:* no key + no network →
-  a finding via `demo` in ~60s.
+  a finding via `demo` in ~60s. *Status: Exists — protect.*
 - **[R30] Model↔runtime checked up front + export survives the reframe.**
   Incompatible pairs rejected at pick time; `export-findings` reachable from
   Report with the format honored. *Accept:* `doctor`/picker fail-loud pre-spend;
   the markdown bundle is reachable via the friendly verb.
 
-### 12.10 Headless/CI parity, robustness, interaction (Partial)
+### 12.10 Headless/CI parity, robustness, interaction (Exists → protect)
 - **[R31] `recon:import` reachable; `--target` consistent; `run` errors are valid
   JSON; export honors format+dirs.** *Accept:* the four CI-blocking edges are
   closed (`… | jq` never sees empty stdout; `kuzushi --target . scan` works).
+  *Status: Exists — protect.*
 - **[R32] Palette degrades (256-color); width is unicode-aware.** *Accept:*
   semantic colors survive on macOS Terminal.app; 組崩作掛 don't misalign tables.
 - **[R33] No empty-prompt hotkey trap; one scroll/keybind grammar; honest
   signifiers.** *Accept:* typing `config` doesn't fire `c`→exploit-chain; the DAG
   legend matches what rows render; canceled never flips to done; the phase chip
-  never renders without a target.
+  never renders without a target. *Status: Exists — protect.*
 
 ### 12.11 Measure / tune (New)
 - **[R34] Detection is a number.** `kuzushi measure` reports precision/recall/F1
@@ -607,18 +625,18 @@ Because most parts exist, the early waves are **expose + compose**, not build.
 
 | Wave | Delivers | Nature |
 | --- | --- | --- |
-| **W0 — Honest surface & trust** | R24, R28, R33 + signifier fixes; render the gallery from real state | expose/fix (parts exist) |
-| **W1 — Keyless value** | R29–R30 | onboarding |
+| **W0 — Honest surface & trust** | R24, R28, R33 + signifier fixes; render the gallery from real state | shipped; protect while composing sweep state |
+| **W1 — Keyless value** | R29–R30 | shipped; protect |
 | **W2 — Engine controls** | R11–R14 (surface the CPG/MCP/LSP enablement + depth ladder that exist artifact-gated) | expose |
 | **W3 — Seed plane** | R15–R16 (external SARIF/Semgrep ingest) | build (small) |
 | **W4 — Cost & tiering surfaced** | R21–R23 (per-role map exists; surface cost-per-confirmed; kill duplicate triage; prompt caching) | expose + fix |
 | **W5 — Cross-run ledger** | R2, R20 (engagement-scoped merge; protect sticky triage) | build |
 | **W6 — Configurable Confirm** | R17–R19 (votes/lenses/PoV over the existing verifier) | build |
-| **W7 — The sweep** | R1, R3–R4 (signal-driven priced proposal queue replaces the static walker) | build (deep) |
+| **W7 — The sweep** | R1, R3–R4 (compose the shipped priced proposal queue into sampled matrix execution + union) | build (deep) |
 | **W8 — The harness** | R5–R8 (mutable, recon-seeded, typed-intent, dynamic fuzz build-and-fix) | build (deep) |
-| **W9 — Strategies** | R9–R10 (saveable composable recipes = the sweep variant axis) | build |
+| **W9 — Strategies** | R9–R10 (promote durable proposals/corrections into reusable named recipes = the sweep variant axis) | build |
 | **W10 — Detection as a number** | R34–R35 (fold into `kuzushi-eval`) | build |
-| **cross** | R31–R32 (CI/terminal parity; R31's `recon:import` is a standing BLOCKER) | fix early |
+| **cross** | R31–R32 (protect shipped headless parity; finish terminal palette portability) | regression coverage |
 
 **Sequencing rule:** nothing here is worth doing while the ship-the-product work
 (publish, platform binaries, supply-chain — `ROADMAP.md` P0) is red. W0–W4 are
@@ -631,17 +649,17 @@ and are de-risked by W5's ledger.
 
 | Metric | Today | Target |
 | --- | --- | --- |
-| Fresh launch → first finding (no key) | auth wall | ≤ 60s via `demo` |
+| Fresh launch → first finding (no key) | offline demo is available in onboarding | preserve ≤ 60s via `demo` |
 | Steer a scan by typed intent | one-off `ask` | re-ranks the harness + next sweep |
 | Enable an engine per-scan with cost shown | hidden/artifact-gated | explicit toggle + estimate |
-| Confirmed-vs-guess visible in the list | detail-only | 100% of rows (tier + oracle + votes) |
+| Confirmed-vs-guess visible in the list | proof/confidence markers exist | 100% of rows plus sweep corroboration/cost |
 | Cost per confirmed finding | not surfaced | shown live |
-| Duplicate LLM triage per unique fingerprint | up to ~11× | 1× |
+| Duplicate LLM triage per unique fingerprint | 1× by default; explicit re-triage opts back in | preserve 1× |
 | Deterministic seed corroborates the hunt | no ingest path | one row, `sources[]` ≥ 2 |
 | Net-new vs re-found across a sweep | not shown | per-run counter |
 | Verify configurability | all-or-nothing | when / max / votes / PoV |
 | Published detection number | `baseline = {}` | F1 + head-to-head vs SARIF |
-| Signifier/trust-contract violations | ≥ 5 known | 0 |
+| Signifier/trust-contract violations | prior known set closed by executable tests | 0 regressions |
 | Phase reachable in shell + scan + run | partial | 100% parity |
 
 ---
@@ -666,8 +684,9 @@ and are de-risked by W5's ledger.
 - **KLEE/symbolic is unintegrated today; `semgrep`/`language` taint backends are
   reserved stubs** — ship them as explicitly-optional, not implied.
 - **`.kuzushi/` path moves** are migrated (additive `open/init`), not broken.
-- **Baseline red tests.** HEAD already fails some workspace tests (BDD onboarding
-  + snapshot; findings-store drift); capture the known-red set before W5.
+- **Baseline discipline.** Treat the current workspace gates as the source of
+  truth; a failing BDD, snapshot, or findings-store test blocks the wave until
+  it is fixed or assigned a narrow, executable quarantine with an owner.
 - **CRAP gate.** New functions ≤ complexity 4, < 40 logical lines,
   `quality:crap-risk` < 7 — the sweep/harness/merge code are the likely offenders.
 

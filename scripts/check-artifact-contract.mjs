@@ -142,6 +142,7 @@ const checks = [
     files: [
       "crates/kuzushi-core/src/run_artifacts/artifact_manifest.rs",
       "crates/kuzushi-core/src/run_artifacts/canonical_run_files.rs",
+      "crates/kuzushi-core/src/run_artifacts/canonical_run_markers.rs",
       "crates/kuzushi-core/src/run_artifacts/run_summary_store.rs",
     ],
     artifacts: [...requiredRunArtifacts, ...reportSubstrateAliasFields],

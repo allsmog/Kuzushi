@@ -40,8 +40,11 @@ pub struct GuidedPhaseConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_after: Option<GuidedPhase>,
     pub map: PhaseTemplateConfig,
-    pub hunt: PhaseTemplateConfig,
-    pub confirm: PhaseTemplateConfig,
+    #[serde(alias = "hunt")]
+    pub scan: PhaseTemplateConfig,
+    pub review: PhaseTemplateConfig,
+    #[serde(alias = "confirm")]
+    pub prove: PhaseTemplateConfig,
     pub fix: PhaseTemplateConfig,
 }
 
@@ -49,8 +52,11 @@ pub struct GuidedPhaseConfig {
 #[serde(rename_all = "kebab-case")]
 pub enum GuidedPhase {
     Map,
-    Hunt,
-    Confirm,
+    #[serde(alias = "hunt")]
+    Scan,
+    Review,
+    #[serde(alias = "confirm")]
+    Prove,
     Fix,
 }
 
@@ -58,8 +64,9 @@ impl GuidedPhase {
     pub fn label(self) -> &'static str {
         match self {
             Self::Map => "map",
-            Self::Hunt => "hunt",
-            Self::Confirm => "confirm",
+            Self::Scan => "scan",
+            Self::Review => "review",
+            Self::Prove => "prove",
             Self::Fix => "fix",
         }
     }
@@ -80,7 +87,7 @@ pub struct PhaseTemplateConfig {
     pub prompt_variant: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub struct OperatorConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,6 +104,43 @@ pub struct OperatorConfig {
     pub mcp_mounts: Vec<McpMountConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fuzz_executors: Vec<FuzzExecutorConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keybindings: Vec<KeybindingOverrideConfig>,
+    #[serde(default = "default_session_retention_days")]
+    pub session_retention_days: u64,
+}
+
+impl Default for OperatorConfig {
+    fn default() -> Self {
+        Self {
+            session_budget_usd: None,
+            spend_hard_ceiling_usd: None,
+            trusted_workflow_auto_accept: false,
+            trusted_modules: Vec::new(),
+            signature_keys: Vec::new(),
+            mcp_mounts: Vec::new(),
+            fuzz_executors: Vec::new(),
+            keybindings: Vec::new(),
+            session_retention_days: DEFAULT_SESSION_RETENTION_DAYS,
+        }
+    }
+}
+
+pub const DEFAULT_SESSION_RETENTION_DAYS: u64 =
+    crate::session_transcript::DEFAULT_SESSION_RETENTION_DAYS;
+
+fn default_session_retention_days() -> u64 {
+    DEFAULT_SESSION_RETENTION_DAYS
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub struct KeybindingOverrideConfig {
+    pub context: String,
+    pub action: String,
+    /// Empty explicitly unbinds the action in this context.
+    #[serde(default)]
+    pub bindings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

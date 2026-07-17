@@ -2,27 +2,41 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::process::Stdio;
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
-use tokio::process::Command;
 
-pub(crate) fn clangd_command(repo: &std::path::Path) -> Command {
-    let mut command = Command::new("clangd");
-    command
-        .arg("--background-index=false")
-        .arg("--log=error")
-        .current_dir(repo)
+pub(crate) const MAX_LSP_BODY_BYTES: usize = 2 * 1024 * 1024;
+const MAX_LSP_HEADER_BYTES: usize = 8 * 1024;
+const MAX_LSP_HEADER_FIELDS: usize = 64;
+
+pub(crate) async fn clangd_command(
+    repo: kuzushi_mcp_common::AuthorizedDirectory,
+) -> Result<kuzushi_mcp_common::read_only_sandbox::SandboxedCommand> {
+    use kuzushi_mcp_common::read_only_sandbox::{read_only_command, resolve_regular_executable};
+
+    let clangd = resolve_regular_executable(std::ffi::OsStr::new("clangd"))?;
+    let args = ["--background-index=false", "--log=error"];
+    let mut sandboxed = read_only_command(&clangd, args, repo).await?;
+    sandboxed
+        .command_mut()?
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    command
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    Ok(sandboxed)
 }
 
-pub(crate) fn initialize_params(root: &std::path::Path) -> Value {
-    json!({
+pub(crate) fn initialize_params(root: &std::path::Path) -> Result<Value> {
+    Ok(json!({
         "processId": std::process::id(),
-        "rootUri": format!("file://{}", root.display()),
+        "rootUri": file_uri(root)?,
         "capabilities": {},
         "clientInfo": { "name": "kuzushi-mcp-clang", "version": env!("CARGO_PKG_VERSION") }
-    })
+    }))
+}
+
+pub(crate) fn file_uri(path: &std::path::Path) -> Result<String> {
+    url::Url::from_file_path(path)
+        .map(String::from)
+        .map_err(|_| anyhow::anyhow!("could not encode absolute file URI for {}", path.display()))
 }
 
 pub(crate) fn request_body(id: i64, method: &str, params: Value) -> Value {
@@ -44,6 +58,10 @@ pub(crate) fn notification_body(method: &str, params: Value) -> Value {
 
 pub(crate) fn framed_lsp_message(body: &Value) -> Result<Vec<u8>> {
     let raw = serde_json::to_vec(body)?;
+    anyhow::ensure!(
+        raw.len() <= MAX_LSP_BODY_BYTES,
+        "clangd request exceeds the {MAX_LSP_BODY_BYTES}-byte limit"
+    );
     Ok(frame_raw_lsp_message(raw))
 }
 
@@ -59,7 +77,8 @@ pub(crate) fn response_matches_id(response: &Value, id: i64) -> bool {
 
 pub(crate) fn response_result(response: Value) -> Result<Value> {
     if let Some(err) = response.get("error") {
-        anyhow::bail!("clangd error: {err}");
+        let error = kuzushi_mcp_common::process::sanitize_terminal_text(&err.to_string());
+        anyhow::bail!("clangd error: {error}");
     }
     Ok(response.get("result").cloned().unwrap_or(Value::Null))
 }
@@ -69,13 +88,20 @@ pub(crate) async fn read_content_length<R: AsyncRead + Unpin>(
 ) -> Result<usize> {
     let mut content_length: Option<usize> = None;
     let mut header_line = Vec::new();
-    loop {
+    for _ in 0..MAX_LSP_HEADER_FIELDS {
         match read_header_line(reader, &mut header_line).await? {
-            HeaderLine::End => break,
-            HeaderLine::Field(line) => record_content_length(&mut content_length, &line),
+            HeaderLine::End => {
+                let length = content_length.context("clangd response missing Content-Length")?;
+                anyhow::ensure!(
+                    length <= MAX_LSP_BODY_BYTES,
+                    "clangd response exceeds the {MAX_LSP_BODY_BYTES}-byte limit"
+                );
+                return Ok(length);
+            }
+            HeaderLine::Field(line) => record_content_length(&mut content_length, &line)?,
         }
     }
-    content_length.context("clangd response missing Content-Length")
+    anyhow::bail!("clangd response has more than {MAX_LSP_HEADER_FIELDS} header fields")
 }
 
 pub(crate) enum HeaderLine {
@@ -108,10 +134,15 @@ pub(crate) fn classify_header_line(line: &str) -> HeaderLine {
     }
 }
 
-pub(crate) fn record_content_length(content_length: &mut Option<usize>, line: &str) {
+pub(crate) fn record_content_length(content_length: &mut Option<usize>, line: &str) -> Result<()> {
     if let Some(len) = content_length_value(line) {
+        anyhow::ensure!(
+            content_length.is_none(),
+            "clangd response has duplicate Content-Length headers"
+        );
         *content_length = Some(len);
     }
+    Ok(())
 }
 
 pub(crate) fn content_length_value(line: &str) -> Option<usize> {
@@ -141,6 +172,10 @@ pub(crate) async fn read_until_crlf<R: AsyncRead + Unpin>(
             return Ok(buf.len());
         }
         buf.push(byte[0]);
+        anyhow::ensure!(
+            buf.len() <= MAX_LSP_HEADER_BYTES,
+            "clangd header exceeds the {MAX_LSP_HEADER_BYTES}-byte limit"
+        );
         if buf.ends_with(b"\r\n") {
             return Ok(buf.len());
         }

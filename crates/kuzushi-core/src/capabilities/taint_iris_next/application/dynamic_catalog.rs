@@ -14,7 +14,7 @@ pub(crate) fn load_taint_iris_next_target_catalog(
     repo_root: &Path,
 ) -> Option<Vec<TaintIrisNextRankedCatalogEntry>> {
     let path = taint_iris_next_target_catalog_path(repo_root);
-    let raw = fs::read_to_string(&path).ok()?;
+    let raw = crate::bounded_file::read_utf8_text_within(repo_root, &path, 8 * 1024 * 1024).ok()?;
     parse_target_catalog_payload(&raw).ok()
 }
 
@@ -34,17 +34,27 @@ pub(crate) struct TaintIrisNextCatalogReport {
     #[serde(skip)]
     pub(crate) cost_usd: f64,
     #[serde(skip)]
+    pub(crate) cost_usd_exact: bool,
+    #[serde(skip)]
     pub(crate) ok: bool,
 }
 
 impl TaintIrisNextCatalogReport {
     pub(crate) fn to_tool_json(&self) -> Value {
-        json!({
+        let mut output = json!({
             "ok": self.ok,
             "output": render_catalog_summary(self),
             "data": serde_json::to_value(self).unwrap_or(Value::Null),
-            "costUsd": self.cost_usd,
-        })
+        });
+        let observed = RuntimeCost::from_usd(self.cost_usd, "taint catalog cost")
+            .expect("catalog runtime response cost was checked");
+        let cost = if self.cost_usd_exact {
+            RuntimeCostReport::known(observed)
+        } else {
+            RuntimeCostReport::incomplete(observed)
+        };
+        crate::module_result::apply_runtime_cost_report(&mut output, cost);
+        output
     }
 }
 
@@ -109,34 +119,17 @@ pub(crate) fn run_taint_iris_next_catalog_report(
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
 
-    // Reuse the existing plan-building primitives so language detection,
-    // context loading and threat-model loading are identical to what the
-    // hunt would see — the agent gets the same view of the codebase.
-    let context = load_taint_iris_next_context(&target);
-    let threat_model = load_taint_iris_next_threat_model(&target);
-    let languages = catalog_languages(&target, context.value.as_ref())?;
-    let context_keywords = taint_iris_next_context_keywords(context.value.as_ref(), &target)?;
-    let prompt = build_catalog_prompt(
-        &target,
-        &languages,
-        &context_keywords,
-        context.value.as_ref(),
-        threat_model.value.as_ref(),
-    );
+    let (languages, prompt) = catalog_prompt_context(&target)?;
+    let system_prompt = optional_taint_next_string(input, &["TAINT_IRIS_NEXT_CATALOG_PROMPT"])?
+        .unwrap_or_else(|| TAINT_IRIS_NEXT_CATALOG_SYSTEM_PROMPT.to_string());
 
-    let request = AgentQueryRequest::new(
-        model.clone(),
-        target.clone(),
-        TAINT_IRIS_NEXT_CATALOG_SYSTEM_PROMPT.to_string(),
-        prompt,
-    );
-    let response = runtime.query_blocking(request)?;
-    let cost_usd = response.cost_usd;
+    let response = query_catalog_agent(runtime, model, &target, system_prompt, prompt)?;
+    let cost = response.checked_cost_report()?;
     let raw_value = catalog_raw_value(&response);
     let (entries, parse_error) = parse_catalog_entries(raw_value.as_ref(), &languages);
 
     let catalog_path = taint_iris_next_target_catalog_path(&target);
-    let status = persist_catalog_status(&catalog_path, &entries);
+    let status = persist_catalog_status(&target, &entries);
     let ok = status == "generated";
 
     Ok(TaintIrisNextCatalogReport {
@@ -146,9 +139,42 @@ pub(crate) fn run_taint_iris_next_catalog_report(
         entries,
         raw_agent_output: raw_value,
         parse_error,
-        cost_usd,
+        cost_usd: cost.observed_usd(),
+        cost_usd_exact: cost.is_complete(),
         ok,
     })
+}
+
+/// Reuse the hunt's plan inputs so catalog generation sees the same language,
+/// context, and threat-model view as the eventual analysis pass.
+fn catalog_prompt_context(target: &Path) -> Result<(Vec<String>, String)> {
+    let context = load_taint_iris_next_context(target);
+    let threat_model = load_taint_iris_next_threat_model(target);
+    let languages = catalog_languages(target, context.value.as_ref())?;
+    let keywords = taint_iris_next_context_keywords(context.value.as_ref(), target)?;
+    let prompt = build_catalog_prompt(
+        target,
+        &languages,
+        &keywords,
+        context.value.as_ref(),
+        threat_model.value.as_ref(),
+    );
+    Ok((languages, prompt))
+}
+
+fn query_catalog_agent(
+    runtime: &dyn AgentRuntime,
+    model: String,
+    target: &Path,
+    system_prompt: String,
+    prompt: String,
+) -> Result<AgentQueryResponse> {
+    crate::runtime::query_blocking_checked(runtime, AgentQueryRequest::new(
+        model,
+        target.to_path_buf(),
+        system_prompt,
+        prompt,
+    ))
 }
 
 fn ensure_catalog_target_dir(target: &Path) -> Result<()> {
@@ -204,11 +230,11 @@ fn parse_catalog_entries(
     }
 }
 
-fn persist_catalog_status(path: &Path, entries: &[TaintIrisNextRankedCatalogEntry]) -> String {
+fn persist_catalog_status(target: &Path, entries: &[TaintIrisNextRankedCatalogEntry]) -> String {
     if entries.is_empty() {
         return "agent-output-invalid".to_string();
     }
-    persist_target_catalog(path, entries)
+    persist_target_catalog(target, entries)
         .map(|_| "generated".to_string())
         .unwrap_or_else(|error| format!("persist-failed: {error}"))
 }
@@ -523,22 +549,69 @@ fn parse_target_catalog_payload(raw: &str) -> Result<Vec<TaintIrisNextRankedCata
     Ok(entries)
 }
 
-fn persist_target_catalog(path: &Path, entries: &[TaintIrisNextRankedCatalogEntry]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("could not mkdir -p {}", parent.display()))?;
-    }
+fn persist_target_catalog(
+    target: &Path,
+    entries: &[TaintIrisNextRankedCatalogEntry],
+) -> Result<PathBuf> {
     let payload = serde_json::json!({ "catalog": entries });
     let pretty = serde_json::to_string_pretty(&payload)
         .context("could not serialize target catalog to JSON")?;
-    std::fs::write(path, pretty).with_context(|| format!("could not write {}", path.display()))?;
-    Ok(())
+    let intended_path = taint_iris_next_target_catalog_path(target);
+    let relative = intended_path
+        .strip_prefix(target)
+        .context("could not resolve target catalog below target")?;
+    crate::workspace::write_workspace_state_file(target, relative, pretty.as_bytes())
+        .with_context(|| format!("could not write {}", intended_path.display()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use tempfile::tempdir;
+
+    struct CapturingCatalogRuntime {
+        requests: Mutex<Vec<AgentQueryRequest>>,
+    }
+
+    impl CapturingCatalogRuntime {
+        fn new() -> Self {
+            Self {
+                requests: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl AgentRuntime for CapturingCatalogRuntime {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.requests.lock().unwrap().push(request);
+            Ok(AgentQueryResponse::default())
+        }
+
+        fn triage_finding_blocking(
+            &self,
+            _request: crate::runtime::TriageRequest,
+        ) -> Result<crate::findings::TriageOutcome> {
+            anyhow::bail!("not used by catalog prompt tests")
+        }
+    }
+
+    #[test]
+    fn catalog_query_uses_declared_prompt_override() {
+        let runtime = CapturingCatalogRuntime::new();
+
+        query_catalog_agent(
+            &runtime,
+            "openai:test".to_string(),
+            std::path::Path::new("/tmp/catalog-target"),
+            "custom catalog system".to_string(),
+            "catalog input".to_string(),
+        )
+        .unwrap();
+
+        let requests = runtime.requests.lock().unwrap();
+        assert_eq!(requests[0].system_prompt, "custom catalog system");
+    }
 
     #[test]
     fn extract_catalog_array_accepts_object_or_array() {
@@ -620,11 +693,48 @@ mod tests {
             score: 50,
             reasons: vec![],
         }];
-        let path = taint_iris_next_target_catalog_path(target);
-        persist_target_catalog(&path, &entries).unwrap();
+        persist_target_catalog(target, &entries).unwrap();
         let loaded = load_taint_iris_next_target_catalog(target).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].cwe, "CWE-22");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persist_target_catalog_rejects_symlinked_leaf() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        std::fs::create_dir_all(workspace.path().join(".kuzushi")).unwrap();
+        let outside_catalog = outside.path().join("catalog.json");
+        std::fs::write(&outside_catalog, "outside-sentinel").unwrap();
+        symlink(
+            &outside_catalog,
+            taint_iris_next_target_catalog_path(workspace.path()),
+        )
+        .unwrap();
+
+        let entries = vec![TaintIrisNextRankedCatalogEntry {
+            cwe: "CWE-22".to_string(),
+            name: "Path Traversal".to_string(),
+            taint_class: "path-traversal".to_string(),
+            languages: vec!["any".to_string()],
+            source_signals: vec![],
+            sink_signals: vec![],
+            sanitizer_signals: vec![],
+            structural_queries: vec![],
+            regex_markers: vec![],
+            score: 50,
+            reasons: vec![],
+        }];
+
+        let error = persist_target_catalog(workspace.path(), &entries).unwrap_err();
+        assert!(format!("{error:#}").contains("symlink"));
+        assert_eq!(
+            std::fs::read_to_string(outside_catalog).unwrap(),
+            "outside-sentinel"
+        );
     }
 
     #[test]

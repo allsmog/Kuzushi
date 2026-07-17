@@ -37,6 +37,7 @@ fn notice_banner_lines(app: &ShellApp, width: u16, max_lines: usize) -> Vec<Line
     let (chip, chip_style) = match notice.severity {
         NoticeSeverity::Error => (" ERROR ", theme::danger()),
         NoticeSeverity::Warn => (" NOTICE ", theme::warn()),
+        NoticeSeverity::Info => (" NOTICE ", theme::muted()),
         NoticeSeverity::Success => (" DONE ", theme::success()),
     };
     let prefix_width = 1 + chip.len() + 2 + notice.source.chars().count() + 3;
@@ -117,6 +118,19 @@ mod tests {
         assert_eq!(lines.len(), 1);
         let text = rendered_text(&lines);
         assert!(text.contains("semgrep missing"));
+        assert!(text.contains("Esc dismiss"));
+    }
+
+    #[test]
+    fn successful_review_receipt_uses_done_chip() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_success_notice("review", "decision saved; will carry forward");
+
+        let lines = notice_banner_lines(&app, 110, NOTICE_BANNER_MAX_LINES);
+        let text = rendered_text(&lines);
+
+        assert!(text.contains("DONE"));
+        assert!(text.contains("review · decision saved; will carry forward"));
         assert!(text.contains("Esc dismiss"));
     }
 

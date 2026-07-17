@@ -1,6 +1,7 @@
 use super::*;
 
-const AGENTIC_SAST_HEADER: &str = "You are Kuzushi's agentic SAST scanner. You find concrete application-security \
+const AGENTIC_SAST_HEADER: &str =
+    "You are Kuzushi's agentic SAST scanner. You find concrete application-security \
 vulnerabilities in local repositories using only source-grounded evidence.";
 
 const AGENTIC_SAST_STATIC_RULES: &str = "Static-only rules:
@@ -55,6 +56,7 @@ pub(crate) fn run_agentic_sast_report(
         result.value,
         persisted,
         result.cost_usd,
+        result.cost_usd_exact,
     ))
 }
 
@@ -66,9 +68,13 @@ fn collect_agentic_sast_findings(
 ) -> Result<CostedStructuredJson<Vec<Finding>>> {
     let mut result = query_agentic_sast_with_scope(runtime, run, ctx, parent_step)?;
     emit_agentic_sast_validation_count(ctx, parent_step, result.value.len());
+    let initial_cost = result.cost_report()?;
     let review = review_agentic_sast_with_scope(runtime, run, result.value, ctx, parent_step)?;
+    let cost =
+        initial_cost.checked_add(review.cost_report()?, "agentic SAST hunt plus review cost")?;
     result.value = review.value;
-    result.cost_usd += review.cost_usd;
+    result.cost_usd = cost.observed_usd();
+    result.cost_usd_exact = cost.is_complete();
     Ok(result)
 }
 
@@ -99,6 +105,7 @@ fn review_agentic_sast_with_scope(
         return Ok(CostedStructuredJson {
             value: findings,
             cost_usd: 0.0,
+            cost_usd_exact: true,
         });
     }
     let _validation_scope =
@@ -110,6 +117,7 @@ fn review_agentic_sast_with_scope(
     Ok(CostedStructuredJson {
         value: findings,
         cost_usd: review.cost_usd,
+        cost_usd_exact: review.cost_usd_exact,
     })
 }
 
@@ -128,6 +136,7 @@ fn agentic_sast_report(
     findings: Vec<Finding>,
     persisted: Option<AgenticSastPersistedRun>,
     cost_usd: f64,
+    cost_usd_exact: bool,
 ) -> AgenticSastReport {
     AgenticSastReport {
         target: run.target.display().to_string(),
@@ -135,6 +144,7 @@ fn agentic_sast_report(
         findings,
         persisted,
         cost_usd,
+        cost_usd_exact,
     }
 }
 
@@ -196,7 +206,10 @@ fn emit_agentic_sast_persisted(
 ) {
     if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
         let label = match persisted {
-            Some(run) => format!("persist findings: {finding_count} saved to {}", run.findings_db),
+            Some(run) => format!(
+                "persist findings: {finding_count} saved to {}",
+                run.findings_db
+            ),
             None => "persist findings: skipped without workspace store".to_string(),
         };
         let _ = trace
@@ -245,7 +258,7 @@ impl AgenticSastRun {
         let options = AgenticSastInput::from_tool_input(input)?;
         let model = agentic_sast_model(input, ctx)?;
         let whitebox_static = whitebox_static_profile_requested(input)?;
-        let system_prompt = agentic_sast_system_prompt(whitebox_static);
+        let system_prompt = agentic_sast_prompt_from_input(input, whitebox_static, &target)?;
         let tool_policy = agent_tool_policy_for_input_and_target(input, &target)?;
         let inventory = collect_agentic_repo_inventory_with_filters(
             &target,
@@ -263,6 +276,41 @@ impl AgenticSastRun {
             whitebox_static,
             inventory,
         })
+    }
+}
+
+fn agentic_sast_prompt_from_input(
+    input: &Value,
+    whitebox_static: bool,
+    target: &Path,
+) -> Result<String> {
+    let Some(value) = optional_nonempty_string(input, "AGENTIC_SAST_PROMPT")? else {
+        return Ok(agentic_sast_system_prompt(whitebox_static));
+    };
+    crate::options::resolve_prepared_prompt_override_for_key(
+        &value,
+        target,
+        "AGENTIC_SAST_PROMPT",
+        &agentic_sast_system_prompt_text(),
+    )
+}
+
+#[cfg(test)]
+mod prompt_override_tests {
+    use super::*;
+
+    #[test]
+    fn inline_agentic_prompt_replaces_the_builtin_instructions() {
+        let target = tempfile::tempdir().unwrap();
+
+        let prompt = agentic_sast_prompt_from_input(
+            &json!({"AGENTIC_SAST_PROMPT": "Focus on authorization boundaries."}),
+            false,
+            target.path(),
+        )
+        .unwrap();
+
+        assert_eq!(prompt, "Focus on authorization boundaries.");
     }
 }
 

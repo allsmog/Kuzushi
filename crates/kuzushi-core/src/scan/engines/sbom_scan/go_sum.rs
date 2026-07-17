@@ -1,6 +1,6 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) use super::dependency_graph::is_go_sum;

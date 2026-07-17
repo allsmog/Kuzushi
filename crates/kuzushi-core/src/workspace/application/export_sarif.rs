@@ -16,25 +16,92 @@ pub(crate) fn findings_to_sarif(
     options: WorkspaceExportOptions,
     total_count: usize,
 ) -> Result<String> {
+    findings_to_sarif_with_benchmark_spend(workspace, records, options, total_count, None, None)
+}
+
+pub(in crate::workspace::application) struct SarifBenchmarkSpend {
+    pub run_id: String,
+    pub total_cost_usd: f64,
+    pub models: Vec<String>,
+    pub llm_call_count: usize,
+    pub llm_audit_complete: bool,
+    pub config_hash: Option<String>,
+}
+
+pub(in crate::workspace::application) fn findings_to_sarif_with_benchmark_spend(
+    workspace: &WorkspaceTarget,
+    records: &[WorkspaceFindingExportRecord],
+    options: WorkspaceExportOptions,
+    total_count: usize,
+    benchmark_spend: Option<&SarifBenchmarkSpend>,
+    scan_run_id: Option<&str>,
+) -> Result<String> {
     let metadata = workspace_export_metadata_value(
         WorkspaceExportFormat::Sarif,
         options,
         records.len(),
         total_count,
     );
-    let runs = group_findings_by_tool(records)
+    let mut runs = group_findings_by_tool(records)
         .into_iter()
         .map(|(tool, tool_records)| build_sarif_run(&tool, &tool_records, workspace, &metadata))
         .collect::<Vec<_>>();
+    if runs.is_empty() {
+        runs.push(empty_sarif_run(&metadata, scan_run_id));
+    }
+    let mut properties = json!({ "kuzushiExport": metadata });
+    if let Some(spend) = benchmark_spend {
+        properties["kuzushiBenchmark"] = benchmark_spend_value(spend);
+    }
     let document = json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": runs,
-        "properties": {
-            "kuzushiExport": metadata,
-        },
+        "properties": properties,
     });
     Ok(serde_json::to_string_pretty(&document)?)
+}
+
+fn empty_sarif_run(
+    metadata: &serde_json::Value,
+    scan_run_id: Option<&str>,
+) -> serde_json::Value {
+    let driver = if scan_run_id.is_some() {
+        "kuzushi:sast-scan"
+    } else {
+        "Kuzushi"
+    };
+    let mut properties = json!({ "kuzushiExport": metadata });
+    if let Some(run_id) = scan_run_id {
+        properties["kuzushiScanRunId"] = json!(run_id);
+    }
+    json!({
+        "tool": { "driver": {
+            "name": driver,
+            "informationUri": KUZUSHI_INFORMATION_URI,
+            "rules": [],
+        }},
+        "results": [],
+        "properties": properties,
+    })
+}
+
+fn benchmark_spend_value(spend: &SarifBenchmarkSpend) -> serde_json::Value {
+    let mut aggregate = json!({
+        "runId": spend.run_id,
+        "totalCostUsd": spend.total_cost_usd,
+        "source": "canonical-run-summary",
+        "models": spend.models,
+        "llmCallCount": spend.llm_call_count,
+        "llmAuditComplete": spend.llm_audit_complete,
+    });
+    if let Some(config_hash) = spend.config_hash.as_ref() {
+        aggregate["configHash"] = json!(config_hash);
+    }
+    json!({
+        "schemaVersion": 2,
+        "aggregateSpend": aggregate,
+    })
 }
 
 fn group_findings_by_tool(
@@ -85,16 +152,22 @@ fn sarif_rules(records: &[&WorkspaceFindingExportRecord]) -> Vec<serde_json::Val
     }
     rules
         .values()
-        .map(|record| {
-            json!({
-                "id": record.rule_id,
-                "name": record.rule_id,
-                "shortDescription": { "text": record.title },
-                "fullDescription": { "text": record.message },
-                "defaultConfiguration": { "level": sarif_level(&record.severity) },
-            })
-        })
+        .map(|record| sarif_rule(record))
         .collect()
+}
+
+fn sarif_rule(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
+    let mut rule = json!({
+        "id": record.rule_id,
+        "name": record.rule_id,
+        "shortDescription": { "text": record.title },
+        "fullDescription": { "text": record.message },
+        "defaultConfiguration": { "level": sarif_level(&record.severity) },
+    });
+    if let Some(cwe) = record.cwe.as_ref() {
+        rule["properties"] = json!({ "tags": ["security", cwe] });
+    }
+    rule
 }
 
 fn sarif_result(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
@@ -178,11 +251,27 @@ fn sarif_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value 
     merge_sarif_properties(&mut properties, sarif_evidence_properties(record));
     merge_sarif_properties(&mut properties, sarif_proof_properties(record));
     merge_sarif_properties(&mut properties, sarif_provenance_properties(record));
+    merge_sarif_properties(&mut properties, sarif_remediation_properties(record));
     properties
 }
 
-fn sarif_core_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
+fn sarif_remediation_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
+    let Some(remediation) = record.remediation.as_ref() else {
+        return json!({});
+    };
     json!({
+        "kuzushiRemediationApplicationId": remediation.application_id,
+        "kuzushiRemediationPatchRunId": remediation.patch_run_id,
+        "kuzushiRemediationApplicationState": remediation.application_state,
+        "kuzushiRemediationReverifyOutcome": remediation.reverify_outcome,
+        "kuzushiRemediationReverifyRunId": remediation.reverify_run_id,
+        "kuzushiRemediationDiffHash": remediation.diff_hash,
+        "kuzushiRemediationTouchedPaths": remediation.touched_paths,
+    })
+}
+
+fn sarif_core_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
+    let mut properties = json!({
         "kuzushiAlias": record.alias,
         "kuzushiIdentityId": record.identity_id,
         "kuzushiKind": record.kind,
@@ -196,7 +285,11 @@ fn sarif_core_properties(record: &WorkspaceFindingExportRecord) -> serde_json::V
         "kuzushiTriageVerdict": record.triage_verdict,
         "kuzushiSuppressed": record.suppressed,
         "kuzushiSnoozedUntil": record.snoozed_until,
-    })
+    });
+    if let Some(cwe) = record.cwe.as_ref() {
+        properties["kuzushiCwe"] = json!(cwe);
+    }
+    properties
 }
 
 fn sarif_evidence_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value {

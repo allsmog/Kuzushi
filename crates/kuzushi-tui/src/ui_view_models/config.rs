@@ -211,11 +211,22 @@ fn base_url_detail(app: &ShellApp) -> String {
 }
 
 fn cost_detail(app: &ShellApp) -> String {
-    if let Some(last) = app.session().last_tool_cost_usd() {
+    let session = app.session();
+    if let Some(last) = session.last_tool_cost_report() {
+        if session.cost_accounting_is_complete() && last.is_complete() {
+            return format!(
+                "session ${:.4}; last tool ${:.4}",
+                session.session_cost_usd(),
+                last.observed_usd()
+            );
+        }
         format!(
-            "session ${:.4}; last tool ${:.4}",
-            app.session().session_cost_usd(),
-            last
+            "session {}; last tool {}",
+            super::format_runtime_cost(
+                session.session_cost_report(),
+                session.cost_accounting_error()
+            ),
+            super::format_runtime_cost(last, session.cost_accounting_error())
         )
     } else {
         "unavailable until a tool reports costUsd".to_string()

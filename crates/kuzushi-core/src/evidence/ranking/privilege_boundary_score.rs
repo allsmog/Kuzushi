@@ -6,7 +6,8 @@ pub(crate) fn privilege_boundary_score(
     finding: &Finding,
     reasons: &mut Vec<String>,
 ) -> i32 {
-    let score = privilege_keyword_score(corpus).max(privilege_surface_score(attack_surface, finding));
+    let score =
+        privilege_keyword_score(corpus).max(privilege_surface_score(attack_surface, finding));
 
     record_privilege_reason(score, reasons);
     score

@@ -17,6 +17,7 @@ fn confirmed(mut finding: Finding) -> Finding {
         confidence: 0.88,
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding
 }
@@ -27,6 +28,7 @@ fn human_confirmed(mut finding: Finding, confidence: f32) -> Finding {
         confidence,
         rationale: "human reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     finding
@@ -36,9 +38,17 @@ fn human_confirmed(mut finding: Finding, confidence: f32) -> Finding {
 fn report_preview_model_uses_export_projection_metadata() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
-    let latest_path = kuzushi_core::latest_run_path(workspace.root());
-    std::fs::create_dir_all(latest_path.parent().unwrap()).unwrap();
-    std::fs::write(&latest_path, "run-123\n").unwrap();
+    kuzushi_core::write_run_summary(
+        workspace.root(),
+        &kuzushi_core::RunSummary::running(
+            "run-123",
+            "tool",
+            None,
+            workspace.root().display().to_string(),
+        )
+        .complete(),
+    )
+    .unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     let mut open = finding("path-traversal", Severity::High, 20);
     open.identity_id = Some("fi_0123456789abcdef0123456789abcdef".to_string());
@@ -46,6 +56,7 @@ fn report_preview_model_uses_export_projection_metadata() {
         open,
         confirmed(finding("sql-injection", Severity::Medium, 40)),
     ];
+    app.hydrate_all_view_data_for_test();
 
     let model = report_preview_model(&app, WorkspaceExportFormat::Csv, ReviewQueueMode::All);
 
@@ -260,6 +271,7 @@ fn report_preview_rows_include_run_summary_provenance() {
     let mut finding = human_confirmed(finding("sql-injection", Severity::High, 40), 0.87);
     finding.scan_id = Some("run-preview".to_string());
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.hydrate_all_view_data_for_test();
     *app.findings_mut() = vec![finding];
 
     let model = report_preview_model(&app, WorkspaceExportFormat::Json, ReviewQueueMode::All);

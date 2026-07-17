@@ -51,10 +51,17 @@ impl ShellApp {
             }
         }
         Err(format!(
-            "timed out after {timeout:?} waiting for job tool worker; running={:?}; job_running={}; activity_events={}; drains={drain_count}; changed_drains={changed_count}",
+            "timed out after {timeout:?} waiting for job tool worker; running={:?}; job_running={}; activity_events={}; drains={drain_count}; changed_drains={changed_count}; recent log: [{}]",
             self.running_tool_name(),
             self.jobs().is_running(JobKind::Run),
             self.activity().map(|activity| activity.events.len()).unwrap_or(0),
+            self.log_lines()
+                .iter()
+                .rev()
+                .take(6)
+                .map(|line| format!("{}: {}", line.prefix, line.body))
+                .collect::<Vec<_>>()
+                .join(" | "),
         ))
     }
 

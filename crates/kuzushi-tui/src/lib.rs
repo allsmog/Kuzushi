@@ -14,14 +14,16 @@ mod build_provenance;
 mod commands;
 mod renderer;
 pub mod scene3d;
+#[cfg(test)]
+mod test_support;
 mod theme;
 pub mod ui_theme;
 pub mod ui_view_models;
 pub mod ui_views;
 
 pub use app::{
-    run_shell, run_shell_with_plain, ActivityRouteState, ActivitySession, AuthScreenFooter,
-    AuthScreenSnapshot, AuthScreenStatus, BootSplashCheck, BootSplashCheckState,
+    run_shell, run_shell_with_context, run_shell_with_plain, ActivityRouteState, ActivitySession,
+    AuthScreenFooter, AuthScreenSnapshot, AuthScreenStatus, BootSplashCheck, BootSplashCheckState,
     BootSplashSnapshot, ChatTurn, CommandPaletteFooter, CommandPaletteSnapshot,
     CommandPaletteStatus, ConfigScreenFooter, ConfigScreenSnapshot, ConfigScreenStatus,
     ConfirmDialogFooter, ConfirmDialogSnapshot, ConfirmDialogStatus, ContextScreenFooter,
@@ -32,9 +34,9 @@ pub use app::{
     KeymapSnapshot, KeymapStatus, OptionsFilter, OptionsScreenFooter, OptionsScreenSnapshot,
     OptionsScreenStatus, OptionsView, PaneFocus, QuitConfirmFooter, QuitConfirmSection,
     QuitConfirmSnapshot, QuitConfirmStatus, ReconSnapshot, SastTasksFooter, SastTasksSnapshot,
-    SastTasksStatus, ScanPanelState, ShellApp, ShellView, ThemePaletteRow, ThemePickerFooter,
-    ThemePickerSnapshot, ThemePickerStatus, ThreatView, UpdateAvailableFooter,
-    UpdateAvailableSnapshot, UpdateAvailableStatus, WorkbenchPane,
+    SastTasksStatus, ScanPanelState, ShellApp, ShellLaunchContext, ShellTargetSource, ShellView,
+    ThemePaletteRow, ThemePickerFooter, ThemePickerSnapshot, ThemePickerStatus, ThreatView,
+    UpdateAvailableFooter, UpdateAvailableSnapshot, UpdateAvailableStatus, WorkbenchPane,
 };
 pub use build_provenance::{
     build_provenance, build_summary, build_version, build_version_static, BuildProvenance,

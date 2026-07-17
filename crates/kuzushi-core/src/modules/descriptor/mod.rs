@@ -8,12 +8,20 @@ mod max_findings_option;
 mod mcp_options;
 mod metadata;
 mod tool_phase;
+mod tool_policy;
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 mod tests;
 pub use descriptor_model::{
-    DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec, OptionType, RuntimeRequirement,
-    ToolDescriptor,
+    DagNodeDescriptor, FileReferenceSemantics, ModuleKind, ModuleMetadata, OptionSpec, OptionType,
+    PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor,
 };
 pub use metadata::BuiltinModule;
 pub use tool_phase::{canonical_tool_phase, ToolPhase};
+pub(in crate::modules) use tool_policy::{
+    external_action_policy, read_policy, repository_execute_policy, target_write_policy,
+    tool_policy, workspace_policy,
+};
+pub use tool_policy::{
+    ApprovalPolicy, FindingStoreRequirement, ToolEffect, ToolPolicy, WorkspaceRequirement,
+};

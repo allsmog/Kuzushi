@@ -343,7 +343,8 @@ export const PatchResultSchema = z.object({
   buildCommand: z.string().nullable().optional(),
   testCommand: z.string().nullable().optional(),
   worktreePath: z.string().nullable().optional(),
-  costUsd: z.number().optional(),
+  costUsd: z.number().finite().nonnegative().optional(),
+  providerSpendUnresolved: z.boolean().optional(),
   validatorLog: z.string().optional(),
   history: z.array(
     z.object({
@@ -353,6 +354,16 @@ export const PatchResultSchema = z.object({
       output: z.string(),
     }),
   ),
+  provenance: z
+    .object({
+      sourceCommit: z.string(),
+      target: z.string(),
+      originatingRunId: z.string().optional(),
+      detectorTool: z.string().optional(),
+      detectorRunId: z.string().optional(),
+      detectorInputDigest: z.string().optional(),
+    })
+    .optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
 });

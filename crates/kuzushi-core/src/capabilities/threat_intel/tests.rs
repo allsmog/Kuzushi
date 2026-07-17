@@ -315,6 +315,8 @@ hunt = "ml-finetune"
         workspace: None,
         findings_store: None,
         trace: None,
+cancellation: None,
+authorization: Default::default(),
     };
 
     let dry = apply_threat_intel_catalog(&catalog, &ctx, None, false, |_, _, _, _| {
@@ -377,6 +379,8 @@ sink_signals = ["zmalloc(count * sizeof(...))"]
         workspace: None,
         findings_store: None,
         trace: None,
+cancellation: None,
+authorization: Default::default(),
     };
     let input = json!({"catalogPath": catalog.display().to_string()});
 
@@ -422,6 +426,8 @@ fn harvest_pipeline_with_mock_dispatch_writes_catalog_and_summary() {
         workspace: Some(&workspace),
         findings_store: None,
         trace: None,
+cancellation: None,
+authorization: Default::default(),
     };
 
     // Canned ndiff responses: usable patterns for two CVE IDs, ok=false
@@ -565,6 +571,8 @@ fn harvest_with_regression_gate_validates_and_writes_entry() {
         workspace: Some(&workspace),
         findings_store: None,
         trace: None,
+cancellation: None,
+authorization: Default::default(),
     };
 
     let dispatch = |name: &str,
@@ -680,6 +688,8 @@ fn harvest_with_regression_gate_rejects_non_splitting_pattern() {
         workspace: Some(&workspace),
         findings_store: None,
         trace: None,
+cancellation: None,
+authorization: Default::default(),
     };
 
     let dispatch = |name: &str,

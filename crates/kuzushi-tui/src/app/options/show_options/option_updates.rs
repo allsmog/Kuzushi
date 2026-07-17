@@ -223,9 +223,6 @@ fn canonical_shell_option(name: &str) -> Option<&'static str> {
     match name.trim() {
         UI_AUTO_OPEN_ACTIVITY_OPTION | "auto_open_activity" => Some(UI_AUTO_OPEN_ACTIVITY_OPTION),
         UI_AUTO_OPEN_VIZ_OPTION | "auto_open_viz" => Some(UI_AUTO_OPEN_VIZ_OPTION),
-        UI_WORKBENCH_DEPTH_STACK_OPTION | "workbench_depth_stack" => {
-            Some(UI_WORKBENCH_DEPTH_STACK_OPTION)
-        }
         _ => None,
     }
 }

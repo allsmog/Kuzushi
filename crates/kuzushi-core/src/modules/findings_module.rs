@@ -11,12 +11,24 @@ pub(crate) fn findings_module() -> BuiltinModule {
                 "findings:list",
                 "List persisted findings.",
                 findings_list_options(),
-            ),
+            )
+            .with_policy(ToolPolicy::new(
+                ToolPhase::Review,
+                RuntimeRequirement::Never,
+                ToolEffect::Read,
+                WorkspaceRequirement::Required,
+                FindingStoreRequirement::Required,
+            )),
             tool_with_options(
                 "findings:dismiss",
                 "Dismiss a finding with an auditable, SARIF-compatible reason.",
                 findings_dismiss_options(),
-            ),
+            )
+            .with_policy(workspace_policy(
+                ToolPhase::Review,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Required,
+            )),
         ],
         vec![],
     )
@@ -75,6 +87,7 @@ fn findings_basic_options() -> Vec<OptionSpec> {
             OptionType::Path,
             "Workspace target for provenance filters.",
         )
+        .workspace_read()
         .advanced(),
         opt("limit", OptionType::Int, "Maximum findings to return.").default(json!(50)),
         opt(
@@ -88,7 +101,7 @@ fn findings_basic_options() -> Vec<OptionSpec> {
             OptionType::String,
             "Substring filter for finding titles.",
         ),
-        opt("filePath", OptionType::Path, "File path filter.").aliases(&["file_path"]),
+        opt("filePath", OptionType::String, "File path filter.").aliases(&["file_path"]),
         opt(
             "severity",
             OptionType::StringList,

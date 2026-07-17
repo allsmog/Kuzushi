@@ -2,12 +2,20 @@ use super::view_keybinding_helpers::{bind, bind_char};
 use super::*;
 
 pub(super) fn catalog_keybindings() -> Vec<ViewKeybinding> {
-    vec![bind(
-        HotkeyTrigger::Enter,
-        "Enter",
-        "use selected row",
-        ViewHotkeyAction::CatalogActivate,
-    )]
+    vec![
+        bind(
+            HotkeyTrigger::Enter,
+            "Enter",
+            "load action",
+            ViewHotkeyAction::CatalogActivate,
+        ),
+        bind_char(
+            'e',
+            "e",
+            "expert engines",
+            ViewHotkeyAction::CatalogToggleExpert,
+        ),
+    ]
 }
 
 pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
@@ -34,8 +42,8 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
         ),
         bind_char('x', "x", "reset view", ViewHotkeyAction::ActivityReset),
         bind_char('b', "b", "background", ViewHotkeyAction::ActivityBackground),
+        bind_char('s', "s", "steer", ViewHotkeyAction::ActivitySteer),
     ];
-    bindings.extend(activity_deck_keybindings());
     bindings.extend([bind(
         HotkeyTrigger::Enter,
         "Enter",
@@ -43,15 +51,6 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
         ViewHotkeyAction::ActivityFocusSelected,
     )]);
     bindings
-}
-
-fn activity_deck_keybindings() -> Vec<ViewKeybinding> {
-    vec![
-        bind_char(']', "[/]", "views", ViewHotkeyAction::ActivityDeckNext),
-        bind_char('[', "[/]", "views", ViewHotkeyAction::ActivityDeckPrev),
-        bind_char('f', "f", "findings", ViewHotkeyAction::ActivityOpenFindings),
-        bind_char('o', "o", "open", ViewHotkeyAction::ActivityOpenDeckArtifact),
-    ]
 }
 
 pub(super) fn home_keybindings() -> Vec<ViewKeybinding> {
@@ -104,117 +103,252 @@ pub(super) fn recommend_keybindings() -> Vec<ViewKeybinding> {
     ]
 }
 
-pub(super) fn workbench_keybindings() -> Vec<ViewKeybinding> {
-    let mut bindings = workbench_movement_keybindings();
-    bindings.extend(workbench_pane_keybindings());
-    bindings.extend(workbench_center_keybindings());
-    bindings.extend(workbench_action_keybindings());
+pub(super) fn workbench_keybindings(app: &ShellApp) -> Vec<ViewKeybinding> {
+    let plan = workbench_phase_plan(app);
+    workbench_keybindings_for_plan(app, plan.as_ref())
+}
+
+pub(super) fn workbench_keybindings_for_plan(
+    app: &ShellApp,
+    plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
+) -> Vec<ViewKeybinding> {
+    // Keep the focused-pane controls first. The footer intentionally compacts
+    // a long binding list on ordinary 80-column terminals, so ordering is a
+    // discoverability contract: pane cycling, opening, and moving must survive
+    // before page/visualization shortcuts and secondary actions.
+    let page = crate::ui_view_models::active_workbench_page(app);
+    if plan.is_some_and(|plan| plan.density == crate::ui_view_models::LayoutDensity::Guided) {
+        return Vec::new();
+    }
+    let available_count = plan.map_or(0, |plan| plan.available_surfaces.len());
+    let focused_surface = plan
+        .and_then(|plan| plan.surface(plan.effective_focus))
+        .copied();
+    let interaction = focused_surface.map(|surface| surface.interaction);
+    let mut bindings = workbench_pane_cycle_keybindings(available_count);
+    bindings.extend(workbench_open_keybindings(focused_surface));
+    if matches!(
+        interaction,
+        Some(
+            crate::ui_view_models::SurfaceInteraction::Selectable
+                | crate::ui_view_models::SurfaceInteraction::Scrollable
+        )
+    ) {
+        bindings.extend(workbench_movement_keybindings());
+    }
+    bindings.extend(workbench_page_keybindings());
+    if !plan.is_some_and(|plan| plan.density == crate::ui_view_models::LayoutDensity::Guided) {
+        bindings.extend(workbench_zoom_keybindings());
+    }
+    bindings.extend(workbench_secondary_action_keybindings(page));
+    bindings.extend(workbench_return_keybindings(plan));
     bindings
 }
 
-fn workbench_pane_keybindings() -> Vec<ViewKeybinding> {
-    vec![
-        bind(
-            HotkeyTrigger::Tab,
-            "Tab",
-            "cycle pane",
-            ViewHotkeyAction::WorkbenchCyclePane,
-        ),
-        bind(
-            HotkeyTrigger::BackTab,
-            "Shift+Tab",
-            "cycle pane",
-            ViewHotkeyAction::WorkbenchCyclePanePrev,
-        ),
+fn workbench_pane_cycle_keybindings(available_count: usize) -> Vec<ViewKeybinding> {
+    if available_count <= 1 {
+        return Vec::new();
+    }
+    [
+        workbench_primary_pane_keybindings()[0].clone(),
+        workbench_previous_pane_keybindings()[0].clone(),
+        workbench_next_pane_keybindings()[0].clone(),
     ]
+    .into()
+}
+
+fn workbench_open_keybindings(
+    surface: Option<crate::ui_view_models::PlannedPhaseSurface>,
+) -> Vec<ViewKeybinding> {
+    let can_open = surface.is_some_and(|surface| {
+        surface.interaction == crate::ui_view_models::SurfaceInteraction::Selectable
+            || surface.id == crate::ui_view_models::PhaseSurfaceId::ReviewQueue
+    });
+    if !can_open {
+        return Vec::new();
+    }
+    vec![workbench_open_keybinding()]
+}
+
+fn workbench_phase_plan(app: &ShellApp) -> Option<crate::ui_view_models::PhasePresentationPlan> {
+    let viewport = app.viewport();
+    crate::renderer::workbench_phase_plan_for_app(
+        app,
+        ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
+    )
+}
+
+fn workbench_return_keybindings(
+    plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
+) -> Vec<ViewKeybinding> {
+    let is_review_detail = plan.is_some_and(|plan| {
+        plan.effective_focus == crate::ui_view_models::PhaseSurfaceId::ReviewDetail
+    });
+    if !is_review_detail {
+        return Vec::new();
+    }
+    vec![bind_char('q', "q", "review list", ViewHotkeyAction::Back)]
+}
+
+fn workbench_primary_pane_keybindings() -> [ViewKeybinding; 1] {
+    [bind(
+        HotkeyTrigger::Tab,
+        "Tab",
+        "pane",
+        ViewHotkeyAction::WorkbenchCyclePane,
+    )]
+}
+
+fn workbench_previous_pane_keybindings() -> [ViewKeybinding; 1] {
+    [bind_char(
+        '[',
+        "[",
+        "pane back",
+        ViewHotkeyAction::WorkbenchCyclePanePrev,
+    )]
+}
+
+fn workbench_next_pane_keybindings() -> [ViewKeybinding; 1] {
+    [bind_char(
+        ']',
+        "]",
+        "pane",
+        ViewHotkeyAction::WorkbenchCyclePane,
+    )]
 }
 
 fn workbench_movement_keybindings() -> Vec<ViewKeybinding> {
     vec![
-        bind_char('j', "j/k", "move", ViewHotkeyAction::WorkbenchScrollNext),
-        bind_char('k', "j/k", "move", ViewHotkeyAction::WorkbenchScrollPrev),
+        bind_char(
+            'j',
+            "j/k/↑/↓",
+            "move",
+            ViewHotkeyAction::WorkbenchScrollNext,
+        ),
+        bind_char(
+            'k',
+            "j/k/↑/↓",
+            "move",
+            ViewHotkeyAction::WorkbenchScrollPrev,
+        ),
+        bind(
+            HotkeyTrigger::Down,
+            "j/k/↑/↓",
+            "move",
+            ViewHotkeyAction::WorkbenchScrollNext,
+        ),
+        bind(
+            HotkeyTrigger::Up,
+            "j/k/↑/↓",
+            "move",
+            ViewHotkeyAction::WorkbenchScrollPrev,
+        ),
         bind_char('g', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollFirst),
         bind_char('G', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollLast),
     ]
 }
 
-fn workbench_center_keybindings() -> Vec<ViewKeybinding> {
-    let mut bindings = vec![
-        bind_char(
-            'd',
-            "d",
-            "CODE/DFD",
-            ViewHotkeyAction::WorkbenchToggleCenter,
-        ),
-        bind(
-            HotkeyTrigger::Right,
-            "←/→",
-            "center view",
-            ViewHotkeyAction::WorkbenchCenterNext,
-        ),
-        bind(
-            HotkeyTrigger::Left,
-            "←/→",
-            "center view",
-            ViewHotkeyAction::WorkbenchCenterPrev,
-        ),
-        bind_char(
-            ']',
-            "[/]",
-            "center view",
-            ViewHotkeyAction::WorkbenchCenterNext,
-        ),
-        bind_char(
-            '[',
-            "[/]",
-            "center view",
-            ViewHotkeyAction::WorkbenchCenterPrev,
-        ),
-    ];
-    bindings.extend(workbench_zoom_keybindings());
-    bindings
-}
-
 fn workbench_zoom_keybindings() -> [ViewKeybinding; 2] {
     [
-        bind_char('z', "z", "zoom viz", ViewHotkeyAction::WorkbenchZoomCenter),
+        bind_char('Z', "Z", "zoom", ViewHotkeyAction::WorkbenchTogglePaneZoom),
         bind_char(
-            'Z',
-            "Z",
-            "zoom pane",
-            ViewHotkeyAction::WorkbenchTogglePaneZoom,
+            'z',
+            "z",
+            "viz",
+            ViewHotkeyAction::WorkbenchOpenFocusedVisualization,
         ),
     ]
 }
 
-fn workbench_action_keybindings() -> Vec<ViewKeybinding> {
-    let mut bindings = WorkbenchPage::ALL
+fn workbench_page_keybindings() -> Vec<ViewKeybinding> {
+    WorkbenchPage::ALL
         .iter()
         .enumerate()
         .map(|(index, page)| {
             bind_char(
                 char::from_digit((index + 1) as u32, 10).unwrap(),
-                "1..4",
+                "1..5",
                 "page",
                 ViewHotkeyAction::WorkbenchPage(*page),
             )
         })
-        .collect::<Vec<_>>();
-    bindings.extend([
+        .collect()
+}
+
+fn workbench_open_keybinding() -> ViewKeybinding {
+    bind(
+        HotkeyTrigger::Enter,
+        "Enter",
+        "open",
+        ViewHotkeyAction::WorkbenchOpen,
+    )
+}
+
+fn workbench_secondary_action_keybindings(page: WorkbenchPage) -> Vec<ViewKeybinding> {
+    let mut bindings = workbench_page_navigation_keybindings();
+    bindings.extend(workbench_page_action_keybindings(page));
+    bindings
+}
+
+fn workbench_page_navigation_keybindings() -> Vec<ViewKeybinding> {
+    vec![
         bind(
-            HotkeyTrigger::Enter,
-            "Enter",
-            "open finding",
-            ViewHotkeyAction::WorkbenchOpen,
+            HotkeyTrigger::BackTab,
+            "Shift+Tab",
+            "mode",
+            ViewHotkeyAction::WorkbenchPageNext,
         ),
         bind_char('n', "n/N", "page", ViewHotkeyAction::WorkbenchPageNext),
         bind_char('N', "n/N", "page", ViewHotkeyAction::WorkbenchPagePrev),
-        bind_char('v', "v", "validate", ViewHotkeyAction::WorkbenchValidate),
-        bind_char('x', "x", "suppress", ViewHotkeyAction::WorkbenchSuppress),
-        bind_char('c', "c", "chain", ViewHotkeyAction::WorkbenchOrderChain),
-        bind_char('D', "D", "cluster", ViewHotkeyAction::WorkbenchCluster),
-    ]);
-    bindings
+    ]
+}
+
+fn workbench_page_action_keybindings(page: WorkbenchPage) -> Vec<ViewKeybinding> {
+    match page {
+        WorkbenchPage::Prove => prove_page_action_keybindings(),
+        WorkbenchPage::Review => vec![bind_char(
+            'D',
+            "D",
+            "cluster",
+            ViewHotkeyAction::WorkbenchCluster,
+        )],
+        WorkbenchPage::Fix => vec![bind_char(
+            'v',
+            "v",
+            "reverify applied",
+            ViewHotkeyAction::WorkbenchReverifyPatch,
+        )],
+        WorkbenchPage::Map | WorkbenchPage::Scan => Vec::new(),
+    }
+}
+
+fn prove_page_action_keybindings() -> Vec<ViewKeybinding> {
+    vec![
+        bind_char(
+            'v',
+            "v",
+            "draft verify",
+            ViewHotkeyAction::WorkbenchValidate,
+        ),
+        bind_char(
+            'D',
+            "D",
+            "defer proof",
+            ViewHotkeyAction::WorkbenchDeferProof,
+        ),
+        bind_char(
+            'x',
+            "x",
+            "draft suppress",
+            ViewHotkeyAction::WorkbenchSuppress,
+        ),
+        bind_char(
+            'c',
+            "c",
+            "draft chain",
+            ViewHotkeyAction::WorkbenchOrderChain,
+        ),
+    ]
 }
 
 pub(super) fn threat_keybindings() -> Vec<ViewKeybinding> {

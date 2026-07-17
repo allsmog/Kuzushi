@@ -1,6 +1,6 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_cartfile_resolved(path: &Path) -> bool {
@@ -52,7 +52,12 @@ fn cartfile_dependency_name(line: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn cartfile_component(target: &Path, path: &Path, source: &str, line: &str) -> Option<SbomComponent> {
+fn cartfile_component(
+    target: &Path,
+    path: &Path,
+    source: &str,
+    line: &str,
+) -> Option<SbomComponent> {
     let mut fields = quoted_fields(line);
     let name = fields.next()?.trim();
     let version = fields.next()?.trim();

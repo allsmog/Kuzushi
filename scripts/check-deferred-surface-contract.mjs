@@ -128,12 +128,15 @@ const optionalAdapterPackages = [
 ];
 
 const deferredDocNeedles = [
-  "systems-hunt:*` entries are internal DAG",
-  "`carlini-threat-hunt`",
-  "`uaf-hunt`",
   "`classifier-gate`",
   "hidden exact-invocation plugin-backed",
   "internally registered DAG nodes",
+];
+
+const capabilityReadmeNeedles = [
+  "six operator capabilities",
+  "Capabilities** overlay",
+  "are no longer activated merely because",
 ];
 
 const failures = [
@@ -144,8 +147,8 @@ const failures = [
   ...missingNeedles(registryTestsFile, exactOnlyToolNeedles),
   ...missingNeedles(registryTestsFile, hiddenDagNodeNeedles),
   ...missingNeedles(registryTestsFile, ["is_registered_dag_node"]),
-  ...missingNeedles(readmeFile, deferredDocNeedles.slice(0, 3)),
-  ...missingNeedles(portPlanFile, deferredDocNeedles.slice(2)),
+  ...missingNeedles(readmeFile, capabilityReadmeNeedles),
+  ...missingNeedles(portPlanFile, deferredDocNeedles),
   ...forbiddenNeedles(recommenderFile, recommenderForbiddenTools),
   ...deferredPackageDependencyFailures(),
   ...systemsHuntTaskFailures(),
@@ -182,11 +185,11 @@ function deferredPackageDependencyFailures() {
   return optionalAdapterPackages
     .flatMap((name) => [
       Object.hasOwn(pkg.dependencies ?? {}, name)
-        ? `${packageFile} must not install deferred adapter package ${name} as a default dependency`
+        ? `${packageFile} must not bundle adapter package ${name} as a default dependency`
         : null,
       Object.hasOwn(pkg.optionalDependencies ?? {}, name)
-        ? null
-        : `${packageFile} must keep deferred adapter package ${name} in optionalDependencies`,
+        ? `${packageFile} must not silently activate adapter package ${name} through optionalDependencies`
+        : null,
     ])
     .filter(Boolean);
 }

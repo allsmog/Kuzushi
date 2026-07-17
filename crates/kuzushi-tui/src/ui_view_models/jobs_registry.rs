@@ -1,7 +1,7 @@
 use super::ui_runs_root_relative_path;
 use crate::app::JobKind;
-use crate::{ActivitySession, DagTaskState, ShellApp};
-use kuzushi_core::list_run_summaries;
+use crate::{ActivitySession, DagTaskState, RunSummaryEntriesState, ShellApp, ViewDataState};
+use kuzushi_core::{RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue};
 use std::collections::HashSet;
 
 /// Lifecycle state of a registry row. The registry can only ever show **one**
@@ -11,6 +11,8 @@ use std::collections::HashSet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum JobRunStatus {
     Running,
+    Canceling,
+    WaitingInput,
     Queued,
     /// A disk summary still marked `running` but with **no live backing** in
     /// this session. The liveness can't be trusted (the owning process may
@@ -23,6 +25,7 @@ pub(crate) enum JobRunStatus {
     Interrupted,
     Partial,
     Skipped,
+    Malformed,
     Unknown,
 }
 
@@ -30,6 +33,8 @@ impl JobRunStatus {
     pub(crate) fn label(self) -> &'static str {
         match self {
             JobRunStatus::Running => "running",
+            JobRunStatus::Canceling => "canceling",
+            JobRunStatus::WaitingInput => "WAITING INPUT",
             JobRunStatus::Queued => "pending",
             JobRunStatus::Stale => "running?",
             JobRunStatus::Completed => "completed",
@@ -38,6 +43,7 @@ impl JobRunStatus {
             JobRunStatus::Interrupted => "interrupted",
             JobRunStatus::Partial => "partial",
             JobRunStatus::Skipped => "skipped",
+            JobRunStatus::Malformed => "malformed",
             JobRunStatus::Unknown => "—",
         }
     }
@@ -87,21 +93,32 @@ pub(crate) struct JobRow {
 pub(crate) struct JobsRegistryModel {
     pub(crate) rows: Vec<JobRow>,
     pub(crate) live_count: usize,
+    pub(crate) history_state: JobHistoryState,
     pub(crate) runs_root_hint: &'static str,
 }
 
-/// Pure builder. The only side effect is the on-disk read of recent run
-/// summaries (same pattern as `run_timeline_model`). Live rows come first
-/// (Running, then Queued), then recent disk rows de-duped by `run_id` so a
-/// live run's still-`running` on-disk twin never appears twice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum JobHistoryState {
+    NoTarget,
+    NotRequested,
+    Loading,
+    Ready,
+    Failed(String),
+}
+
+/// Pure projection over live state and the asynchronously hydrated run-history
+/// page. Live rows come first (Running, then Queued), then recent disk rows
+/// de-duped by `run_id` so a live run's still-`running` disk twin never appears
+/// twice. This function never reads or repairs run artifacts.
 pub(crate) fn jobs_registry_model(app: &ShellApp, disk_limit: usize) -> JobsRegistryModel {
     let live = live_job_rows(app);
     let live_ids: HashSet<String> = live.iter().map(|row| row.run_id.clone()).collect();
     let live_count = live.len();
+    let (disk_rows, history_state) = hydrated_disk_job_rows(app, disk_limit);
 
     let mut rows = live;
     rows.extend(
-        disk_job_rows(app, disk_limit)
+        disk_rows
             .into_iter()
             .filter(|row| !live_ids.contains(&row.run_id)),
     );
@@ -109,6 +126,7 @@ pub(crate) fn jobs_registry_model(app: &ShellApp, disk_limit: usize) -> JobsRegi
     JobsRegistryModel {
         rows,
         live_count,
+        history_state,
         runs_root_hint: ui_runs_root_relative_path(),
     }
 }
@@ -139,7 +157,7 @@ fn live_run_row(app: &ShellApp) -> Option<JobRow> {
         run_id: session.run_id.clone(),
         kind: kind_from_run_id(&session.run_id),
         label,
-        status: JobRunStatus::Running,
+        status: live_run_status(app, session, scan),
         elapsed_secs: Some(session.started_at.elapsed().as_secs()),
         phase: live_run_phase(session, scan.map(|scan| scan.stage.as_str())),
         findings: scan.map(|scan| scan.findings_count as u64),
@@ -147,6 +165,25 @@ fn live_run_row(app: &ShellApp) -> Option<JobRow> {
         source: JobSource::Live,
         cancelable: true,
     })
+}
+
+fn live_run_status(
+    app: &ShellApp,
+    session: &ActivitySession,
+    scan: Option<&crate::ScanPanelState>,
+) -> JobRunStatus {
+    let activity_is_canceling = session
+        .tasks
+        .values()
+        .any(|row| row.state == DagTaskState::Canceling);
+    if activity_is_canceling
+        || app.tool_abort_requested()
+        || scan.is_some_and(|scan| scan.abort_requested)
+    {
+        JobRunStatus::Canceling
+    } else {
+        JobRunStatus::Running
+    }
 }
 
 /// Current step of the live run: the active DAG row's label, falling back to
@@ -174,25 +211,75 @@ fn live_run_phase(session: &ActivitySession, scan_stage: Option<&str>) -> Option
 fn worker_job_rows(app: &ShellApp) -> Vec<JobRow> {
     let mut rows = Vec::new();
     if app.jobs().is_running(JobKind::Plan) && app.planner_running() {
-        rows.push(worker_job_row("plan", "planner"));
+        rows.push(worker_job_row(
+            "plan",
+            "planner",
+            requested_status(app.plan_abort_requested()),
+            None,
+        ));
     }
     if app.jobs().is_running(JobKind::Threat) && app.threat_worker_running() {
-        rows.push(worker_job_row("threat", "threat-model"));
+        rows.push(worker_job_row(
+            "threat",
+            "threat-model",
+            requested_status(app.threat_abort_requested()),
+            None,
+        ));
     }
-    if app.jobs().is_running(JobKind::Agent) {
-        rows.push(worker_job_row("agent", "agent"));
+    if let Some(agent) = agent_worker_job_row(app) {
+        rows.push(agent);
     }
     rows
 }
 
-fn worker_job_row(run_id: &str, label: &str) -> JobRow {
+fn agent_worker_job_row(app: &ShellApp) -> Option<JobRow> {
+    if !app.jobs().is_running(JobKind::Agent) {
+        return None;
+    }
+    let question = app
+        .activity()
+        .and_then(|session| session.operator_question.as_ref());
+    let status = if app.jobs().cancel_requested(JobKind::Agent)
+        || app.agent_chat().is_some_and(|agent| agent.abort_requested)
+    {
+        JobRunStatus::Canceling
+    } else {
+        question.map_or(JobRunStatus::Running, |_| JobRunStatus::WaitingInput)
+    };
+    let phase = question.map(|card| {
+        format!(
+            "question {}/{}",
+            card.active_question_index() + 1,
+            card.request().questions.len()
+        )
+    });
+    let run_id = app
+        .activity()
+        .map_or_else(|| "agent".to_string(), |session| session.run_id.clone());
+    Some(worker_job_row(&run_id, "agent", status, phase))
+}
+
+fn requested_status(abort_requested: bool) -> JobRunStatus {
+    if abort_requested {
+        JobRunStatus::Canceling
+    } else {
+        JobRunStatus::Running
+    }
+}
+
+fn worker_job_row(
+    run_id: &str,
+    label: &str,
+    status: JobRunStatus,
+    phase: Option<String>,
+) -> JobRow {
     JobRow {
         run_id: run_id.to_string(),
         kind: run_id.to_string(),
         label: label.to_string(),
-        status: JobRunStatus::Running,
+        status,
         elapsed_secs: None,
-        phase: None,
+        phase,
         findings: None,
         target: String::new(),
         source: JobSource::Live,
@@ -203,9 +290,8 @@ fn worker_job_row(run_id: &str, label: &str) -> JobRow {
 fn queued_job_rows(app: &ShellApp) -> Vec<JobRow> {
     app.steer_queue()
         .iter()
-        .enumerate()
-        .map(|(index, cmd)| JobRow {
-            run_id: crate::app::SteerQueue::synthetic_id(index),
+        .map(|(run_id, cmd)| JobRow {
+            run_id,
             kind: "queued".to_string(),
             label: cmd.summary.clone(),
             status: JobRunStatus::Queued,
@@ -219,21 +305,62 @@ fn queued_job_rows(app: &ShellApp) -> Vec<JobRow> {
         .collect()
 }
 
-fn disk_job_rows(app: &ShellApp, disk_limit: usize) -> Vec<JobRow> {
+fn hydrated_disk_job_rows(app: &ShellApp, disk_limit: usize) -> (Vec<JobRow>, JobHistoryState) {
     let Some(target) = app.target() else {
-        return Vec::new();
+        return (Vec::new(), JobHistoryState::NoTarget);
     };
-    let Ok(summaries) = list_run_summaries(target) else {
-        return Vec::new();
-    };
-    summaries
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_run_summary_entries(Some(target))
+    {
+        ViewDataState::Ready(RunSummaryEntriesState::Ready(entries)) => {
+            (disk_job_rows(entries, disk_limit), JobHistoryState::Ready)
+        }
+        ViewDataState::Ready(RunSummaryEntriesState::Failed(error)) => {
+            (Vec::new(), JobHistoryState::Failed(error))
+        }
+        ViewDataState::Loading => (Vec::new(), JobHistoryState::Loading),
+        ViewDataState::NotRequested => (Vec::new(), JobHistoryState::NotRequested),
+    }
+}
+
+fn disk_job_rows(entries: Vec<RunSummaryEntry>, disk_limit: usize) -> Vec<JobRow> {
+    entries
         .into_iter()
         .take(disk_limit)
-        .map(disk_job_row)
+        .map(disk_job_row_from_entry)
         .collect()
 }
 
-fn disk_job_row(summary: kuzushi_core::RunSummary) -> JobRow {
+fn disk_job_row_from_entry(entry: RunSummaryEntry) -> JobRow {
+    let RunSummaryEntry {
+        run_id,
+        path,
+        state,
+    } = entry;
+    match state {
+        RunSummaryEntryState::Ready(summary) => disk_summary_job_row(summary),
+        RunSummaryEntryState::Issue(issue) => disk_issue_job_row(run_id, path, issue),
+    }
+}
+
+fn disk_issue_job_row(run_id: String, path: std::path::PathBuf, issue: RunSummaryIssue) -> JobRow {
+    JobRow {
+        run_id,
+        kind: "history".to_string(),
+        label: format!("run history issue: {issue:?}"),
+        status: JobRunStatus::Malformed,
+        elapsed_secs: None,
+        phase: None,
+        findings: None,
+        target: path.display().to_string(),
+        source: JobSource::Disk,
+        cancelable: false,
+    }
+}
+
+fn disk_summary_job_row(summary: kuzushi_core::RunSummary) -> JobRow {
     let elapsed_secs = summary
         .completed_at_unix
         .map(|completed| completed.saturating_sub(summary.started_at_unix));

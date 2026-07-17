@@ -1,6 +1,10 @@
 use super::*;
 
 impl AgentRouter {
+    pub(crate) fn operator_models_path(paths: &ConfigPaths) -> PathBuf {
+        home_models_path(paths)
+    }
+
     /// Empty router — every role returns `None` from `pick`. The
     /// [`RoutedRuntime`] then falls back to the operator's
     /// `ctx.config.model`.

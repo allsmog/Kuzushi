@@ -30,7 +30,7 @@ pub(in crate::modules) fn run_android_apk_prepare(
         "prepare",
         &format!("android-apk:prepare start · workspace={}", target.display()),
     );
-    let outcome = match prepare_apk(&input, &target) {
+    let outcome = match ctx.with_cancellation(|cancel| prepare_apk(&input, &target, cancel)) {
         Ok(outcome) => outcome,
         Err(error) => return Ok(failed_tool_output("android-apk:prepare", &target, error)),
     };

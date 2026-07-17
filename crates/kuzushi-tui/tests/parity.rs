@@ -1,9 +1,9 @@
-//! Ignored design-parity tests for the Claude Design mockup bundle.
+//! Design-parity tests for the Claude Design mockup bundle.
 //!
 //! Run with:
-//! `cargo test -p kuzushi-tui --test parity -- --ignored`
+//! `cargo test -p kuzushi-tui --test parity`
 
-use std::{path::PathBuf, process::Command};
+use std::{collections::BTreeMap, path::PathBuf, process::Command, sync::OnceLock};
 
 use kuzushi_core::{ToolOptionStore, V2Config};
 use kuzushi_tui::{
@@ -211,22 +211,38 @@ fn fresh_app() -> ShellApp {
 }
 
 fn mockup_text(mockup: &str) -> String {
+    let text = mockup_texts()
+        .get(mockup)
+        .unwrap_or_else(|| panic!("mockup extractor omitted {mockup}"));
+    normalize_text(text)
+}
+
+fn mockup_texts() -> &'static BTreeMap<String, String> {
+    static MOCKUP_TEXTS: OnceLock<Result<BTreeMap<String, String>, String>> = OnceLock::new();
+    MOCKUP_TEXTS
+        .get_or_init(extract_mockup_texts)
+        .as_ref()
+        .unwrap_or_else(|error| panic!("{error}"))
+}
+
+fn extract_mockup_texts() -> Result<BTreeMap<String, String>, String> {
     let repo = repo_root();
     let output = Command::new("node")
         .arg("scripts/mockup-to-text.mjs")
-        .arg("--mockup")
-        .arg(format!("design/mockups/{mockup}"))
+        .arg("--json")
         .current_dir(&repo)
         .output()
-        .unwrap_or_else(|error| panic!("failed to run mockup extractor: {error}"));
+        .map_err(|error| format!("failed to run mockup extractor: {error}"))?;
     if !output.status.success() {
-        panic!(
-            "mockup extractor failed for {mockup}\nstdout:\n{}\nstderr:\n{}",
+        return Err(format!(
+            "mockup extractor failed with {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
-        );
+        ));
     }
-    normalize_text(&String::from_utf8_lossy(&output.stdout))
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("mockup extractor returned invalid JSON: {error}"))
 }
 
 fn repo_root() -> PathBuf {

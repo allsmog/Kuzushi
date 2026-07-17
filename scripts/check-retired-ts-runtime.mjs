@@ -35,6 +35,7 @@ const retiredUiPaths = [
   "src/ui/setup.ts",
   "src/ui/shell-keybinds.ts",
 ];
+const retiredRuntimePaths = ["scripts/claude-cli-bridge.mjs", "src/copilot/print.ts"];
 const retiredUiDependencies = ["ink", "react", "react-dom", "@types/react", "@types/react-dom"];
 const retiredUiRuntimePackages = new Set(["ink", "react", "react-dom"]);
 const deletedClaudeCliRuntimePackages = new Set(["@anthropic-ai/claude-agent-sdk"]);
@@ -65,7 +66,6 @@ const docRoots = [
   "README.md",
   "docs",
   "examples",
-  "recipes",
   ".github",
   ".github/workflows/kuzushi-reference.yml",
   "AGENTS.md",
@@ -74,10 +74,8 @@ const docRoots = [
 const historicalDocPrefixes = [
   "docs/notes/",
   "docs/assessments/",
-  "docs/data-model/",
   "docs/devex/",
   "docs/superpowers/",
-  "docs/rust-migration-status.md",
   "docs/all-prompts.txt",
 ];
 
@@ -107,6 +105,12 @@ for (const dir of retiredDirs) {
 for (const uiPath of retiredUiPaths) {
   if (existsSync(path.join(repo, uiPath))) {
     failures.push(`${uiPath} still exists; interactive shell UI belongs in Rust Ratatui.`);
+  }
+}
+
+for (const runtimePath of retiredRuntimePaths) {
+  if (existsSync(path.join(repo, runtimePath))) {
+    failures.push(`${runtimePath} still exists; the Rust/LangGraph runtime supersedes it.`);
   }
 }
 

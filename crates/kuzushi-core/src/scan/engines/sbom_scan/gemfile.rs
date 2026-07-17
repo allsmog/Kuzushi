@@ -1,6 +1,6 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn gemfile_components(target: &Path, path: &Path, text: &str) -> Vec<SbomComponent> {
@@ -43,5 +43,9 @@ fn quoted_value(value: &str) -> Option<&str> {
     value
         .strip_prefix('"')
         .and_then(|value| value.split('"').next())
-        .or_else(|| value.strip_prefix('\'').and_then(|value| value.split('\'').next()))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.split('\'').next())
+        })
 }

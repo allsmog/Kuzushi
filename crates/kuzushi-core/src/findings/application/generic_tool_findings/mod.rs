@@ -9,4 +9,3 @@ use anyhow::Result;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
-use uuid::Uuid;

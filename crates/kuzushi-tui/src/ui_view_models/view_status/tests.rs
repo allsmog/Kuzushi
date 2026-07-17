@@ -5,7 +5,7 @@ use kuzushi_core::V2Config;
 fn view_status_defaults_to_modules_catalog() {
     let app = ShellApp::new(V2Config::default(), None);
 
-    assert_eq!(view_status_segment(&app), "catalog");
+    assert_eq!(view_status_segment(&app), "capabilities");
 }
 
 #[test]
@@ -27,6 +27,12 @@ fn view_status_reflects_actual_view_before_focused_module() {
 
     app.set_shell_view(ShellView::Tools);
     assert_eq!(view_status_segment(&app), "tools");
+
+    app.set_shell_view(ShellView::Permissions);
+    assert_eq!(view_status_segment(&app), "permissions");
+
+    app.set_shell_view(ShellView::CommandPalette);
+    assert_eq!(view_status_segment(&app), "palette");
 
     app.router.threat_mut().open(ThreatView::Stride);
     app.set_shell_view(ShellView::Threat);

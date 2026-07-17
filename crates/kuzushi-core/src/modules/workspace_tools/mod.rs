@@ -119,6 +119,8 @@ mod tests {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         }
     }
 
@@ -179,6 +181,7 @@ mod tests {
                     confidence: 0.9,
                     rationale: "operator confirmed".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
             )
             .unwrap();

@@ -1,5 +1,5 @@
 use super::{routing_mode, RoutingMode};
-use crate::ShellApp;
+use crate::{ShellApp, ShellView, WorkbenchPage};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PromptModel {
@@ -7,17 +7,25 @@ pub(crate) struct PromptModel {
     pub(crate) input: String,
     pub(crate) cursor: usize,
     pub(crate) placeholder: Option<String>,
+    pub(crate) workbench_mode: Option<WorkbenchPage>,
 }
 
 pub(crate) fn prompt_model(app: &ShellApp) -> PromptModel {
     if let Some(search) = app.history_search() {
         return reverse_search_prompt(app, &search.query);
     }
+    let workbench_mode = workbench_prompt_mode(app);
     PromptModel {
-        prefix: prompt_text(prompt_brand(), routing_mode(app), app.focused_module()),
+        prefix: workbench_mode
+            .map(workbench_prompt_token)
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                prompt_text(prompt_brand(), routing_mode(app), app.focused_module())
+            }),
         input: app.input().to_string(),
         cursor: app.cursor(),
-        placeholder: prompt_placeholder(app),
+        placeholder: prompt_placeholder(app, workbench_mode),
+        workbench_mode,
     }
 }
 
@@ -30,13 +38,53 @@ fn reverse_search_prompt(app: &ShellApp, query: &str) -> PromptModel {
         input,
         cursor,
         placeholder: None,
+        workbench_mode: None,
     }
 }
 
-fn prompt_placeholder(app: &ShellApp) -> Option<String> {
-    app.input()
-        .is_empty()
-        .then(|| "type help or press Tab".to_string())
+fn prompt_placeholder(app: &ShellApp, mode: Option<WorkbenchPage>) -> Option<String> {
+    app.input().is_empty().then(|| {
+        mode.map(workbench_prompt_placeholder)
+            .unwrap_or("type help or press Tab")
+            .to_string()
+    })
+}
+
+pub(crate) fn workbench_prompt_mode(app: &ShellApp) -> Option<WorkbenchPage> {
+    (app.shell_view() == ShellView::Workbench).then(|| super::active_workbench_page(app))
+}
+
+pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
+    let mut text = "NAVIGATE · Shift+Tab mode · Tab/[/] pane".to_string();
+    let keys = app
+        .ui()
+        .keymap_binding_labels("composer", "prompt_mode", &["Esc"]);
+    if !keys.is_empty() {
+        text.push_str(" · ");
+        text.push_str(&keys.join("/"));
+        text.push_str(" prompt");
+    }
+    text
+}
+
+pub(crate) const fn workbench_prompt_token(page: WorkbenchPage) -> &'static str {
+    match page {
+        WorkbenchPage::Map => "◇ MAP › ",
+        WorkbenchPage::Scan => "▦ SCAN › ",
+        WorkbenchPage::Review => "▣ REVIEW › ",
+        WorkbenchPage::Prove => "◎ PROVE › ",
+        WorkbenchPage::Fix => "◆ FIX › ",
+    }
+}
+
+const fn workbench_prompt_placeholder(page: WorkbenchPage) -> &'static str {
+    match page {
+        WorkbenchPage::Map => "describe what to map",
+        WorkbenchPage::Scan => "describe what to scan",
+        WorkbenchPage::Review => "describe what to review",
+        WorkbenchPage::Prove => "describe what to verify",
+        WorkbenchPage::Fix => "describe the patch to draft",
+    }
 }
 
 pub(crate) fn prompt_brand() -> &'static str {

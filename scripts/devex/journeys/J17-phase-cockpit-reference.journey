@@ -1,0 +1,67 @@
+# J17 — Canonical five-phase cockpit reference
+# Governing reference: /Users/operator/Desktop/Kuzushi TUI.pdf
+# SHA-256: fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545
+#
+# The explicit DevEx hook enriches only the canonical offline-demo target with
+# the same deterministic state used by the buffer contract. It cannot write
+# into an operator target. `kuzushi demo` is the separate headless command, so
+# this journey enters through the target gate and presses `d` inside the TUI.
+# Numeric page keys are printable view hotkeys, so this journey enters strict
+# Navigate mode before selecting Map, Scan, Review, Prove, and Fix.
+name: Canonical five-phase cockpit reference
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_DEVEX_PHASE_FIXTURE=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+keys: d
+wait-for: 120 PDF phase reference fixture loaded
+keys: Escape
+submit: workbench
+wait: 2
+keys: F2
+keys: 1
+wait-live-snap: 10 VIEW MAP | 1-map
+expect-ansi-profile: truecolor
+expect: PROJECT CONTEXT
+expect: ATTACK SURFACE
+expect: HOT MODULES
+expect: THREAT MODEL / DFD
+expect: NEXT
+ask: Map — does project readiness lead, with real attack-surface and threat-model context supporting one obvious NEXT action?
+keys: 2
+wait-live-snap: 10 VIEW SCAN | 2-scan
+expect: SCOPE / PLAN
+expect: RECORDED ENGINE OUTCOMES
+expect: FINDING / ARTIFACT DELTA
+expect: SCAN RECEIPT
+expect: outcome completed
+ask: Scan — do accepted attempts, engine outcomes, deltas, and the recorded receipt remain distinct from live Run Focus progress?
+keys: 3
+wait-live-snap: 10 VIEW REVIEW | 3-review
+expect: FINDINGS
+expect: SELECTED FINDING
+expect: F-0001
+expect: SQL injection reaches query
+expect: runtime_verified
+ask: Review — is the queue confidence-first, is exactly one selected identity obvious, and do actions visibly target that finding?
+keys: 4
+wait-live-snap: 10 VIEW PROVE | 4-prove
+expect: STATUS / NEXT
+expect: SQL injection reaches query
+expect: EVIDENCE
+expect: PROOF · REPLAY
+expect: replay verify-phase
+expect: verify F-0001
+ask: Prove — do identity, STATUS, and NEXT precede evidence, with replay offered only for the persisted verification run?
+keys: 5
+wait-live-snap: 10 VIEW FIX | 5-fix
+expect: BREAKDOWN REPORT
+expect: ATTACK TREE
+expect: DFD
+expect: REMEDIATION
+expect: Staged for approval
+expect: report
+ask: Fix — does remediation lifecycle lead the operator toward an authorized next action while diagrams remain supporting evidence?
+keys: Escape

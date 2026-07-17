@@ -20,10 +20,9 @@ mod tests {
         let effects = app.reduce_scan_start(Some(temp.path().to_path_buf()), None);
         EffectRuntime::execute(&mut app, effects);
 
-        assert!(app
-            .log_lines()
-            .iter()
-            .any(|line| line.body.contains("scan already running")));
+        assert!(app.log_lines().iter().any(|line| {
+            line.body.contains("scan start blocked") && line.body.contains("then retry")
+        }));
     }
 
     #[test]
@@ -41,7 +40,7 @@ mod tests {
     }
 
     #[test]
-    fn guided_scan_with_target_opens_current_phase_picker_without_worker() {
+    fn guided_scan_with_fresh_target_opens_map_questions_without_worker() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
 
@@ -57,14 +56,17 @@ mod tests {
 
         EffectRuntime::execute(&mut app, effects);
 
-        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        assert_eq!(app.shell_view(), ShellView::Workbench);
         assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+        assert!(app.guided_scan_question_model().is_some_and(|question| {
+            question.header == "MAP · ROUTE" && question.options.iter().any(|option| option.other)
+        }));
         assert!(app.target().is_some());
         assert!(app.scan_is_none());
         assert!(app
             .log_lines()
             .iter()
-            .any(|line| line.prefix == "scan" && line.body.contains("guided workflow")));
+            .any(|line| line.prefix == "scan" && line.body.contains("guided scan opened")));
     }
 
     #[test]
@@ -82,8 +84,13 @@ mod tests {
 
         EffectRuntime::execute(&mut app, effects);
 
-        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        assert_eq!(app.shell_view(), ShellView::Workbench);
         assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+        assert_eq!(
+            app.guided_scan_question_model()
+                .map(|question| question.header),
+            Some("MAP · ROUTE".to_string())
+        );
         assert_eq!(app.target(), Some(workspace.root()));
         assert!(app.scan_is_none());
     }
@@ -103,5 +110,52 @@ mod tests {
             .log_lines()
             .iter()
             .any(|line| line.prefix == "scan" && line.body.contains("scan .")));
+    }
+
+    #[test]
+    fn guided_scan_cannot_switch_target_while_tool_work_is_live() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(first.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let prior_view = app.shell_view();
+        app.set_running_tool_for_test("context:build");
+
+        let effects = app.open_guided_scan(Some(second.path().to_path_buf()));
+
+        assert!(effects.is_empty());
+        assert_eq!(app.target(), Some(workspace.root()));
+        assert_eq!(app.shell_view(), prior_view);
+        assert!(app.log_lines().iter().any(|line| {
+            line.prefix == "scan"
+                && line.body.contains("scan start blocked")
+                && line.body.contains("then retry")
+        }));
+    }
+
+    #[test]
+    fn prepared_scan_rechecks_all_live_job_slots_before_dispatch() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let effects = app.prepare_scan_start_effect(ScanStartPreparation {
+            target: Some(workspace.root().to_path_buf()),
+            explicit_input: None,
+        });
+        assert!(matches!(effects.as_slice(), [ShellEffect::StartScan(_)]));
+
+        let plan_ticket = app.jobs_mut().start(JobKind::Plan, "planner");
+        EffectRuntime::execute(&mut app, effects);
+
+        assert!(app.scan_is_none());
+        assert!(!app.jobs().is_running(JobKind::Run));
+        assert!(app.jobs().is_running(JobKind::Plan));
+        assert!(app
+            .log_lines()
+            .iter()
+            .any(|line| { line.prefix == "scan" && line.body.contains("scan start blocked") }));
+
+        app.jobs_mut().finish(JobKind::Plan);
+        plan_ticket.complete();
     }
 }

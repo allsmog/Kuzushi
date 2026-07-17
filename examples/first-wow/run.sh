@@ -45,4 +45,4 @@ cat "${REPORT_PATH}"
 
 echo
 echo "Report: ${REPORT_PATH}"
-echo "Findings DB: ${WORK_DIR}/.kuzushi/v2/findings.sqlite3"
+echo "Findings DB: ${WORK_DIR}/.kuzushi/v3/index.sqlite3"

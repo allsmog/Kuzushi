@@ -1,7 +1,7 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use roxmltree::Node;
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_maven_pom(path: &Path) -> bool {
@@ -71,7 +71,10 @@ fn dependency_scope(dependency: Node<'_, '_>) -> String {
     }
 }
 
-fn child_elements<'a>(node: Node<'a, 'a>, name: &'static str) -> impl Iterator<Item = Node<'a, 'a>> {
+fn child_elements<'a>(
+    node: Node<'a, 'a>,
+    name: &'static str,
+) -> impl Iterator<Item = Node<'a, 'a>> {
     node.children()
         .filter(move |child| child.is_element() && child.tag_name().name() == name)
 }

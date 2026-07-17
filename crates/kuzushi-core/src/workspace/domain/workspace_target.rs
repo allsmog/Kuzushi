@@ -95,7 +95,7 @@ impl WorkspaceTarget {
                 .with_context(|| format!("Could not resolve {}", path.display()))?
         } else {
             anyhow::bail!(
-                "Target path does not exist: {}. Next: pass an existing directory with --target <path> (or --target . for the current directory).",
+                "Target path does not exist: {}. Next: use an existing directory; in the CLI, put the global target before the command, for example `kuzushi --target . scan`.",
                 path.display()
             );
         };
@@ -103,6 +103,11 @@ impl WorkspaceTarget {
         if !root.is_dir() {
             anyhow::bail!("Target must be a directory: {}", root.display());
         }
+
+        validated_workspace_descendant(
+            &root,
+            Path::new(KUZUSHI_STATE_DIR).join(WORKSPACE_STATE_VERSION_DIR),
+        )?;
 
         Ok(Self { root })
     }
@@ -132,10 +137,7 @@ impl WorkspaceTarget {
     }
 
     pub fn ensure_state_dir(&self) -> Result<PathBuf> {
-        let state_dir = self.state_dir();
-        fs::create_dir_all(&state_dir)
-            .with_context(|| format!("Could not create {}", state_dir.display()))?;
-        Ok(state_dir)
+        initialize_workspace_state(&self.root)
     }
 }
 

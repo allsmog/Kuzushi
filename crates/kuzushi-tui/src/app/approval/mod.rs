@@ -22,18 +22,17 @@ pub(crate) use super::*;
 /// patterns that are unambiguously destructive (no false-positives on
 /// `git push origin foo` etc.).
 
-/// Parse a `patch:run` / `patch:finding` result into a `PendingPatch`.
-/// Tools should produce `data` shaped like:
-///   `{ alias, rationale, side_effect?, diff, tests: [{name, blurb}],
-///      guardrail?, staged_at? }`
-/// All fields except `alias` + `rationale` + `diff` are optional —
-/// missing fields collapse to None / empty.
+/// Project the typed, persisted `PatchResult` returned by `patch:finding`
+/// into the shell review gate. Legacy ad-hoc patch-shaped JSON is not
+/// apply-authoritative.
 pub(crate) use confirm_gate_for_tool::*;
 pub(crate) use contains_destructive_shell_fragment::*;
 pub(crate) use label::*;
+pub(crate) use selected_patch::*;
 mod confirm_gate_for_tool;
 mod contains_destructive_shell_fragment;
 mod label;
+mod selected_patch;
 pub use confirm_gate_for_tool::confirm_gate_for_tool;
 pub use contains_destructive_shell_fragment::parse_pending_patch;
 pub use label::ConfirmKind;

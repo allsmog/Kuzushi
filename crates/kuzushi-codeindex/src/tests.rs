@@ -32,6 +32,9 @@ mod tests {
         let def = definition_call(Backend::Gtags, "parse", repo).unwrap();
         assert_eq!(def.tool, "gtags.definitions");
         assert_eq!(def.args["symbol"], serde_json::json!("parse"));
+        let joern_def = definition_call(Backend::Joern, "parse", repo).unwrap();
+        assert_eq!(joern_def.tool, "joern.definitions");
+        assert_eq!(joern_def.args["fn"], serde_json::json!("parse"));
         assert!(definition_call(Backend::Clang, "parse", repo).is_none());
 
         let pos = FilePosition {

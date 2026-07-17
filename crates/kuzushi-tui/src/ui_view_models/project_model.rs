@@ -3,7 +3,7 @@ use super::{
     threat_summary_review,
 };
 use crate::app::ProjectScopeTreeState;
-use crate::ShellApp;
+use crate::{ShellApp, ViewDataState};
 
 mod document_rows;
 use document_rows::project_model_document_rows;
@@ -86,14 +86,19 @@ fn project_scope_label(app: &ShellApp) -> String {
 }
 
 fn project_revision_label(app: &ShellApp) -> String {
-    app.workbench_cache()
-        .borrow_mut()
-        .git_metadata(app.target())
-        .map(|git| {
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_git_metadata(app.target())
+    {
+        ViewDataState::Ready(Some(git)) => {
             let sha = git.sha.chars().take(7).collect::<String>();
             format!("rev:{}{}", sha, if git.dirty { "*" } else { "" })
-        })
-        .unwrap_or_else(|| "rev:unknown".to_string())
+        }
+        ViewDataState::Ready(None) | ViewDataState::NotRequested | ViewDataState::Loading => {
+            "rev:unknown".to_string()
+        }
+    }
 }
 
 fn scope_tree_row(app: &ShellApp) -> ProjectModelRow {
@@ -108,21 +113,21 @@ fn scope_tree_row(app: &ShellApp) -> ProjectModelRow {
     };
     match app
         .workbench_cache()
-        .borrow_mut()
-        .project_scope_tree(app.target())
+        .borrow()
+        .cached_project_scope_tree(app.target())
     {
-        Some(ProjectScopeTreeState::Persisted(tree)) => {
+        ViewDataState::Ready(ProjectScopeTreeState::Persisted(tree)) => {
             scope_tree_project_row(&tree, ProjectModelOrigin::Local, "present")
         }
-        Some(ProjectScopeTreeState::RootOnly) => root_only_scope_tree_row(),
-        Some(ProjectScopeTreeState::Unreadable(error)) => ProjectModelRow {
+        ViewDataState::Ready(ProjectScopeTreeState::RootOnly) => root_only_scope_tree_row(),
+        ViewDataState::Ready(ProjectScopeTreeState::Unreadable(error)) => ProjectModelRow {
             section: "scope tree",
             origin: ProjectModelOrigin::Stale,
             state: "unreadable",
             summary: format!("scope tree could not be read: {error}"),
             action: "target <path>",
         },
-        None => root_only_scope_tree_row(),
+        ViewDataState::NotRequested | ViewDataState::Loading => root_only_scope_tree_row(),
     }
 }
 

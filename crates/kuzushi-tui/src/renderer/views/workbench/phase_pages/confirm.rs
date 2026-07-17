@@ -1,0 +1,431 @@
+use super::*;
+use crate::ui_view_models::{FindingDetailModel, FindingEvidenceRow, ProvePhaseModel};
+use ratatui::layout::{Constraint, Direction, Layout};
+
+mod proof;
+
+use proof::{
+    compact_proof_lines, finding_header_lines, proof_ladder_lines, proof_lines, proof_title,
+};
+
+const SIDE_BY_SIDE_MIN_WIDTH: u16 = 78;
+
+pub(super) fn render(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    state: PhaseRenderState,
+) {
+    let Some(finding) = model.finding.as_ref() else {
+        render_empty(frame, area, model, state);
+        return;
+    };
+    if uses_critical_compact_status(area, state) {
+        render_critical_compact(frame, area, model, finding, state);
+        return;
+    }
+    if let Some(pane) = state.zoom {
+        render_zoomed(frame, area, model, state, pane);
+        return;
+    }
+    render_unzoomed(frame, area, model, finding, state);
+}
+
+fn render_unzoomed(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    finding: &FindingDetailModel,
+    state: PhaseRenderState,
+) {
+    if area.width < 50 || area.height < 10 {
+        render_critical_compact(frame, area, model, finding, state);
+        return;
+    }
+    let status_rows = status_lines(model, finding, area.width.saturating_sub(2) as usize)
+        .len()
+        .saturating_add(2)
+        .min(area.height.saturating_sub(4) as usize) as u16;
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(status_rows), Constraint::Min(4)])
+        .split(area);
+    render_status(frame, rows[0], model, finding, state);
+    if area.width >= SIDE_BY_SIDE_MIN_WIDTH {
+        render_reference_body(frame, rows[1], model, finding, state);
+    } else {
+        render_compact_body(frame, rows[1], model, finding, state);
+    }
+}
+
+fn uses_critical_compact_status(area: Rect, state: PhaseRenderState) -> bool {
+    matches!(
+        state.density,
+        LayoutDensity::Sparse | LayoutDensity::Focused | LayoutDensity::Guided
+    ) && state.zoom == Some(WorkbenchPane::Source)
+        && (area.width < 50 || area.height < 10)
+}
+
+fn render_critical_compact(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    finding: &FindingDetailModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        compact_status_title(state),
+        critical_compact_lines(model, finding, area.width.saturating_sub(2) as usize),
+        WorkbenchPane::Source,
+        state,
+    );
+}
+
+fn compact_status_title(state: PhaseRenderState) -> &'static str {
+    if state.density == LayoutDensity::Focused {
+        "ZOOM · PROVE STATUS / NEXT"
+    } else {
+        "PROVE · STATUS / NEXT"
+    }
+}
+
+fn critical_compact_lines(
+    model: &ProvePhaseModel,
+    finding: &FindingDetailModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let stale = model
+        .proof
+        .as_ref()
+        .is_some_and(|proof| proof.requires_revalidation);
+    vec![
+        compact_identity_line(model, finding, width),
+        compact_status_line(finding, stale, width),
+        compact_next_line(finding, width),
+    ]
+}
+
+fn compact_identity_line(
+    model: &ProvePhaseModel,
+    finding: &FindingDetailModel,
+    width: usize,
+) -> Line<'static> {
+    let identity = finding.alias.as_deref().unwrap_or(&finding.identity_label);
+    let label = model
+        .selection_disclosure
+        .as_ref()
+        .map(|disclosure| format!("⚠ {}", disclosure.message))
+        .unwrap_or_else(|| {
+            format!(
+                "{identity} {} {}src {} {}",
+                finding.proof_meter,
+                finding.source_count,
+                compact_confidence(finding.proof_confidence_label.as_str()),
+                finding.severity_label
+            )
+        });
+    Line::styled(fit(&label, width), theme::heading())
+}
+
+fn compact_status_line(finding: &FindingDetailModel, stale: bool, width: usize) -> Line<'static> {
+    let stale_label = if stale { " · ⚠ STALE" } else { "" };
+    let status = format!(
+        "{} · {}{stale_label}",
+        finding.lifecycle_status, finding.proof_meter
+    );
+    Line::from(vec![
+        Span::styled("STATUS ", theme::label()),
+        Span::styled(
+            fit(&status, width.saturating_sub(7)),
+            if stale {
+                theme::warn()
+            } else {
+                theme::primary()
+            },
+        ),
+    ])
+}
+
+fn compact_next_line(finding: &FindingDetailModel, width: usize) -> Line<'static> {
+    let next = finding
+        .next_command
+        .as_deref()
+        .unwrap_or(finding.next_action_label.as_str());
+    Line::from(vec![
+        Span::styled("NEXT   ", theme::warn()),
+        Span::styled(fit(next, width.saturating_sub(7)), theme::accent()),
+    ])
+}
+
+fn compact_confidence(label: &str) -> &str {
+    match label {
+        "CONFIRMED" => "CFM",
+        "LIKELY" => "LIK",
+        "DISMISSED" => "DIS",
+        _ => "UNV",
+    }
+}
+
+pub(super) fn plain_lines(model: &ProvePhaseModel, width: usize) -> Vec<Line<'static>> {
+    let Some(finding) = model.finding.as_ref() else {
+        return divider_lines("STATUS / NEXT", empty_selection_lines(model), width);
+    };
+    let mut lines = divider_lines("STATUS / NEXT", status_lines(model, finding, width), width);
+    lines.extend(divider_lines(
+        "EVIDENCE",
+        evidence_lines(finding, width),
+        width,
+    ));
+    lines.extend(divider_lines(
+        "PROOF LADDER",
+        proof_ladder_lines(finding, model.proof.as_ref(), width),
+        width,
+    ));
+    lines.extend(divider_lines(
+        proof_title(model.proof.as_ref()),
+        proof_lines(model.proof.as_ref(), finding, width),
+        width,
+    ));
+    lines
+}
+
+fn render_empty(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "STATUS / NEXT",
+        empty_selection_lines(model),
+        WorkbenchPane::Source,
+        state,
+    );
+}
+
+fn empty_selection_lines(model: &ProvePhaseModel) -> Vec<Line<'static>> {
+    empty_state_panel(
+        "no finding selected",
+        &[model.empty_hint.unwrap_or("select a finding in Review")],
+        &[("2", "open Review and choose a finding")],
+    )
+}
+
+fn render_status(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    finding: &FindingDetailModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "STATUS / NEXT",
+        status_lines(model, finding, area.width.saturating_sub(2) as usize),
+        WorkbenchPane::Source,
+        state,
+    );
+}
+
+fn status_lines(
+    model: &ProvePhaseModel,
+    finding: &FindingDetailModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = selection_disclosure_lines(model.selection_disclosure.as_ref(), width);
+    lines.extend(finding_header_lines(finding, width));
+    if model
+        .proof
+        .as_ref()
+        .is_some_and(|proof| proof.requires_revalidation)
+    {
+        lines.push(Line::styled(
+            fit("⚠ prior proof is stale for this observation", width),
+            theme::warn(),
+        ));
+    }
+    lines
+}
+
+fn render_reference_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    finding: &FindingDetailModel,
+    state: PhaseRenderState,
+) {
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+        .split(area);
+    render_evidence(frame, columns[0], finding, state);
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .split(columns[1]);
+    render_ladder(frame, right[0], model, finding, state);
+    render_runtime_proof(frame, right[1], model, finding, state);
+}
+
+fn render_compact_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    finding: &FindingDetailModel,
+    state: PhaseRenderState,
+) {
+    let width = area.width.saturating_sub(2) as usize;
+    let mut lines = evidence_lines(finding, width);
+    lines.push(divider("PROOF LADDER", area.width.saturating_sub(2)));
+    lines.extend(proof_ladder_lines(finding, model.proof.as_ref(), width));
+    lines.push(divider(
+        proof_title(model.proof.as_ref()),
+        area.width.saturating_sub(2),
+    ));
+    lines.extend(compact_proof_lines(model.proof.as_ref(), finding, width));
+    render_lines_pane(
+        frame,
+        area,
+        "EVIDENCE / PROOF · z attack path",
+        lines,
+        WorkbenchPane::Center,
+        state,
+    );
+}
+
+fn render_zoomed(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    state: PhaseRenderState,
+    pane: WorkbenchPane,
+) {
+    let Some(finding) = model.finding.as_ref() else {
+        render_empty(frame, area, model, state);
+        return;
+    };
+    match pane {
+        WorkbenchPane::Source => render_status(frame, area, model, finding, state),
+        WorkbenchPane::Center => render_evidence(frame, area, finding, state),
+        WorkbenchPane::Findings => render_ladder(frame, area, model, finding, state),
+        WorkbenchPane::Details => render_runtime_proof(frame, area, model, finding, state),
+    }
+}
+
+fn render_evidence(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    finding: &FindingDetailModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "EVIDENCE · z attack path",
+        evidence_lines(finding, area.width.saturating_sub(2) as usize),
+        WorkbenchPane::Center,
+        state,
+    );
+}
+
+fn evidence_lines(finding: &FindingDetailModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![evidence_summary_line(finding, width)];
+    if finding.evidence.is_empty() {
+        lines.push(empty_evidence_line(width));
+    }
+    for (index, evidence) in finding.evidence.iter().enumerate() {
+        lines.extend(evidence_anchor_lines(index, evidence, width));
+    }
+    if finding.evidence_overflow > 0 {
+        lines.push(evidence_overflow_line(finding.evidence_overflow));
+    }
+    lines
+}
+
+fn evidence_summary_line(finding: &FindingDetailModel, width: usize) -> Line<'static> {
+    let summary = format!(
+        "{} · {} source(s) · {}",
+        finding.evidence_state, finding.source_count, finding.corroboration
+    );
+    Line::styled(fit(&summary, width), theme::label())
+}
+
+fn empty_evidence_line(width: usize) -> Line<'static> {
+    Line::styled(
+        fit("no structured evidence anchors recorded", width),
+        theme::muted(),
+    )
+}
+
+fn evidence_anchor_lines(
+    index: usize,
+    evidence: &FindingEvidenceRow,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let header = format!("{}. {} · {}", index + 1, evidence.origin, evidence.header);
+    let mut lines = vec![Line::styled(fit(&header, width), theme::primary())];
+    if !evidence.snippet.trim().is_empty() {
+        lines.push(Line::styled(fit(&evidence.snippet, width), theme::muted()));
+    }
+    if !evidence.rationale.trim().is_empty() {
+        lines.push(Line::styled(
+            fit(&evidence.rationale, width),
+            theme::muted(),
+        ));
+    }
+    lines
+}
+
+fn evidence_overflow_line(hidden: usize) -> Line<'static> {
+    Line::styled(
+        format!("… {hidden} more evidence anchor(s)"),
+        theme::muted(),
+    )
+}
+
+fn render_ladder(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    finding: &FindingDetailModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "PROOF LADDER",
+        proof_ladder_lines(
+            finding,
+            model.proof.as_ref(),
+            area.width.saturating_sub(2) as usize,
+        ),
+        WorkbenchPane::Findings,
+        state,
+    );
+}
+
+fn render_runtime_proof(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ProvePhaseModel,
+    finding: &FindingDetailModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        proof_title(model.proof.as_ref()),
+        proof_lines(
+            model.proof.as_ref(),
+            finding,
+            area.width.saturating_sub(2) as usize,
+        ),
+        WorkbenchPane::Details,
+        state,
+    );
+}

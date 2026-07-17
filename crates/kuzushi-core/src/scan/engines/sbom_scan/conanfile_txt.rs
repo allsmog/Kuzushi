@@ -1,6 +1,6 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_conanfile_txt(path: &Path) -> bool {
@@ -9,11 +9,7 @@ pub(super) fn is_conanfile_txt(path: &Path) -> bool {
         .is_some_and(|name| name == "conanfile.txt")
 }
 
-pub(super) fn conanfile_components(
-    target: &Path,
-    path: &Path,
-    text: &str,
-) -> Vec<SbomComponent> {
+pub(super) fn conanfile_components(target: &Path, path: &Path, text: &str) -> Vec<SbomComponent> {
     requirements(text)
         .into_iter()
         .map(|requirement| {

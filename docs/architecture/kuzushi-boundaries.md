@@ -21,6 +21,7 @@ harness, module cockpit, artifacts, proof workflow, and TUI.
 | `patch` | `crates/kuzushi-core/src/patch` and remediation code | Suggest diffs and validate only when approved/configured. |
 | `report` | `crates/kuzushi-core/src/report.rs` and `crates/kuzushi-core/src/report` | Read artifacts/findings and produce report output. No execution. |
 | `run_trace` | `crates/kuzushi-core/src/run_trace.rs` and `crates/kuzushi-core/src/run_artifacts` | Run IDs, events, trace, summaries, failure handoff, artifact manifest. |
+| `run_lifecycle` | `crates/kuzushi-core/src/run_lifecycle` | Versioned semantic run items, persistence policy, durable writer, compatibility projection, and the pure live/replay reducer. |
 | `failure` | `crates/kuzushi-core/src/run_artifacts/run_failures.rs` | Bounded fallback context for partial/failed runs. |
 | `ui_*` | `crates/kuzushi-tui/src/ui_view_models.rs`, `ui_theme.rs`, `ui_views.rs` | View models, semantic styles, and rendering over already-shaped state. |
 
@@ -72,6 +73,8 @@ highest-risk dependency violations, and catch hardcoded model fallback patterns:
   subprocesses;
 - run-trace artifacts dispatching tools, runtimes, scanners, verification,
   patch, report, or recommender code;
+- run-lifecycle presentation reconstructing typed task, status, cost, or next
+  action from trace labels, descriptor catalogs, or result JSON;
 - TUI renderers dispatching runtime/tool execution;
 - TUI view models and view state dispatching runtime/tool execution;
 - retired TypeScript/React/Ink shell files, dependencies, imports, and duplicate

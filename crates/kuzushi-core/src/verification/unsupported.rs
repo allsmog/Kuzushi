@@ -58,6 +58,8 @@ impl VerificationOutcome {
             duration_ms: self.duration_ms,
             cost_usd: self.cost_usd,
             notes: self.notes.clone(),
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: String::new(),
         }
     }
@@ -83,10 +85,15 @@ impl Default for VerifyOptions {
     }
 }
 
-pub async fn verify_finding(finding: &Finding, opts: VerifyOptions) -> Result<VerificationOutcome> {
+pub async fn verify_finding(
+    finding: &Finding,
+    opts: VerifyOptions,
+    workspace_root: &Path,
+) -> Result<VerificationOutcome> {
     let backend = detect_backend(opts.backend);
     let language = infer_language(&finding.file_path);
-    let mut outcome = verify_with_language(finding, backend, &opts, &language).await?;
+    let mut outcome =
+        verify_with_language(finding, backend, &opts, &language, workspace_root).await?;
     // Record which language adapter produced the outcome so persistence
     // round-trips it.
     outcome.language = Some(language_label(language));
@@ -98,11 +105,12 @@ async fn verify_with_language(
     backend: SandboxBackend,
     opts: &VerifyOptions,
     language: &Lang,
+    workspace_root: &Path,
 ) -> Result<VerificationOutcome> {
     match language {
-        Lang::Rust => verify_rust(finding, backend, opts).await,
-        Lang::C => verify_c_like(finding, backend, opts, CCompiler::Gcc).await,
-        Lang::Cpp => verify_c_like(finding, backend, opts, CCompiler::Gpp).await,
+        Lang::Rust => verify_rust(finding, backend, opts, workspace_root).await,
+        Lang::C => verify_c_like(finding, backend, opts, CCompiler::Gcc, workspace_root).await,
+        Lang::Cpp => verify_c_like(finding, backend, opts, CCompiler::Gpp, workspace_root).await,
         Lang::Python => verify_python(finding, backend, opts).await,
         Lang::JavaScript => verify_node(finding, backend, opts, "js").await,
         Lang::TypeScript => verify_node(finding, backend, opts, "ts").await,

@@ -7,7 +7,8 @@
 
 /// Attacker + skeptical-reviewer methodology (map surface, trace source→sink,
 /// verify guards before reporting).
-pub const ATTACKER_METHODOLOGY: &str = "You think like an attacker and a skeptical security reviewer. You map attack surface, \
+pub const ATTACKER_METHODOLOGY: &str =
+    "You think like an attacker and a skeptical security reviewer. You map attack surface, \
 trace data flow from source to sink, and verify exploitability before reporting. Most \
 static signals are false positives, so every reported finding must be justified by cited \
 code evidence.
@@ -42,11 +43,13 @@ Your rationale must cite the file:line evidence that justifies the confidence ba
 a confidence band (high/medium/low), not an invented numeric probability.";
 
 /// Empty findings are a correct, valued outcome.
-pub const EMPTY_FINDINGS_OK: &str = "Reporting zero findings is a correct, valued outcome. Return {\"findings\":[]} rather than \
+pub const EMPTY_FINDINGS_OK: &str =
+    "Reporting zero findings is a correct, valued outcome. Return {\"findings\":[]} rather than \
 lowering the evidence bar. False negatives are preferable to fabricated positives.";
 
 /// Output-contract reminder: return only the enforced structured output.
-pub const OUTPUT_CONTRACT: &str = "Output conforms to the enforced structured-output schema. Return only that structured \
+pub const OUTPUT_CONTRACT: &str =
+    "Output conforms to the enforced structured-output schema. Return only that structured \
 output. Do not include markdown fences, prose, tool-call preambles, or schema text.";
 
 #[cfg(test)]

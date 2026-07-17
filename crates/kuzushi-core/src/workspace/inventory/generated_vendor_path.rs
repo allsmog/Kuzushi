@@ -1,4 +1,5 @@
 use super::*;
+use crate::bounded_file::read_source_text_prefix;
 
 pub(crate) fn generated_vendor_path(
     relative: &str,
@@ -81,12 +82,8 @@ pub(crate) fn generated_file(path: &str) -> bool {
 }
 
 pub(crate) fn read_text_prefix(path: &Path, max_bytes: usize) -> Result<Option<String>> {
-    let bytes = fs::read(path).with_context(|| format!("Could not read {}", path.display()))?;
-    if bytes.iter().take(4096).any(|byte| *byte == 0) {
-        return Ok(None);
-    }
-    let prefix = &bytes[..bytes.len().min(max_bytes)];
-    Ok(Some(String::from_utf8_lossy(prefix).to_string()))
+    read_source_text_prefix(path, max_bytes)
+        .with_context(|| format!("Could not read {}", path.display()))
 }
 
 pub(crate) fn repo_relative(root: &Path, path: &Path) -> String {

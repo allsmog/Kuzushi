@@ -9,9 +9,52 @@ pub fn confirm_gate_for_tool(
     allowlist: &std::collections::BTreeSet<String>,
 ) -> Option<PendingConfirm> {
     destructive_verb_confirm(tool, input)
+        .or_else(|| delegated_target_write_confirm(tool, input))
         .or_else(|| network_egress_confirm(tool, input, allowlist))
         .or_else(|| pwn_candidate_confirm(tool, input, allowlist))
         .or_else(|| fs_write_confirm(tool, input, allowlist))
+}
+
+fn delegated_target_write_confirm(tool: &str, input: &serde_json::Value) -> Option<PendingConfirm> {
+    let auto_patch = tool == "sast:scan"
+        && input
+            .get("autoPatch")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+    auto_patch.then(|| PendingConfirm {
+        kind: ConfirmKind::DescriptorEffect,
+        tool: tool.to_string(),
+        target: "patch:finding".to_string(),
+        rationale: Some("autoPatch delegates an approved target write".to_string()),
+        allowlist: None,
+        actor: opt_str(input, "actor"),
+        remembered: false,
+    })
+}
+
+/// Descriptor-owned approval is the final shell gate. It deliberately does
+/// not consult the session allowlist: a target write or external action must
+/// mint a fresh dispatch proof through an affirmative confirmation.
+pub fn descriptor_approval_confirm(
+    descriptor: &kuzushi_core::ToolDescriptor,
+    input: &serde_json::Value,
+) -> Option<PendingConfirm> {
+    if descriptor.approval != kuzushi_core::modules::ApprovalPolicy::Explicit {
+        return None;
+    }
+    let target = ["target", "url", "path"]
+        .into_iter()
+        .find_map(|key| input.get(key).and_then(serde_json::Value::as_str))
+        .unwrap_or(descriptor.name.as_str());
+    Some(PendingConfirm {
+        kind: ConfirmKind::DescriptorEffect,
+        tool: descriptor.name.clone(),
+        target: target.to_string(),
+        rationale: Some(format!("declared {:?} effect", descriptor.effect)),
+        allowlist: None,
+        actor: opt_str(input, "actor"),
+        remembered: false,
+    })
 }
 
 fn opt_str(input: &serde_json::Value, key: &str) -> Option<String> {

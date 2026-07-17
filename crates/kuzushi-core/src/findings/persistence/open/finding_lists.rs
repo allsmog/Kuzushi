@@ -1,5 +1,4 @@
 use super::*;
-use std::collections::BTreeMap;
 
 impl FindingStore {
     pub fn list_findings(&self, limit: usize) -> Result<Vec<Finding>> {
@@ -14,8 +13,7 @@ impl FindingStore {
 
     pub fn list_findings_filtered(&self, filter: &FindingListFilter) -> Result<FindingListReport> {
         let all_findings = self.v3_all_findings()?;
-        let (count, mut findings) = collect_filtered_findings(self, all_findings, filter)?;
-        self.attach_latest_verifications_to_findings(&mut findings)?;
+        let (count, findings) = collect_filtered_findings(self, all_findings, filter)?;
         Ok(FindingListReport { count, findings })
     }
 }
@@ -27,81 +25,72 @@ fn collect_filtered_findings(
 ) -> Result<(usize, Vec<Finding>)> {
     let mut count = 0;
     let mut findings = Vec::new();
-    let mut review_cache = BTreeMap::new();
+    let review_cache = store.latest_review_decisions_for_findings(&rows, false)?;
+    let human_review_cache = filter
+        .has_derived_triage_state_filter()
+        .then(|| store.latest_review_decisions_for_findings(&rows, true))
+        .transpose()?
+        .unwrap_or_default();
+    let stable_fps = rows.iter().map(finding_stable_key).collect::<Vec<_>>();
+    let lifecycle_cache = store.current_statuses_for(&stable_fps)?;
     for row in rows {
-        count +=
-            push_matching_finding(store, &mut review_cache, &mut findings, row, filter)? as usize;
+        count += push_matching_finding(
+            &review_cache,
+            &human_review_cache,
+            &lifecycle_cache,
+            &mut findings,
+            row,
+            filter,
+        ) as usize;
     }
     Ok((count, findings))
 }
 
 fn push_matching_finding(
-    store: &FindingStore,
-    review_cache: &mut BTreeMap<String, Option<ReviewDecision>>,
+    review_cache: &std::collections::BTreeMap<String, ReviewDecision>,
+    human_review_cache: &std::collections::BTreeMap<String, ReviewDecision>,
+    lifecycle_cache: &std::collections::BTreeMap<String, String>,
     findings: &mut Vec<Finding>,
     finding: Finding,
     filter: &FindingListFilter,
-) -> Result<bool> {
-    let review_decision = latest_review_decision_for_filter(store, review_cache, &finding)?;
-    if !filter.matches_with_review_decision(&finding, review_decision.as_ref()) {
-        return Ok(false);
+) -> bool {
+    let cache_key = review_cache_key(&finding);
+    let review_decision = cache_key.as_ref().and_then(|key| review_cache.get(key));
+    if !filter.matches_with_review_decision(&finding, review_decision) {
+        return false;
     }
-    if filter.has_derived_triage_state_filter() {
-        let lifecycle = store.stable_lifecycle_status_for_finding(&finding)?;
-        // The fold reads the latest HUMAN decision, not the latest of any
-        // author, so a later automated re-triage cannot mask a human verdict.
-        let human_decision = latest_human_review_decision_for_filter(store, &finding)?;
-        let derived = derive_triage_state(lifecycle, human_decision.as_ref());
-        if !filter.matches_triage_lifecycle(&derived) {
-            return Ok(false);
-        }
+    if !matches_derived_filter(
+        human_review_cache,
+        lifecycle_cache,
+        &finding,
+        cache_key.as_deref(),
+        filter,
+    ) {
+        return false;
     }
     if findings.len() < filter.limit {
         findings.push(finding);
     }
-    Ok(true)
+    true
 }
 
-fn latest_review_decision_for_filter(
-    store: &FindingStore,
-    review_cache: &mut BTreeMap<String, Option<ReviewDecision>>,
+fn matches_derived_filter(
+    human_reviews: &std::collections::BTreeMap<String, ReviewDecision>,
+    lifecycles: &std::collections::BTreeMap<String, String>,
     finding: &Finding,
-) -> Result<Option<ReviewDecision>> {
-    let Some(cache_key) = review_cache_key(finding) else {
-        return Ok(None);
-    };
-    if let Some(decision) = review_cache.get(&cache_key) {
-        return Ok(decision.clone());
+    cache_key: Option<&str>,
+    filter: &FindingListFilter,
+) -> bool {
+    if !filter.has_derived_triage_state_filter() {
+        return true;
     }
-    let decision =
-        load_latest_review_decision_for_filter(store, finding)?.map(|record| record.decision);
-    review_cache.insert(cache_key, decision.clone());
-    Ok(decision)
-}
-
-fn load_latest_review_decision_for_filter(
-    store: &FindingStore,
-    finding: &Finding,
-) -> Result<Option<ReviewDecisionRecord>> {
-    if let Some(identity_id) = finding.identity_id.as_deref() {
-        return store.latest_review_decision_for_identity(identity_id);
-    }
-    match finding.id {
-        Some(finding_id) => store.latest_review_decision(finding_id),
-        None => Ok(None),
-    }
-}
-
-fn latest_human_review_decision_for_filter(
-    store: &FindingStore,
-    finding: &Finding,
-) -> Result<Option<ReviewDecision>> {
-    let Some(finding_id) = finding.id else {
-        return Ok(None);
-    };
-    Ok(store
-        .latest_human_review_decision_for_finding_identity(finding_id)?
-        .map(|record| record.decision))
+    let lifecycle = lifecycles
+        .get(&finding_stable_key(finding))
+        .map(|status| StableLifecycleStatus::from_current_status(status))
+        .unwrap_or(StableLifecycleStatus::Open);
+    // Human review wins over later automated re-triage.
+    let human_decision = cache_key.and_then(|key| human_reviews.get(key));
+    filter.matches_triage_lifecycle(&derive_triage_state(lifecycle, human_decision))
 }
 
 fn review_cache_key(finding: &Finding) -> Option<String> {
@@ -110,4 +99,11 @@ fn review_cache_key(finding: &Finding) -> Option<String> {
         .as_ref()
         .map(|identity_id| format!("identity:{identity_id}"))
         .or_else(|| finding.id.map(|finding_id| format!("finding:{finding_id}")))
+}
+
+fn finding_stable_key(finding: &Finding) -> String {
+    finding
+        .identity_id
+        .clone()
+        .unwrap_or_else(|| finding.fingerprint.clone())
 }

@@ -40,4 +40,6 @@ pub struct UafHuntReport {
     pub truncated: bool,
     #[serde(rename = "costUsd")]
     pub cost_usd: f64,
+    #[serde(skip)]
+    pub cost_usd_exact: bool,
 }

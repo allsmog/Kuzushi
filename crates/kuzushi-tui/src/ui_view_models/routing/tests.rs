@@ -6,7 +6,7 @@ fn routing_mode_defaults_to_shell() {
     let app = ShellApp::new(V2Config::default(), None);
 
     assert_eq!(routing_mode(&app), RoutingMode::Shell);
-    assert_eq!(routing_mode_segment(&app), "mode:shell");
+    assert_eq!(routing_mode_segment(&app), "route:shell");
 }
 
 #[test]
@@ -48,11 +48,13 @@ fn routing_mode_prioritizes_agent_over_plan() {
 }
 
 #[test]
-fn uses_activity_frame_only_for_activity_view() {
+fn uses_activity_frame_only_for_active_activity_view() {
     let mut app = ShellApp::new(V2Config::default(), None);
     assert!(!uses_activity_frame(&app));
 
     app.set_shell_view(ShellView::Activity);
+    assert!(!uses_activity_frame(&app));
+    app.set_activity(Some(crate::ActivitySession::new("run-active")));
     assert!(uses_activity_frame(&app));
 
     app.set_shell_view(ShellView::ModuleRun);
@@ -113,11 +115,13 @@ fn plain_render_mode_selects_specialized_plain_views() {
         }
     );
 
-    app.set_shell_view(ShellView::ModelPicker);
-    assert!(matches!(
+    app.open_model_picker();
+    assert_eq!(
         plain_render_mode(&app),
-        PlainRenderMode::InteractiveOnly(model) if model.title == "MODEL PICKER"
-    ));
+        PlainRenderMode::LineBased {
+            include_context_strip: false
+        }
+    );
 
     app.set_shell_view(ShellView::FilePicker);
     assert!(matches!(

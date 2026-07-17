@@ -58,7 +58,7 @@ For vocabulary and dependency rules, see
 - External binaries such as Semgrep, CodeQL, `nmap`, and `curl` are optional
   by tool. Missing binaries should fail actionably.
 - `pnpm build` compiles retained TypeScript exports; Rust builds use Cargo.
-- `.kuzushi`, `.ralph`, `.kuzushi-active`, native binaries, temp prompts, and
+- `.kuzushi`, `.kuzushi-active`, native binaries, temp prompts, and
   SQLite files are local state, not product assets.
 - The pre-commit hook expects `lint-staged`. If local dependencies are missing,
   run focused checks and record the hook blocker before bypassing hooks.

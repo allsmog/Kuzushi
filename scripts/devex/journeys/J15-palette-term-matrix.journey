@@ -6,10 +6,11 @@
 name: Palette and TERM matrix
 cwd: @TMP_TARGET
 env: HOME=@TMP_HOME TERM=xterm-256color
-env-unset: COLORTERM
+env-unset: COLORTERM NO_COLOR
 launch:
 wait-for: 25 CHOOSE A TARGET
 snap: 256color-target-gate
+expect-ansi-profile: indexed
 ask: TERM=xterm-256color (emulated macOS Terminal) — inspect the .ansi capture: are colors 256-safe (38;5;N) or truecolor-only (38;2;R;G;B), and is the screen legible?
 wait: 2
 snap: 256color-motion
@@ -19,14 +20,19 @@ type: recon
 keys: Down
 snap: 256color-palette-selection
 expect: ▸
+expect-ansi-profile: indexed
 ask: Palette — is the selected recon command/tool/module row visible through both the non-color marker and theme styling?
 keys: Escape
-submit: quit
+# The target gate is a strict picker, so prompt text is intentionally paused.
+# Use the shell's global two-stage quit chord before changing TERM/theme.
+keys: C-c C-c
 wait: 2
+env-unset: NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_THEME=high-contrast KUZUSHI_REDUCED_MOTION=1
 launch:
 wait-for: 25 CHOOSE A TARGET
 snap: high-contrast-gate
+expect-ansi-profile: truecolor
 ask: KUZUSHI_THEME=high-contrast — bright white + bold palette active in the .ansi capture, and still legible?
 keys: C-g
 type: recon
@@ -34,8 +40,9 @@ keys: Down
 snap: high-contrast-palette-selection
 expect: ▸
 keys: Escape
-submit: quit
+keys: C-c C-c
 wait: 2
+env-unset: NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1
 launch:
 wait-for: 25 CHOOSE A TARGET
@@ -48,3 +55,4 @@ type: recon
 keys: Down
 snap: truecolor-palette-selection
 expect: ▸
+expect-ansi-profile: truecolor

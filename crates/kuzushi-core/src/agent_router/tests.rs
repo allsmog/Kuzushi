@@ -2,6 +2,9 @@
 mod tests {
     use super::super::*;
     use crate::findings::{Finding, Severity};
+    use crate::runtime::{
+        AgentQueryControl, ModelTokenUsage, Observed, SubagentRole, TracedRuntime,
+    };
     use std::path::PathBuf;
     use std::sync::Mutex;
 
@@ -18,6 +21,86 @@ mod tests {
                 last_query_model: Mutex::new(None),
                 last_triage_model: Mutex::new(None),
             })
+        }
+    }
+
+    #[derive(Default)]
+    struct ObservedRecorderRuntime {
+        query_system_prompts: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl AgentRuntime for ObservedRecorderRuntime {
+        fn query_observed_blocking(
+            &self,
+            request: AgentQueryRequest,
+        ) -> Result<Observed<AgentQueryResponse>> {
+            self.query_system_prompts
+                .lock()
+                .unwrap()
+                .push(request.system_prompt);
+            Ok(Observed::new(
+                AgentQueryResponse::default(),
+                ModelTokenUsage::from_reported_options(Some(7), None),
+            ))
+        }
+
+        fn query_observed_blocking_controlled(
+            &self,
+            _request: AgentQueryRequest,
+            control: AgentQueryControl,
+        ) -> Result<Observed<AgentQueryResponse>> {
+            control.ensure_active()?;
+            Ok(Observed::new(
+                AgentQueryResponse::default(),
+                ModelTokenUsage::reported(0, 0),
+            ))
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!("legacy triage path must not serve an observed request")
+        }
+
+        fn triage_finding_observed_blocking(
+            &self,
+            _request: TriageRequest,
+        ) -> Result<Observed<TriageOutcome>> {
+            Ok(Observed::without_usage(TriageOutcome::default()))
+        }
+
+        fn supports_tools(&self) -> bool {
+            true
+        }
+
+        fn next_step_observed_blocking(
+            &self,
+            _request: &AgentToolLoopRequest,
+            _history: &[LoopHistoryEntry],
+        ) -> Result<Observed<AgentLoopStep>> {
+            Ok(Observed::new(
+                AgentLoopStep::Final {
+                    text: "done".to_string(),
+                    structured: None,
+                    cost_usd: None,
+                },
+                ModelTokenUsage::reported(5, 2),
+            ))
+        }
+    }
+
+    struct FailingObservedRuntime;
+
+    #[async_trait]
+    impl AgentRuntime for FailingObservedRuntime {
+        fn query_observed_blocking(
+            &self,
+            _request: AgentQueryRequest,
+        ) -> Result<Observed<AgentQueryResponse>> {
+            anyhow::bail!("could not parse response: raw-model-response-sentinel")
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            unreachable!("not used by the wrapper error test")
         }
     }
 
@@ -39,6 +122,7 @@ mod tests {
                 confidence: 0.0,
                 rationale: "test".to_string(),
                 cost_usd: 0.0,
+                cost_usd_exact: true,
             })
         }
     }
@@ -53,6 +137,95 @@ mod tests {
             Severity::High,
             "msg",
         )
+    }
+
+    fn observed_query_request(system_prompt: &str) -> AgentQueryRequest {
+        AgentQueryRequest::new(
+            "openai:observed-model",
+            PathBuf::from("/tmp"),
+            system_prompt,
+            "operator prompt",
+        )
+    }
+
+    fn observed_triage_request() -> TriageRequest {
+        TriageRequest {
+            model: "openai:observed-model".to_string(),
+            cwd: PathBuf::from("/tmp"),
+            finding: synthetic_finding(),
+            prompt_template: None,
+        }
+    }
+
+    fn observed_tool_loop_request() -> AgentToolLoopRequest {
+        AgentToolLoopRequest {
+            model: "openai:observed-model".to_string(),
+            cwd: PathBuf::from("/tmp"),
+            system_prompt: "system".to_string(),
+            prompt: "operator prompt".to_string(),
+            tools: Vec::new(),
+            max_steps: 1,
+            runtime_options: None,
+            temperature: None,
+        }
+    }
+
+    fn routed_runtime(inner: Arc<dyn AgentRuntime>) -> RoutedRuntime<'static> {
+        RoutedRuntime::new(
+            inner,
+            Arc::new(AgentRouter::empty()),
+            Some("openai:observed-model".to_string()),
+        )
+    }
+
+    fn emit_traced_usage_variants(traced: &TracedRuntime<'_>) {
+        traced
+            .query_observed_blocking(observed_query_request("partial system"))
+            .unwrap();
+        traced
+            .query_observed_blocking_controlled(
+                observed_query_request("zero system"),
+                AgentQueryControl::default(),
+            )
+            .unwrap();
+        traced
+            .triage_finding_observed_blocking(observed_triage_request())
+            .unwrap();
+    }
+
+    type PersistedModelFinish = (Option<u64>, Option<u64>, Option<String>);
+
+    fn persisted_model_finishes(target: &Path, run_id: &str) -> Vec<PersistedModelFinish> {
+        crate::run_lifecycle::read_run_items(target, run_id)
+            .unwrap()
+            .unwrap()
+            .items
+            .iter()
+            .filter_map(|item| match &item.item {
+                crate::run_lifecycle::RunItemV1::ModelCallFinished {
+                    usage, error_class, ..
+                } => Some((
+                    usage.input_tokens,
+                    usage.output_tokens,
+                    error_class.as_ref().map(|value| value.as_str().to_string()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn persisted_model_error_class(target: &Path, run_id: &str) -> Option<String> {
+        persisted_model_finishes(target, run_id)
+            .into_iter()
+            .find_map(|(_, _, error_class)| error_class)
+    }
+
+    fn assert_artifact_excludes(target: &Path, run_id: &str, artifact: &str, secret: &str) {
+        let persisted = std::fs::read_to_string(crate::run_artifacts::run_artifact_path(
+            target, run_id, artifact,
+        ))
+        .unwrap();
+        assert!(!persisted.contains(secret));
     }
 
     fn write_models_toml(home: &Path, body: &str) -> PathBuf {
@@ -341,6 +514,132 @@ primary = "gpt-5.5"
             Some("openai:explicit-legacy"),
             "legacy path must not rewrite the model"
         );
+    }
+
+    #[test]
+    fn observed_query_control_and_triage_usage_survive_both_wrappers() {
+        let inner = Arc::new(ObservedRecorderRuntime::default());
+        let routed = routed_runtime(inner);
+
+        let query = routed
+            .query_observed_blocking(observed_query_request("query system"))
+            .unwrap();
+        assert_eq!(query.usage.observed_counts(), (Some(7), None));
+
+        let controlled = routed
+            .query_observed_blocking_controlled(
+                observed_query_request("controlled system"),
+                AgentQueryControl::default(),
+            )
+            .unwrap();
+        assert_eq!(controlled.usage.observed_counts(), (Some(0), Some(0)));
+        assert!(controlled.usage.is_complete());
+
+        let triage = routed
+            .triage_finding_observed_blocking(observed_triage_request())
+            .unwrap();
+        assert_eq!(triage.usage.observed_counts(), (None, None));
+        assert!(triage.usage.is_unavailable());
+    }
+
+    #[test]
+    fn observed_step_and_subagent_usage_survive_both_wrappers() {
+        let inner = Arc::new(ObservedRecorderRuntime::default());
+        let routed = routed_runtime(inner.clone());
+
+        let step = routed
+            .next_step_observed_blocking(&observed_tool_loop_request(), &[])
+            .unwrap();
+        assert_eq!(step.usage.observed_counts(), (Some(5), Some(2)));
+
+        let subagent = routed
+            .spawn_subagent_observed_blocking(
+                SubagentRole::UnsafeBlockReasoner,
+                observed_query_request("caller system"),
+            )
+            .unwrap();
+        assert_eq!(subagent.usage.observed_counts(), (Some(7), None));
+        let prompts = inner.query_system_prompts.lock().unwrap();
+        let subagent_prompt = prompts.last().unwrap();
+        assert!(
+            subagent_prompt.starts_with(SubagentRole::UnsafeBlockReasoner.system_prompt_prefix())
+        );
+        assert!(subagent_prompt.ends_with("caller system"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn async_observed_methods_preserve_partial_and_unavailable_usage() {
+        let routed = routed_runtime(Arc::new(ObservedRecorderRuntime::default()));
+
+        let query = routed
+            .query_observed(observed_query_request("async system"))
+            .await
+            .unwrap();
+        let triage = routed
+            .triage_finding_observed(observed_triage_request())
+            .await
+            .unwrap();
+
+        assert_eq!(query.usage.observed_counts(), (Some(7), None));
+        assert_eq!(triage.usage.observed_counts(), (None, None));
+    }
+
+    #[test]
+    fn traced_wrapper_chain_persists_zero_partial_and_unavailable_usage() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = crate::run_artifacts::new_run_id("observed-wrapper-chain");
+        let observation =
+            crate::run_lifecycle::RunObservationHandle::jsonl(target.path(), &run_id).unwrap();
+        let routed = routed_runtime(Arc::new(ObservedRecorderRuntime::default()));
+        let traced = TracedRuntime::new(&routed, observation.trace_handle());
+
+        emit_traced_usage_variants(&traced);
+        observation.flush().unwrap();
+
+        assert_eq!(
+            persisted_model_finishes(target.path(), &run_id),
+            vec![
+                (
+                    Some(7),
+                    None,
+                    Some("usage_incomplete_lower_bound".to_string())
+                ),
+                (Some(0), Some(0), None),
+                (None, None, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn traced_wrapper_chain_persists_only_sanitized_error_metadata() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = crate::run_artifacts::new_run_id("observed-wrapper-error");
+        let observation =
+            crate::run_lifecycle::RunObservationHandle::jsonl(target.path(), &run_id).unwrap();
+        let routed = routed_runtime(Arc::new(FailingObservedRuntime));
+        let traced = TracedRuntime::new(&routed, observation.trace_handle());
+
+        let error = traced
+            .query_observed_blocking(observed_query_request("system"))
+            .unwrap_err();
+        assert!(error.to_string().contains("raw-model-response-sentinel"));
+        observation.flush().unwrap();
+        drop(traced);
+        drop(observation);
+
+        assert_eq!(
+            persisted_model_error_class(target.path(), &run_id).as_deref(),
+            Some("invalid_response")
+        );
+
+        for artifact in ["items.jsonl", "trace.jsonl"] {
+            assert_artifact_excludes(
+                target.path(),
+                &run_id,
+                artifact,
+                "raw-model-response-sentinel",
+            );
+        }
     }
 
     #[test]

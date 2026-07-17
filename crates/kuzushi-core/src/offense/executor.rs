@@ -58,7 +58,11 @@ mod tests {
     }
 
     impl PlayTransport for SpyTransport {
-        fn send(&self, _target: &ScopeTarget, _request: &PlayRequest) -> Result<PlayResponse, String> {
+        fn send(
+            &self,
+            _target: &ScopeTarget,
+            _request: &PlayRequest,
+        ) -> Result<PlayResponse, String> {
             self.sent.set(true);
             Ok(self.response.clone())
         }
@@ -86,7 +90,10 @@ mod tests {
         let result = run_play(&scope, "10.9.9.9", 1, "run-1", &admin_probe(), &transport);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("refused"));
-        assert!(!transport.sent.get(), "transport must not be touched for a denied target");
+        assert!(
+            !transport.sent.get(),
+            "transport must not be touched for a denied target"
+        );
     }
 
     #[test]
@@ -97,7 +104,9 @@ mod tests {
         assert!(transport.sent.get());
         assert!(outcome.exploited);
         assert!(outcome.evidence.contains(&"status=200".to_string()));
-        assert!(outcome.evidence.contains(&"signal:welcome admin".to_string()));
+        assert!(outcome
+            .evidence
+            .contains(&"signal:welcome admin".to_string()));
     }
 
     #[test]

@@ -168,7 +168,7 @@ pub(in crate::modules) fn inspect_manifest_dependencies(
     orm_or_db: &mut BTreeSet<&'static str>,
     sanitization_libs: &mut BTreeSet<&'static str>,
 ) -> Result<()> {
-    let Ok(raw) = fs::read_to_string(path) else {
+    let Some(raw) = read_optional_manifest(path)? else {
         return Ok(());
     };
     let parsed = serde_json::from_str::<Value>(&raw)

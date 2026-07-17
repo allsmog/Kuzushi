@@ -10,16 +10,18 @@ pub(crate) fn run_taint_cwe_select(
     let cwes = run_taint_cwe_select_value(&input, &target, runtime, model.as_deref())?;
     let summary = format!(
         "pipeline:taint-cwe-select selected {} CWE class{}",
-        cwes.len(),
-        if cwes.len() == 1 { "" } else { "es" }
+        cwes.value.len(),
+        if cwes.value.len() == 1 { "" } else { "es" }
     );
     let data = json!({
         "target": target.display().to_string(),
-        "cwes": cwes,
+        "cwes": cwes.value,
     });
-    Ok(crate::module_result::completed_output_result(
+    let mut result = crate::module_result::completed_output_result(
         summary.clone(),
         summary,
         data,
-    ))
+    );
+    crate::module_result::apply_runtime_cost_report(&mut result, cwes.cost_report()?);
+    Ok(result)
 }

@@ -111,7 +111,8 @@ mod tests {
         std::fs::create_dir(temp.path().join(".kuzushi")).unwrap();
         std::fs::write(temp.path().join(".kuzushi").join("state.json"), "{}").unwrap();
         let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
-        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_active_view_blocking();
 
         let candidates = app.completion_candidates("attach des");
 

@@ -48,6 +48,9 @@ pub struct DeepAuditOutcome {
     pub triage: TriageOutcome,
     pub evidence: Vec<EvidenceCitation>,
     pub cost_usd: f64,
+    /// False when at least one provider call did not report an exact cost.
+    #[serde(default)]
+    pub cost_usd_exact: bool,
     pub steps_used: u32,
     pub truncated: bool,
 }

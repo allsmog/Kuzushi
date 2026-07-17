@@ -16,7 +16,8 @@ pub(crate) fn activity_feed_scroll_offset(
     if route.feed_auto_tail {
         return line_count.saturating_sub(viewport_height);
     }
-    clamp_scroll(route.feed_scroll, line_count, viewport_height)
+    let tail = line_count.saturating_sub(viewport_height);
+    tail.saturating_sub(route.feed_scroll.min(tail))
 }
 
 fn clamp_scroll(requested: usize, line_count: usize, viewport_height: usize) -> usize {
@@ -54,8 +55,8 @@ mod tests {
         route.feed_scroll = 3;
         route.feed_auto_tail = false;
 
-        assert_eq!(activity_feed_scroll_offset(&route, 20, 7), 3);
+        assert_eq!(activity_feed_scroll_offset(&route, 20, 7), 10);
         route.feed_scroll = 99;
-        assert_eq!(activity_feed_scroll_offset(&route, 20, 7), 13);
+        assert_eq!(activity_feed_scroll_offset(&route, 20, 7), 0);
     }
 }

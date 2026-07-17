@@ -22,3 +22,5 @@ mod source_files;
 
 pub use derive_whitebox_variant_patterns::derive_whitebox_variant_patterns;
 pub use hunt_whitebox_static_variants::hunt_whitebox_static_variants;
+#[cfg(test)]
+pub(crate) use hunt_whitebox_static_variants::hunt_whitebox_static_variants_with_limits;

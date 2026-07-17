@@ -67,6 +67,10 @@ fn worker_handle_registry_cancels_timed_out_handles_once() {
     assert_eq!(timed_out.len(), 1);
     assert_eq!(timed_out[0].label, "blocked");
     assert!(cancel.is_cancelled());
+    assert_eq!(
+        cancel.disposition(),
+        Some(kuzushi_core::scan::CancellationDisposition::Interrupted)
+    );
     assert_eq!(registry.active_count(), 1);
     assert!(registry.cancel_timed_out(Instant::now()).is_empty());
     drop(tx);
@@ -104,7 +108,7 @@ fn app_drain_marks_timed_out_tool_abort_requested() {
 }
 
 #[test]
-fn unresponsive_worker_escalates_to_synthetic_failure_after_grace() {
+fn unresponsive_worker_quarantines_job_after_grace() {
     let (tx, rx) = mpsc::channel::<()>();
     let mut config = V2Config::default();
     config.runtime.worker_watchdog_timeout_ms = Some(5);
@@ -134,26 +138,27 @@ fn unresponsive_worker_escalates_to_synthetic_failure_after_grace() {
     assert!(app.has_running_work());
     assert!(app.jobs().is_running(JobKind::Run));
 
-    // Before the grace window elapses, no synthetic failure is emitted.
-    assert!(!app.jobs_mut().fail_unresponsive_slots(Instant::now()));
+    // Before the grace window elapses, quarantine is not armed.
+    assert!(!app.jobs_mut().quarantine_unresponsive_slots(Instant::now()));
     assert!(app.has_running_work());
 
-    // Grace elapses with still no terminal event: a synthetic Failed terminal
-    // event releases the slot through the normal job-event path.
+    // Grace elapses with still no terminal event: quarantine keeps exclusive
+    // ownership because the OS thread can still perform side effects.
     let after_grace = Instant::now() + WORKER_UNRESPONSIVE_GRACE;
-    assert!(app.jobs_mut().fail_unresponsive_slots(after_grace));
-    assert!(app.drain_background_events());
-    assert!(!app.has_running_work());
-    assert!(!app.jobs().is_running(JobKind::Run));
-
-    // The slot is free again: new work is accepted while the hung thread
-    // is left alone (never killed, still parked on the channel).
-    let next = app.jobs_mut().start(JobKind::Run, "next:tool");
+    assert!(app.jobs_mut().quarantine_unresponsive_slots(after_grace));
+    assert!(app.has_running_work());
     assert!(app.jobs().is_running(JobKind::Run));
-    drop(next);
-    drop(ticket);
+    assert!(app.jobs().is_quarantined(JobKind::Run));
+    assert!(app.jobs_mut().try_start(JobKind::Run, "next:tool").is_err());
+
+    // Once the worker truly exits, its guard emits the real terminal event
+    // and the slot is released through the normal job-event path.
     drop(tx);
     assert!(wait_for_app_handle_reap(&mut app));
+    assert!(app.has_running_work());
+    drop(ticket);
+    assert!(app.drain_background_events());
+    assert!(!app.has_running_work());
 }
 
 #[test]

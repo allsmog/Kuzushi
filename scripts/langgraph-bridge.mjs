@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import process from "node:process";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
+import { debugDumpBridgeCall } from "./langgraph-bridge/diagnostics.mjs";
+import { bridgeErrorResponse } from "./langgraph-bridge/errors.mjs";
 import { mcpToolsForRequest } from "./langgraph-bridge/mcp.mjs";
 import {
   appendStructuredOutputContract,
@@ -144,66 +144,6 @@ async function handleNextStep(request) {
   return nextStepResultFromResponse(response);
 }
 
-function debugDumpBridgeCall(kind, request, tools, systemPrompt, response) {
-  debugDumpFullPrompt(kind, request, systemPrompt);
-  const path = process.env.KUZUSHI_BRIDGE_DEBUG_DUMP;
-  if (!path) return;
-  try {
-    const text = messageText(response);
-    const dump = {
-      ts: Date.now(),
-      kind,
-      model: request.model,
-      thinkingLevel: request.thinkingLevel ?? request.thinking_level,
-      toolCount: tools.length,
-      toolNames: tools.map((tool) => tool.name).filter(Boolean),
-      promptLen: (request.prompt ?? "").length,
-      promptHead: (request.prompt ?? "").slice(0, 1500),
-      messageCount: (request.messages ?? []).length,
-      systemPromptLen: String(systemPrompt ?? "").length,
-      systemPromptHead: String(systemPrompt ?? "").slice(0, 800),
-      responseLen: text.length,
-      responseHead: text.slice(0, 4000),
-      responseTail: text.slice(-500),
-      stopReason: response?.response_metadata?.finish_reason,
-      responseToolNames: (response?.tool_calls ?? []).map((call) => call.name).filter(Boolean),
-    };
-    appendFileSync(path, `${JSON.stringify(dump)}\n`);
-  } catch {}
-}
-
-function debugDumpFullPrompt(kind, request, systemPrompt) {
-  const root = process.env.KUZUSHI_BRIDGE_DEBUG_FULL_PROMPT;
-  if (!root) return;
-  try {
-    mkdirSync(root, { recursive: true });
-    const filename = `prompt-${Date.now()}-${process.pid}-${kind}.txt`;
-    writeFileSync(path.join(root, filename), fullPromptDebugBody(request, systemPrompt));
-  } catch {}
-}
-
-function fullPromptDebugBody(request, systemPrompt) {
-  const messages = request.messages ?? [];
-  if (messages.length) {
-    return [
-      "[system]",
-      String(systemPrompt ?? ""),
-      "",
-      "[messages]",
-      JSON.stringify(messages, null, 2),
-      "",
-    ].join("\n");
-  }
-  return [
-    "[system]",
-    String(systemPrompt ?? ""),
-    "",
-    "[prompt]",
-    String(request.prompt ?? ""),
-    "",
-  ].join("\n");
-}
-
 function nextStepResultFromResponse(response) {
   const usage = usageFromMessage(response);
   const call = response.tool_calls?.[0];
@@ -213,6 +153,8 @@ function nextStepResultFromResponse(response) {
       step: "tool_call",
       call: { name: call.name, input: call.args ?? {}, callId: call.id },
       cost_usd: usage.costUsd,
+      input_tokens: usage.inputTokens,
+      output_tokens: usage.outputTokens,
     };
   }
   const text = messageText(response);
@@ -222,6 +164,8 @@ function nextStepResultFromResponse(response) {
     text,
     structured: maybeParseJson(text),
     cost_usd: usage.costUsd,
+    input_tokens: usage.inputTokens,
+    output_tokens: usage.outputTokens,
   };
 }
 
@@ -241,7 +185,6 @@ async function handlePing(request) {
     input_tokens: usage.inputTokens,
     output_tokens: usage.outputTokens,
     cost_usd: usage.costUsd,
-    text_preview: messageText(response).slice(0, 120),
   };
 }
 
@@ -267,6 +210,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stdout.write(JSON.stringify({ ok: false, error: error?.message ?? String(error) }));
+  process.stdout.write(JSON.stringify(bridgeErrorResponse(error)));
   process.exitCode = 1;
 });

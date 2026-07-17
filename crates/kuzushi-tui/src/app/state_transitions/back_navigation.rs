@@ -6,11 +6,14 @@ impl ShellApp {
     /// command after boot). The stack is maintained by `sync_view_change`
     /// — every transition into a new view pushes the prior view here.
     pub(crate) fn go_back(&mut self) {
+        if self.restore_contextual_surface_origin() {
+            return;
+        }
         match self.router.navigation_mut().pop_history() {
             Some(ShellView::Home) => {
                 self.clear_focused_module();
                 self.router.catalog_mut().collapse();
-                self.set_shell_view(ShellView::Home);
+                self.open_workbench(WorkbenchPane::Findings);
             }
             Some(target) => {
                 self.set_shell_view(target);
@@ -19,5 +22,9 @@ impl ShellApp {
                 self.open_workbench(WorkbenchPane::Findings);
             }
         }
+        let destination = self.shell_view();
+        self.router
+            .navigation_mut()
+            .accept_back_transition(destination);
     }
 }

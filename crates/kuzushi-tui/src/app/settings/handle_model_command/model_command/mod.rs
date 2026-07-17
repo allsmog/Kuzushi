@@ -15,11 +15,11 @@ pub(super) struct ModelCommand {
 
 impl ShellApp {
     pub(crate) fn reduce_model_command(&mut self, raw: &Option<String>) -> Vec<ShellEffect> {
-        self.set_shell_view(ShellView::Config);
         let Some(command) = parsing::parse_model_command(raw.clone()) else {
-            self.show_model_catalog();
+            self.open_model_picker();
             return Vec::new();
         };
+        self.set_shell_view(ShellView::Config);
         let (model, thinking_level) = match parsing::resolve_model_command_selection(&command) {
             Ok(selection) => selection,
             Err(message) => {

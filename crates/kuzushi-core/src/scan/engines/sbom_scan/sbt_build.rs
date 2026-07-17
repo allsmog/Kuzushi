@@ -1,6 +1,6 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_sbt_build(path: &Path) -> bool {
@@ -69,7 +69,12 @@ fn dependency_candidate(line: &str) -> bool {
     line.contains("libraryDependencies") || line.starts_with('"')
 }
 
-fn sbt_dependency_name(group: &str, artifact: &str, line: &str, scala_binary: Option<&str>) -> String {
+fn sbt_dependency_name(
+    group: &str,
+    artifact: &str,
+    line: &str,
+    scala_binary: Option<&str>,
+) -> String {
     let artifact = if line.contains("%%") {
         scala_binary
             .map(|version| format!("{artifact}_{version}"))

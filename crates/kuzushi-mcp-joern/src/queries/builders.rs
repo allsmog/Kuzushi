@@ -27,6 +27,13 @@ pub fn callees_of(fn_name: &str) -> String {
     )
 }
 
+pub fn definitions(fn_name: &str) -> String {
+    format!(
+        "cpg.method.nameExact(\"{}\").map(m => Map(\"name\" -> m.name, \"kind\" -> \"method\", \"location\" -> Map(\"start\" -> Map(\"file\" -> m.filename, \"line\" -> m.lineNumber.getOrElse(0)), \"end\" -> Map(\"file\" -> m.filename, \"line\" -> m.lineNumberEnd.orElse(m.lineNumber).getOrElse(0))), \"qualifier\" -> m.fullName)).l",
+        escape_scala_string(fn_name)
+    )
+}
+
 /// Hard ceiling on `maxCallDepth`. Joern's interprocedural dataflow
 /// is exponential in call-graph depth on large CPGs (a 187 MB postgres
 /// CPG with depth 32 already pushes the JVM into long pauses), so we

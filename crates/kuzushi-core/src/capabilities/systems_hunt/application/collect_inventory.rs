@@ -1,4 +1,5 @@
 use super::*;
+use crate::bounded_file::read_source_text_prefix;
 
 pub(crate) fn collect_inventory(
     root: &Path,
@@ -53,38 +54,68 @@ pub(crate) fn collect_inventory_inner(
     if files.len() >= options.max_files {
         return Ok(());
     }
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return Ok(());
-    };
-    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.path());
-    for entry in entries {
+    for entry in sorted_readable_entries(dir) {
         if files.len() >= options.max_files {
             break;
         }
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if path.is_dir() {
-            if should_skip_systems_dir(name.as_ref(), options.include_non_production) {
-                continue;
-            }
-            collect_inventory_inner(root, &path, options, files)?;
-            continue;
-        }
-        if !is_systems_source(&path) {
-            continue;
-        }
-        let Ok(bytes) = fs::read(&path) else {
-            continue;
-        };
-        let content =
-            String::from_utf8_lossy(&bytes[..bytes.len().min(options.max_bytes_per_file)])
-                .to_string();
-        let rel = path_relative_to(root, &path);
-        files.push((rel, content));
+        collect_systems_entry(root, entry, options, files)?;
     }
     Ok(())
+}
+
+fn sorted_readable_entries(dir: &Path) -> Vec<fs::DirEntry> {
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.path());
+    entries
+}
+
+fn collect_systems_entry(
+    root: &Path,
+    entry: fs::DirEntry,
+    options: InventoryWalkOptions,
+    files: &mut Vec<(String, String)>,
+) -> Result<()> {
+    let Ok(file_type) = entry.file_type() else {
+        return Ok(());
+    };
+    if file_type.is_dir() {
+        return collect_systems_directory(root, &entry, options, files);
+    }
+    if let Some(item) = systems_inventory_file(root, &entry.path(), file_type.is_file(), options) {
+        files.push(item);
+    }
+    Ok(())
+}
+
+fn collect_systems_directory(
+    root: &Path,
+    entry: &fs::DirEntry,
+    options: InventoryWalkOptions,
+    files: &mut Vec<(String, String)>,
+) -> Result<()> {
+    let name = entry.file_name();
+    if should_skip_systems_dir(&name.to_string_lossy(), options.include_non_production) {
+        return Ok(());
+    }
+    collect_inventory_inner(root, &entry.path(), options, files)
+}
+
+fn systems_inventory_file(
+    root: &Path,
+    path: &Path,
+    is_file: bool,
+    options: InventoryWalkOptions,
+) -> Option<(String, String)> {
+    if !is_file || !is_systems_source(path) {
+        return None;
+    }
+    let content = read_source_text_prefix(path, options.max_bytes_per_file)
+        .ok()
+        .flatten()?;
+    Some((path_relative_to(root, path), content))
 }
 
 fn should_skip_systems_dir(name: &str, include_non_production: bool) -> bool {

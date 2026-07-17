@@ -1,0 +1,2 @@
+{"n":1,"kind":"tool","label":"recon:nmap started","module_id":"recon","verb":"nmap"}
+{"n":2,"kind":"refused","label":"recon:nmap failed","module_id":"recon","verb":"nmap","severity":"danger"}

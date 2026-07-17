@@ -31,6 +31,8 @@ pub(super) fn clear_projection_tables(tx: &rusqlite::Transaction<'_>) -> Result<
     tx.execute_batch(
         r#"
         delete from patch_attempt_events;
+        delete from patch_lifecycle_current;
+        delete from patch_lifecycle_events;
         delete from audit_events;
         delete from verification_events;
         delete from run_states;

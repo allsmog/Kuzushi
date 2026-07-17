@@ -15,7 +15,7 @@ fn tools_model_lists_registry_tools() {
     assert!(model
         .groups
         .iter()
-        .any(|group| group.label == "HUNT"
+        .any(|group| group.label == "SCAN"
             && group.rows.iter().any(|row| row.cells[0] == "sast:scan")));
     assert!(all_tool_rows(&model)
         .iter()
@@ -31,9 +31,9 @@ fn tools_model_groups_follow_canonical_phase_order() {
     let model = tools_model(&app);
     let labels: Vec<&str> = model.groups.iter().map(|group| group.label).collect();
 
-    // Phase groups appear in canonical MAP→HUNT→CONFIRM→FIX→OPERATE order,
+    // Phase groups appear in canonical MAP→SCAN→REVIEW→PROVE→FIX→OPERATE order,
     // filtering to the non-empty subset.
-    let order = ["MAP", "HUNT", "CONFIRM", "FIX", "OPERATE"];
+    let order = ["MAP", "SCAN", "REVIEW", "PROVE", "FIX", "OPERATE"];
     let positions: Vec<usize> = labels
         .iter()
         .filter_map(|label| order.iter().position(|o| o == label))
@@ -63,15 +63,15 @@ fn tools_model_filters_by_phase_key() {
 
     let model = tools_model(&app);
 
-    // Only the HUNT group survives a phase:hunt query.
+    // The deprecated phase:hunt query resolves to the canonical SCAN group.
     assert!(model
         .groups
         .iter()
-        .all(|group| group.label == "HUNT" || group.label == YOUR_TOOLS_LABEL));
+        .all(|group| group.label == "SCAN" || group.label == YOUR_TOOLS_LABEL));
     assert!(model
         .groups
         .iter()
-        .any(|group| group.label == "HUNT" && !group.rows.is_empty()));
+        .any(|group| group.label == "SCAN" && !group.rows.is_empty()));
 }
 
 #[test]

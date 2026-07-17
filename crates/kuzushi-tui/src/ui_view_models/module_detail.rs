@@ -1,4 +1,4 @@
-use crate::ShellApp;
+use crate::{app::DirectoryListingState, ShellApp, ViewDataState};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,21 +81,31 @@ fn module_availability_section(hidden: bool) -> Option<ModuleKeyValueSection> {
 }
 
 pub(crate) fn module_prompts_model(app: &ShellApp, module_id: &str) -> Vec<ModulePromptOnDisk> {
-    let root = prompt_root(app, module_id);
-    match std::fs::metadata(&root) {
-        Ok(metadata) if metadata.is_dir() => {}
-        Ok(_) => return vec![invalid_prompt_root(app, &root, "not a directory")],
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
-        Err(_) => return vec![invalid_prompt_root(app, &root, "unreadable")],
-    }
-    let entries = match std::fs::read_dir(&root) {
-        Ok(entries) => entries,
-        Err(_) => return vec![invalid_prompt_root(app, &root, "unreadable")],
+    let Some(root) = prompt_root(app, module_id) else {
+        return Vec::new();
     };
-    let mut prompts: Vec<ModulePromptOnDisk> = entries
-        .flatten()
-        .filter_map(|entry| prompt_from_entry(app, entry))
-        .collect();
+    let Some(target) = app.target() else {
+        return Vec::new();
+    };
+    let listing = app
+        .workbench_cache()
+        .borrow()
+        .cached_directory_listing(target, &root);
+    let entries = match listing {
+        ViewDataState::Ready(DirectoryListingState::Ready(entries)) => entries,
+        ViewDataState::Ready(DirectoryListingState::Missing) => return Vec::new(),
+        ViewDataState::Ready(DirectoryListingState::NonDirectory) => {
+            return vec![invalid_prompt_root(app, &root, "not a directory")]
+        }
+        ViewDataState::Ready(DirectoryListingState::Unreadable) => {
+            return vec![invalid_prompt_root(app, &root, "unreadable")]
+        }
+        ViewDataState::NotRequested | ViewDataState::Loading => return Vec::new(),
+    };
+    let mut prompts = entries
+        .into_iter()
+        .filter_map(|path| prompt_from_path(app, path))
+        .collect::<Vec<_>>();
     prompts.sort_by(|a, b| a.verb.cmp(&b.verb));
     prompts
 }
@@ -107,34 +117,28 @@ fn invalid_prompt_root(app: &ShellApp, root: &Path, reason: &str) -> ModulePromp
     }
 }
 
-fn prompt_root(app: &ShellApp, module_id: &str) -> PathBuf {
+fn prompt_root(app: &ShellApp, module_id: &str) -> Option<PathBuf> {
     app.target()
         .map(|target| kuzushi_core::module_prompt_root(target, module_id))
-        .unwrap_or_else(|| kuzushi_core::relative_module_prompt_root(module_id))
 }
 
-fn prompt_from_entry(app: &ShellApp, entry: std::fs::DirEntry) -> Option<ModulePromptOnDisk> {
-    if !entry.metadata().ok()?.is_file() {
-        return None;
-    }
-    let name = entry.file_name().to_string_lossy().to_string();
+fn prompt_from_path(app: &ShellApp, path: PathBuf) -> Option<ModulePromptOnDisk> {
+    let name = path.file_name()?.to_string_lossy().to_string();
     if !name.ends_with(".md") {
         return None;
     }
     Some(ModulePromptOnDisk {
         verb: name.trim_end_matches(".md").to_string(),
-        path: display_prompt_path(app, &entry.path()),
+        path: display_prompt_path(app, &path),
     })
 }
 
 fn display_prompt_path(app: &ShellApp, path: &Path) -> String {
-    path.strip_prefix(workspace_root(app))
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| path.display().to_string())
-}
-
-fn workspace_root(app: &ShellApp) -> &Path {
-    app.target().unwrap_or_else(|| Path::new("."))
+    app.target()
+        .and_then(|root| path.strip_prefix(root).ok())
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 fn visible_module_tools(module: &kuzushi_core::BuiltinModule) -> Vec<ModuleToolRow> {
@@ -318,6 +322,7 @@ mod tests {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
         app.set_focused_module(Some("sast".to_string()));
+        app.hydrate_all_view_data_for_test();
 
         let model = focused_module_detail_model(&app).expect("focused module detail");
         let prompts = model.prompts_section.expect("prompts section");
@@ -336,6 +341,7 @@ mod tests {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
         app.set_focused_module(Some("sast".to_string()));
+        app.hydrate_all_view_data_for_test();
 
         let model = focused_module_detail_model(&app).expect("focused module detail");
         let prompts = model.prompts_section.expect("prompts section");
@@ -349,5 +355,15 @@ mod tests {
                 kuzushi_core::relative_module_prompt_root("sast").display()
             )
         );
+    }
+
+    #[test]
+    fn targetless_module_detail_does_not_list_prompts_from_cwd() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_focused_module(Some("sast".to_string()));
+
+        let model = focused_module_detail_model(&app).expect("focused module detail");
+
+        assert_eq!(model.prompts_section, None);
     }
 }

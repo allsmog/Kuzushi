@@ -10,19 +10,13 @@ impl TaintIrisNextInput {
         let discover_signals = read_bool_option(input, "discoverSignals")
             .or_else(|| read_bool_option(input, "discover_signals"))
             .unwrap_or(true);
-        let target_subdir = optional_taint_next_string(input, &["targetSubdir", "target_subdir"])?
-            .filter(|subdir| !subdir.trim().is_empty());
-        if let Some(subdir) = &target_subdir {
-            if subdir.starts_with('/') || subdir.split('/').any(|part| part == "..") {
-                anyhow::bail!(
-                    "taint-iris-next:hunt targetSubdir must be a relative path under --target without '..' traversal, got {subdir:?}"
-                );
-            }
-        }
+        let target_subdir = taint_iris_next_target_subdir(input)?;
         let allow_deterministic_fallback = read_bool_option(input, "allowDeterministicFallback")
             .or_else(|| read_bool_option(input, "allow_deterministic_fallback"))
             .unwrap_or(false);
         let extra_catalog_entries = parse_extra_catalog_entries(input)?;
+        let system_prompt = optional_taint_next_string(input, &["TAINT_IRIS_NEXT_PROMPT"])?
+            .unwrap_or_else(taint_iris_next_system_prompt);
         Ok(Self {
             mode,
             backend,
@@ -37,9 +31,26 @@ impl TaintIrisNextInput {
             discover_signals,
             target_subdir,
             allow_deterministic_fallback,
+            system_prompt,
             extra_catalog_entries,
         })
     }
+}
+
+fn taint_iris_next_target_subdir(input: &Value) -> Result<Option<String>> {
+    let subdir = optional_taint_next_string(input, &["targetSubdir", "target_subdir"])?
+        .filter(|value| !value.trim().is_empty());
+    if subdir.as_deref().is_some_and(invalid_target_subdir) {
+        anyhow::bail!(
+            "taint-iris-next:hunt targetSubdir must be a relative path under --target without '..' traversal, got {:?}",
+            subdir.unwrap()
+        );
+    }
+    Ok(subdir)
+}
+
+fn invalid_target_subdir(subdir: &str) -> bool {
+    subdir.starts_with('/') || subdir.split('/').any(|part| part == "..")
 }
 
 pub(in crate::capabilities::taint_iris_next) fn parse_taint_iris_next_cwe_focus(
@@ -338,32 +349,31 @@ pub(in crate::capabilities::taint_iris_next) fn resolve_tool_target(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<PathBuf> {
     if let Some(target) = input.get("target").and_then(Value::as_str) {
-        return resolve_input_target(target);
+        return resolve_input_target(target, ctx);
     }
     if let Some(workspace) = ctx.workspace {
         return Ok(workspace.root().to_path_buf());
     }
-    current_dir()
+    anyhow::bail!("taint-iris-next requires an explicit active workspace")
 }
 
-fn resolve_input_target(target: &str) -> Result<PathBuf> {
+fn resolve_input_target(target: &str, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     let trimmed = target.trim();
     if trimmed.is_empty() {
-        return current_dir();
+        anyhow::bail!("taint-iris-next target may not be blank")
     }
-    resolve_candidate_target(PathBuf::from(trimmed))
+    resolve_candidate_target(PathBuf::from(trimmed), ctx)
 }
 
-fn resolve_candidate_target(candidate: PathBuf) -> Result<PathBuf> {
+fn resolve_candidate_target(candidate: PathBuf, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     if candidate.is_absolute() {
         Ok(candidate)
     } else {
-        Ok(current_dir()?.join(candidate))
+        let workspace = ctx
+            .workspace
+            .context("taint-iris-next requires an explicit active workspace")?;
+        Ok(workspace.root().join(candidate))
     }
-}
-
-fn current_dir() -> Result<PathBuf> {
-    std::env::current_dir().context("Could not resolve current directory")
 }
 
 fn string_list_input(input: &Value, keys: &[&str]) -> Result<Option<Vec<String>>> {
@@ -431,7 +441,10 @@ pub(in crate::capabilities::taint_iris_next) fn optional_nonempty_string(
     }
 }
 
-fn optional_taint_next_string(input: &Value, keys: &[&str]) -> Result<Option<String>> {
+pub(in crate::capabilities::taint_iris_next) fn optional_taint_next_string(
+    input: &Value,
+    keys: &[&str],
+) -> Result<Option<String>> {
     for key in keys {
         if let Some(value) = input.get(*key) {
             return parse_optional_taint_next_string(value, key);

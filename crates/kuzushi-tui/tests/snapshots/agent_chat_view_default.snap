@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 277
 ---
- KUZUSHI › agent · mode:agent · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › agent · route:agent · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- AGENT · empty ------------------------------------------------------------------------------------------------------
        ∅  no question yet

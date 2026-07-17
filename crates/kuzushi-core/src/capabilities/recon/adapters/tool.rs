@@ -51,31 +51,28 @@ pub fn execute_recon_tool(
 ) -> Result<Value> {
     enforce_recon_scope(name, &input, ctx)?;
     match name {
-        "recon:nmap" => {
-            Ok(run_recon_nmap(&input, ctx, &ScanCancellation::default())?.to_tool_json())
-        }
-        "recon:subdomain" => {
-            Ok(run_recon_subdomain(&input, ctx, &ScanCancellation::default())?.to_tool_json())
-        }
-        "recon:http-fingerprint" => {
-            Ok(
-                run_recon_http_fingerprint(&input, ctx, &ScanCancellation::default())?
-                    .to_tool_json(),
-            )
-        }
-        "recon:import" => Ok(dispatch_recon_import(&input, ctx)?.to_tool_json()),
+        "recon:nmap" => ctx
+            .with_cancellation(|cancel| run_recon_nmap(&input, ctx, cancel))
+            .map(|report| report.to_tool_json()),
+        "recon:subdomain" => ctx
+            .with_cancellation(|cancel| run_recon_subdomain(&input, ctx, cancel))
+            .map(|report| report.to_tool_json()),
+        "recon:http-fingerprint" => ctx
+            .with_cancellation(|cancel| run_recon_http_fingerprint(&input, ctx, cancel))
+            .map(|report| report.to_tool_json()),
+        "recon:import" => dispatch_recon_import(&input, ctx),
         other => anyhow::bail!("unknown recon tool {other:?}"),
     }
 }
 
 /// Dispatch a `recon:import` call to the per-source adapter. The input
-/// carries `{"tool": "amass|httpx|nuclei|nmap-xml", "path": "..."}`.
+/// carries `{"tool": "amass|httpx|nuclei|nmap-xml|burp-xml|har", "path": "..."}`.
 /// Splitting by `tool` keeps the adapters focused (one parser per
 /// supported recon format) while presenting a single dispatch verb.
 fn dispatch_recon_import(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<crate::capabilities::recon::domain::ReconReport> {
+) -> Result<Value> {
     let kind = input
         .get("tool")
         .and_then(Value::as_str)
@@ -84,21 +81,70 @@ fn dispatch_recon_import(
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "recon:import needs a `tool` field. \
-                 Supported: amass, httpx, nuclei, nmap-xml"
+                 Supported: amass, httpx, nuclei, nmap-xml, burp-xml, har"
             )
         })?;
     match kind {
-        "amass" => crate::capabilities::recon::application::run_recon_import_amass(input, ctx),
-        "httpx" => crate::capabilities::recon::application::run_recon_import_httpx(input, ctx),
-        "nuclei" => crate::capabilities::recon::application::run_recon_import_nuclei(input, ctx),
+        "amass" => crate::capabilities::recon::application::run_recon_import_amass(input, ctx)
+            .map(|report| report.to_tool_json()),
+        "httpx" => crate::capabilities::recon::application::run_recon_import_httpx(input, ctx)
+            .map(|report| report.to_tool_json()),
+        "nuclei" => crate::capabilities::recon::application::run_recon_import_nuclei(input, ctx)
+            .map(|report| report.to_tool_json()),
         "nmap-xml" | "nmap_xml" => {
             crate::capabilities::recon::application::run_recon_import_nmap_xml(input, ctx)
+                .map(|report| report.to_tool_json())
         }
+        "burp-xml" | "burp_xml" | "burp" => import_bounty_capture(input, ctx, false),
+        "har" => import_bounty_capture(input, ctx, true),
         other => anyhow::bail!(
             "unknown recon:import tool {other:?}. \
-             Supported: amass, httpx, nuclei, nmap-xml"
+             Supported: amass, httpx, nuclei, nmap-xml, burp-xml, har"
         ),
     }
+}
+
+fn import_bounty_capture(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    is_har: bool,
+) -> Result<Value> {
+    let workspace = ctx
+        .workspace
+        .context("recon:import requires an active workspace target")?;
+    let path = input
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .context("recon:import needs a `path` field")?;
+    if is_har {
+        let summary = crate::findings::import::import_har(workspace, &path)?;
+        return Ok(import_capture_output("har", summary.imported, summary.skipped_out_of_scope, summary));
+    }
+    let summary = crate::findings::import::import_burp_xml(workspace, &path)?;
+    Ok(import_capture_output(
+        "burp-xml",
+        summary.imported,
+        summary.skipped_out_of_scope,
+        summary,
+    ))
+}
+
+fn import_capture_output(
+    format: &str,
+    imported: usize,
+    skipped_out_of_scope: usize,
+    summary: impl serde::Serialize,
+) -> Value {
+    let skipped = if skipped_out_of_scope == 0 {
+        String::new()
+    } else {
+        format!(" · {skipped_out_of_scope} out-of-scope skipped")
+    };
+    let output = format!("recon:import {format} imported {imported} finding(s){skipped}");
+    crate::module_result::completed_output_result(output.clone(), output, json!(summary))
 }
 
 /// Refuse recon dispatch when the requested target is out of scope per

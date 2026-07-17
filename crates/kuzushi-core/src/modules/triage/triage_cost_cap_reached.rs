@@ -52,9 +52,9 @@ static TRIAGE_RUNTIME_CACHE: OnceLock<Mutex<TriageRuntimeCache>> = OnceLock::new
 
 pub(in crate::modules) fn triage_cost_cap_reached(
     cost_cap_usd: Option<f64>,
-    total_cost: f64,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> bool {
-    cost_cap_usd.is_some_and(|cap| total_cost >= cap)
+    cost_cap_usd.is_some_and(|cap| !cost.is_complete() || cost.observed_usd() >= cap)
 }
 
 pub(in crate::modules) fn call_triage_runtime(
@@ -78,7 +78,7 @@ pub(in crate::modules) fn call_triage_runtime(
             });
         }
     }
-    let outcome = runtime.triage_finding_blocking(request)?;
+    let outcome = crate::runtime::triage_finding_blocking_checked(runtime, request)?;
     cache_triage_outcome(key, outcome.clone());
     Ok(TriageRuntimeOutcome {
         outcome,
@@ -138,12 +138,14 @@ pub(in crate::modules) fn persist_triage_outcome(
     stats: &mut TriageRunStats,
     finding: Finding,
     runtime_outcome: TriageRuntimeOutcome,
-) {
+) -> Result<()> {
     let Some(_finding_id) = finding.id else {
-        stats.record_unpersisted_outcome(finding, runtime_outcome.outcome);
-        return;
+        stats.record_unpersisted_outcome(finding, runtime_outcome.outcome)?;
+        return Ok(());
     };
-    if let Err(error) = store.record_auto_triage_for_fingerprint(&finding.fingerprint, &runtime_outcome.outcome) {
+    if let Err(error) =
+        store.record_auto_triage_for_fingerprint(&finding.fingerprint, &runtime_outcome.outcome)
+    {
         eprintln!(
             "[triage:run] could not persist triage for finding {}: {error}",
             finding.fingerprint
@@ -152,8 +154,9 @@ pub(in crate::modules) fn persist_triage_outcome(
     if runtime_outcome.cached {
         stats.record_cached_outcome(finding, runtime_outcome.outcome);
     } else {
-        stats.record_persisted_outcome(finding, runtime_outcome.outcome);
+        stats.record_persisted_outcome(finding, runtime_outcome.outcome)?;
     }
+    Ok(())
 }
 
 pub(in crate::modules) fn high_confidence_false_positive(result: &Value) -> bool {
@@ -185,15 +188,19 @@ pub(in crate::modules) fn triage_response(
         &summary,
     );
     let mut result = crate::module_result::completed_output_result(summary.clone(), summary, data);
-    add_triage_response_metadata(&mut result, warnings, stats.total_cost);
+    add_triage_response_metadata(&mut result, warnings, stats.cost_report());
     result
 }
 
-fn add_triage_response_metadata(result: &mut Value, warnings: Vec<String>, cost_usd: f64) {
+fn add_triage_response_metadata(
+    result: &mut Value,
+    warnings: Vec<String>,
+    cost: crate::runtime::RuntimeCostReport,
+) {
     if let Some(object) = result.as_object_mut() {
         object.insert("warnings".to_string(), json!(warnings));
-        object.insert("costUsd".to_string(), json!(cost_usd));
     }
+    crate::module_result::apply_runtime_cost_report(result, cost);
 }
 
 fn triage_response_data(
@@ -205,7 +212,7 @@ fn triage_response_data(
     dropped_high_conf_fp: usize,
     summary: &str,
 ) -> Value {
-    json!({
+    let mut data = json!({
         "summary": summary,
         "triaged": stats.triaged(),
         "total": stage1.total,
@@ -213,7 +220,6 @@ fn triage_response_data(
         "fp": stats.fp,
         "needsReview": stats.needs_review,
         "byDesign": stats.by_design,
-        "costUsd": stats.total_cost,
         "missingFingerprints": missing_fingerprints,
         "concurrency": input.concurrency,
         "stage2Tier": triage_tier_label(input.stage2_tier),
@@ -224,15 +230,20 @@ fn triage_response_data(
         "stages": triage_stages(input, config, stage1, stats, dropped_high_conf_fp),
         "results": stats.results,
         "findings": stats.results,
-    })
+    });
+    crate::module_result::apply_runtime_cost_report(&mut data, stats.cost_report());
+    data
 }
 
 fn triage_warnings(stats: &TriageRunStats, missing_fingerprints: &[String]) -> Vec<String> {
     let mut warnings = Vec::new();
     if stats.cost_cap_hit {
+        warnings.push(cost_cap_warning(stats));
+    }
+    if !stats.cost_report().is_complete() {
         warnings.push(format!(
-            "Cost cap hit; {} finding(s) remain unevaluated.",
-            stats.pending_after_cap
+            "Provider spend is unresolved; observed subtotal is ${:.4}.",
+            stats.cost_report().observed_usd()
         ));
     }
     if !missing_fingerprints.is_empty() {
@@ -244,6 +255,19 @@ fn triage_warnings(stats: &TriageRunStats, missing_fingerprints: &[String]) -> V
     warnings
 }
 
+fn cost_cap_warning(stats: &TriageRunStats) -> String {
+    if stats.cost_report().is_complete() {
+        return format!(
+            "Cost cap hit; {} finding(s) remain unevaluated.",
+            stats.pending_after_cap
+        );
+    }
+    format!(
+        "Cost-cap enforcement halted on unresolved provider spend; {} finding(s) remain unevaluated.",
+        stats.pending_after_cap
+    )
+}
+
 pub(in crate::modules) fn triage_stages(
     input: &TriageRunInput,
     config: &TriageExecutionConfig,
@@ -251,7 +275,7 @@ pub(in crate::modules) fn triage_stages(
     stats: &TriageRunStats,
     dropped_high_conf_fp: usize,
 ) -> Value {
-    json!([
+    let mut stages = json!([
         {
             "stage": "prefilter",
             "kept": stage1.kept_count,
@@ -268,9 +292,12 @@ pub(in crate::modules) fn triage_stages(
             "needsReview": stats.needs_review,
             "byDesign": stats.by_design,
             "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
-            "costUsd": stats.total_cost,
             "costCapHit": stats.cost_cap_hit,
             "pendingAfterCap": stats.pending_after_cap,
         }
-    ])
+    ]);
+    if let Some(stage) = stages.get_mut(1) {
+        crate::module_result::apply_runtime_cost_report(stage, stats.cost_report());
+    }
+    stages
 }

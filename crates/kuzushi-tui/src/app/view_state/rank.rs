@@ -28,7 +28,7 @@ pub struct ThrottleAdvisory {
 }
 
 /// A transient, auto-clearing banner. `Error` (red) for failures, `Warn`
-/// (amber) for non-fatal notices like a clipped multi-line paste.
+/// (amber) for non-fatal notices like a staged multi-line paste.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
     pub source: String,
@@ -41,6 +41,8 @@ pub struct Notice {
 pub enum NoticeSeverity {
     Error,
     Warn,
+    /// Informational terminal state such as a deliberately skipped tool.
+    Info,
     /// Background work finished while the operator was elsewhere — green
     /// banner with the result and the verb that opens it.
     Success,
@@ -92,6 +94,8 @@ pub struct ExploitChainStep {
 /// for the attack-path visualization.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaintFlowSnapshot {
+    pub finding_fingerprint: Option<String>,
+    pub finding_identity_id: Option<String>,
     pub cwe: String,
     pub severity: String,
     pub stages: Vec<TaintStage>,
@@ -132,7 +136,15 @@ pub struct PlanProposal {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlanChange {
+    RunTool {
+        phase: WorkflowPhase,
+        tool: String,
+        input: Option<String>,
+    },
     SetOption {
+        /// Present only for prose submitted through a selected phase. The
+        /// application reducer uses it as a hard capability boundary.
+        phase: Option<WorkflowPhase>,
         global: bool,
         tool: Option<String>,
         name: String,
@@ -149,7 +161,17 @@ pub enum PlanChange {
 impl PlanChange {
     pub fn label(&self) -> String {
         match self {
+            PlanChange::RunTool { phase, tool, input } => format!(
+                "{} run {}{}",
+                phase.label(),
+                tool,
+                input
+                    .as_deref()
+                    .map(|value| format!(" {value}"))
+                    .unwrap_or_default()
+            ),
             PlanChange::SetOption {
+                phase,
                 global,
                 tool,
                 name,
@@ -160,7 +182,10 @@ impl PlanChange {
                     .as_deref()
                     .map(|tool| format!("{tool} "))
                     .unwrap_or_default();
-                format!("{scope} {tool_part}{name}={value}")
+                let phase_part = phase
+                    .map(|phase| format!("{} ", phase.label()))
+                    .unwrap_or_default();
+                format!("{phase_part}{scope} {tool_part}{name}={value}")
             }
             PlanChange::Ask { question } => format!("ask {question}"),
             PlanChange::Note { text } => format!("note {text}"),

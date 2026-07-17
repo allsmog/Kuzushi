@@ -1,5 +1,12 @@
-use super::{save_strategy_queue, StrategyPhase, StrategyProposal};
-use crate::fs_atomic::{load_jsonl, now_ms, save_jsonl, slug};
+use super::persistence::{
+    begin_strategy_transaction, clear_strategy_transaction, encode_strategy_jsonl,
+    write_strategy_jsonl_body,
+};
+use super::{
+    acquire_recovered_strategy_lock, load_strategy_jsonl, load_strategy_queue_unlocked,
+    save_strategy_jsonl, strategy_state_path, StrategyPhase, StrategyProposal,
+};
+use crate::fs_atomic::{now_ms, slug};
 use crate::workspace::WorkspaceTarget;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -102,19 +109,35 @@ impl StrategyCorrection {
 }
 
 pub fn strategy_corrections_path(workspace: &WorkspaceTarget) -> PathBuf {
-    workspace.state_dir().join(STRATEGY_CORRECTIONS_FILE)
+    strategy_state_path(workspace, STRATEGY_CORRECTIONS_FILE)
 }
 
 pub fn load_strategy_corrections(workspace: &WorkspaceTarget) -> Result<Vec<StrategyCorrection>> {
-    load_jsonl(&strategy_corrections_path(workspace), "strategy correction")
+    let _guard = acquire_recovered_strategy_lock(workspace)?;
+    load_strategy_corrections_unlocked(workspace)
+}
+
+fn load_strategy_corrections_unlocked(
+    workspace: &WorkspaceTarget,
+) -> Result<Vec<StrategyCorrection>> {
+    load_strategy_jsonl(workspace, STRATEGY_CORRECTIONS_FILE, "strategy correction")
 }
 
 pub fn save_strategy_corrections(
     workspace: &WorkspaceTarget,
     corrections: &[StrategyCorrection],
 ) -> Result<()> {
-    save_jsonl(
-        &strategy_corrections_path(workspace),
+    let _guard = acquire_recovered_strategy_lock(workspace)?;
+    save_strategy_corrections_unlocked(workspace, corrections)
+}
+
+fn save_strategy_corrections_unlocked(
+    workspace: &WorkspaceTarget,
+    corrections: &[StrategyCorrection],
+) -> Result<()> {
+    save_strategy_jsonl(
+        workspace,
+        STRATEGY_CORRECTIONS_FILE,
         corrections,
         "strategy correction",
     )
@@ -124,9 +147,10 @@ pub fn append_strategy_correction(
     workspace: &WorkspaceTarget,
     correction: &StrategyCorrection,
 ) -> Result<()> {
-    let mut corrections = load_strategy_corrections(workspace)?;
+    let _guard = acquire_recovered_strategy_lock(workspace)?;
+    let mut corrections = load_strategy_corrections_unlocked(workspace)?;
     corrections.push(correction.clone());
-    save_strategy_corrections(workspace, &corrections)
+    save_strategy_corrections_unlocked(workspace, &corrections)
 }
 
 pub fn record_strategy_correction(
@@ -140,10 +164,29 @@ pub fn record_and_apply_strategy_correction(
     workspace: &WorkspaceTarget,
     correction: &StrategyCorrection,
 ) -> Result<()> {
-    append_strategy_correction(workspace, correction)?;
-    let mut proposals = super::load_strategy_queue(workspace)?;
+    let _guard = acquire_recovered_strategy_lock(workspace)?;
+    let mut corrections = load_strategy_corrections_unlocked(workspace)?;
+    let mut proposals = load_strategy_queue_unlocked(workspace)?;
+    corrections.push(correction.clone());
     apply_strategy_correction_to_proposals(&mut proposals, correction);
-    save_strategy_queue(workspace, &proposals)
+    persist_strategy_transaction(workspace, &proposals, &corrections)
+}
+
+fn persist_strategy_transaction(
+    workspace: &WorkspaceTarget,
+    proposals: &[StrategyProposal],
+    corrections: &[StrategyCorrection],
+) -> Result<()> {
+    let queue_body = encode_strategy_jsonl(proposals, "strategy proposal")?;
+    let corrections_body = encode_strategy_jsonl(corrections, "strategy correction")?;
+    begin_strategy_transaction(workspace, queue_body.clone(), corrections_body.clone())?;
+    write_strategy_jsonl_body(
+        workspace,
+        STRATEGY_CORRECTIONS_FILE,
+        corrections_body.as_bytes(),
+    )?;
+    write_strategy_jsonl_body(workspace, super::STRATEGY_QUEUE_FILE, queue_body.as_bytes())?;
+    clear_strategy_transaction(workspace)
 }
 
 pub fn apply_strategy_corrections(
@@ -151,7 +194,16 @@ pub fn apply_strategy_corrections(
     run_id: Option<&str>,
     proposals: &mut [StrategyProposal],
 ) -> Result<()> {
-    for correction in load_strategy_corrections(workspace)? {
+    let _guard = acquire_recovered_strategy_lock(workspace)?;
+    apply_strategy_corrections_unlocked(workspace, run_id, proposals)
+}
+
+pub(crate) fn apply_strategy_corrections_unlocked(
+    workspace: &WorkspaceTarget,
+    run_id: Option<&str>,
+    proposals: &mut [StrategyProposal],
+) -> Result<()> {
+    for correction in load_strategy_corrections_unlocked(workspace)? {
         if correction_applies_to_run(&correction, run_id) {
             apply_strategy_correction_to_proposals(proposals, &correction);
         }

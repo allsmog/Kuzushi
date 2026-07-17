@@ -1,0 +1,50 @@
+{
+  "failures": [
+    {
+      "agentThreadContext": {
+        "allowedProofLevel": "artifact-review-only; runtime verification did not run",
+        "artifactsAvailable": [
+          {
+            "kind": "json",
+            "label": "tool input",
+            "path": "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/input.json"
+          }
+        ],
+        "cause": "--option target /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpRwa92m conflicts with cwd /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpmX2fbI. Pass one canonical workspace target.",
+        "claimsForbidden": [
+          "success claim without explicit verification",
+          "verified claim",
+          "exploited claim",
+          "fixed claim",
+          "empirical proof claim",
+          "runtime proof claim",
+          "exploit proven",
+          "fix confirmed",
+          "false positive verdict",
+          "no vulnerability verdict"
+        ],
+        "failedStage": "secret-scan:scan",
+        "fallbackPrompt": "Continue the failed Kuzushi run for secret-scan:scan. Cause: --option target /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpRwa92m conflicts with cwd /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpmX2fbI. Pass one canonical workspace target.. Proof level: artifact-review-only; runtime verification did not run. Missing artifacts: none. Inspect next: /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/failures.json, /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/result.json, /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/input.json, /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/artifacts.json, /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/run.json, /Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/report.md. Forbidden claims: success claim without explicit verification, verified claim, exploited claim, fixed claim, empirical proof claim, runtime proof claim, exploit proven, fix confirmed, false positive verdict, no vulnerability verdict. Recovery options: Rerun secret-scan:scan after fixing the reported cause., Keep follow-up claims at artifact-review-only proof level..",
+        "missingArtifacts": [],
+        "nextFilesOrArtifactsToInspect": [
+          "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/failures.json",
+          "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/result.json",
+          "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/input.json",
+          "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/artifacts.json",
+          "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/run.json",
+          "/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783665319-87e3a88021a9/report.md"
+        ],
+        "recoveryOptions": [
+          "Rerun secret-scan:scan after fixing the reported cause.",
+          "Keep follow-up claims at artifact-review-only proof level."
+        ],
+        "whatFailed": "secret-scan:scan did not complete successfully: --option target /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpRwa92m conflicts with cwd /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpmX2fbI. Pass one canonical workspace target."
+      },
+      "error": "--option target /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpRwa92m conflicts with cwd /private/var/folders/p2/jh9w3cr118v7sn24vp1mx4440000gn/T/.tmpmX2fbI. Pass one canonical workspace target.",
+      "status": "failed",
+      "tool": "secret-scan:scan"
+    }
+  ],
+  "runId": "run-1783665319-87e3a88021a9",
+  "status": "failed"
+}

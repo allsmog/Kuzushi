@@ -16,7 +16,7 @@ use crate::findings::TriageOutcome;
 use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
 use crate::runtime::{
     validate_model_spec, AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
-    AgentToolLoopRequest, LoopHistoryEntry, TriageRequest,
+    AgentToolLoopRequest, LoopHistoryEntry, Observed, TriageRequest,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -30,8 +30,8 @@ mod as_key;
 mod query_blocking;
 mod route_types;
 mod routed_runtime_dispatch;
-mod runtime_handle;
 mod router_state;
+mod runtime_handle;
 #[cfg(test)]
 mod tests;
 

@@ -22,32 +22,59 @@ pub(super) fn threat_model_output_lines(
     summary: &ThreatModelSummary,
     finding_count: usize,
     persisted: bool,
+    has_concrete_content: bool,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Vec<String> {
-    let mut lines = threat_model_header_lines(flavor, input, persisted);
-    lines.extend(threat_model_metric_lines(input, summary, finding_count));
+    let mut lines = threat_model_header_lines(flavor, input, persisted, has_concrete_content);
+    lines.extend(threat_model_metric_lines(
+        input,
+        summary,
+        finding_count,
+        cost,
+    ));
     lines
 }
 
-pub(super) fn emit_threat_model_done(
+pub(super) fn emit_threat_model_terminal(
     ctx: &ToolExecutionContext<'_>,
     verb: &str,
     flavor: BuildFlavor,
     summary: &ThreatModelSummary,
+    has_concrete_content: bool,
 ) {
     if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step(
-                "done",
-                verb,
-                format!(
-                    "{} complete · {threats} threats · {nodes} nodes",
-                    flavor.tool_name(),
-                    threats = summary.threat_count,
-                    nodes = summary.node_count
-                ),
-            )
-            .emit();
+        let mut terminal = trace.step(
+            terminal_trace_kind(has_concrete_content),
+            verb,
+            threat_model_terminal_label(flavor, summary, has_concrete_content),
+        );
+        if !has_concrete_content {
+            terminal = terminal.with_severity("warn");
+        }
+        let _ = terminal.emit();
     }
+}
+
+fn terminal_trace_kind(has_concrete_content: bool) -> &'static str {
+    if has_concrete_content {
+        "done"
+    } else {
+        "tool-progress"
+    }
+}
+
+fn threat_model_terminal_label(
+    flavor: BuildFlavor,
+    summary: &ThreatModelSummary,
+    has_concrete_content: bool,
+) -> String {
+    let status = evidence_status(has_concrete_content);
+    format!(
+        "{} {status} · {threats} threats · {nodes} nodes",
+        flavor.tool_name(),
+        threats = summary.threat_count,
+        nodes = summary.node_count
+    )
 }
 
 pub(super) fn threat_model_artifacts(
@@ -74,17 +101,25 @@ fn threat_model_header_lines(
     flavor: BuildFlavor,
     input: &BuildInput,
     persisted: bool,
+    has_concrete_content: bool,
 ) -> Vec<String> {
     match flavor {
-        BuildFlavor::ThreatModel => threat_model_build_header_lines(input, persisted),
-        BuildFlavor::RandoriPasta => randori_pasta_header_lines(input),
+        BuildFlavor::ThreatModel => {
+            threat_model_build_header_lines(input, persisted, has_concrete_content)
+        }
+        BuildFlavor::RandoriPasta => randori_pasta_header_lines(input, has_concrete_content),
     }
 }
 
-fn threat_model_build_header_lines(input: &BuildInput, persisted: bool) -> Vec<String> {
+fn threat_model_build_header_lines(
+    input: &BuildInput,
+    persisted: bool,
+    has_concrete_content: bool,
+) -> Vec<String> {
     vec![
         format!(
-            "threat-model:build complete for {} ({})",
+            "threat-model:build {} for {} ({})",
+            evidence_status(has_concrete_content),
             input.repo_name,
             input.target.display()
         ),
@@ -95,15 +130,16 @@ fn threat_model_build_header_lines(input: &BuildInput, persisted: bool) -> Vec<S
         format!("  Artifact: {}", input.output_dir),
         format!(
             "  Saved:    {}",
-            saved_threat_model_status(persisted, &input.target)
+            saved_threat_model_status(persisted, has_concrete_content, &input.target)
         ),
     ]
 }
 
-fn randori_pasta_header_lines(input: &BuildInput) -> Vec<String> {
+fn randori_pasta_header_lines(input: &BuildInput, has_concrete_content: bool) -> Vec<String> {
     vec![
         format!(
-            "randori:pasta complete for {} ({})",
+            "randori:pasta {} for {} ({})",
+            evidence_status(has_concrete_content),
             input.repo_name,
             input.target.display()
         ),
@@ -112,15 +148,27 @@ fn randori_pasta_header_lines(input: &BuildInput) -> Vec<String> {
     ]
 }
 
-fn saved_threat_model_status(persisted: bool, target: &Path) -> String {
+fn evidence_status(has_concrete_content: bool) -> &'static str {
+    if has_concrete_content {
+        "complete"
+    } else {
+        "partial — inadequate evidence"
+    }
+}
+
+fn saved_threat_model_status(persisted: bool, has_concrete_content: bool, target: &Path) -> String {
+    let path = persistent_threat_model_path(target);
     if persisted {
-        let path = persistent_threat_model_path(target);
         path.strip_prefix(target)
             .unwrap_or(path.as_path())
             .display()
             .to_string()
-    } else {
+    } else if has_concrete_content {
         "skipped (operator-edited model preserved)".to_string()
+    } else if path.exists() {
+        "skipped (inadequate candidate; previous model preserved)".to_string()
+    } else {
+        "skipped (inadequate candidate; no durable model written)".to_string()
     }
 }
 
@@ -128,6 +176,7 @@ fn threat_model_metric_lines(
     input: &BuildInput,
     summary: &ThreatModelSummary,
     finding_count: usize,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> [String; 4] {
     [
         format!("  Threats:  {}", summary.threat_count),
@@ -140,8 +189,18 @@ fn threat_model_metric_lines(
             finding_count,
             findings_suppressed_suffix(input.emit_findings)
         ),
-        "  Cost:     $0.0000".to_string(),
+        format!("  Cost:     {}", threat_model_cost_label(cost)),
     ]
+}
+
+fn threat_model_cost_label(cost: crate::runtime::RuntimeCostReport) -> String {
+    if cost.is_unavailable() {
+        return "unavailable".to_string();
+    }
+    match cost.exact_usd() {
+        Some(exact) => format!("${exact:.4}"),
+        None => format!(">=${:.4} (incomplete)", cost.observed_usd()),
+    }
 }
 
 fn findings_suppressed_suffix(emit_findings: bool) -> &'static str {

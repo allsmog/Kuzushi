@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use super::super::transport::{MAX_JSONRPC_REQUEST_BYTES, MAX_JSONRPC_RESPONSE_BYTES};
     use super::super::*;
     use crate::tool::{Tool, ToolHandler, ToolRegistry};
     use anyhow::Result;
@@ -8,6 +9,7 @@ mod tests {
     use std::io::Cursor;
 
     struct EchoHandler;
+    struct OversizedHandler;
 
     #[async_trait]
     impl ToolHandler for EchoHandler {
@@ -16,15 +18,31 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl ToolHandler for OversizedHandler {
+        async fn call(&self, _args: Value) -> Result<Value> {
+            Ok(json!({"payload": "x".repeat(MAX_JSONRPC_RESPONSE_BYTES)}))
+        }
+    }
+
     fn make_registry() -> ToolRegistry {
-        ToolRegistry::new().register(
-            Tool {
-                name: "echo".to_string(),
-                description: "Echo args back.".to_string(),
-                input_schema: json!({ "type": "object" }),
-            },
-            EchoHandler,
-        )
+        ToolRegistry::new()
+            .register(
+                Tool {
+                    name: "echo".to_string(),
+                    description: "Echo args back.".to_string(),
+                    input_schema: json!({ "type": "object" }),
+                },
+                EchoHandler,
+            )
+            .register(
+                Tool {
+                    name: "oversized".to_string(),
+                    description: "Return a response over the transport budget.".to_string(),
+                    input_schema: json!({ "type": "object" }),
+                },
+                OversizedHandler,
+            )
     }
 
     async fn drive(input: &str) -> String {
@@ -36,6 +54,16 @@ mod tests {
             .await
             .unwrap();
         String::from_utf8(output).unwrap()
+    }
+
+    fn padded_frame(message: &str, frame_bytes: usize, newline: bool) -> String {
+        assert!(message.len() <= frame_bytes);
+        let mut frame = " ".repeat(frame_bytes - message.len());
+        frame.push_str(message);
+        if newline {
+            frame.push('\n');
+        }
+        frame
     }
 
     #[tokio::test]
@@ -97,5 +125,56 @@ mod tests {
     async fn empty_lines_are_skipped() {
         let out = drive("\n\n{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/list\"}\n\n").await;
         assert!(out.contains("\"name\":\"echo\""));
+    }
+
+    #[tokio::test]
+    async fn exact_request_limit_is_accepted() {
+        let message = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"initialize\"}";
+        let input = padded_frame(message, MAX_JSONRPC_REQUEST_BYTES, true);
+
+        let out = drive(&input).await;
+
+        assert!(out.contains("\"id\":7"));
+        assert!(out.contains("\"protocolVersion\""));
+        assert!(!out.contains("frame limit"));
+    }
+
+    #[tokio::test]
+    async fn oversized_newline_frame_is_drained_before_the_next_request() {
+        let oversized = padded_frame("{}", MAX_JSONRPC_REQUEST_BYTES + 1, true);
+        let valid = "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"tools/list\"}\n";
+
+        let out = drive(&format!("{oversized}{valid}")).await;
+
+        let responses = out.lines().collect::<Vec<_>>();
+        assert_eq!(responses.len(), 2);
+        assert!(responses[0].contains("-32600"));
+        assert!(responses[0].contains("frame limit"));
+        assert!(responses[1].contains("\"id\":8"));
+        assert!(responses[1].contains("\"name\":\"echo\""));
+    }
+
+    #[tokio::test]
+    async fn oversized_unterminated_frame_returns_a_stable_error() {
+        let input = padded_frame("{}", MAX_JSONRPC_REQUEST_BYTES + 1, false);
+
+        let out = drive(&input).await;
+
+        assert_eq!(out.lines().count(), 1);
+        assert!(out.contains("-32600"));
+        assert!(out.contains("frame limit"));
+    }
+
+    #[tokio::test]
+    async fn oversized_tool_response_is_replaced_with_a_bounded_error() {
+        let input = "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{\"name\":\"oversized\",\"arguments\":{}}}\n";
+
+        let out = drive(input).await;
+
+        assert!(out.len() < MAX_JSONRPC_RESPONSE_BYTES);
+        assert!(out.contains("\"id\":9"));
+        assert!(out.contains("-32603"));
+        assert!(out.contains("response exceeds"));
+        assert!(!out.contains(&"x".repeat(1024)));
     }
 }

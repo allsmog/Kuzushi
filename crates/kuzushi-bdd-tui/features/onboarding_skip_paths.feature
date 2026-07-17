@@ -1,29 +1,32 @@
-Feature: Skip paths
-  Esc on a phase picker hands off to the Workbench cockpit.
-  The documented `KUZUSHI_SKIP_ONBOARDING` env bypasses the flow.
+Feature: Setup remains explicitly reachable
+  Esc leaves aggregate Setup for the reality-derived workflow page. The
+  documented onboarding bypass remains available for controlled environments,
+  and /setup returns to readiness without forging phase progress.
 
-  Scenario: KUZUSHI_SKIP_ONBOARDING short-circuits to Catalog
+  Scenario: Skip-onboarding opens the workflow page
     Given a fresh kuzushi workspace
     And the env var "KUZUSHI_SKIP_ONBOARDING" is set to "1"
     And no model is configured
     When I launch the shell
-    Then the status segment shows "modules"
-    And I do not see "CHOOSE A MODEL"
+    Then the status segment shows "workbench"
+    And I see "PROJECT CONTEXT"
+    And I do not see "SETUP · READY THE MAP RUN"
 
-  Scenario: Esc leaves the phase picker for Workbench
+  Scenario: Esc leaves Setup for the reality-derived Map page
     Given a fresh kuzushi workspace
-    And a model and auth are configured
+    And no model is configured
     When I launch the shell
-    And I press "Esc"
-    Then I see "AIM - ATTACK SURFACE"
+    Then I see "SETUP · READY THE MAP RUN"
+    When I press "Esc"
+    Then I see "PROJECT CONTEXT"
     And the status segment shows "workbench"
 
-  Scenario: Repeated Esc stays on Workbench
+  Scenario: Setup can be reopened explicitly
     Given a fresh kuzushi workspace
-    And a model and auth are configured
+    And no model is configured
     When I launch the shell
-    And I press "Esc"
-    And I press "Esc"
-    And I press "Esc"
-    And I press "Esc"
-    Then I see "AIM - ATTACK SURFACE"
+    Then I see "SETUP · READY THE MAP RUN"
+    When I press "Esc"
+    And I type command "setup"
+    Then I see "SETUP · READY THE MAP RUN"
+    And the status segment shows "setup"

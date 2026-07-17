@@ -192,6 +192,54 @@ mod tests {
         assert_eq!(store.latest_run_id().unwrap(), None);
     }
 
+    struct SuccessfulNativeScanner;
+
+    impl ScanEngine for SuccessfulNativeScanner {
+        fn id(&self) -> &'static str {
+            "successful-native"
+        }
+
+        fn scan(&self, _target: &Path, _cancel: &ScanCancellation) -> Result<Vec<Finding>> {
+            Ok(vec![Finding::new_tool(
+                self.id(),
+                "native/success",
+                "src/lib.rs",
+                1,
+                None,
+                Severity::Low,
+                "candidate",
+            )])
+        }
+    }
+
+    struct FailingNativeScanner;
+
+    impl ScanEngine for FailingNativeScanner {
+        fn id(&self) -> &'static str {
+            "failing-native"
+        }
+
+        fn scan(&self, _target: &Path, _cancel: &ScanCancellation) -> Result<Vec<Finding>> {
+            anyhow::bail!("native engine failed")
+        }
+    }
+
+    #[test]
+    fn native_scan_run_exists_only_after_every_selected_engine_completes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![
+            Box::new(SuccessfulNativeScanner),
+            Box::new(FailingNativeScanner),
+        ];
+
+        let error = run_scan_engines(&workspace, &store, &scanners).unwrap_err();
+
+        assert!(error.to_string().contains("native engine failed"));
+        assert!(store.list_findings(10).unwrap().is_empty());
+    }
+
     #[test]
     fn subprocess_scanners_report_missing_configured_binary_in_preflight() {
         let tmp = tempfile::tempdir().unwrap();
@@ -338,15 +386,103 @@ mod tests {
     }
 
     #[test]
-    fn default_scan_engines_include_native_deterministic_scanners() {
-        let engines = default_scan_engines();
-        let ids = engines.iter().map(|engine| engine.id()).collect::<Vec<_>>();
+    fn default_scan_engines_include_semgrep_when_it_is_available() {
+        let selection = default_scan_engine_selection_for_test(true, true);
+        let ids = selection
+            .engines
+            .iter()
+            .map(|engine| engine.id())
+            .collect::<Vec<_>>();
 
         assert!(ids.contains(&"semgrep"));
         assert!(ids.contains(&"dep-hygiene"));
         assert!(ids.contains(&"cargo-audit"));
         assert!(ids.contains(&"secret-scan"));
         assert!(ids.contains(&"iac-scan"));
+        assert!(selection.skipped.is_empty());
+    }
+
+    #[test]
+    fn default_scan_engines_skip_missing_optional_semgrep_but_explicit_task_keeps_it() {
+        let selection = default_scan_engine_selection_for_test(false, true);
+        let ids = selection
+            .engines
+            .iter()
+            .map(|engine| engine.id())
+            .collect::<Vec<_>>();
+
+        assert!(!ids.contains(&"semgrep"));
+        assert!(ids.contains(&"secret-scan"));
+        assert_eq!(selection.skipped.len(), 1);
+        assert_eq!(selection.skipped[0].id, "semgrep");
+        assert!(selection.skipped[0].warning.contains("continuing"));
+
+        let explicit = scan_engines_for_tasks(&["semgrep".to_string()]).unwrap();
+        assert_eq!(explicit.len(), 1);
+        assert_eq!(explicit[0].id(), "semgrep");
+    }
+
+    #[test]
+    fn default_scan_skips_missing_cargo_audit_but_explicit_task_keeps_it() {
+        let selection = default_scan_engine_selection_for_test(true, false);
+        let ids = selection
+            .engines
+            .iter()
+            .map(|engine| engine.id())
+            .collect::<Vec<_>>();
+
+        assert!(!ids.contains(&"cargo-audit"));
+        assert_eq!(selection.skipped.len(), 1);
+        assert_eq!(selection.skipped[0].id, "cargo-audit");
+
+        let explicit = scan_engines_for_tasks(&["cargo-audit".to_string()]).unwrap();
+        assert_eq!(explicit.len(), 1);
+        assert_eq!(explicit[0].id(), "cargo-audit");
+    }
+
+    #[test]
+    fn semgrep_command_forces_metrics_off_in_argv_and_environment() {
+        let scanner = SemgrepScanner {
+            binary: "semgrep-fixture".to_string(),
+            config: vec!["auto".to_string(), "p/security-audit".to_string()],
+        };
+        let command = scanner.semgrep_command(Path::new("/tmp/repo"));
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(&args[..3], ["--metrics", "off", "--json"]);
+        assert_eq!(
+            args,
+            [
+                "--metrics",
+                "off",
+                "--json",
+                "--config",
+                "auto",
+                "--config",
+                "p/security-audit",
+                "/tmp/repo",
+            ]
+        );
+        let metrics_env = command
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new("SEMGREP_SEND_METRICS"))
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().into_owned());
+        assert_eq!(metrics_env.as_deref(), Some("off"));
+    }
+
+    #[test]
+    fn semgrep_default_names_a_metrics_compatible_security_pack() {
+        let scanner = SemgrepScanner::default();
+
+        assert_eq!(scanner.config, [DEFAULT_SEMGREP_CONFIG]);
+        assert_ne!(scanner.config, ["auto"]);
+
+        let from_blank = SemgrepScanner::from_tool_input(&json!({ "config": "" })).unwrap();
+        assert_eq!(from_blank.config, [DEFAULT_SEMGREP_CONFIG]);
     }
 
     #[test]

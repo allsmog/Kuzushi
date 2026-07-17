@@ -1,4 +1,6 @@
 use super::*;
+use std::cell::{Ref, RefCell};
+use std::path::{Path, PathBuf};
 
 mod history;
 
@@ -9,6 +11,35 @@ pub(crate) enum EditorClearResult {
     DraftCleared,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompletionPreviewKey {
+    pub(crate) editor_revision: u64,
+    pub(crate) cursor: usize,
+    pub(crate) input_mode: InputMode,
+    pub(crate) cache_generation: u64,
+    pub(crate) command_provider_generation: u64,
+}
+
+#[derive(Debug, Clone)]
+struct CompletionPreviewMemo {
+    key: CompletionPreviewKey,
+    target: Option<PathBuf>,
+    preview: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PastedBlock {
+    marker: String,
+    text: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EditorInputSnapshot {
+    input: String,
+    cursor: usize,
+    pasted_blocks: Vec<PastedBlock>,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct EditorState {
     input: String,
@@ -16,10 +47,18 @@ pub(crate) struct EditorState {
     command_history: Vec<String>,
     history_index: Option<usize>,
     history_draft: String,
+    history_draft_pasted_blocks: Vec<PastedBlock>,
     last_cleared_input: Option<String>,
+    last_cleared_pasted_blocks: Vec<PastedBlock>,
+    pasted_blocks: Vec<PastedBlock>,
+    next_paste_id: u64,
     completion_cycle: Option<CompletionCycle>,
     input_mode: InputMode,
     history_search: Option<HistorySearch>,
+    revision: u64,
+    completion_preview: RefCell<Option<CompletionPreviewMemo>>,
+    #[cfg(test)]
+    completion_preview_recomputations: std::cell::Cell<usize>,
 }
 
 impl Default for EditorState {
@@ -30,10 +69,18 @@ impl Default for EditorState {
             command_history: Vec::new(),
             history_index: None,
             history_draft: String::new(),
+            history_draft_pasted_blocks: Vec::new(),
             last_cleared_input: None,
+            last_cleared_pasted_blocks: Vec::new(),
+            pasted_blocks: Vec::new(),
+            next_paste_id: 0,
             completion_cycle: None,
             input_mode: InputMode::Prompt,
             history_search: None,
+            revision: 0,
+            completion_preview: RefCell::new(None),
+            #[cfg(test)]
+            completion_preview_recomputations: std::cell::Cell::new(0),
         }
     }
 }
@@ -66,7 +113,11 @@ impl EditorState {
     }
 
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
-        self.cursor = cursor.min(self.char_count());
+        let cursor = cursor.min(self.char_count());
+        if self.cursor != cursor {
+            self.cursor = cursor;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn input_mode(&self) -> InputMode {
@@ -74,7 +125,10 @@ impl EditorState {
     }
 
     pub(crate) fn set_input_mode(&mut self, mode: InputMode) {
-        self.input_mode = mode;
+        if self.input_mode != mode {
+            self.input_mode = mode;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn history_search(&self) -> Option<&HistorySearch> {
@@ -92,34 +146,69 @@ impl EditorState {
 
     pub(crate) fn set_last_cleared_input(&mut self, input: Option<String>) {
         self.last_cleared_input = input;
+        self.last_cleared_pasted_blocks.clear();
     }
 
     pub(crate) fn set_input(&mut self, value: impl Into<String>) {
-        self.input = value.into();
-        self.cursor = self.char_count();
+        let value = value.into();
+        let cursor = value.chars().count();
+        if self.input == value && self.cursor == cursor {
+            return;
+        }
+        self.input = value;
+        self.cursor = cursor;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn clear_input(&mut self) {
+        if self.input.is_empty() && self.cursor == 0 && self.pasted_blocks.is_empty() {
+            return;
+        }
         self.input.clear();
+        self.pasted_blocks.clear();
         self.cursor = 0;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn take_input(&mut self) -> String {
+        let changed = !self.input.is_empty() || self.cursor != 0 || !self.pasted_blocks.is_empty();
         self.cursor = 0;
         self.history_index = None;
-        std::mem::take(&mut self.input)
+        let input = std::mem::take(&mut self.input);
+        let pasted_blocks = std::mem::take(&mut self.pasted_blocks);
+        if changed {
+            self.touch_completion_preview();
+        }
+        expand_pasted_blocks(input, &pasted_blocks)
     }
 
-    pub(crate) fn snapshot_input(&self) -> (String, usize) {
-        (self.input.clone(), self.cursor)
+    pub(crate) fn expanded_input(&self) -> String {
+        expand_pasted_blocks(self.input.clone(), &self.pasted_blocks)
     }
 
-    pub(crate) fn restore_input_snapshot(&mut self, input: String, cursor: usize) {
-        self.input = input;
-        self.cursor = cursor.min(self.char_count());
+    pub(crate) fn snapshot_input(&self) -> EditorInputSnapshot {
+        EditorInputSnapshot {
+            input: self.input.clone(),
+            cursor: self.cursor,
+            pasted_blocks: self.pasted_blocks.clone(),
+        }
+    }
+
+    pub(crate) fn restore_input_snapshot(&mut self, snapshot: EditorInputSnapshot) {
+        let cursor = snapshot.cursor.min(snapshot.input.chars().count());
+        if self.input == snapshot.input
+            && self.cursor == cursor
+            && self.pasted_blocks == snapshot.pasted_blocks
+        {
+            return;
+        }
+        self.input = snapshot.input;
+        self.cursor = cursor;
+        self.pasted_blocks = snapshot.pasted_blocks;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn esc_clear_input_or_completion(&mut self) -> EditorClearResult {
@@ -137,16 +226,20 @@ impl EditorState {
             return false;
         }
         self.last_cleared_input = Some(std::mem::take(&mut self.input));
+        self.last_cleared_pasted_blocks = std::mem::take(&mut self.pasted_blocks);
         self.cursor = 0;
         self.history_index = None;
+        self.touch_completion_preview();
         true
     }
 
     pub(crate) fn restore_last_cleared_input(&mut self) {
         if let Some(stashed) = self.last_cleared_input.take() {
             self.input = stashed;
+            self.pasted_blocks = std::mem::take(&mut self.last_cleared_pasted_blocks);
             self.cursor = self.char_count();
             self.history_index = None;
+            self.touch_completion_preview();
         }
     }
 
@@ -178,6 +271,23 @@ impl EditorState {
         self.input.insert_str(byte, s);
         self.cursor += s.chars().count();
         self.history_index = None;
+        self.touch_completion_preview();
+    }
+
+    pub(crate) fn insert_multiline_paste(&mut self, text: &str) -> String {
+        self.next_paste_id = self.next_paste_id.wrapping_add(1).max(1);
+        let lines = text.split('\n').count();
+        let chars = text.chars().count();
+        let marker = format!(
+            "⟪paste #{} · {lines} lines · {chars} chars⟫",
+            self.next_paste_id
+        );
+        self.pasted_blocks.push(PastedBlock {
+            marker: marker.clone(),
+            text: text.to_string(),
+        });
+        self.insert_str_at_cursor(&marker);
+        marker
     }
 
     pub(crate) fn insert_char_at_cursor(&mut self, ch: char) {
@@ -185,6 +295,7 @@ impl EditorState {
         self.input.insert(byte, ch);
         self.cursor += 1;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn backspace(&mut self) {
@@ -201,6 +312,7 @@ impl EditorState {
         self.input.drain(start..end);
         self.cursor = new_cursor;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn delete_forward(&mut self) {
@@ -212,11 +324,13 @@ impl EditorState {
         let end = char_index_to_byte(&self.input, self.cursor + 1);
         self.input.drain(start..end);
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn move_cursor_left(&mut self) {
         if self.cursor > 0 {
             self.cursor -= 1;
+            self.touch_completion_preview();
         }
     }
 
@@ -224,15 +338,23 @@ impl EditorState {
         let count = self.char_count();
         if self.cursor < count {
             self.cursor += 1;
+            self.touch_completion_preview();
         }
     }
 
     pub(crate) fn move_cursor_home(&mut self) {
-        self.cursor = 0;
+        if self.cursor != 0 {
+            self.cursor = 0;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn move_cursor_end(&mut self) {
-        self.cursor = self.char_count();
+        let end = self.char_count();
+        if self.cursor != end {
+            self.cursor = end;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn word_boundary_left(&self) -> usize {
@@ -270,14 +392,23 @@ impl EditorState {
         self.input.drain(start..end);
         self.cursor = target;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn move_cursor_word_left(&mut self) {
-        self.cursor = self.word_boundary_left();
+        let target = self.word_boundary_left();
+        if self.cursor != target {
+            self.cursor = target;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn move_cursor_word_right(&mut self) {
-        self.cursor = self.word_boundary_right();
+        let target = self.word_boundary_right();
+        if self.cursor != target {
+            self.cursor = target;
+            self.touch_completion_preview();
+        }
     }
 
     pub(crate) fn kill_to_start(&mut self) {
@@ -288,12 +419,17 @@ impl EditorState {
         self.input.drain(..end);
         self.cursor = 0;
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     pub(crate) fn kill_to_end(&mut self) {
         let start = char_index_to_byte(&self.input, self.cursor);
+        if start == self.input.len() {
+            return;
+        }
         self.input.truncate(start);
         self.history_index = None;
+        self.touch_completion_preview();
     }
 
     fn restore_completion_prefix(&mut self) -> bool {
@@ -306,6 +442,81 @@ impl EditorState {
         self.input = cycle.prefix;
         self.cursor = self.char_count();
         self.history_index = None;
+        self.touch_completion_preview();
         true
     }
+
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(crate) fn completion_preview_matches(
+        &self,
+        key: CompletionPreviewKey,
+        target: Option<&Path>,
+    ) -> bool {
+        self.completion_preview
+            .borrow()
+            .as_ref()
+            .is_some_and(|memo| memo.key == key && memo.target.as_deref() == target)
+    }
+
+    pub(crate) fn store_completion_preview(
+        &self,
+        key: CompletionPreviewKey,
+        target: Option<&Path>,
+        preview: Option<String>,
+    ) {
+        *self.completion_preview.borrow_mut() = Some(CompletionPreviewMemo {
+            key,
+            target: target.map(Path::to_path_buf),
+            preview,
+        });
+        #[cfg(test)]
+        self.completion_preview_recomputations
+            .set(self.completion_preview_recomputations.get() + 1);
+    }
+
+    pub(crate) fn completion_preview(&self) -> Option<Ref<'_, str>> {
+        Ref::filter_map(self.completion_preview.borrow(), |memo| {
+            memo.as_ref()?.preview.as_deref()
+        })
+        .ok()
+    }
+
+    pub(crate) fn invalidate_completion_preview(&mut self) {
+        self.completion_preview.get_mut().take();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn completion_preview_recomputations(&self) -> usize {
+        self.completion_preview_recomputations.get()
+    }
+
+    fn touch_completion_preview(&mut self) {
+        self.pasted_blocks
+            .retain(|block| self.input.contains(&block.marker));
+        self.revision = self.revision.wrapping_add(1);
+        self.invalidate_completion_preview();
+    }
+}
+
+fn expand_pasted_blocks(input: String, blocks: &[PastedBlock]) -> String {
+    let mut occurrences = blocks
+        .iter()
+        .filter_map(|block| input.find(&block.marker).map(|offset| (offset, block)))
+        .collect::<Vec<_>>();
+    occurrences.sort_by_key(|(offset, _)| *offset);
+    let mut expanded = String::with_capacity(input.len());
+    let mut cursor = 0;
+    for (offset, block) in occurrences {
+        if offset < cursor {
+            continue;
+        }
+        expanded.push_str(&input[cursor..offset]);
+        expanded.push_str(&block.text);
+        cursor = offset + block.marker.len();
+    }
+    expanded.push_str(&input[cursor..]);
+    expanded
 }

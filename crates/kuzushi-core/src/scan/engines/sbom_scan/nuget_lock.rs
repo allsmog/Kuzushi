@@ -1,7 +1,7 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_nuget_lock(path: &Path) -> bool {
@@ -13,7 +13,8 @@ pub(super) fn is_nuget_lock(path: &Path) -> bool {
 pub(super) fn nuget_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_json::from_str(&text).context("sbom-scan: parse packages.lock.json")?;
+    let value: Value =
+        serde_json::from_str(&text).context("sbom-scan: parse packages.lock.json")?;
     let source = relative_display(target, path);
     Ok(value
         .get("dependencies")
@@ -27,7 +28,8 @@ pub(super) fn nuget_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDep
 pub(super) fn nuget_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_json::from_str(&text).context("sbom-scan: parse packages.lock.json")?;
+    let value: Value =
+        serde_json::from_str(&text).context("sbom-scan: parse packages.lock.json")?;
     Ok(value
         .get("dependencies")
         .and_then(Value::as_object)

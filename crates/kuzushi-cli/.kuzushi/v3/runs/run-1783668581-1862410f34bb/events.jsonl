@@ -1,0 +1,2 @@
+{"n":1,"kind":"run","status":"started","message":"recon:nmap started","atUnix":1783668581,"tool":"recon:nmap","artifact":{"label":"tool input","path":"/Users/operator/vibe-code/Kuzushi/crates/kuzushi-cli/.kuzushi/v3/runs/run-1783668581-1862410f34bb/input.json","kind":"json"}}
+{"n":2,"kind":"run","status":"failed","message":"tool failed","atUnix":1783668582,"tool":"recon:nmap"}

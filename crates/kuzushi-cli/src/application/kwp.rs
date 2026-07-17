@@ -179,6 +179,7 @@ fn validate_run_audit_scope(target: &Option<PathBuf>, run_id: &Option<String>) -
 }
 
 fn load_run_audit_json(target: PathBuf, run_id: String) -> Result<Value> {
+    kuzushi_core::run_artifacts::RunId::parse(&run_id).context("invalid KWP audit run id")?;
     let workspace = WorkspaceTarget::new(target)?;
     let audit_path = kwp_audit_log_path(workspace.root(), &run_id);
     if !audit_path.is_file() {

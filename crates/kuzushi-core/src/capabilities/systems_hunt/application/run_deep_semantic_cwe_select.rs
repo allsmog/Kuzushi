@@ -49,9 +49,7 @@ fn prepare_deep_semantic_cwe_select<'a>(
     })
 }
 
-fn deep_semantic_cwe_runtime(
-    runtime: Option<&dyn AgentRuntime>,
-) -> Result<&dyn AgentRuntime> {
+fn deep_semantic_cwe_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn AgentRuntime> {
     runtime.context(
         "systems-hunt:deep-semantic-cwe-select requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )
@@ -82,15 +80,15 @@ fn query_deep_semantic_cwe_select(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     run: &DeepSemanticCweSelectRun<'_>,
-) -> Result<Value> {
+) -> Result<CostedStructuredJson<Value>> {
     let _llm_scope =
         begin_deep_semantic_child_scope(ctx, run.parent_step, "cwe-select", "cwe-select");
-    let raw = query_required_structured_json(
+    let raw = query_required_structured_json_with_cost(
         run.runtime,
         AgentQueryRequest::new(
             run.model.clone(),
             run.target.clone(),
-            DEEP_SEMANTIC_CWE_SYSTEM_PROMPT.to_string(),
+            run.options.deep_semantic_cwe_system_prompt.clone(),
             format!(
             "Select relevant native-code CWE classes for this repository. Return JSON with cwes[].\n\n{}",
             format_inventory(&run.inventory)
@@ -112,13 +110,15 @@ fn query_deep_semantic_cwe_select(
 fn deep_semantic_cwe_output(
     ctx: &ToolExecutionContext<'_>,
     run: &DeepSemanticCweSelectRun<'_>,
-    raw: Value,
+    raw: CostedStructuredJson<Value>,
 ) -> DeepSemanticCweOutput {
     let output = DeepSemanticCweOutput {
-        cwes: parse_cwe_selections(&raw)
+        cwes: parse_cwe_selections(&raw.value)
             .into_iter()
             .take(run.options.max_cwe_classes)
             .collect(),
+        cost_usd: raw.cost_usd,
+        cost_usd_exact: raw.cost_usd_exact,
     };
     emit_deep_semantic_done(
         ctx,
@@ -135,8 +135,8 @@ pub(crate) fn run_deep_semantic_hunt_report(
 ) -> Result<SystemsHuntReport> {
     let run = prepare_deep_semantic_hunt(input, ctx, runtime)?;
     let cwes = selected_deep_semantic_cwes(input, ctx, run.runtime, &run.options)?;
-    ensure_deep_semantic_cwes_selected(&run, &cwes)?;
-    finish_deep_semantic_hunt(input, ctx, &run, &cwes)
+    ensure_deep_semantic_cwes_selected(&run, &cwes.value)?;
+    finish_deep_semantic_hunt(input, ctx, &run, cwes)
 }
 
 struct DeepSemanticHuntRun<'a> {
@@ -159,6 +159,7 @@ fn prepare_deep_semantic_hunt<'a>(
         format!("target={}", target.display()),
     );
     let execution = resolve_deep_semantic_execution(input, ctx, runtime)?;
+    artifact_root(&target, &execution.options.artifact_dir)?;
     Ok(DeepSemanticHuntRun {
         target,
         parent_step,
@@ -220,7 +221,7 @@ fn finish_deep_semantic_hunt(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     run: &DeepSemanticHuntRun<'_>,
-    cwes: &[DeepSemanticCweSelection],
+    cwes: CostedStructuredJson<Vec<DeepSemanticCweSelection>>,
 ) -> Result<SystemsHuntReport> {
     emit_deep_semantic_progress(
         ctx,
@@ -228,9 +229,20 @@ fn finish_deep_semantic_hunt(
         "deep-semantic-hunt",
         "cwe-select · choose classes",
     );
-    let (findings, artifacts) = collect_deep_semantic_hunt_findings(input, ctx, run, cwes)?;
-    let persisted = persist_systems_findings(&run.target, &findings, ctx)?;
-    let report = deep_semantic_report(run, findings, persisted, artifacts);
+    let findings = collect_deep_semantic_hunt_findings(input, ctx, run, &cwes.value)?;
+    let persisted = persist_systems_findings(&run.target, &findings.value.0, ctx)?;
+    let total_cost = cwes.cost_report()?.checked_add(
+        findings.cost_report()?,
+        "deep-semantic selection plus hunt cost",
+    )?;
+    let report = deep_semantic_report(
+        run,
+        findings.value.0,
+        persisted,
+        findings.value.1,
+        total_cost.observed_usd(),
+        total_cost.is_complete(),
+    );
     emit_deep_semantic_done(
         ctx,
         "deep-semantic-hunt",
@@ -244,9 +256,13 @@ fn collect_deep_semantic_hunt_findings(
     ctx: &ToolExecutionContext<'_>,
     run: &DeepSemanticHuntRun<'_>,
     cwes: &[DeepSemanticCweSelection],
-) -> Result<(Vec<Finding>, Vec<String>)> {
+) -> Result<CostedStructuredJson<(Vec<Finding>, Vec<String>)>> {
     let raw = query_deep_semantic_with_scope(input, ctx, run, cwes)?;
-    normalized_deep_semantic_hunt(input, run, raw)
+    Ok(CostedStructuredJson {
+        value: normalized_deep_semantic_hunt(input, run, raw.value)?,
+        cost_usd: raw.cost_usd,
+        cost_usd_exact: raw.cost_usd_exact,
+    })
 }
 
 fn deep_semantic_report(
@@ -254,6 +270,8 @@ fn deep_semantic_report(
     findings: Vec<Finding>,
     persisted: Option<SystemsHuntPersistedRun>,
     artifacts: Vec<String>,
+    cost_usd: f64,
+    cost_usd_exact: bool,
 ) -> SystemsHuntReport {
     SystemsHuntReport {
         target: run.target.display().to_string(),
@@ -261,7 +279,8 @@ fn deep_semantic_report(
         findings,
         persisted,
         artifacts,
-        cost_usd: 0.0,
+        cost_usd,
+        cost_usd_exact,
     }
 }
 
@@ -270,15 +289,21 @@ fn query_deep_semantic_with_scope(
     ctx: &ToolExecutionContext<'_>,
     run: &DeepSemanticHuntRun<'_>,
     cwes: &[DeepSemanticCweSelection],
-) -> Result<Value> {
+) -> Result<CostedStructuredJson<Value>> {
     let _llm_scope = begin_deep_semantic_child_scope(
         ctx,
         run.parent_step,
         "deep-semantic-hunt",
         "deep-semantic-hunt",
     );
-    let raw =
-        query_deep_semantic_findings(run.runtime, run.model.clone(), input, &run.target, cwes)?;
+    let raw = query_deep_semantic_findings(
+        run.runtime,
+        run.model.clone(),
+        input,
+        &run.target,
+        cwes,
+        &run.options.deep_semantic_hunt_system_prompt,
+    )?;
     drop(_llm_scope);
     Ok(raw)
 }
@@ -360,19 +385,31 @@ pub(crate) fn selected_deep_semantic_cwes(
     ctx: &ToolExecutionContext<'_>,
     runtime: &dyn AgentRuntime,
     options: &SystemsHuntInput,
-) -> Result<Vec<DeepSemanticCweSelection>> {
+) -> Result<CostedStructuredJson<Vec<DeepSemanticCweSelection>>> {
     let cwes = match cwes_from_input(input) {
-        Some(cwes) => cwes,
+        Some(cwes) => CostedStructuredJson {
+            value: cwes,
+            cost_usd: 0.0,
+            cost_usd_exact: true,
+        },
         None => fallback_deep_semantic_cwes(input, ctx, runtime)?,
     };
-    Ok(cwes.into_iter().take(options.max_cwe_classes).collect())
+    Ok(CostedStructuredJson {
+        value: cwes
+            .value
+            .into_iter()
+            .take(options.max_cwe_classes)
+            .collect(),
+        cost_usd: cwes.cost_usd,
+        cost_usd_exact: cwes.cost_usd_exact,
+    })
 }
 
 pub(crate) fn fallback_deep_semantic_cwes(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: &dyn AgentRuntime,
-) -> Result<Vec<DeepSemanticCweSelection>> {
+) -> Result<CostedStructuredJson<Vec<DeepSemanticCweSelection>>> {
     // Used to be `.unwrap_or_default()` — any failure inside
     // `run_deep_semantic_cwe_select` (bridge crash, structured-JSON
     // contract failure, model 429, parse error) silently produced an
@@ -381,5 +418,9 @@ pub(crate) fn fallback_deep_semantic_cwes(
     // of staring at "0 findings, ok: true".
     let output = run_deep_semantic_cwe_select(input, ctx, Some(runtime))
         .context("systems-hunt:deep-semantic-cwe-select failed; cannot fall back to empty CWE list because that hides agent/bridge errors")?;
-    Ok(output.cwes)
+    Ok(CostedStructuredJson {
+        value: output.cwes,
+        cost_usd: output.cost_usd,
+        cost_usd_exact: output.cost_usd_exact,
+    })
 }

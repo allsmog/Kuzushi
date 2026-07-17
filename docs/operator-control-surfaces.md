@@ -26,6 +26,31 @@ Precedence is:
 Explicit input therefore wins over `--option`, shell `set`, and persisted
 options.
 
+### Prompt provenance
+
+Prompt options have an authority split at this same boundary:
+
+- explicit inline text from direct tool input, a shell session option, or the
+  operator-owned global option store is operator-controlled and may replace a
+  tool's editable instruction template;
+- a prompt path inside the target and an automatically discovered
+  `<target>/.kuzushi/prompts/<module>/<verb>.md` file are target-controlled,
+  so their text is wrapped as untrusted optional focus/context below the
+  descriptor's immutable built-in safety and output-contract instructions;
+- `<target>/.kuzushi/v3/options.json` may not set descriptor prompt keys, even
+  when explicit input would otherwise override them.
+
+Every raw inline prompt value and target prompt file has a 65,536-byte UTF-8
+ceiling. The canonical preparation boundary rejects larger values with the
+option name and limit before runtime dispatch; it never truncates them or
+reinterprets an oversized inline value as a path. Immutable built-in policy and
+the encoded untrusted-data envelope are added after this raw-content check.
+
+Passing a repository path does not convert its contents into operator
+authority. Use inline one-shot input, shell `set`, or home-scoped `setg` when a
+full prompt replacement is intentional. This rule applies identically to
+scan, shell, and run because all three use canonical registry preparation.
+
 Within each stored scope there is also a target axis. Values are merged in
 specificity order: `all` first, then `module:<id>`, then `tool:<module:verb>`.
 That means a tool-specific value beats a module value, and a module value beats
@@ -48,6 +73,16 @@ kuzushi --target . run semgrep:scan \
 tool's descriptor. Use `--input` for structured values that are easier to read
 as JSON. If both are present for the same canonical option, `--input` wins.
 
+`target` is descriptor-typed, not globally synonymous with a repository path.
+For a `path` option (for example a scanner target), inline JSON or a session
+`--option` may establish the workspace when `--target` is absent; when a
+workspace is already explicit, the resolved path must remain inside it.
+Persisted `target`/`cwd` values are checked at the shared dispatch boundary and
+cannot steer execution outside the workspace that owns the finding store and
+run artifacts. For a `string` option (for example `recon:nmap` or
+`offense:chain`), `target` remains a host/URL and a separate `--target <repo>`
+is still required for workspace-backed state.
+
 `kuzushi scan` is a shorthand for `sast:scan`. Flags such as `--mode`,
 `--tasks`, `--triage`, `--budget`, `--since`, `--include-worktree`,
 `--fail-on`, and `--sarif` compile into sparse `sast:scan` JSON input or
@@ -55,18 +90,46 @@ scan-gate policy, then go through the same preparation path as
 `kuzushi run sast:scan` where they are tool input.
 
 Global `--load <specifier>` is supported for shell and headless `run`.
-For `file://` modules, trust is digest-pinned in `kuzushi.lock`: approve the
-exact resolved bundle with `kuzushi kwp approve <specifier>` before loading it.
-The loader hashes the canonical bundle and checks the lockfile before any
-module bytes are imported. `[operator].trusted_modules` is retained only as
-deprecated compatibility state and is not the `file://` worker trust boundary.
+For local file/path modules, trust is digest-pinned in `kuzushi.lock`: approve
+the exact resolved bundle with `kuzushi kwp approve <specifier>` before
+loading it. The host hashes the canonical bundle and checks its approval
+before importing module bytes. `[operator].trusted_modules` remains only for
+explicitly trusted `package:<npm-name>` compatibility specifiers and is not the
+local-worker trust boundary; file-URL aliases and local-resolving package
+payloads are rejected.
+A headless dynamic invocation must still pass an explicit global
+`--target <workspace>` so an inline `target`/`cwd` value cannot bootstrap
+workspace policy or artifact placement from process cwd.
 
-`kuzushi run --autonomy <recon|hunt|confirm|fix>` sets the autonomy ceiling
+`kuzushi scan` rejects `--load` with guidance to use `kuzushi run`; it does not
+silently discard the specifier or reinterpret a dynamic tool as a scan task.
+All other non-shell/non-run commands reject it for the same reason.
+
+`kuzushi run --autonomy <recon|scan|review|prove|fix>` sets the autonomy ceiling
 for that run. The shared dispatch gate refuses any tool whose engagement phase
-sits above the rung (`recon`→map, `hunt`→hunt, `confirm`→confirm, `fix`→fix)
+sits above the rung (`recon`→map, `scan`→scan, `review`→review,
+`prove`→prove, `fix`→fix)
 with an actionable error — it never silently runs or substitutes it. Omitted =
 `fix` (unconstrained, matching prior behavior). The requested rung is clamped
-by `[phases].stop_after`; an unrecognized rung is a hard error.
+by `[phases].stop_after`; an unrecognized or numeric rung is a hard error.
+`hunt` and `confirm` remain deprecated input aliases for `scan` and `prove`
+for one major release.
+
+### Session persistence
+
+Interactive, plain, and scripted shell launches write a redacted semantic
+transcript under `~/.kuzushi/v3/sessions/`. The transcript records target
+provenance, submitted commands, major view changes, run identifiers, questions,
+visible agent turns, and terminal outcomes; it does not record keystrokes,
+environment values, credentials, or streaming deltas. Detailed tool payloads
+remain in target-scoped run artifacts.
+
+`kuzushi sessions list|show|export|prune` operates on this global store. The
+global `--target` filters `sessions list`; it does not relocate the store.
+`--no-session-persistence` (alias `--ephemeral`) opts out for one shell launch
+and is rejected for other commands. The home-scoped setting
+`operator.session_retention_days` defaults to 30 and cannot be supplied by a
+target project. See [Durable shell session transcripts](architecture/session-transcripts.md).
 
 ## Shell
 
@@ -78,10 +141,69 @@ The Rust shell uses the same descriptors:
 - `setg <key> <value>` writes a global option.
 - `unsetg <key>` clears a global option.
 - `scan` prepares `sast:scan` input from the option store before dispatch.
-- `autonomy [recon|hunt|confirm|fix]` (alias `posture`) reads or sets the
+- `autonomy [recon|scan|review|prove|fix]` (alias `posture`) reads or sets the
   always-visible autonomy dial; `Ctrl+↑`/`Ctrl+↓` raise/lower it one rung. The
   dial is the same ceiling `kuzushi run --autonomy` sets; it is session-scoped
   and clamped by `[phases].stop_after`.
+
+The interactive route is
+`Target → Setup → Map ↔ Run Focus → Scan ↔ Run Focus → Review → Prove ↔ Run
+Focus → Fix ↔ Run Focus → Report`:
+
+Run Focus task rows, status, cost, artifacts/findings, questions, terminal
+outcome, and `NEXT` action are source-backed projections of committed typed run
+items. A replayed run and a live run use the same reducer. Legacy runs disclose
+lossy reconstruction instead of presenting inferred catalog tasks as runtime
+truth.
+
+- `setup` opens the aggregate readiness surface. Its Model, Credentials,
+  Prompt, and Budget blockers are derived from the selected Map plan. A
+  deterministic runtime-free plan needs no model; any model-backed task must
+  name an explicitly selected compatible model with its actual API-key, OAuth,
+  or session credential. An unset budget is `not enforced`; a set budget must
+  be positive and remain within the configured hard ceiling.
+- `workbench` opens the five-page Map/Scan/Review/Prove/Fix ring. `Shift+Tab`
+  cycles pages while preserving the shared draft and cursor; Navigate-mode
+  `1..5` selects directly. The selected interaction mode and durable reality
+  are disclosed separately, and page navigation never changes workspace
+  reality, autonomy, model, permissions, or evidence.
+- Remaining prose on a Workbench page is compiled as intent for that selected
+  phase, after known commands and explicit `run <tool>` parsing. Descriptors,
+  option preparation, autonomy, authorization, and no-silent-fallback policy
+  still own dispatch. A future-phase submission explains its missing durable
+  prerequisite instead of rerouting work.
+- `findings` and `open <id>` open Review, `next` (`continue`) invokes the
+  current phase planner, and `report` opens the dedicated export exit.
+- `activity` opens Run Focus. Foreground Run Focus owns input in Navigate mode
+  and identifies its origin, for example `RUN FOCUS · SCAN`;
+  `s` accepts only a valid `run <tool> …` steer command and `b` backgrounds
+  without cancelling, restoring the exact captured workflow origin. The final
+  chain → plan → steer outcome restores that origin with one receipt. Manual
+  inspection and background work never auto-return.
+- Help, Controls, and Capabilities are contextual modals. Jobs, Replay, Trace,
+  and visualizations are contextual full-frame decks. Replacing one contextual
+  surface retains the original workflow origin; Esc restores that exact route
+  and input mode.
+- Report orders the existing formats SARIF, Markdown bundle, JSONL, JSON, CSV;
+  defaults completeness to All; cycles All/Open/Complete; and permits editing
+  target-relative output paths. Its defaults are `report.sarif`, `report/`,
+  `findings.jsonl`, `findings.json`, and `findings.csv`. Export success or
+  failure remains on Report with format, count, completeness, absolute
+  path/error, and timestamp.
+  Revealing a destination requires explicit `o` and is an argument-safe
+  platform action, never an automatic side effect.
+- Root-shell agent runs may display a reliable operator-question card in Run
+  Focus. Questions are capped, cancellable, backgroundable, redacted in run
+  artifacts, and never exposed to modules, subagents, bridge-owned loops, or
+  headless stdin. The root planner uses the same multi-step agent turn: it may
+  call `request_user_input`, consume the answer, and continue planning without
+  serializing a deferred `ask` proposal. The first operator edit snoozes any
+  auto-resolution deadline; submit/cancel remain visibly pending until the
+  worker persists and acknowledges the outcome. Jobs renders such runs as
+  `WAITING INPUT`.
+- Completed foreground phase attempts restore their exact origin and leave a
+  restart-safe result card. Selecting or discarding records a disposition over
+  immutable run references; selecting a patch never applies it.
 
 Session options last only for the shell process. Global options are persisted.
 Workspace option files are loaded when present and preserved by the same store
@@ -105,6 +227,43 @@ Config uses separate paths:
 Use config for durable runtime/provider defaults and global policy, not for
 per-tool behavior. Current runtime/policy config includes:
 
+### Interactive keybindings
+
+Home-scoped `operator.keybindings` may replace or remove shell bindings without
+recompiling Kuzushi. Each entry names a context and action; an empty `bindings`
+array explicitly unbinds that action. Bindings accept one stroke or a two-stroke
+chord, including literal `backtab`, modifiers such as `ctrl+g`, arrows, and
+navigation keys:
+
+```toml
+[[operator.keybindings]]
+context = "workbench"
+action = "cycle_phase"
+bindings = ["backtab", "g p"]
+
+[[operator.keybindings]]
+context = "global"
+action = "command_palette"
+bindings = ["ctrl+g"]
+
+[[operator.keybindings]]
+context = "phase_result"
+action = "continue"
+bindings = ["ctrl+n"]
+```
+
+Contexts are `global`, `composer`, `workbench`, `phase_result`, `question`,
+`run_focus`, `picker`, `report`, and `modal`. Phase-result actions are `select`,
+`continue`, `open`, `refine`, `run_again`, `regenerate`, and `discard`. Runtime
+dispatch, footers, operator-question hints, and phase-result cards all consume
+the same resolved bindings; an unbound action is never advertised with its old
+key. Duplicate bindings within one context, unknown actions, malformed strokes,
+and duplicate context/action entries reject the new map atomically; the previous
+valid map remains active. The shell polls the global config and hot-reloads only
+keybindings, so a config edit cannot silently change the active model, provider,
+runtime, or permission policy. Project config may not set
+`operator.keybindings`.
+
 ```toml
 model = "openai:gpt-4.1"
 
@@ -117,8 +276,8 @@ worker_watchdog_timeout_ms = 21600000
 session_budget_usd = 2.50
 spend_hard_ceiling_usd = 10.00
 trusted_workflow_auto_accept = false
-# Deprecated compatibility list; file:// workers use kuzushi.lock approvals.
-trusted_modules = ["file:///absolute/path/to/my-module"]
+# Deprecated compatibility list; local workers use kuzushi.lock approvals.
+trusted_modules = ["package:trusted-module"]
 
 [[operator.signature_keys]]
 key_id = "trusted-author"
@@ -126,14 +285,19 @@ algorithm = "ed25519"
 public_key = "base64-encoded-ed25519-public-key"
 
 [phases]
-# Optional phase boundary for guided runs: map, hunt, confirm, or fix.
-stop_after = "hunt"
+# Canonical ceiling: map, scan, review, prove, or fix.
+stop_after = "review"
 
-[phases.hunt]
+[phases.scan]
 budget_usd = 1.25
 concurrency = 2
 strategy_cap = 3
 prompt_variant = "deep"
+
+[phases.review]
+budget_usd = 0.50
+
+[phases.prove]
 confirmation_depth = "sampled"
 ```
 
@@ -143,10 +307,20 @@ config, not environment variables. Project configs may set `[phases]` fields;
 repository must not redirect model choice, credentials, process execution, or
 operator trust policy.
 
-`operator.signature_keys` are trust roots for non-empty KWP lockfile
-`signatureChain` entries. Each entry verifies
+For one major release, `[phases.hunt]` loads as `[phases.scan]` and
+`[phases.confirm]` loads as `[phases.prove]`, with a deprecation warning.
+Supplying an alias and its replacement together is a hard error, and all saved
+configuration uses only `scan`, `review`, and `prove`.
+
+Report is intentionally absent from `[phases]`: it is a workflow exit, not a
+phase or autonomy rung.
+
+`operator.signature_keys` are global trust roots for non-empty KWP lockfile
+`signatureChain` entries. They verify
 `ed25519:v1:<keyId>:<base64Signature>` over the module id, digest, descriptor
-hash, and version recorded in `kuzushi.lock`.
+hash, and version. Host-mounted MCP aliases and fuzz executors likewise belong
+under global `operator.mcp_mounts` and `operator.fuzz_executors`, never in
+target-owned configuration.
 
 ## Model Selection
 
@@ -193,6 +367,42 @@ hosts = ["admin.example.com"]
 
 When an allow list is present, unmatched hosts/IPs are out of scope. With only
 deny rules, unmatched targets remain unknown rather than explicitly allowed.
+
+## Patch application and re-verification
+
+`PatchResult` controls patch synthesis and disposable-worktree validation only.
+A `SOUND` patch is a draft until an operator applies the reviewed diff. Apply
+creates an append-only `PatchLifecycleRecorded` v3 event keyed by
+`applicationId`; its projection records target and durable finding identity,
+patch run id, diff hash, optional base commit, relative touched paths with
+before/after hashes, actor/timestamps, reverify run id, state, and outcome
+detail. Applying never clears the state that proves the application occurred.
+
+Re-verification is the descriptor-backed headless tool:
+
+```bash
+kuzushi --target . run patch:reverify \
+  --input '{"applicationId":"application-id-from-apply-receipt"}'
+```
+
+`applicationId` is required. Registry preparation binds the originating
+detector, its exact original tool input, and the explicit workspace. The tool
+refuses attribution when touched-file hashes changed after apply. It never
+substitutes a detector, target, runtime, provider, or model:
+
+- deterministic successful absence → `Verified`;
+- rediscovery → `StillVulnerable`;
+- nondeterministic absence → `NotRediscovered`;
+- unavailable comparison → `Inconclusive`;
+- cancellation/process loss → `Interrupted`;
+- changed touched-file hashes → `ChangedSinceApply`.
+
+Only `Verified` promotes the related patch result to `PatchStatus::Verified`.
+All inconclusive outcomes preserve the earlier `SOUND` synthesis result.
+
+Finding exports expose remediation metadata additively in JSON/JSONL/Markdown,
+SARIF properties, and flattened CSV columns: application id, patch run id,
+application state, reverify outcome/run id, diff hash, and touched paths.
 
 ## Suppression rules
 

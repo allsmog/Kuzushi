@@ -145,6 +145,8 @@ mod compare_findings_by_confidence_tests {
             duration_ms: 0,
             cost_usd: 0.0,
             notes: Vec::new(),
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: String::new(),
         }
     }

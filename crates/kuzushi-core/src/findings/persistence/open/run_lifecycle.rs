@@ -5,6 +5,38 @@ use crate::storage_v3::writer_actor::{
 };
 
 impl FindingStore {
+    pub(crate) fn with_run_lifecycle<T>(
+        &self,
+        id: &str,
+        target: &Path,
+        operation: impl FnOnce() -> Result<(T, usize)>,
+    ) -> Result<T> {
+        self.record_run_started(id, target, "running")?;
+        match operation() {
+            Ok((value, findings_count)) => {
+                self.finish_successful_run(id, findings_count)?;
+                Ok(value)
+            }
+            Err(error) => Err(self.finish_failed_run(id, error)),
+        }
+    }
+
+    fn finish_successful_run(&self, id: &str, findings_count: usize) -> Result<()> {
+        self.record_run_finished(id, "completed", findings_count)
+            .inspect_err(|_| {
+                let _ = self.record_run_finished(id, "failed", findings_count);
+            })
+    }
+
+    fn finish_failed_run(&self, id: &str, error: anyhow::Error) -> anyhow::Error {
+        match self.record_run_finished(id, "failed", 0) {
+            Ok(()) => error,
+            Err(terminal_error) => error.context(format!(
+                "also could not record failed lifecycle for run {id}: {terminal_error:#}"
+            )),
+        }
+    }
+
     pub fn record_run_started(&self, id: &str, target: &Path, status: &str) -> Result<()> {
         self.record_v3_run_lifecycle(RunLifecycleWrite {
             event_kind: EventKind::RunStarted,
@@ -12,6 +44,7 @@ impl FindingStore {
             target: Some(target.display().to_string()),
             status: status.to_string(),
             findings_count: None,
+            terminal_item_hash: None,
             actor: "finding-store".to_string(),
         })?;
         Ok(())
@@ -28,6 +61,7 @@ impl FindingStore {
             target: None,
             status: status.to_string(),
             findings_count: Some(findings_count as u64),
+            terminal_item_hash: None,
             actor: "finding-store".to_string(),
         })?;
         // Only a fully-completed re-scan can honestly retire a prior finding.

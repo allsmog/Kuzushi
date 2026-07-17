@@ -2,7 +2,6 @@ use super::harvest_entry::HarvestedCatalogEntry;
 use crate::capabilities::threat_intel::application::regression_gate::RegressionGateStatus;
 use crate::capabilities::threat_intel::domain::HuntKind;
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn render_catalog_toml(
@@ -79,7 +78,10 @@ fn regression_gate_provenance(entry: &HarvestedCatalogEntry) -> Vec<String> {
     let Some(outcome) = &entry.gate_outcome else {
         return vec!["regression-gate=disabled".to_string()];
     };
-    let mut chunks = vec![format!("regression-gate={}", gate_status_label(&outcome.status))];
+    let mut chunks = vec![format!(
+        "regression-gate={}",
+        gate_status_label(&outcome.status)
+    )];
     if let (Some(pre), Some(post)) = (outcome.pre_fix_hits, outcome.post_fix_hits) {
         chunks.push(format!("hits pre/post={pre}/{post}"));
     }
@@ -165,27 +167,36 @@ fn escape_toml_string(value: &str) -> String {
         .replace('\r', "\\r")
 }
 
-pub(super) fn write_catalog_with_append(path: &Path, new_text: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("could not create {}", parent.display()))?;
-    }
-    if path.exists() {
-        append_catalog(path, new_text)
+pub(super) fn write_catalog_with_append(
+    workspace_root: &Path,
+    path: &Path,
+    new_text: &str,
+) -> Result<()> {
+    let relative = path.strip_prefix(workspace_root).with_context(|| {
+        format!(
+            "threat-intel catalog {} must stay inside workspace {}",
+            path.display(),
+            workspace_root.display()
+        )
+    })?;
+    let body = if std::fs::symlink_metadata(path).is_ok() {
+        appended_catalog(workspace_root, path, new_text)?
     } else {
-        fs::write(path, new_text)
-            .with_context(|| format!("could not write catalog to {}", path.display()))
-    }
+        new_text.to_string()
+    };
+    crate::workspace::write_workspace_state_file(workspace_root, relative, body.as_bytes())?;
+    Ok(())
 }
 
-fn append_catalog(path: &Path, new_text: &str) -> Result<()> {
-    let mut existing = fs::read_to_string(path)
-        .with_context(|| format!("could not read existing catalog at {}", path.display()))?;
+fn appended_catalog(workspace_root: &Path, path: &Path, new_text: &str) -> Result<String> {
+    let mut existing =
+        crate::bounded_file::read_utf8_text_within(workspace_root, path, 4 * 1024 * 1024)
+            .with_context(|| format!("could not read existing catalog at {}", path.display()))?;
     if !existing.ends_with('\n') {
         existing.push('\n');
     }
     existing.push_str(new_text);
-    fs::write(path, existing).with_context(|| format!("could not write catalog to {}", path.display()))
+    Ok(existing)
 }
 
 #[cfg(test)]
@@ -229,13 +240,16 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("harvested.toml");
         let text = render_catalog_toml(&[entry], &path).unwrap();
-        fs::write(&path, &text).unwrap();
+        std::fs::write(&path, &text).unwrap();
         let parsed = crate::capabilities::threat_intel::parse_catalog_str(&text, &path).unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].cwe, "CWE-190");
         assert_eq!(parsed[0].hunt, HuntKind::TaintIrisNext);
         let sub = parsed[0].hunt_config.get("taint_iris_next").unwrap();
-        assert_eq!(sub.get("taint_class").unwrap().as_str(), Some("integer-overflow"));
+        assert_eq!(
+            sub.get("taint_class").unwrap().as_str(),
+            Some("integer-overflow")
+        );
     }
 
     #[test]

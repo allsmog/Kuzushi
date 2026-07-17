@@ -71,9 +71,36 @@ fn taint_flow_snapshot_stages_are_capped() {
         }]
     });
 
-    let flow = taint_flow_from_data(&data).expect("flow");
+    let flow = taint_flows_from_data(&data)
+        .into_iter()
+        .next()
+        .expect("flow");
 
     assert_eq!(flow.stages.len(), MAX_TAINT_FLOW_STAGES);
+}
+
+#[test]
+fn taint_flow_snapshots_preserve_all_finding_keys() {
+    let data = json!({
+        "flows": [
+            {
+                "findingFingerprint": "fp-first",
+                "findingIdentityId": "fi_first",
+                "stages": [{ "message": "first", "filePath": "src/shared.rs", "line": 1 }]
+            },
+            {
+                "findingFingerprint": "fp-second",
+                "findingIdentityId": "fi_second",
+                "stages": [{ "message": "second", "filePath": "src/shared.rs", "line": 2 }]
+            }
+        ]
+    });
+
+    let flows = taint_flows_from_data(&data);
+
+    assert_eq!(flows.len(), 2);
+    assert_eq!(flows[0].finding_fingerprint.as_deref(), Some("fp-first"));
+    assert_eq!(flows[1].finding_identity_id.as_deref(), Some("fi_second"));
 }
 
 fn repeated_strings(count: usize) -> Vec<String> {

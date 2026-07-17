@@ -1,0 +1,516 @@
+use super::*;
+use crate::ui_view_models::{EngagementHeaderModel, JourneyPhaseStatus, WorkbenchHint};
+use ratatui::style::Modifier;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub(in crate::renderer::views) fn phase_header_lines(
+    header: &EngagementHeaderModel,
+    hints: &[WorkbenchHint],
+    width: usize,
+    height: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![identity_line(header, width)];
+    lines.extend(context_header_lines(header, width));
+    let trailing = command_hint_lines(header, hints, width);
+    let card_rows = height.saturating_sub(lines.len() + trailing.len() + 3);
+    lines.extend(result_card_lines(
+        header.result_card.as_ref(),
+        width,
+        card_rows,
+    ));
+    lines.extend(trailing);
+    lines
+}
+
+fn context_header_lines(header: &EngagementHeaderModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.extend(phase_rail_line(&header.phase_rail, width));
+    lines.extend(
+        header
+            .finding_filter
+            .as_deref()
+            .map(|filter| finding_filter_line(filter, width)),
+    );
+    lines.extend(next_header_lines(header, width));
+    lines
+}
+
+fn next_header_lines(header: &EngagementHeaderModel, width: usize) -> Vec<Line<'static>> {
+    if uses_compact_result_header(header, width) {
+        return Vec::new();
+    }
+    next_lines(header, width)
+}
+
+fn command_hint_lines(
+    header: &EngagementHeaderModel,
+    hints: &[WorkbenchHint],
+    width: usize,
+) -> Vec<Line<'static>> {
+    if header.result_card.is_some() || width < 80 || hints.is_empty() {
+        return Vec::new();
+    }
+    vec![command_hint_line(hints, width)]
+}
+
+fn uses_compact_result_header(header: &EngagementHeaderModel, width: usize) -> bool {
+    width < 50 && header.result_card.is_some()
+}
+
+fn result_card_lines(
+    card: Option<&crate::ui_view_models::PhaseResultCardModel>,
+    width: usize,
+    max_rows: usize,
+) -> Vec<Line<'static>> {
+    let Some(card) = card else {
+        return Vec::new();
+    };
+    result_card_render_rows(card, width, max_rows)
+        .into_iter()
+        .map(|row| {
+            // Source identities intentionally terminate at this styling boundary.
+            let _source_key = row.key;
+            let _disclosed_source_keys = row.disclosed_keys;
+            row.line
+        })
+        .collect()
+}
+
+#[derive(Debug)]
+struct PhaseResultRenderRow {
+    line: Line<'static>,
+    key: Option<kuzushi_core::run_lifecycle::RunCellKey>,
+    disclosed_keys: std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
+}
+
+#[derive(Debug, Default)]
+struct PhaseResultRenderSource {
+    key: Option<kuzushi_core::run_lifecycle::RunCellKey>,
+    disclosed_keys: std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PhaseResultRenderStyle {
+    prefix: ratatui::style::Style,
+    text: ratatui::style::Style,
+}
+
+struct FixedPhaseResultRows {
+    heading: Vec<PhaseResultRenderRow>,
+    trailing: Vec<PhaseResultRenderRow>,
+}
+
+fn result_card_render_rows(
+    card: &crate::ui_view_models::PhaseResultCardModel,
+    width: usize,
+    max_rows: usize,
+) -> Vec<PhaseResultRenderRow> {
+    if max_rows <= 3 {
+        return compact_result_rows(card, width, max_rows);
+    }
+    let fixed = fixed_result_rows(card, width);
+    let detail_budget = max_rows
+        .saturating_sub(fixed.heading.len() + fixed.trailing.len())
+        .max(1);
+    let detail = bounded_result_detail_rows(card, width, detail_budget);
+    fixed
+        .heading
+        .into_iter()
+        .chain(detail)
+        .chain(fixed.trailing)
+        .collect()
+}
+
+fn compact_result_rows(
+    card: &crate::ui_view_models::PhaseResultCardModel,
+    width: usize,
+    max_rows: usize,
+) -> Vec<PhaseResultRenderRow> {
+    if max_rows == 0 {
+        return Vec::new();
+    }
+    let omitted = card.detail_rows.len();
+    let summary = format!("{} · +{omitted} details · replay", card.outcome);
+    vec![compact_result_row(
+        " RESULT ",
+        &summary,
+        width,
+        theme::warn(),
+        card.semantic_keys.clone(),
+    )]
+}
+
+fn compact_result_row(
+    prefix: &str,
+    text: &str,
+    width: usize,
+    style: ratatui::style::Style,
+    disclosed_keys: std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
+) -> PhaseResultRenderRow {
+    let body_width = width.saturating_sub(display_width(prefix));
+    PhaseResultRenderRow {
+        line: Line::from(vec![
+            Span::styled(prefix.to_string(), style),
+            Span::styled(fit(text, body_width), style),
+        ]),
+        key: None,
+        disclosed_keys,
+    }
+}
+
+fn fixed_result_rows(
+    card: &crate::ui_view_models::PhaseResultCardModel,
+    width: usize,
+) -> FixedPhaseResultRows {
+    let heading = wrapped_result_row(
+        " RESULT ",
+        &format!("{} · attempt {}", card.outcome, card.attempt_id),
+        width,
+        PhaseResultRenderStyle {
+            prefix: theme::warn(),
+            text: theme::primary(),
+        },
+        PhaseResultRenderSource::default(),
+    );
+    let control = wrapped_result_row(
+        "  ",
+        &card.control_hint,
+        width,
+        PhaseResultRenderStyle {
+            prefix: theme::accent(),
+            text: theme::accent(),
+        },
+        PhaseResultRenderSource::default(),
+    );
+    let next = wrapped_result_row(
+        "  next: ",
+        &card.recommended,
+        width,
+        PhaseResultRenderStyle {
+            prefix: theme::label(),
+            text: theme::label(),
+        },
+        PhaseResultRenderSource::default(),
+    );
+    FixedPhaseResultRows {
+        heading,
+        trailing: control.into_iter().chain(next).collect(),
+    }
+}
+
+fn bounded_result_detail_rows(
+    card: &crate::ui_view_models::PhaseResultCardModel,
+    width: usize,
+    budget: usize,
+) -> Vec<PhaseResultRenderRow> {
+    let rows = card
+        .detail_rows
+        .iter()
+        .flat_map(|row| {
+            wrapped_result_row(
+                "  ",
+                &row.text,
+                width,
+                PhaseResultRenderStyle {
+                    prefix: theme::muted(),
+                    text: theme::muted(),
+                },
+                PhaseResultRenderSource {
+                    key: row.key.clone(),
+                    disclosed_keys: row.disclosed_keys.clone(),
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    if rows.len() <= budget {
+        return rows;
+    }
+    bounded_result_detail_overflow(rows, width, budget)
+}
+
+fn bounded_result_detail_overflow(
+    rows: Vec<PhaseResultRenderRow>,
+    width: usize,
+    budget: usize,
+) -> Vec<PhaseResultRenderRow> {
+    let retained = retained_detail_count(rows.len(), width, budget);
+    let omitted = rows.len().saturating_sub(retained);
+    let disclosed_keys = accounted_render_keys(&rows[retained..]);
+    let mut visible = rows.into_iter().take(retained).collect::<Vec<_>>();
+    let disclosure = detail_disclosure_text(omitted, width);
+    visible.extend(wrapped_result_row(
+        "  ",
+        &disclosure,
+        width,
+        PhaseResultRenderStyle {
+            prefix: theme::warn(),
+            text: theme::warn(),
+        },
+        PhaseResultRenderSource {
+            key: None,
+            disclosed_keys,
+        },
+    ));
+    visible
+}
+
+fn retained_detail_count(total: usize, width: usize, budget: usize) -> usize {
+    let mut retained = budget.saturating_sub(detail_disclosure_row_count(total, width));
+    for _ in 0..2 {
+        let omitted = total.saturating_sub(retained);
+        retained = budget
+            .saturating_sub(detail_disclosure_row_count(omitted, width))
+            .min(total);
+    }
+    retained
+}
+
+fn detail_disclosure_row_count(omitted: usize, width: usize) -> usize {
+    let body_width = width.saturating_sub(2).max(1);
+    wrap_text(&detail_disclosure_text(omitted, width), body_width).len()
+}
+
+fn detail_disclosure_text(omitted: usize, width: usize) -> String {
+    let detailed = format!("+{omitted} detail row(s) omitted · inspect/replay");
+    if display_width(&detailed) <= width.saturating_sub(2) {
+        return detailed;
+    }
+    format!("+{omitted} omitted · replay")
+}
+
+fn accounted_render_keys(
+    rows: &[PhaseResultRenderRow],
+) -> std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey> {
+    rows.iter()
+        .flat_map(|row| row.key.iter().chain(row.disclosed_keys.iter()))
+        .cloned()
+        .collect()
+}
+
+fn wrapped_result_row(
+    prefix: &str,
+    text: &str,
+    width: usize,
+    style: PhaseResultRenderStyle,
+    source: PhaseResultRenderSource,
+) -> Vec<PhaseResultRenderRow> {
+    let body_width = width.saturating_sub(display_width(prefix)).max(1);
+    wrap_text(text, body_width)
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| PhaseResultRenderRow {
+            line: Line::from(vec![
+                Span::styled(
+                    if index == 0 {
+                        prefix.to_string()
+                    } else {
+                        " ".repeat(display_width(prefix))
+                    },
+                    style.prefix,
+                ),
+                Span::styled(chunk, style.text),
+            ]),
+            key: source.key.clone(),
+            disclosed_keys: source.disclosed_keys.clone(),
+        })
+        .collect()
+}
+
+fn finding_filter_line(filter: &str, width: usize) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(" FILTER ", theme::warn()),
+        Span::styled(
+            fit(
+                &format!("{filter} · clear: findings filter clear"),
+                width.saturating_sub(8),
+            ),
+            theme::primary(),
+        ),
+    ])
+}
+
+fn identity_line(header: &EngagementHeaderModel, width: usize) -> Line<'static> {
+    let mut spans = Vec::new();
+    let mut used = 0;
+    for (text, style) in identity_atoms(header) {
+        push_atom(&mut spans, &mut used, width, text, style);
+    }
+    Line::from(spans)
+}
+
+fn identity_atoms(header: &EngagementHeaderModel) -> Vec<(String, ratatui::style::Style)> {
+    let mut atoms = vec![
+        ("KUZUSHI".to_string(), theme::heading()),
+        (
+            format!("VIEW {}", header.phase.label()),
+            mode_style(header.phase),
+        ),
+    ];
+    if header
+        .reality_phase
+        .is_some_and(|reality| reality != header.phase)
+    {
+        let reality = header.reality_phase.expect("checked reality phase");
+        atoms.push((format!("REALITY {}", reality.label()), theme::muted()));
+    }
+    atoms.extend([
+        (format!("target {}", header.target), theme::label()),
+        live_atom(header.live),
+    ]);
+    if header.cost_invalid {
+        atoms.push(("cost invalid".to_string(), theme::danger()));
+    } else if !header.cost_complete {
+        atoms.push((
+            format!("cost >=${:.2} incomplete", header.cost_usd),
+            theme::warn(),
+        ));
+    } else if header.cost_usd > 0.0 {
+        atoms.push((format!("cost ${:.2}", header.cost_usd), theme::primary()));
+    }
+    atoms.extend([
+        (header.context.clone(), context_style(&header.context)),
+        (format!("model {}", header.model), theme::muted()),
+        (module_atom(&header.module), module_style(&header.module)),
+    ]);
+    atoms
+}
+
+fn mode_style(phase: kuzushi_core::WorkflowPhase) -> ratatui::style::Style {
+    match phase {
+        kuzushi_core::WorkflowPhase::Map => theme::mode_map(),
+        kuzushi_core::WorkflowPhase::Scan => theme::mode_scan(),
+        kuzushi_core::WorkflowPhase::Review => theme::mode_review(),
+        kuzushi_core::WorkflowPhase::Prove => theme::mode_prove(),
+        kuzushi_core::WorkflowPhase::Fix => theme::mode_fix(),
+    }
+}
+
+fn module_atom(module: &str) -> String {
+    if module == "all modules" {
+        return "module all".to_string();
+    }
+    let module_id = module.split_once(':').map(|(id, _)| id).unwrap_or(module);
+    format!("module {module_id}")
+}
+
+fn module_style(module: &str) -> ratatui::style::Style {
+    if module == "all modules" {
+        theme::muted()
+    } else {
+        theme::accent()
+    }
+}
+
+fn context_style(context: &str) -> ratatui::style::Style {
+    let normalized = context.to_ascii_lowercase();
+    if normalized.contains("not built") || normalized.contains("missing") {
+        theme::muted()
+    } else if normalized.contains("stale") || normalized.contains("partial") {
+        theme::warn()
+    } else {
+        theme::success()
+    }
+}
+
+fn live_atom(live: bool) -> (String, ratatui::style::Style) {
+    if !live {
+        return ("○ idle".to_string(), theme::subtle());
+    }
+    let mut style = theme::success();
+    if live_pulse_on() {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    ("● LIVE".to_string(), style)
+}
+
+fn live_pulse_on() -> bool {
+    if !theme::cinematic_motion_enabled(theme::active_theme()) {
+        return false;
+    }
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| (duration.as_millis() / 500) % 2 == 0)
+        .unwrap_or(false)
+}
+
+fn push_atom(
+    spans: &mut Vec<Span<'static>>,
+    used: &mut usize,
+    width: usize,
+    text: String,
+    style: ratatui::style::Style,
+) {
+    let separator_width = usize::from(*used > 0) * 3;
+    let atom_width = display_width(&text);
+    if used.saturating_add(separator_width + atom_width) > width {
+        return;
+    }
+    if *used > 0 {
+        spans.push(Span::styled(" · ", theme::subtle()));
+    }
+    spans.push(Span::styled(text, style));
+    *used += separator_width + atom_width;
+}
+
+fn phase_rail_line(statuses: &[JourneyPhaseStatus], width: usize) -> Option<Line<'static>> {
+    if statuses.is_empty() || width < 60 {
+        return None;
+    }
+    let mut spans = vec![Span::raw(" ")];
+    for (index, status) in statuses.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" · ", theme::subtle()));
+        }
+        let style = journey_phase_tone_style(status.tone);
+        spans.push(Span::styled(status.phase_label.to_string(), style));
+        spans.push(Span::styled(status.state_symbol.to_string(), style));
+    }
+    let line = Line::from(spans);
+    (line.width() <= width).then_some(line)
+}
+
+fn next_lines(header: &EngagementHeaderModel, width: usize) -> Vec<Line<'static>> {
+    let body = if width >= 100 || header.next_tools.is_empty() {
+        header.next_action.clone()
+    } else {
+        header
+            .next_action
+            .split_once(" — ")
+            .map(|(head, _)| head.to_string())
+            .unwrap_or_else(|| header.next_action.clone())
+    };
+    wrap_text(&body, width.saturating_sub(8).max(16))
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| {
+            let lead = if index == 0 {
+                Span::styled(" ▸ NEXT ", theme::warn())
+            } else {
+                Span::raw("        ")
+            };
+            Line::from(vec![lead, Span::styled(chunk, theme::primary())])
+        })
+        .collect()
+}
+
+fn command_hint_line(hints: &[WorkbenchHint], width: usize) -> Line<'static> {
+    let mut spans = vec![Span::raw(" ")];
+    let mut used = 1;
+    for hint in hints {
+        let atom = format!("{} {}", hint.verb, hint.label);
+        let separator = usize::from(used > 1) * 3;
+        let atom_width = display_width(&atom);
+        if used + separator + atom_width > width {
+            continue;
+        }
+        if separator > 0 {
+            spans.push(Span::styled(" · ", theme::subtle()));
+        }
+        spans.push(Span::styled(atom, theme::muted()));
+        used += separator + atom_width;
+    }
+    Line::from(spans)
+}
+
+#[cfg(test)]
+mod tests;

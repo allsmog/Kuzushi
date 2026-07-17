@@ -6,11 +6,18 @@ pub(crate) fn full_mode_module() -> BuiltinModule {
         "Full-codebase scan",
         ModuleKind::Offense,
         "Whole-codebase chunked LLM pass — token-greedy file clustering, per-chunk model query.",
-        vec![hidden_tool_with_options(
-            "full-mode:hunt",
-            "Compatibility alias for agentic-sast:scan with strategy=chunked.",
-            full_mode_hunt_options(),
-        )],
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::InputAware,
+                FindingStoreRequirement::Optional,
+            ),
+            vec![hidden_tool_with_options(
+                "full-mode:hunt",
+                "Compatibility alias for agentic-sast:scan with strategy=chunked.",
+                full_mode_hunt_options(),
+            )],
+        ),
         vec![],
     )
 }
@@ -56,6 +63,7 @@ fn full_mode_scope_file_option() -> OptionSpec {
         OptionType::Path,
         "Optional repo-relative path to a newline-delimited scope file. Defaults to <target>/.kuzushi/v3/since.txt when --since populated it.",
     )
+    .workspace_read()
 }
 
 fn full_mode_failed_chunk_ids_option() -> OptionSpec {
@@ -97,10 +105,16 @@ pub(crate) fn classifier_gate_module() -> BuiltinModule {
         "Classifier gate",
         ModuleKind::Triage,
         "Cheap LLM classifier with adaptive p80 quantile gate. Score one finding to decide whether the deep auditor should run.",
-        vec![tool_with_options(
-            "classifier-gate:score",
-            "Score a finding with the cheap classifier; updates the running quantile.",
-            vec![
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Review,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Optional,
+            ),
+            vec![tool_with_options(
+                "classifier-gate:score",
+                "Score a finding with the cheap classifier; updates the running quantile.",
+                vec![
                 opt(
                     "findingFingerprint",
                     OptionType::String,
@@ -113,8 +127,9 @@ pub(crate) fn classifier_gate_module() -> BuiltinModule {
                     "Target percentile for the adaptive threshold (0.0 < p < 1.0).",
                 )
                 .default(serde_json::json!(0.80)),
-            ],
-        )],
+                ],
+            )],
+        ),
         vec![],
     )
 }
@@ -125,10 +140,16 @@ pub(crate) fn deep_audit_module() -> BuiltinModule {
         "Deep auditor",
         ModuleKind::Triage,
         "Tool-augmented LLM auditor — uses code-nav primitives to verify a finding's triggerability.",
-        vec![hidden_tool_with_options(
-            "deep-audit:run",
-            "Compatibility alias for triage:run with strategy=deep.",
-            vec![
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Review,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Optional,
+            ),
+            vec![hidden_tool_with_options(
+                "deep-audit:run",
+                "Compatibility alias for triage:run with strategy=deep.",
+                vec![
                 opt(
                     "findingFingerprint",
                     OptionType::String,
@@ -147,8 +168,9 @@ pub(crate) fn deep_audit_module() -> BuiltinModule {
                     "Initial spend ticket; refunded with the bridge's reported cost.",
                 )
                 .default(serde_json::json!(1.0)),
-            ],
-        )],
+                ],
+            )],
+        ),
         vec![],
     )
 }

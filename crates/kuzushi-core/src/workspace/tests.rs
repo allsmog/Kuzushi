@@ -2,12 +2,26 @@
 mod tests {
     use super::super::*;
     use crate::findings::{
-        DismissReason, Finding, FindingEvidence, FindingStore, ReviewDecision,
-        ReviewDecisionVerdict, Severity, StaticProofState, TriageAuthor, TriageOutcome,
-        TriageVerdict,
+        DismissReason, Finding, FindingEvidence, FindingStore, PatchLifecycleFile,
+        PatchLifecycleRecord, PatchLifecycleState, ReviewDecision, ReviewDecisionVerdict,
+        Severity, StaticProofState, TriageAuthor, TriageOutcome, TriageVerdict,
     };
-    use crate::run_artifacts::{write_run_summary, RunSummary};
+    use crate::run_artifacts::{write_run_summary, RunLlmCallAudit, RunSummary};
+    use crate::runtime::{RuntimeCost, RuntimeCostReport};
     use std::fs;
+
+    #[test]
+    fn missing_workspace_target_reports_domain_failure_with_actionable_cli_guidance() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing = tmp.path().join("missing");
+
+        let error = WorkspaceTarget::new(&missing).unwrap_err().to_string();
+
+        assert!(error.contains("Target path does not exist"), "{error}");
+        assert!(error.contains("missing"), "{error}");
+        assert!(error.contains("Next: use an existing directory"), "{error}");
+        assert!(error.contains("kuzushi --target . scan"), "{error}");
+    }
 
     #[test]
     fn resolves_v3_state_paths_under_project() {
@@ -35,6 +49,34 @@ mod tests {
             workspace_attachments_path(target.root()),
             target.root().join(".kuzushi/v3/attachments.json")
         );
+    }
+
+    #[test]
+    fn initializing_workspace_state_keeps_generated_state_out_of_git() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = WorkspaceTarget::new(tmp.path()).unwrap();
+
+        target.ensure_state_dir().unwrap();
+
+        assert_eq!(
+            fs::read_to_string(target.root().join(".kuzushi/.gitignore")).unwrap(),
+            "*\n!scope.toml\n!prompts/\n!prompts/**\n!v3/\nv3/*\n!v3/config.toml\n"
+        );
+    }
+
+    #[test]
+    fn initializing_workspace_state_preserves_an_existing_ignore_policy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = WorkspaceTarget::new(tmp.path()).unwrap();
+        let ignore_path = target.root().join(".kuzushi/.gitignore");
+        fs::create_dir_all(ignore_path.parent().unwrap()).unwrap();
+        let policy =
+            "# custom\n*\n!scope.toml\n!prompts/\n!prompts/**\n!v3/\nv3/*\n!v3/config.toml\n";
+        fs::write(&ignore_path, policy).unwrap();
+
+        target.ensure_state_dir().unwrap();
+
+        assert_eq!(fs::read_to_string(ignore_path).unwrap(), policy);
     }
 
     #[test]
@@ -448,6 +490,22 @@ mod tests {
         }])
     }
 
+    fn assert_exported_alias_and_priority(
+        document: &serde_json::Value,
+        rule_id: &str,
+        alias: &str,
+        priority: &str,
+    ) {
+        let finding = document["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|finding| finding["ruleId"] == rule_id)
+            .unwrap_or_else(|| panic!("missing exported finding {rule_id}"));
+        assert_eq!(finding["alias"], alias);
+        assert_eq!(finding["priority"], priority);
+    }
+
     fn seed_workspace_with_findings(workspace: &WorkspaceTarget, count: u32) {
         write_fixture_source(workspace.root());
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -522,8 +580,461 @@ mod tests {
         assert!(first["properties"]["kuzushiDerivedSourcePresent"].is_boolean());
         assert!(first["properties"]["kuzushiAutomatedReasoningPresent"].is_boolean());
         assert!(first["properties"]["kuzushiRawHttpBlobPresent"].is_boolean());
+        assert!(first["properties"].get("kuzushiCwe").is_none());
         // Non-suppressed findings carry no SARIF result.suppressions array.
         assert!(first.get("suppressions").is_none());
+    }
+
+    #[test]
+    fn remediation_truth_is_additive_across_every_export_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        seed_workspace_with_findings(&workspace, 1);
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let finding = store.list_findings(1).unwrap().remove(0);
+        let stable_fp = store
+            .patch_lifecycle_stable_fp(&finding.fingerprint)
+            .unwrap();
+        store
+            .insert_patch_lifecycle_record(&PatchLifecycleRecord {
+                application_id: "application-1".to_string(),
+                stable_fp,
+                fingerprint: finding.fingerprint,
+                finding_scan_id: finding.scan_id,
+                patch_run_id: "patch-run-1".to_string(),
+                target: workspace.root().display().to_string(),
+                diff_hash: "sha256:diff".to_string(),
+                base_commit: Some("base-commit".to_string()),
+                touched_files: vec![PatchLifecycleFile {
+                    path: "src/app.ts".to_string(),
+                    before_hash: Some("sha256:before".to_string()),
+                    after_hash: Some("sha256:after".to_string()),
+                }],
+                state: PatchLifecycleState::Verified,
+                reverify_run_id: Some("reverify-run-1".to_string()),
+                detail: Some("originating detector no longer rediscovered it".to_string()),
+                actor: "operator".to_string(),
+                application_started_at: "2026-07-13T11:59:59Z".to_string(),
+                applied_at: Some("2026-07-13T12:00:00Z".to_string()),
+                updated_at: "2026-07-13T12:05:00Z".to_string(),
+            })
+            .unwrap();
+
+        let json_path = tmp.path().join("findings.json");
+        export_workspace_findings(&workspace, &json_path, None).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(json_path).unwrap()).unwrap();
+        let remediation = &json["findings"][0]["remediation"];
+        assert_eq!(remediation["applicationId"], "application-1");
+        assert_eq!(remediation["applicationState"], "verified");
+        assert_eq!(remediation["reverifyOutcome"], "verified");
+        assert_eq!(remediation["touchedPaths"][0], "src/app.ts");
+
+        let jsonl_path = tmp.path().join("findings.jsonl");
+        export_workspace_findings(&workspace, &jsonl_path, None).unwrap();
+        let finding_line = fs::read_to_string(jsonl_path)
+            .unwrap()
+            .lines()
+            .nth(1)
+            .unwrap()
+            .to_string();
+        assert!(finding_line.contains("\"applicationId\":\"application-1\""));
+
+        let csv_path = tmp.path().join("findings.csv");
+        export_workspace_findings(&workspace, &csv_path, None).unwrap();
+        let csv = fs::read_to_string(csv_path).unwrap();
+        assert!(csv.contains("remediation_application_id"));
+        assert!(csv.contains("application-1,patch-run-1,verified,verified,reverify-run-1"));
+
+        let sarif_path = tmp.path().join("findings.sarif");
+        export_workspace_findings(&workspace, &sarif_path, None).unwrap();
+        let sarif: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(sarif_path).unwrap()).unwrap();
+        let properties = &sarif["runs"][0]["results"][0]["properties"];
+        assert_eq!(properties["kuzushiRemediationApplicationId"], "application-1");
+        assert_eq!(properties["kuzushiRemediationReverifyOutcome"], "verified");
+
+        let markdown_path = tmp.path().join("report");
+        export_workspace_findings(
+            &workspace,
+            &markdown_path,
+            Some(WorkspaceExportFormat::MarkdownBundle),
+        )
+        .unwrap();
+        let finding_doc = fs::read_dir(markdown_path.join("findings"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let markdown = fs::read_to_string(finding_doc).unwrap();
+        assert!(markdown.contains("**Remediation:** verified (`application-1`)"));
+        assert!(markdown.contains("**Re-verification:** verified (`reverify-run-1`)"));
+        assert!(markdown.contains("**Touched paths:** src/app.ts"));
+    }
+
+    #[test]
+    fn sarif_emits_shared_domain_cwe_without_changing_fingerprints() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        write_fixture_source(workspace.root());
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("run-cwe", workspace.root(), "completed")
+            .unwrap();
+        let finding = fixture_finding("semgrep/CWE_89/sql", Severity::High, 12);
+        let fingerprint = finding.fingerprint.clone();
+        store.insert_finding("run-cwe", &finding).unwrap();
+        let json_output = tmp.path().join("cwe.json");
+        let output = tmp.path().join("cwe.sarif");
+
+        export_workspace_findings(&workspace, &json_output, None).unwrap();
+        export_workspace_findings(&workspace, &output, None).unwrap();
+
+        let projection: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(json_output).unwrap()).unwrap();
+        assert_eq!(projection["findings"][0]["cwe"], "CWE-89");
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+        let run = &document["runs"][0];
+        assert_eq!(
+            run["tool"]["driver"]["rules"][0]["properties"]["tags"][1],
+            "CWE-89"
+        );
+        assert_eq!(run["results"][0]["properties"]["kuzushiCwe"], "CWE-89");
+        assert_eq!(run["results"][0]["fingerprints"]["kuzushi/v1"], fingerprint);
+    }
+
+    #[test]
+    fn allowed_empty_sarif_has_one_stable_driver_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+        let output = tmp.path().join("empty.sarif");
+
+        export_workspace_findings_with_options(
+            &workspace,
+            &output,
+            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Sarif)).with_allow_empty(true),
+        )
+        .unwrap();
+
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+        assert_eq!(document["runs"].as_array().unwrap().len(), 1);
+        assert_eq!(document["runs"][0]["tool"]["driver"]["name"], "Kuzushi");
+        assert_eq!(
+            document["runs"][0]["tool"]["driver"]["rules"],
+            serde_json::json!([])
+        );
+        assert_eq!(document["runs"][0]["results"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn empty_scan_sarif_identifies_outer_run_and_keeps_spend() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+        write_terminal_scan_summary(&workspace, "scan-empty", "sast:scan", 0.0);
+        let output = tmp.path().join("empty-scan.sarif");
+
+        export_scan_findings_sarif_with_run_summary(
+            &workspace,
+            &output,
+            &["scan-empty".to_string()],
+            "scan-empty",
+        )
+        .unwrap();
+
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+        assert_eq!(
+            document["runs"][0]["tool"]["driver"]["name"],
+            "kuzushi:sast-scan"
+        );
+        assert_eq!(
+            document["runs"][0]["properties"]["kuzushiScanRunId"],
+            "scan-empty"
+        );
+        assert_eq!(document["runs"][0]["results"], serde_json::json!([]));
+        assert_eq!(
+            document["properties"]["kuzushiBenchmark"]["aggregateSpend"]["runId"],
+            "scan-empty"
+        );
+        assert_eq!(
+            document["properties"]["kuzushiBenchmark"]["aggregateSpend"]["totalCostUsd"],
+            0.0
+        );
+        assert_eq!(
+            document["properties"]["kuzushiBenchmark"]["aggregateSpend"]["llmCallCount"],
+            0
+        );
+        assert_eq!(
+            document["properties"]["kuzushiBenchmark"]["aggregateSpend"]["models"],
+            serde_json::json!([])
+        );
+    }
+
+    #[test]
+    fn scan_sarif_uses_outer_run_cost_once_without_summing_children() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        seed_workspace_with_findings(&workspace, 1);
+        write_terminal_scan_summary(&workspace, "run-1", "sast:scan", 0.42);
+        write_terminal_scan_summary(&workspace, "child-1", "agentic-sast:scan", 9.99);
+        let run_ids = vec!["run-1".to_string(), "child-1".to_string()];
+        let output = tmp.path().join("scan.sarif");
+
+        export_scan_findings_sarif_with_run_summary(&workspace, &output, &run_ids, "run-1")
+            .unwrap();
+
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+        let benchmark = &document["properties"]["kuzushiBenchmark"];
+        assert_eq!(benchmark["schemaVersion"], 2);
+        assert_eq!(benchmark["aggregateSpend"]["runId"], "run-1");
+        assert_eq!(benchmark["aggregateSpend"]["totalCostUsd"], 0.42);
+        assert_eq!(
+            benchmark["aggregateSpend"]["source"],
+            "canonical-run-summary"
+        );
+        assert_eq!(benchmark["aggregateSpend"]["llmAuditComplete"], true);
+        assert_eq!(
+            benchmark["aggregateSpend"]["configHash"],
+            format!("sha256:{}", "a".repeat(64))
+        );
+        assert!(document["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|run| run.pointer("/properties/kuzushiBenchmark").is_none()));
+    }
+
+    #[test]
+    fn scan_sarif_omits_canonical_spend_receipt_for_incomplete_aggregate_cost() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+        let observed = RuntimeCost::from_usd(0.25, "test benchmark cost").unwrap();
+        let summary = RunSummary::running(
+            "scan-incomplete",
+            "scan",
+            Some("sast:scan".to_string()),
+            workspace.root().display().to_string(),
+        )
+        .complete()
+        .with_cost_report(RuntimeCostReport::incomplete(observed));
+        write_run_summary(workspace.root(), &summary).unwrap();
+        let output = tmp.path().join("incomplete.sarif");
+
+        export_scan_findings_sarif_with_run_summary(
+            &workspace,
+            &output,
+            &["scan-incomplete".to_string()],
+            "scan-incomplete",
+        )
+        .unwrap();
+
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+        assert!(document.pointer("/properties/kuzushiBenchmark").is_none());
+    }
+
+    fn write_terminal_scan_summary(
+        workspace: &WorkspaceTarget,
+        run_id: &str,
+        tool: &str,
+        cost_usd: f64,
+    ) {
+        let summary = RunSummary::running(
+            run_id,
+            "scan",
+            Some(tool.to_string()),
+            workspace.root().display().to_string(),
+        )
+        .complete()
+        .with_cost(Some(cost_usd))
+        .with_config_hash(Some(format!("sha256:{}", "a".repeat(64))));
+        write_run_summary(workspace.root(), &summary).unwrap();
+    }
+
+    #[test]
+    fn scan_sarif_binds_observed_models_from_every_included_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+        write_terminal_scan_summary(&workspace, "scan-models", "sast:scan", 0.42);
+        write_model_run_summary(&workspace, "child-a", "anthropic:model-a", false);
+        write_model_run_summary(&workspace, "child-b", "anthropic:model-b", false);
+        let run_ids = vec!["scan-models".into(), "child-a".into(), "child-b".into()];
+        let output = tmp.path().join("models.sarif");
+
+        export_scan_findings_sarif_with_run_summary(&workspace, &output, &run_ids, "scan-models")
+            .unwrap();
+
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+        let receipt = &document["properties"]["kuzushiBenchmark"]["aggregateSpend"];
+        assert_eq!(receipt["llmCallCount"], 2);
+        assert_eq!(
+            receipt["models"],
+            serde_json::json!(["anthropic:model-a", "anthropic:model-b"])
+        );
+        assert_eq!(receipt["llmAuditComplete"], true);
+    }
+
+    #[test]
+    fn scan_sarif_excludes_explicitly_unattempted_model_calls_from_evidence() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+        write_terminal_scan_summary(&workspace, "scan-pre-call", "sast:scan", 0.0);
+        write_pre_call_model_run_summary(&workspace, "child-pre-call", "anthropic:model-a");
+        let output = tmp.path().join("pre-call.sarif");
+
+        export_scan_findings_sarif_with_run_summary(
+            &workspace,
+            &output,
+            &["scan-pre-call".into(), "child-pre-call".into()],
+            "scan-pre-call",
+        )
+        .unwrap();
+
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+        let receipt = &document["properties"]["kuzushiBenchmark"]["aggregateSpend"];
+        assert_eq!(receipt["llmCallCount"], 0);
+        assert_eq!(receipt["models"], serde_json::json!([]));
+        assert_eq!(receipt["llmAuditComplete"], true);
+    }
+
+    #[test]
+    fn scan_sarif_marks_model_audit_incomplete_when_a_trace_was_malformed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+        write_terminal_scan_summary(&workspace, "scan-malformed", "sast:scan", 0.42);
+        write_model_run_summary(&workspace, "child-malformed", "anthropic:model-a", true);
+        let run_ids = vec!["scan-malformed".into(), "child-malformed".into()];
+        let output = tmp.path().join("malformed.sarif");
+
+        export_scan_findings_sarif_with_run_summary(
+            &workspace,
+            &output,
+            &run_ids,
+            "scan-malformed",
+        )
+        .unwrap();
+
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+        assert_eq!(
+            document["properties"]["kuzushiBenchmark"]["aggregateSpend"]["llmAuditComplete"],
+            false
+        );
+    }
+
+    #[test]
+    fn scan_sarif_marks_model_audit_incomplete_for_unresolved_child_spend() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+        write_terminal_scan_summary(&workspace, "scan-unresolved-child", "sast:scan", 0.42);
+        let observed = RuntimeCost::from_usd(0.1, "test child cost").unwrap();
+        let child = RunSummary::running(
+            "child-unresolved",
+            "tool",
+            Some("agentic-sast:scan".to_string()),
+            workspace.root().display().to_string(),
+        )
+        .complete()
+        .with_cost_report(RuntimeCostReport::incomplete(observed))
+        .with_llm_calls(vec![RunLlmCallAudit {
+            n: 1,
+            kind: "reasoning".to_string(),
+            verb: Some("query".to_string()),
+            model: "anthropic:model-a".to_string(),
+            provider: "anthropic".to_string(),
+            prompt_hash: "sha256:test".to_string(),
+            latency_ms: Some(1),
+            cost_usd: Some(0.1),
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
+            call_attempted: Some(true),
+        }]);
+        write_run_summary(workspace.root(), &child).unwrap();
+        let output = tmp.path().join("unresolved-child.sarif");
+
+        export_scan_findings_sarif_with_run_summary(
+            &workspace,
+            &output,
+            &["scan-unresolved-child".into(), "child-unresolved".into()],
+            "scan-unresolved-child",
+        )
+        .unwrap();
+
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+        assert_eq!(
+            document["properties"]["kuzushiBenchmark"]["aggregateSpend"]["llmAuditComplete"],
+            false
+        );
+    }
+
+    fn write_model_run_summary(
+        workspace: &WorkspaceTarget,
+        run_id: &str,
+        model: &str,
+        malformed_trace: bool,
+    ) {
+        let summary = RunSummary::running(
+            run_id,
+            "tool",
+            Some("agentic-sast:scan".to_string()),
+            workspace.root().display().to_string(),
+        )
+        .complete()
+        .with_cost(Some(0.1))
+        .with_llm_calls(vec![RunLlmCallAudit {
+            n: 1,
+            kind: "reasoning".to_string(),
+            verb: Some("query".to_string()),
+            model: model.to_string(),
+            provider: "anthropic".to_string(),
+            prompt_hash: "sha256:test".to_string(),
+            latency_ms: Some(1),
+            cost_usd: Some(0.1),
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
+            call_attempted: None,
+        }])
+        .with_trace_malformed_lines(malformed_trace.then_some(1));
+        write_run_summary(workspace.root(), &summary).unwrap();
+    }
+
+    fn write_pre_call_model_run_summary(workspace: &WorkspaceTarget, run_id: &str, model: &str) {
+        let summary = RunSummary::running(
+            run_id,
+            "tool",
+            Some("agentic-sast:scan".to_string()),
+            workspace.root().display().to_string(),
+        )
+        .complete()
+        .with_cost(Some(0.0))
+        .with_llm_calls(vec![RunLlmCallAudit {
+            n: 1,
+            kind: "reasoning".to_string(),
+            verb: Some("query".to_string()),
+            model: model.to_string(),
+            provider: "anthropic".to_string(),
+            prompt_hash: "sha256:test".to_string(),
+            latency_ms: None,
+            cost_usd: None,
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
+            call_attempted: Some(false),
+        }]);
+        write_run_summary(workspace.root(), &summary).unwrap();
     }
 
     #[test]
@@ -673,6 +1184,7 @@ mod tests {
                     confidence: 0.8,
                     rationale: "model believes this is a false positive".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
                 TriageAuthor::Auto,
             )
@@ -710,6 +1222,7 @@ mod tests {
                     confidence: 0.9,
                     rationale: "reviewed source-linked evidence".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
                 TriageAuthor::Human,
             )
@@ -745,7 +1258,7 @@ mod tests {
         // verification) reads `unverified`.
         assert!(body.contains("not_recorded,unverified,not attempted"));
         assert!(body.contains(
-            "all,2,2,reviewDecisionReason;snoozedUntil;evidence.sourceCount;evidence.rawHttpBlobPresent"
+            "all,2,2,cwe;reviewDecisionReason;snoozedUntil;evidence.sourceCount;evidence.rawHttpBlobPresent"
         ));
         assert!(body.contains("fixture/rule-0"));
         assert!(body.contains("fixture/rule-1"));
@@ -803,6 +1316,7 @@ mod tests {
                     confidence: 0.9,
                     rationale: "operator confirmed evidence".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
                 TriageAuthor::Human,
             )
@@ -815,6 +1329,7 @@ mod tests {
                     confidence: 0.5,
                     rationale: "more evidence required".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
             )
             .unwrap();
@@ -851,6 +1366,115 @@ mod tests {
     }
 
     #[test]
+    fn filtered_exports_keep_workspace_aliases_and_priority_in_json_and_markdown() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        write_fixture_source(workspace.root());
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("run-aliases", workspace.root(), "completed")
+            .unwrap();
+
+        let critical = fixture_finding("fixture/terminal-critical", Severity::Critical, 10);
+        let open = fixture_finding("fixture/open-high", Severity::High, 20);
+        let low = fixture_finding("fixture/terminal-low", Severity::Low, 30);
+        let critical_id = store.insert_finding("run-aliases", &critical).unwrap();
+        store.insert_finding("run-aliases", &open).unwrap();
+        let low_id = store.insert_finding("run-aliases", &low).unwrap();
+        for finding_id in [critical_id, low_id] {
+            store
+                .record_triage_with_author(
+                    finding_id,
+                    &TriageOutcome {
+                        verdict: TriageVerdict::TruePositive,
+                        confidence: 0.95,
+                        rationale: "operator confirmed the evidence".to_string(),
+                        cost_usd: 0.0,
+                        cost_usd_exact: true,
+                    },
+                    TriageAuthor::Human,
+                )
+                .unwrap();
+        }
+
+        let all_output = tmp.path().join("all-aliases.json");
+        export_workspace_findings(&workspace, &all_output, Some(WorkspaceExportFormat::Json))
+            .unwrap();
+        let all: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(all_output).unwrap()).unwrap();
+        assert_exported_alias_and_priority(
+            &all,
+            "fixture/terminal-critical",
+            "F-0001",
+            "review-order:1",
+        );
+        assert_exported_alias_and_priority(&all, "fixture/open-high", "F-0002", "review-order:2");
+        assert_exported_alias_and_priority(
+            &all,
+            "fixture/terminal-low",
+            "F-0003",
+            "review-order:3",
+        );
+
+        let open_output = tmp.path().join("open-aliases.json");
+        export_workspace_findings_with_options(
+            &workspace,
+            &open_output,
+            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+                .with_completeness(WorkspaceExportCompleteness::Open),
+        )
+        .unwrap();
+        let open: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(open_output).unwrap()).unwrap();
+        assert_eq!(open["findings"].as_array().unwrap().len(), 1);
+        assert_exported_alias_and_priority(&open, "fixture/open-high", "F-0002", "review-order:2");
+
+        let complete_output = tmp.path().join("complete-aliases.json");
+        export_workspace_findings_with_options(
+            &workspace,
+            &complete_output,
+            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+                .with_completeness(WorkspaceExportCompleteness::Complete),
+        )
+        .unwrap();
+        let complete: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(complete_output).unwrap()).unwrap();
+        assert_exported_alias_and_priority(
+            &complete,
+            "fixture/terminal-critical",
+            "F-0001",
+            "review-order:1",
+        );
+        assert_exported_alias_and_priority(
+            &complete,
+            "fixture/terminal-low",
+            "F-0003",
+            "review-order:3",
+        );
+
+        let bundle = tmp.path().join("complete-aliases-bundle");
+        export_workspace_findings_with_options(
+            &workspace,
+            &bundle,
+            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::MarkdownBundle))
+                .with_completeness(WorkspaceExportCompleteness::Complete),
+        )
+        .unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(bundle.join("manifest.json")).unwrap())
+                .unwrap();
+        let aliases = manifest["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|finding| finding["alias"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(aliases, vec!["F-0001", "F-0003"]);
+        let low_markdown = fs::read_to_string(bundle.join("findings/F-0003.md")).unwrap();
+        assert!(low_markdown.starts_with("# F-0003 ·"), "{low_markdown}");
+    }
+
+    #[test]
     fn exports_review_completeness_by_durable_identity() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
@@ -873,6 +1497,7 @@ mod tests {
                     confidence: 0.9,
                     rationale: "operator confirmed the durable finding".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
                 TriageAuthor::Human,
             )
@@ -894,7 +1519,7 @@ mod tests {
                 .with_completeness(WorkspaceExportCompleteness::Complete),
         )
         .unwrap();
-        assert_eq!(complete.count, 2);
+        assert_eq!(complete.count, 1);
 
         let complete_json: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(complete_output).unwrap()).unwrap();
@@ -904,7 +1529,7 @@ mod tests {
             .iter()
             .map(|finding| finding["reviewDecision"].as_str().unwrap())
             .collect::<Vec<_>>();
-        assert_eq!(decisions, vec!["confirmed", "confirmed"]);
+        assert_eq!(decisions, vec!["confirmed"]);
         assert!(complete_json["findings"]
             .as_array()
             .unwrap()
@@ -947,6 +1572,7 @@ mod tests {
                     confidence: 0.91,
                     rationale: "operator rejected prior occurrence".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
                 TriageAuthor::Human,
             )
@@ -960,7 +1586,7 @@ mod tests {
                 .with_completeness(WorkspaceExportCompleteness::Complete),
         )
         .unwrap();
-        assert_eq!(complete.count, 1);
+        assert_eq!(complete.count, 0);
 
         let open_output = tmp.path().join("reappeared-open.json");
         let open = export_workspace_findings_with_options(
@@ -1068,6 +1694,7 @@ mod tests {
                     confidence: 0.9,
                     rationale: "operator confirmed".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
             )
             .unwrap();
@@ -1168,6 +1795,7 @@ mod tests {
                     confidence: 0.9,
                     rationale: "human confirmed this is real".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
                 TriageAuthor::Human,
             )
@@ -1183,6 +1811,7 @@ mod tests {
                     confidence: 0.7,
                     rationale: "auto re-triage thinks this is fp".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
                 TriageAuthor::Auto,
             )

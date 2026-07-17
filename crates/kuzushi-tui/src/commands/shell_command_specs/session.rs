@@ -2,6 +2,12 @@ use super::*;
 
 pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
     ShellCommandSpec {
+        command: "session",
+        aliases: &["/session"],
+        category: ShellCommandCategory::Session,
+        description: "show durable session transcript status",
+    },
+    ShellCommandSpec {
         command: "history",
         aliases: &["/history"],
         category: ShellCommandCategory::Session,
@@ -120,20 +126,6 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &["/quit-confirm"],
         category: ShellCommandCategory::Session,
         description: "show exit confirmation checklist without quitting",
-    },
-    ShellCommandSpec {
-        command: "pwn",
-        aliases: &[
-            "/pwn",
-            "pwn target <path>",
-            "pwn profile",
-            "pwn reverse [function]",
-            "pwn auto",
-            "pwn state",
-            "pwn candidates <target>",
-        ],
-        category: ShellCommandCategory::Session,
-        description: "binary exploitation dashboard and pwn:* workflow actions",
     },
     ShellCommandSpec {
         command: "quit",

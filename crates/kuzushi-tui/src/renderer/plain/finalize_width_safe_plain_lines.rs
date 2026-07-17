@@ -25,7 +25,7 @@ pub(crate) fn should_truncate_plain_line(line: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
-    if line.starts_with("mode:") {
+    if line.starts_with("route:") {
         return true;
     }
     if trimmed.chars().all(|ch| {

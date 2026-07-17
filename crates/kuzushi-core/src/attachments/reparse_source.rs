@@ -16,15 +16,28 @@ pub fn reparse_source(workspace: &WorkspaceTarget, id: &str) -> Result<Attachmen
 
 pub fn known_artifacts(workspace: &WorkspaceTarget, module_id: &str) -> Result<Vec<KnownArtifact>> {
     ensure_supported_module(module_id)?;
-    Ok(known_artifact_candidates(workspace, module_id)
+    known_artifact_candidates(workspace, module_id)
         .into_iter()
-        .map(|(path, description)| KnownArtifact {
-            module_id: module_id.to_string(),
-            path: path.clone(),
-            description: description.to_string(),
-            exists: workspace.root().join(path).exists(),
+        .map(|(path, description)| {
+            Ok(KnownArtifact {
+                module_id: module_id.to_string(),
+                exists: known_artifact_exists(workspace, &path)?,
+                path,
+                description: description.to_string(),
+            })
         })
-        .collect())
+        .collect()
+}
+
+fn known_artifact_exists(workspace: &WorkspaceTarget, relative: &str) -> Result<bool> {
+    let path = crate::workspace::validated_workspace_descendant(workspace.root(), relative)?;
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => {
+            Err(error).with_context(|| format!("Could not inspect artifact {}", path.display()))
+        }
+    }
 }
 
 fn known_artifact_candidates(
@@ -42,7 +55,9 @@ fn known_artifact_candidates(
 
 fn context_known_artifacts(workspace: &WorkspaceTarget) -> Vec<(String, &'static str)> {
     vec![(
-        known_artifact_relative_path(workspace, |root| crate::context::context_snapshot_path(root)),
+        known_artifact_relative_path(workspace, |root| {
+            crate::context::context_snapshot_path(root)
+        }),
         "context snapshot",
     )]
 }
@@ -93,8 +108,7 @@ fn known_artifact_relative_path(
     artifact_path: impl FnOnce(&Path) -> PathBuf,
 ) -> String {
     let path = artifact_path(workspace.root());
-    path
-        .strip_prefix(workspace.root())
+    path.strip_prefix(workspace.root())
         .unwrap_or(&path)
         .to_string_lossy()
         .replace('\\', "/")
@@ -110,12 +124,16 @@ pub(crate) fn ensure_supported_module(module_id: &str) -> Result<()> {
 }
 
 pub(crate) fn load_store(workspace: &WorkspaceTarget) -> Result<AttachmentStoreFile> {
+    const MAX_ATTACHMENT_STORE_BYTES: usize = 4 * 1024 * 1024;
     let path = attachment_store_path(workspace);
-    if !path.exists() {
+    let Some(body) = crate::workspace::read_optional_workspace_text(
+        workspace.root(),
+        &path,
+        MAX_ATTACHMENT_STORE_BYTES,
+    )?
+    else {
         return Ok(AttachmentStoreFile::default());
-    }
-    let body =
-        fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
+    };
     let value: serde_json::Value = serde_json::from_str(&body)
         .with_context(|| format!("Could not parse {}", path.display()))?;
     if value.is_array() {
@@ -130,11 +148,14 @@ pub(crate) fn load_store(workspace: &WorkspaceTarget) -> Result<AttachmentStoreF
 }
 
 pub(crate) fn save_store(workspace: &WorkspaceTarget, store: &AttachmentStoreFile) -> Result<()> {
-    workspace.ensure_state_dir()?;
     let path = attachment_store_path(workspace);
     let body = format!("{}\n", serde_json::to_string_pretty(store)?);
-    crate::fs_atomic::write_atomic(&path, &body)
-        .with_context(|| format!("Could not write {}", path.display()))
+    let relative = path
+        .strip_prefix(workspace.root())
+        .context("Attachment store escaped the workspace")?;
+    crate::workspace::write_workspace_state_file(workspace.root(), relative, body.as_bytes())
+        .with_context(|| format!("Could not write {}", path.display()))?;
+    Ok(())
 }
 
 pub(crate) fn upsert_record(

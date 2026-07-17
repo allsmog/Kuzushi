@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { PatchResultSchema } from "../../src/index.js";
 import type { KwpExecutionContext, KwpRuntimeHandle } from "../../src/modules/index.js";
 import * as moduleSdk from "../../src/modules/index.js";
 // Import exactly through the public-surface barrel to assert that the
@@ -47,5 +48,25 @@ describe("kuzushi/modules public barrel", () => {
   it("keeps retired built-in factory symbols as migration stubs", () => {
     expect(typeof createCoreSastModule).toBe("function");
     expect(() => createCoreSastModule()).toThrow(/retired from the public SDK/);
+  });
+
+  it("preserves unresolved patch spend in the public PatchResult schema", () => {
+    const result = PatchResultSchema.parse({
+      patchRunId: "patch-1",
+      fingerprint: "fp-1",
+      repo: "/repo",
+      diff: null,
+      status: "UNKNOWN",
+      iterations: 1,
+      costUsd: 0.25,
+      providerSpendUnresolved: true,
+      history: [],
+    });
+
+    expect(result.costUsd).toBe(0.25);
+    expect(result.providerSpendUnresolved).toBe(true);
+    expect(
+      PatchResultSchema.safeParse({ ...result, costUsd: Number.POSITIVE_INFINITY }).success,
+    ).toBe(false);
   });
 });

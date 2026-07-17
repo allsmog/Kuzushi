@@ -10,7 +10,13 @@ pub(crate) fn analyze_deno_import_manifest(
     };
 
     let mut out = Vec::new();
-    analyze_import_scope(file_path, manifest, "imports", parsed.get("imports"), &mut out);
+    analyze_import_scope(
+        file_path,
+        manifest,
+        "imports",
+        parsed.get("imports"),
+        &mut out,
+    );
     analyze_scoped_imports(file_path, manifest, &parsed, &mut out);
     out
 }

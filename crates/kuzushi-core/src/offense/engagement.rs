@@ -10,7 +10,9 @@ use super::chain::AttackChain;
 use super::engagement_scope::EngagementScope;
 use super::spec::ChainSpec;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+const MAX_ENGAGEMENT_FILE_BYTES: usize = 1024 * 1024;
 
 /// A ready-to-run chain: the authorized-scope policy, the target host string,
 /// and the executable chain, all resolved and checked.
@@ -51,7 +53,7 @@ fn resolve_scope(input: &Value, workspace_root: &Path) -> Result<EngagementScope
             .map_err(|err| format!("invalid inline scope: {err}"));
     }
     let path = workspace_root.join(".kuzushi/engagement-scope.json");
-    let contents = read_required(&path, "engagement scope")?;
+    let contents = read_required(workspace_root, &path, "engagement scope")?;
     serde_json::from_str(&contents).map_err(|err| format!("invalid {}: {err}", path.display()))
 }
 
@@ -62,30 +64,37 @@ fn resolve_chain_spec(input: &Value, workspace_root: &Path) -> Result<ChainSpec,
     }
     let name = string_field(input, &["chainFile", "chain_file", "play"])
         .ok_or_else(|| "offense:chain requires a chain (inline) or chainFile name".to_string())?;
-    let path = chain_file_path(workspace_root, &name);
-    let contents = read_required(&path, "chain spec")?;
+    let path = chain_file_path(workspace_root, &name)?;
+    let contents = read_required(workspace_root, &path, "chain spec")?;
     serde_json::from_str(&contents).map_err(|err| format!("invalid {}: {err}", path.display()))
 }
 
 /// `.kuzushi/plays/<name>.json`, accepting `name`, `name.json`, or a relative
 /// path under the workspace. Rejects absolute paths and `..` traversal.
-fn chain_file_path(workspace_root: &Path, name: &str) -> PathBuf {
+fn chain_file_path(workspace_root: &Path, name: &str) -> Result<PathBuf, String> {
     let trimmed = name.trim().trim_end_matches(".json");
-    workspace_root
+    let relative = Path::new(trimmed);
+    if trimmed.is_empty()
+        || relative
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("chainFile must be a non-empty relative path without traversal".to_string());
+    }
+    Ok(workspace_root
         .join(".kuzushi/plays")
-        .join(format!("{trimmed}.json"))
+        .join(format!("{trimmed}.json")))
 }
 
-fn read_required(path: &Path, label: &str) -> Result<String, String> {
-    if path.components().any(|c| c.as_os_str() == "..") {
-        return Err(format!("{label} path must not traverse with .."));
-    }
-    std::fs::read_to_string(path).map_err(|err| {
-        format!(
-            "could not read {label} at {}: {err}; declare it inline or create the file",
-            path.display()
-        )
-    })
+fn read_required(workspace_root: &Path, path: &Path, label: &str) -> Result<String, String> {
+    crate::workspace::read_workspace_text(workspace_root, path, MAX_ENGAGEMENT_FILE_BYTES).map_err(
+        |err| {
+            format!(
+                "could not read {label} at {}: {err}; declare it inline or create the file",
+                path.display()
+            )
+        },
+    )
 }
 
 fn string_field(input: &Value, keys: &[&str]) -> Option<String> {
@@ -176,6 +185,28 @@ mod tests {
         .unwrap();
         let input = json!({"target": "10.0.0.5", "chainFile": "../../etc/passwd"});
         let err = prepare_chain_run(&input, dir.path()).unwrap_err();
-        assert!(err.contains(".."));
+        assert!(err.contains("chainFile"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_scope_and_chain_do_not_follow_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(workspace.path().join(".kuzushi/plays")).unwrap();
+        let secret = outside.path().join("secret.json");
+        std::fs::write(&secret, inline_chain().to_string()).unwrap();
+        symlink(&secret, workspace.path().join(".kuzushi/plays/probe.json")).unwrap();
+
+        let input = json!({
+            "target": "10.0.0.5",
+            "scope": inline_scope(),
+            "chainFile": "probe"
+        });
+        let error = prepare_chain_run(&input, workspace.path()).unwrap_err();
+
+        assert!(error.contains("chain spec"));
     }
 }

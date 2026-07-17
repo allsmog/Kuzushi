@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+const GOVULNCHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 #[derive(Debug, Clone, Default)]
 pub struct GovulncheckScanner;
 
@@ -23,42 +25,59 @@ impl ScanEngine for GovulncheckScanner {
             anyhow::bail!("govulncheck scan cancelled");
         }
         ensure_govulncheck_available()?;
-        let output = Command::new("govulncheck")
+        let mut command = Command::new("govulncheck");
+        command
             .args(["-json", "./..."])
             .current_dir(target)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .with_context(|| "govulncheck: failed to invoke `govulncheck -json ./...`")?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let findings = parse_govulncheck_json(target, &stdout);
-        if !output.status.success() && findings.is_empty() {
+            .stderr(Stdio::piped());
+        let output = crate::bounded_subprocess::output_with_control(
+            &mut command,
+            "govulncheck",
+            Some(cancellation),
+            GOVULNCHECK_TIMEOUT,
+        )
+        .with_context(|| "govulncheck: failed to invoke `govulncheck -json ./...`")?;
+        if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("govulncheck failed: {}", stderr.trim());
         }
-        Ok(findings)
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        parse_govulncheck_json(target, &stdout)
     }
 }
 
-pub fn parse_govulncheck_json(target: &Path, text: &str) -> Vec<Finding> {
-    let events = govulncheck_events(text);
+pub fn parse_govulncheck_json(target: &Path, text: &str) -> Result<Vec<Finding>> {
+    let events = govulncheck_events(text)?;
+    anyhow::ensure!(
+        !events.is_empty(),
+        "govulncheck returned no JSON events; refusing a false-clean result"
+    );
     let advisories = govulncheck_advisories(&events);
     events
         .iter()
         .filter_map(|event| event.finding.as_ref())
-        .filter_map(|finding| govulncheck_finding(target, finding, &advisories))
+        .enumerate()
+        .map(|(index, finding)| {
+            govulncheck_finding(target, finding, &advisories)
+                .with_context(|| format!("govulncheck finding event {} is invalid", index + 1))
+        })
         .collect()
 }
 
-fn govulncheck_events(text: &str) -> Vec<GovulncheckEvent> {
+fn govulncheck_events(text: &str) -> Result<Vec<GovulncheckEvent>> {
     text.lines()
-        .filter_map(|line| serde_json::from_str::<GovulncheckEvent>(line).ok())
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .map(|(index, line)| {
+            serde_json::from_str::<GovulncheckEvent>(line).with_context(|| {
+                format!("govulncheck returned malformed JSONL at line {}", index + 1)
+            })
+        })
         .collect()
 }
 
-fn govulncheck_advisories(
-    events: &[GovulncheckEvent],
-) -> BTreeMap<String, GovulncheckAdvisory> {
+fn govulncheck_advisories(events: &[GovulncheckEvent]) -> BTreeMap<String, GovulncheckAdvisory> {
     events
         .iter()
         .filter_map(|event| event.osv.clone())
@@ -70,22 +89,24 @@ fn govulncheck_finding(
     target: &Path,
     finding: &GovulncheckFinding,
     advisories: &BTreeMap<String, GovulncheckAdvisory>,
-) -> Option<Finding> {
-    let advisory_id = finding.osv.as_deref()?;
+) -> Result<Finding> {
+    let advisory_id = finding
+        .osv
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .context("missing non-empty osv id")?;
     let advisory = advisories.get(advisory_id);
     let (file_path, line) = finding_location(target, finding);
-    Some(
-        Finding::new_tool(
-            "govulncheck",
-            format!("govulncheck/{advisory_id}"),
-            file_path,
-            line,
-            None,
-            Severity::High,
-            finding_message(advisory_id, advisory, finding),
-        )
-        .with_static_proof_state(StaticProofState::CodeCited),
+    Ok(Finding::new_tool(
+        "govulncheck",
+        format!("govulncheck/{advisory_id}"),
+        file_path,
+        line,
+        None,
+        Severity::High,
+        finding_message(advisory_id, advisory, finding),
     )
+    .with_static_proof_state(StaticProofState::CodeCited))
 }
 
 fn finding_location(target: &Path, finding: &GovulncheckFinding) -> (String, u32) {
@@ -94,8 +115,18 @@ fn finding_location(target: &Path, finding: &GovulncheckFinding) -> (String, u32
         .iter()
         .flatten()
         .filter_map(|frame| frame.position.as_ref())
-        .find_map(|position| position.filename.as_deref().map(|file| (file, position.line)))
-        .map(|(file, line)| (relative_display(target, Path::new(file)), line.unwrap_or(1).max(1)))
+        .find_map(|position| {
+            position
+                .filename
+                .as_deref()
+                .map(|file| (file, position.line))
+        })
+        .map(|(file, line)| {
+            (
+                relative_display(target, Path::new(file)),
+                line.unwrap_or(1).max(1),
+            )
+        })
         .unwrap_or_else(|| ("go.mod".to_string(), 1))
 }
 
@@ -119,7 +150,11 @@ fn finding_message(
         .and_then(|advisory| advisory.summary.as_deref())
         .unwrap_or(advisory_id);
     let mut message = format!("{advisory_id}: {summary}");
-    if let Some(version) = finding.fixed_version.as_deref().filter(|value| !value.is_empty()) {
+    if let Some(version) = finding
+        .fixed_version
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
         message.push_str(&format!("; fixed in {version}"));
     }
     if let Some(frame) = first_trace_label(finding) {
@@ -199,11 +234,12 @@ mod tests {
 
     #[test]
     fn parses_reachable_vulnerability_events() {
-        let json = r#"{"osv":{"id":"GO-2024-0001","summary":"path traversal in proxy"}}"#.to_string()
+        let json = r#"{"osv":{"id":"GO-2024-0001","summary":"path traversal in proxy"}}"#
+            .to_string()
             + "\n"
             + r#"{"finding":{"osv":"GO-2024-0001","fixed_version":"v1.2.3","trace":[{"function":"main.run","position":{"filename":"cmd/proxy/main.go","line":42}}]}}"#;
 
-        let findings = parse_govulncheck_json(Path::new("/repo"), &json);
+        let findings = parse_govulncheck_json(Path::new("/repo"), &json).unwrap();
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].tool, "govulncheck");
@@ -211,5 +247,24 @@ mod tests {
         assert_eq!(findings[0].file_path, "cmd/proxy/main.go");
         assert_eq!(findings[0].start_line, 42);
         assert!(findings[0].message.contains("fixed in v1.2.3"));
+    }
+
+    #[test]
+    fn rejects_malformed_or_empty_jsonl_instead_of_reporting_clean() {
+        assert!(parse_govulncheck_json(Path::new("/repo"), "not-json\n").is_err());
+        assert!(parse_govulncheck_json(Path::new("/repo"), "\n").is_err());
+        assert!(parse_govulncheck_json(Path::new("/repo"), r#"{"finding":{}}"#).is_err());
+    }
+
+    #[test]
+    fn cancelled_scan_stops_before_govulncheck_preflight() {
+        let cancellation = ScanCancellation::default();
+        cancellation.cancel();
+
+        let error = GovulncheckScanner
+            .scan(Path::new("."), &cancellation)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
     }
 }

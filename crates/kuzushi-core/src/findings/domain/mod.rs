@@ -8,6 +8,7 @@ mod finding_identity;
 mod finding_record;
 mod from_semgrep;
 mod now_isoish;
+mod patch_lifecycle;
 mod patch_status;
 mod persisted_results;
 mod proof_confidence;
@@ -28,10 +29,11 @@ pub use finding_record::{
 };
 pub use from_semgrep::{Severity, VulnSource};
 pub(crate) use now_isoish::now_isoish;
+pub use patch_lifecycle::{PatchLifecycleFile, PatchLifecycleRecord, PatchLifecycleState};
 pub use patch_status::PatchStatus;
 pub use persisted_results::{
-    PatchAttempt, PatchResult, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, TriageAuthor, TriageVerdict,
+    PatchAttempt, PatchAttemptSummary, PatchProvenance, PatchResult, PersistedProofVerdict,
+    PersistedSandboxBackend, PersistedVerification, TriageAuthor, TriageVerdict,
 };
 pub use proof_confidence::ProofConfidence;
 pub use review_decision::{

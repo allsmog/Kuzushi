@@ -6,7 +6,9 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_requirements_txt(
 ) -> Vec<DepHygieneFinding> {
     raw.lines()
         .filter_map(requirement_line)
-        .filter_map(|spec| analyze_pep508_for_manifest(ManifestKind::RequirementsTxt, file_path, spec))
+        .filter_map(|spec| {
+            analyze_pep508_for_manifest(ManifestKind::RequirementsTxt, file_path, spec)
+        })
         .collect()
 }
 

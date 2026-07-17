@@ -15,10 +15,20 @@ pub(in crate::modules) fn triage_summary(
         stats.needs_review
     );
     append_by_design_summary(&mut summary, stats.by_design);
-    summary.push_str(&format!("\n      cost=${:.4}", stats.total_cost));
+    append_cost_summary(&mut summary, stats);
     append_cost_cap_summary(&mut summary, stats);
     append_missing_fingerprints_summary(&mut summary, missing_fingerprints);
     summary
+}
+
+fn append_cost_summary(summary: &mut String, stats: &TriageRunStats) {
+    let cost = stats.cost_report();
+    let label = if cost.is_complete() {
+        "cost"
+    } else {
+        "observed cost (provider spend unresolved)"
+    };
+    summary.push_str(&format!("\n      {label}=${:.4}", cost.observed_usd()));
 }
 
 pub(in crate::modules) fn append_by_design_summary(summary: &mut String, by_design: usize) {
@@ -152,7 +162,9 @@ fn finding_has_review_decision(store: &FindingStore, finding: &Finding) -> Resul
         return Ok(true);
     }
     if let Some(identity_id) = finding.identity_id.as_deref() {
-        return Ok(store.latest_review_decision_for_identity(identity_id)?.is_some());
+        return Ok(store
+            .latest_review_decision_for_identity(identity_id)?
+            .is_some());
     }
     finding
         .id

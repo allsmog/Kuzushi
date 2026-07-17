@@ -11,11 +11,28 @@ pub(crate) use rg_engine::rg_available;
 pub(crate) fn extract_taint_iris_next_evidence(
     plan: &TaintIrisNextPlan,
 ) -> Result<TaintIrisNextEvidenceResult> {
-    let mut candidates = collect_taint_iris_next_candidates(plan)?;
+    let collected = collect_candidate_and_backend_evidence(plan)?;
+    Ok(project_evidence_result(plan, collected))
+}
+
+struct CollectedEvidence {
+    candidates: Vec<TaintIrisNextCandidate>,
+    linked_stories: Vec<TaintIrisNextLinkedStory>,
+    backend_path_count: usize,
+    structural_engine: String,
+    warnings: Vec<String>,
+}
+
+fn collect_candidate_and_backend_evidence(plan: &TaintIrisNextPlan) -> Result<CollectedEvidence> {
+    let structural = structural_candidates::collect_structural_candidates(plan)?;
+    let structural_engine = structural.engine;
+    let mut candidates = collect_taint_iris_next_candidates(plan, structural.candidates)?;
     let mut warnings = plan.backend.warnings.clone();
-    let primary = primary_backend_evidence(plan, &mut candidates, &mut warnings);
-    let mut linked_stories = primary.linked_stories;
-    let mut backend_path_count = primary.backend_path_count;
+    warnings.extend(structural.warning);
+    let BackendEvidence {
+        mut linked_stories,
+        mut backend_path_count,
+    } = primary_backend_evidence(plan, &mut candidates, &mut warnings);
     corroborate_with_codeql(
         plan,
         &mut candidates,
@@ -23,7 +40,26 @@ pub(crate) fn extract_taint_iris_next_evidence(
         &mut backend_path_count,
         &mut warnings,
     );
+    Ok(CollectedEvidence {
+        candidates,
+        linked_stories,
+        backend_path_count,
+        structural_engine,
+        warnings,
+    })
+}
 
+fn project_evidence_result(
+    plan: &TaintIrisNextPlan,
+    collected: CollectedEvidence,
+) -> TaintIrisNextEvidenceResult {
+    let CollectedEvidence {
+        candidates,
+        linked_stories,
+        backend_path_count,
+        structural_engine,
+        warnings,
+    } = collected;
     let linked_by_candidate = result_summary::linked_story_ids_by_candidate(&linked_stories);
     let mut evidence =
         evidence_projection::project_candidate_evidence(&candidates, &linked_by_candidate);
@@ -36,7 +72,7 @@ pub(crate) fn extract_taint_iris_next_evidence(
     let finding_count = linked_story_count;
     let candidate_count = evidence.len().saturating_sub(finding_count);
 
-    Ok(TaintIrisNextEvidenceResult {
+    TaintIrisNextEvidenceResult {
         backend: plan.backend.selected.clone(),
         tool: result_summary::selected_tool(plan),
         evidence,
@@ -48,26 +84,34 @@ pub(crate) fn extract_taint_iris_next_evidence(
         labeled_spec_counts,
         linked_story_count,
         backend_path_count,
-        structural_engine: plan.backend.structural_tool.clone(),
-        triage_summary: json!({
-            "finding": finding_count,
-            "candidate": candidate_count,
-            "rejected": 0,
-        }),
+        structural_engine,
+        triage_summary: evidence_triage_summary(finding_count, candidate_count),
         outcome: result_summary::outcome(linked_story_count, candidate_count).to_string(),
         warnings,
-        artifacts: json!({
-            "codeqlLanguage": Value::Null,
-            "codeqlQueryPath": Value::Null,
-            "codeqlCompileStatus": "not-run",
-        }),
+        artifacts: not_run_codeql_artifacts(),
+    }
+}
+
+fn evidence_triage_summary(finding_count: usize, candidate_count: usize) -> Value {
+    json!({
+        "finding": finding_count,
+        "candidate": candidate_count,
+        "rejected": 0,
+    })
+}
+
+fn not_run_codeql_artifacts() -> Value {
+    json!({
+        "codeqlLanguage": Value::Null,
+        "codeqlQueryPath": Value::Null,
+        "codeqlCompileStatus": "not-run",
     })
 }
 
 fn collect_taint_iris_next_candidates(
     plan: &TaintIrisNextPlan,
+    raw_candidates: Vec<TaintIrisNextCandidate>,
 ) -> Result<Vec<TaintIrisNextCandidate>> {
-    let raw_candidates = structural_candidates::collect_structural_candidates(plan)?;
     // Fold the per-target source/sink discovery sweep into the raw
     // candidate stream BEFORE syntactic narrowing so discovery's
     // marker-regex matches go through the same comment/string-literal
@@ -348,12 +392,8 @@ fn run_identifier_injection_detector_for_plan(
     // Match the discovery sweep's file budget so a 100k-file repo
     // doesn't double its disk-read cost just for the detector.
     let max_files = plan.caps.max_files_per_query.saturating_mul(8).max(2_000);
-    let files =
-        match collect_taint_iris_next_source_paths(&plan.scan_root, Some(max_files)) {
-            Ok(files) => files,
-            Err(_) => return Vec::new(),
-        };
-    let matches = detect_identifier_injection_in_paths(&files);
+    let paths = &plan.source_paths[..plan.source_paths.len().min(max_files)];
+    let matches = detect_identifier_injection_in_paths(paths);
     candidates_from_identifier_injection_matches(&matches, &plan.cwe_focus)
 }
 

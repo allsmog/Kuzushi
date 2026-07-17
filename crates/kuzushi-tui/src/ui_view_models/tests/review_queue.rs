@@ -1,9 +1,18 @@
 use super::*;
+use crate::app::{Msg, ShellEffect, TermEvent, WorkbenchPage, WorkbenchPane};
+use crate::commands::ReviewDecisionCommand;
+use crate::ui_view_models::findings::projected_visible_finding_pairs;
+use crate::ui_view_models::{
+    current_finding_for_detail, phase_cockpit_model_for_phase, PhaseCockpitBody,
+};
+use crate::{InputMode, PendingPatch, WorkflowPhase};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::findings::{
     ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, TriageAuthor,
 };
 use kuzushi_core::{
-    Finding, FindingEvidence, Severity, StaticProofState, TriageOutcome, TriageVerdict, V2Config,
+    Finding, FindingEvidence, PersistedProofVerdict, PersistedSandboxBackend,
+    PersistedVerification, Severity, StaticProofState, TriageOutcome, TriageVerdict, V2Config,
 };
 
 fn finding(rule: &str, severity: Severity, line: u32) -> Finding {
@@ -16,6 +25,7 @@ fn confirmed(mut finding: Finding) -> Finding {
         confidence: 0.93,
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding
 }
@@ -26,6 +36,7 @@ fn human_confirmed(mut finding: Finding, confidence: f32) -> Finding {
         confidence,
         rationale: "human reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     finding
@@ -61,7 +72,7 @@ fn review_queue_model_separates_open_and_terminal_decisions() {
     assert_eq!(open_model.visible_count, 1);
     assert_eq!(open_model.open_count, 1);
     assert_eq!(open_model.complete_count, 1);
-    assert_eq!(open_model.filter_label, "decision:open");
+    assert_eq!(open_model.filter_label, "completeness:open");
     assert_eq!(
         open_model.header,
         "REVIEW QUEUE - showing 1 of 2 - 1 open - 1 complete"
@@ -73,14 +84,25 @@ fn review_queue_model_separates_open_and_terminal_decisions() {
     assert_eq!(open_model.rows[0].confidence_label, "-");
     assert_eq!(open_model.rows[0].lifecycle_status, "statically_supported");
     assert_eq!(open_model.rows[0].evidence_state, "evidence:1");
-    assert!(open_model.rows[0].selected);
+    assert!(open_model.row_is_selected(0));
 
     let complete_model = review_queue_model(&app, ReviewQueueMode::Complete);
     assert_eq!(complete_model.visible_count, 1);
     assert_eq!(complete_model.rows[0].decision, "confirmed");
     assert!(complete_model.rows[0].decision_complete);
     assert_eq!(complete_model.rows[0].confidence_label, "93%");
-    assert_eq!(complete_model.rows[0].next_action, "decision_complete");
+    assert_eq!(complete_model.rows[0].next_action, "review complete");
+}
+
+#[test]
+fn review_queue_model_names_the_active_findings_filter() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![finding("path-traversal", Severity::High, 20)];
+    app.set_active_findings_filter(Some("severity:high".to_string()));
+
+    let model = review_queue_model(&app, ReviewQueueMode::Open);
+
+    assert_eq!(model.filter_label, "severity:high");
 }
 
 #[test]
@@ -110,8 +132,352 @@ fn review_queue_model_marks_cursor_row_when_no_finding_is_pinned() {
 
     let model = review_queue_model(&app, ReviewQueueMode::All);
 
-    assert!(!model.rows[0].selected);
-    assert!(model.rows[1].selected);
+    assert!(!model.row_is_selected(0));
+    assert!(model.row_is_selected(1));
+}
+
+#[test]
+fn review_queue_rows_are_reused_across_cursor_only_navigation() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_findings(
+        (0..400)
+            .map(|index| finding(&format!("rule-{index:04}"), Severity::High, index + 1))
+            .collect(),
+    );
+
+    let first = review_queue_model(&app, ReviewQueueMode::All);
+    app.router.findings_mut().set_cursor(1);
+    let navigated = review_queue_model(&app, ReviewQueueMode::All);
+
+    assert!(std::sync::Arc::ptr_eq(&first.rows, &navigated.rows));
+    assert!(navigated.row_is_selected(1));
+    app.findings_mut()[0].severity = Severity::Critical;
+    let refreshed = review_queue_model(&app, ReviewQueueMode::All);
+    assert!(!std::sync::Arc::ptr_eq(&navigated.rows, &refreshed.rows));
+}
+
+#[test]
+fn review_queue_cursor_identity_wins_over_a_stale_pinned_finding() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![
+        finding("first", Severity::High, 1),
+        finding("second", Severity::Medium, 2),
+    ];
+    let projected = projected_visible_finding_pairs(&app);
+    assert_eq!(projected.len(), 2);
+    *app.selected_finding_mut() = Some(projected[0].1.clone());
+    app.router.findings_mut().set_cursor(1);
+
+    let model = review_queue_model(&app, ReviewQueueMode::All);
+    let selected = model.selected().expect("cursor row selected");
+    let detail = crate::ui_view_models::current_finding_for_detail(&app).expect("cursor detail");
+
+    assert_eq!(selected.alias, projected[1].0);
+    assert_eq!(detail.1.fingerprint, projected[1].1.fingerprint);
+
+    app.open_finding_at_cursor();
+    assert_eq!(
+        app.selected_finding()
+            .as_ref()
+            .map(|finding| &finding.fingerprint),
+        Some(&projected[1].1.fingerprint)
+    );
+}
+
+#[test]
+fn repeated_j_crosses_workflow_group_boundary_without_identity_drift() {
+    let mut confirmed = finding("confirmed", Severity::Critical, 3);
+    confirmed.triage = Some(TriageOutcome {
+        verdict: TriageVerdict::TruePositive,
+        confidence: 0.99,
+        rationale: "runtime confirmed".to_string(),
+        cost_usd: 0.0,
+        cost_usd_exact: true,
+    });
+    confirmed.verification = Some(PersistedVerification {
+        proof_level: 3,
+        proof_verdict: PersistedProofVerdict::Exploited,
+        backend: PersistedSandboxBackend::Plain,
+        language: None,
+        harness_path: None,
+        crash_evidence: None,
+        duration_ms: 1,
+        cost_usd: 0.0,
+        notes: Vec::new(),
+        verification_run_id: None,
+        verified_scan_id: None,
+        created_at: "2026-07-09T00:00:00Z".to_string(),
+    });
+    let needs_high = finding("needs-high", Severity::High, 1);
+    let needs_low = finding("needs-low", Severity::Low, 2);
+    let needs_low_fingerprint = needs_low.fingerprint.clone();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![confirmed, needs_low, needs_high];
+    app.set_shell_view(crate::ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Review));
+    app.router
+        .workbench_mut()
+        .set_focus(crate::WorkbenchPane::Findings);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    let model = review_queue_model(&app, ReviewQueueMode::All);
+    assert_eq!(model.rows[0].rule, "confirmed");
+    assert_eq!(model.rows[1].rule, "needs-high");
+    assert_eq!(model.rows[2].rule, "needs-low");
+    assert_eq!(model.rows[0].workflow_group, ReviewWorkflowGroup::Confirmed);
+    assert_eq!(
+        model.rows[1].workflow_group,
+        ReviewWorkflowGroup::NeedsReview
+    );
+
+    press_workbench_key(&mut app, crossterm::event::KeyCode::Char('j'));
+    let model = review_queue_model(&app, ReviewQueueMode::All);
+    assert_eq!(model.rows[1].rule, "needs-high");
+    assert!(model.row_is_selected(1));
+
+    press_workbench_key(&mut app, crossterm::event::KeyCode::Char('j'));
+    let model = review_queue_model(&app, ReviewQueueMode::All);
+    assert_eq!(model.rows[2].rule, "needs-low");
+    assert_eq!(
+        model.rows[2].workflow_group,
+        ReviewWorkflowGroup::NeedsReview
+    );
+    assert!(model.row_is_selected(2));
+    let detail = crate::ui_view_models::current_finding_for_detail(&app).expect("cursor detail");
+    assert_eq!(detail.1.fingerprint, needs_low_fingerprint);
+
+    press_workbench_key(&mut app, crossterm::event::KeyCode::Enter);
+    assert_eq!(
+        app.selected_finding()
+            .as_ref()
+            .map(|finding| &finding.fingerprint),
+        Some(&needs_low_fingerprint)
+    );
+}
+
+#[test]
+fn canonical_projection_keeps_workflow_groups_as_metadata_only() {
+    let needs_review = identity_finding("needs-review", Severity::Medium, 1, 1, "fi_needs_review");
+    let confirmed = human_confirmed(
+        identity_finding("confirmed", Severity::Low, 2, 2, "fi_confirmed"),
+        0.91,
+    );
+    let deferred = identity_finding("deferred", Severity::Critical, 3, 3, "fi_deferred");
+    let closed = human_rejected(identity_finding(
+        "closed",
+        Severity::High,
+        4,
+        4,
+        "fi_closed",
+    ));
+    let deferred_decision = review_decision_record(&deferred, 10, ReviewDecisionVerdict::Deferred);
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![closed, confirmed, deferred, needs_review];
+    app.set_review_decisions(vec![deferred_decision]);
+
+    let projected = projected_visible_finding_pairs(&app);
+    let rules = projected
+        .iter()
+        .map(|(_, finding)| finding.rule_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rules,
+        vec!["deferred", "needs-review", "confirmed", "closed"]
+    );
+
+    let groups = review_queue_model(&app, ReviewQueueMode::All)
+        .rows
+        .iter()
+        .map(|row| row.workflow_group)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        groups,
+        vec![
+            ReviewWorkflowGroup::Deferred,
+            ReviewWorkflowGroup::NeedsReview,
+            ReviewWorkflowGroup::Confirmed,
+            ReviewWorkflowGroup::Closed,
+        ]
+    );
+}
+
+#[test]
+fn decision_group_change_preserves_confidence_order_and_cockpit_identity() {
+    let mut selected =
+        identity_finding("selected", Severity::Critical, 1, 1, "fi_selected_identity");
+    selected.file_path = "src/auth/login.rs".to_string();
+    selected.fingerprint = "selected-fingerprint".to_string();
+    selected.dedup_key = Some("selected-key".to_string());
+    let mut other = identity_finding("other", Severity::Low, 2, 2, "fi_other_identity");
+    other.file_path = "src/misc/other.rs".to_string();
+    other.fingerprint = "other-fingerprint".to_string();
+    other.dedup_key = Some("other-key".to_string());
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![selected.clone(), other.clone()];
+    *app.selected_finding_mut() = Some(selected.clone());
+    app.sync_findings_cursor_to_selected();
+    assert_eq!(
+        projected_visible_finding_pairs(&app)[0].1.fingerprint,
+        selected.fingerprint
+    );
+
+    app.set_review_decisions(vec![review_decision_record(
+        &selected,
+        20,
+        ReviewDecisionVerdict::Deferred,
+    )]);
+    app.sync_findings_cursor_to_selected();
+
+    let projected = projected_visible_finding_pairs(&app);
+    assert_eq!(projected[0].1.fingerprint, selected.fingerprint);
+    assert_eq!(projected[1].1.fingerprint, other.fingerprint);
+    assert_eq!(app.router.findings().cursor(), 0);
+    assert_projected_identity_across_phase_models(&app, &selected, &projected[0].0);
+    assert_projected_identity_across_actions(&mut app, &selected, &projected[0].0);
+}
+
+fn assert_projected_identity_across_phase_models(app: &ShellApp, selected: &Finding, alias: &str) {
+    let review = review_queue_model(app, ReviewQueueMode::All);
+    let selected_row = review.selected().unwrap();
+    assert_eq!(selected_row.alias, alias);
+    assert_eq!(selected_row.workflow_group, ReviewWorkflowGroup::Deferred);
+    assert_eq!(
+        current_finding_for_detail(app).unwrap().1.fingerprint,
+        selected.fingerprint
+    );
+
+    let PhaseCockpitBody::Review(review) =
+        phase_cockpit_model_for_phase(app, WorkflowPhase::Review).body
+    else {
+        panic!("expected Review cockpit");
+    };
+    assert_eq!(review.review.selected().unwrap().alias, alias);
+    assert_eq!(
+        review
+            .finding
+            .as_ref()
+            .map(|finding| finding.fingerprint.as_str()),
+        Some(selected.fingerprint.as_str())
+    );
+
+    let PhaseCockpitBody::Prove(prove) =
+        phase_cockpit_model_for_phase(app, WorkflowPhase::Prove).body
+    else {
+        panic!("expected Prove cockpit");
+    };
+    assert_eq!(prove.finding.unwrap().fingerprint, selected.fingerprint);
+}
+
+fn assert_projected_identity_across_actions(app: &mut ShellApp, selected: &Finding, alias: &str) {
+    prepare_prove_navigation(app);
+    let verify = press_without_running_effects(app, KeyCode::Char('v'));
+    assert!(verify.effects.is_empty());
+    assert!(app.input().starts_with("run verify:exploit {"));
+    assert!(app.input().contains(&selected.fingerprint));
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+
+    app.set_input("");
+    prepare_prove_navigation(app);
+    press_without_running_effects(app, KeyCode::Char('x'));
+    assert_eq!(app.input(), format!("suppress {alias} --reason "));
+    prepare_prove_navigation(app);
+    press_without_running_effects(app, KeyCode::Enter);
+    assert_eq!(
+        app.selected_finding().as_ref().unwrap().fingerprint,
+        selected.fingerprint
+    );
+
+    let decision = app.reduce_review_decision_command(&ReviewDecisionCommand::Record {
+        verdict: "confirmed".to_string(),
+        reason: "runtime proof".to_string(),
+    });
+    let apply = decision.iter().find_map(|effect| match effect {
+        ShellEffect::RecordReviewDecision(apply) => Some(apply),
+        _ => None,
+    });
+    assert_eq!(apply.unwrap().finding.fingerprint, selected.fingerprint);
+
+    app.engagement.set_pending_patch(PendingPatch {
+        alias: alias.to_string(),
+        patch_run_id: "patch-fixture".to_string(),
+        status: kuzushi_core::PatchStatus::Sound,
+        rationale: "parameterize query".to_string(),
+        side_effect: None,
+        diff: "- raw(query)\n+ bind(query)".to_string(),
+        tests: Vec::new(),
+        guardrail: None,
+        staged_at: None,
+    });
+    let PhaseCockpitBody::Fix(fix) = phase_cockpit_model_for_phase(app, WorkflowPhase::Fix).body
+    else {
+        panic!("expected Fix cockpit");
+    };
+    assert_eq!(fix.finding.unwrap().fingerprint, selected.fingerprint);
+    assert_eq!(fix.patch.unwrap().alias, alias);
+}
+
+fn prepare_prove_navigation(app: &mut ShellApp) {
+    app.set_shell_view(crate::ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Prove));
+    app.router
+        .workbench_mut()
+        .set_focus(WorkbenchPane::Findings);
+    app.set_input_mode(InputMode::Navigate);
+}
+
+fn press_without_running_effects(app: &mut ShellApp, code: KeyCode) -> crate::app::UpdateResult {
+    crate::app::update(
+        app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(code, KeyModifiers::empty()))),
+    )
+}
+
+fn press_workbench_key(app: &mut ShellApp, code: crossterm::event::KeyCode) {
+    crate::app::update_and_execute_effects(
+        app,
+        crate::app::Msg::Term(crate::app::TermEvent::Key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::empty(),
+        ))),
+    );
+}
+
+#[test]
+fn review_queue_keeps_confidence_then_severity_order_inside_a_group() {
+    let mut likely_low = finding("likely-low", Severity::Low, 4);
+    likely_low.static_proof_state = Some(StaticProofState::SourceSinkLinked);
+    let mut likely_high = finding("likely-high", Severity::High, 3);
+    likely_high.static_proof_state = Some(StaticProofState::SourceSinkLinked);
+    let unverified_low = finding("unverified-low", Severity::Low, 2);
+    let unverified_critical = finding("unverified-critical", Severity::Critical, 1);
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![unverified_low, likely_low, unverified_critical, likely_high];
+
+    let model = review_queue_model(&app, ReviewQueueMode::All);
+    let order = model
+        .rows
+        .iter()
+        .map(|row| row.rule.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        order,
+        vec![
+            "likely-high",
+            "likely-low",
+            "unverified-critical",
+            "unverified-low"
+        ]
+    );
+    assert!(model
+        .rows
+        .iter()
+        .all(|row| row.workflow_group == ReviewWorkflowGroup::NeedsReview));
 }
 
 #[test]
@@ -236,12 +602,35 @@ fn identity_finding(
     finding
 }
 
+fn review_decision_record(
+    finding: &Finding,
+    id: i64,
+    verdict: ReviewDecisionVerdict,
+) -> ReviewDecisionRecord {
+    ReviewDecisionRecord {
+        id,
+        finding_id: finding.id.expect("persisted test finding"),
+        identity_id: finding.identity_id.clone(),
+        decision: ReviewDecision {
+            verdict,
+            author: TriageAuthor::Human,
+            confidence: 0.88,
+            rationale: "operator decision".to_string(),
+            dismiss_reason: None,
+            actor: None,
+        },
+        triage_verdict: None,
+        created_at: "2026-07-10T00:00:00Z".to_string(),
+    }
+}
+
 fn human_rejected(mut finding: Finding) -> Finding {
     finding.triage = Some(TriageOutcome {
         verdict: TriageVerdict::FalsePositive,
         confidence: 0.91,
         rationale: "operator rejected prior occurrence".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     finding
@@ -263,6 +652,10 @@ fn workflow_groups_map_every_review_decision_without_merging_opposites() {
     );
     assert_eq!(
         workflow_group("accepted_risk", None),
+        ReviewWorkflowGroup::Deferred
+    );
+    assert_eq!(
+        workflow_group("deferred", None),
         ReviewWorkflowGroup::Deferred
     );
     assert_eq!(

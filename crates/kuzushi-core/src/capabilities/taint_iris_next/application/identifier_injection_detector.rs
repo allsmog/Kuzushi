@@ -162,7 +162,7 @@ fn is_c_family_source(file: &TaintIrisNextSourcePath) -> bool {
 }
 
 fn parseable_source_bytes(file: &TaintIrisNextSourcePath) -> Option<Vec<u8>> {
-    let bytes = std::fs::read(&file.absolute_path).ok()?;
+    let bytes = crate::bounded_file::read_regular_bytes(&file.absolute_path, 8 * 1024 * 1024).ok()?;
     (!bytes.is_empty() && !bytes.iter().take(4096).any(|byte| *byte == 0)).then_some(bytes)
 }
 

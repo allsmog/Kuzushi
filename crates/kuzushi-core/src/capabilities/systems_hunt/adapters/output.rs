@@ -33,7 +33,15 @@ impl SystemsHuntReport {
             report_output,
             json!(self),
         );
-        output["costUsd"] = json!(self.cost_usd);
+        let observed =
+            crate::runtime::RuntimeCost::from_usd(self.cost_usd, "systems-hunt report cost")
+                .expect("systems-hunt validates runtime cost before report construction");
+        let cost = if self.cost_usd_exact {
+            crate::runtime::RuntimeCostReport::known(observed)
+        } else {
+            crate::runtime::RuntimeCostReport::incomplete(observed)
+        };
+        crate::module_result::apply_runtime_cost_report(&mut output, cost);
         output
     }
 }
@@ -74,9 +82,11 @@ pub(crate) fn execute_invariant_extract(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let output = run_systems_invariant_extract(input, ctx, runtime)?;
-    Ok(tool_json(
-        format!("systems-hunt invariants: {}", output.invariants.len()),
-        output,
-    ))
+    let output = run_systems_invariant_extract_with_cost(input, ctx, runtime)?;
+    let mut result = tool_json(
+        format!("systems-hunt invariants: {}", output.value.invariants.len()),
+        &output.value,
+    );
+    crate::module_result::apply_runtime_cost_report(&mut result, output.cost_report()?);
+    Ok(result)
 }

@@ -8,7 +8,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{RunTraceStep, append_run_trace_step, next_run_trace_step_number, run_artifact_path};
+use super::{append_run_trace_step, next_run_trace_step_number, run_artifact_path, RunTraceStep};
 
 thread_local! {
     static PARENT_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
@@ -79,12 +79,22 @@ pub struct TraceHandle {
     inner: Arc<TraceHandleInner>,
     module_id: Option<Arc<str>>,
     parent_step: Option<usize>,
+    observation_plan_item_id: Option<crate::run_lifecycle::RunItemId>,
+    observation_plan_revision: u64,
+    observation_task_id: Option<crate::run_lifecycle::RunTaskId>,
+    observation_task_item_id: Option<crate::run_lifecycle::RunItemId>,
+    observation_task_title: Option<Arc<str>>,
+    observation_parent_item_id: Option<crate::run_lifecycle::RunItemId>,
+    observation_attempt_id: Option<crate::run_lifecycle::RunAttemptId>,
+    observation_phase: Option<crate::WorkflowPhase>,
 }
 
 struct TraceHandleInner {
     sink: Arc<dyn TraceSink>,
+    observation: Option<crate::run_lifecycle::RunItemWriter>,
     counter: Arc<AtomicUsize>,
     emit_lock: Arc<Mutex<()>>,
+    rejected_invalid_steps: AtomicU64,
 }
 
 impl TraceHandle {
@@ -96,11 +106,25 @@ impl TraceHandle {
         Self::with_counter(sink, initial_step_number)
     }
 
+    pub(crate) fn with_initial_step_number_and_observation(
+        sink: Arc<dyn TraceSink>,
+        initial_step_number: usize,
+        observation: crate::run_lifecycle::RunItemWriter,
+    ) -> Self {
+        Self::with_shared_state(
+            sink,
+            Arc::new(AtomicUsize::new(initial_step_number)),
+            Arc::new(Mutex::new(())),
+            Some(observation),
+        )
+    }
+
     fn with_counter(sink: Arc<dyn TraceSink>, initial_step_number: usize) -> Self {
         Self::with_shared_state(
             sink,
             Arc::new(AtomicUsize::new(initial_step_number)),
             Arc::new(Mutex::new(())),
+            None,
         )
     }
 
@@ -108,15 +132,26 @@ impl TraceHandle {
         sink: Arc<dyn TraceSink>,
         counter: Arc<AtomicUsize>,
         emit_lock: Arc<Mutex<()>>,
+        observation: Option<crate::run_lifecycle::RunItemWriter>,
     ) -> Self {
         Self {
             inner: Arc::new(TraceHandleInner {
                 sink,
+                observation,
                 counter,
                 emit_lock,
+                rejected_invalid_steps: AtomicU64::new(0),
             }),
             module_id: None,
             parent_step: None,
+            observation_plan_item_id: None,
+            observation_plan_revision: 0,
+            observation_task_id: None,
+            observation_task_item_id: None,
+            observation_task_title: None,
+            observation_parent_item_id: None,
+            observation_attempt_id: None,
+            observation_phase: None,
         }
     }
 
@@ -132,15 +167,65 @@ impl TraceHandle {
         let (counter, emit_lock) = shared_trace_state(&trace_path, || {
             next_run_trace_step_number(&target, &run_id).saturating_sub(1)
         });
-        Self::with_shared_state(Arc::new(JsonlSink::new(target, run_id)), counter, emit_lock)
+        Self::with_shared_state(
+            Arc::new(JsonlSink::new(target, run_id)),
+            counter,
+            emit_lock,
+            None,
+        )
+    }
+
+    pub fn observed_jsonl_with_delivery_subscribers(
+        target: impl Into<PathBuf>,
+        run_id: impl Into<String>,
+        subscriber: Option<crate::run_lifecycle::CommittedItemSubscriber>,
+        range_subscriber: Option<crate::run_lifecycle::CommittedRangeSubscriber>,
+        fault_subscriber: Option<crate::run_lifecycle::RunItemDeliveryFaultSubscriber>,
+    ) -> anyhow::Result<Self> {
+        Self::observed_jsonl_with_derivative_delivery_subscriber(
+            target,
+            run_id,
+            subscriber,
+            range_subscriber,
+            None,
+            fault_subscriber,
+        )
+    }
+
+    pub(crate) fn observed_jsonl_with_derivative_delivery_subscriber(
+        target: impl Into<PathBuf>,
+        run_id: impl Into<String>,
+        subscriber: Option<crate::run_lifecycle::CommittedItemSubscriber>,
+        range_subscriber: Option<crate::run_lifecycle::CommittedRangeSubscriber>,
+        derivative_subscriber: Option<crate::run_lifecycle::DerivativeRangeSubscriber>,
+        fault_subscriber: Option<crate::run_lifecycle::RunItemDeliveryFaultSubscriber>,
+    ) -> anyhow::Result<Self> {
+        let target = target.into();
+        let run_id = run_id.into();
+        let trace_path = run_artifact_path(&target, &run_id, "trace.jsonl");
+        let (counter, emit_lock) = shared_trace_state(&trace_path, || {
+            next_run_trace_step_number(&target, &run_id).saturating_sub(1)
+        });
+        let writer = crate::run_lifecycle::RunItemWriter::open_with_derivative_delivery_subscriber(
+            &target,
+            &run_id,
+            subscriber,
+            range_subscriber,
+            derivative_subscriber,
+            fault_subscriber,
+        )?;
+        Ok(Self::with_shared_state(
+            Arc::new(JsonlSink::new(target, run_id)),
+            counter,
+            emit_lock,
+            Some(writer),
+        ))
     }
 
     pub fn for_module(&self, module_id: impl Into<String>) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-            module_id: Some(Arc::from(module_id.into())),
-            parent_step: self.parent_step,
-        }
+        let mut scoped = self.clone();
+        scoped.module_id = Some(Arc::from(module_id.into()));
+        scoped
     }
 
     pub fn for_tool(&self, tool_name: &str) -> Self {
@@ -148,11 +233,9 @@ impl TraceHandle {
     }
 
     pub fn child(&self, parent_step: usize) -> Self {
-        Self {
-            inner: Arc::clone(&self.inner),
-            module_id: self.module_id.clone(),
-            parent_step: Some(parent_step),
-        }
+        let mut scoped = self.clone();
+        scoped.parent_step = Some(parent_step);
+        scoped
     }
 
     pub fn step<'a>(
@@ -201,7 +284,104 @@ impl TraceHandle {
         self.inner.sink.run_artifact_location()
     }
 
+    pub fn run_observation(&self) -> Option<crate::run_lifecycle::RunObservationHandle> {
+        self.inner.observation.as_ref()?;
+        Some(self.scoped_run_observation())
+    }
+
+    fn scoped_run_observation(&self) -> crate::run_lifecycle::RunObservationHandle {
+        let observation = crate::run_lifecycle::RunObservationHandle::from_trace(self.clone());
+        let observation = self.apply_plan_scope(observation);
+        let observation = self.apply_work_scope(observation);
+        self.apply_attempt_scope(observation)
+    }
+
+    fn apply_plan_scope(
+        &self,
+        observation: crate::run_lifecycle::RunObservationHandle,
+    ) -> crate::run_lifecycle::RunObservationHandle {
+        self.observation_plan_item_id
+            .map_or(observation.clone(), |item_id| {
+                observation.with_plan_scope(item_id, self.observation_plan_revision)
+            })
+    }
+
+    fn apply_work_scope(
+        &self,
+        observation: crate::run_lifecycle::RunObservationHandle,
+    ) -> crate::run_lifecycle::RunObservationHandle {
+        let observation = self
+            .observation_task_id
+            .map_or(observation.clone(), |task_id| observation.for_task(task_id));
+        let observation = match (
+            self.observation_task_item_id,
+            self.observation_task_title.as_deref(),
+        ) {
+            (Some(item_id), Some(title)) => observation.with_task_scope(item_id, title),
+            _ => observation,
+        };
+        self.observation_parent_item_id
+            .map_or(observation.clone(), |item_id| {
+                observation.with_parent(item_id)
+            })
+    }
+
+    fn apply_attempt_scope(
+        &self,
+        observation: crate::run_lifecycle::RunObservationHandle,
+    ) -> crate::run_lifecycle::RunObservationHandle {
+        match (self.observation_attempt_id, self.observation_phase) {
+            (Some(attempt_id), Some(phase)) => observation.for_attempt(attempt_id, phase),
+            _ => observation,
+        }
+    }
+
+    pub(crate) fn with_run_item_scope(
+        &self,
+        plan_item_id: Option<crate::run_lifecycle::RunItemId>,
+        plan_revision: u64,
+        task_id: Option<crate::run_lifecycle::RunTaskId>,
+        task_item_id: Option<crate::run_lifecycle::RunItemId>,
+        task_title: Option<String>,
+        parent_item_id: Option<crate::run_lifecycle::RunItemId>,
+        attempt_id: Option<crate::run_lifecycle::RunAttemptId>,
+        phase: Option<crate::WorkflowPhase>,
+    ) -> Self {
+        let mut scoped = self.clone();
+        scoped.observation_plan_item_id = plan_item_id;
+        scoped.observation_plan_revision = plan_revision;
+        scoped.observation_task_id = task_id;
+        scoped.observation_task_item_id = task_item_id;
+        scoped.observation_task_title = task_title.map(Arc::from);
+        scoped.observation_parent_item_id = parent_item_id;
+        scoped.observation_attempt_id = attempt_id;
+        scoped.observation_phase = phase;
+        scoped
+    }
+
+    pub(crate) fn item_writer(&self) -> Option<&crate::run_lifecycle::RunItemWriter> {
+        self.inner.observation.as_ref()
+    }
+
+    /// Invalid provider-cost metadata is rejected before it can reach any
+    /// durable or live sink. The counter makes that diagnostic loss visible
+    /// without panicking a product workflow for an auxiliary trace failure.
+    pub fn rejected_invalid_steps(&self) -> u64 {
+        self.inner.rejected_invalid_steps.load(Ordering::Relaxed)
+    }
+
     fn record_step(&self, mut step: RunTraceStep) -> usize {
+        if let Err(error) = super::write_run_artifact_json::validate_trace_step_cost(&step) {
+            let rejected = self
+                .inner
+                .rejected_invalid_steps
+                .fetch_add(1, Ordering::Relaxed)
+                + 1;
+            eprintln!(
+                "kuzushi: rejected invalid trace step #{rejected} before sink dispatch: {error:#}"
+            );
+            return 0;
+        }
         let _guard = self
             .inner
             .emit_lock
@@ -230,6 +410,22 @@ impl TraceStepBuilder<'_> {
     pub fn with_cost_usd(mut self, cost: f64) -> Self {
         if let Some(step) = self.step.as_mut() {
             step.cost_usd = Some(cost);
+            step.observed_cost_usd = None;
+            step.provider_spend_unresolved = false;
+        }
+        self
+    }
+
+    pub fn with_cost_report(mut self, report: crate::runtime::RuntimeCostReport) -> Self {
+        if let Some(step) = self.step.take() {
+            self.step = Some(step.with_cost_report(report));
+        }
+        self
+    }
+
+    pub fn with_call_attempted(mut self, attempted: bool) -> Self {
+        if let Some(step) = self.step.as_mut() {
+            step.call_attempted = Some(attempted);
         }
         self
     }
@@ -351,6 +547,7 @@ pub struct BroadcastSink {
     inner: Arc<dyn TraceSink>,
     tx: Sender<RunTraceStep>,
     dropped_live_sends: AtomicU64,
+    rejected_invalid_steps: AtomicU64,
 }
 
 impl BroadcastSink {
@@ -359,16 +556,28 @@ impl BroadcastSink {
             inner,
             tx,
             dropped_live_sends: AtomicU64::new(0),
+            rejected_invalid_steps: AtomicU64::new(0),
         }
     }
 
     pub fn dropped_live_sends(&self) -> u64 {
         self.dropped_live_sends.load(Ordering::Relaxed)
     }
+
+    pub fn rejected_invalid_steps(&self) -> u64 {
+        self.rejected_invalid_steps.load(Ordering::Relaxed)
+    }
 }
 
 impl TraceSink for BroadcastSink {
     fn record(&self, step: &RunTraceStep) {
+        if let Err(error) = super::write_run_artifact_json::validate_trace_step_cost(step) {
+            let rejected = self.rejected_invalid_steps.fetch_add(1, Ordering::Relaxed) + 1;
+            eprintln!(
+                "kuzushi: rejected invalid live trace step #{rejected} before durable or broadcast dispatch: {error:#}"
+            );
+            return;
+        }
         self.inner.record(step);
         if self.tx.send(step.clone()).is_err() {
             let dropped = self.dropped_live_sends.fetch_add(1, Ordering::Relaxed) + 1;

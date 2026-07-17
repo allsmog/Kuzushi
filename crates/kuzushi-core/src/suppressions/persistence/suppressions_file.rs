@@ -3,11 +3,12 @@ use crate::suppressions::domain::{
     parse_utc_date_to_unix, FindingRef, SuppressionOrigin, SuppressionPredicate, SuppressionReason,
     SuppressionRule,
 };
-use crate::workspace::WorkspaceTarget;
+use crate::workspace::{write_workspace_state_file, WorkspaceTarget};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
 const SUPPRESSIONS_FILE_VERSION: u8 = 1;
+const MAX_SUPPRESSIONS_FILE_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,11 +58,14 @@ struct RawPredicate {
 /// context (no silent default), matching `load_program_scope`.
 pub fn load_suppression_rules(workspace: &WorkspaceTarget) -> Result<Vec<SuppressionRule>> {
     let path = workspace.suppressions_path();
-    if !path.exists() {
+    let Some(body) = crate::workspace::read_optional_workspace_text(
+        workspace.root(),
+        &path,
+        MAX_SUPPRESSIONS_FILE_BYTES,
+    )?
+    else {
         return Ok(Vec::new());
-    }
-    let body = std::fs::read_to_string(&path)
-        .with_context(|| format!("Could not read {}", path.display()))?;
+    };
     let file: SuppressionsFile =
         toml::from_str(&body).with_context(|| format!("Could not parse {}", path.display()))?;
     file.rules
@@ -74,20 +78,20 @@ pub fn save_suppression_rules(
     workspace: &WorkspaceTarget,
     rules: &[SuppressionRule],
 ) -> Result<()> {
-    workspace.ensure_state_dir()?;
     let file = SuppressionsFile {
         version: SUPPRESSIONS_FILE_VERSION,
         rules: rules.iter().map(RawSuppressionRule::from_rule).collect(),
     };
     let body = toml::to_string_pretty(&file).context("Could not serialize suppression rules")?;
     let path = workspace.suppressions_path();
-    std::fs::write(&path, body).with_context(|| format!("Could not write {}", path.display()))
+    let relative = path
+        .strip_prefix(workspace.root())
+        .with_context(|| format!("{} escaped the workspace", path.display()))?;
+    write_workspace_state_file(workspace.root(), relative, body.as_bytes())?;
+    Ok(())
 }
 
-pub fn upsert_suppression_rule(
-    workspace: &WorkspaceTarget,
-    rule: SuppressionRule,
-) -> Result<()> {
+pub fn upsert_suppression_rule(workspace: &WorkspaceTarget, rule: SuppressionRule) -> Result<()> {
     let mut rules = load_suppression_rules(workspace)?;
     rules.retain(|existing| existing.id != rule.id);
     rules.push(rule);
@@ -110,34 +114,40 @@ pub fn remove_suppression_rule(workspace: &WorkspaceTarget, rule_id: &str) -> Re
 /// the operator does not supply an explicit id.
 pub fn derive_rule_id(predicate: &SuppressionPredicate, reason: SuppressionReason) -> String {
     let canonical = canonical_predicate(predicate);
-    let hash = hash_parts("suppression-rule", &[canonical.as_bytes(), reason.as_str().as_bytes()]);
+    let hash = hash_parts(
+        "suppression-rule",
+        &[canonical.as_bytes(), reason.as_str().as_bytes()],
+    );
     format!("sup-{}", &hash.as_str()[..8])
 }
 
 fn canonical_predicate(predicate: &SuppressionPredicate) -> String {
-    let mut parts = Vec::new();
-    if let Some(reference) = &predicate.finding_id {
-        parts.push(format!("finding={}", reference.0));
-    }
-    if let Some(value) = &predicate.rule_id {
-        parts.push(format!("rule={value}"));
-    }
-    if let Some(value) = &predicate.tool {
-        parts.push(format!("tool={value}"));
-    }
-    if let Some(value) = &predicate.module {
-        parts.push(format!("module={value}"));
-    }
-    if let Some(glob) = &predicate.path_glob {
-        parts.push(format!("path={}", glob.glob().glob()));
-    }
-    if let Some(severity) = predicate.severity_below {
-        parts.push(format!("severity_below={}", severity.as_str()));
-    }
-    if let Some(scope) = predicate.scope_status {
-        parts.push(format!("scope_status={}", scope_verdict_token(scope)));
-    }
-    parts.join("|")
+    [
+        predicate
+            .finding_id
+            .as_ref()
+            .map(|reference| format!("finding={}", reference.0)),
+        predicate.rule_id.as_ref().map(|value| format!("rule={value}")),
+        predicate.tool.as_ref().map(|value| format!("tool={value}")),
+        predicate
+            .module
+            .as_ref()
+            .map(|value| format!("module={value}")),
+        predicate
+            .path_glob
+            .as_ref()
+            .map(|glob| format!("path={}", glob.glob().glob())),
+        predicate
+            .severity_below
+            .map(|severity| format!("severity_below={}", severity.as_str())),
+        predicate
+            .scope_status
+            .map(|scope| format!("scope_status={}", scope_verdict_token(scope))),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("|")
 }
 
 impl RawSuppressionRule {
@@ -208,13 +218,22 @@ impl RawPredicate {
 
     fn from_predicate(predicate: &SuppressionPredicate) -> Self {
         Self {
-            finding_id: predicate.finding_id.as_ref().map(|reference| reference.0.clone()),
+            finding_id: predicate
+                .finding_id
+                .as_ref()
+                .map(|reference| reference.0.clone()),
             rule_id: predicate.rule_id.clone(),
             tool: predicate.tool.clone(),
-            path: predicate.path_glob.as_ref().map(|glob| glob.glob().glob().to_string()),
+            path: predicate
+                .path_glob
+                .as_ref()
+                .map(|glob| glob.glob().glob().to_string()),
             module: predicate.module.clone(),
             severity_below: predicate.severity_below.map(|s| s.as_str().to_string()),
-            scope_status: predicate.scope_status.map(scope_verdict_token).map(str::to_string),
+            scope_status: predicate
+                .scope_status
+                .map(scope_verdict_token)
+                .map(str::to_string),
         }
     }
 }

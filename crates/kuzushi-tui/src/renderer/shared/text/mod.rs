@@ -209,7 +209,7 @@ fn char_display_width(ch: char) -> usize {
     UnicodeWidthChar::width(ch).unwrap_or(0)
 }
 
-fn take_columns(value: &str, max_columns: usize) -> String {
+pub(crate) fn take_columns(value: &str, max_columns: usize) -> String {
     let mut width = 0usize;
     let mut out = String::new();
     for ch in value.chars() {
@@ -223,7 +223,7 @@ fn take_columns(value: &str, max_columns: usize) -> String {
     out
 }
 
-fn take_tail_columns(value: &str, max_columns: usize) -> String {
+pub(crate) fn take_tail_columns(value: &str, max_columns: usize) -> String {
     let mut width = 0usize;
     let mut chars = Vec::new();
     for ch in value.chars().rev() {

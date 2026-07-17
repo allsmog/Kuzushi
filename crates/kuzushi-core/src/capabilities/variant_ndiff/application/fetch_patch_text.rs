@@ -1,37 +1,52 @@
 use super::*;
 
 pub(crate) fn fetch_patch_text(url: &str, input: &Value) -> Result<Option<String>> {
-    if let Some(fixtures) = input
-        .get("patchFixtures")
-        .or_else(|| input.get("patch_fixtures"))
-        .and_then(Value::as_object)
-    {
-        if let Some(text) = fixtures.get(url).and_then(Value::as_str) {
-            return Ok(Some(text.to_string()));
-        }
+    if let Some(text) = patch_fixture(url, input) {
+        return Ok(Some(text));
     }
-    if input
-        .get("offline")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if offline_patch_fetch(input) {
         return Ok(None);
     }
     let path = PathBuf::from(url);
     if path.exists() {
-        return fs::read_to_string(&path)
-            .map(Some)
-            .with_context(|| format!("Could not read patch file {}", path.display()));
+        return read_local_patch(&path);
     }
-    let mut fetch_url = url.to_string();
-    let github_commit = url.starts_with("https://github.com/")
+    curl_text(&patch_fetch_url(url), input, "ndiff:extract-fix-pattern")
+}
+
+fn patch_fixture(url: &str, input: &Value) -> Option<String> {
+    input
+        .get("patchFixtures")
+        .or_else(|| input.get("patch_fixtures"))
+        .and_then(Value::as_object)
+        .and_then(|fixtures| fixtures.get(url))
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+}
+
+fn offline_patch_fetch(input: &Value) -> bool {
+    input
+        .get("offline")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn read_local_patch(path: &Path) -> Result<Option<String>> {
+    crate::bounded_file::read_utf8_text(path, 16 * 1024 * 1024)
+        .map(Some)
+        .with_context(|| format!("Could not read patch file {}", path.display()))
+}
+
+fn patch_fetch_url(url: &str) -> String {
+    let needs_patch_suffix = url.starts_with("https://github.com/")
         && (url.contains("/commit/") || url.contains("/pull/"))
         && !url.ends_with(".patch")
         && !url.ends_with(".diff");
-    if github_commit {
-        fetch_url.push_str(".patch");
+    if needs_patch_suffix {
+        format!("{url}.patch")
+    } else {
+        url.to_string()
     }
-    curl_text(&fetch_url, input, "ndiff:extract-fix-pattern")
 }
 
 pub(crate) fn curl_json(url: &str, input: &Value, tool: &str) -> Result<Value> {
@@ -50,7 +65,7 @@ pub(crate) fn curl_text(url: &str, input: &Value, tool: &str) -> Result<Option<S
     command
         .args(["-fsSL", "--max-time", "15", "-H", "Accept: text/plain"])
         .arg(url);
-    let output = command.output().with_context(|| {
+    let output = crate::bounded_subprocess::output(&mut command, "curl patch fetch").with_context(|| {
         format!("{tool} requires curl to fetch advisories or patches; install curl or pass patchText/offline fixtures")
     })?;
     if !output.status.success() {

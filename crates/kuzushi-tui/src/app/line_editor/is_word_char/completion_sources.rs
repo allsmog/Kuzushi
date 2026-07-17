@@ -111,28 +111,25 @@ impl ShellApp {
             .collect()
     }
 
-    pub(in crate::app::line_editor) fn finding_completion_values(&self) -> Vec<String> {
-        finding_completion_values_for_target(self.target_path_buf(), self.findings())
+    pub(in crate::app::line_editor) fn finding_completion_values(&self) -> CompletionValues<'_> {
+        let target = self.target();
+        CompletionValues::Borrowed(std::cell::Ref::map(
+            self.workbench_cache().borrow(),
+            |cache| cache.cached_finding_completion_values(target),
+        ))
     }
 
-    pub(in crate::app::line_editor) fn run_id_completion_values(&self) -> Vec<String> {
-        let mut values = Vec::new();
-        if let Some(run_id) = self.scan().and_then(|scan| scan.run_id.clone()) {
-            values.push(run_id);
-        }
-        if let Some(target) = self.target_path_buf() {
-            let runs_dir = kuzushi_core::runs_root(target);
-            if let Ok(entries) = fs::read_dir(runs_dir) {
-                values.extend(entries.flatten().filter_map(|entry| {
-                    entry
-                        .file_type()
-                        .ok()
-                        .filter(|file_type| file_type.is_dir())
-                        .and_then(|_| entry.file_name().into_string().ok())
-                }));
-            }
-        }
-        values
+    pub(in crate::app::line_editor) fn run_id_completion_values(&self) -> CompletionValues<'_> {
+        let target = self.target();
+        let live = [
+            self.activity().map(|session| session.run_id.as_str()),
+            self.active_tool_run_id(),
+            self.scan().and_then(|scan| scan.run_id.as_deref()),
+        ];
+        let stored = std::cell::Ref::map(self.workbench_cache().borrow(), |cache| {
+            cache.cached_run_id_completion_values(target)
+        });
+        CompletionValues::RunIds { live, stored }
     }
 }
 
@@ -159,11 +156,21 @@ mod tests {
             abort_requested: false,
             error: None,
         }));
+        app.set_activity(Some(ActivitySession::new("r-active")));
+        app.set_active_tool_run_id_for_test("r-active");
+        app.hydrate_active_view_blocking();
 
-        let values = app.run_id_completion_values();
+        let candidates = app.completion_candidates("replay r");
 
-        assert!(values.contains(&"r-active".to_string()));
-        assert!(values.contains(&"r-past".to_string()));
-        assert!(!values.contains(&"not-a-run".to_string()));
+        assert!(candidates.contains(&"replay r-active".to_string()));
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|candidate| candidate.as_str() == "replay r-active")
+                .count(),
+            1
+        );
+        assert!(candidates.contains(&"replay r-past".to_string()));
+        assert!(!candidates.contains(&"replay not-a-run".to_string()));
     }
 }

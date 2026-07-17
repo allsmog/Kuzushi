@@ -235,7 +235,7 @@ fn deep_audit_response(
     outcome: crate::capabilities::deep_auditor::DeepAuditOutcome,
 ) -> Value {
     let summary = format!("deep-audit:run {}", outcome.triage.verdict.as_str());
-    let data = json!({
+    let mut data = json!({
         "findingId": finding.id,
         "fingerprint": finding.fingerprint,
         "verdict": outcome.triage.verdict,
@@ -243,10 +243,20 @@ fn deep_audit_response(
         "rationale": outcome.triage.rationale,
         "stepsUsed": outcome.steps_used,
         "truncated": outcome.truncated,
-        "costUsd": outcome.cost_usd,
         "evidence": outcome.evidence,
     });
+    if outcome.cost_usd_exact {
+        data["costUsd"] = json!(outcome.cost_usd);
+    } else {
+        data["observedCostUsd"] = json!(outcome.cost_usd);
+        data["providerSpendUnresolved"] = json!(true);
+    }
     let mut result = crate::module_result::completed_output_result(summary.clone(), summary, data);
-    result["costUsd"] = json!(outcome.cost_usd);
+    if outcome.cost_usd_exact {
+        result["costUsd"] = json!(outcome.cost_usd);
+    } else {
+        result["observedCostUsd"] = json!(outcome.cost_usd);
+        result["providerSpendUnresolved"] = json!(true);
+    }
     result
 }

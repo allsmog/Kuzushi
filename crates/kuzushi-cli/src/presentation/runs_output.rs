@@ -5,6 +5,87 @@ use std::time::Duration;
 
 use super::scan_ci::format_duration;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunsReplayRow {
+    key: Option<kuzushi_core::run_lifecycle::RunCellKey>,
+    text: String,
+}
+
+pub(crate) fn runs_replay_plain(read: &kuzushi_core::run_lifecycle::RunProjectionRead) -> String {
+    let presentation = kuzushi_core::run_lifecycle::present_run(read);
+    let rows = runs_replay_rows(&presentation);
+    rows.into_iter()
+        .map(|row| {
+            let _source_key = row.key;
+            row.text
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(crate) fn runs_replay_json(
+    read: &kuzushi_core::run_lifecycle::RunProjectionRead,
+) -> Result<String> {
+    serde_json::to_string_pretty(read).context("serialize typed run replay")
+}
+
+fn runs_replay_rows(
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+) -> Vec<RunsReplayRow> {
+    let mut rows = presentation
+        .overview_lines()
+        .into_iter()
+        .map(unkeyed_replay_row)
+        .collect::<Vec<_>>();
+    append_presentation_sections(&mut rows, presentation);
+    append_presentation_timeline(&mut rows, presentation);
+    rows.push(unkeyed_replay_row(String::new()));
+    rows
+}
+
+fn append_presentation_sections(
+    rows: &mut Vec<RunsReplayRow>,
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+) {
+    let mut active_section = None;
+    for row in presentation.summary_text_rows() {
+        if row.section != active_section {
+            if let Some(section) = row.section.as_ref() {
+                rows.push(unkeyed_replay_row(section.label().to_string()));
+            }
+            active_section = row.section.clone();
+        }
+        rows.push(keyed_replay_row(row));
+    }
+}
+
+fn append_presentation_timeline(
+    rows: &mut Vec<RunsReplayRow>,
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+) {
+    if presentation.timeline.is_empty() {
+        return;
+    }
+    rows.push(unkeyed_replay_row("TIMELINE".to_string()));
+    rows.extend(
+        presentation
+            .timeline_text_rows()
+            .into_iter()
+            .map(keyed_replay_row),
+    );
+}
+
+fn keyed_replay_row(row: kuzushi_core::run_lifecycle::RunPresentationTextRowV1) -> RunsReplayRow {
+    RunsReplayRow {
+        key: Some(row.key),
+        text: row.text,
+    }
+}
+
+fn unkeyed_replay_row(text: String) -> RunsReplayRow {
+    RunsReplayRow { key: None, text }
+}
+
 pub(crate) fn runs_list_output(
     workspace: &WorkspaceTarget,
     runs: &[RunSummary],
@@ -178,6 +259,14 @@ fn push_run_summary_findings(lines: &mut Vec<String>, summary: &RunSummary) {
 fn push_run_summary_cost(lines: &mut Vec<String>, summary: &RunSummary) {
     if let Some(cost) = summary.cost_usd {
         lines.push(format!("Cost USD: {cost:.4}"));
+    } else if let Some(observed) = summary
+        .provider_spend_unresolved
+        .then_some(summary.observed_cost_usd)
+        .flatten()
+    {
+        lines.push(format!(
+            "Observed cost USD: {observed:.4} (provider spend unresolved)"
+        ));
     }
 }
 
@@ -206,3 +295,7 @@ fn summary_elapsed(summary: &RunSummary) -> Option<Duration> {
         .checked_sub(summary.started_at_unix)
         .map(Duration::from_secs)
 }
+
+#[cfg(test)]
+#[path = "runs_output/tests.rs"]
+mod tests;

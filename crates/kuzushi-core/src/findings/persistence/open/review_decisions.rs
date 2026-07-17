@@ -3,7 +3,98 @@ use crate::storage_v3::writer_actor::{
     ControlCommand, DecisionCommand, DecisionWrite, StorageWriterActor, WriterCommand,
 };
 
+const LATEST_REVIEW_DECISIONS_SQL: &str = r#"
+with requested as (
+    select json_extract(value, '$.key') as lookup_key,
+           json_extract(value, '$.identityId') as identity_id,
+           cast(json_extract(value, '$.findingId') as integer) as finding_id
+      from json_each(?1)
+), ranked as (
+    select requested.lookup_key,
+           decisions.id, decisions.finding_id, decisions.identity_id,
+           decisions.decision_verdict, decisions.triage_verdict,
+           decisions.confidence, decisions.rationale, decisions.author,
+           decisions.created_at, decisions.dismiss_reason, decisions.dismissed_by,
+           row_number() over (
+               partition by requested.lookup_key
+               order by decisions.created_at desc, decisions.id desc
+           ) as decision_rank
+      from requested
+      join review_decisions as decisions
+        on (requested.identity_id is not null and decisions.identity_id = requested.identity_id)
+        or (requested.identity_id is null and decisions.finding_id = requested.finding_id)
+     where ?2 = 0 or decisions.author = 'human'
+)
+select id, finding_id, identity_id, decision_verdict, triage_verdict,
+       confidence, rationale, author, created_at, dismiss_reason, dismissed_by, lookup_key
+  from ranked
+ where decision_rank = 1
+"#;
+
+const REVIEW_DECISIONS_FOR_FINDINGS_SQL: &str = r#"
+with requested as (
+    select json_extract(value, '$.identityId') as identity_id,
+           cast(json_extract(value, '$.findingId') as integer) as finding_id
+      from json_each(?1)
+), matched as (
+    select distinct decisions.id, decisions.finding_id, decisions.identity_id,
+           decisions.decision_verdict, decisions.triage_verdict,
+           decisions.confidence, decisions.rationale, decisions.author,
+           decisions.created_at, decisions.dismiss_reason, decisions.dismissed_by
+      from requested
+      join review_decisions as decisions
+        on (requested.identity_id is not null and decisions.identity_id = requested.identity_id)
+        or (requested.identity_id is null and decisions.finding_id = requested.finding_id)
+)
+select id, finding_id, identity_id, decision_verdict, triage_verdict,
+       confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+  from matched
+ order by created_at asc, id asc
+"#;
+
 impl FindingStore {
+    pub(crate) fn latest_review_decisions_for_findings(
+        &self,
+        findings: &[Finding],
+        human_only: bool,
+    ) -> Result<std::collections::BTreeMap<String, ReviewDecision>> {
+        let requested = findings
+            .iter()
+            .filter_map(review_decision_request)
+            .collect::<Vec<_>>();
+        if requested.is_empty() {
+            return Ok(std::collections::BTreeMap::new());
+        }
+        let requested = serde_json::to_string(&requested)?;
+        let mut stmt = self.conn.prepare(LATEST_REVIEW_DECISIONS_SQL)?;
+        let rows = stmt.query_map(params![requested, human_only as i64], |row| {
+            Ok((
+                row.get::<_, String>(11)?,
+                review_decision_record_from_row(row)?.decision,
+            ))
+        })?;
+        rows.collect::<rusqlite::Result<std::collections::BTreeMap<_, _>>>()
+            .context("Could not batch latest review decisions")
+    }
+
+    pub fn list_review_decisions_for_findings(
+        &self,
+        findings: &[Finding],
+    ) -> Result<Vec<ReviewDecisionRecord>> {
+        let requested = findings
+            .iter()
+            .filter_map(review_decision_request)
+            .collect::<Vec<_>>();
+        if requested.is_empty() {
+            return Ok(Vec::new());
+        }
+        let requested = serde_json::to_string(&requested)?;
+        let mut stmt = self.conn.prepare(REVIEW_DECISIONS_FOR_FINDINGS_SQL)?;
+        let rows = stmt.query_map(params![requested], review_decision_record_from_row)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not batch review decisions")
+    }
+
     pub fn list_review_decisions(&self, finding_id: i64) -> Result<Vec<ReviewDecisionRecord>> {
         let mut stmt = self.conn.prepare(
             r#"
@@ -188,7 +279,12 @@ impl FindingStore {
         author: TriageAuthor,
     ) -> Result<i64> {
         let decision = ReviewDecision::from_triage(triage, Some(author));
-        self.append_review_decision(finding_id, &decision, true)
+        self.append_review_decision_event(
+            finding_id,
+            &decision,
+            true,
+            Some((triage.cost_usd, triage.cost_usd_exact)),
+        )
     }
 
     fn append_review_decision(
@@ -197,7 +293,7 @@ impl FindingStore {
         decision: &ReviewDecision,
         updates_finding_triage: bool,
     ) -> Result<i64> {
-        self.append_review_decision_event(finding_id, decision, updates_finding_triage)
+        self.append_review_decision_event(finding_id, decision, updates_finding_triage, None)
     }
 
     fn append_review_decision_event(
@@ -205,6 +301,7 @@ impl FindingStore {
         finding_id: i64,
         decision: &ReviewDecision,
         updates_finding_triage: bool,
+        triage_cost: Option<(f64, bool)>,
     ) -> Result<i64> {
         let target = self
             .v3_target_for_finding(finding_id, "review decision")?
@@ -215,28 +312,25 @@ impl FindingStore {
             WriterCommand::Control(ControlCommand::Barrier),
         )?
         .committed_seq;
-        let receipt = StorageWriterActor::commit_blocking(
-            target.event_log_dir,
-            target.db_path,
-            WriterCommand::Decision(DecisionCommand::ReviewDecision(DecisionWrite {
-                stable_fp: target.stable_fp,
-                finding_id: Some(finding_id),
-                identity_id: target.identity_id,
-                verdict: decision.verdict.as_str().to_string(),
-                author: decision.author.as_str().to_string(),
-                rationale: decision.rationale.clone(),
-                confidence_millis: confidence_millis(decision.confidence),
-                read_watermark,
-                updates_finding_triage,
-                dismiss_reason: decision
-                    .dismiss_reason
-                    .map(|reason| reason.as_str().to_string()),
-                dismissed_by: decision.actor.clone(),
-            })),
-        )?;
-        Ok(receipt
-            .projected_review_decision_id
-            .unwrap_or(receipt.committed_seq as i64))
+        let (triage_cost_usd, triage_cost_usd_exact) = triage_cost_payload(triage_cost)?;
+        let write = DecisionWrite {
+            stable_fp: target.stable_fp,
+            finding_id: Some(finding_id),
+            identity_id: target.identity_id,
+            verdict: decision.verdict.as_str().to_string(),
+            author: decision.author.as_str().to_string(),
+            rationale: decision.rationale.clone(),
+            confidence_millis: confidence_millis(decision.confidence),
+            read_watermark,
+            updates_finding_triage,
+            triage_cost_usd,
+            triage_cost_usd_exact,
+            dismiss_reason: decision
+                .dismiss_reason
+                .map(|reason| reason.as_str().to_string()),
+            dismissed_by: decision.actor.clone(),
+        };
+        commit_review_decision(target.event_log_dir, target.db_path, write)
     }
 
     fn identity_id_for_finding(&self, finding_id: i64) -> Result<Option<String>> {
@@ -244,6 +338,56 @@ impl FindingStore {
             .v3_finding_by_projected_id(finding_id)?
             .and_then(|finding| finding.identity_id))
     }
+}
+
+fn triage_cost_payload(cost: Option<(f64, bool)>) -> Result<(Option<serde_json::Number>, bool)> {
+    let Some((cost_usd, exact)) = cost else {
+        return Ok((None, true));
+    };
+    anyhow::ensure!(
+        cost_usd.is_finite() && cost_usd >= 0.0,
+        "triage provider cost must be finite and non-negative"
+    );
+    let number = serde_json::Number::from_f64(cost_usd)
+        .context("triage provider cost could not be represented in event JSON")?;
+    Ok((Some(number), exact))
+}
+
+fn commit_review_decision(
+    event_log_dir: std::path::PathBuf,
+    db_path: std::path::PathBuf,
+    write: DecisionWrite,
+) -> Result<i64> {
+    let receipt = StorageWriterActor::commit_blocking(
+        event_log_dir,
+        db_path,
+        WriterCommand::Decision(DecisionCommand::ReviewDecision(write)),
+    )?;
+    Ok(receipt
+        .projected_review_decision_id
+        .unwrap_or(receipt.committed_seq as i64))
+}
+
+fn review_decision_request(finding: &Finding) -> Option<serde_json::Value> {
+    finding
+        .identity_id
+        .as_ref()
+        .map(|identity_id| {
+            serde_json::json!({
+                "key": format!("identity:{identity_id}"),
+                "identityId": identity_id,
+                "findingId": finding.id,
+            })
+        })
+        .or_else(|| {
+            finding.id.map(|finding_id| {
+                serde_json::json!({
+                    "key": format!("finding:{finding_id}"),
+                    "identityId": null,
+                    "findingId": finding_id,
+                })
+            })
+        })
 }
 
 fn confidence_millis(confidence: f32) -> u16 {

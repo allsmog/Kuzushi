@@ -93,19 +93,21 @@ pub(crate) fn score_with_index_blocking(
     surfaces: Vec<RankedSystemsSurface>,
 ) -> Vec<RankedSystemsSurface> {
     fn run(surfaces: Vec<RankedSystemsSurface>) -> Vec<RankedSystemsSurface> {
-        match tokio::runtime::Builder::new_current_thread()
+        let runtime = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
         {
-            Ok(rt) => rt.block_on(score_with_index(surfaces)),
-            Err(_) => Vec::new(),
-        }
+            Ok(runtime) => runtime,
+            Err(_) => return surfaces,
+        };
+        runtime.block_on(score_with_index(surfaces))
     }
 
     if tokio::runtime::Handle::try_current().is_ok() {
+        let fallback = surfaces.clone();
         std::thread::spawn(move || run(surfaces))
             .join()
-            .unwrap_or_default()
+            .unwrap_or(fallback)
     } else {
         run(surfaces)
     }

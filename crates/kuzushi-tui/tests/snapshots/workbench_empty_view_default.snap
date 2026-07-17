@@ -2,29 +2,18 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI › workbench · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › workbench · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
-Kuzushi · target:no target · page:confirm · o idle · modules:all modules
- type next guided workflow · type scan run scan · type options sast:scan tune scanners · type ask ask the agent
+Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
+ type Enter open in Prove · type findings clear projection · press z open heatmap · type scan again
 
- -- SOURCE · 0 files ---------------------------------------------------------------------------------------------------
-       ∅  no source tree
-       no finding-bearing files yet — run `scan` to populate the tree.
-
-       > scan                  populate finding-bearing files
-
- -- [CODE·] |  DFD·  |  CHAIN·  |  FLOW·  |  RISK·  --------------------------------------------------------------------
-       ∅  no finding selected
-       select a finding to show source context.
-
-       > scan                  populate findings
-       > open <id>             pin a finding
-
- -- REVIEW QUEUE - showing 0 of 0 - 0 open - 0 complete ----------------------------------------------------------------
+ -- FINDINGS -----------------------------------------------------------------------------------------------------------
 ∅ review queue empty
 no findings loaded for review
 > findings
 > filter completeness:open
+ -- SELECTED FINDING ---------------------------------------------------------------------------------------------------
+       ∅  no finding selected
+       move through FINDINGS to inspect a result
 
- -- DETAILS ------------------------------------------------------------------------------------------------------------
-no finding selected — move through FINDINGS to preview details here.
+       > Enter                 open selected finding in Prove

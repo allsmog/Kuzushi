@@ -40,6 +40,8 @@ impl ShellApp {
     }
 
     fn show_unsupported_workspace_command(&mut self, raw: &str) {
+        let workspace_view = self.build_workspace_view(None);
+        self.domain_mut().set_workspace_view(workspace_view);
         self.set_shell_view(ShellView::Workspace);
         if raw.starts_with("usage: ") {
             self.log("error", raw);
@@ -67,24 +69,35 @@ impl ShellApp {
     }
 
     pub(crate) fn clear_conversation(&mut self) -> Vec<ShellEffect> {
-        self.jobs_mut().cancel(JobKind::Agent);
-        self.jobs_mut().finish(JobKind::Agent);
+        let live_agent_was_canceled = self.jobs_mut().cancel(JobKind::Agent);
+        if live_agent_was_canceled {
+            let run = crate::app::ClearedAgentRun {
+                run_id: self.agent_chat().and_then(|agent| agent.run_id.clone()),
+                started_secs: self
+                    .agent_chat()
+                    .map(|agent| agent.started_secs)
+                    .unwrap_or_default(),
+                artifact_target: self.agent_artifact_target_owned(),
+            };
+            self.runtime_state.remember_cleared_agent_run(run);
+        } else {
+            self.runtime_state.clear_cleared_agent_run();
+            self.set_agent_cancel(None);
+        }
         self.clear_log();
         *self.selected_finding_mut() = None;
         self.clear_agent_chat();
-        self.set_agent_cancel(None);
         self.set_shell_view(ShellView::Catalog);
         self.log(
             "system",
             "Conversation cleared. Command history retained. Next: history or help",
         );
-        // The Agent slot is force-finished out-of-band above instead of via
-        // its normal terminal ShellEvent, so the centralized steer-queue
-        // drain in `apply_job_event` never runs for it (the worker's
-        // eventual terminal event arrives with a stale generation and is
-        // dropped by `JobHub::drain_one`). Drain here so a steer item queued
-        // while only an agent chat was running doesn't starve after `/clear`.
-        self.advance_steer_queue()
+        // Keep the canceled Agent slot occupied until its current generation
+        // emits a terminal event. Releasing it here would let queued work run
+        // concurrently with a non-cooperative worker that still has workspace
+        // side effects in flight. `apply_job_event` drains steer after the
+        // terminal event releases the slot.
+        Vec::new()
     }
 }
 
@@ -116,5 +129,26 @@ mod tests {
             }
             _ => panic!("expected workspace reindex effect"),
         }
+    }
+
+    #[test]
+    fn workspace_usage_error_hydrates_the_active_target_projection() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+
+        app.reduce_workspace_command_effects(&WorkspaceCommand::Unsupported(
+            "usage: findings export <path> [format]".to_string(),
+        ));
+
+        let model = crate::ui_view_models::workspace_model(&app);
+        assert_eq!(app.shell_view(), ShellView::Workspace);
+        assert!(!model.empty);
+        assert_eq!(
+            app.domain().workspace_view().root.as_deref(),
+            Some(temp.path().canonicalize().unwrap().as_path())
+        );
+        assert_ne!(model.target_label, "none");
+        assert!(model.status.starts_with("workspace ready"));
     }
 }

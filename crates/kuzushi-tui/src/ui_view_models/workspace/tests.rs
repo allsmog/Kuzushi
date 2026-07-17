@@ -31,7 +31,7 @@ fn workspace_model_formats_missing_workspace_defaults() {
     assert_eq!(model.target_label, "none");
     assert_eq!(model.state_label, workspace_state_relative_path());
     assert_eq!(model.findings_db_label, findings_db_relative_path());
-    assert_eq!(model.findings_label, "none yet (run scan first)");
+    assert_eq!(model.findings_label, "unavailable (select a target)");
     assert_eq!(model.last_export_label, "none");
     assert!(model.empty);
     assert_eq!(model.rollup_total, 0);
@@ -61,8 +61,8 @@ fn workspace_model_projects_workspace_summary_and_rollup() {
     let model = workspace_model(&app);
 
     assert_eq!(model.target_label, "./kuzushi-demo");
-    assert_eq!(model.state_label, "./v2");
-    assert_eq!(model.findings_db_label, "./findings.sqlite3");
+    assert_eq!(model.state_label, "./.kuzushi/v2");
+    assert_eq!(model.findings_db_label, "./.kuzushi/v2/findings.sqlite3");
     assert_eq!(model.findings_label, "3");
     assert_eq!(model.last_export_label, "./findings.json");
     assert!(!model.empty);
@@ -116,8 +116,35 @@ fn plain_workspace_projection_projects_active_workspace_rows() {
         .contains(&"target: ./kuzushi-demo".to_string()));
     assert!(model
         .summary_rows
-        .contains(&"findings: 3 in db (not loaded)".to_string()));
+        .contains(&"findings: loading · 3 persisted".to_string()));
     assert!(model.empty_rows.is_empty());
+}
+
+#[test]
+fn workspace_model_uses_loaded_findings_when_status_count_is_unresolved() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.domain_mut()
+        .set_workspace_view(crate::app::WorkspaceView {
+            root: Some(PathBuf::from("/tmp/kuzushi-demo")),
+            state_dir: Some(PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v3")),
+            findings_db: Some(PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v3/index.sqlite3")),
+            findings_count: None,
+            last_export: None,
+            status: "workspace ready".to_string(),
+        });
+    *app.findings_mut() = vec![
+        finding_with_severity(Severity::Critical),
+        finding_with_severity(Severity::High),
+        finding_with_severity(Severity::Medium),
+        finding_with_severity(Severity::Low),
+    ];
+
+    let model = workspace_model(&app);
+
+    assert_eq!(model.findings_label, "4");
+    assert_eq!(model.rollup_total, 4);
+    assert_eq!(model.state_label, "./.kuzushi/v3");
+    assert_eq!(model.findings_db_label, "./.kuzushi/v3/index.sqlite3");
 }
 
 fn finding_with_severity(severity: Severity) -> Finding {

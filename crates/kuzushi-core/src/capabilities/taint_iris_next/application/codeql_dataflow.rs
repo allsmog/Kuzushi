@@ -11,76 +11,43 @@ pub(crate) fn wait_with_optional_timeout(
     child: &mut Child,
     timeout_secs: u64,
 ) -> anyhow::Result<std::process::Output> {
+    let readers = start_codeql_output_readers(child);
+    match wait_for_codeql_exit(child, timeout_secs) {
+        Ok(status) => finish_codeql_output(status, readers),
+        Err(error) => {
+            kill_and_reap_child(child);
+            let _ = join_codeql_reader(readers.0, "stdout");
+            let _ = join_codeql_reader(readers.1, "stderr");
+            Err(error)
+        }
+    }
+}
+
+fn wait_for_codeql_exit(
+    child: &mut Child,
+    timeout_secs: u64,
+) -> anyhow::Result<std::process::ExitStatus> {
     if timeout_secs == 0 {
-        return wait_without_timeout(child);
+        return child.wait().context("could not wait for child process");
     }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
-    wait_until_child_exits(child, deadline, timeout_secs)?;
-    finish_child_output(child, "could not finalise child")
+    wait_for_codeql_exit_until(child, deadline, timeout_secs)
 }
 
-fn wait_without_timeout(child: &mut Child) -> anyhow::Result<std::process::Output> {
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let status = child.wait().context("could not wait for child process")?;
-    Ok(std::process::Output {
-        status,
-        stdout: read_optional_pipe(stdout),
-        stderr: read_optional_pipe(stderr),
-    })
-}
-
-fn wait_until_child_exits(
+fn wait_for_codeql_exit_until(
     child: &mut Child,
     deadline: std::time::Instant,
     timeout_secs: u64,
-) -> anyhow::Result<()> {
-    while child_is_still_running(child, deadline, timeout_secs)? {
-        std::thread::sleep(std::time::Duration::from_secs(2));
+) -> anyhow::Result<std::process::ExitStatus> {
+    loop {
+        if let Some(status) = child.try_wait().context("could not poll child process")? {
+            return Ok(status);
+        }
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!("analysis child exceeded {timeout_secs}s timeout")
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    Ok(())
-}
-
-fn child_is_still_running(
-    child: &mut Child,
-    deadline: std::time::Instant,
-    timeout_secs: u64,
-) -> anyhow::Result<bool> {
-    Ok(!poll_child_exit(child, deadline, timeout_secs)?)
-}
-
-fn poll_child_exit(
-    child: &mut Child,
-    deadline: std::time::Instant,
-    timeout_secs: u64,
-) -> anyhow::Result<bool> {
-    let Some(status) = try_wait_child(child)? else {
-        enforce_child_deadline(child, deadline, timeout_secs)?;
-        return Ok(false);
-    };
-    let _ = status;
-    Ok(true)
-}
-
-fn try_wait_child(child: &mut Child) -> anyhow::Result<Option<std::process::ExitStatus>> {
-    child.try_wait().or_else(|error| {
-        kill_and_reap_child(child);
-        anyhow::bail!("could not poll child process: {error}")
-    })
-}
-
-fn enforce_child_deadline(
-    child: &mut Child,
-    deadline: std::time::Instant,
-    timeout_secs: u64,
-) -> anyhow::Result<()> {
-    if std::time::Instant::now() < deadline {
-        return Ok(());
-    }
-    kill_and_reap_child(child);
-    anyhow::bail!(
-        "child exceeded {timeout_secs}s timeout; set the relevant *_TIMEOUT_SECS=0 to disable"
-    )
 }
 
 fn kill_and_reap_child(child: &mut Child) {
@@ -88,27 +55,54 @@ fn kill_and_reap_child(child: &mut Child) {
     let _ = child.wait();
 }
 
-fn finish_child_output(
-    child: &mut Child,
-    wait_context: &'static str,
-) -> anyhow::Result<std::process::Output> {
+type CodeqlOutputReader = std::thread::JoinHandle<Result<Vec<u8>>>;
+
+fn start_codeql_output_readers(child: &mut Child) -> (CodeqlOutputReader, CodeqlOutputReader) {
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let status = child.wait().context(wait_context)?;
+    let stdout = std::thread::spawn(move || {
+        read_optional_pipe(
+            stdout,
+            crate::bounded_subprocess::DEFAULT_STDOUT_LIMIT,
+            "analysis stdout",
+        )
+    });
+    let stderr = std::thread::spawn(move || {
+        read_optional_pipe(
+            stderr,
+            crate::bounded_subprocess::DEFAULT_STDERR_LIMIT,
+            "analysis stderr",
+        )
+    });
+    (stdout, stderr)
+}
+
+fn finish_codeql_output(
+    status: std::process::ExitStatus,
+    readers: (CodeqlOutputReader, CodeqlOutputReader),
+) -> Result<std::process::Output> {
     Ok(std::process::Output {
         status,
-        stdout: read_optional_pipe(stdout),
-        stderr: read_optional_pipe(stderr),
+        stdout: join_codeql_reader(readers.0, "stdout")?,
+        stderr: join_codeql_reader(readers.1, "stderr")?,
     })
 }
 
-fn read_optional_pipe<R: std::io::Read>(pipe: Option<R>) -> Vec<u8> {
-    let Some(mut pipe) = pipe else {
-        return Vec::new();
+fn read_optional_pipe<R: std::io::Read>(
+    pipe: Option<R>,
+    limit: usize,
+    label: &str,
+) -> Result<Vec<u8>> {
+    let Some(pipe) = pipe else {
+        return Ok(Vec::new());
     };
-    let mut buf = Vec::new();
-    let _ = pipe.read_to_end(&mut buf);
-    buf
+    crate::bounded_subprocess::drain_bounded(pipe, limit, label)
+}
+
+fn join_codeql_reader(reader: CodeqlOutputReader, stream: &str) -> Result<Vec<u8>> {
+    reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("codeql {stream} reader panicked"))?
 }
 
 /// True iff a usable `codeql` CLI is on PATH (or under `/opt/codeql/`).
@@ -198,82 +192,67 @@ pub(crate) fn run_codeql_flows(plan: &TaintIrisNextPlan) -> Result<Option<Vec<Co
     let Some(launcher) = codeql_launcher_path() else {
         return Ok(None);
     };
+    let queries = selected_codeql_queries(plan);
+    let sarif_file =
+        tempfile::NamedTempFile::new().context("could not create codeql sarif tempfile")?;
+    let timeout_secs = (plan.caps.codeql_analyze_timeout_ms as u64).div_ceil(1_000);
+    let output = run_codeql_analysis(
+        &launcher,
+        &db_path,
+        sarif_file.path(),
+        &queries,
+        timeout_secs,
+    )?;
+    ensure_codeql_analysis_succeeded(&output)?;
+    let sarif = crate::bounded_file::read_utf8_text(sarif_file.path(), 64 * 1024 * 1024)
+        .context("could not read codeql SARIF output")?;
+    Ok(Some(parse_sarif_flows(&sarif)))
+}
 
-    // Pick what to run. Order of preference:
-    //  1. Per-target catalog CWEs -> resolve to specific .ql files inside
-    //     the pack so we only run queries the agent considers relevant
-    //     to this codebase. Cuts a 179-query suite down to ~12-20 queries
-    //     on a typical postgres run.
-    //  2. KUZUSHI_CODEQL_QUERY_SUITE env override (a path or `<lang>-...qls`).
-    //  3. The default `<lang>-security-and-quality.qls` for the dominant
-    //     language.
-    let env_override = std::env::var("KUZUSHI_CODEQL_QUERY_SUITE")
-        .ok()
-        .and_then(|s| {
-            let trimmed = s.trim().to_string();
-            (!trimmed.is_empty()).then_some(trimmed)
-        });
-    let catalog_queries = filter_existing_codeql_selectors(codeql_queries_from_catalog(
+fn selected_codeql_queries(plan: &TaintIrisNextPlan) -> Vec<String> {
+    let catalog = filter_existing_codeql_selectors(codeql_queries_from_catalog(
         &plan.catalog,
         &plan.languages,
     ));
-    let queries: Vec<String> = if let Some(override_value) = env_override {
-        vec![override_value]
-    } else if !catalog_queries.is_empty() {
-        catalog_queries
-    } else {
+    if catalog.is_empty() {
         vec![codeql_default_query_suite(&plan.languages)]
-    };
-
-    // Default: no wall-clock timeout. CodeQL's cpp-security-and-quality
-    // suite has 179 queries covering 79 CWEs and routinely takes hours
-    // on a postgres-scale DB; an aggressive timeout silently corrupts
-    // results by aborting mid-suite. Operators who need a deadline can
-    // set KUZUSHI_CODEQL_TIMEOUT_SECS to a positive number; setting it
-    // to 0 (or leaving it unset) means "wait forever."
-    let timeout_secs: u64 = std::env::var("KUZUSHI_CODEQL_TIMEOUT_SECS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-
-    let sarif_file =
-        tempfile::NamedTempFile::new().context("could not create codeql sarif tempfile")?;
-
-    let mut command = Command::new(&launcher);
-    command
-        .arg("database")
-        .arg("analyze")
-        .arg("--format=sarif-latest")
-        .arg("--output")
-        .arg(sarif_file.path())
-        .arg("--ram=4096")
-        .arg("--threads=4")
-        .arg(db_path.as_path());
-    for query in &queries {
-        command.arg(query);
+    } else {
+        catalog
     }
-    let output = command
+}
+
+fn run_codeql_analysis(
+    launcher: &Path,
+    db_path: &Path,
+    sarif_path: &Path,
+    queries: &[String],
+    timeout_secs: u64,
+) -> Result<std::process::Output> {
+    let mut command = Command::new(launcher);
+    command
+        .args(["database", "analyze", "--format=sarif-latest", "--output"])
+        .arg(sarif_path)
+        .args(["--ram=4096", "--threads=4"])
+        .arg(db_path)
+        .args(queries)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = command
         .spawn()
-        .with_context(|| format!("could not invoke codeql at {}", launcher.display()))
-        .and_then(|mut child| wait_with_optional_timeout(&mut child, timeout_secs))?;
+        .with_context(|| format!("could not invoke codeql at {}", launcher.display()))?;
+    wait_with_optional_timeout(&mut child, timeout_secs)
+}
 
-    if !output.status.success() {
-        anyhow::bail!(
-            "codeql exited with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-                .chars()
-                .take(800)
-                .collect::<String>()
-        );
+fn ensure_codeql_analysis_succeeded(output: &std::process::Output) -> Result<()> {
+    if output.status.success() {
+        return Ok(());
     }
-
-    let sarif =
-        std::fs::read_to_string(sarif_file.path()).context("could not read codeql SARIF output")?;
-    Ok(Some(parse_sarif_flows(&sarif)))
+    let stderr = String::from_utf8_lossy(&output.stderr)
+        .chars()
+        .take(800)
+        .collect::<String>();
+    anyhow::bail!("codeql exited with {}: {stderr}", output.status)
 }
 
 /// Translate the per-target catalog into specific CodeQL query selectors.
@@ -754,28 +733,12 @@ mod tests {
             target: scan_root.clone(),
             scan_root,
             repo_root: PathBuf::from("."),
+            source_paths: std::sync::Arc::from([]),
             mode: TaintIrisNextMode::Hunt,
-            caps: TaintIrisNextCaps {
-                max_catalog_entries: 1,
-                max_candidates_per_cwe: 10,
-                max_evidence_per_cwe: 10,
-                max_files_per_query: 10,
-                max_specs_per_cwe: 10,
-                max_agent_findings: 10,
-                codeql_analyze_timeout_ms: 1000,
-                min_evidence_level: "candidate".to_string(),
-            },
+            caps: dataflow_test_caps(),
             languages: vec!["cpp".to_string()],
-            context_status: TaintIrisNextArtifactStatus {
-                ok: true,
-                path: None,
-                reason: "test".to_string(),
-            },
-            threat_model_status: TaintIrisNextArtifactStatus {
-                ok: true,
-                path: None,
-                reason: "test".to_string(),
-            },
+            context_status: test_artifact_status(),
+            threat_model_status: test_artifact_status(),
             repo_context: None,
             threat_model: None,
             catalog: vec![TaintIrisNextRankedCatalogEntry {
@@ -793,18 +756,44 @@ mod tests {
             }],
             structural_queries: Vec::new(),
             prompt_catalog: String::new(),
-            backend: TaintIrisNextBackendChoice {
-                requested: "codeql".to_string(),
-                selected: "codeql".to_string(),
-                codeql_db_path: None,
-                corroborate_with_codeql: None,
-                structural_tool: "test".to_string(),
-                warnings: Vec::new(),
-            },
+            backend: test_backend_choice(),
             max_budget_usd: None,
             allow_deterministic_fallback: false,
+            system_prompt: taint_iris_next_system_prompt(),
             cwe_focus: Vec::new(),
             discovered_signals: DiscoveredSignals::default(),
+        }
+    }
+
+    fn dataflow_test_caps() -> TaintIrisNextCaps {
+        TaintIrisNextCaps {
+            max_catalog_entries: 1,
+            max_candidates_per_cwe: 10,
+            max_evidence_per_cwe: 10,
+            max_files_per_query: 10,
+            max_specs_per_cwe: 10,
+            max_agent_findings: 10,
+            codeql_analyze_timeout_ms: 1000,
+            min_evidence_level: "candidate".to_string(),
+        }
+    }
+
+    fn test_artifact_status() -> TaintIrisNextArtifactStatus {
+        TaintIrisNextArtifactStatus {
+            ok: true,
+            path: None,
+            reason: "test".to_string(),
+        }
+    }
+
+    fn test_backend_choice() -> TaintIrisNextBackendChoice {
+        TaintIrisNextBackendChoice {
+            requested: "codeql".to_string(),
+            selected: "codeql".to_string(),
+            codeql_db_path: None,
+            corroborate_with_codeql: None,
+            structural_tool: "test".to_string(),
+            warnings: Vec::new(),
         }
     }
 

@@ -3,8 +3,10 @@ use super::{
     verify_system_prompt, VerifyFindingInput,
 };
 use crate::findings::FindingStore;
-use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
+use crate::runtime::{AgentQueryRequest, AgentRuntime, RuntimeCost, RuntimeCostReport};
+use crate::structured_output::{
+    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
+};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -49,9 +51,34 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
             &input,
         )?);
     }
-    let result = super::verify_consensus::combine_verify_passes(passes)?;
+    let cost = passes.iter().try_fold(
+        RuntimeCostReport::known(RuntimeCost::ZERO),
+        |total, pass| total.checked_add(pass.cost_report()?, "verification consensus cost"),
+    )?;
+    let result = super::verify_consensus::combine_verify_passes(
+        passes.into_iter().map(|pass| pass.value).collect(),
+    )?;
 
-    verify_finding_response(result)
+    bind_verification_result(result, &finding)
+        .and_then(|result| verify_finding_response(result, cost))
+}
+
+fn bind_verification_result(
+    mut result: Value,
+    finding: &crate::findings::Finding,
+) -> Result<Value> {
+    let scan_id = finding
+        .scan_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .context("verify:finding requires a canonical discovery run id")?;
+    let object = result
+        .as_object_mut()
+        .context("normalized verification result must be an object")?;
+    object.insert("verifiedScanId".to_string(), json!(scan_id));
+    object.insert("identityId".to_string(), json!(finding.identity_id.clone()));
+    Ok(result)
 }
 
 fn verify_finding_model(input: &Value, configured_model: Option<&str>) -> Result<String> {
@@ -72,8 +99,8 @@ fn run_one_verify_pass(
     prompt: &str,
     fingerprint: &str,
     input: &VerifyFindingInput,
-) -> Result<Value> {
-    query_required_structured_json(
+) -> Result<CostedStructuredJson<Value>> {
+    query_required_structured_json_with_cost(
         runtime,
         verify_agent_query_request(model, workspace_root, prompt, input),
         StructuredJsonContract::new(
@@ -98,9 +125,9 @@ fn verify_agent_query_request(
         prompt.to_string(),
     );
     if input.mcps {
-        request = request.with_tool_policy(crate::proof::whitebox_policy::whitebox_static_policy_for_target(
-            workspace_root,
-        ));
+        request = request.with_tool_policy(
+            crate::proof::whitebox_policy::whitebox_static_policy_for_target(workspace_root),
+        );
     }
     if let Some(timeout_ms) = input.mcp_tool_timeout_ms {
         let runtime_options = crate::runtime::AgentRuntimeOptions {
@@ -143,7 +170,7 @@ fn require_verify_finding_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<
     )
 }
 
-fn verify_finding_response(result: Value) -> Result<Value> {
+fn verify_finding_response(result: Value, cost: RuntimeCostReport) -> Result<Value> {
     let exploitable = required_result_bool(&result, "exploitable")?;
     let verdict = if exploitable {
         "VULNERABLE"
@@ -161,21 +188,30 @@ fn verify_finding_response(result: Value) -> Result<Value> {
     {
         lines.push(format!("      vector: {vector}"));
     }
-    lines.push("      cost=$0.0000".to_string());
+    if cost.is_unavailable() {
+        lines.push("      cost unavailable".to_string());
+    } else {
+        let cost_label = if cost.is_complete() {
+            "cost"
+        } else {
+            "observed cost"
+        };
+        lines.push(format!("      {cost_label}=${:.4}", cost.observed_usd()));
+    }
     let summary = format!("verify:finding complete ({verdict})");
     let proof = verification_proof_snapshot(&result)?;
     let data = verification_response_data(result, &proof, &summary)?;
     let mut response =
         crate::module_result::completed_output_result(summary, lines.join("\n"), data);
-    add_verification_response_metadata(&mut response, proof);
+    add_verification_response_metadata(&mut response, proof, cost);
     Ok(response)
 }
 
-fn add_verification_response_metadata(response: &mut Value, proof: Value) {
+fn add_verification_response_metadata(response: &mut Value, proof: Value, cost: RuntimeCostReport) {
     if let Some(object) = response.as_object_mut() {
         object.insert("proof".to_string(), proof);
-        object.insert("costUsd".to_string(), json!(0.0));
     }
+    crate::module_result::apply_runtime_cost_report(response, cost);
 }
 
 fn verification_response_data(result: Value, proof: &Value, summary: &str) -> Result<Value> {
@@ -198,6 +234,8 @@ fn verification_proof_snapshot(result: &Value) -> Result<Value> {
         "proofLevel": required_result_field(result, "proofLevel")?,
         "proofVerdict": required_result_field(result, "proofVerdict")?,
         "confidence": required_result_field(result, "confidence")?,
+        "verifiedScanId": required_result_field(result, "verifiedScanId")?,
+        "identityId": required_result_field(result, "identityId")?,
     }))
 }
 
@@ -235,31 +273,45 @@ fn value_type_name(value: &Value) -> &'static str {
 mod tests {
     use super::*;
 
+    fn known_cost(cost_usd: f64) -> RuntimeCostReport {
+        RuntimeCostReport::known(RuntimeCost::from_usd(cost_usd, "test cost").unwrap())
+    }
+
     #[test]
     fn verify_response_exposes_non_empirical_proof_snapshot() {
-        let response = verify_finding_response(json!({
-            "fingerprint": "fp-1",
-            "exploitable": true,
-            "confidence": 0.7,
-            "proofLevel": 2,
-            "proofVerdict": "not_reproduced"
-        }))
+        let response = verify_finding_response(
+            json!({
+                "fingerprint": "fp-1",
+                "exploitable": true,
+                "confidence": 0.7,
+                "proofLevel": 2,
+                "proofVerdict": "exploited",
+                "verifiedScanId": "scan-1",
+                "identityId": "identity-1"
+            }),
+            known_cost(0.25),
+        )
         .unwrap();
 
         assert_eq!(response["status"], json!("completed"));
         assert_eq!(response["proof"]["empirical"], json!(false));
         assert_eq!(response["data"]["proof"]["fingerprint"], json!("fp-1"));
         assert_eq!(response["data"]["exploitable"], json!(true));
+        assert_eq!(response["proof"]["verifiedScanId"], json!("scan-1"));
+        assert_eq!(response["costUsd"], json!(0.25));
         assert!(response["artifacts"].as_array().unwrap().is_empty());
     }
 
     #[test]
     fn verify_response_rejects_missing_proof_fields_instead_of_defaulting() {
-        let error = verify_finding_response(json!({
-            "fingerprint": "fp-1",
-            "exploitable": false,
-            "confidence": 0.2
-        }))
+        let error = verify_finding_response(
+            json!({
+                "fingerprint": "fp-1",
+                "exploitable": false,
+                "confidence": 0.2
+            }),
+            known_cost(0.0),
+        )
         .unwrap_err()
         .to_string();
 
@@ -268,14 +320,56 @@ mod tests {
 
     #[test]
     fn verify_response_rejects_missing_exploitable_instead_of_defaulting() {
-        let error = verify_finding_response(json!({
-            "fingerprint": "fp-1",
-            "confidence": 0.7
-        }))
+        let error = verify_finding_response(
+            json!({
+                "fingerprint": "fp-1",
+                "confidence": 0.7
+            }),
+            known_cost(0.0),
+        )
         .unwrap_err()
         .to_string();
 
         assert!(error.contains("missing boolean `exploitable`"));
+    }
+
+    #[test]
+    fn verify_response_omits_monetary_fields_when_cost_is_unavailable() {
+        let response = verify_finding_response(
+            json!({
+                "fingerprint": "fp-1",
+                "exploitable": false,
+                "confidence": 0.7,
+                "proofLevel": 2,
+                "proofVerdict": "not_reproduced",
+                "verifiedScanId": "scan-1",
+                "identityId": null
+            }),
+            RuntimeCostReport::UNAVAILABLE,
+        )
+        .unwrap();
+
+        assert!(response.get("costUsd").is_none());
+        assert!(response.get("observedCostUsd").is_none());
+        assert!(response.get("providerSpendUnresolved").is_none());
+        assert!(response["data"].get("costUsd").is_none());
+        assert!(response["data"].get("observedCostUsd").is_none());
+        assert!(response["output"]
+            .as_str()
+            .unwrap()
+            .contains("cost unavailable"));
+    }
+
+    #[test]
+    fn verification_binding_captures_the_exact_finding_generation() {
+        let mut finding = crate::findings::Finding::default();
+        finding.scan_id = Some("scan-current".to_string());
+        finding.identity_id = Some("identity-current".to_string());
+
+        let result = bind_verification_result(json!({"fingerprint": "fp"}), &finding).unwrap();
+
+        assert_eq!(result["verifiedScanId"], "scan-current");
+        assert_eq!(result["identityId"], "identity-current");
     }
 
     #[test]

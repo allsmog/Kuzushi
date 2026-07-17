@@ -1,8 +1,9 @@
-use crate::capabilities::full_mode_multi::domain::{ChunkPlan, CostSummary, FullModePlan};
+use crate::capabilities::full_mode_multi::domain::{
+    ChunkPlan, CostSummary, FullModePlan, MAX_FILE_BYTES,
+};
 use crate::findings::{Finding, Severity};
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::fs;
 use std::path::Path;
 
 pub(crate) const SYSTEM_PROMPT_C: &str = r#"You are Kuzushi's whole-codebase scanner. You are seeing
@@ -75,7 +76,10 @@ pub(crate) fn render_chunk_prompt(root: &Path, chunk: &ChunkPlan) -> Result<Stri
     body.push_str("Files in this chunk:\n\n");
     for fb in &chunk.files {
         let abs = root.join(&fb.path);
-        let contents = match fs::read_to_string(&abs) {
+        let contents = match crate::bounded_file::read_utf8_text(
+            &abs,
+            fb.bytes.min(MAX_FILE_BYTES),
+        ) {
             Ok(c) => c,
             Err(_) => continue,
         };

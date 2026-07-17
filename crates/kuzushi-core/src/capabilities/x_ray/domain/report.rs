@@ -16,6 +16,10 @@ pub struct XRayReportData {
     pub entry_point_counts: XRayEntryPointCounts,
     pub invariant_counts: XRayInvariantCounts,
     pub cost_usd: f64,
+    /// False when only an observed subtotal is available because one of the
+    /// provider calls did not report an exact monetary charge.
+    #[serde(default)]
+    pub cost_usd_exact: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

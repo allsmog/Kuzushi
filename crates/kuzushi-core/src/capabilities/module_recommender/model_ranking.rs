@@ -19,7 +19,16 @@ No prose, no code fences.";
 pub(crate) struct ModelRanking<'a> {
     runtime: Option<&'a dyn AgentRuntime>,
     model: Option<String>,
+    unavailable_reason: Option<String>,
     cwd: PathBuf,
+}
+
+pub(crate) struct ModelRankingOutcome {
+    pub(crate) recommendations: Option<Vec<ModuleRecommendation>>,
+    pub(crate) model: Option<String>,
+    pub(crate) cost: crate::runtime::RuntimeCostReport,
+    pub(crate) provider_spend_unresolved: bool,
+    pub(crate) fallback_reason: Option<String>,
 }
 
 impl<'a> ModelRanking<'a> {
@@ -33,6 +42,7 @@ impl<'a> ModelRanking<'a> {
             return Self {
                 runtime: None,
                 model: None,
+                unavailable_reason: Some("model ranking was disabled by tool input".to_string()),
                 cwd: root.to_path_buf(),
             };
         }
@@ -40,39 +50,105 @@ impl<'a> ModelRanking<'a> {
             .get("model")
             .and_then(Value::as_str)
             .map(str::to_string);
-        let model = resolve_explicit_model(
+        let resolved = resolve_explicit_model(
             "module-recommender:recommend",
             input_model,
             ctx.config.model.as_deref(),
-        )
-        .ok();
+        );
+        let (model, unavailable_reason) = match resolved {
+            Ok(model) => (Some(model), None),
+            Err(error) => (None, Some(error.to_string())),
+        };
         Self {
             runtime,
             model,
+            unavailable_reason,
             cwd: root.to_path_buf(),
         }
     }
 
-    /// The model id used for ranking, when ranking is active.
-    pub(crate) fn model_label(&self) -> Option<&str> {
-        self.runtime.and(self.model.as_deref())
-    }
-
-    /// Model-ranked recommendations, or `None` to fall back to the rule catalog.
-    pub(crate) fn rank(&self, request: &RecommenderRequest) -> Option<Vec<ModuleRecommendation>> {
-        let runtime = self.runtime?;
-        let model = self.model.as_ref()?;
+    pub(crate) fn rank(&self, request: &RecommenderRequest) -> ModelRankingOutcome {
+        let Some(runtime) = self.runtime else {
+            return self.unattempted_fallback("agent runtime is unavailable");
+        };
+        let Some(model) = self.model.as_ref() else {
+            return self.unattempted_fallback("no explicit model is available");
+        };
         let query = AgentQueryRequest::new(
             model.clone(),
             self.cwd.clone(),
             RECOMMENDER_SYSTEM_PROMPT,
             render_recommender_prompt(request),
         );
-        let response = runtime.query_blocking(query).ok()?;
-        let picks = parse_tool_picks(&response.text)?;
+        let response = match crate::runtime::query_blocking_checked(runtime, query) {
+            Ok(response) => response,
+            Err(error) => return self.failed_query(model, error),
+        };
+        let cost = match response.checked_cost_report() {
+            Ok(cost) => cost,
+            Err(error) => return self.failed_query(model, error),
+        };
+        let Some(picks) = parse_tool_picks(&response.text) else {
+            return fallback_after_response(model, cost, "model response was not a JSON pick list");
+        };
         let recommendations = build_model_recommendations(&picks, request);
-        (!recommendations.is_empty()).then_some(recommendations)
+        if recommendations.is_empty() {
+            return fallback_after_response(
+                model,
+                cost,
+                "model response contained no available tool picks",
+            );
+        }
+        ModelRankingOutcome {
+            recommendations: Some(recommendations),
+            model: Some(model.clone()),
+            cost,
+            provider_spend_unresolved: !cost.is_complete(),
+            fallback_reason: None,
+        }
     }
+
+    fn unattempted_fallback(&self, default_reason: &str) -> ModelRankingOutcome {
+        ModelRankingOutcome {
+            recommendations: None,
+            model: self.model.clone(),
+            cost: exact_zero_cost(),
+            provider_spend_unresolved: false,
+            fallback_reason: Some(
+                self.unavailable_reason
+                    .clone()
+                    .unwrap_or_else(|| default_reason.to_string()),
+            ),
+        }
+    }
+
+    fn failed_query(&self, model: &str, error: anyhow::Error) -> ModelRankingOutcome {
+        ModelRankingOutcome {
+            recommendations: None,
+            model: Some(model.to_string()),
+            cost: crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+            provider_spend_unresolved: true,
+            fallback_reason: Some(format!("model ranking query failed: {error}")),
+        }
+    }
+}
+
+fn fallback_after_response(
+    model: &str,
+    cost: crate::runtime::RuntimeCostReport,
+    reason: &str,
+) -> ModelRankingOutcome {
+    ModelRankingOutcome {
+        recommendations: None,
+        model: Some(model.to_string()),
+        cost,
+        provider_spend_unresolved: !cost.is_complete(),
+        fallback_reason: Some(reason.to_string()),
+    }
+}
+
+fn exact_zero_cost() -> crate::runtime::RuntimeCostReport {
+    crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO)
 }
 
 pub(crate) fn model_ranking_enabled(input: &Value) -> bool {
@@ -181,6 +257,8 @@ fn priority_from_str(value: &str) -> RecommendationPriority {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::findings::TriageOutcome;
+    use crate::runtime::{AgentQueryResponse, TriageRequest};
 
     fn request(tools: &[&str]) -> RecommenderRequest {
         RecommenderRequest {
@@ -261,6 +339,104 @@ mod tests {
         assert_eq!(recs[0].tool, "semgrep:scan");
         assert_eq!(recs[0].priority, RecommendationPriority::High);
         assert_eq!(recs[0].signals, vec!["model-ranked".to_string()]);
+    }
+
+    struct RankingRuntime {
+        response: Option<AgentQueryResponse>,
+    }
+
+    impl AgentRuntime for RankingRuntime {
+        fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.response
+                .clone()
+                .context("scripted module-ranking query failure")
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!("unused")
+        }
+    }
+
+    #[test]
+    fn ranking_success_preserves_exact_provider_cost() {
+        let runtime = ranking_runtime(
+            r#"[{"tool":"semgrep:scan","priority":"high","reason":"best signal"}]"#,
+            0.4,
+            true,
+        );
+        let config = ranking_config();
+        let ctx = ranking_context(&config);
+        let ranking = ModelRanking::resolve(&ctx, Some(&runtime), &json!({}), Path::new("/tmp"));
+
+        let outcome = ranking.rank(&request(&["semgrep:scan"]));
+
+        assert_eq!(outcome.recommendations.unwrap().len(), 1);
+        assert_eq!(outcome.cost.exact_usd(), Some(0.4));
+        assert!(!outcome.provider_spend_unresolved);
+        assert!(outcome.fallback_reason.is_none());
+    }
+
+    #[test]
+    fn query_failure_marks_provider_spend_unresolved() {
+        let runtime = RankingRuntime { response: None };
+        let config = ranking_config();
+        let ctx = ranking_context(&config);
+        let ranking = ModelRanking::resolve(&ctx, Some(&runtime), &json!({}), Path::new("/tmp"));
+
+        let outcome = ranking.rank(&request(&["semgrep:scan"]));
+
+        assert!(outcome.recommendations.is_none());
+        assert_eq!(outcome.cost.exact_usd(), None);
+        assert_eq!(outcome.cost.observed_usd(), 0.0);
+        assert!(outcome.provider_spend_unresolved);
+        assert!(outcome
+            .fallback_reason
+            .unwrap()
+            .contains("scripted module-ranking query failure"));
+    }
+
+    #[test]
+    fn parse_fallback_keeps_the_reported_cost_exact() {
+        let runtime = ranking_runtime("not JSON", 0.2, true);
+        let config = ranking_config();
+        let ctx = ranking_context(&config);
+        let ranking = ModelRanking::resolve(&ctx, Some(&runtime), &json!({}), Path::new("/tmp"));
+
+        let outcome = ranking.rank(&request(&["semgrep:scan"]));
+
+        assert!(outcome.recommendations.is_none());
+        assert_eq!(outcome.cost.exact_usd(), Some(0.2));
+        assert!(!outcome.provider_spend_unresolved);
+        assert!(outcome.fallback_reason.is_some());
+    }
+
+    fn ranking_runtime(text: &str, cost_usd: f64, reported: bool) -> RankingRuntime {
+        RankingRuntime {
+            response: Some(AgentQueryResponse {
+                text: text.to_string(),
+                cost_usd,
+                cost_usd_reported: reported,
+                ..AgentQueryResponse::default()
+            }),
+        }
+    }
+
+    fn ranking_config() -> crate::config::V2Config {
+        crate::config::V2Config {
+            model: Some("openai:test".to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn ranking_context(config: &crate::config::V2Config) -> ToolExecutionContext<'_> {
+        ToolExecutionContext {
+            config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        }
     }
 
     #[test]

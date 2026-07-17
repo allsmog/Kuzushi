@@ -1,8 +1,8 @@
 # Kuzushi Roadmap — Path to World-Class
 
-This roadmap operationalizes the June 2026 deep audit (5 code deep-dives +
-4 market studies). It is ordered by leverage: each phase unblocks the next,
-and nothing in a later phase is worth doing while an earlier phase is red.
+This roadmap started from the June 2026 deep audit and is maintained against
+the live Rust product. The status snapshot below was reconciled on 2026-07-12;
+code, tests, release workflows, and the npm registry remain the source of truth.
 
 ## North star
 
@@ -14,13 +14,13 @@ and nothing in a later phase is worth doing while an earlier phase is red.
 
 | Metric | Today | World-class |
 | --- | --- | --- |
-| `npm install -g kuzushi` installs the documented product | ❌ (registry = retired 0.20.0 TS CLI) | ✅ all major platforms |
-| Findings with repo-verified evidence (span + content hash) | Semgrep-only | 100% of persisted findings |
-| "Exploitable: confirmed" backed by runtime proof | LLM opinion can claim it | Only crash/PoV-backed (proof level 4) |
+| `npm install -g kuzushi` installs the documented product | Native `0.24.0-alpha.6`; the repo is one alpha ahead | ✅ current release on all supported platforms |
+| Findings with repo-verified evidence (span + content hash) | Producer-dependent, with unverified states surfaced honestly | 100% of persisted findings |
+| "Exploitable: confirmed" backed by runtime proof | Runtime-verified is reserved for proof level 4 | Preserve this invariant |
 | Published detection numbers (TP/FP/cost) | `baseline.json` is `{}` | Scoreboard on real corpora + CWE-Bench-Java head-to-head |
-| Stable finding identity across runs/toolchains | ❌ (DefaultHasher + message) | ✅ SHA-256, message-independent |
-| CI gating (`--fail-on`) + SARIF from the CLI | ❌ | ✅ |
-| Incident-grade reliability bugs (bridge hang, DB races, silent parse) | 3 open | 0 |
+| Stable finding identity across runs/toolchains | Durable target-scoped `fp3`; evidence-free findings still use a normalized text locator | Remove the remaining description-sensitive fallback |
+| CI gating (`--fail-on`) + SARIF from the CLI | ✅ implemented and documented | Preserve in reference CI |
+| Incident-grade reliability bugs | Tracked by executable gates and run-state tests, not a stale prose count | 0 open release blockers |
 
 ---
 
@@ -28,41 +28,33 @@ and nothing in a later phase is worth doing while an earlier phase is red.
 **Goal: a stranger can install and run what the README describes.**
 *~1–2 weeks. Nothing else matters while this is red.*
 
-- [ ] **P0.1 Publish 0.24.x to npm.** Registry `latest` is 0.20.0 with
-  `bin: dist/cli.js` (the retired TypeScript CLI); repo is 0.24.0-alpha.0
-  Rust. Every README command is broken for real installers.
+- [ ] **P0.1 Keep the native npm release current.** Registry `latest` is the
+  native `0.24.0-alpha.6`; this tree is `0.24.0-alpha.8`. Publish the current
+  alpha only after its release gates are green.
   *Exit: `npm i -g kuzushi && kuzushi doctor` matches README on a clean machine.*
-- [ ] **P0.2 Platform-split native binaries** as npm `optionalDependencies`
-  (esbuild/Biome pattern). `release.yml` currently stages only linux-x64 into
-  the npm tarball; darwin/arm64/win32 users get exit 127 with unactionable
-  advice. Drop the duplicate ~25MB `kz` binary (argv0 dispatch already exists
-  in `bin/kuzushi-rs.mjs`). Add `curl | sh` installer + Homebrew tap.
+- [ ] **P0.2 Finish cross-platform release hardening.** `release.yml` now
+  builds and stages Linux, macOS, and Windows binaries into the npm tarball;
+  several matrix legs remain best-effort. Promote them to required after a
+  green tagged release, then add the installer/Homebrew distribution path.
   *Exit: install succeeds on linux-x64, darwin-arm64, darwin-x64, win32-x64.*
-- [ ] **P0.3 Kill the supply-chain liabilities.** Required dependency
-  `@kuzushi/randori-plugin` resolves from `github:allsmog/randori-plugin`
-  (a personal repo — availability + integrity risk fatal to AppSec adoption).
-  Vendor it or publish to the registry. Cut LangChain stack + runtime
-  `typescript` from the default install (bridge becomes an optional extra).
+- [ ] **P0.3 Reduce the default bridge dependency footprint.** The former
+  GitHub-only Randori dependency is gone. LangChain and bridge dependencies
+  remain in the default install; make them an explicit runtime extra without
+  weakening the retained TypeScript module SDK.
   *Exit: zero `github:` specifiers in the dependency graph; install < 30s, no native compile.*
-- [ ] **P0.4 CI gating semantics.** `--ci` is output-format only
-  (`crates/kuzushi-cli/src/command.rs`); scan exits 0 regardless of findings,
-  so Kuzushi cannot block a PR. Add `kuzushi scan --fail-on <severity>`,
-  `--sarif <path>` (export exists at
-  `crates/kuzushi-core/src/workspace/application/export_sarif.rs` but is CLI-unreachable),
-  a documented exit-code table, and a published GitHub Action wrapping
-  `.github/workflows/kuzushi-reference.yml`.
+- [x] **P0.4 CI gating semantics.** `kuzushi scan --fail-on <severity>` and
+  `--sarif <path>` are implemented, documented, and covered by the reference
+  workflow and scan-gate tests.
   *Exit: a GitHub Actions job fails on a high-severity finding and uploads SARIF to Code Scanning.*
-- [ ] **P0.5 Trust kit.** Fix CHANGELOG ordering (v1.0.0 currently listed below
-  0.24.0-alpha), SECURITY.md supported versions ("0.1.x"), RELEASING.md
-  examples. State the privacy promise explicitly: *"local-first; the only
-  bytes that leave your machine go to your model provider"* (verified true —
-  currently unstated). Enable npm provenance by default.
+- [ ] **P0.5 Finish the trust kit.** The README now states the local-first,
+  zero-first-party-telemetry promise and release publishing supports npm
+  provenance. Make provenance the default and keep release/security examples
+  synchronized through executable documentation checks.
   *Exit: a security engineer's 10-minute diligence pass finds no incoherence.*
-- [ ] **P0.6 First-run wow, offline.** `kuzushi demo` built into the binary
-  (vendored vulnerable fixture + bundled rules → real finding → evidence →
-  proof state), no API key, no semgrep install. When a default scan finds
-  nothing, print what ran / what was skipped / why (today: silent 0 findings).
-  `examples/first-wow/` exists but is not shipped in the npm tarball.
+- [x] **P0.6 First-run wow, offline.** `kuzushi demo` scans a bundled fixture
+  without a key, model, or external scanner, persists honest `signal_only`
+  evidence, and hands the operator to the real findings workflow. Default scan
+  output also reports skipped engines and their reasons.
   *Exit: install → demo finding with evidence in < 90 seconds, offline.*
 
 ## Phase 1 — Make the evidence promise true 🔴
@@ -78,12 +70,11 @@ and nothing in a later phase is worth doing while an earlier phase is red.
   `FindingEvidence`. Citations that fail validation → finding persists as
   `evidence_unverified` and renders visibly degraded.
   *Exit: zero findings persist with unverified file/line claims; fabricated citations are caught at insert time (test: agent emits fake line → finding marked degraded).*
-- [ ] **P1.2 Stable finding identity.** `fingerprint_parts()` hashes the
-  **message** with **`DefaultHasher`** (`findings/domain/mod.rs:31`) — two LLM
-  runs describing the same bug differently = two findings; a toolchain bump
-  can resurrect every historical finding. Switch to SHA-256 over
-  (rule_id, file_path, start_line) — message excluded — with a one-time
-  stored-fingerprint migration.
+- [ ] **P1.2 Finish stable finding identity.** The old `DefaultHasher` path has
+  been replaced by target-scoped `fp3` identity. Findings with validated
+  evidence use normalized evidence content, but evidence-free findings still
+  fall back to normalized title/message text. Replace that last
+  description-sensitive locator and retain migration coverage.
   *Exit: same bug, different LLM phrasing → same fingerprint; fingerprints byte-identical across Rust versions.*
 - [ ] **P1.3 Dedup that actually dedups.** Findings without an extractable CWE
   get `dedup_key = None` and bypass cross-engine merge entirely
@@ -204,9 +195,10 @@ and nothing in a later phase is worth doing while an earlier phase is red.
   *scan → validated evidence → honest triage → runtime proof → patch → report*
   — must be bulletproof before breadth grows.
 - [ ] **P4.4 Engineering hygiene track** (parallel, ongoing): split
-  `modules/pwn/mod.rs` (2,327 LOC); test the untested hot zones
-  (`workspace/inventory/inspect_python_route_line.rs` — 1,529 LOC, 0 tests;
-  offense planner/persistence); centralize model price tables (two stale
+  `modules/pwn/mod.rs` (2,327 LOC); split the mixed-language route detector
+  (`workspace/inventory/inspect_python_route_line.rs` — 1,543 LOC, covered by
+  route integration tests in `workspace/inventory/tests.rs`); add focused
+  offense planner/persistence tests; centralize model price tables (two stale
   hardcoded copies); bridge protocol-version handshake; macOS sandbox
   honesty in doctor (no bwrap → say so and clamp).
 

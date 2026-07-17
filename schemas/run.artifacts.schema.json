@@ -168,6 +168,28 @@
             ],
             "properties": {
               "path": {
+                "pattern": "(^|/)items\\.jsonl$"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "label": {
+                "const": "semantic run items"
+              },
+              "kind": {
+                "const": "jsonl"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
                 "pattern": "(^|/)context\\.json$"
               }
             }

@@ -73,6 +73,138 @@ fn strategy_queue_missing_file_is_empty() {
 }
 
 #[test]
+fn direct_strategy_load_initializes_ignored_state() {
+    let temp = tempfile::tempdir().unwrap();
+    if !initialize_git_fixture(temp.path()) {
+        return;
+    }
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+
+    assert!(load_strategy_queue(&workspace).unwrap().is_empty());
+
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(temp.path())
+        .args(["status", "--porcelain", "--untracked-files=all"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(
+        output.stdout.is_empty(),
+        "strategy load dirtied fresh repository: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+fn initialize_git_fixture(root: &std::path::Path) -> bool {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    };
+    git(&["init", "-q"])
+        && git(&["config", "user.email", "test@example.com"])
+        && git(&["config", "user.name", "Kuzushi Test"])
+        && std::fs::write(root.join("README.md"), "fixture\n").is_ok()
+        && git(&["add", "README.md"])
+        && git(&["commit", "-q", "-m", "initial"])
+}
+
+#[cfg(unix)]
+#[test]
+fn strategy_ledgers_reject_symlinks_without_touching_their_targets() {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempfile::tempdir().unwrap();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    workspace.ensure_state_dir().unwrap();
+    std::fs::write(outside.path(), "OUTSIDE_STRATEGY_TOKEN").unwrap();
+    symlink(outside.path(), strategy_queue_path(&workspace)).unwrap();
+
+    let proposal = StrategyProposal::new(
+        StrategyPhase::Review,
+        "run semgrep:scan",
+        "exercise the safe state boundary",
+    );
+    assert!(load_strategy_queue(&workspace).is_err());
+    assert!(save_strategy_queue(&workspace, &[proposal]).is_err());
+    assert_eq!(
+        std::fs::read_to_string(outside.path()).unwrap(),
+        "OUTSIDE_STRATEGY_TOKEN"
+    );
+}
+
+#[test]
+fn concurrent_strategy_appends_do_not_lose_updates() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let handles = (0..8)
+        .map(|index| {
+            let workspace = workspace.clone();
+            std::thread::spawn(move || {
+                let mut proposal = StrategyProposal::new(
+                    StrategyPhase::Review,
+                    format!("strategy-{index}"),
+                    "concurrency regression",
+                );
+                proposal.id = format!("proposal-{index}");
+                append_strategy_proposal(&workspace, &proposal).unwrap();
+            })
+        })
+        .collect::<Vec<_>>();
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let proposals = load_strategy_queue(&workspace).unwrap();
+    assert_eq!(proposals.len(), 8);
+}
+
+#[test]
+fn oversized_strategy_write_is_rejected_before_installation() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let proposal = StrategyProposal::new(
+        StrategyPhase::Review,
+        "run semgrep:scan",
+        "x".repeat(5 * 1024 * 1024),
+    );
+
+    let error = save_strategy_queue(&workspace, &[proposal]).unwrap_err();
+
+    assert!(error.to_string().contains("write limit"));
+    assert!(load_strategy_queue(&workspace).unwrap().is_empty());
+}
+
+#[test]
+fn pending_strategy_transaction_is_completed_before_reads() {
+    use super::persistence::{
+        begin_strategy_transaction, encode_strategy_jsonl, write_strategy_jsonl_body,
+    };
+
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let proposal = semgrep_strategy_proposal();
+    let correction = workspace_strategy_correction();
+    let queue_body = encode_strategy_jsonl(&[proposal], "strategy proposal").unwrap();
+    let corrections_body = encode_strategy_jsonl(&[correction], "strategy correction").unwrap();
+    begin_strategy_transaction(&workspace, queue_body, corrections_body.clone()).unwrap();
+    write_strategy_jsonl_body(
+        &workspace,
+        STRATEGY_CORRECTIONS_FILE,
+        corrections_body.as_bytes(),
+    )
+    .unwrap();
+
+    assert_eq!(load_strategy_queue(&workspace).unwrap().len(), 1);
+    assert_eq!(load_strategy_corrections(&workspace).unwrap().len(), 1);
+}
+
+#[test]
 fn strategy_proposal_records_execution_outcome() {
     let mut proposal = StrategyProposal::new(
         StrategyPhase::Review,

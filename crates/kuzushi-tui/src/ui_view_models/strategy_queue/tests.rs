@@ -19,6 +19,20 @@ fn strategy_queue_model_requires_target() {
 }
 
 #[test]
+fn strategy_queue_not_requested_does_not_claim_to_be_loading() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+
+    let model = strategy_queue_model(&app);
+
+    assert_eq!(
+        model.summary,
+        "strategy queue not generated — run `recommend`"
+    );
+}
+
+#[test]
 fn strategy_queue_model_reads_persisted_proposals() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
@@ -39,6 +53,7 @@ fn strategy_queue_model_reads_persisted_proposals() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
     let model = strategy_queue_model(&app);
 
     assert_eq!(
@@ -76,6 +91,7 @@ fn strategy_queue_model_sorts_proposed_before_approved_and_rejected() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
     let model = strategy_queue_model(&app);
 
     assert_eq!(model.rows[0].id, "review-codeql-scan");

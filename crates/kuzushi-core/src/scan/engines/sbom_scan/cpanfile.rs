@@ -1,6 +1,6 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_cpanfile(path: &Path) -> bool {
@@ -63,7 +63,10 @@ fn requirement_version(text: &str) -> Option<String> {
 
 fn quoted_value(text: &str) -> Option<(&str, &str)> {
     let text = text.trim_start();
-    let quote = text.chars().next().filter(|quote| matches!(quote, '\'' | '"'))?;
+    let quote = text
+        .chars()
+        .next()
+        .filter(|quote| matches!(quote, '\'' | '"'))?;
     let rest = &text[quote.len_utf8()..];
     let end = rest.find(quote)?;
     Some((&rest[..end], &rest[end + quote.len_utf8()..]))

@@ -24,8 +24,20 @@ pub(in crate::scan) fn capture_scanner_process_pipes(
         .with_context(|| format!("Could not capture {scanner_name} stderr"))?;
 
     Ok(ScannerProcessReaders {
-        stdout: thread::spawn(move || read_pipe(stdout)),
-        stderr: thread::spawn(move || read_pipe(stderr)),
+        stdout: thread::spawn(move || {
+            crate::bounded_subprocess::drain_bounded(
+                stdout,
+                crate::bounded_subprocess::DEFAULT_STDOUT_LIMIT,
+                "scanner stdout",
+            )
+        }),
+        stderr: thread::spawn(move || {
+            crate::bounded_subprocess::drain_bounded(
+                stderr,
+                crate::bounded_subprocess::DEFAULT_STDERR_LIMIT,
+                "scanner stderr",
+            )
+        }),
     })
 }
 

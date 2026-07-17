@@ -97,7 +97,7 @@ fn parse_file(
     language_id: &'static str,
     parsers: &mut HashMap<&'static str, Parser>,
 ) -> Option<ParsedFile> {
-    let source_bytes = std::fs::read(absolute).ok()?;
+    let source_bytes = crate::bounded_file::read_regular_bytes(absolute, 8 * 1024 * 1024).ok()?;
     if source_bytes.is_empty() {
         return None;
     }

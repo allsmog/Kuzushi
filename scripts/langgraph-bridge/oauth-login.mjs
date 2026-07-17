@@ -12,6 +12,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import http from "node:http";
 import { createInterface } from "node:readline";
+import { invalidProviderResponseError, providerHttpError } from "./errors.mjs";
 import {
   oauthCredentialBag,
   oauthCredentialsPath,
@@ -156,14 +157,19 @@ function jsonHeaders() {
   return { "content-type": "application/json", accept: "application/json" };
 }
 
-async function exchangeAuthorizationCode(cfg, params) {
+export async function exchangeAuthorizationCode(cfg, params) {
   const { headers, body } = tokenExchangeBody(cfg, params);
   const response = await fetch(cfg.tokenUrl, { method: "POST", headers, body });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`${cfg.label} token exchange failed (${response.status}): ${text.slice(0, 300)}`);
+  if (!response.ok) throw providerHttpError(response.status);
+  return parseProviderTokenJson(await response.text());
+}
+
+function parseProviderTokenJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw invalidProviderResponseError();
   }
-  return JSON.parse(text);
 }
 
 function saveCredential(cfg, credential) {

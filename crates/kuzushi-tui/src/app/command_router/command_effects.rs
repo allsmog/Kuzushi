@@ -161,6 +161,10 @@ impl ShellApp {
     ) -> Option<Vec<ShellEffect>> {
         match command {
             ShellCommand::Clear => Some(vec![ShellEffect::ClearConversation]),
+            ShellCommand::SessionInfo => {
+                self.show_session_transcript_status();
+                Some(Vec::new())
+            }
             ShellCommand::Load(specifier) => Some(self.reduce_load_command(specifier.clone())),
             ShellCommand::Pause => Some(vec![ShellEffect::PauseActiveWork]),
             ShellCommand::Resume(run_id) => Some(vec![ShellEffect::ResumeSession(ResumeSession {
@@ -364,6 +368,8 @@ impl ShellApp {
                 Some(self.reduce_component_selection(selection.as_deref()))
             }
             ShellCommand::Findings => {
+                self.set_active_findings_filter(None);
+                self.prepare_findings_list_view();
                 Some(self.open_workbench_effects(crate::app::WorkbenchPane::Findings))
             }
             ShellCommand::FindingsFilter(expression) => {
@@ -410,9 +416,17 @@ impl ShellApp {
                 run_id: self.current_activity_run_id(),
             })]),
             ShellCommand::Demo => Some(vec![ShellEffect::StartOfflineDemoFixtureScan]),
-            ShellCommand::Workbench(pane) => Some(self.open_workbench_effects(*pane)),
+            ShellCommand::Workbench(pane) => {
+                Some(self.open_reality_derived_workbench_effects(*pane))
+            }
+            ShellCommand::Report => Some(self.open_report_view()),
             _ => None,
         }
+    }
+
+    fn open_report_view(&mut self) -> Vec<ShellEffect> {
+        self.open_report_from_current_origin();
+        Vec::new()
     }
 
     fn reduce_target_navigation_command(
@@ -424,9 +438,14 @@ impl ShellApp {
             ShellCommand::Scan(target) => Some(vec![ShellEffect::OpenGuidedScan(GuidedScanOpen {
                 target: target.clone(),
             })]),
-            ShellCommand::ScriptedScan(target) => {
-                Some(self.reduce_scan_start(target.clone(), None))
+            ShellCommand::ScriptedScan(Some(target)) => {
+                Some(self.request_target_activation(TargetActivation {
+                    path: target.clone(),
+                    selected_scope: None,
+                    source: TargetActivationSource::ScriptedScan,
+                }))
             }
+            ShellCommand::ScriptedScan(None) => Some(self.reduce_scan_start(None, None)),
             ShellCommand::Target(path) => Some(self.reduce_target_command(path.as_deref())),
             ShellCommand::TargetRevision(reference) => {
                 Some(self.reduce_target_revision_command(reference))
@@ -452,6 +471,10 @@ impl ShellApp {
             }
             ShellCommand::Ask(question) => Some(self.reduce_ask_agent(question)),
             ShellCommand::Plan(goal) => Some(self.reduce_planner_start(goal)),
+            ShellCommand::PhaseIntent {
+                selected_phase,
+                text,
+            } => Some(self.reduce_phase_intent(*selected_phase, text)),
             ShellCommand::PlanApply => Some(self.reduce_apply_pending_plan()),
             ShellCommand::PlanDiscard => Some(self.reduce_discard_pending_plan()),
             ShellCommand::ThreatRegen => Some(self.reduce_threat_regen()),
@@ -461,10 +484,21 @@ impl ShellApp {
             ShellCommand::ReviewDecision(command) => {
                 Some(self.reduce_review_decision_command(command))
             }
+            ShellCommand::ProofDeferral { reference, reason } => {
+                Some(self.reduce_proof_deferral(reference, reason))
+            }
             ShellCommand::Strategy(command) => Some(self.reduce_strategy_command(command)),
             ShellCommand::Pwn(command) => Some(self.reduce_pwn_command(command)),
             _ => None,
         }
+    }
+
+    fn reduce_proof_deferral(&mut self, reference: &str, reason: &str) -> Vec<ShellEffect> {
+        vec![ShellEffect::RecordProofDeferral(ProofDeferralApply {
+            target: self.target_owned(),
+            reference: reference.to_string(),
+            reason: reason.to_string(),
+        })]
     }
 
     fn reduce_option_command_effect(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
@@ -536,8 +570,8 @@ impl ShellApp {
     fn open_home_view(&mut self) {
         self.clear_focused_module();
         self.router.catalog_mut().collapse();
-        self.set_shell_view(ShellView::Home);
-        self.log("home", "showing Kuzushi cockpit");
+        self.open_cached_workbench(WorkbenchPane::Findings);
+        self.log("home", "showing the phase cockpit");
     }
 
     fn open_help_view(&mut self, query: Option<String>) {
@@ -549,14 +583,15 @@ impl ShellApp {
     fn open_modules_view(&mut self) {
         self.clear_focused_module();
         self.set_shell_view(ShellView::Catalog);
-        self.router.catalog_mut().expand();
+        self.router.catalog_mut().collapse();
+        self.router.catalog_mut().jump_start();
         self.router.modules_mut().open();
-        let count = self.registry().modules().count();
+        let count = self.catalog_module_count();
         self.log(
-            "module",
+            "capability",
             format!(
-                "showing {count} {}",
-                if count == 1 { "module" } else { "modules" }
+                "showing {count} phase-native {} · press F2, then e for expert engines",
+                if count == 1 { "action" } else { "actions" }
             ),
         );
     }
@@ -612,35 +647,31 @@ impl ShellApp {
 
     fn open_onboarding_picker(&mut self) {
         if self.target().is_none() {
-            self.log(
-                "onboarding",
-                "no active workspace target; set one with `target <path>` first",
-            );
+            self.open_target_picker();
             return;
         }
-        self.open_planning_picker();
+        self.open_setup();
     }
 
     fn open_next_phase_picker(&mut self) {
         self.workbench_cache()
             .borrow_mut()
             .invalidate_map_artifacts();
-        let Some(journey) = crate::ui_view_models::journey_model(self) else {
-            self.log(
-                "journey",
-                "no active workspace target; set one with `target <path>` first",
+        self.invalidate_view_hydration();
+        if let Some(target) = self.target_owned() {
+            self.hydrate_view_keys_blocking(
+                &target,
+                vec![crate::app::ViewHydrationKey::MapArtifacts],
             );
-            return;
-        };
-        self.open_phase_picker(journey.current);
+        }
+        if !self.open_next_journey_destination() {
+            self.open_target_picker();
+        }
     }
 
     fn open_requested_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
         if self.target().is_none() {
-            self.log(
-                "journey",
-                "no active workspace target; set one with `target <path>` first",
-            );
+            self.open_target_picker();
             return;
         }
         self.workbench_cache()
@@ -664,10 +695,7 @@ impl ShellApp {
     }
 
     fn open_filtered_findings_view(&mut self) {
-        self.set_shell_view(ShellView::Workbench);
-        self.router
-            .workbench_mut()
-            .set_focus(crate::app::WorkbenchPane::Findings);
+        self.prepare_findings_list_view();
     }
 
     fn reduce_findings_since(&mut self, reference: &str) -> Vec<ShellEffect> {
@@ -703,15 +731,8 @@ impl ShellApp {
     }
 
     fn show_permissions_status(&mut self) {
-        self.set_shell_view(ShellView::Config);
-        self.log(
-            "permissions",
-            "model fallback forbidden without explicit consent; headless run requires explicit tool names",
-        );
-        self.log(
-            "permissions",
-            "network egress, filesystem writes outside staged flows, and destructive actions require approval; denial leaves state unchanged",
-        );
+        self.set_shell_view(ShellView::Permissions);
+        self.log("view", "permission policy");
     }
 
     fn open_tune_view(&mut self) {
@@ -722,12 +743,12 @@ impl ShellApp {
     fn focus_module_or_log_error(&mut self, module: &str) {
         if self
             .registry()
-            .modules()
+            .all_modules()
             .any(|entry| entry.metadata().id == module)
         {
             self.set_focused_module(Some(module.to_string()));
-            self.set_shell_view(ShellView::Module);
-            self.log("use", module);
+            self.open_tools_view(Some(format!("module:{module}")));
+            self.log("use", format!("showing {module} tools"));
         } else {
             self.log("error", self.unknown_module_message(module));
         }
@@ -798,9 +819,26 @@ impl ShellApp {
         match run_id {
             "plan" if self.jobs().is_running(JobKind::Plan) => Some(JobKind::Plan),
             "threat" if self.jobs().is_running(JobKind::Threat) => Some(JobKind::Threat),
-            "agent" if self.jobs().is_running(JobKind::Agent) => Some(JobKind::Agent),
+            _ if self.agent_job_matches_reference(run_id) => Some(JobKind::Agent),
             _ => None,
         }
+    }
+
+    fn agent_job_matches_reference(&self, run_id: &str) -> bool {
+        use crate::app::JobKind;
+        if !self.jobs().is_running(JobKind::Agent) {
+            return false;
+        }
+        if run_id == "agent" {
+            return true;
+        }
+        let Some(agent_id) = self.activity().map(|session| session.run_id.as_str()) else {
+            return false;
+        };
+        matches!(
+            resolve_run_reference(run_id, [agent_id]),
+            RunReferenceResolution::Resolved(_)
+        )
     }
 
     fn live_run_matches_reference(&self, run_id: &str) -> bool {
@@ -858,18 +896,47 @@ impl ShellApp {
         );
     }
 
-    /// Drop back to the Workbench without touching cancel tokens so the live
-    /// run keeps going. The Workbench top-bar `● LIVE` chip stays lit because
-    /// it is gated on `has_running_work()`.
+    pub(crate) fn submit_run_focus_steer_editor(&mut self) {
+        let raw = self
+            .router
+            .activity()
+            .steer_editor
+            .as_ref()
+            .map(|editor| editor.input.trim().to_string())
+            .unwrap_or_default();
+        match validate_run_focus_steer(&raw) {
+            Ok(command) => {
+                self.enqueue_steer_command(&command);
+                self.router.activity_mut().close_steer_editor();
+            }
+            Err(error) => {
+                if let Some(editor) = self.router.activity_mut().steer_editor.as_mut() {
+                    editor.error = Some(error);
+                }
+            }
+        }
+    }
+
+    /// Restore the exact route that launched Run Focus without touching any
+    /// cancellation token. A run opened manually has no workflow origin and
+    /// falls back to Workbench.
     pub(crate) fn background_handoff(&mut self) {
-        self.set_shell_view(ShellView::Workbench);
+        let origin = self.activity().and_then(|session| session.run_focus_origin);
+        if let Some(session) = self.activity_mut() {
+            session.run_focus_backgrounded = true;
+            if let Some(origin) = session.run_focus_origin.as_mut() {
+                origin.auto_return = false;
+            }
+        }
+        self.set_shell_view(origin.map_or(ShellView::Workbench, |origin| origin.view));
+        self.set_input_mode(origin.map_or(InputMode::Prompt, |origin| origin.input_mode));
         if self.has_running_work() {
             self.log(
                 "background",
                 "job still running in the background — Ctrl+C cancels, `jobs` to check",
             );
         } else {
-            self.log("background", "no live job; showing Workbench");
+            self.log("background", "no live job; restored the prior view");
         }
     }
 
@@ -881,15 +948,41 @@ impl ShellApp {
     /// looks running yet; without the `planning_queues_empty` guard the steer
     /// item would be popped and then dropped by the overlap reject.
     pub(crate) fn advance_steer_queue(&mut self) -> Vec<ShellEffect> {
+        self.take_next_steer_effects().unwrap_or_default()
+    }
+
+    fn take_next_steer_effects(&mut self) -> Option<Vec<ShellEffect>> {
         if self.steer_dispatch_blocked() {
-            return Vec::new();
+            return None;
         }
         let Some(queued) = self.steer_queue_mut().pop_front() else {
-            return Vec::new();
+            return None;
         };
         self.log("queue", format!("dispatching queued {}", queued.summary));
-        self.reduce_command_message(crate::commands::parse_command(&queued.raw))
-            .effects
+        Some(
+            self.reduce_command_message(crate::commands::parse_command(&queued.raw))
+                .effects,
+        )
+    }
+
+    /// Keep draining queued synchronous or rejected commands while the shell
+    /// remains idle. A bounded pass prevents an arbitrary queue from
+    /// monopolizing a terminal tick; commands that start work stop the pass
+    /// through `steer_dispatch_blocked` and resume after their terminal event.
+    pub(crate) fn drain_idle_steer_queue(&mut self) -> bool {
+        const DRAIN_LIMIT: usize = 32;
+        let mut changed = false;
+        for _ in 0..DRAIN_LIMIT {
+            let Some(effects) = self.take_next_steer_effects() else {
+                break;
+            };
+            changed = true;
+            EffectRuntime::execute(self, effects);
+            if self.steer_dispatch_blocked() {
+                break;
+            }
+        }
+        changed
     }
 
     fn steer_dispatch_blocked(&self) -> bool {
@@ -897,6 +990,11 @@ impl ShellApp {
             || self.engagement.has_pending_chain()
             || self.engagement.has_pending_prereq_prompt()
             || !self.engagement.planning_queues_empty()
+            || self.should_quit()
+            || matches!(
+                self.shell_view(),
+                ShellView::QuitConfirm | ShellView::ConfirmDialog
+            )
     }
 
     fn open_run_diff_view(&mut self, left: String, right: String) {
@@ -924,31 +1022,19 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_recommend(&mut self) -> Vec<ShellEffect> {
-        self.set_shell_view(ShellView::Recommend);
-        self.router.catalog_mut().reset_recommend_cursor();
-        if self.target().is_none() {
-            self.log(
-                "recommend",
-                "choose a target with `target <path>` or run `demo` for the offline fixture",
-            );
-            return Vec::new();
-        }
-        if !crate::ui_view_models::recommendation_artifact_needs_refresh(self) {
-            self.log("recommend", "latest module recommendations");
-            return Vec::new();
-        }
+        self.open_modules_view();
         self.log(
             "recommend",
-            "running module-recommender:recommend for the active target",
+            "phase-native capabilities are derived from workspace reality · press F2, then e for engines",
         );
-        self.reduce_run_tool(Some("module-recommender:recommend".to_string()), None)
+        Vec::new()
     }
 
     pub(crate) fn reduce_aim(&mut self, focus: &Option<String>) -> Vec<ShellEffect> {
         self.set_shell_view(ShellView::Workbench);
         self.router
             .workbench_mut()
-            .set_page(Some(crate::app::WorkbenchPage::Terrain));
+            .set_page(Some(crate::app::WorkbenchPage::Map));
         self.router
             .workbench_mut()
             .set_focus(crate::app::WorkbenchPane::Center);
@@ -997,14 +1083,25 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_patch_apply(&mut self) -> Vec<ShellEffect> {
-        let Some(patch) = self.engagement.pending_patch().cloned() else {
-            self.log("patch", "no pending patch. Next: run patch:finding");
+        let Some(target) = self.target_owned() else {
+            self.log("patch", "patch apply requires an active target");
             return Vec::new();
         };
+        let selection = match load_durable_fix_selection(&target) {
+            Ok(selection) => selection,
+            Err(error) => {
+                self.log("error", format!("patch apply blocked: {error}"));
+                return Vec::new();
+            }
+        };
+        let patch = selection.patch;
+        self.engagement.set_pending_patch(patch.clone());
         vec![ShellEffect::ApplyReviewedPatch(ReviewedPatchApply {
+            selected_attempt_id: selection.attempt_id,
             alias: patch.alias,
+            patch_run_id: patch.patch_run_id,
             diff: patch.diff,
-            target: self.target_owned(),
+            target: Some(target),
         })]
     }
 
@@ -1016,11 +1113,63 @@ impl ShellApp {
         self.set_shell_view(ShellView::Workbench);
         self.router
             .workbench_mut()
-            .set_page(Some(crate::app::WorkbenchPage::Ship));
+            .set_page(Some(crate::app::WorkbenchPage::Fix));
         self.log(
             "patch",
             format!("discarded pending patch for {}", patch.alias),
         );
         Vec::new()
+    }
+}
+
+fn validate_run_focus_steer(raw: &str) -> Result<String, String> {
+    if !raw.starts_with("run ") {
+        return Err("steer accepts only: run <tool> [input]".to_string());
+    }
+    match crate::commands::parse_command(raw) {
+        crate::commands::ShellCommand::RunTool { tool: Some(_), .. } => Ok(raw.to_string()),
+        _ => Err("steer requires an explicit tool: run <tool> [input]".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod run_focus_steer_tests {
+    use super::*;
+
+    #[test]
+    fn steer_accepts_only_an_explicit_run_command() {
+        assert_eq!(
+            validate_run_focus_steer("run semgrep:scan {\"path\":\"src\"}"),
+            Ok("run semgrep:scan {\"path\":\"src\"}".to_string())
+        );
+        assert!(validate_run_focus_steer("findings").is_err());
+        assert!(validate_run_focus_steer("run").is_err());
+        assert!(validate_run_focus_steer("queue run semgrep:scan").is_err());
+    }
+
+    #[test]
+    fn background_restores_the_captured_origin_without_canceling() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let mut session = ActivitySession::new("run-live").with_run_focus_origin(RunFocusOrigin {
+            view: ShellView::Home,
+            input_mode: InputMode::Navigate,
+            auto_return: true,
+        });
+        session.run_focus_terminal_pending = false;
+        app.set_activity(Some(session));
+        app.set_shell_view(ShellView::Activity);
+
+        app.background_handoff();
+
+        assert_eq!(app.shell_view(), ShellView::Home);
+        assert_eq!(app.input_mode(), InputMode::Navigate);
+        assert!(app
+            .activity()
+            .is_some_and(|session| session.run_focus_backgrounded));
+        assert!(app.activity().is_some_and(|session| {
+            session
+                .run_focus_origin
+                .is_some_and(|origin| !origin.auto_return)
+        }));
     }
 }

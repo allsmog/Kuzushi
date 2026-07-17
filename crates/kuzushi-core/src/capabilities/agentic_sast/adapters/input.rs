@@ -107,33 +107,32 @@ pub(crate) fn resolve_tool_target(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<PathBuf> {
     if let Some(target) = input.get("target").and_then(Value::as_str) {
-        return resolve_input_target(target);
+        return resolve_input_target(target, ctx);
     }
     if let Some(workspace) = ctx.workspace {
         return Ok(workspace.root().to_path_buf());
     }
-    current_dir()
+    anyhow::bail!("agentic-sast requires an explicit active workspace")
 }
 
-fn resolve_input_target(target: &str) -> Result<PathBuf> {
+fn resolve_input_target(target: &str, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     let trimmed = target.trim();
     if trimmed.is_empty() {
-        return current_dir();
+        anyhow::bail!("agentic-sast target may not be blank")
     }
     let candidate = PathBuf::from(trimmed);
-    resolve_candidate_target(candidate)
+    resolve_candidate_target(candidate, ctx)
 }
 
-fn resolve_candidate_target(candidate: PathBuf) -> Result<PathBuf> {
+fn resolve_candidate_target(candidate: PathBuf, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     if candidate.is_absolute() {
         Ok(candidate)
     } else {
-        Ok(current_dir()?.join(candidate))
+        let workspace = ctx
+            .workspace
+            .context("agentic-sast requires an explicit active workspace")?;
+        Ok(workspace.root().join(candidate))
     }
-}
-
-fn current_dir() -> Result<PathBuf> {
-    std::env::current_dir().context("Could not resolve current directory")
 }
 
 fn string_list_input(input: &Value, keys: &[&str]) -> Result<Option<Vec<String>>> {

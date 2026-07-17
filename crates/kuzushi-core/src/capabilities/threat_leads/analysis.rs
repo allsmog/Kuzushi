@@ -175,8 +175,14 @@ fn lead_classification(candidates: &[Value]) -> &'static str {
 
 pub(super) fn lead_priority(lead: &Value) -> u8 {
     [
-        priority_if(lead["pattern"].as_str() == Some("remote-path-to-local-write"), 100),
-        priority_if(lead["classification"].as_str() == Some("production-or-mixed"), 20),
+        priority_if(
+            lead["pattern"].as_str() == Some("remote-path-to-local-write"),
+            100,
+        ),
+        priority_if(
+            lead["classification"].as_str() == Some("production-or-mixed"),
+            20,
+        ),
         priority_if(lead["confidence"].as_str() == Some("high"), 10),
         priority_if(
             lead["title"].as_str().is_some_and(contains_file_write_risk),
@@ -188,7 +194,11 @@ pub(super) fn lead_priority(lead: &Value) -> u8 {
 }
 
 fn priority_if(condition: bool, points: u8) -> u8 {
-    if condition { points } else { 0 }
+    if condition {
+        points
+    } else {
+        0
+    }
 }
 
 fn contains_file_write_risk(text: &str) -> bool {

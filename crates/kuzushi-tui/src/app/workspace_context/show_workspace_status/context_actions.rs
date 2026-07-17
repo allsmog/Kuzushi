@@ -65,6 +65,7 @@ impl ShellApp {
             input,
             workspace,
             thinking_level: None,
+            authorization: ExecutionAuthorization::default(),
         })]
     }
 
@@ -83,14 +84,16 @@ impl ShellApp {
         &self,
         scope: Option<&str>,
         workspace: &WorkspaceTarget,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<PreparedToolInput> {
         let ctx = ToolExecutionContext {
             config: self.config(),
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
-        self.registry().prepare_tool_input_for_dispatch(
+        self.registry().prepare_dispatch_input(
             "context:build",
             context_build_input(scope),
             &ctx,

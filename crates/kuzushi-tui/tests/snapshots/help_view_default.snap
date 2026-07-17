@@ -2,48 +2,50 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
- KUZUSHI › help · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › help · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
 Glossary: TP=true positive; FP=false positive; DFD=data-flow diagram; taint-iris=source-to-sink hunt; x-ray=architecture
 review; randori=threat model; tob/shinsa=plugin adapters.
-Examples: demo  ·  next  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  model 1
+Examples: demo  ·  next  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  findings export report.sarif sarif
 
 NAVIGATION — browse modules and tools
-home - open Kuzushi cockpit home
+home - open the current phase cockpit
   aliases / examples: /home, /
 help - show grouped shell help
   aliases / examples: /help, /h, h, ?
 workbench - open the split-pane command center
   aliases / examples: /workbench
+report - export the engagement report with a durable receipt
+  aliases / examples: /report
 aim [focus] - seed the engagement harness from the Workbench AIM page
   aliases / examples: aim, /aim, aim sqli, aim idor
-modules - browse native Rust modules
+modules - open phase-native capabilities (Expert engines with e)
   aliases / examples: /modules, /m, m, show modules
-recommend - open latest module recommendations
+recommend - open phase-native recommended capabilities
   aliases / examples: /recommend, rec, /rec
 tools [query] - list or filter routed Rust tools
   aliases / examples: /tools, show tools, tools semgrep, tools --fav
 find [query] - open the Tools view grammar-first (alias for tools [query])
-  aliases / examples: /find, find phase:hunt taint
+  aliases / examples: /find, find phase:scan taint
 favorite <tool> - toggle a tool on the per-workspace YOUR TOOLS shelf
   aliases / examples: /favorite <tool>, fav <tool>, /fav <tool>
 doctor - show shell preflight health
   aliases / examples: /doctor, health, /health
-use <module> - focus a module
+use <module> - filter the expert tool inventory by module
   aliases / examples: use semgrep, /use <module>
 back - return to the previous view
   aliases / examples: /back, /b, b
 quickstart - first-run guided setup
   aliases / examples: /quickstart
-onboarding - open the planning-stage multi-select picker
-  aliases / examples: /onboarding, /planning
+setup - review target, Map plan, model/credentials, prompt, and budget readiness
+  aliases / examples: /setup, onboarding, /onboarding, /planning
 next - continue the engagement (alias: continue) — open the current phase's picker
   aliases / examples: /next
-phase <map|hunt|confirm|fix> - open a specific engagement phase picker
-  aliases / examples: phase map, phase hunt, phase confirm, phase fix
-autonomy [recon|hunt|confirm|fix] - read/set the autonomy dial (also Ctrl+Up/Down) — the tool-dispatch ceiling
+phase <map|scan|review|prove|fix> - open a specific engagement phase picker
+  aliases / examples: phase map, phase scan, phase review, phase prove, phase fix, phase hunt, phase confirm
+autonomy [recon|scan|review|prove|fix] - read/set the autonomy dial (also Ctrl+Up/Down) — the tool-dispatch ceiling
   aliases / examples: autonomy, /autonomy, posture, /posture
 logs - scrollable full-screen transcript
   aliases / examples: /logs, log, transcript, /transcript
@@ -57,10 +59,9 @@ scan [target] - open the guided workflow for a target; `scan .` opts into cwd
   aliases / examples: scan ., /scan [target]
 run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthand
   aliases / examples: run ., /run <tool> [json], run . [json]
-recon:import <amass|httpx|nuclei|nmap-xml> <path> - import an external reconnaissance export through the registered
-recon tool
-aliases / examples: recon import <amass|httpx|nuclei|nmap-xml> <path>, /recon:import <amass|httpx|nuclei|nmap-xml>
-<path>
+recon:import <amass|httpx|nuclei|nmap-xml|burp-xml|har> <path> - import an external reconnaissance export through the
+registered recon tool
+  aliases / examples: recon import <format> <path>, /recon:import <format> <path>
 ask <question> - explicit agent question
   aliases / examples: /ask <question>, ?text
 queue <tool|verb> - queue a command to run after the current one finishes
@@ -129,10 +130,11 @@ workspace - show target and state status
   aliases / examples: /workspace, workspace status
 workspace reindex - refresh the v3 content-addressed workspace index
   aliases / examples: /workspace reindex, workspace index
-workspace export findings <path> [format] [--completeness open|complete] [--allow-empty] - export findings; choose
+findings export <path> [format] [--completeness open|complete] [--allow-empty] - export findings; choose
 all/open/complete and pass --allow-empty for metadata-only exports
-aliases / examples: /workspace export findings <path> [format] [--completeness open|complete] [--allow-empty], findings
-export <path> [format] [--completeness open|complete] [--allow-empty], export <path> [format] [--completeness
+aliases / examples: findings export report.sarif sarif, /findings export <path> [format] [--completeness open|complete]
+[--allow-empty], /workspace export findings <path> [format] [--completeness open|complete] [--allow-empty], workspace
+export findings <path> [format] [--completeness open|complete] [--allow-empty], export <path> [format] [--completeness
 open|complete] [--allow-empty]
 workspace scope init - write an editable .kuzushi/scope.toml scaffold
   aliases / examples: /workspace scope init
@@ -140,9 +142,9 @@ workspace scope init - write an editable .kuzushi/scope.toml scaffold
 FINDINGS / EVIDENCE — browse findings, evidence, and report output
 findings - open persisted findings
   aliases / examples: /f, f, /findings
-findings filter <expr> - filter findings by severity, confidence (proof), review decision, or completeness
+findings filter <expr> - filter findings by severity, confidence, decision, or completeness; use clear to reset
 aliases / examples: findings filter state:new rank:high, findings filter decision:confirmed completeness:open, findings
-filter confidence:confirmed, /findings filter <expr>
+filter confidence:confirmed, findings filter clear, /findings filter <expr>
 component <scope|path|all> - focus Workbench findings on a detected component
   aliases / examples: component web/app, component entrypoint-cmd-proxy, component all
 open <id> - open a finding alias or fingerprint
@@ -150,6 +152,8 @@ open <id> - open a finding alias or fingerprint
 decision <verdict> <reason> - record a human review decision for the selected finding
 aliases / examples: decision confirmed reviewed source-linked evidence, decision suppressed accepted by policy owner,
 review rejected_false_positive reviewed data flow
+proof defer <id> --reason <text> - record a human proof deferral for the current finding generation
+  aliases / examples: /proof defer F-0001 --reason production harness unavailable
 dismiss <reason> <note> - dismiss the selected finding with an auditable reason
   aliases / examples: dismiss false_positive not reachable in prod, dismiss used_in_tests test fixture only
 suppress <id> --reason <text> [--author operator] [--days 90] - record an expiring suppression rule and matching human
@@ -217,6 +221,8 @@ target rev <ref> - switch target git revision when worktree is clean
   aliases / examples: /target rev <sha>, target revision <ref>
 
 SESSION — history, cost, lifecycle
+session - show durable session transcript status
+  aliases / examples: /session
 history - show command history
   aliases / examples: /history
 clear - clear conversation log
@@ -257,8 +263,5 @@ boot - show launch readiness splash
   aliases / examples: /boot, boot-splash, /boot-splash
 quit-confirm - show exit confirmation checklist without quitting
   aliases / examples: /quit-confirm
-pwn - binary exploitation dashboard and pwn:* workflow actions
-aliases / examples: /pwn, pwn target <path>, pwn profile, pwn reverse [function], pwn auto, pwn state, pwn candidates
-<target>
 quit - exit the shell
   aliases / examples: q, /q, exit, /quit, /exit

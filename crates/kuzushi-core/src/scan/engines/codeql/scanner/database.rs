@@ -12,15 +12,36 @@ impl CodeqlScanner {
         }
 
         let language = self.required_codeql_language(target, binary, cancel)?;
-        let db_path = crate::workspace::workspace_codeql_db_path(target);
-        if is_codeql_database_dir(&db_path) {
-            return Ok(CodeqlDatabase { db_path, language });
+        let (db_path, relative_db_path) = managed_codeql_database_path(target)?;
+        if !is_codeql_database_dir(&db_path) {
+            self.rebuild_managed_codeql_database(
+                target,
+                binary,
+                cancel,
+                &db_path,
+                &relative_db_path,
+                &language,
+            )?;
         }
-
-        remove_stale_codeql_database(&db_path)?;
-        create_codeql_database_parent(&db_path)?;
-        self.create_codeql_database(target, binary, cancel, &db_path, &language)?;
         Ok(CodeqlDatabase { db_path, language })
+    }
+
+    fn rebuild_managed_codeql_database(
+        &self,
+        target: &Path,
+        binary: &str,
+        cancel: &ScanCancellation,
+        db_path: &Path,
+        relative_db_path: &Path,
+        language: &str,
+    ) -> Result<()> {
+        remove_stale_codeql_database(db_path)?;
+        create_codeql_database_parent(db_path)?;
+        if let Err(error) = self.create_codeql_database(target, binary, cancel, db_path, language) {
+            return Err(cleanup_managed_codeql_error(db_path, error));
+        }
+        crate::workspace::prepare_workspace_output_path(target, relative_db_path)?;
+        validate_managed_codeql_database(db_path)
     }
 
     pub(crate) fn configured_codeql_database(
@@ -38,7 +59,7 @@ impl CodeqlScanner {
             );
         }
         Ok(CodeqlDatabase {
-            language: self.configured_codeql_language(target, binary, cancel, &db_path),
+            language: self.configured_codeql_language(target, binary, cancel, &db_path)?,
             db_path,
         })
     }
@@ -49,16 +70,18 @@ impl CodeqlScanner {
         binary: &str,
         cancel: &ScanCancellation,
         db_path: &Path,
-    ) -> String {
-        self.language
-            .clone()
-            .or_else(|| {
-                detect_language_from_database(binary, db_path, cancel)
-                    .ok()
-                    .flatten()
-            })
+    ) -> Result<String> {
+        if let Some(language) = self.language.clone() {
+            return Ok(language);
+        }
+        detect_language_from_database(binary, db_path, cancel)?
             .or_else(|| detect_codeql_language_from_heuristics(target))
-            .unwrap_or_else(|| "javascript".to_string())
+            .with_context(|| {
+                format!(
+                    "codeql: could not determine the language for configured database {}; pass an explicit language",
+                    db_path.display()
+                )
+            })
     }
 
     pub(crate) fn required_codeql_language(
@@ -134,29 +157,14 @@ impl CodeqlScanner {
         if cancel.is_cancelled() {
             return Err(CodeqlCreateFailure::Cancelled);
         }
-
-        let command = codeql_create_command(binary, args, cwd);
-        let mut child = spawn_codeql_create_child(command, binary, args)?;
-        let process_group_id = child_process_group_id(&child);
-        let readers = capture_scanner_process_pipes(&mut child, "codeql")
-            .map_err(|error| CodeqlCreateFailure::Spawn(error.to_string()))?;
-        let child = cancel
-            .register_child(child, process_group_id)
-            .map_err(|error| CodeqlCreateFailure::Spawn(error.to_string()))?;
-        let status = wait_for_scanner_process(&child, cancel)
-            .map_err(|error| CodeqlCreateFailure::Spawn(error.to_string()))?;
-        let output = join_scanner_process_readers(readers, "codeql")
-            .map_err(|error| CodeqlCreateFailure::Spawn(error.to_string()))?;
-
-        let Some(status) = status else {
-            return Err(CodeqlCreateFailure::Cancelled);
-        };
-
-        if !status.success() {
+        let output = self
+            .run_codeql_raw_output(binary, args, cwd, cancel)
+            .map_err(|error| codeql_create_runtime_failure(cancel, error))?;
+        if !output.status.success() {
             return Err(codeql_create_exit_failure(
                 binary,
                 args,
-                status,
+                output.status,
                 &output.stdout,
                 &output.stderr,
             ));
@@ -166,26 +174,42 @@ impl CodeqlScanner {
     }
 }
 
-fn codeql_create_command(binary: &str, args: &[String], cwd: Option<&Path>) -> Command {
-    let mut command = Command::new(binary);
-    command.args(args);
-    if let Some(cwd) = cwd {
-        command.current_dir(cwd);
+fn codeql_create_runtime_failure(
+    cancel: &ScanCancellation,
+    error: anyhow::Error,
+) -> CodeqlCreateFailure {
+    if cancel.is_cancelled() {
+        CodeqlCreateFailure::Cancelled
+    } else {
+        CodeqlCreateFailure::Spawn(error.to_string())
     }
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    configure_scanner_subprocess_env(&mut command);
-    configure_scanner_process_group(&mut command);
-    command
 }
 
-fn spawn_codeql_create_child(
-    mut command: Command,
-    binary: &str,
-    args: &[String],
-) -> std::result::Result<std::process::Child, CodeqlCreateFailure> {
-    command
-        .spawn()
-        .map_err(|error| CodeqlCreateFailure::Spawn(codeql_start_error(binary, args, error)))
+fn managed_codeql_database_path(target: &Path) -> Result<(PathBuf, PathBuf)> {
+    let declared_db_path = crate::workspace::workspace_codeql_db_path(target);
+    let relative_db_path = declared_db_path
+        .strip_prefix(target)
+        .context("CodeQL database path escaped the workspace")?;
+    let db_path = crate::workspace::prepare_workspace_output_path(target, relative_db_path)?;
+    Ok((db_path, relative_db_path.to_path_buf()))
+}
+
+fn validate_managed_codeql_database(db_path: &Path) -> Result<()> {
+    if is_codeql_database_dir(db_path) {
+        return Ok(());
+    }
+    let error = anyhow::anyhow!(
+        "codeql reported success without a valid database at {}",
+        db_path.display()
+    );
+    Err(cleanup_managed_codeql_error(db_path, error))
+}
+
+fn cleanup_managed_codeql_error(db_path: &Path, error: anyhow::Error) -> anyhow::Error {
+    match remove_stale_codeql_database(db_path) {
+        Ok(()) => error,
+        Err(cleanup) => cleanup.context(error),
+    }
 }
 
 enum CodeqlCreateFailure {
@@ -205,20 +229,6 @@ impl CodeqlCreateFailure {
             Self::Exit(message) | Self::Spawn(message) => anyhow::anyhow!(message),
         }
     }
-}
-
-fn codeql_start_error(binary: &str, args: &[String], error: std::io::Error) -> String {
-    if error.kind() == std::io::ErrorKind::NotFound {
-        return format!(
-            "codeql: could not find CodeQL CLI {:?}. Install it with `gh extension install github/gh-codeql && gh codeql install-stub`, download it from https://github.com/github/codeql-cli-binaries/releases, or pass {{\"binary\":\"/path/to/codeql\"}}. Next: run codeql:scan {{\"binary\":\"/path/to/codeql\",\"language\":\"javascript\"}} or task block codeql.",
-            binary
-        );
-    }
-    format!(
-        "codeql: could not start {:?} {}: {error}",
-        binary,
-        shell_join(args)
-    )
 }
 
 fn codeql_create_exit_failure(
@@ -357,5 +367,35 @@ esac
         assert!(calls.contains("--build-mode=autobuild"), "{calls}");
         assert!(!calls.contains("--build-mode=none"), "{calls}");
         assert_eq!(calls.lines().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn database_create_deadline_kills_sleeping_codeql_process() {
+        let temp = tempdir().unwrap();
+        let repo = temp.path().join("repo");
+        let db = temp.path().join("codeql-db");
+        fs::create_dir_all(&repo).unwrap();
+        create_codeql_database_parent(&db).unwrap();
+        let fake = write_fake_codeql(temp.path(), "#!/bin/sh\nsleep 60\n");
+        let scanner = CodeqlScanner {
+            language: Some("javascript".to_string()),
+            build_mode: Some("none".to_string()),
+            command_timeout: std::time::Duration::from_millis(40),
+            ..CodeqlScanner::default()
+        };
+
+        let error = scanner
+            .create_codeql_database(
+                &repo,
+                fake.to_str().unwrap(),
+                &ScanCancellation::default(),
+                &db,
+                "javascript",
+            )
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("deadline"), "{error}");
     }
 }

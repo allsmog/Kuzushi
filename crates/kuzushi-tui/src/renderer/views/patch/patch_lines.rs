@@ -45,8 +45,15 @@ fn push_empty_patch_lines(lines: &mut Vec<Line<'static>>, alias: &str, width: u1
 
 fn push_rationale_lines(lines: &mut Vec<Line<'static>>, patch: &PatchReviewModel, width: u16) {
     lines.push(divider(
-        &format!("PATCH · {} · RATIONALE", patch.alias),
+        &format!("PATCH · {} · {} · RATIONALE", patch.alias, patch.status),
         width,
+    ));
+    lines.push(indent(
+        Line::from(vec![
+            Span::styled("candidate: ", theme::muted()),
+            Span::styled(patch.patch_run_id.clone(), theme::primary()),
+        ]),
+        3,
     ));
     for line in wrap_text(&patch.rationale, width.saturating_sub(3) as usize) {
         lines.push(indent(styled(&line, theme::primary()), 3));

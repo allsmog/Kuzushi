@@ -1,12 +1,12 @@
 use super::*;
-use serde_yaml::Value as YamlValue;
+use serde_json::Value as YamlValue;
 
 pub(in crate::scan::engines::dep_hygiene) fn analyze_conda_environment(
     file_path: &Path,
     raw: &str,
     manifest: ManifestKind,
 ) -> Vec<DepHygieneFinding> {
-    let Ok(value) = serde_yaml::from_str::<YamlValue>(raw) else {
+    let Ok(value) = crate::yaml::parse_value(raw) else {
         return Vec::new();
     };
     dependencies(&value)
@@ -20,7 +20,9 @@ fn conda_dependency_findings(
     dependency: &YamlValue,
 ) -> Vec<DepHygieneFinding> {
     if let Some(raw) = dependency.as_str() {
-        return conda_finding(file_path, manifest, raw).into_iter().collect();
+        return conda_finding(file_path, manifest, raw)
+            .into_iter()
+            .collect();
     }
     pip_dependencies(dependency)
         .into_iter()
@@ -30,11 +32,7 @@ fn conda_dependency_findings(
         .collect()
 }
 
-fn conda_finding(
-    file_path: &Path,
-    manifest: ManifestKind,
-    raw: &str,
-) -> Option<DepHygieneFinding> {
+fn conda_finding(file_path: &Path, manifest: ManifestKind, raw: &str) -> Option<DepHygieneFinding> {
     let dependency = conda_dependency(raw)?;
     dependency_finding(file_path, manifest, "dependencies", dependency)
 }
@@ -67,7 +65,9 @@ fn dependency_finding(
             dependency.name,
             dependency.constraint,
             DepHygieneSeverity::Medium,
-            format!("{section}: floor-only range; add an upper bound to fix the supply-chain surface"),
+            format!(
+                "{section}: floor-only range; add an upper bound to fix the supply-chain surface"
+            ),
         ));
     }
     None
@@ -107,10 +107,7 @@ fn pip_dependencies(value: &YamlValue) -> Option<&Vec<YamlValue>> {
 }
 
 fn sequence_child<'a>(value: &'a YamlValue, key: &str) -> Option<&'a Vec<YamlValue>> {
-    value
-        .as_mapping()?
-        .get(YamlValue::from(key))?
-        .as_sequence()
+    value.as_object()?.get(key)?.as_array()
 }
 
 fn is_floating_dependency(constraint: &str) -> bool {

@@ -65,6 +65,8 @@ mod tests {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         }
     }
 

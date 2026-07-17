@@ -1,5 +1,5 @@
 use super::*;
-use serde_yaml::Value as YamlValue;
+use serde_json::Value as YamlValue;
 
 const SHARD_SCOPES: &[&str] = &["dependencies", "development_dependencies"];
 
@@ -8,7 +8,7 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_shard_manifest(
     raw: &str,
     manifest: ManifestKind,
 ) -> Vec<DepHygieneFinding> {
-    let Ok(value) = serde_yaml::from_str::<YamlValue>(raw) else {
+    let Ok(value) = crate::yaml::parse_value(raw) else {
         return Vec::new();
     };
     SHARD_SCOPES
@@ -25,12 +25,17 @@ fn section_findings(
 ) -> Vec<DepHygieneFinding> {
     value
         .get(scope)
-        .and_then(YamlValue::as_mapping)
+        .and_then(YamlValue::as_object)
         .into_iter()
         .flat_map(|dependencies| dependencies.iter())
         .filter_map(|(name, dependency)| {
-            let name = name.as_str()?;
-            shard_finding(file_path, manifest, scope, name, dependency_version(dependency))
+            shard_finding(
+                file_path,
+                manifest,
+                scope,
+                name,
+                dependency_version(dependency),
+            )
         })
         .collect()
 }
@@ -61,7 +66,9 @@ fn shard_finding(
             name,
             constraint,
             DepHygieneSeverity::Medium,
-            format!("{scope}: floor-only range; add an upper bound to fix the supply-chain surface"),
+            format!(
+                "{scope}: floor-only range; add an upper bound to fix the supply-chain surface"
+            ),
         ));
     }
     None
@@ -70,7 +77,7 @@ fn shard_finding(
 fn dependency_version(value: &YamlValue) -> Option<&str> {
     value
         .as_str()
-        .or_else(|| value.as_mapping()?.get(YamlValue::from("version"))?.as_str())
+        .or_else(|| value.as_object()?.get("version")?.as_str())
 }
 
 fn is_floating_shard_constraint(constraint: &str) -> bool {

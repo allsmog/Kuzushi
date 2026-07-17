@@ -7,7 +7,7 @@ impl ShellApp {
         // explicitly. We canonicalize self.target to the resolved root so
         // subsequent reads are stable, but only when a target was already
         // supplied; we never write a value the operator did not provide.
-        let (workspace, store) = open_finding_store_for_target(self.target_path_buf())?;
+        let (workspace, store) = open_finding_store_for_target_read_only(self.target_path_buf())?;
         let resolved = workspace.root().to_path_buf();
         if self.target() != Some(resolved.as_path()) {
             self.set_target(Some(resolved));

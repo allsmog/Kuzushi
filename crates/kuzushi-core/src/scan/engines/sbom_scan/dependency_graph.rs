@@ -1,6 +1,7 @@
-use super::*;
+use super::bounded_fs as fs;
 use super::edge_readers::dependency_edges_for_path;
 use super::target::ignored_dir;
+use super::*;
 use serde_json::Value;
 
 const NPM_LOCK_DEPENDENCY_FIELDS: &[&str] = &[
@@ -31,10 +32,12 @@ fn collect_package_lock_edges(
         anyhow::bail!("sbom-scan scan cancelled");
     }
     for entry in fs::read_dir(dir).with_context(|| format!("sbom-scan: read {}", dir.display()))? {
-        let path = entry?.path();
-        if path.is_dir() && !ignored_dir(&path) {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let path = entry.path();
+        if file_type.is_dir() && !ignored_dir(&path) {
             collect_package_lock_edges(target, &path, edges, cancellation)?;
-        } else {
+        } else if file_type.is_file() {
             edges.extend(dependency_edges_for_path(target, &path)?);
         }
     }

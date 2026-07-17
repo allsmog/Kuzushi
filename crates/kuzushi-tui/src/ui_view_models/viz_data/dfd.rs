@@ -1,4 +1,6 @@
-use super::super::threat_dfd_diagram::{parse_flows, parse_nodes, zones_in_order};
+use super::super::threat_dfd_diagram::{
+    parse_flows, parse_nodes, zones_in_order, DfdFlow, DfdNode,
+};
 use crate::{DfdModelCacheKey, ShellApp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,52 +39,76 @@ pub(crate) fn dfd_model(app: &ShellApp) -> DfdModel {
     if let Some(cached) = app.workbench_cache().borrow().dfd_model(&key) {
         return cached;
     }
-    let model = dfd_model_from_doc(doc.as_ref());
+    let model = dfd_model_from_doc(doc.as_ref(), app.target());
     app.workbench_cache()
         .borrow_mut()
         .cache_dfd_model(key, model.clone());
     model
 }
 
-fn dfd_model_from_doc(doc: Option<&serde_json::Value>) -> DfdModel {
+fn dfd_model_from_doc(
+    doc: Option<&serde_json::Value>,
+    target: Option<&std::path::Path>,
+) -> DfdModel {
     let Some(doc) = doc else {
-        return DfdModel {
-            empty_hint: Some(
-                "no threat model yet — run `threat-model:build` to populate".to_string(),
-            ),
-            ..Default::default()
-        };
+        return empty_dfd("no threat model yet — run `threat-model:build` to populate");
     };
+    if kuzushi_core::workflow_attempts::threat_model_is_scope_placeholder_only(doc) {
+        return empty_dfd(scope_placeholder_hint(target));
+    }
+    if !kuzushi_core::workflow_attempts::threat_model_has_concrete_dfd(doc) {
+        return empty_dfd(
+            "threat model has no concrete topology yet — add design evidence and rebuild",
+        );
+    }
     let nodes = parse_nodes(doc);
     if nodes.is_empty() {
-        return DfdModel {
-            empty_hint: Some("threat model has no data-flow diagram yet".to_string()),
-            ..Default::default()
-        };
+        return empty_dfd("threat model has no data-flow diagram yet");
     }
     let flows = parse_flows(doc, &nodes);
-    let zones = zones_in_order(&nodes);
     DfdModel {
-        nodes: nodes
-            .iter()
-            .map(|n| DfdNodeModel {
-                name: n.name.clone(),
-                zone: n.zone.clone(),
-                kind: dfd_kind(&n.kind),
-            })
-            .collect(),
-        flows: flows
-            .iter()
-            .map(|f| DfdFlowModel {
-                from: f.source.clone(),
-                to: f.target.clone(),
-                crosses: f.crosses,
-                label: f.label.clone(),
-            })
-            .collect(),
-        zones,
+        zones: zones_in_order(&nodes),
+        nodes: project_dfd_nodes(&nodes),
+        flows: project_dfd_flows(&flows),
         empty_hint: None,
     }
+}
+
+fn empty_dfd(hint: impl Into<String>) -> DfdModel {
+    DfdModel {
+        empty_hint: Some(hint.into()),
+        ..Default::default()
+    }
+}
+
+fn project_dfd_nodes(nodes: &[DfdNode]) -> Vec<DfdNodeModel> {
+    nodes
+        .iter()
+        .map(|node| DfdNodeModel {
+            name: node.name.clone(),
+            zone: node.zone.clone(),
+            kind: dfd_kind(&node.kind),
+        })
+        .collect()
+}
+
+fn project_dfd_flows(flows: &[DfdFlow]) -> Vec<DfdFlowModel> {
+    flows
+        .iter()
+        .map(|flow| DfdFlowModel {
+            from: flow.source.clone(),
+            to: flow.target.clone(),
+            crosses: flow.crosses,
+            label: flow.label.clone(),
+        })
+        .collect()
+}
+
+fn scope_placeholder_hint(target: Option<&std::path::Path>) -> String {
+    target.map_or_else(
+        || "threat model contains only a generated repository-scope placeholder".to_string(),
+        kuzushi_core::workflow_attempts::insufficient_map_evidence_message,
+    )
 }
 
 fn dfd_kind(raw: &str) -> DfdKind {
@@ -106,11 +132,54 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_threat_model(temp.path(), "api");
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
-        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
 
         assert_eq!(dfd_model(&app).nodes[0].name, "api");
         write_threat_model(temp.path(), "worker");
+        app.workbench_cache()
+            .borrow_mut()
+            .invalidate_workspace_files();
+        app.invalidate_view_hydration();
+        app.hydrate_all_view_data_for_test();
         assert_eq!(dfd_model(&app).nodes[0].name, "worker");
+    }
+
+    #[test]
+    fn generated_repository_scope_placeholder_is_an_empty_dfd() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = persistent_threat_model_path(temp.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            path,
+            serde_json::json!({
+                "dfd": {
+                    "nodes": [{
+                        "id": "n1",
+                        "name": "fixture repository scope",
+                        "trustZone": "analysis-scope",
+                        "type": "process"
+                    }],
+                    "flows": []
+                },
+                "threats": []
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
+
+        let model = dfd_model(&app);
+
+        assert!(model.nodes.is_empty());
+        assert!(model.flows.is_empty());
+        let target = workspace.root().display().to_string();
+        assert!(model
+            .empty_hint
+            .as_deref()
+            .is_some_and(|hint| hint.contains(&target)));
     }
 
     fn write_threat_model(root: &std::path::Path, node: &str) {
@@ -122,13 +191,24 @@ mod tests {
                 "dfd": {
                     "nodes": [
                         {
-                            "id": "node",
+                            "id": "node-a",
                             "name": node,
                             "trustZone": "app",
                             "type": "process"
+                        },
+                        {
+                            "id": "node-b",
+                            "name": "store",
+                            "trustZone": "data",
+                            "type": "data-store"
                         }
                     ],
-                    "flows": []
+                    "flows": [{
+                        "id": "flow",
+                        "sourceId": "node-a",
+                        "targetId": "node-b",
+                        "description": "write"
+                    }]
                 }
             })
             .to_string(),

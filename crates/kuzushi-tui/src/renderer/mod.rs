@@ -14,12 +14,15 @@ use ratatui::widgets::Paragraph;
 pub(in crate::renderer) use render_app::*;
 pub(in crate::renderer) use section_slot::*;
 pub(in crate::renderer) use shared::*;
+pub(crate) use views::workbench_phase_plan_for_app;
 pub(in crate::renderer) use views::*;
 mod chrome;
 mod plain;
 pub(crate) mod shared;
 mod views;
 
+#[cfg(test)]
+mod phase_composition_contract;
 mod render_app;
 mod section_slot;
 #[cfg(test)]

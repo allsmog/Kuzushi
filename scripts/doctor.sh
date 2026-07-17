@@ -10,6 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SEMGREP_REQUIREMENTS_FILE="${REPO_DIR}/.github/requirements-ci.txt"
 
 STRICT=0
 while (( $# )); do
@@ -99,10 +100,21 @@ else
 fi
 
 # ─── Optional scanners ─────────────────────────────────────────────
-if command -v semgrep >/dev/null 2>&1; then
-  ok "semgrep" "$(semgrep --version 2>/dev/null | head -1)"
+PINNED_SEMGREP_VERSION="$(
+  sed -nE 's/^[[:space:]]*semgrep[[:space:]]*==[[:space:]]*([^[:space:]#]+).*$/\1/p' \
+    "$SEMGREP_REQUIREMENTS_FILE" 2>/dev/null | head -1 || true
+)"
+if [[ -z "$PINNED_SEMGREP_VERSION" ]]; then
+  miss "semgrep pin" "missing exact semgrep==VERSION entry in .github/requirements-ci.txt"
+elif command -v semgrep >/dev/null 2>&1; then
+  SEMGREP_VERSION="$(semgrep --version 2>/dev/null | head -1 || true)"
+  if [[ "$SEMGREP_VERSION" == "$PINNED_SEMGREP_VERSION" ]]; then
+    ok "semgrep" "$SEMGREP_VERSION (matches .github/requirements-ci.txt)"
+  else
+    warn "semgrep" "${SEMGREP_VERSION:-unknown} (.github/requirements-ci.txt pins $PINNED_SEMGREP_VERSION)"
+  fi
 else
-  warn "semgrep" "not installed (needed for e2e + default scan; 'pip install semgrep')"
+  warn "semgrep" "not installed (run 'python -m pip install -r .github/requirements-ci.txt')"
 fi
 
 if command -v codeql >/dev/null 2>&1; then
@@ -127,7 +139,7 @@ fi
 if command -v sqlite3 >/dev/null 2>&1; then
   ok "sqlite3" "$(sqlite3 --version 2>/dev/null | awk '{print $1}')"
 else
-  warn "sqlite3" "not installed (optional — better-sqlite3 bundles its own)"
+  warn "sqlite3" "not installed (optional; used by some e2e helpers)"
 fi
 
 # ─── node_modules presence ─────────────────────────────────────────

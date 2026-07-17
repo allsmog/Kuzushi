@@ -1,0 +1,2 @@
+{"n":1,"kind":"tool","label":"dynamic-demo:scan started","module_id":"dynamic-demo","verb":"scan"}
+{"n":2,"kind":"refused","label":"dynamic-demo:scan failed","module_id":"dynamic-demo","verb":"scan","severity":"danger"}

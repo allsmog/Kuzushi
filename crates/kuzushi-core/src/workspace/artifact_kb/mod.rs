@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 pub(crate) use discover_workspace_artifact_records::*;
 pub(crate) use fnv1a_hex::*;
 pub(crate) use infer_title::*;
+pub(crate) use open::SourceSignature;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -15,6 +16,7 @@ mod fnv1a_hex;
 mod from_text_source;
 mod infer_title;
 mod open;
+mod refresh_workspace_artifacts;
 mod render_prompt_block;
 mod search_artifact_knowledge;
 #[cfg(test)]
@@ -22,6 +24,9 @@ mod tests;
 
 pub use from_text_source::ArtifactKnowledgeRecord;
 pub use from_text_source::ArtifactSearchResult;
+pub(crate) use refresh_workspace_artifacts::{
+    index_artifact_sources, refresh_workspace_artifacts, ArtifactRefreshReport,
+};
 pub use render_prompt_block::artifact_kb_path;
 pub use render_prompt_block::index_workspace_artifacts;
 pub use render_prompt_block::ArtifactIndexReport;

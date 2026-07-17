@@ -1,4 +1,5 @@
 use crate::event_log::EventKind;
+use crate::findings::PatchLifecycleRecord;
 use serde_json::{json, Value};
 
 mod observations;
@@ -16,6 +17,10 @@ pub struct DecisionWrite {
     pub confidence_millis: u16,
     pub read_watermark: u64,
     pub updates_finding_triage: bool,
+    /// Provider-observed triage cost. Absent for non-triage decisions.
+    pub triage_cost_usd: Option<serde_json::Number>,
+    /// Whether `triage_cost_usd` is the complete provider charge.
+    pub triage_cost_usd_exact: bool,
     /// SARIF-ecosystem dismissal reason (`used_in_tests`, ...) when this
     /// decision dismisses the finding. `None` for ordinary triage decisions.
     pub dismiss_reason: Option<String>,
@@ -43,6 +48,8 @@ impl DecisionWrite {
             "confidenceMillis": self.confidence_millis,
             "readWatermark": self.read_watermark,
             "updatesFindingTriage": self.updates_finding_triage,
+            "triageCostUsd": self.triage_cost_usd,
+            "triageCostUsdExact": self.triage_cost_usd_exact,
             "dismissReason": self.dismiss_reason,
             "dismissedBy": self.dismissed_by,
         })
@@ -76,6 +83,8 @@ pub struct VerificationWrite {
     pub stable_fp: String,
     pub finding_id: Option<i64>,
     pub identity_id: Option<String>,
+    pub verification_run_id: Option<String>,
+    pub verified_scan_id: Option<String>,
     pub proof_level: u8,
     pub proof_verdict: String,
     pub backend: String,
@@ -94,6 +103,8 @@ impl VerificationWrite {
             "stableFp": self.stable_fp,
             "findingId": self.finding_id,
             "identityId": self.identity_id,
+            "verificationRunId": self.verification_run_id,
+            "verifiedScanId": self.verified_scan_id,
             "proofLevel": self.proof_level,
             "proofVerdict": self.proof_verdict,
             "backend": self.backend,
@@ -107,7 +118,7 @@ impl VerificationWrite {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PatchAttemptWrite {
     pub stable_fp: String,
     pub fingerprint: String,
@@ -120,9 +131,15 @@ pub struct PatchAttemptWrite {
     pub build_command: Option<String>,
     pub test_command: Option<String>,
     pub worktree_path: Option<String>,
+    /// Exact provider-reported value. SQLite REAL and serde_json both retain
+    /// the original finite f64; micros remains replay compatibility for older
+    /// patch-attempt events.
+    pub cost_usd: Option<f64>,
     pub cost_usd_micros: Option<i64>,
+    pub provider_spend_unresolved: bool,
     pub validator_log: Option<String>,
     pub history_json: String,
+    pub provenance: Option<crate::findings::PatchProvenance>,
     pub actor: String,
 }
 
@@ -140,10 +157,25 @@ impl PatchAttemptWrite {
             "buildCommand": self.build_command,
             "testCommand": self.test_command,
             "worktreePath": self.worktree_path,
+            "costUsd": self.cost_usd,
             "costUsdMicros": self.cost_usd_micros,
+            "providerSpendUnresolved": self.provider_spend_unresolved,
             "validatorLog": self.validator_log,
             "historyJson": self.history_json,
+            "provenance": self.provenance,
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchLifecycleWrite {
+    pub record: PatchLifecycleRecord,
+}
+
+impl PatchLifecycleWrite {
+    pub(super) fn payload(&self) -> Value {
+        serde_json::to_value(&self.record)
+            .expect("PatchLifecycleRecord is always JSON-serializable")
     }
 }
 
@@ -176,6 +208,7 @@ pub struct RunLifecycleWrite {
     pub target: Option<String>,
     pub status: String,
     pub findings_count: Option<u64>,
+    pub terminal_item_hash: Option<String>,
     pub actor: String,
 }
 
@@ -186,6 +219,7 @@ impl RunLifecycleWrite {
             "target": self.target,
             "status": self.status,
             "findingsCount": self.findings_count,
+            "terminalItemHash": self.terminal_item_hash,
         })
     }
 }

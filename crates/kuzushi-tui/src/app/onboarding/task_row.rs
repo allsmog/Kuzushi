@@ -1,4 +1,5 @@
 use super::task_id::PlanningTaskId;
+use kuzushi_core::workspace::ArtifactState as CoreArtifactState;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -26,7 +27,7 @@ pub enum ArtifactState {
     Cached,
     Invalid,
     Missing,
-    /// The task is a re-runnable action (Hunt/Confirm/Fix scan, triage, patch)
+    /// The task is a re-runnable action (Scan/Review/Prove/Fix work)
     /// rather than an artifact build — there is nothing to cache or reuse.
     Action,
 }
@@ -41,8 +42,8 @@ impl PlanningTaskRow {
         {
             Some(rel) => {
                 let path = target.join(rel);
-                let state = artifact_state(&path);
-                let modified = artifact_modified(&path);
+                let state = artifact_state(target, &path);
+                let modified = artifact_modified(target, &path, state);
                 (path, state, modified)
             }
             // Action tasks have no cached artifact; the path is a harmless
@@ -123,50 +124,20 @@ fn task_workspace_blocker(task: PlanningTaskId, target: &Path) -> Option<String>
 
 /// Last-modified time of an artifact, when it exists on disk. Used only for
 /// the "prior work found ~N ago" orientation line — absence is not an error.
-pub fn artifact_modified(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
+pub fn artifact_modified(target: &Path, path: &Path, state: ArtifactState) -> Option<SystemTime> {
+    if state != ArtifactState::Cached {
+        return None;
+    }
+    kuzushi_core::workspace::artifact_modified_within(target, path)
+        .ok()
+        .flatten()
 }
 
-pub fn artifact_state(path: &Path) -> ArtifactState {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_dir() => directory_artifact_state(path),
-        Ok(metadata) if metadata.is_file() => file_artifact_state(path),
-        Ok(_) => ArtifactState::Invalid,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ArtifactState::Missing,
-        Err(_) => ArtifactState::Invalid,
-    }
-}
-
-fn directory_artifact_state(path: &Path) -> ArtifactState {
-    match std::fs::read_dir(path) {
-        Ok(mut entries) => {
-            if entries.next().is_some() {
-                ArtifactState::Cached
-            } else {
-                ArtifactState::Missing
-            }
-        }
-        Err(_) => ArtifactState::Invalid,
-    }
-}
-
-fn file_artifact_state(path: &Path) -> ArtifactState {
-    let Ok(body) = std::fs::read_to_string(path) else {
-        return ArtifactState::Invalid;
-    };
-    if body.trim().is_empty() {
-        return ArtifactState::Invalid;
-    }
-    // JSON artifacts must parse; other artifacts (Markdown, binary CPG)
-    // are deemed cached on presence.
-    if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
-        if serde_json::from_str::<serde_json::Value>(&body).is_ok() {
-            ArtifactState::Cached
-        } else {
-            ArtifactState::Invalid
-        }
-    } else {
-        ArtifactState::Cached
+pub fn artifact_state(target: &Path, path: &Path) -> ArtifactState {
+    match kuzushi_core::workspace::artifact_state_within(target, path) {
+        CoreArtifactState::Cached => ArtifactState::Cached,
+        CoreArtifactState::Invalid => ArtifactState::Invalid,
+        CoreArtifactState::Missing => ArtifactState::Missing,
     }
 }
 
@@ -201,7 +172,7 @@ mod tests {
     fn missing_artifact_is_missing() {
         let tmp = tempfile::tempdir().unwrap();
         assert_eq!(
-            artifact_state(&tmp.path().join("nope.json")),
+            artifact_state(tmp.path(), &tmp.path().join("nope.json")),
             ArtifactState::Missing
         );
     }
@@ -211,7 +182,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("empty");
         std::fs::create_dir(&dir).unwrap();
-        assert_eq!(artifact_state(&dir), ArtifactState::Missing);
+        assert_eq!(artifact_state(tmp.path(), &dir), ArtifactState::Missing);
     }
 
     #[test]
@@ -220,7 +191,7 @@ mod tests {
         let dir = tmp.path().join("populated");
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("inside.txt"), "x").unwrap();
-        assert_eq!(artifact_state(&dir), ArtifactState::Cached);
+        assert_eq!(artifact_state(tmp.path(), &dir), ArtifactState::Cached);
     }
 
     #[test]
@@ -229,7 +200,7 @@ mod tests {
         let path = tmp.path().join("ok.json");
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(b"{}").unwrap();
-        assert_eq!(artifact_state(&path), ArtifactState::Cached);
+        assert_eq!(artifact_state(tmp.path(), &path), ArtifactState::Cached);
     }
 
     #[test]
@@ -237,7 +208,25 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("bad.json");
         std::fs::write(&path, "{not-json").unwrap();
-        assert_eq!(artifact_state(&path), ArtifactState::Invalid);
+        assert_eq!(artifact_state(tmp.path(), &path), ArtifactState::Invalid);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn planning_artifact_probe_rejects_symlinked_state_parent() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("context-snapshot.json"), "{}").unwrap();
+        symlink(outside.path(), target.path().join(".kuzushi")).unwrap();
+        let path = target.path().join(".kuzushi/context-snapshot.json");
+
+        assert_eq!(artifact_state(target.path(), &path), ArtifactState::Invalid);
+        assert_eq!(
+            artifact_modified(target.path(), &path, ArtifactState::Invalid),
+            None
+        );
     }
 
     #[test]

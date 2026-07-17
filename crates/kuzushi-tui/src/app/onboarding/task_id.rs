@@ -1,9 +1,9 @@
-use super::phase::WorkflowPhase;
+use kuzushi_core::WorkflowPhase;
 
-/// Every task an operator can select across the four engagement phases. Each
+/// Every task an operator can select across the five engagement phases. Each
 /// variant maps to a concrete tool (or a tool + option) and, for the Map-phase
 /// tasks that build reusable artifacts, an artifact path used for prior-run
-/// detection. Hunt/Confirm/Fix tasks are actions (no cached artifact).
+/// detection. Scan/Review/Prove/Fix tasks are actions (no cached artifact).
 ///
 /// Ordering of variants is the canonical UI/run order, grouped by phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -18,8 +18,11 @@ pub enum PlanningTaskId {
     BuildCodePropertyGraph,
     BuildCodeQlDatabase,
     ThreatIntelCves,
+    /// Retained only to decode older saved plans; no longer offered by the
+    /// source-security phase picker.
+    #[allow(dead_code)]
     ReverseEngineerBinary,
-    // 崩 KUZUSHI · hunt — find vulnerabilities.
+    // Scan — find candidate vulnerabilities and security signals.
     ScanSecrets,
     ScanSemgrep,
     ScanCodeql,
@@ -27,9 +30,12 @@ pub enum PlanningTaskId {
     HuntTaint,
     HuntThreatModel,
     HuntSystems,
+    /// Retained only to decode older saved plans; superseded by the supported
+    /// systems/dataflow engines and no longer offered by Planning.
     HuntUseAfterFree,
-    // 作 TSUKURI · confirm — triage & verify.
+    // Review — triage and decide candidate findings.
     TriageFindings,
+    // Prove — verify actionable findings with empirical evidence.
     VerifyFindings,
     // 掛 KAKE · fix — patch & report.
     PatchFindings,
@@ -47,7 +53,6 @@ impl PlanningTaskId {
         PlanningTaskId::BuildCodePropertyGraph,
         PlanningTaskId::BuildCodeQlDatabase,
         PlanningTaskId::ThreatIntelCves,
-        PlanningTaskId::ReverseEngineerBinary,
         PlanningTaskId::ScanSecrets,
         PlanningTaskId::ScanSemgrep,
         PlanningTaskId::ScanCodeql,
@@ -55,7 +60,6 @@ impl PlanningTaskId {
         PlanningTaskId::HuntTaint,
         PlanningTaskId::HuntThreatModel,
         PlanningTaskId::HuntSystems,
-        PlanningTaskId::HuntUseAfterFree,
         PlanningTaskId::TriageFindings,
         PlanningTaskId::VerifyFindings,
         PlanningTaskId::PatchFindings,
@@ -85,8 +89,9 @@ impl PlanningTaskId {
             | ThreatIntelCves
             | ReverseEngineerBinary => WorkflowPhase::Map,
             ScanSecrets | ScanSemgrep | ScanCodeql | ScanAgenticSast | HuntTaint
-            | HuntThreatModel | HuntSystems | HuntUseAfterFree => WorkflowPhase::Hunt,
-            TriageFindings | VerifyFindings => WorkflowPhase::Confirm,
+            | HuntThreatModel | HuntSystems | HuntUseAfterFree => WorkflowPhase::Scan,
+            TriageFindings => WorkflowPhase::Review,
+            VerifyFindings => WorkflowPhase::Prove,
             PatchFindings | BuildReport => WorkflowPhase::Fix,
         }
     }
@@ -138,13 +143,23 @@ impl PlanningTaskId {
             ScanCodeql => "codeql:scan",
             ScanAgenticSast => "agentic-sast:scan",
             HuntTaint => "taint-iris-next:hunt",
-            HuntThreatModel => "carlini-threat-hunt:run",
+            HuntThreatModel => "offense-review:threat-hunt",
             HuntSystems => "systems-hunt:systems-hunt",
             HuntUseAfterFree => "uaf-hunt:hunt",
             TriageFindings => "triage:run",
             VerifyFindings => "verify:finding",
             PatchFindings => "patch:finding",
             BuildReport => "report:build",
+        }
+    }
+
+    /// Stable Activity identity for one planned capability invocation.
+    /// Distinct planning tasks may intentionally dispatch the same tool.
+    pub(crate) fn activity_task_id(self) -> String {
+        match self {
+            Self::BuildStrideThreatModel => "threat-model:build[stride]".to_string(),
+            Self::BuildPastaThreatModel => "threat-model:build[pasta]".to_string(),
+            _ => self.tool_name().to_string(),
         }
     }
 
@@ -174,7 +189,7 @@ impl PlanningTaskId {
 
     /// Relative artifact path under the workspace root used to determine
     /// whether the task has already been run. `None` for action tasks
-    /// (Hunt/Confirm/Fix and reverse-engineering) that don't cache a
+    /// (Scan/Review/Prove/Fix and reverse-engineering) that don't cache a
     /// reusable artifact at a fixed path.
     pub fn artifact_relative_path(self) -> Option<&'static str> {
         use PlanningTaskId::*;
@@ -273,8 +288,9 @@ mod tests {
             };
             let expected = match task.phase() {
                 WorkflowPhase::Map => ToolPhase::Map,
-                WorkflowPhase::Hunt => ToolPhase::Hunt,
-                WorkflowPhase::Confirm => ToolPhase::Confirm,
+                WorkflowPhase::Scan => ToolPhase::Scan,
+                WorkflowPhase::Review => ToolPhase::Review,
+                WorkflowPhase::Prove => ToolPhase::Prove,
                 WorkflowPhase::Fix => ToolPhase::Fix,
             };
             assert_eq!(

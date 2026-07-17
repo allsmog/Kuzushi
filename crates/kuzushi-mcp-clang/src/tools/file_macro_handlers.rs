@@ -11,11 +11,11 @@ use super::tool_types::{DiagnosticsTool, MacroExpandTool, SemanticTokensTool};
 impl ToolHandler for MacroExpandTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let request = PositionRequest::from_args(&args)?;
+        let request = PositionRequest::from_args(&args, &self.handle)?;
         let client = request.client(&self.handle).await?;
-        open_document(&client, &request.file.file).await?;
+        open_document(&client, &request.file.file, &request.file.source_text).await?;
         let hover = client
-            .request("textDocument/hover", request.params())
+            .request("textDocument/hover", request.params()?)
             .await?;
         let expansion = extract_first_code_fence(&hover);
         Ok(json!({ "hover": hover, "expansion": expansion }))
@@ -26,11 +26,11 @@ impl ToolHandler for MacroExpandTool {
 impl ToolHandler for SemanticTokensTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let request = FileRequest::from_args(&args)?;
+        let request = FileRequest::from_args(&args, &self.handle)?;
         let client = request.client(&self.handle).await?;
-        open_document(&client, &request.file).await?;
+        open_document(&client, &request.file, &request.source_text).await?;
         let raw = client
-            .request("textDocument/semanticTokens/full", request.text_document())
+            .request("textDocument/semanticTokens/full", request.text_document()?)
             .await?;
         Ok(json!({ "tokens": raw }))
     }
@@ -40,11 +40,11 @@ impl ToolHandler for SemanticTokensTool {
 impl ToolHandler for DiagnosticsTool {
     async fn call(&self, args: Value) -> Result<Value> {
         ensure_clangd()?;
-        let request = FileRequest::from_args(&args)?;
+        let request = FileRequest::from_args(&args, &self.handle)?;
         let client = request.client(&self.handle).await?;
-        open_document(&client, &request.file).await?;
+        open_document(&client, &request.file, &request.source_text).await?;
         let raw = client
-            .request("textDocument/diagnostic", request.text_document())
+            .request("textDocument/diagnostic", request.text_document()?)
             .await?;
         Ok(json!({ "diagnostics": raw }))
     }

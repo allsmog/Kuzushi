@@ -170,18 +170,29 @@ fn begin_triage_llm_scope(
 
 fn emit_triage_done(ctx: &ToolExecutionContext<'_>, stats: &TriageRunStats) {
     if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step(
-                "done",
-                "run",
-                format!(
-                    "verdict-write · tp={} fp={} review={} byDesign={}",
-                    stats.tp, stats.fp, stats.needs_review, stats.by_design,
-                ),
-            )
-            .with_cost_usd(stats.total_cost)
-            .emit();
+        let cost = stats.cost_report();
+        let label = triage_done_label(stats, cost);
+        let mut step = trace.step("done", "run", label);
+        if let Some(exact) = cost.exact_usd() {
+            step = step.with_cost_usd(exact);
+        }
+        let _ = step.emit();
     }
+}
+
+fn triage_done_label(stats: &TriageRunStats, cost: crate::runtime::RuntimeCostReport) -> String {
+    let unresolved = if cost.is_complete() {
+        String::new()
+    } else {
+        format!(
+            " · provider spend unresolved (observed ${:.4})",
+            cost.observed_usd()
+        )
+    };
+    format!(
+        "verdict-write · tp={} fp={} review={} byDesign={}{}",
+        stats.tp, stats.fp, stats.needs_review, stats.by_design, unresolved,
+    )
 }
 
 pub(in crate::modules) fn require_triage_workspace<'a>(

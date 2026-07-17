@@ -6,6 +6,11 @@ pub(crate) struct SystemsHuntInput {
     pub(crate) max_cwe_classes: usize,
     pub(crate) artifact_dir: String,
     pub(crate) model: Option<String>,
+    pub(crate) invariant_system_prompt: String,
+    pub(crate) trigger_system_prompt: String,
+    pub(crate) hunt_system_prompt: String,
+    pub(crate) deep_semantic_cwe_system_prompt: String,
+    pub(crate) deep_semantic_hunt_system_prompt: String,
     /// Max files visited by `collect_inventory`. Default 5000 (was 200):
     /// large enough to cover libxml2-class libraries in a single walk, tunable
     /// for million-LoC monorepos.

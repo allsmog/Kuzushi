@@ -68,7 +68,10 @@ fn knowledge_base_model_filters_attachments_to_active_module() {
     let model = knowledge_base_model(&app);
 
     assert!(model.summary_rows.contains(&KnowledgeBaseSummaryRow {
-        cells: ["store".to_string(), "./attachments.json".to_string()],
+        cells: [
+            "store".to_string(),
+            "./.kuzushi/v3/attachments.json".to_string(),
+        ],
     }));
     assert_eq!(model.artifact_rows[0].cells[0], "present");
     assert_eq!(model.artifact_rows[0].cells[1], "crates/demo/src/lib.rs");

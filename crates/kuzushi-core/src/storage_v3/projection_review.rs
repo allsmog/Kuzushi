@@ -4,8 +4,8 @@ use rusqlite::{params, Transaction};
 
 use super::projection_fts::rebuild_fts_if_available;
 use super::projection_payload::{
-    payload_i64, payload_str, require_payload_str, require_payload_u64, stable_fp_from_payload,
-    triage_verdict_for_review,
+    payload_f64, payload_i64, payload_str, require_payload_str, require_payload_u64,
+    stable_fp_from_payload, triage_verdict_for_review,
 };
 
 pub(super) fn project_review_decision(
@@ -69,6 +69,39 @@ fn project_finding_triage_json(
     let Some(triage_verdict) = triage_verdict else {
         return Ok(());
     };
+    let (cost_usd, cost_usd_exact) = projected_triage_cost(event)?;
+    write_finding_triage_projection(
+        tx,
+        event,
+        finding_id,
+        triage_verdict,
+        confidence,
+        cost_usd,
+        cost_usd_exact,
+    )
+}
+
+fn projected_triage_cost(event: &EventEnvelope) -> Result<(f64, bool)> {
+    let cost_usd = payload_f64(&event.payload, "triageCostUsd").unwrap_or(0.0);
+    crate::runtime::RuntimeCost::from_usd(cost_usd, "projected triage cost")?;
+    let exact = event
+        .payload
+        .get("triageCostUsdExact")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+    Ok((cost_usd, exact))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_finding_triage_projection(
+    tx: &Transaction<'_>,
+    event: &EventEnvelope,
+    finding_id: i64,
+    triage_verdict: &str,
+    confidence: f64,
+    cost_usd: f64,
+    cost_usd_exact: bool,
+) -> Result<()> {
     tx.execute(
         r#"
         update finding_observations
@@ -79,10 +112,11 @@ fn project_finding_triage_json(
                    'verdict', ?2,
                    'confidence', ?3,
                    'rationale', ?4,
-                   'cost_usd', 0.0
+                   'cost_usd', ?5,
+                   'cost_usd_exact', case when ?6 then json('true') else json('false') end
                  ),
                  '$.triaged_by',
-                 ?5
+                 ?7
                )
          where finding_json is not null
            and json_extract(finding_json, '$.id') = ?1
@@ -92,17 +126,15 @@ fn project_finding_triage_json(
             triage_verdict,
             confidence,
             payload_str(&event.payload, "rationale").unwrap_or(""),
+            cost_usd,
+            cost_usd_exact,
             payload_str(&event.payload, "author").unwrap_or(event.actor.as_str()),
         ],
     )?;
     Ok(())
 }
 
-fn project_review_search(
-    tx: &Transaction<'_>,
-    event: &EventEnvelope,
-    verdict: &str,
-) -> Result<()> {
+fn project_review_search(tx: &Transaction<'_>, event: &EventEnvelope, verdict: &str) -> Result<()> {
     let Some(stable_fp) = stable_fp_from_payload(&event.payload) else {
         return Ok(());
     };

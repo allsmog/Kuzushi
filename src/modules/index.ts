@@ -97,6 +97,8 @@ export type {
   CopilotModule,
   CopilotModuleRequirement,
   DagContext,
+  DagDatabase,
+  DagDatabaseStatement,
   DagTool,
   DagToolSpec,
   ExecutionContext,

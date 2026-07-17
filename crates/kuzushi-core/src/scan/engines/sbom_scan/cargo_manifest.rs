@@ -1,7 +1,7 @@
+use super::bounded_fs as fs;
 use super::toml_manifest::{toml_value_at, toml_version};
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 const TARGET_DEPENDENCY_SCOPES: &[&str] =
@@ -29,10 +29,7 @@ pub(super) fn is_cargo_manifest(path: &Path) -> bool {
         .is_some_and(|name| name == "Cargo.toml")
 }
 
-pub(super) fn cargo_manifest_edges(
-    target: &Path,
-    path: &Path,
-) -> Result<Vec<SbomDependencyEdge>> {
+pub(super) fn cargo_manifest_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse Cargo.toml")?;

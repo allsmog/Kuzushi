@@ -20,10 +20,10 @@ pub(crate) const RUN_SCAN_COMMANDS: &[ShellCommandSpec] = &[
         description: "dispatch a tool; run . is shell-only focused-module shorthand",
     },
     ShellCommandSpec {
-        command: "recon:import <amass|httpx|nuclei|nmap-xml> <path>",
+        command: "recon:import <amass|httpx|nuclei|nmap-xml|burp-xml|har> <path>",
         aliases: &[
-            "recon import <amass|httpx|nuclei|nmap-xml> <path>",
-            "/recon:import <amass|httpx|nuclei|nmap-xml> <path>",
+            "recon import <format> <path>",
+            "/recon:import <format> <path>",
         ],
         category: ShellCommandCategory::RunScan,
         description: "import an external reconnaissance export through the registered recon tool",

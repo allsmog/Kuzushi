@@ -50,11 +50,11 @@ pub(crate) fn complete_value_candidates(
     slash: bool,
     prefix_words: &[&str],
     current: &str,
-    values: Vec<String>,
+    values: CompletionValues<'_>,
 ) -> Vec<String> {
     let head = prefix_words.join(" ");
     let slash_prefix = if slash { "/" } else { "" };
-    let matched = rank_fuzzy(dedupe_sorted(values), current);
+    let matched = rank_completion_values(values, current);
     matched
         .into_iter()
         .map(|value| {
@@ -65,6 +65,34 @@ pub(crate) fn complete_value_candidates(
             }
         })
         .collect()
+}
+
+fn rank_completion_values(values: CompletionValues<'_>, current: &str) -> Vec<String> {
+    match values {
+        CompletionValues::Owned(values) => {
+            rank_matching_refs(values.iter().map(String::as_str), current)
+        }
+        CompletionValues::Static(values) => rank_matching_refs(values.iter().copied(), current),
+        CompletionValues::Borrowed(values) => {
+            rank_matching_refs(values.iter().map(String::as_str), current)
+        }
+        CompletionValues::RunIds { live, stored } => rank_matching_refs(
+            live.into_iter()
+                .flatten()
+                .chain(stored.iter().map(String::as_str)),
+            current,
+        ),
+    }
+}
+
+fn rank_matching_refs<'a>(values: impl Iterator<Item = &'a str>, current: &str) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let matched = values
+        .filter(|value| subsequence_score(value, current).is_some())
+        .filter(|value| seen.insert(*value))
+        .map(str::to_string)
+        .collect();
+    rank_fuzzy(matched, current)
 }
 
 pub(crate) fn dedupe_sorted(values: Vec<String>) -> Vec<String> {

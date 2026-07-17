@@ -1,9 +1,12 @@
+use kuzushi_mcp_common::ReadRootCapability;
 use std::sync::Arc;
 
 use super::health_handle::ClangdHandle;
 
 pub(crate) struct HealthTool;
-pub(crate) struct CompileCommandsTool;
+pub(crate) struct CompileCommandsTool {
+    pub(crate) read_capability: ReadRootCapability,
+}
 
 pub(crate) struct DefinitionTool {
     pub(crate) handle: Arc<ClangdHandle>,
@@ -40,6 +43,3 @@ pub(crate) struct SemanticTokensTool {
 pub(crate) struct DiagnosticsTool {
     pub(crate) handle: Arc<ClangdHandle>,
 }
-
-#[allow(dead_code)]
-pub(crate) struct NotYetImplemented(pub(crate) &'static str);

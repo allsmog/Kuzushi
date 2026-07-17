@@ -4,9 +4,9 @@ use crate::support::require_cli_target;
 use anyhow::{bail, Context, Result};
 use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
 use kuzushi_core::{
-    list_run_summaries, load_run_summary, run_artifact_path, runs_root, RunSummary, WorkspaceTarget,
+    list_run_summaries, load_run_summary, read_run_artifact_text, runs_root, RunSummary,
+    WorkspaceTarget,
 };
-use std::fs;
 use std::path::PathBuf;
 
 use super::runs_diff::runs_diff_command;
@@ -24,6 +24,9 @@ pub(crate) fn runs_command(command: RunsCommand, global_target: Option<PathBuf>)
         RunsCommand::Trace { run_id, target, json } => {
             runs_trace_command(require_cli_target("runs trace", target, global_target)?, &run_id, json)
         }
+        RunsCommand::Replay { run_id, target, json } => {
+            runs_replay_command(require_cli_target("runs replay", target, global_target)?, &run_id, json)
+        }
         RunsCommand::Diff { base_run_id, compare_run_id, target, json } => {
             runs_diff_command(require_cli_target("runs diff", target, global_target)?, &base_run_id, &compare_run_id, json)
         }
@@ -31,6 +34,17 @@ pub(crate) fn runs_command(command: RunsCommand, global_target: Option<PathBuf>)
             runs_prune_command(require_cli_target("runs prune", target, global_target)?, older_than_days, keep_last, dry_run, json)
         }
     }
+}
+
+pub(crate) fn runs_replay_command(target: PathBuf, run_id: &str, json: bool) -> Result<()> {
+    let workspace = WorkspaceTarget::new(target)?;
+    let read = kuzushi_core::run_lifecycle::load_run_projection(workspace.root(), run_id)?;
+    if json {
+        println!("{}", crate::presentation::runs_replay_json(&read)?);
+    } else {
+        print!("{}", crate::presentation::runs_replay_plain(&read));
+    }
+    Ok(())
 }
 
 pub(crate) fn runs_list_command(target: PathBuf, status: Vec<String>, json: bool) -> Result<()> {
@@ -100,15 +114,11 @@ pub(crate) fn runs_show_command(target: PathBuf, run_id: &str, json: bool) -> Re
 
 pub(crate) fn runs_trace_command(target: PathBuf, run_id: &str, json: bool) -> Result<()> {
     let workspace = WorkspaceTarget::new(target)?;
-    let trace_path = run_trace_path(&workspace, run_id);
-    let body = fs::read_to_string(&trace_path)
-        .with_context(|| format!("Could not read {}", trace_path.display()))?;
+    let (trace_path, body) =
+        read_run_artifact_text(workspace.root(), run_id, run_trace_artifact_leaf())
+            .require("Run trace")?;
     print!("{}", runs_trace_output(&trace_path, &body, json)?);
     Ok(())
-}
-
-pub(crate) fn run_trace_path(workspace: &WorkspaceTarget, run_id: &str) -> PathBuf {
-    run_artifact_path(workspace.root(), run_id, run_trace_artifact_leaf())
 }
 
 fn run_trace_artifact_leaf() -> &'static str {
@@ -134,5 +144,36 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].run_id, "run-c");
         assert_eq!(filtered[0].status, "canceled");
+    }
+
+    #[test]
+    fn trace_rejects_run_id_traversal() {
+        let target = tempfile::tempdir().unwrap();
+
+        let error =
+            runs_trace_command(target.path().to_path_buf(), "../outside", false).unwrap_err();
+
+        assert!(error.to_string().contains("unsafe"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trace_rejects_symlinked_run_directory() {
+        use std::os::unix::fs::symlink;
+
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("trace.jsonl"), "outside").unwrap();
+        let runs = kuzushi_core::runs_root(target.path());
+        std::fs::create_dir_all(&runs).unwrap();
+        symlink(outside.path(), runs.join("run-link")).unwrap();
+
+        let error = runs_trace_command(target.path().to_path_buf(), "run-link", false).unwrap_err();
+
+        assert!(error.to_string().contains("unsafe"));
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("trace.jsonl")).unwrap(),
+            "outside"
+        );
     }
 }

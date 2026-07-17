@@ -2,7 +2,10 @@ pub(super) fn package_url(ecosystem: &str, name: &str, version: Option<&str>) ->
     let package_type = package_type(ecosystem)?;
     let version = version.and_then(exact_version);
     Some(match version {
-        Some(version) => format!("pkg:{package_type}/{}@{version}", encode_name(ecosystem, name)),
+        Some(version) => format!(
+            "pkg:{package_type}/{}@{version}",
+            encode_name(ecosystem, name)
+        ),
         None => format!("pkg:{package_type}/{}", encode_name(ecosystem, name)),
     })
 }

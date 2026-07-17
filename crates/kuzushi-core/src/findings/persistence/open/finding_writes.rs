@@ -2,7 +2,7 @@ use super::*;
 use crate::content_store::ContentStore;
 use crate::identity::{compute_observation_hash_v3, hash_parts, ObservationHashInput};
 use crate::storage_v3::writer_actor::{
-    FileFactWrite, ObservationWrite, SnapshotWrite, StorageWriterActor, WatcherCommand,
+    FileFactWrite, ObservationWrite, SnapshotWrite, StorageWriterSession, WatcherCommand,
     WriteReceipt, WriterCommand,
 };
 use std::path::{Path, PathBuf};
@@ -26,6 +26,8 @@ struct ObservationProvenance {
     blob_hash: String,
     byte_span: Option<(u64, u64)>,
 }
+
+const MAX_OBSERVATION_SOURCE_BYTES: usize = 64 * 1024 * 1024;
 
 enum ProjectionEvidence {
     Replace(Vec<FindingEvidence>),
@@ -68,6 +70,33 @@ impl ProjectionIdentityLink {
 
 impl FindingStore {
     pub fn insert_finding(&self, scan_id: &str, finding: &Finding) -> Result<i64> {
+        let mut writer = self.storage_writer_session()?;
+        self.insert_finding_with_writer(scan_id, finding, &mut writer)
+    }
+
+    pub fn insert_findings(&self, scan_id: &str, findings: &[Finding]) -> Result<Vec<i64>> {
+        if findings.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut writer = self.storage_writer_session()?;
+        findings
+            .iter()
+            .map(|finding| self.insert_finding_with_writer(scan_id, finding, &mut writer))
+            .collect()
+    }
+
+    fn storage_writer_session(&self) -> Result<StorageWriterSession> {
+        let (event_log_dir, db_path) =
+            self.required_v3_storage_paths("record finding observations")?;
+        StorageWriterSession::open(event_log_dir, db_path)
+    }
+
+    fn insert_finding_with_writer(
+        &self,
+        scan_id: &str,
+        finding: &Finding,
+        writer: &mut StorageWriterSession,
+    ) -> Result<i64> {
         // Identity bookkeeping stays transactional while the mutable finding
         // view is projected by the v3 writer after the observation event is
         // appended. This keeps current finding state behind the event log.
@@ -78,14 +107,7 @@ impl FindingStore {
         let outcome = self.insert_finding_statements(&tx, scan_id, finding)?;
         tx.commit()
             .context("Could not commit findings write transaction")?;
-        self.record_v3_observation(scan_id, finding, outcome)
-    }
-
-    pub fn insert_findings(&self, scan_id: &str, findings: &[Finding]) -> Result<Vec<i64>> {
-        findings
-            .iter()
-            .map(|finding| self.insert_finding(scan_id, finding))
-            .collect()
+        self.record_v3_observation(scan_id, finding, outcome, writer)
     }
 
     fn insert_finding_statements(
@@ -208,9 +230,10 @@ impl FindingStore {
         scan_id: &str,
         finding: &Finding,
         outcome: FindingInsertOutcome,
+        writer: &mut StorageWriterSession,
     ) -> Result<i64> {
         let commit = self.v3_observation_commit(scan_id, finding, outcome)?;
-        self.commit_v3_observation(commit)
+        self.commit_v3_observation(commit, writer)
     }
 
     fn v3_observation_commit(
@@ -251,14 +274,12 @@ impl FindingStore {
         Ok(projected)
     }
 
-    fn commit_v3_observation(&self, commit: ObservationCommit) -> Result<i64> {
-        let (event_log_dir, db_path) =
-            self.required_v3_storage_paths("record finding observation")?;
-        let receipts = StorageWriterActor::commit_blocking_many(
-            event_log_dir,
-            db_path,
-            observation_commands(commit),
-        )?;
+    fn commit_v3_observation(
+        &self,
+        commit: ObservationCommit,
+        writer: &mut StorageWriterSession,
+    ) -> Result<i64> {
+        let receipts = writer.commit_many(observation_commands(commit))?;
         projected_finding_id_from_receipts(receipts)
     }
 
@@ -273,7 +294,7 @@ impl FindingStore {
         let Some(source_path) = source_path_for_finding(&root, &finding.file_path) else {
             return Ok(None);
         };
-        let Some(bytes) = read_optional_file(&source_path)? else {
+        let Some(bytes) = read_optional_file(&root, &source_path)? else {
             return Ok(None);
         };
         let Some(objects_dir) = self.v3_objects_dir() else {
@@ -540,12 +561,26 @@ fn row_to_current_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> 
     serde_json::from_str(&raw).map_err(|error| to_sql_error(anyhow::Error::new(error)))
 }
 
-fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {
-    match std::fs::read(path) {
+fn read_optional_file(root: &Path, path: &Path) -> Result<Option<Vec<u8>>> {
+    match crate::bounded_file::read_regular_bytes_within(
+        root,
+        path,
+        MAX_OBSERVATION_SOURCE_BYTES,
+    ) {
         Ok(bytes) => Ok(Some(bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) if provenance_read_is_safely_omitted(&error) => Ok(None),
         Err(error) => Err(error).with_context(|| format!("Could not read {}", path.display())),
     }
+}
+
+fn provenance_read_is_safely_omitted(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound
+            | std::io::ErrorKind::PermissionDenied
+            | std::io::ErrorKind::InvalidData
+            | std::io::ErrorKind::InvalidInput
+    )
 }
 
 fn build_observation_provenance(

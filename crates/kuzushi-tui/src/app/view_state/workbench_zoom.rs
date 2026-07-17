@@ -34,6 +34,10 @@ impl WorkbenchZoom {
         }
     }
 
+    pub(crate) fn show(&mut self, focus: WorkbenchPane) {
+        *self = Self::Pane(focus);
+    }
+
     pub(crate) fn clear(&mut self) {
         *self = Self::Off;
     }

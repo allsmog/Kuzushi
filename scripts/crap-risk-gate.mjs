@@ -2,11 +2,12 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { testCoversProductionFile } from "./crap-risk-test-mapping.mjs";
 
 const root = execGit(["rev-parse", "--show-toplevel"], process.cwd()).trim() || process.cwd();
 const threshold = Number(process.env.KUZUSHI_CRAP_RISK_THRESHOLD ?? "7");
 const allChanged = changedFiles();
-const hasChangedTest = allChanged.some(isTestFile);
+const changedTests = changedTestFiles(allChanged);
 const changed = changedCodeFiles(allChanged);
 const failures = [];
 
@@ -14,13 +15,16 @@ for (const file of changed) {
   const abs = path.join(root, file);
   if (!existsSync(abs)) continue;
   const source = readFileSync(abs, "utf8");
+  const hasFocusedChangedTest =
+    changedTests.some((test) => testCoversProductionFile(file, test.file, test.source)) ||
+    hasChangedInlineTest(file, source);
   const blocks = scoredFunctionBlocks(file, source);
   const logicalFileLines = logicalLines(source).length;
   if (scoresWholeFile(file) && isProductionCode(file) && logicalFileLines > 300) {
     failures.push(`${file}: file has ${logicalFileLines} logical lines; limit is 300`);
   }
   for (const block of blocks) {
-    const metrics = scoreBlock(file, block, hasChangedTest);
+    const metrics = scoreBlock(file, block, hasFocusedChangedTest);
     if (metrics.complexity > 4) {
       failures.push(
         `${file}:${block.line} ${block.name} complexity ${metrics.complexity}; limit is 4`,
@@ -61,6 +65,20 @@ function changedFiles() {
 
 function changedCodeFiles(files) {
   return files.filter(isTrackedCodeFile);
+}
+
+function changedTestFiles(files) {
+  return files.filter(isTestFile).map((file) => ({
+    file,
+    source: existsSync(path.join(root, file)) ? readFileSync(path.join(root, file), "utf8") : "",
+  }));
+}
+
+function hasChangedInlineTest(file, source) {
+  if (!file.endsWith(".rs")) return false;
+  const marker = source.split(/\r?\n/).findIndex((line) => line.includes("#[cfg(test)]"));
+  if (marker < 0) return false;
+  return changedLineRanges(file).some((range) => range.end >= marker + 1);
 }
 
 function changedFilesFromGit() {
@@ -160,12 +178,12 @@ function braceDepthAfter(char, depth, opened) {
   return { depth, opened };
 }
 
-function scoreBlock(file, block, hasChangedTest) {
+function scoreBlock(file, block, hasFocusedChangedTest) {
   const lines = logicalLines(block.source);
   const complexity = complexityScore(block.source);
   const sizeWeight = Math.max(0, Math.ceil((lines.length - 40) / 20));
   const sideEffectWeight = sideEffectScore(block.source);
-  const coverageGap = isProductionCode(file) && !hasChangedTest ? 1 : 0;
+  const coverageGap = isProductionCode(file) && !hasFocusedChangedTest ? 1 : 0;
   const centralityWeight = centralityScore(file);
   return {
     lines: lines.length,

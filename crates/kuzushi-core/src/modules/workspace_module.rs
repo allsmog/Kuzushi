@@ -6,7 +6,17 @@ pub(crate) fn workspace_module() -> BuiltinModule {
         "Workspace",
         ModuleKind::Intel,
         "Report target and state paths.",
-        vec![workspace_status_tool(), workspace_export_findings_tool()],
+        vec![
+            workspace_status_tool().with_policy(read_policy(
+                ToolPhase::Map,
+                WorkspaceRequirement::Optional,
+            )),
+            workspace_export_findings_tool().with_policy(target_write_policy(
+                ToolPhase::Map,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Optional,
+            )),
+        ],
         vec![],
     )
 }
@@ -58,6 +68,7 @@ fn workspace_export_output_option() -> OptionSpec {
          Use a directory path when format=markdown-bundle.",
     )
     .aliases(&["path"])
+    .target_write()
     .required()
 }
 
@@ -67,7 +78,14 @@ pub(crate) fn sast_module() -> BuiltinModule {
         "SAST Pipeline",
         ModuleKind::Defense,
         "Full SAST pipeline: context, scanners, AI triage, verification, patch, and report.",
-        vec![sast_scan_tool()],
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::InputAware,
+                FindingStoreRequirement::Required,
+            ),
+            vec![sast_scan_tool()],
+        ),
         vec![dag("sast:scan", "report", &["context:build"])],
     )
 }
@@ -78,6 +96,20 @@ fn sast_scan_tool() -> ToolDescriptor {
         "Run the full SAST pipeline for the current target.",
         sast_scan_options(),
     )
+    .with_prompt(editable_prompt(
+        "triage instructions",
+        "sast",
+        "triage",
+        "TRIAGE_PROMPT",
+        crate::runtime::DEFAULT_TRIAGE_PROMPT.to_string(),
+    ))
+    .with_prompt(editable_prompt(
+        "verification instructions",
+        "sast",
+        "verify",
+        "VERIFY_PROMPT",
+        crate::verification::DEFAULT_VERIFY_PROMPT.to_string(),
+    ))
 }
 
 fn sast_scan_options() -> Vec<OptionSpec> {
@@ -214,6 +246,7 @@ fn sast_triage_options() -> Vec<OptionSpec> {
             OptionType::String,
             "Prompt text or path override forwarded to scan triage.",
         )
+        .inline_or_workspace_file()
         .advanced(),
     ]
 }
@@ -253,6 +286,7 @@ fn sast_verification_options() -> Vec<OptionSpec> {
             OptionType::String,
             "Prompt text or path override forwarded to scan verification.",
         )
+        .inline_or_workspace_file()
         .advanced(),
     ]
 }
@@ -451,7 +485,14 @@ pub(crate) fn agentic_sast_module() -> BuiltinModule {
         "Agentic SAST",
         ModuleKind::Defense,
         "LLM-driven detectors that reason about data flow and intent rather than pattern-match.",
-        vec![agentic_sast_scan_tool()],
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Required,
+            ),
+            vec![agentic_sast_scan_tool()],
+        ),
         vec![dag("agentic-sast:scan", "findings", &["context:build"])],
     )
 }
@@ -462,6 +503,13 @@ fn agentic_sast_scan_tool() -> ToolDescriptor {
         "Run agentic SAST detectors for the current target.",
         agentic_sast_scan_options(),
     )
+    .with_prompt(editable_prompt(
+        "scan instructions",
+        "agentic-sast",
+        "scan",
+        "AGENTIC_SAST_PROMPT",
+        crate::capabilities::agentic_sast::agentic_sast_system_prompt_text(),
+    ))
 }
 
 fn agentic_sast_scan_options() -> Vec<OptionSpec> {
@@ -470,6 +518,13 @@ fn agentic_sast_scan_options() -> Vec<OptionSpec> {
         max_findings_option(40),
         opt("passes", OptionType::Int, "Agentic review pass count.").default(json!(1)),
         agentic_sast_mode_option(),
+        opt(
+            "AGENTIC_SAST_PROMPT",
+            OptionType::String,
+            "Agentic SAST instruction template or workspace file.",
+        )
+        .inline_or_workspace_file()
+        .advanced(),
     ];
     options.extend(sast_whitebox_options());
     options.extend(agentic_sast_filter_options());
@@ -506,7 +561,7 @@ fn agentic_sast_filter_options() -> Vec<OptionSpec> {
 }
 
 fn agentic_sast_chunk_options() -> Vec<OptionSpec> {
-    vec![
+    let mut options = vec![
         opt("strategy", OptionType::Enum, "Agentic SAST strategy.")
             .choices(&["standard", "chunked"])
             .default(json!("standard"))
@@ -530,13 +585,22 @@ fn agentic_sast_chunk_options() -> Vec<OptionSpec> {
             "Chunked strategy spend deposit per chunk.",
         )
         .advanced(),
+    ];
+    options.extend(agentic_sast_chunk_execution_options());
+    options
+}
+
+fn agentic_sast_chunk_execution_options() -> Vec<OptionSpec> {
+    vec![
         opt(
             "dryRun",
             OptionType::Bool,
             "Plan chunked strategy cost without model calls.",
         )
         .advanced(),
-        opt("scopeFile", OptionType::Path, "Chunked strategy scope file.").advanced(),
+        opt("scopeFile", OptionType::Path, "Chunked strategy scope file.")
+            .workspace_read()
+            .advanced(),
         opt(
             "failedChunkIds",
             OptionType::String,

@@ -13,7 +13,7 @@ use crate::proof::whitebox_policy::{
 use crate::runtime::SubagentRole;
 use crate::runtime::{AgentQueryRequest, AgentRuntime, AgentToolPolicy};
 use crate::structured_output::{
-    parse_or_repair_required_structured_json_with_cost, query_required_structured_json,
+    parse_or_repair_required_structured_json_with_cost,
     query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
 };
 use anyhow::{Context, Result};
@@ -23,7 +23,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
-use uuid::Uuid;
 
 mod adapters;
 mod application;

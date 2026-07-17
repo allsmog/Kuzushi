@@ -14,7 +14,9 @@ pub(super) fn dry_run_report(plan: FullModePlan) -> FullModeReport {
         chunks_dispatched: 0,
         chunks_failed: 0,
         failed_chunk_errors: Vec::new(),
-        cost_usd: 0.0,
+        cost_usd: Some(0.0),
+        observed_cost_usd: 0.0,
+        unresolved_provider_spend: false,
         dry_run: true,
         first_chunk_error: None,
     }

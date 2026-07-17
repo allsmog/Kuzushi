@@ -153,9 +153,9 @@ of these in its "explicitly NOT doing" list; the PRD non-goals repeat it.
 | **`kz` duplicate binary** | ~7 (25 MB artifact risk) | 05-20 | none | Fixed in WIP: the duplicate `kz` bin target and byte-identical `src/bin/kz.rs` wrapper are removed. Re-add only if packaging explicitly needs the short command. |
 | **Catalog / Module / ModuleRun / Tools** ShellViews | ~ (tui) | 05-14 – 07-02 | none | The "browse modules → pick one → run → watch transcript" product the vision explicitly retired. Survive only as `modules`/`use`/`tools` verbs + Catalog's odd reuse as a transient run screen (`onboarding/runner.rs:523`). `run` now auto-opens Activity; findings live in Workbench. |
 | **Story** ShellView | (tui) | 05-15 | none | `ui_view_models/session_story.rs`, `story` verb. Session-replay novelty; no anchor. |
-| **LangChain default-install stack** | (npm) | — | infra | `package.json` `dependencies`: `@langchain/*` ×5 + `langchain` + runtime `typescript`. ROADMAP P0.3 wants these demoted to an **optional extra**; the Rust bridge (`scripts/langgraph-bridge.mjs`, load-bearing) stays but should not force a LangChain default install. |
+| **LangChain default-install stack** | (npm) | — | infra | `package.json` still carries the five `@langchain/*` packages required by the load-bearing bridge. The unused `langchain` umbrella was removed and `typescript` moved to development-only; making the bridge stack optional remains a separate packaging decision. |
 | **`github:allsmog/*` plugin specifiers** | (npm) | — | none | `package.json` optionalDeps: `tob-skills`, `vuln-scout`, `promptarmor-plugin`, `shinsa-plugin`. ROADMAP P0.3 supply-chain liability (personal-repo availability/integrity). Back the deferred `prompt_armor`/`shinsa`/`tob`/`vuln-scout` modules. |
-| **`src/copilot/print.ts` compatibility shim** | (ts) | — | none | Fixed in WIP: the implementation moved to the neutral SDK surface `src/modules/print.ts`; `src/copilot/print.ts` remains only as a compatibility re-export. |
+| **Retired `src/copilot/print.ts` shim** | (ts) | — | none | Removed. The supported print API lives under the exported `kuzushi/modules` surface in `src/modules/print.ts`. |
 
 **Nuance for pwn/uaf/offense/chrome-rce:** the PRD non-goal is "don't *ship*
 roadmap modules until they produce first-class evidence artifacts" — so the
@@ -228,7 +228,7 @@ plain output · routing/screen_context · tests · docs · mode-parity matrix).
 | Story view | LEGACY-CUT | — | view variant + verb + `session_story.rs` + tests |
 | LangChain default deps | LEGACY-CUT | infra | `package.json` deps→optional; keep bridge |
 | `github:allsmog/*` specifiers | LEGACY-CUT | — | `package.json` optionalDeps + deferred plugin modules |
-| `src/copilot/print.ts` | LEGACY-CUT | — | WIP compatibility shim; implementation lives in `src/modules/print.ts` |
+| `src/copilot/print.ts` | LEGACY-CUT | — | **complete**; implementation lives in `src/modules/print.ts` |
 | Home view | REDUNDANT-FOLD | A2 | view + verb + renderer + back-nav |
 | Recommend view | REDUNDANT-FOLD | A4 | view + verb + renderer |
 | Threat text pages (4) | REDUNDANT-FOLD | A1 | view sub-modes + verbs + renderer |
@@ -265,7 +265,7 @@ plain output · routing/screen_context · tests · docs · mode-parity matrix).
 7. **Catalog/Module/ModuleRun/Tools + Home/Recommend/Threat-text/SastTasks views** — the bulk of the catalog-era + folded TUI surface (per-view LOC in `kuzushi-tui`).
 8. **`kz` duplicate binary** — fixed in WIP by removing the second bin target and wrapper source.
 9. **`offense`** — deferred; small.
-10. **`src/copilot/print.ts`** — fixed in WIP as a compatibility shim over `src/modules/print.ts`.
+10. **`src/copilot/print.ts`** — removed; `src/modules/print.ts` is the supported SDK surface.
 
 ### ORPHAN-FINISH, by cheapest-to-integrate (fastest vision wins first)
 1. **`kuzushi export`** — commit the working tree (one commit; closes a ROADMAP item).

@@ -241,3 +241,52 @@ fn scope_tree_round_trips_scopes_json() {
     );
     assert_eq!(loaded, tree);
 }
+
+#[cfg(unix)]
+#[test]
+fn scope_tree_state_rejects_an_outside_symlink_for_reads_and_writes() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    fs::write(outside.path(), "OUTSIDE_SCOPE_TOKEN").unwrap();
+    let path = project_model_scopes_path(workspace.path());
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    symlink(outside.path(), &path).unwrap();
+
+    let tree = discover_nested_project_scopes(workspace.path());
+    let read_error = format!(
+        "{:#}",
+        load_nested_project_scopes(workspace.path()).unwrap_err()
+    );
+    let write_error = format!(
+        "{:#}",
+        save_nested_project_scopes(workspace.path(), &tree).unwrap_err()
+    );
+
+    assert!(read_error.contains("symlink"), "{read_error}");
+    assert!(write_error.contains("symlink"), "{write_error}");
+    assert!(!read_error.contains("OUTSIDE_SCOPE_TOKEN"));
+    assert_eq!(
+        fs::read_to_string(outside.path()).unwrap(),
+        "OUTSIDE_SCOPE_TOKEN"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_manifest_discovery_does_not_follow_an_outside_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    fs::write(outside.path(), r#"{"workspaces":["private-service"]}"#).unwrap();
+    touch_dir(workspace.path(), "private-service");
+    symlink(outside.path(), workspace.path().join("package.json")).unwrap();
+
+    let tree = discover_nested_project_scopes(workspace.path());
+
+    assert!(!tree.scopes.iter().any(|scope| {
+        scope.kind == NestedProjectKind::PackageRoot && scope.rel_path == "private-service"
+    }));
+}

@@ -6,6 +6,20 @@ use notify::{
 use std::process::Command;
 
 #[test]
+fn current_tree_hash_matches_indexed_snapshot_without_creating_state() {
+    let target = tempfile::tempdir().unwrap();
+    fs::create_dir_all(target.path().join("src")).unwrap();
+    fs::write(target.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+
+    let current = current_workspace_tree_hash(target.path()).unwrap();
+
+    assert!(!target.path().join(".kuzushi").exists());
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let indexed = index_workspace_snapshot(&workspace).unwrap();
+    assert_eq!(current, indexed.tree_hash);
+}
+
+#[test]
 fn repeated_file_changes_keep_latest_state() {
     let changes = coalesce_changes([
         WorkspaceChange::FileChanged("src/main.rs".into()),
@@ -70,6 +84,62 @@ fn plans_source_and_policy_changes_differently() {
         ReindexPlan::MarkStaleOnly
     );
     assert!(should_ignore_path(Path::new(".kuzushi/v3/index.sqlite3")));
+    assert!(should_ignore_path(Path::new(".kuzushi/codeql-db/db-cpp/default/cache")));
+    assert!(should_ignore_path(Path::new(".git/HEAD")));
+}
+
+#[test]
+fn full_snapshot_excludes_git_and_kuzushi_owned_state() {
+    if Command::new("git").arg("--version").output().is_err() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(temp.path().join("src")).unwrap();
+    fs::write(temp.path().join("src/lib.rs"), "pub fn live() {}\n").unwrap();
+    git(temp.path(), &["init", "-q"]);
+    let codeql = temp.path().join(".kuzushi/codeql-db/db-cpp/default/cache");
+    fs::create_dir_all(codeql.parent().unwrap()).unwrap();
+    fs::File::create(&codeql)
+        .unwrap()
+        .set_len(MAX_INDEXED_FILE_BYTES + 1)
+        .unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+
+    let snapshot = index_workspace_snapshot(&workspace).unwrap();
+
+    assert_eq!(snapshot.files.len(), 1);
+    assert_eq!(snapshot.files[0].path, "src/lib.rs");
+}
+
+#[test]
+fn oversized_source_file_fails_before_unbounded_read() {
+    let temp = tempfile::tempdir().unwrap();
+    let oversized = temp.path().join("oversized.bin");
+    fs::File::create(&oversized)
+        .unwrap()
+        .set_len(MAX_INDEXED_FILE_BYTES + 1)
+        .unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+
+    let error = index_workspace_snapshot(&workspace).unwrap_err();
+
+    assert!(error.to_string().contains("safety limit"));
+    assert!(error.to_string().contains("oversized.bin"));
+}
+
+#[test]
+fn snapshot_budget_rejects_excess_files_and_bytes() {
+    let mut file_budget = IndexBudget {
+        files: MAX_INDEXED_SNAPSHOT_FILES,
+        bytes: 0,
+    };
+    assert!(file_budget.record(0).is_err());
+
+    let mut byte_budget = IndexBudget {
+        files: 0,
+        bytes: MAX_INDEXED_SNAPSHOT_BYTES,
+    };
+    assert!(byte_budget.record(1).is_err());
 }
 
 #[test]
@@ -144,6 +214,67 @@ fn watcher_ignores_v3_state_and_coalesces_batches() {
     assert_eq!(
         changes,
         vec![WorkspaceChange::FileDeleted("src/main.rs".into())]
+    );
+}
+
+#[test]
+fn watcher_ignores_owned_state_but_keeps_policy_signals() {
+    let root = Path::new("/repo");
+    let changes = classify_watcher_events(
+        root,
+        [
+            WatchEvent::Modified("/repo/.kuzushi/codeql-db/db-cpp/cache".into()),
+            WatchEvent::Modified("/repo/.kuzushi/prompts/sast/triage.md".into()),
+            WatchEvent::Modified("/repo/.git/logs/HEAD".into()),
+            WatchEvent::Modified("/repo/.git/index".into()),
+        ],
+    );
+
+    assert_eq!(
+        changes,
+        vec![
+            WorkspaceChange::GitIndexChanged,
+            WorkspaceChange::PromptOrHouseRuleChanged,
+        ]
+    );
+}
+
+#[test]
+fn state_aware_watcher_reports_v3_path_without_indexing_it() {
+    let event = Event::new(EventKind::Modify(ModifyKind::Data(
+        notify::event::DataChange::Any,
+    )))
+    .add_path("/repo/.kuzushi/v3/runs/run-1/trace.jsonl".into());
+
+    let (changes, state_paths) = classify_notify_event_with_state(Path::new("/repo"), event);
+
+    assert!(changes.is_empty());
+    assert_eq!(
+        state_paths,
+        vec![PathBuf::from(
+            ".kuzushi/v3/runs/run-1/trace.jsonl"
+        )]
+    );
+}
+
+#[test]
+fn state_aware_watcher_reports_map_artifacts_without_codeql_churn() {
+    let event = Event::new(EventKind::Modify(ModifyKind::Data(
+        notify::event::DataChange::Any,
+    )))
+    .add_path("/repo/.kuzushi/context-snapshot.json".into())
+    .add_path("/repo/.kuzushi/codeql-db".into())
+    .add_path("/repo/.kuzushi/codeql-db/db-cpp/cache/chunk".into());
+
+    let (changes, state_paths) = classify_notify_event_with_state(Path::new("/repo"), event);
+
+    assert!(changes.is_empty());
+    assert_eq!(
+        state_paths,
+        vec![
+            PathBuf::from(".kuzushi/codeql-db"),
+            PathBuf::from(".kuzushi/context-snapshot.json"),
+        ]
     );
 }
 

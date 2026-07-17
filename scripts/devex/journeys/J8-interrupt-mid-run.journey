@@ -15,12 +15,13 @@ keys: d
 wait-for: 5 ACTIVITY
 snap: mid-run-before-interrupt
 keys: C-c
-wait-for: 2 canceling
+wait-for: 2 cancel
 snap: cancel-requested
-expect: canceling
-ask: Cancel request — does live work move to CANCELING while cleanup is active instead of becoming terminal early?
+expect: cancel
+ask: Cancel request — does live work show CANCELING while cleanup is active, or CANCELED only when cleanup has already completed?
 wait: 3
 snap: canceled-terminal
+expect: canceled
 ask: Terminal state — is operator-stopped work marked CANCELED, while watchdog/process-loss remains INTERRUPTED?
 submit: jobs
 wait: 3

@@ -18,6 +18,14 @@ mod tests {
         )
     }
 
+    fn finding_in_workspace(path: &str, source: &str) -> (tempfile::TempDir, Finding) {
+        let workspace = tempfile::tempdir().unwrap();
+        let source_path = workspace.path().join(path);
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(source_path, source).unwrap();
+        (workspace, finding_for(path))
+    }
+
     fn sandbox_result(
         outcome: ExitOutcome,
         exit_code: Option<i32>,
@@ -141,8 +149,8 @@ mod tests {
         // it under whatever python interpreter is available. When no
         // interpreter is present we expect InfrastructureError. When one
         // is, we expect a real outcome.
-        let finding = finding_for("src/app.py");
-        let outcome = verify_finding(&finding, VerifyOptions::default())
+        let (workspace, finding) = finding_in_workspace("src/app.py", "# verify fixture\n");
+        let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
             .await
             .unwrap();
         assert_eq!(outcome.language.as_deref(), Some("python"));
@@ -162,8 +170,11 @@ mod tests {
 
     #[tokio::test]
     async fn verify_rust_reaches_a_terminal_outcome() {
-        let finding = finding_for("src/lib.rs");
-        let outcome = verify_finding(&finding, VerifyOptions::default())
+        let (workspace, finding) = finding_in_workspace(
+            "src/lib.rs",
+            "pub fn parse(input: &[u8]) { let _ = input; }\n",
+        );
+        let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
             .await
             .unwrap();
         assert_eq!(outcome.language.as_deref(), Some("rust"));
@@ -178,8 +189,11 @@ mod tests {
 
     #[tokio::test]
     async fn verify_c_reaches_a_terminal_outcome() {
-        let finding = finding_for("src/x.c");
-        let outcome = verify_finding(&finding, VerifyOptions::default())
+        let (workspace, finding) = finding_in_workspace(
+            "src/x.c",
+            "#include <stddef.h>\nvoid parse(const unsigned char *p, size_t n) { (void)p; (void)n; }\n",
+        );
+        let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
             .await
             .unwrap();
         assert_eq!(outcome.language.as_deref(), Some("c"));
@@ -194,8 +208,8 @@ mod tests {
 
     #[tokio::test]
     async fn verify_node_reaches_a_terminal_outcome() {
-        let finding = finding_for("src/x.js");
-        let outcome = verify_finding(&finding, VerifyOptions::default())
+        let (workspace, finding) = finding_in_workspace("src/x.js", "// verify fixture\n");
+        let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
             .await
             .unwrap();
         assert_eq!(outcome.language.as_deref(), Some("javascript"));
@@ -210,8 +224,8 @@ mod tests {
 
     #[tokio::test]
     async fn verify_returns_unsupported_for_unknown_extension() {
-        let finding = finding_for("src/Makefile");
-        let outcome = verify_finding(&finding, VerifyOptions::default())
+        let (workspace, finding) = finding_in_workspace("src/Makefile", "all:\n\t@true\n");
+        let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
             .await
             .unwrap();
         assert_eq!(outcome.proof_verdict, ProofVerdict::LanguageUnsupportedYet);
@@ -239,7 +253,8 @@ mod tests {
 
     #[tokio::test]
     async fn scaffold_writes_cargo_project_layout() {
-        let src = build_rust_trigger(&finding_for("src/x.rs"));
+        let (workspace, finding) = finding_in_workspace("src/x.rs", "// no signature\n");
+        let src = build_rust_trigger(&finding, workspace.path()).unwrap();
         let project = scaffold_rust_project(&src).await.unwrap();
         assert!(project.path.join("Cargo.toml").exists());
         assert!(project.path.join("src").join("lib.rs").exists());
@@ -252,7 +267,8 @@ mod tests {
 
     #[tokio::test]
     async fn verifier_command_helpers_mount_project_read_write() {
-        let src = build_rust_trigger(&finding_for("src/x.rs"));
+        let (workspace, finding) = finding_in_workspace("src/x.rs", "// no signature\n");
+        let src = build_rust_trigger(&finding, workspace.path()).unwrap();
         let project = scaffold_rust_project(&src).await.unwrap();
         let opts = VerifyOptions {
             timeout_ms: 1234,
@@ -268,7 +284,8 @@ mod tests {
 
     #[tokio::test]
     async fn compile_failure_outcome_maps_nonzero_exit_to_harness_failure() {
-        let src = build_rust_trigger(&finding_for("src/x.rs"));
+        let (workspace, finding) = finding_in_workspace("src/x.rs", "// no signature\n");
+        let src = build_rust_trigger(&finding, workspace.path()).unwrap();
         let project = scaffold_rust_project(&src).await.unwrap();
         let compile = sandbox_result(ExitOutcome::Exited, Some(1), None);
 
@@ -510,6 +527,7 @@ mod tests {
             PersistedSandboxBackend::Bwrap,
             PersistedSandboxBackend::Podman,
             PersistedSandboxBackend::Plain,
+            PersistedSandboxBackend::Model,
         ] {
             assert_eq!(PersistedSandboxBackend::from_str(b.as_str()), Some(b));
         }
@@ -520,8 +538,13 @@ mod tests {
 
     #[tokio::test]
     async fn scaffold_c_project_writes_trigger_and_target() {
-        let finding = finding_for("src/x.c");
-        let project = scaffold_c_project(&finding, CCompiler::Gcc).await.unwrap();
+        let (workspace, finding) = finding_in_workspace(
+            "src/x.c",
+            "#include <stdint.h>\n#include <stddef.h>\nvoid parse(const uint8_t *data, size_t len) { (void)data; (void)len; }\n",
+        );
+        let project = scaffold_c_project(&finding, CCompiler::Gcc, workspace.path())
+            .await
+            .unwrap();
         let trigger = std::fs::read_to_string(project.path.join("trigger.c")).unwrap();
         let target = std::fs::read_to_string(project.path.join("target.c")).unwrap();
         assert!(trigger.contains("kuzushi_verify_call_target"));
@@ -700,7 +723,9 @@ mod tests {
         .unwrap();
         let mut finding = finding_for(path.to_str().unwrap());
         finding.start_line = 4;
-        let project = scaffold_c_project(&finding, CCompiler::Gcc).await.unwrap();
+        let project = scaffold_c_project(&finding, CCompiler::Gcc, tmp.path())
+            .await
+            .unwrap();
 
         let target = std::fs::read_to_string(project.path.join("target.c")).unwrap();
         assert!(target.contains("#include \"suspect_source.c\""));
@@ -725,7 +750,9 @@ mod tests {
         .unwrap();
         let mut finding = finding_for(path.to_str().unwrap());
         finding.start_line = 2;
-        let project = scaffold_c_project(&finding, CCompiler::Gcc).await.unwrap();
+        let project = scaffold_c_project(&finding, CCompiler::Gcc, tmp.path())
+            .await
+            .unwrap();
 
         let target = std::fs::read_to_string(project.path.join("target.c")).unwrap();
         // Fallback stub keeps the no-op body.
@@ -734,12 +761,14 @@ mod tests {
     }
 
     #[test]
-    fn build_c_trigger_falls_back_when_no_signature_locatable() {
-        let mut finding = finding_for("/no/such/file.c");
+    fn build_c_trigger_rejects_source_outside_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(outside.path(), "void outside(void) {}\n").unwrap();
+        let mut finding = finding_for(outside.path().to_str().unwrap());
         finding.start_line = 99;
-        let trigger = build_c_trigger(&finding);
-        assert!(trigger.suspect_source.is_none());
-        assert!(trigger.target_c.contains("payload-only fallback"));
+        let error = build_c_trigger(&finding, workspace.path()).unwrap_err();
+        assert!(error.to_string().contains("inside workspace"));
     }
 
     // ----- sanitizer-stderr detection ------------------------------
@@ -888,8 +917,11 @@ mod tests {
         if kuzushi_sandbox::which("node").is_some() {
             return;
         }
-        let finding = finding_for("src/x.js");
-        let outcome = verify_finding(&finding, VerifyOptions::default())
+        let (workspace, finding) = finding_in_workspace(
+            "src/x.js",
+            "export function parse(value) { return value; }\n",
+        );
+        let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
             .await
             .unwrap();
         assert_eq!(outcome.proof_verdict, ProofVerdict::InfrastructureError);
@@ -905,8 +937,8 @@ mod tests {
         if kuzushi_sandbox::which("clang").is_some() || kuzushi_sandbox::which("gcc").is_some() {
             return;
         }
-        let finding = finding_for("src/x.c");
-        let outcome = verify_finding(&finding, VerifyOptions::default())
+        let (workspace, finding) = finding_in_workspace("src/x.c", "void parse(void) {}\n");
+        let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
             .await
             .unwrap();
         assert_eq!(outcome.proof_verdict, ProofVerdict::InfrastructureError);
@@ -925,7 +957,7 @@ mod tests {
         .unwrap();
         let mut finding = finding_for(path.to_str().unwrap());
         finding.start_line = 2;
-        let trigger = build_rust_trigger(&finding);
+        let trigger = build_rust_trigger(&finding, tmp.path()).unwrap();
         // Either the located-function header or the synthesized-call
         // header should appear; both name the function.
         assert!(trigger.trigger_test.contains("parse"));
@@ -936,14 +968,76 @@ mod tests {
     }
 
     #[test]
-    fn build_rust_trigger_falls_back_when_no_signature_locatable() {
-        let mut finding = finding_for("/no/such/file.rs");
+    fn build_rust_trigger_rejects_source_outside_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(outside.path(), "pub fn outside() {}\n").unwrap();
+        let mut finding = finding_for(outside.path().to_str().unwrap());
         finding.start_line = 99;
-        let trigger = build_rust_trigger(&finding);
-        assert!(trigger
-            .trigger_test
-            .contains("No enclosing function located"));
-        assert!(trigger.suspect_source.is_none());
+        let error = build_rust_trigger(&finding, workspace.path()).unwrap_err();
+        assert!(error.to_string().contains("inside workspace"));
+    }
+
+    #[test]
+    fn build_rust_trigger_resolves_relative_source_from_explicit_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(workspace.path().join("src")).unwrap();
+        std::fs::write(
+            workspace.path().join("src/lib.rs"),
+            "pub fn parse(input: &[u8]) -> usize { input.len() }\n",
+        )
+        .unwrap();
+        let finding = finding_for("src/lib.rs");
+
+        let trigger = build_rust_trigger(&finding, workspace.path()).unwrap();
+
+        assert!(trigger.trigger_test.contains("suspect::parse"));
+    }
+
+    #[test]
+    fn build_rust_trigger_rejects_parent_traversal() {
+        let parent = tempfile::tempdir().unwrap();
+        let workspace = parent.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        std::fs::write(parent.path().join("outside.rs"), "pub fn outside() {}\n").unwrap();
+        let finding = finding_for("../outside.rs");
+
+        let error = build_rust_trigger(&finding, &workspace).unwrap_err();
+
+        assert!(error.to_string().contains("inside workspace"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_rust_trigger_rejects_symlinked_source() {
+        use std::os::unix::fs::symlink;
+
+        let parent = tempfile::tempdir().unwrap();
+        let workspace = parent.path().join("workspace");
+        std::fs::create_dir(&workspace).unwrap();
+        let outside = parent.path().join("outside.rs");
+        std::fs::write(&outside, "pub fn outside() {}\n").unwrap();
+        symlink(&outside, workspace.join("linked.rs")).unwrap();
+        let finding = finding_for("linked.rs");
+
+        let error = build_rust_trigger(&finding, &workspace).unwrap_err();
+
+        assert!(error.to_string().contains("inside workspace"));
+    }
+
+    #[test]
+    fn build_rust_trigger_reports_oversized_source() {
+        let workspace = tempfile::tempdir().unwrap();
+        let source = workspace.path().join("large.rs");
+        std::fs::File::create(&source)
+            .unwrap()
+            .set_len(8 * 1024 * 1024 + 1)
+            .unwrap();
+        let finding = finding_for("large.rs");
+
+        let error = build_rust_trigger(&finding, workspace.path()).unwrap_err();
+
+        assert!(error.to_string().contains("inside workspace"));
     }
 
     // ----- Rust signature parsing ----------------------------------
@@ -1085,7 +1179,7 @@ mod tests {
         .unwrap();
         let mut finding = finding_for(path.to_str().unwrap());
         finding.start_line = 1;
-        let trigger = build_rust_trigger(&finding);
+        let trigger = build_rust_trigger(&finding, tmp.path()).unwrap();
         assert!(trigger.suspect_source.is_some());
         let project = scaffold_rust_project(&trigger).await.unwrap();
         let suspect = std::fs::read_to_string(project.path.join("src").join("suspect.rs")).unwrap();
@@ -1107,7 +1201,7 @@ mod tests {
         .unwrap();
         let mut finding = finding_for(path.to_str().unwrap());
         finding.start_line = 2;
-        let trigger = build_rust_trigger(&finding);
+        let trigger = build_rust_trigger(&finding, tmp.path()).unwrap();
         // No sink call — payload-only fallback because the file uses
         // `crate::` paths.
         assert!(trigger.trigger_test.contains("Payload-only harness"));

@@ -1,17 +1,24 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use serde_yaml::{Mapping, Value};
-use std::fs;
+use serde_json::Value;
 use std::path::Path;
+
+type Mapping = serde_json::Map<String, Value>;
 
 pub(super) fn pubspec_components(
     target: &Path,
     path: &Path,
     text: &str,
 ) -> Result<Vec<SbomComponent>> {
-    let value: Value = serde_yaml::from_str(text).context("sbom-scan: parse pubspec.yaml")?;
+    let value = crate::yaml::parse_value(text).context("sbom-scan: parse pubspec.yaml")?;
     let mut components = dependency_components(target, path, &value, "dependencies");
-    components.extend(dependency_components(target, path, &value, "dev_dependencies"));
+    components.extend(dependency_components(
+        target,
+        path,
+        &value,
+        "dev_dependencies",
+    ));
     Ok(components)
 }
 
@@ -24,7 +31,7 @@ pub(super) fn is_pubspec_yaml(path: &Path) -> bool {
 pub(super) fn pubspec_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_yaml::from_str(&text).context("sbom-scan: parse pubspec.yaml")?;
+    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pubspec.yaml")?;
     let source = relative_display(target, path);
     let mut edges = dependency_edges(&value, "dependencies", &source);
     edges.extend(dependency_edges(&value, "dev_dependencies", &source));
@@ -40,7 +47,9 @@ fn dependency_components(
     mapping_child(value, scope)
         .into_iter()
         .flat_map(|dependencies| dependencies.iter())
-        .filter_map(|(name, dependency)| dependency_component(target, path, scope, name, dependency))
+        .filter_map(|(name, dependency)| {
+            dependency_component(target, path, scope, name, dependency)
+        })
         .collect()
 }
 
@@ -48,7 +57,7 @@ fn dependency_edges(value: &Value, scope: &'static str, source: &str) -> Vec<Sbo
     mapping_child(value, scope)
         .into_iter()
         .flat_map(|dependencies| dependencies.keys())
-        .filter_map(package_name)
+        .filter_map(|name| package_name(name))
         .filter(|name| !is_sdk_dependency(name))
         .map(|to| SbomDependencyEdge {
             from: "root".to_string(),
@@ -62,7 +71,7 @@ fn dependency_component(
     target: &Path,
     path: &Path,
     scope: &str,
-    name: &Value,
+    name: &str,
     dependency: &Value,
 ) -> Option<SbomComponent> {
     let name = package_name(name)?;
@@ -83,10 +92,9 @@ fn is_sdk_dependency(name: &str) -> bool {
     matches!(name, "flutter" | "dart")
 }
 
-fn package_name(name: &Value) -> Option<&str> {
-    name.as_str()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
+fn package_name(name: &str) -> Option<&str> {
+    let name = name.trim();
+    (!name.is_empty()).then_some(name)
 }
 
 fn dependency_version(dependency: &Value) -> Option<&str> {
@@ -102,12 +110,9 @@ fn mapping_child<'a>(value: &'a Value, key: &str) -> Option<&'a Mapping> {
 }
 
 fn mapping_value<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    mapping(value)?.get(Value::String(key.to_string()))
+    mapping(value)?.get(key)
 }
 
 fn mapping(value: &Value) -> Option<&Mapping> {
-    match value {
-        Value::Mapping(mapping) => Some(mapping),
-        _ => None,
-    }
+    value.as_object()
 }

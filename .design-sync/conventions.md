@@ -1,72 +1,135 @@
-## Kuzushi TUI Kit — conventions
+# Kuzushi TUI Kit — current implementation contract
 
-This library renders the **Kuzushi terminal (Ratatui) shell** look: a dark,
-monospace "growing console" of timestamped log lines, findings, and a status
-strip. Build security-tool and terminal-style UIs by **composing its
-components** — never hand-write terminal markup or invent class names.
+This design-sync project mirrors the current Rust Ratatui shell. It is a
+reference for designing from the product Kuzushi actually ships; it is not a
+proposal, a chat transcript, or a replacement workflow. Preserve Kuzushi's
+security lifecycle, typed outcomes, and source-backed truth.
 
-### Wrap everything in `TermFrame`
+The reference baseline is branch `codex/atlas-native-cockpit` at
+`ccb29faec323b52300b3f28e35bd85473ad841d7`. The canonical visual fixtures are
+the committed phase-cockpit snapshots under
+`crates/kuzushi-tui/src/renderer/snapshots/phase_cockpit/` and the route
+snapshots under `crates/kuzushi-tui/tests/snapshots/`.
 
-Every screen is a `TermFrame` — the dark, rounded terminal window. It supplies
-the background, the monospace grid, and (optionally) the macOS traffic-light
-chrome. **A primitive placed outside a `TermFrame` renders as light text on
-nothing** — always nest `StatusStrip`, `Row`, `SectionHeader`, `LogLine`,
-`Footer`, `SeverityBadge`, and `Glyph` inside one.
+## Shell anatomy
 
-- `cols={N}` fixes the grid to N monospace columns (the real shell runs 120;
-  a full status strip needs ~100). Omit `cols` to fill the container.
-- `chromeless` drops the traffic-light bar for an embedded panel.
+A normal phase page reads from top to bottom as:
 
-Import the stylesheet once at your app root — there is **no theme provider**,
-all styling ships in this sheet:
+1. A one-line context strip: `KUZUSHI · VIEW <PHASE>` plus honest reality,
+   target, liveness, cost, context, model, and active module facts when space
+   permits.
+2. The reality-derived five-phase rail: `組 map · 崩 scan · 覧 review · 証 prove
+   · 掛 fix`. Visiting a page never advances this rail.
+3. One `▸ NEXT` action and a short page-specific action line.
+4. The phase-owned cockpit body. At 120 columns it may expose three useful
+   panes; at 80 it normally exposes two; constrained terminals keep only the
+   primary pane.
+5. A compact status footer and only the bindings that work on this view.
+6. The phase composer at the bottom:
+   `◇ MAP ›`, `▦ SCAN ›`, `▣ REVIEW ›`, `◎ PROVE ›`, or `◆ FIX ›`.
 
-```tsx
-import "@kuzushi/tui-kit/styles.css";
-```
+Run Focus is the exception: active work owns the whole frame with its own run
+header, health line, adaptive TASKS/OUTPUT panes, and controls. Setup and target
+selection likewise own their guidance instead of inheriting generic transcript
+chrome.
 
-### Color is a `tone`, never a class or hex
+## The planning workflow stays at the bottom
 
-Don't write CSS classes or color literals. Every text-bearing component takes a
-semantic `tone` from the 8-role theme plus the severity scale:
+The bottom planner is a current product contract and must not disappear.
 
-`primary` · `muted` · `subtle` · `accent` · `label` · `heading` · `success` ·
-`warn` · `danger` · `selection` · `critical` · `high` · `medium` · `low`
+- The phase composer is always the last row of every Map, Scan, Review, Prove,
+  and Fix page.
+- Submitting a bare phase intent launches the phase-constrained planner in Run
+  Focus. The active run is work, not history.
+- When the planner returns, a conditional `◆ PLAN · goal: … · X/Y active`
+  proposal card appears immediately above the same phase composer.
+- The operator reviews changes with `j/k`, toggles with `Space`, applies active
+  changes with `y`, or discards with `n`. `/yes` and `/no` remain command
+  equivalents.
+- The proposal card is not permanent chrome. Represent all three real states:
+  phase prompt, planner running in Run Focus, and returned plan proposal.
 
-- `Glyph tone="…"` colors any text run or status glyph (`✓ ✗ ● ▸ ◆ … ⏵ ·`).
-- `Row tone="…"` colors a whole line; `Row selected` paints the j/k cursor
-  highlight (inverse accent), and `Row cols={N}` extends it full-width.
-- `LogLine kind="…"` picks the leading glyph and tone for you. Kinds:
-  `in` · `run` · `ok` · `err` · `agent` · `flow` · `find` · `log`.
-- `SeverityBadge level="…"` — `critical` · `high` · `medium` · `low`.
+## Canonical screens and families
 
-One inherited rule: `accent` (#7fb8ff) is reserved for next-action callouts and
-selection — never decoration.
+- Target Picker → Setup → Map → Scan → Review → Prove → Fix → Report is the
+  engagement spine.
+- `PhaseCockpit` covers the five durable pages. Its content differs by phase:
+  project context/attack surface, recorded engine receipts, review
+  queue/detail, evidence/proof ladder, and remediation/report/attack tree.
+- `RunFocus` covers active, waiting, completed, partial, failed, canceled, and
+  interrupted run truth. Completion is a terminal state, never an eternal
+  spinner.
+- `AttentionCard` covers typed questions, confirmations, credential gates, and
+  approvals. Attention replaces normal input while it is unresolved.
+- `RouteScreen` covers the line-oriented families such as Capabilities, Jobs,
+  Runs, Replay, Trace, Help, Auth, Config, Permissions, Cost, Logs, Context,
+  Workspace, Knowledge Base, editors, and recovery surfaces. These retain the
+  shared context/status grammar without becoming phase cockpits.
+- Scene/visualization decks are contextual views over real artifacts and
+  return to their exact origin.
 
-### Where the truth lives
+## Responsive contract
 
-- `styles.css` (and the sheet it imports) defines the palette as `--kz-*`
-  custom properties and the `kz-*` classes — read it before restyling.
-- Each component ships a `<Name>.prompt.md` (usage) and `<Name>.d.ts` (the prop
-  contract). The eight components: `TermFrame`, `StatusStrip`, `Row`, `Glyph`,
-  `SectionHeader`, `LogLine`, `Footer`, `SeverityBadge`.
+- `40×12`: constrained fallback. Keep location, honest state, NEXT, one focal
+  pane, the minimal footer, and the phase composer. Omit the rail and secondary
+  panes before truncating the focal result.
+- `60×20`: compact single/stacked content with wrapped footer hints.
+- `80×24`: primary target. Two useful panes, short header, full composer.
+- `120×36`: primary target. Up to three phase-specific panes and complete
+  supporting detail.
+- `160×48`: expose more evidence, claim/provenance detail, or diagrams. Do not
+  stretch labels and paths across the empty width.
 
-### Idiomatic example
+Never hide detail without a visible inspect, scroll, replay, trace, or zoom
+action. Long paths, run IDs, fingerprints, models, and revisions are compact by
+default and exact in detail surfaces.
 
-```tsx
-<TermFrame title="kuzushi · sast" cols={100}>
-  <StatusStrip target="~/work/acme-checkout" module="sast" cost="$0.41" cols={100} />
-  <Row> </Row>
-  <SectionHeader label="FINDINGS · 2 critical" cols={100} />
-  <LogLine kind="find" time="14:33:42">
-    {" "}<Glyph tone="primary">F-0012</Glyph>{" · "}
-    <SeverityBadge level="critical" />{" · refund-bot.ts:127"}
-  </LogLine>
-  <Footer
-    stage="sast:scan"
-    findings={11}
-    module="sast"
-    keybinds={[{ key: "/findings", hint: "browse" }, { key: "/open", hint: "F-0001" }]}
-    cols={100}
-  />
-</TermFrame>
-```
+## Visual grammar
+
+The palette is copied from `crates/kuzushi-tui/src/theme/mod.rs`:
+
+- background `#0b0d10`
+- primary `#cfd6e0`, muted `#7d8794`, subtle `#3d4654`
+- accent `#7fb8ff`, label `#a6cdff`, heading `#ffffff`
+- success `#57c479`, warning `#e2c14a`, danger `#e25c5c`
+- phase identity: Map `#3dc7b5`, Scan `#e7b94b`, Review `#66a9ff`,
+  Prove `#b57cff`, Fix `#ee72b7`
+
+Color never carries status alone. Preserve the words and glyphs (`✓`, `●`,
+`⚠`, `!`, `×`, `⊘`, `·`). Use thin left pane rails and terminal rules; avoid
+decorative cards, fake macOS window controls, decorative gradients, emoji, or
+generic chat bubbles. The current one-row cinematic scanline texture on
+Workbench and Run Focus is the only gradient-backed surface treatment in this
+reference.
+
+## Truth and hierarchy rules
+
+- Current state, latest terminal result, and historical receipts are distinct.
+- One fact has one primary home; do not repeat phase, status, result, cost, or
+  NEXT in multiple regions.
+- Results retain outcome, source, artifact durability, cost completeness, and
+  recommended next action. Partial, degraded, canceled, interrupted, skipped,
+  and failed are not styled as success.
+- Findings retain alias, severity, confidence, evidence count, decision,
+  lifecycle, proof, and source identity.
+- Fix retains draft → staged → applied → reverified history.
+- Descriptor-backed tool names and shared scan/shell/run behavior remain
+  operational truth. Do not invent tools, evidence, proof, artifacts, or cost.
+- Never expose hidden chain-of-thought. Run output is an operator-visible event
+  feed and artifact trail.
+
+## Component use
+
+Import `@kuzushi/tui-kit/styles.css` once. Build from the shipped components:
+
+- `TerminalFrame` — neutral terminal viewport and exact cell dimensions.
+- `PhaseRail`, `PhasePrompt`, `PlanningCard` — shared journey and bottom
+  planning grammar.
+- `PhaseCockpit` — Map/Scan/Review/Prove/Fix full-screen reference.
+- `RunFocus` — live and terminal run states.
+- `SetupScreen` — aggregate readiness before Start Map.
+- `AttentionCard` — question/confirmation/credential/approval gates.
+- `RouteScreen` — shared line-oriented route families.
+
+The authored previews are representative current-state fixtures. Treat them as
+implementation references, not suggested redesigns.

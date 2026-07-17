@@ -94,7 +94,7 @@ impl<'a> RoutedRuntime<'a> {
     ) -> Result<AgentQueryResponse> {
         let model = self.resolve_model_for_role(role, 0, Some(&request.model))?;
         request.model = model;
-        self.inner.query_blocking(request)
+        crate::runtime::query_blocking_checked(&self.inner, request)
     }
 
     /// Triage routed by role.
@@ -105,7 +105,9 @@ impl<'a> RoutedRuntime<'a> {
     ) -> Result<TriageOutcome> {
         let model = self.resolve_model_for_role(role, 0, Some(&request.model))?;
         request.model = model;
-        self.inner.triage_finding_blocking(request)
+        self.inner
+            .triage_finding_blocking(request)
+            .and_then(TriageOutcome::validate_cost)
     }
 }
 

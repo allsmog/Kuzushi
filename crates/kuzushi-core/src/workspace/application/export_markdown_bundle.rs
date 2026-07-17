@@ -8,7 +8,7 @@ use super::export_evidence_origin::finding_evidence_origin_label;
 use super::export_metadata::workspace_export_metadata_value;
 use super::export_projection_model::WorkspaceFindingExportRecord;
 use super::*;
-use crate::findings::{sorted_finding_aliases, FindingEvidence};
+use crate::findings::FindingEvidence;
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,9 +37,8 @@ pub(crate) fn write_markdown_bundle(
     fs::create_dir_all(&findings_dir)
         .with_context(|| format!("Could not create {}", findings_dir.display()))?;
 
-    let aliased = sorted_finding_aliases(findings);
     let readme_file = write_bundle_readme(workspace, records, output_dir, options, total_count)?;
-    let finding_files = write_bundle_finding_files(&aliased, records, &findings_dir)?;
+    let finding_files = write_bundle_finding_files(findings, records, &findings_dir)?;
     write_bundle_manifest(
         workspace,
         records,
@@ -84,10 +83,7 @@ fn push_readme_header(
     total_count: usize,
 ) {
     out.push_str("# Kuzushi findings bundle\n\n");
-    out.push_str(&format!(
-        "- **Target:** `{}`\n",
-        workspace.root().display()
-    ));
+    out.push_str(&format!("- **Target:** `{}`\n", workspace.root().display()));
     out.push_str("- **Projection:** `WorkspaceFindingExportRecord`\n");
     out.push_str(&format!(
         "- **Completeness:** `{}`\n",
@@ -151,7 +147,9 @@ fn projection_count_summary(
 
 fn push_readme_findings_table(out: &mut String, records: &[WorkspaceFindingExportRecord]) {
     out.push_str("## Findings\n\n");
-    out.push_str("| Alias | Severity | Confidence | Decision | Lifecycle | Evidence | Location |\n");
+    out.push_str(
+        "| Alias | Severity | Confidence | Decision | Lifecycle | Evidence | Location |\n",
+    );
     out.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
     for record in records {
         out.push_str(&format!(
@@ -177,16 +175,17 @@ fn markdown_table_cell(value: &str) -> String {
 }
 
 fn write_bundle_finding_files(
-    aliased: &[(String, Finding)],
+    findings: &[Finding],
     records: &[WorkspaceFindingExportRecord],
     findings_dir: &Path,
 ) -> Result<Vec<BundleFindingFile>> {
-    let records_by_alias = records_by_alias(records);
+    let findings_by_fingerprint = findings_by_fingerprint(findings);
     let mut files = Vec::new();
-    for (alias, finding) in aliased {
-        let record = records_by_alias
-            .get(alias.as_str())
-            .with_context(|| format!("missing export projection for finding {alias}"))?;
+    for record in records {
+        let alias = &record.alias;
+        let finding = findings_by_fingerprint
+            .get(record.fingerprint.as_str())
+            .with_context(|| format!("missing finding source for {alias}"))?;
         let body = render_bundle_finding_markdown(record, finding);
         let relative_path = format!("findings/{alias}.md");
         let file = write_bundle_text_file(
@@ -202,12 +201,10 @@ fn write_bundle_finding_files(
     Ok(files)
 }
 
-fn records_by_alias(
-    records: &[WorkspaceFindingExportRecord],
-) -> HashMap<&str, &WorkspaceFindingExportRecord> {
-    records
+fn findings_by_fingerprint(findings: &[Finding]) -> HashMap<&str, &Finding> {
+    findings
         .iter()
-        .map(|record| (record.alias.as_str(), record))
+        .map(|finding| (finding.fingerprint.as_str(), finding))
         .collect()
 }
 
@@ -247,10 +244,38 @@ fn push_bundle_header(out: &mut String, record: &WorkspaceFindingExportRecord) {
     out.push_str(&format!("- **Rule:** `{}`\n", record.rule_id));
     out.push_str(&format!("- **Fingerprint:** `{}`\n", record.fingerprint));
     push_bundle_run_provenance(out, record);
+    push_bundle_remediation(out, record);
     out.push_str(&format!(
         "- **Location:** `{}:{}`\n\n",
         record.location.file, record.location.start_line
     ));
+}
+
+fn push_bundle_remediation(out: &mut String, record: &WorkspaceFindingExportRecord) {
+    let Some(remediation) = record.remediation.as_ref() else {
+        return;
+    };
+    out.push_str(&format!(
+        "- **Remediation:** {} (`{}`)\n",
+        remediation.application_state, remediation.application_id
+    ));
+    out.push_str(&format!(
+        "- **Patch run:** `{}` · diff `{}`\n",
+        remediation.patch_run_id, remediation.diff_hash
+    ));
+    if let Some(outcome) = remediation.reverify_outcome.as_deref() {
+        out.push_str(&format!("- **Re-verification:** {outcome}"));
+        if let Some(run_id) = remediation.reverify_run_id.as_deref() {
+            out.push_str(&format!(" (`{run_id}`)"));
+        }
+        out.push('\n');
+    }
+    if !remediation.touched_paths.is_empty() {
+        out.push_str(&format!(
+            "- **Touched paths:** {}\n",
+            remediation.touched_paths.join(", ")
+        ));
+    }
 }
 
 fn push_bundle_evidence_summary(out: &mut String, record: &WorkspaceFindingExportRecord) {
@@ -274,10 +299,7 @@ fn push_bundle_analysis_summary(out: &mut String, record: &WorkspaceFindingExpor
         "- **Automated reasoning:** {}\n",
         record.analysis.automated_reasoning_present
     ));
-    out.push_str(&format!(
-        "- **Confidence:** {}\n",
-        record.proof_confidence
-    ));
+    out.push_str(&format!("- **Confidence:** {}\n", record.proof_confidence));
     out.push_str(&format!(
         "- **Static proof:** {} ({})\n",
         record.static_proof_label, record.static_proof_state
@@ -365,9 +387,7 @@ fn write_bundle_manifest(
         .with_context(|| format!("Could not write {}", path.display()))
 }
 
-fn finding_files_by_alias(
-    finding_files: &[BundleFindingFile],
-) -> HashMap<&str, &BundleFileEntry> {
+fn finding_files_by_alias(finding_files: &[BundleFindingFile]) -> HashMap<&str, &BundleFileEntry> {
     finding_files
         .iter()
         .map(|file| (file.alias.as_str(), &file.file))

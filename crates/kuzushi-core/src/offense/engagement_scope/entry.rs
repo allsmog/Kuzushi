@@ -9,7 +9,10 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScopeEntry {
     Ip(IpAddr),
-    Cidr { base: IpAddr, prefix: u8 },
+    Cidr {
+        base: IpAddr,
+        prefix: u8,
+    },
     /// Hostname; a bare host matches itself and its subdomains, a `*.suffix`
     /// host matches subdomains only.
     Host(String),
@@ -26,7 +29,9 @@ impl ScopeEntry {
         }
         match value.parse::<IpAddr>() {
             Ok(ip) => Ok(ScopeEntry::Ip(ip)),
-            Err(_) => Ok(ScopeEntry::Host(value.trim_end_matches('.').to_ascii_lowercase())),
+            Err(_) => Ok(ScopeEntry::Host(
+                value.trim_end_matches('.').to_ascii_lowercase(),
+            )),
         }
     }
 
@@ -51,8 +56,12 @@ impl ScopeEntry {
 }
 
 fn parse_cidr(addr: &str, prefix: &str) -> Result<ScopeEntry, String> {
-    let base: IpAddr = addr.parse().map_err(|_| format!("invalid CIDR address {addr:?}"))?;
-    let prefix: u8 = prefix.parse().map_err(|_| format!("invalid CIDR prefix {prefix:?}"))?;
+    let base: IpAddr = addr
+        .parse()
+        .map_err(|_| format!("invalid CIDR address {addr:?}"))?;
+    let prefix: u8 = prefix
+        .parse()
+        .map_err(|_| format!("invalid CIDR prefix {prefix:?}"))?;
     let max = if base.is_ipv4() { 32 } else { 128 };
     if prefix > max {
         return Err(format!("CIDR prefix /{prefix} exceeds /{max}"));

@@ -3,6 +3,11 @@ use crate::ShellApp;
 use kuzushi_core::{Finding, Severity, TriageOutcome, TriageVerdict, V2Config};
 use serde_json::json;
 
+fn hydrate_diff(app: &mut ShellApp, left: &str, right: &str) {
+    app.open_run_diff_for_test(left, right);
+    app.hydrate_active_view_blocking();
+}
+
 #[test]
 fn run_diff_model_compares_findings_by_stable_identity() {
     let temp = tempfile::tempdir().unwrap();
@@ -76,6 +81,7 @@ fn run_diff_model_compares_findings_by_stable_identity() {
         reviewed_finding("fi_changed", TriageVerdict::FalsePositive),
     ];
 
+    hydrate_diff(&mut app, "run-left", "run-right");
     let model = run_diff_model(&app, "run-left", "run-right");
 
     assert_eq!(model.left_revision, "rev:abcdef1");
@@ -99,6 +105,27 @@ fn run_diff_model_compares_findings_by_stable_identity() {
     assert_eq!(model.not_seen.len(), 1);
     assert_eq!(model.not_seen[0].title, "not seen item");
     assert!(model.warnings.is_empty());
+}
+
+#[test]
+fn run_diff_rejects_traversal_run_ids_without_reflecting_raw_paths() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+
+    hydrate_diff(&mut app, "../../outside\nrun", "run-safe");
+    let model = run_diff_model(&app, "../../outside\nrun", "run-safe");
+
+    assert!(model
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("invalid run id")));
+    assert!(model.new_findings.is_empty());
+    assert!(model.not_seen.is_empty());
+    assert!(model
+        .warnings
+        .iter()
+        .all(|warning| !warning.contains("outside\nrun")));
 }
 
 #[test]
@@ -135,6 +162,7 @@ fn run_diff_model_separates_unique_uncertain_identity_matches() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
 
+    hydrate_diff(&mut app, "run-left", "run-right");
     let model = run_diff_model(&app, "run-left", "run-right");
 
     assert!(model.new_findings.is_empty());
@@ -191,6 +219,7 @@ fn run_diff_model_does_not_carry_decisions_to_uncertain_matches() {
         TriageVerdict::TruePositive,
     )];
 
+    hydrate_diff(&mut app, "run-left", "run-right");
     let model = run_diff_model(&app, "run-left", "run-right");
 
     assert_eq!(model.uncertain_matches.len(), 1);
@@ -246,6 +275,7 @@ fn run_diff_model_leaves_ambiguous_uncertain_matches_unpaired() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
 
+    hydrate_diff(&mut app, "run-left", "run-right");
     let model = run_diff_model(&app, "run-left", "run-right");
 
     assert!(model.uncertain_matches.is_empty());
@@ -319,6 +349,7 @@ fn run_diff_model_warns_for_missing_snapshots() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
 
+    hydrate_diff(&mut app, "missing-a", "missing-b");
     let model = run_diff_model(&app, "missing-a", "missing-b");
 
     assert_eq!(model.new_findings.len(), 0);
@@ -358,6 +389,7 @@ fn run_diff_model_warns_when_comparison_run_is_partial_or_failed() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
 
+    hydrate_diff(&mut app, "run-left", "run-right");
     let model = run_diff_model(&app, "run-left", "run-right");
 
     assert_eq!(model.left_status, "partial");
@@ -391,6 +423,7 @@ fn run_diff_model_preserves_completed_status() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
 
+    hydrate_diff(&mut app, "run-left", "run-right");
     let model = run_diff_model(&app, "run-left", "run-right");
 
     assert_eq!(model.left_status, "completed");

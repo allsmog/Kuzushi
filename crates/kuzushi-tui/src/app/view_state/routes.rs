@@ -2,14 +2,16 @@ mod pickers;
 
 use super::ActivityRouteState;
 pub use pickers::{
-    AuthPickerRouteState, ModelPickerRouteState, PlanningPickerRouteState, TargetPickerRouteState,
+    AuthPickerRouteState, ModelPickerRouteState, PlanningPickerRouteState, SetupEditor,
+    SetupRouteState, SetupRowId, TargetPickerRouteState,
 };
-use std::time::Instant;
+use std::{path::PathBuf, time::Instant};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RouterState {
     current: crate::app::ShellView,
     overlay_origin: Option<crate::app::ShellView>,
+    overlay_input_mode: Option<crate::app::InputMode>,
     focused_module: Option<String>,
     auth_screen_snapshot: Option<crate::app::AuthScreenSnapshot>,
     boot_splash_snapshot: Option<crate::app::BootSplashSnapshot>,
@@ -36,6 +38,8 @@ pub struct RouterState {
     model_picker: ModelPickerRouteState,
     auth_picker: AuthPickerRouteState,
     target_picker: TargetPickerRouteState,
+    setup: SetupRouteState,
+    report: ReportRouteState,
     file_picker: FilePickerRouteState,
     activity: ActivityRouteState,
     workbench: WorkbenchRouteState,
@@ -74,6 +78,14 @@ impl RouterState {
 
     pub(crate) fn set_overlay_origin(&mut self, origin: Option<crate::app::ShellView>) {
         self.overlay_origin = origin;
+    }
+
+    pub(crate) fn overlay_input_mode(&self) -> Option<crate::app::InputMode> {
+        self.overlay_input_mode
+    }
+
+    pub(crate) fn set_overlay_input_mode(&mut self, mode: Option<crate::app::InputMode>) {
+        self.overlay_input_mode = mode;
     }
 
     pub(crate) fn focused_module(&self) -> Option<&str> {
@@ -327,6 +339,22 @@ impl RouterState {
         &mut self.target_picker
     }
 
+    pub(crate) fn setup(&self) -> &SetupRouteState {
+        &self.setup
+    }
+
+    pub(crate) fn setup_mut(&mut self) -> &mut SetupRouteState {
+        &mut self.setup
+    }
+
+    pub(crate) fn report(&self) -> &ReportRouteState {
+        &self.report
+    }
+
+    pub(crate) fn report_mut(&mut self) -> &mut ReportRouteState {
+        &mut self.report
+    }
+
     pub(crate) fn file_picker(&self) -> &FilePickerRouteState {
         &self.file_picker
     }
@@ -505,15 +533,190 @@ impl RouterState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportRouteState {
+    format_index: usize,
+    completeness: kuzushi_core::WorkspaceExportCompleteness,
+    path_draft: String,
+    editing_path: bool,
+    origin: Option<ReportOrigin>,
+    receipt: Option<ReportReceipt>,
+    reveal_error: Option<String>,
+}
+
+impl Default for ReportRouteState {
+    fn default() -> Self {
+        Self {
+            format_index: 0,
+            completeness: kuzushi_core::WorkspaceExportCompleteness::All,
+            path_draft: "report.sarif".to_string(),
+            editing_path: false,
+            origin: None,
+            receipt: None,
+            reveal_error: None,
+        }
+    }
+}
+
+impl ReportRouteState {
+    pub(crate) const FORMATS: [kuzushi_core::WorkspaceExportFormat; 5] = [
+        kuzushi_core::WorkspaceExportFormat::Sarif,
+        kuzushi_core::WorkspaceExportFormat::MarkdownBundle,
+        kuzushi_core::WorkspaceExportFormat::Jsonl,
+        kuzushi_core::WorkspaceExportFormat::Json,
+        kuzushi_core::WorkspaceExportFormat::Csv,
+    ];
+
+    pub(crate) fn format(&self) -> kuzushi_core::WorkspaceExportFormat {
+        Self::FORMATS[self.format_index]
+    }
+
+    pub(crate) fn format_index(&self) -> usize {
+        self.format_index
+    }
+
+    pub(crate) fn move_format(&mut self, delta: isize) {
+        self.format_index = self
+            .format_index
+            .saturating_add_signed(delta)
+            .min(Self::FORMATS.len() - 1);
+        self.path_draft = default_report_path(self.format()).to_string();
+        self.receipt = None;
+        self.reveal_error = None;
+    }
+
+    pub(crate) fn completeness(&self) -> kuzushi_core::WorkspaceExportCompleteness {
+        self.completeness
+    }
+
+    pub(crate) fn cycle_completeness(&mut self) {
+        self.completeness = match self.completeness {
+            kuzushi_core::WorkspaceExportCompleteness::All => {
+                kuzushi_core::WorkspaceExportCompleteness::Open
+            }
+            kuzushi_core::WorkspaceExportCompleteness::Open => {
+                kuzushi_core::WorkspaceExportCompleteness::Complete
+            }
+            kuzushi_core::WorkspaceExportCompleteness::Complete => {
+                kuzushi_core::WorkspaceExportCompleteness::All
+            }
+        };
+        self.receipt = None;
+        self.reveal_error = None;
+    }
+
+    pub(crate) fn path_draft(&self) -> &str {
+        &self.path_draft
+    }
+
+    pub(crate) fn path_draft_mut(&mut self) -> &mut String {
+        &mut self.path_draft
+    }
+
+    pub(crate) fn editing_path(&self) -> bool {
+        self.editing_path
+    }
+
+    pub(crate) fn set_editing_path(&mut self, editing: bool) {
+        self.editing_path = editing;
+    }
+
+    pub(crate) fn set_origin(&mut self, origin: ReportOrigin) {
+        self.origin = Some(origin);
+    }
+
+    pub(crate) fn take_origin(&mut self) -> Option<ReportOrigin> {
+        self.origin.take()
+    }
+
+    pub(crate) fn receipt(&self) -> Option<&ReportReceipt> {
+        self.receipt.as_ref()
+    }
+
+    pub(crate) fn set_receipt(&mut self, receipt: ReportReceipt) {
+        self.receipt = Some(receipt);
+        self.reveal_error = None;
+    }
+
+    pub(crate) fn reveal_error(&self) -> Option<&str> {
+        self.reveal_error.as_deref()
+    }
+
+    pub(crate) fn set_reveal_error(&mut self, error: Option<String>) {
+        self.reveal_error = error;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReportOrigin {
+    pub(crate) view: crate::app::ShellView,
+    pub(crate) input_mode: crate::app::InputMode,
+}
+
+fn default_report_path(format: kuzushi_core::WorkspaceExportFormat) -> &'static str {
+    match format {
+        kuzushi_core::WorkspaceExportFormat::Sarif => "report.sarif",
+        kuzushi_core::WorkspaceExportFormat::MarkdownBundle => "report/",
+        kuzushi_core::WorkspaceExportFormat::Jsonl => "findings.jsonl",
+        kuzushi_core::WorkspaceExportFormat::Json => "findings.json",
+        kuzushi_core::WorkspaceExportFormat::Csv => "findings.csv",
+    }
+}
+
+#[cfg(test)]
+mod report_route_tests {
+    use super::*;
+    use kuzushi_core::{WorkspaceExportCompleteness, WorkspaceExportFormat};
+
+    #[test]
+    fn report_formats_follow_the_locked_order_and_paths() {
+        let mut route = ReportRouteState::default();
+        let expected = [
+            (WorkspaceExportFormat::Sarif, "report.sarif"),
+            (WorkspaceExportFormat::MarkdownBundle, "report/"),
+            (WorkspaceExportFormat::Jsonl, "findings.jsonl"),
+            (WorkspaceExportFormat::Json, "findings.json"),
+            (WorkspaceExportFormat::Csv, "findings.csv"),
+        ];
+
+        for (index, (format, path)) in expected.into_iter().enumerate() {
+            assert_eq!(route.format(), format);
+            assert_eq!(route.path_draft(), path);
+            if index + 1 < ReportRouteState::FORMATS.len() {
+                route.move_format(1);
+            }
+        }
+    }
+
+    #[test]
+    fn report_completeness_cycles_all_open_complete() {
+        let mut route = ReportRouteState::default();
+        assert_eq!(route.completeness(), WorkspaceExportCompleteness::All);
+        route.cycle_completeness();
+        assert_eq!(route.completeness(), WorkspaceExportCompleteness::Open);
+        route.cycle_completeness();
+        assert_eq!(route.completeness(), WorkspaceExportCompleteness::Complete);
+        route.cycle_completeness();
+        assert_eq!(route.completeness(), WorkspaceExportCompleteness::All);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportReceipt {
+    pub(crate) format: kuzushi_core::WorkspaceExportFormat,
+    pub(crate) completeness: kuzushi_core::WorkspaceExportCompleteness,
+    pub(crate) count: Option<usize>,
+    pub(crate) absolute_path: Option<PathBuf>,
+    pub(crate) error: Option<String>,
+    pub(crate) timestamp: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkbenchRouteState {
     focus: crate::app::WorkbenchPane,
     zoom: crate::app::WorkbenchZoom,
     page: Option<crate::app::WorkbenchPage>,
-    center_mode: crate::app::WorkbenchCenterMode,
     scroll: crate::app::WorkbenchPaneScroll,
     review: crate::app::WorkbenchReviewState,
-    nav: crate::app::WorkbenchNav,
-    depth_stack: bool,
 }
 
 impl Default for WorkbenchRouteState {
@@ -522,16 +725,17 @@ impl Default for WorkbenchRouteState {
             focus: crate::app::WorkbenchPane::Findings,
             zoom: crate::app::WorkbenchZoom::default(),
             page: None,
-            center_mode: crate::app::WorkbenchCenterMode::default(),
             scroll: crate::app::WorkbenchPaneScroll::default(),
             review: crate::app::WorkbenchReviewState::default(),
-            nav: crate::app::WorkbenchNav::default(),
-            depth_stack: false,
         }
     }
 }
 
 impl WorkbenchRouteState {
+    pub(crate) fn reset_for_target(&mut self) {
+        *self = Self::default();
+    }
+
     pub(crate) fn focus(&self) -> crate::app::WorkbenchPane {
         self.focus
     }
@@ -549,6 +753,11 @@ impl WorkbenchRouteState {
         self.zoom.toggle(self.focus);
     }
 
+    pub(crate) fn show_zoomed_focus(&mut self, focus: crate::app::WorkbenchPane) {
+        self.focus = focus;
+        self.zoom.show(focus);
+    }
+
     pub(crate) fn clear_zoom(&mut self) {
         self.zoom.clear();
     }
@@ -559,29 +768,6 @@ impl WorkbenchRouteState {
 
     pub(crate) fn set_page(&mut self, page: Option<crate::app::WorkbenchPage>) {
         self.page = page;
-    }
-
-    pub(crate) fn center_mode(&self) -> crate::app::WorkbenchCenterMode {
-        self.center_mode
-    }
-
-    pub(crate) fn set_center_mode(&mut self, mode: crate::app::WorkbenchCenterMode) {
-        self.center_mode = mode;
-    }
-
-    pub(crate) fn toggle_center_mode(&mut self) {
-        self.center_mode = self.center_mode.toggled();
-        self.scroll.set(crate::app::WorkbenchPane::Center, 0);
-    }
-
-    pub(crate) fn cycle_center_mode(&mut self, direction: i32) {
-        self.center_mode = if direction >= 0 {
-            self.center_mode.next()
-        } else {
-            self.center_mode.prev()
-        };
-        self.focus = crate::app::WorkbenchPane::Center;
-        self.scroll.set(crate::app::WorkbenchPane::Center, 0);
     }
 
     pub(crate) fn scroll(&self) -> crate::app::WorkbenchPaneScroll {
@@ -598,22 +784,6 @@ impl WorkbenchRouteState {
 
     pub(crate) fn review_mut(&mut self) -> &mut crate::app::WorkbenchReviewState {
         &mut self.review
-    }
-
-    pub(crate) fn nav(&self) -> &crate::app::WorkbenchNav {
-        &self.nav
-    }
-
-    pub(crate) fn nav_mut(&mut self) -> &mut crate::app::WorkbenchNav {
-        &mut self.nav
-    }
-
-    pub(crate) fn depth_stack(&self) -> bool {
-        self.depth_stack
-    }
-
-    pub(crate) fn set_depth_stack(&mut self, enabled: bool) {
-        self.depth_stack = enabled;
     }
 }
 
@@ -713,6 +883,9 @@ pub struct NavigationRouteState {
 
 impl NavigationRouteState {
     pub(crate) fn sync_view_change(&mut self, view: crate::app::ShellView) -> bool {
+        if crate::app::contextual_surface_view(view) {
+            return false;
+        }
         let current = Some(view);
         if self.synced_view == current {
             return false;
@@ -751,6 +924,12 @@ impl NavigationRouteState {
         self.history.pop()
     }
 
+    /// Accept a user-requested back destination without recording the view
+    /// they just left as a new forward step on the next redraw.
+    pub(crate) fn accept_back_transition(&mut self, view: crate::app::ShellView) {
+        self.synced_view = Some(view);
+    }
+
     #[cfg(test)]
     pub(crate) fn contains_history(&self, view: &crate::app::ShellView) -> bool {
         self.history.contains(view)
@@ -763,8 +942,6 @@ fn is_transient_view(view: &crate::app::ShellView) -> bool {
         crate::app::ShellView::Story
             | crate::app::ShellView::FilePicker
             | crate::app::ShellView::CommandPalette
-            | crate::app::ShellView::ModelPicker
-            | crate::app::ShellView::AuthMethodPicker
             | crate::app::ShellView::PlanningPicker
             | crate::app::ShellView::TargetPicker
     )
@@ -910,8 +1087,14 @@ impl CatalogRouteState {
         self.expanded = false;
     }
 
+    #[cfg(test)]
     pub(crate) fn expand(&mut self) {
         self.expanded = true;
+    }
+
+    pub(crate) fn toggle_expanded(&mut self) {
+        self.expanded = !self.expanded;
+        self.cursor = 0;
     }
 
     pub(crate) fn is_expanded(&self) -> bool {
@@ -986,6 +1169,16 @@ impl FilePickerRouteState {
         self.truncated = truncated;
     }
 
+    pub(crate) fn replace_files(&mut self, files: Vec<String>, truncated: bool) {
+        let selected = self.selected_path();
+        self.files = files;
+        self.truncated = truncated;
+        let filtered = self.filtered_paths();
+        self.cursor = selected
+            .and_then(|selected| filtered.iter().position(|path| path == &selected))
+            .unwrap_or_else(|| self.cursor.min(filtered.len().saturating_sub(1)));
+    }
+
     pub(crate) fn files(&self) -> &[String] {
         &self.files
     }
@@ -1054,6 +1247,12 @@ pub struct FindingsRouteState {
 impl FindingsRouteState {
     pub(crate) fn reset(&mut self) {
         self.cursor = 0;
+    }
+
+    pub(crate) fn reset_for_target(&mut self) {
+        self.cursor = 0;
+        self.active_filter = None;
+        self.selected_finding = None;
     }
 
     pub(crate) fn cursor(&self) -> usize {
@@ -1267,6 +1466,7 @@ impl TuneRouteState {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PromptsRouteState {
     cursor: usize,
+    document: Option<PromptDocumentState>,
 }
 
 impl PromptsRouteState {
@@ -1281,6 +1481,70 @@ impl PromptsRouteState {
 
     pub(crate) fn move_cursor(&mut self, delta: i32, len: usize) {
         self.cursor = shifted_cursor(self.cursor, delta, len);
+    }
+
+    pub(crate) fn document(&self) -> Option<&PromptDocumentState> {
+        self.document.as_ref()
+    }
+
+    pub(crate) fn document_mut(&mut self) -> Option<&mut PromptDocumentState> {
+        self.document.as_mut()
+    }
+
+    pub(crate) fn open_document(&mut self, document: PromptDocumentState) {
+        self.document = Some(document);
+    }
+
+    pub(crate) fn close_document(&mut self) -> Option<PromptDocumentState> {
+        self.document.take()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PromptDocumentMode {
+    #[default]
+    Normal,
+    Insert,
+    Command,
+    ConfirmDiscard,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptDocumentState {
+    pub prompt_specs: Vec<kuzushi_core::modules::PromptSpec>,
+    pub prompt_index: usize,
+    pub role: String,
+    pub path: PathBuf,
+    pub source: String,
+    pub hash: String,
+    pub context_note: String,
+    pub lines: Vec<String>,
+    pub trailing_newline: bool,
+    pub cursor_row: usize,
+    pub cursor_col: usize,
+    pub top_row: usize,
+    pub mode: PromptDocumentMode,
+    pub command: String,
+    pub dirty: bool,
+    pub exit_after_save: bool,
+    pub pending_g: bool,
+    pub origin: crate::app::ShellView,
+}
+
+impl PromptDocumentState {
+    pub fn text(&self) -> String {
+        let mut text = self.lines.join("\n");
+        if self.trailing_newline {
+            text.push('\n');
+        }
+        text
+    }
+
+    pub fn current_line_len(&self) -> usize {
+        self.lines
+            .get(self.cursor_row)
+            .map(|line| line.chars().count())
+            .unwrap_or(0)
     }
 }
 

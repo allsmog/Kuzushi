@@ -18,15 +18,6 @@ pub(crate) fn model_choice_index_by_id(model: &str) -> Option<usize> {
     MODEL_CHOICES.iter().position(|choice| choice.id == model)
 }
 
-pub(crate) fn ready_default_model_choice_index(configured_model: Option<&str>) -> Option<usize> {
-    if configured_model.is_some() {
-        return None;
-    }
-    ready_provider_choice_index(auth_ready_for_provider("openai-codex"), "openai-codex")
-        .or_else(|| ready_provider_choice_index(auth_ready_for_provider("openai"), "openai"))
-        .or_else(|| ready_provider_choice_index(auth_ready_for_provider("anthropic"), "anthropic"))
-}
-
 pub(crate) fn ready_provider_choice_index(ready: bool, provider: &str) -> Option<usize> {
     ready.then(|| {
         MODEL_CHOICES

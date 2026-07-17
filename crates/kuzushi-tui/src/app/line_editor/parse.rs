@@ -1,4 +1,5 @@
 use super::*;
+use std::cell::Ref;
 
 pub(crate) struct CompletionRequest<'a> {
     pub(crate) slash: bool,
@@ -48,7 +49,17 @@ impl<'a> CompletionRequest<'a> {
     }
 }
 
-pub(crate) type CompletionValuesFn = fn(&ShellApp) -> Vec<String>;
+pub(crate) enum CompletionValues<'a> {
+    Owned(Vec<String>),
+    Static(&'static [&'static str]),
+    Borrowed(Ref<'a, [String]>),
+    RunIds {
+        live: [Option<&'a str>; 3],
+        stored: Ref<'a, [String]>,
+    },
+}
+
+pub(crate) type CompletionValuesFn = for<'a> fn(&'a ShellApp) -> CompletionValues<'a>;
 
 pub(crate) type NestedCompletionFn = fn(&ShellApp, bool, &[&str], &str) -> Vec<String>;
 

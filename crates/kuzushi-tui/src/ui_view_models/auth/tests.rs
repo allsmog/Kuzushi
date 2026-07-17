@@ -52,3 +52,15 @@ fn model_auth_status_reports_choice_auth_for_unknown_provider() {
 
     assert_eq!(model_auth_status(&choice), "manual");
 }
+
+#[test]
+fn model_oauth_status_preserves_expired_and_invalid_states() {
+    assert_eq!(oauth_model_status("stored in keychain"), "OAuth ready");
+    assert_eq!(oauth_model_status("expired 2h ago"), "OAuth expired");
+    assert_eq!(oauth_model_status("unreadable"), "OAuth invalid");
+    assert_eq!(oauth_model_status("missing"), "OAuth missing");
+    assert_eq!(
+        anthropic_model_auth_status(false, "expired yesterday"),
+        "OAuth expired"
+    );
+}

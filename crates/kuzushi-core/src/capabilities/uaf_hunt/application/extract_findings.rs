@@ -19,15 +19,22 @@ fn extract_findings_from_text(
     outcome: &AgentLoopOutcome,
     options: &UafHuntInput,
 ) -> Result<Vec<Finding>> {
-    if outcome.text.is_empty() {
+    if outcome.truncated {
         return Ok(Vec::new());
     }
-    if let Ok(parsed) = serde_json::from_str::<Value>(outcome.text.trim()) {
-        return normalize_uaf_hunt_findings(&parsed, options.max_findings);
+    parse_findings_text(&outcome.text, options.max_findings)
+}
+
+fn parse_findings_text(text: &str, max_findings: usize) -> Result<Vec<Finding>> {
+    let text = text.trim();
+    if text.is_empty() {
+        anyhow::bail!("uaf-hunt output parse failed: agent returned no findings envelope");
     }
-    extract_first_json_object(&outcome.text)
-        .map(|parsed| normalize_uaf_hunt_findings(&parsed, options.max_findings))
-        .unwrap_or_else(|| Ok(Vec::new()))
+    let parsed = serde_json::from_str::<Value>(text)
+        .ok()
+        .or_else(|| extract_first_json_object(text))
+        .ok_or_else(|| anyhow::anyhow!("uaf-hunt output parse failed: no valid JSON object"))?;
+    normalize_uaf_hunt_findings(&parsed, max_findings)
 }
 
 fn extract_first_json_object(text: &str) -> Option<Value> {
@@ -50,5 +57,13 @@ mod tests {
         assert_eq!(parsed["findings"], json!([]));
         assert!(extract_first_json_object("no object").is_none());
         assert!(extract_first_json_object("} before {").is_none());
+    }
+
+    #[test]
+    fn missing_or_malformed_text_cannot_look_like_a_clean_hunt() {
+        for text in ["", "agent stopped without an envelope", "before {broken} after"] {
+            let error = parse_findings_text(text, 10).unwrap_err().to_string();
+            assert!(error.contains("output parse failed"), "{error}");
+        }
     }
 }

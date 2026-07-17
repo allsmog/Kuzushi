@@ -19,6 +19,10 @@ use license_file::repository_license_findings;
 use manifest::{is_license_manifest, manifest_license, ManifestLicense};
 use source_header::source_header_findings;
 
+const MAX_LICENSE_MANIFEST_BYTES: usize = 8 * 1024 * 1024;
+const MAX_LICENSE_FILE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_SOURCE_HEADER_BYTES: usize = 64 * 1024;
+
 #[derive(Debug, Clone, Default)]
 pub struct LicenseScanScanner;
 
@@ -56,7 +60,11 @@ pub fn scan_licenses_with_options(
     let findings = manifests
         .iter()
         .filter_map(|path| license_finding(target, path).transpose())
-        .chain(repository_license_findings(target, &manifests)?.into_iter().map(Ok))
+        .chain(
+            repository_license_findings(target, &manifests)?
+                .into_iter()
+                .map(Ok),
+        )
         .chain(
             source_header_findings(
                 target,
@@ -64,8 +72,8 @@ pub fn scan_licenses_with_options(
                 cancellation,
                 options.require_source_spdx_headers,
             )?
-                .into_iter()
-                .map(Ok),
+            .into_iter()
+            .map(Ok),
         )
         .collect::<Result<Vec<_>>>()?;
     Ok(LicenseScanReport {
@@ -80,7 +88,10 @@ fn ensure_directory(target: &Path) -> Result<()> {
         anyhow::bail!("license-scan: target does not exist: {}", target.display());
     }
     if !target.is_dir() {
-        anyhow::bail!("license-scan: target is not a directory: {}", target.display());
+        anyhow::bail!(
+            "license-scan: target is not a directory: {}",
+            target.display()
+        );
     }
     Ok(())
 }
@@ -94,13 +105,15 @@ fn collect_manifests(
     if cancellation.is_cancelled() {
         anyhow::bail!("license-scan scan cancelled");
     }
-    for entry in fs::read_dir(dir).with_context(|| format!("license-scan: read {}", dir.display()))?
+    for entry in
+        fs::read_dir(dir).with_context(|| format!("license-scan: read {}", dir.display()))?
     {
         let entry = entry?;
+        let file_type = entry.file_type()?;
         let path = entry.path();
-        if path.is_dir() && !ignored_dir(&path) {
+        if file_type.is_dir() && !ignored_dir(&path) {
             collect_manifests(root, &path, manifests, cancellation)?;
-        } else if is_license_manifest(&path) {
+        } else if file_type.is_file() && is_license_manifest(&path) {
             manifests.push(path);
         }
     }
@@ -120,13 +133,14 @@ fn ignored_dir(path: &Path) -> bool {
 }
 
 fn license_finding(target: &Path, path: &Path) -> Result<Option<LicenseScanFinding>> {
-    let text = fs::read_to_string(path)
+    let text = crate::bounded_file::read_utf8_text(path, MAX_LICENSE_MANIFEST_BYTES)
         .with_context(|| format!("license-scan: read {}", path.display()))?;
     match manifest_license(path, &text)? {
         ManifestLicense::Skip => Ok(None),
         ManifestLicense::Missing => Ok(Some(missing_license_finding(target, path))),
         ManifestLicense::Declared(license) => {
-            Ok(risky_license(&license).map(|risk| risky_license_finding(target, path, &license, risk)))
+            Ok(risky_license(&license)
+                .map(|risk| risky_license_finding(target, path, &license, risk)))
         }
     }
 }

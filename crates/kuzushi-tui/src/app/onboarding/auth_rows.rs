@@ -7,6 +7,8 @@
 //! layout without silently desyncing which action a given cursor position
 //! triggers.
 
+use crate::app::settings::AuthProvider;
+
 /// The kind of credential action a picker row performs. Selection is matched
 /// on this identity, never on the row's numeric position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,15 +32,15 @@ pub struct AuthMethodRow {
 const OFFLINE_DEMO_ROW: AuthMethodRow = AuthMethodRow {
     kind: AuthMethodRowKind::OfflineDemo,
     label: "Offline demo",
-    hint: "run bundled fixture now; no key, model, or scanner binary",
+    hint: "run bundled offline fixture now; no key, model, or scanner binary",
 };
 
 /// Ordered credential-entry rows for a provider. Every credentialed provider
 /// offers the offline demo as a keyless escape hatch, so it is always the
 /// last row. Providers with no OAuth flow render `[ApiKey, OfflineDemo]`.
 pub fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
-    match provider {
-        "anthropic" => vec![
+    match AuthProvider::from_scene_provider(provider) {
+        Some(AuthProvider::Anthropic) => vec![
             AuthMethodRow {
                 kind: AuthMethodRowKind::ApiKey,
                 label: "API key (ANTHROPIC_API_KEY)",
@@ -51,7 +53,7 @@ pub fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
             },
             OFFLINE_DEMO_ROW,
         ],
-        "openai" | "openai-codex" => vec![
+        Some(AuthProvider::OpenAi) => vec![
             AuthMethodRow {
                 kind: AuthMethodRowKind::ApiKey,
                 label: "API key (OPENAI_API_KEY)",
@@ -64,7 +66,7 @@ pub fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
             },
             OFFLINE_DEMO_ROW,
         ],
-        _ => Vec::new(),
+        Some(AuthProvider::GitHubCopilot) | None => Vec::new(),
     }
 }
 

@@ -14,13 +14,17 @@ pub mod policy;
 mod tests;
 mod traced_runtime;
 
-pub use application::run_tool_loop;
+pub use application::{
+    query_blocking_checked, query_blocking_controlled_checked, run_tool_loop,
+    run_tool_loop_observed, spawn_subagent_blocking_checked, triage_finding_blocking_checked,
+};
 pub use domain::{
-    append_structured_output_contract, AgentLoopOutcome, AgentLoopStep, AgentQueryControl,
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
+    append_structured_output_contract, triage_cost_report, AgentLoopOutcome, AgentLoopStep,
+    AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
     AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
-    McpAttachment, ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult,
-    TriageRequest,
+    McpAttachment, ModelTier, ModelTokenUsage, Observed, RuntimeCost, RuntimeCostReport,
+    SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TriageRequest,
+    DEFAULT_TRIAGE_PROMPT, INTERACTION_REQUIRED_CODE, REQUEST_USER_INPUT_TOOL_NAME,
 };
 pub use mcp_probe::{
     mcp_attachment_plan_for_target, plan_contains, McpArtifactSpec, MCP_ARTIFACT_TABLE,
@@ -30,7 +34,10 @@ pub use policy::{
     bridge_api_key_env_for_model, canonical_model_spec, require_configured_model,
     resolve_explicit_model, validate_model_api_key_env, validate_model_spec,
 };
-pub use traced_runtime::{model_provider, prompt_pair_hash, TracedRuntime};
+pub use traced_runtime::{
+    model_error_class_from_message, model_provider, prompt_pair_hash, safe_model_failure_message,
+    TracedRuntime,
+};
 
 pub fn missing_agent_runtime_message(tool_name: &str) -> String {
     format!(

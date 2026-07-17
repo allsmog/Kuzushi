@@ -52,30 +52,62 @@ impl ShellApp {
             self.log_current_target();
             return Vec::new();
         };
-        vec![ShellEffect::ActivateTarget(TargetActivation {
+        self.request_target_activation(TargetActivation {
             path: PathBuf::from(raw),
             selected_scope: None,
             source: TargetActivationSource::Command,
-        })]
+        })
+    }
+
+    pub(crate) fn request_target_activation(
+        &mut self,
+        activation: TargetActivation,
+    ) -> Vec<ShellEffect> {
+        if self.target_activation_blocked() {
+            return Vec::new();
+        }
+        vec![ShellEffect::ActivateTarget(activation)]
     }
 
     pub(crate) fn activate_target_effect(
         &mut self,
         activation: TargetActivation,
     ) -> Vec<ShellEffect> {
-        let label = activation.path.display().to_string();
+        if self.target_activation_blocked() {
+            return Vec::new();
+        }
         match WorkspaceTarget::new(&activation.path) {
-            Ok(workspace) => {
-                let effects = self.activate_target(workspace);
-                self.apply_initial_onboarding_phase();
-                self.finish_target_activation(activation);
-                effects
-            }
+            Ok(workspace) => self.activate_resolved_target(workspace, activation),
             Err(error) => {
-                self.log("error", format!("invalid target {label:?}: {error}"));
+                self.set_error_notice(
+                    "target",
+                    target_activation_error_message(&activation.path, &error),
+                );
                 Vec::new()
             }
         }
+    }
+
+    fn activate_resolved_target(
+        &mut self,
+        workspace: WorkspaceTarget,
+        activation: TargetActivation,
+    ) -> Vec<ShellEffect> {
+        let root = workspace.root().to_path_buf();
+        if !self.ensure_target_state_dir(&workspace, &root) {
+            return Vec::new();
+        }
+        let Some(phases) = self.target_phase_config(&workspace) else {
+            return Vec::new();
+        };
+        let scan_input = target_activation_scan_input(activation.source);
+        let mut effects = self.activate_target_with_phases(workspace, phases);
+        self.apply_initial_onboarding_phase();
+        self.finish_target_activation(activation);
+        if let Some(input) = scan_input {
+            effects.extend(self.reduce_scan_start(None, input));
+        }
+        effects
     }
 
     fn log_current_target(&mut self) {
@@ -86,21 +118,155 @@ impl ShellApp {
         self.log("target", format!("current target: {current}"));
     }
 
+    #[cfg(test)]
     pub(crate) fn activate_target(&mut self, workspace: WorkspaceTarget) -> Vec<ShellEffect> {
         let root = workspace.root().to_path_buf();
-        self.set_target(Some(root.clone()));
-        if self.ensure_target_state_dir(&workspace, &root) {
-            self.record_active_target(&root);
-            self.refresh_active_scope_tree(&root);
+        if !self.ensure_target_state_dir(&workspace, &root) {
+            return Vec::new();
         }
-        self.apply_ready_default_model_after_target_activation();
+        let Some(phases) = self.target_phase_config(&workspace) else {
+            return Vec::new();
+        };
+        self.activate_target_with_phases(workspace, phases)
+    }
+
+    fn activate_target_with_phases(
+        &mut self,
+        workspace: WorkspaceTarget,
+        phases: kuzushi_core::GuidedPhaseConfig,
+    ) -> Vec<ShellEffect> {
+        self.invalidate_view_hydration();
+        let root = workspace.root().to_path_buf();
+        let session_options = self
+            .option_store()
+            .scope_only(kuzushi_core::OptionScope::Session);
+        let (mut option_store, option_store_error) = persistent_option_store(Some(&workspace));
+        option_store.merge_store(session_options);
+        self.domain_mut().reset_for_target(&workspace);
+        self.engagement.reset_for_target();
+        self.router.findings_mut().reset_for_target();
+        self.router.workbench_mut().reset_for_target();
+        *self.router.activity_mut() = crate::app::ActivityRouteState::default();
+        self.session.set_option_store(option_store);
+        self.config_mut().phases = phases;
+        refresh_auto_open_prefs_from_store(self);
+        self.set_target(Some(root.clone()));
+        self.schedule_target_profile_hydration(&root);
+        self.workbench_cache()
+            .borrow_mut()
+            .git_metadata(Some(&root));
+        self.set_active_scope(None);
+        if let Some(error) = option_store_error {
+            self.log("options", error);
+        }
+        self.record_active_target(&root);
+        self.refresh_active_scope_tree(&root);
+        self.reload_tool_shelf();
+        Self::target_activation_effects(root)
+    }
+
+    fn target_activation_effects(root: PathBuf) -> Vec<ShellEffect> {
         vec![
+            ShellEffect::RefreshContextView,
             ShellEffect::RefreshFindings(FindingsRefresh {
                 announce: false,
                 filter: None,
             }),
+            ShellEffect::HydrateSceneSnapshots(SceneSnapshotsHydration { target: Some(root) }),
+            ShellEffect::RefreshPwnState,
             ShellEffect::RefreshProgramScope,
         ]
+    }
+
+    fn target_phase_config(
+        &mut self,
+        workspace: &WorkspaceTarget,
+    ) -> Option<kuzushi_core::GuidedPhaseConfig> {
+        match kuzushi_core::load_config_for_target(Some(workspace.root())) {
+            Ok(config) => Some(config.phases),
+            Err(error) => {
+                self.log(
+                    "target",
+                    format!(
+                        "target activation failed before state changed — could not load {}: {error}",
+                        workspace.root().display()
+                    ),
+                );
+                None
+            }
+        }
+    }
+
+    pub(crate) fn reload_external_target_settings(
+        &mut self,
+        target: &Path,
+        reload_config: bool,
+        reload_options: bool,
+    ) {
+        if reload_config {
+            self.reload_external_phase_config(target);
+        }
+        if reload_options {
+            self.reload_external_option_store(target);
+        }
+    }
+
+    fn reload_external_phase_config(&mut self, target: &Path) {
+        let posture = self.autonomy();
+        match kuzushi_core::load_config_for_target(Some(target)) {
+            Ok(config) => {
+                self.config_mut().phases = config.phases;
+                self.set_autonomy(posture);
+            }
+            Err(error) => self.log(
+                "config",
+                format!(
+                    "external project config change rejected; keeping active settings: {error}"
+                ),
+            ),
+        }
+    }
+
+    fn reload_external_option_store(&mut self, target: &Path) {
+        let Ok(workspace) = WorkspaceTarget::new(target) else {
+            return;
+        };
+        let session_options = self
+            .option_store()
+            .scope_only(kuzushi_core::OptionScope::Session);
+        let (mut option_store, error) = persistent_option_store(Some(&workspace));
+        if let Some(error) = error {
+            self.log(
+                "options",
+                format!("external options change unreadable; keeping active settings: {error}"),
+            );
+            return;
+        }
+        option_store.merge_store(session_options);
+        self.session.set_option_store(option_store);
+        refresh_auto_open_prefs_from_store(self);
+    }
+
+    pub(crate) fn reload_external_project_scope_tree(&mut self, root: &Path) {
+        match kuzushi_core::load_nested_project_scopes(root) {
+            Ok(Some(tree)) => self.apply_discovered_project_scopes(root, tree),
+            Ok(None) => self.set_active_scope(Some(root_target_scope())),
+            Err(error) => self.log(
+                "scope:mapping",
+                format!("external project scopes unreadable; keeping active scope: {error}"),
+            ),
+        }
+    }
+
+    fn target_activation_blocked(&mut self) -> bool {
+        if !self.has_running_work() {
+            return false;
+        }
+        self.log(
+            "target",
+            "target switch blocked — finish or cancel the active work, then retry",
+        );
+        true
     }
 
     fn finish_target_activation(&mut self, activation: TargetActivation) {
@@ -123,8 +289,6 @@ impl ShellApp {
             self.router
                 .workbench_mut()
                 .set_focus(WorkbenchPane::Findings);
-            let center_mode = self.default_workbench_center_mode(WorkbenchPane::Findings);
-            self.router.workbench_mut().set_center_mode(center_mode);
             self.clamp_findings_cursor();
         }
     }
@@ -138,7 +302,10 @@ impl ShellApp {
             Err(error) => {
                 self.log(
                     "target",
-                    format!("set {} but state dir init failed: {error}", root.display()),
+                    format!(
+                        "target activation failed before state changed — could not initialize {}: {error}",
+                        root.display()
+                    ),
                 );
                 false
             }
@@ -173,6 +340,9 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_target_revision_command(&mut self, reference: &str) -> Vec<ShellEffect> {
+        if self.target_revision_blocked() {
+            return Vec::new();
+        }
         let Some(target) = self.target_owned() else {
             self.log(
                 "target",
@@ -190,6 +360,9 @@ impl ShellApp {
         &mut self,
         switch: TargetRevisionSwitch,
     ) -> Vec<ShellEffect> {
+        if self.target_revision_blocked() {
+            return Vec::new();
+        }
         match kuzushi_core::switch_target_revision(&switch.target, &switch.reference) {
             Ok(outcome) => self.apply_target_revision_switch(
                 &switch.target,
@@ -203,13 +376,26 @@ impl ShellApp {
         }
     }
 
+    fn target_revision_blocked(&mut self) -> bool {
+        if !self.runtime_state.project_scope_discovery_running() {
+            return self.target_activation_blocked();
+        }
+        self.log(
+            "target",
+            "target revision switch blocked — wait for project scope discovery, then retry",
+        );
+        true
+    }
+
     fn apply_target_revision_switch(
         &mut self,
         target: &Path,
         previous_sha: &str,
         current_sha: &str,
     ) -> Vec<ShellEffect> {
+        self.invalidate_view_hydration();
         *self.workbench_cache().borrow_mut() = WorkbenchCache::default();
+        self.refresh_phase_attempt_projection();
         self.refresh_target_scope_after_revision_switch(target);
         self.log_target_revision_switch(previous_sha, current_sha);
         target_revision_refresh_effects()
@@ -350,6 +536,52 @@ impl ShellApp {
             self.show_story();
         }
     }
+}
+
+fn target_activation_scan_input(
+    source: TargetActivationSource,
+) -> Option<Option<serde_json::Value>> {
+    match source {
+        TargetActivationSource::ScriptedScan => Some(None),
+        TargetActivationSource::OfflineDemo => Some(Some(kuzushi_core::offline_demo_scan_input())),
+        TargetActivationSource::Command | TargetActivationSource::Picker => None,
+    }
+}
+
+#[cfg(test)]
+mod workspace_initialization_tests {
+    use super::*;
+
+    #[test]
+    fn unsafe_workspace_policy_rejects_activation_before_target_changes() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::create_dir(target.path().join(".kuzushi")).unwrap();
+        std::fs::write(target.path().join(".kuzushi/.gitignore"), "").unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let effects = app.activate_target_effect(TargetActivation {
+            path: target.path().to_path_buf(),
+            selected_scope: None,
+            source: TargetActivationSource::Command,
+        });
+
+        assert!(effects.is_empty());
+        assert!(app.target().is_none());
+        assert!(!target.path().join(".kuzushi/v3").exists());
+    }
+}
+
+fn target_activation_error_message(path: &Path, error: &anyhow::Error) -> String {
+    let label = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("selected path");
+    let reason = if error.to_string().contains("does not exist") {
+        "does not exist"
+    } else {
+        "is not a usable directory"
+    };
+    format!("Target {label:?} {reason}. Next: target <existing-directory>")
 }
 
 fn target_revision_refresh_effects() -> Vec<ShellEffect> {

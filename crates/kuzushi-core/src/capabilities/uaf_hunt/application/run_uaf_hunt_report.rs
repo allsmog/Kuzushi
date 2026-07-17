@@ -7,6 +7,7 @@ use crate::capabilities::uaf_hunt::application::{
 use crate::capabilities::uaf_hunt::domain::{UafHuntInput, UafHuntReport};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{run_tool_loop, AgentLoopOutcome, AgentRuntime, AgentToolLoopRequest};
+use crate::WorkspaceTarget;
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -131,6 +132,7 @@ fn finish_uaf_hunt_run(
         steps_used: outcome.steps_used,
         truncated: outcome.truncated,
         cost_usd: outcome.cost_usd,
+        cost_usd_exact: outcome.cost_usd_exact,
     })
 }
 
@@ -194,7 +196,7 @@ fn emit_uaf_hunt_done(ctx: &ToolExecutionContext<'_>, finding_count: usize) {
 
 fn resolve_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     let resolved = match requested_uaf_target(input)? {
-        Some(target) => target,
+        Some(target) => resolve_requested_uaf_target(target, ctx)?,
         None => context_uaf_target(ctx)?,
     };
     ensure_uaf_target_dir(&resolved)?;
@@ -212,20 +214,24 @@ fn requested_uaf_target(input: &Value) -> Result<Option<PathBuf>> {
 fn normalize_requested_uaf_target(raw: &str) -> Result<PathBuf> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return current_dir_target();
+        anyhow::bail!("uaf-hunt target may not be blank")
     }
     let candidate = PathBuf::from(trimmed);
+    Ok(candidate)
+}
+
+fn resolve_requested_uaf_target(
+    candidate: PathBuf,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<PathBuf> {
     if candidate.is_absolute() {
-        Ok(candidate)
-    } else {
-        Ok(current_dir_target()?.join(candidate))
+        return Ok(candidate);
     }
+    Ok(required_uaf_workspace(ctx)?.join(candidate))
 }
 
 fn context_uaf_target(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    ctx.workspace
-        .map(|workspace| Ok(workspace.root().to_path_buf()))
-        .unwrap_or_else(current_dir_target)
+    Ok(required_uaf_workspace(ctx)?.to_path_buf())
 }
 
 fn ensure_uaf_target_dir(resolved: &Path) -> Result<()> {
@@ -238,8 +244,10 @@ fn ensure_uaf_target_dir(resolved: &Path) -> Result<()> {
     Ok(())
 }
 
-fn current_dir_target() -> Result<PathBuf> {
-    std::env::current_dir().context("uaf-hunt: could not resolve current directory")
+fn required_uaf_workspace<'a>(ctx: &'a ToolExecutionContext<'_>) -> Result<&'a Path> {
+    ctx.workspace
+        .map(WorkspaceTarget::root)
+        .context("uaf-hunt requires an explicit active workspace")
 }
 
 fn require_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn AgentRuntime> {

@@ -17,7 +17,7 @@
 //!
 //! The CPG to import is taken from `KUZUSHI_JOERN_CPG`; if unset the
 //! server starts empty and the agent must call `joern.parse` first or
-//! pass an explicit CPG via `joern.query`.
+//! pass an explicit CPG through the MCP attachment plan.
 
 use anyhow::{Context, Result};
 use std::net::TcpListener;

@@ -11,6 +11,7 @@ pub(crate) struct ConfirmCardModel {
     pub(crate) rationale: Option<String>,
     pub(crate) allowlist: Option<String>,
     pub(crate) allows_decision: bool,
+    pub(crate) allows_remembered_yes: bool,
 }
 
 pub(crate) fn confirm_card_model(app: &ShellApp) -> Option<ConfirmCardModel> {
@@ -32,6 +33,7 @@ impl ConfirmCardModel {
             rationale: confirm.rationale.clone(),
             allowlist: confirm.allowlist.clone(),
             allows_decision: confirm.kind.allows_yes(),
+            allows_remembered_yes: confirm.kind.allows_remembered_yes(),
         }
     }
 }

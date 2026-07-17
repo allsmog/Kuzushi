@@ -1,7 +1,7 @@
+use super::bounded_fs as fs;
 use super::python_dependency::{python_component, python_dependency_name};
-use super::{SbomComponent, SbomDependencyEdge, relative_display};
+use super::{relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_requirements_manifest(name: &str) -> bool {

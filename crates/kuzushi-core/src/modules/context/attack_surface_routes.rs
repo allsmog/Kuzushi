@@ -74,15 +74,12 @@ pub(in crate::modules) fn attack_surface_service_boundaries(
 }
 
 pub(in crate::modules) fn save_context_snapshot(root: &Path, snapshot: &Value) -> Result<PathBuf> {
-    let snapshot_path = crate::context::context_snapshot_path(root);
-    if let Some(parent) = snapshot_path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("Could not create {}", parent.display()))?;
-    }
+    let path = crate::context::context_snapshot_path(root);
+    let relative = path
+        .strip_prefix(root)
+        .context("Context snapshot path escaped the workspace")?;
     let body = format!("{}\n", serde_json::to_string_pretty(snapshot)?);
-    fs::write(&snapshot_path, body)
-        .with_context(|| format!("Could not write {}", snapshot_path.display()))?;
-    Ok(snapshot_path)
+    crate::workspace::write_workspace_state_file(root, relative, body.as_bytes())
 }
 
 pub(in crate::modules) fn generated_context_slices(

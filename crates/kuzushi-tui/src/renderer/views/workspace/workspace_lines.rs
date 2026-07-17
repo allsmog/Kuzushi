@@ -69,3 +69,58 @@ fn append_workspace_rollup(lines: &mut Vec<Line<'static>>, model: &WorkspaceMode
 fn workspace_rollup_line(row: &WorkspaceRollupRow) -> Line<'static> {
     severity_rollup_bar(row.label, row.count, row.total, row.severity_tone)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::{Finding, Severity, V2Config};
+    use std::path::PathBuf;
+
+    #[test]
+    fn workspace_lines_keep_state_identity_and_current_count_at_operator_sizes() {
+        let app = workspace_fixture();
+        for area in [Rect::new(0, 0, 100, 30), Rect::new(0, 0, 80, 24)] {
+            let lines = workspace_lines(&app, area);
+            let rendered = lines
+                .iter()
+                .map(Line::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            assert!(rendered.contains("./.kuzushi/v3"));
+            assert!(rendered.contains("./.kuzushi/v3/index.sqlite3"));
+            assert!(rendered.contains("FINDINGS ROLLUP · 4 persisted"));
+            assert!(rendered
+                .lines()
+                .any(|line| { line.contains("findings") && line.trim_end().ends_with('4') }));
+            assert!(!rendered.contains("findings  none yet"));
+            assert!(lines.len() <= area.height as usize);
+            assert!(lines
+                .iter()
+                .all(|line| line.to_string().chars().count() <= area.width as usize));
+        }
+    }
+
+    fn workspace_fixture() -> ShellApp {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.domain_mut()
+            .set_workspace_view(crate::app::WorkspaceView {
+                root: Some(PathBuf::from("/tmp/kuzushi-demo")),
+                state_dir: Some(PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v3")),
+                findings_db: Some(PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v3/index.sqlite3")),
+                findings_count: None,
+                last_export: None,
+                status: "workspace ready".to_string(),
+            });
+        *app.findings_mut() = [
+            Severity::Critical,
+            Severity::High,
+            Severity::Medium,
+            Severity::Low,
+        ]
+        .into_iter()
+        .map(|severity| Finding::new_semgrep("rule.demo", "src/lib.rs", 1, None, severity, "demo"))
+        .collect();
+        app
+    }
+}

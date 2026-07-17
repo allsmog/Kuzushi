@@ -46,33 +46,110 @@ mod tests {
     }
 
     #[test]
-    fn phase_stamping_is_display_metadata_only() {
-        // Stamping must set `phase` and leave every dispatch-relevant field
-        // (name, headless, hidden, runtime_requirement, options) untouched —
-        // proving phase is display grouping, not execution input.
+    fn explicit_policy_declaration_preserves_descriptor_identity() {
+        let descriptor = hidden_tool_with_options(
+            "semgrep:scan",
+            "Scan with Semgrep.",
+            vec![opt("target", OptionType::Path, "Path.")],
+        );
+        let before = descriptor.clone();
+        let policy = ToolPolicy::new(
+            ToolPhase::Scan,
+            RuntimeRequirement::Never,
+            ToolEffect::Read,
+            WorkspaceRequirement::Required,
+            FindingStoreRequirement::Required,
+        );
         let module = builtin_module(
             "semgrep",
             "Semgrep",
             ModuleKind::Scan,
             "Static analysis",
-            vec![hidden_tool_with_options(
-                "semgrep:scan",
-                "Scan with Semgrep.",
-                vec![opt("target", OptionType::Path, "Path.")],
-            )],
+            tools_with_policy(policy, vec![descriptor]),
             vec![],
         );
-        let before = module.tools()[0].clone();
-        let stamped = module.with_stamped_phases();
-        let after = &stamped.tools()[0];
+        let after = &module.tools()[0];
 
-        assert_eq!(before.phase, ToolPhase::Operate); // default before stamping
-        assert_eq!(after.phase, ToolPhase::Hunt); // canonical semgrep phase
+        assert_eq!(before.phase, ToolPhase::Operate);
+        assert_eq!(after.phase, ToolPhase::Scan);
         assert_eq!(after.name, before.name);
         assert_eq!(after.headless, before.headless);
         assert_eq!(after.hidden, before.hidden);
         assert_eq!(after.runtime_requirement, before.runtime_requirement);
         assert_eq!(after.options, before.options);
+        assert_eq!(after.effect, ToolEffect::Read);
+        assert_eq!(after.approval, ApprovalPolicy::None);
+        assert_eq!(after.workspace_requirement, WorkspaceRequirement::Required);
+        assert_eq!(
+            after.finding_store_requirement,
+            FindingStoreRequirement::Required
+        );
+    }
+
+    #[test]
+    fn editable_prompt_metadata_is_serialized_and_path_backed() {
+        let descriptor = tool("demo:scan", "Run demo.").with_prompt(editable_prompt(
+            "scan instructions",
+            "demo",
+            "scan",
+            "DEMO_PROMPT",
+            "Review the target.".to_string(),
+        ));
+
+        let value = serde_json::to_value(&descriptor).unwrap();
+
+        assert_eq!(value["prompts"][0]["role"], "scan instructions");
+        assert_eq!(value["prompts"][0]["optionKey"], "DEMO_PROMPT");
+        assert_eq!(
+            descriptor.prompts[0].override_relative_path(),
+            std::path::PathBuf::from(".kuzushi/prompts/demo/scan.md")
+        );
+    }
+
+    #[test]
+    fn editable_prompt_requires_a_declared_canonical_option() {
+        let tool = tool("demo:scan", "Run demo.")
+            .with_prompt(editable_prompt(
+                "scan instructions",
+                "demo",
+                "scan",
+                "DEMO_PROMPT",
+                "Review the target.".to_string(),
+            ))
+            .with_policy(workspace_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Optional,
+            ));
+        let module = builtin_module(
+            "demo",
+            "Demo",
+            ModuleKind::Defense,
+            "Demo module",
+            vec![tool],
+            vec![],
+        );
+
+        let error = module.validate_declared_policy().unwrap_err().to_string();
+
+        assert!(error.contains("undeclared option"));
+        assert!(error.contains("DEMO_PROMPT"));
+    }
+
+    #[test]
+    fn builtin_policy_must_be_declared_before_registration() {
+        let module = builtin_module(
+            "unsafe-default",
+            "Unsafe Default",
+            ModuleKind::Defense,
+            "Missing policy regression fixture.",
+            vec![tool("unsafe-default:run", "Run without policy.")],
+            vec![],
+        );
+
+        let error = module.validate_declared_policy().unwrap_err().to_string();
+
+        assert!(error.contains("has no descriptor-owned policy"), "{error}");
     }
 
     #[test]

@@ -12,7 +12,6 @@ mod tests {
             severity: "high".to_string(),
             file_path: file.to_string(),
             start_line: line,
-            end_line: Some(line),
             message: message.to_string(),
             tool: "semgrep".to_string(),
             vuln_source: None,
@@ -65,7 +64,6 @@ mod tests {
     fn score_emits_pm10_hit_when_finding_within_window_with_cwe() {
         let oracle = Oracle {
             cve: "CVE-TEST".to_string(),
-            slice: Some("test".to_string()),
             name: None,
             commit: None,
             ground_truth: vec![OracleEntry {
@@ -74,16 +72,12 @@ mod tests {
                 line_start: 100,
                 line_end: 100,
                 cwe: vec!["CWE-78".to_string()],
-                kind: String::new(),
-                notes: String::new(),
                 expected_verdict: None,
                 expected_severity: None,
             }],
             expected_min_recall: None,
-            notes: None,
         };
         let dump = FindingsDump {
-            count: 1,
             findings: vec![finding_row(
                 "src/foo.c",
                 105,
@@ -156,7 +150,6 @@ mod tests {
     fn score_demotes_to_file_only_when_cwe_mismatched() {
         let oracle = Oracle {
             cve: "CVE-TEST".to_string(),
-            slice: Some("test".to_string()),
             name: None,
             commit: None,
             ground_truth: vec![OracleEntry {
@@ -165,16 +158,12 @@ mod tests {
                 line_start: 100,
                 line_end: 100,
                 cwe: vec!["CWE-78".to_string()],
-                kind: String::new(),
-                notes: String::new(),
                 expected_verdict: None,
                 expected_severity: None,
             }],
             expected_min_recall: None,
-            notes: None,
         };
         let dump = FindingsDump {
-            count: 1,
             findings: vec![finding_row(
                 "src/foo.c",
                 105,
@@ -190,7 +179,6 @@ mod tests {
     fn score_proof_state_breakdown_partitions_primary_hits() {
         let oracle = Oracle {
             cve: "CVE-TEST".to_string(),
-            slice: Some("test".to_string()),
             name: None,
             commit: None,
             ground_truth: vec![
@@ -200,8 +188,6 @@ mod tests {
                     line_start: 10,
                     line_end: 10,
                     cwe: vec!["CWE-78".to_string()],
-                    kind: String::new(),
-                    notes: String::new(),
                     expected_verdict: None,
                     expected_severity: None,
                 },
@@ -211,8 +197,6 @@ mod tests {
                     line_start: 20,
                     line_end: 20,
                     cwe: vec!["CWE-78".to_string()],
-                    kind: String::new(),
-                    notes: String::new(),
                     expected_verdict: None,
                     expected_severity: None,
                 },
@@ -222,14 +206,11 @@ mod tests {
                     line_start: 30,
                     line_end: 30,
                     cwe: vec!["CWE-78".to_string()],
-                    kind: String::new(),
-                    notes: String::new(),
                     expected_verdict: None,
                     expected_severity: None,
                 },
             ],
             expected_min_recall: None,
-            notes: None,
         };
         let mut validated = finding_row("src/a.c", 10, "CWE-78 exec");
         validated.static_proof_state = Some("statically_confirmed".to_string());
@@ -238,7 +219,6 @@ mod tests {
         other_static.static_proof_state = Some("signal_only".to_string());
         let llm_only = finding_row("src/c.c", 30, "CWE-78 exec");
         let dump = FindingsDump {
-            count: 3,
             findings: vec![validated, other_static, llm_only],
         };
         let report = score(&cli(), &oracle, &dump, Path::new("/tmp"));
@@ -254,7 +234,6 @@ mod tests {
     fn score_reports_verdict_and_severity_label_accuracy() {
         let oracle = Oracle {
             cve: "CVE-TEST".to_string(),
-            slice: Some("test".to_string()),
             name: None,
             commit: None,
             ground_truth: vec![
@@ -264,8 +243,6 @@ mod tests {
                     line_start: 10,
                     line_end: 10,
                     cwe: vec!["CWE-78".to_string()],
-                    kind: String::new(),
-                    notes: String::new(),
                     expected_verdict: Some("true_positive".to_string()),
                     expected_severity: Some("high".to_string()),
                 },
@@ -275,14 +252,11 @@ mod tests {
                     line_start: 20,
                     line_end: 20,
                     cwe: vec!["CWE-79".to_string()],
-                    kind: String::new(),
-                    notes: String::new(),
                     expected_verdict: Some("false_positive".to_string()),
                     expected_severity: Some("medium".to_string()),
                 },
             ],
             expected_min_recall: None,
-            notes: None,
         };
         let mut correct = finding_row("src/a.c", 10, "CWE-78 exec");
         correct.severity = "ERROR".to_string();
@@ -293,7 +267,6 @@ mod tests {
         wrong.severity = "low".to_string();
         wrong.verdict = Some("true_positive".to_string());
         let dump = FindingsDump {
-            count: 2,
             findings: vec![correct, wrong],
         };
 

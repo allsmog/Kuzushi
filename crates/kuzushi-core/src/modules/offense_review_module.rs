@@ -6,7 +6,14 @@ pub(crate) fn offense_review_module() -> BuiltinModule {
         "Offense Review",
         ModuleKind::Offense,
         "Model-backed offensive review tools over existing threat-model artifacts.",
-        vec![threat_hunt_tool()],
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Required,
+            ),
+            vec![threat_hunt_tool()],
+        ),
         vec![dag(
             "offense-review:threat-hunt",
             "findings",
@@ -21,4 +28,11 @@ fn threat_hunt_tool() -> ToolDescriptor {
         "Run bounded offensive review agents over selected actors and threats from the active threat model.",
         carlini_threat_hunt_options(),
     )
+    .with_prompt(editable_prompt(
+        "offensive review mission",
+        "offense-review",
+        "threat-hunt",
+        "CARLINI_THREAT_HUNT_PROMPT",
+        crate::capabilities::carlini_threat_hunt::DEFAULT_CARLINI_MISSION.to_string(),
+    ))
 }

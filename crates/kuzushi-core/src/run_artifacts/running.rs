@@ -14,6 +14,12 @@ pub struct RunLlmCallAudit {
     pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub provider_spend_unresolved: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_attempted: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -65,8 +71,19 @@ pub struct RunSummary {
     pub findings: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// Provider-observed subtotal when the complete charge is unresolved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_cost_usd: Option<f64>,
+    /// True only when `observed_cost_usd` is present and provider spend is
+    /// known to be incomplete.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub provider_spend_unresolved: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Digest of the canonical terminal intent. This makes terminal retries
+    /// content-idempotent even when a derived artifact needs repair.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_result_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process_id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,6 +98,9 @@ pub struct RunSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Compatibility summary for single-model runs. Once trace-backed model
+    /// calls exist, this is the sole observed model only; multi-model runs
+    /// leave it unset and expose every actual call through `llm_calls`.
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_hash: Option<String>,
@@ -125,7 +145,10 @@ impl RunSummary {
             completed_at_unix: None,
             findings: None,
             cost_usd: None,
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
             error: None,
+            terminal_result_sha256: None,
             process_id: None,
             kuzushi_version: Some(env!("CARGO_PKG_VERSION").to_string()),
             prompt_spine_version: Some(crate::prompts::PROMPT_SPINE_VERSION.to_string()),
@@ -198,7 +221,49 @@ impl RunSummary {
 
     pub fn with_cost(mut self, cost_usd: Option<f64>) -> Self {
         self.cost_usd = cost_usd;
+        self.observed_cost_usd = None;
+        self.provider_spend_unresolved = false;
         self
+    }
+
+    pub fn with_cost_report(mut self, cost: crate::runtime::RuntimeCostReport) -> Self {
+        self.cost_usd = cost.exact_usd();
+        self.observed_cost_usd = if cost.is_complete() || cost.is_unavailable() {
+            None
+        } else {
+            Some(cost.observed_usd())
+        };
+        self.provider_spend_unresolved = !cost.is_complete() && !cost.is_unavailable();
+        self
+    }
+
+    pub fn checked_cost_report(&self) -> Result<crate::runtime::RuntimeCostReport> {
+        let exact = self
+            .cost_usd
+            .map(|cost| crate::runtime::RuntimeCost::from_usd(cost, "run summary cost"))
+            .transpose()?;
+        let observed = self
+            .observed_cost_usd
+            .map(|cost| crate::runtime::RuntimeCost::from_usd(cost, "run summary observed cost"))
+            .transpose()?;
+        anyhow::ensure!(
+            exact.is_none() || observed.is_none(),
+            "run summary cannot claim both costUsd and observedCostUsd"
+        );
+        anyhow::ensure!(
+            !self.provider_spend_unresolved || observed.is_some(),
+            "run summary providerSpendUnresolved=true requires observedCostUsd"
+        );
+        anyhow::ensure!(
+            observed.is_none() || self.provider_spend_unresolved,
+            "run summary observedCostUsd requires providerSpendUnresolved=true"
+        );
+        Ok(match (exact, observed) {
+            (Some(cost), None) => crate::runtime::RuntimeCostReport::known(cost),
+            (None, Some(cost)) => crate::runtime::RuntimeCostReport::incomplete(cost),
+            (None, None) => crate::runtime::RuntimeCostReport::UNAVAILABLE,
+            (Some(_), Some(_)) => unreachable!("contradictory run summary cost rejected above"),
+        })
     }
 
     pub fn with_model(mut self, model: Option<String>) -> Self {
@@ -216,7 +281,11 @@ impl RunSummary {
         self.prompt_spine_version = source.prompt_spine_version.clone();
         self.git_sha = source.git_sha.clone();
         self.git_branch = source.git_branch.clone();
-        self.model = source.model.clone();
+        // A resolved runtime may be the first producer able to report the
+        // effective model. Preserve a model captured at start, but allow the
+        // terminal result to fill an absent value without refreshing the rest
+        // of the start-time reproducibility snapshot.
+        self.model = source.model.clone().or(self.model);
         self.config_hash = source.config_hash.clone();
         self.platform = source.platform.clone();
         self.house_rules = source.house_rules.clone();
@@ -227,17 +296,30 @@ impl RunSummary {
         self.cli_args = source.cli_args.clone();
         self.loaded_modules = source.loaded_modules.clone();
         self.trace_malformed_lines = source.trace_malformed_lines;
+        self.terminal_result_sha256 = source
+            .terminal_result_sha256
+            .clone()
+            .or(self.terminal_result_sha256);
         self
     }
 
     pub fn with_artifact(mut self, artifact: RunArtifact) -> Self {
         if let Some(artifact) = artifact.normalized() {
-            self.artifacts.push(artifact);
+            if let Some(existing) = self
+                .artifacts
+                .iter_mut()
+                .find(|existing| existing.path == artifact.path)
+            {
+                *existing = artifact;
+            } else {
+                self.artifacts.push(artifact);
+            }
         }
         self
     }
 
     pub fn with_llm_calls(mut self, llm_calls: Vec<RunLlmCallAudit>) -> Self {
+        self.model = sole_observed_model(&llm_calls);
         self.llm_calls = llm_calls;
         self
     }
@@ -294,6 +376,20 @@ impl RunSummary {
         }
         self
     }
+
+    pub fn with_terminal_result_sha256(mut self, terminal_result_sha256: Option<String>) -> Self {
+        self.terminal_result_sha256 = non_empty_metadata(terminal_result_sha256);
+        self
+    }
+}
+
+fn sole_observed_model(calls: &[RunLlmCallAudit]) -> Option<String> {
+    let mut models = calls
+        .iter()
+        .map(|call| call.model.trim())
+        .filter(|model| !model.is_empty());
+    let first = models.next()?.to_string();
+    models.all(|model| model == first).then_some(first)
 }
 
 fn build_git_sha() -> Option<String> {
@@ -314,6 +410,10 @@ fn non_empty_metadata(value: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 fn runtime_platform() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
@@ -330,6 +430,15 @@ pub struct RunTraceStep {
     pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub provider_spend_unresolved: bool,
+    /// Explicit invocation evidence for new trace producers. `None` preserves
+    /// compatibility with schema-v2 rows whose terminal-call status must be
+    /// recovered from the legacy metadata shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_attempted: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

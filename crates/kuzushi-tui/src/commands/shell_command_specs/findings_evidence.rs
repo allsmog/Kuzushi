@@ -13,11 +13,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
             "findings filter state:new rank:high",
             "findings filter decision:confirmed completeness:open",
             "findings filter confidence:confirmed",
+            "findings filter clear",
             "/findings filter <expr>",
         ],
         category: ShellCommandCategory::FindingsEvidence,
         description:
-            "filter findings by severity, confidence (proof), review decision, or completeness",
+            "filter findings by severity, confidence, decision, or completeness; use clear to reset",
     },
     ShellCommandSpec {
         command: "component <scope|path|all>",
@@ -44,6 +45,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         ],
         category: ShellCommandCategory::FindingsEvidence,
         description: "record a human review decision for the selected finding",
+    },
+    ShellCommandSpec {
+        command: "proof defer <id> --reason <text>",
+        aliases: &["/proof defer F-0001 --reason production harness unavailable"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "record a human proof deferral for the current finding generation",
     },
     ShellCommandSpec {
         command: "dismiss <reason> <note>",

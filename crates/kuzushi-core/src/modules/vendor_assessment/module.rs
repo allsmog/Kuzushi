@@ -13,22 +13,41 @@ pub(in crate::modules) fn module() -> BuiltinModule {
 
 fn vendor_assessment_tools() -> Vec<ToolDescriptor> {
     vec![
-        vendor_assessment_attach_tool(),
+        vendor_assessment_attach_tool().with_policy(workspace_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
         tool_with_options(
             "vendor-assessment:scope",
             "Set or inspect assessment scope.",
             vendor_assessment_scope_options(),
-        ),
+        )
+        .with_policy(workspace_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
         tool_with_options(
             "vendor-assessment:prompts",
             "Generate assessment prompt packets.",
             vendor_assessment_prompt_options(),
-        ),
+        )
+        .with_policy(workspace_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
         tool_with_options(
             "vendor-assessment:assess",
             "Assess attached vendor evidence against the configured product scope and produce a risk summary.",
             vendor_assessment_assess_options(),
-        ),
+        )
+        .with_policy(workspace_policy(
+            ToolPhase::Scan,
+            RuntimeRequirement::Always,
+            FindingStoreRequirement::Optional,
+        )),
     ]
 }
 
@@ -43,7 +62,7 @@ fn vendor_assessment_attach_tool() -> ToolDescriptor {
 fn vendor_assessment_attach_options() -> Vec<OptionSpec> {
     let mut options = vec![
         opt("source", OptionType::String, "Evidence source path or URL."),
-        opt("path", OptionType::Path, "Evidence document path."),
+        opt("path", OptionType::Path, "Evidence document path.").external_read(),
         opt("url", OptionType::String, "Evidence document URL."),
         deprecated_target_option(),
         opt("kind", OptionType::String, "Evidence kind.").advanced(),
@@ -242,6 +261,7 @@ fn assess_tool(
     let result = vendor_assessment_capability::assess(
         &root,
         scope_update_from_input(&input),
+        string_input_any(&input, &["runId"]),
         runtime,
         || resolve_tool_model("vendor-assessment:assess", &input, ctx),
     )?;

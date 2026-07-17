@@ -7,6 +7,7 @@ mod tests;
 
 pub use client::ClangdClient;
 pub use locations::parse_locations;
+pub(crate) use protocol::file_uri;
 
 #[cfg(test)]
 pub(crate) use protocol::{

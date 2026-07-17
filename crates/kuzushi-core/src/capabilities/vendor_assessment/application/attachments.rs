@@ -2,7 +2,6 @@ use super::storage::{load_updated_scope, resolve_input_path, save_scope};
 use crate::capabilities::vendor_assessment::domain::{unix_millis, AttachmentInput};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn attach(root: &Path, input: AttachmentInput) -> Result<Value> {
@@ -67,12 +66,13 @@ fn remote_attachment_content() -> AttachmentContent {
 
 fn local_attachment_content(root: &Path, source: &str) -> Result<AttachmentContent> {
     let path = resolve_input_path(root, source);
-    let raw = fs::read(&path).with_context(|| {
-        format!(
-            "Could not read vendor assessment attachment {}",
-            path.display()
-        )
-    })?;
+    let raw =
+        crate::bounded_file::read_regular_bytes(&path, 32 * 1024 * 1024).with_context(|| {
+            format!(
+                "Could not read vendor assessment attachment {}",
+                path.display()
+            )
+        })?;
     Ok(content_from_bytes(&raw))
 }
 
@@ -121,8 +121,12 @@ fn append_to_array(value: &mut Value, item: Value) {
 fn attach_response(scope: Value, doc: Value, scope_path: PathBuf) -> Value {
     let output = format!(
         "Attached {} ({})\nScope: {}",
-        doc.get("title").and_then(Value::as_str).unwrap_or("document"),
-        doc.get("status").and_then(Value::as_str).unwrap_or("attached"),
+        doc.get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("document"),
+        doc.get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("attached"),
         scope_path.display()
     );
     crate::module_result::completed_output_result(

@@ -25,15 +25,31 @@ fn report_header_lines(summary: &RunSummary) -> Vec<String> {
         format!("# Kuzushi Run Report - {}", summary.run_id),
         String::new(),
         format!("- Status: {}", summary.status),
-        format!("- Tool: {}", summary.tool.as_deref().unwrap_or("not recorded")),
+        format!(
+            "- Tool: {}",
+            summary.tool.as_deref().unwrap_or("not recorded")
+        ),
         format!("- Target: {}", summary.target),
         format!("- Findings: {}", optional_number(summary.findings)),
-        format!("- Cost USD: {}", optional_cost(summary.cost_usd)),
+        format!("- Cost USD: {}", run_cost(summary)),
         String::new(),
     ];
     lines.extend(reproducibility_lines(summary));
     lines.extend(llm_call_lines(&summary.llm_calls));
     lines
+}
+
+fn run_cost(summary: &RunSummary) -> String {
+    if let Some(cost) = summary.cost_usd {
+        return format!("{cost:.6}");
+    }
+    if summary.provider_spend_unresolved {
+        return summary
+            .observed_cost_usd
+            .map(|cost| format!("observed {cost:.6}; provider spend unresolved"))
+            .unwrap_or_else(|| "invalid unresolved receipt".to_string());
+    }
+    "not recorded".to_string()
 }
 
 fn reproducibility_lines(summary: &RunSummary) -> Vec<String> {
@@ -45,7 +61,10 @@ fn reproducibility_lines(summary: &RunSummary) -> Vec<String> {
         metadata_line("Config Hash", summary.config_hash.as_deref()),
         metadata_line("Git SHA", summary.git_sha.as_deref()),
         metadata_line("Git Branch", summary.git_branch.as_deref()),
-        metadata_line("Threat Model SHA256", summary.threat_model_sha256.as_deref()),
+        metadata_line(
+            "Threat Model SHA256",
+            summary.threat_model_sha256.as_deref(),
+        ),
         target_git_metadata_line(summary.target_git.as_ref()),
     ]);
     lines.push(format!(
@@ -217,7 +236,12 @@ fn declared_artifact_lines(artifacts: &[RunArtifact]) -> Vec<String> {
     }
     artifacts
         .iter()
-        .map(|artifact| format!("- {} ({}) - {}", artifact.label, artifact.kind, artifact.path))
+        .map(|artifact| {
+            format!(
+                "- {} ({}) - {}",
+                artifact.label, artifact.kind, artifact.path
+            )
+        })
         .collect()
 }
 

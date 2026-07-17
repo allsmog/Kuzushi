@@ -23,12 +23,24 @@ pub mod engines;
 pub mod infrastructure;
 mod subprocess;
 
+/// Privacy-compatible default ruleset for Semgrep-backed security scans.
+///
+/// Semgrep rejects its special `auto` selector when metrics are disabled. Kuzushi
+/// deliberately forces metrics off, so the default must name a concrete pack.
+pub(crate) const DEFAULT_SEMGREP_CONFIG: &str = "p/security-audit";
+
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(in crate::scan) use application::default_scan_engine_selection_for_test;
 pub use application::{
-    default_scan_engines, normalize_semgrep_json, run_scan_engines, run_scan_engines_with_options,
+    default_scan_engines, normalize_semgrep_json, prepare_scan_workspace_state, run_scan_engines,
+    run_scan_engines_with_options, run_scan_engines_with_options_and_cancellation,
     run_semgrep_scan, scan_engines_for_tasks, ScanRun, ScanRunOptions,
+};
+pub(crate) use application::{
+    select_default_scan_engines, DefaultScanEngineSelection, SkippedDefaultScanEngine,
 };
 pub use domain::{
     CodeqlPersistedRun, CodeqlScanReport, ScanEngine, ScanEngineOutput, SemgrepPersistedRun,
@@ -51,12 +63,12 @@ pub use engines::sbom_scan::{
     scan_sbom, SbomComponent, SbomDependencyEdge, SbomLockfile, SbomScanReport,
 };
 pub(in crate::scan) use engines::semgrep::*;
-pub use subprocess::{RegisteredChild, ScanCancellation};
 use subprocess::{
-    capture_scanner_process_pipes, child_process_group_id, configure_scanner_process_group,
-    configure_scanner_subprocess_env, join_scanner_process_readers, wait_for_scanner_process,
-    ProcessOutput,
+    capture_scanner_process_pipes, configure_scanner_subprocess_env, join_scanner_process_readers,
+    wait_for_scanner_process, ProcessOutput,
 };
+pub(crate) use subprocess::{configure_scanner_process_group, PreparedProcessGroup};
+pub use subprocess::{CancellationDisposition, RegisteredChild, ScanCancellation};
 
 pub(crate) fn completed_scan_tool_json(output: String, data: Value) -> Value {
     let summary = output_summary(&output);

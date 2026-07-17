@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context;
 
 pub(crate) fn default_context_snapshot_view(snapshot_path: Option<PathBuf>) -> ContextSnapshotView {
     ContextSnapshotView {
@@ -39,20 +40,22 @@ pub(crate) fn default_workspace_view(target: Option<&WorkspaceTarget>) -> Worksp
 }
 
 pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<ContextSnapshotView> {
-    match context_snapshot_path_state(&snapshot_path) {
-        ContextSnapshotPathState::Missing => {
-            return Ok(default_context_snapshot_view(Some(snapshot_path)));
+    let workspace_root = context_snapshot_workspace_root(&snapshot_path)?;
+    let body = match kuzushi_core::workspace::read_optional_workspace_text(
+        &workspace_root,
+        &snapshot_path,
+        kuzushi_core::context::MAX_CONTEXT_SNAPSHOT_BYTES,
+    ) {
+        Ok(Some(body)) => body,
+        Ok(None) => return Ok(default_context_snapshot_view(Some(snapshot_path))),
+        Err(error) => {
+            return Ok(invalid_context_snapshot_view(
+                snapshot_path,
+                &format!("unsafe or unreadable: {error}"),
+            ))
         }
-        ContextSnapshotPathState::NonFile => {
-            return Ok(invalid_context_snapshot_view(snapshot_path, "not a file"));
-        }
-        ContextSnapshotPathState::Unreadable => {
-            return Ok(malformed_context_snapshot_view(snapshot_path));
-        }
-        ContextSnapshotPathState::File => {}
-    }
-
-    match read_context_snapshot_json(&snapshot_path) {
+    };
+    match read_context_snapshot_json(&body) {
         ContextSnapshotRead::Present(snapshot) => {
             Ok(present_context_snapshot_view(snapshot_path, &snapshot))
         }
@@ -60,22 +63,18 @@ pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<Conte
     }
 }
 
-fn context_snapshot_path_state(snapshot_path: &std::path::Path) -> ContextSnapshotPathState {
-    match fs::metadata(snapshot_path) {
-        Ok(metadata) if metadata.is_file() => ContextSnapshotPathState::File,
-        Ok(_) => ContextSnapshotPathState::NonFile,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            ContextSnapshotPathState::Missing
-        }
-        Err(_) => ContextSnapshotPathState::Unreadable,
-    }
-}
-
-enum ContextSnapshotPathState {
-    File,
-    Missing,
-    NonFile,
-    Unreadable,
+fn context_snapshot_workspace_root(snapshot_path: &std::path::Path) -> Result<PathBuf> {
+    let state_root = snapshot_path
+        .parent()
+        .context("Context snapshot path has no state directory")?;
+    let root = state_root
+        .parent()
+        .context("Context snapshot path has no workspace root")?;
+    anyhow::ensure!(
+        kuzushi_core::context_snapshot_path(root) == snapshot_path,
+        "Context snapshot path is outside the canonical workspace state location"
+    );
+    Ok(root.to_path_buf())
 }
 
 fn present_context_snapshot_view(
@@ -117,12 +116,8 @@ fn present_context_snapshot_view(
     }
 }
 
-fn read_context_snapshot_json(snapshot_path: &std::path::Path) -> ContextSnapshotRead {
-    let Ok(body) = fs::read_to_string(snapshot_path) else {
-        return ContextSnapshotRead::Malformed;
-    };
-
-    match serde_json::from_str(&body) {
+fn read_context_snapshot_json(body: &str) -> ContextSnapshotRead {
+    match serde_json::from_str(body) {
         Ok(value) => ContextSnapshotRead::Present(value),
         Err(_) => ContextSnapshotRead::Malformed,
     }
@@ -234,11 +229,30 @@ mod tests {
 
         assert_eq!(view.snapshot_path, Some(snapshot_path));
         assert!(!view.exists);
-        assert_eq!(
-            view.status,
-            "malformed context snapshot (not a file). Next: context build"
+        assert!(
+            view.status.contains("unsafe or unreadable"),
+            "{}",
+            view.status
         );
         assert!(view.languages.is_empty());
         assert!(view.frameworks.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_context_snapshot_view_rejects_outside_symlink_without_disclosing_content() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "OUTSIDE_CONTEXT_TOKEN").unwrap();
+        let snapshot_path = kuzushi_core::context_snapshot_path(temp.path());
+        fs::create_dir_all(snapshot_path.parent().unwrap()).unwrap();
+        symlink(outside.path(), &snapshot_path).unwrap();
+
+        let view = load_context_snapshot_view(snapshot_path).unwrap();
+
+        assert!(view.status.contains("unsafe or unreadable"));
+        assert!(!view.status.contains("OUTSIDE_CONTEXT_TOKEN"));
     }
 }

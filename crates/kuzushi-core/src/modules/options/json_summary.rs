@@ -31,8 +31,9 @@ pub(in crate::modules) fn validate_tool_input_options(
     for spec in &tool.options {
         match object.remove(&spec.name) {
             Some(value) => {
-                let coerced = coerce_option_value(spec, value)
-                    .with_context(|| format!("{} option {}", tool.name, spec.name))?;
+                let coerced = coerce_option_value(spec, value).map_err(|error| {
+                    anyhow::anyhow!("{} option {}: {error}", tool.name, spec.name)
+                })?;
                 validated.insert(spec.name.clone(), coerced);
             }
             None if spec.required => {
@@ -140,7 +141,7 @@ pub fn coerce_option_value(spec: &OptionSpec, value: Value) -> Result<Value> {
         OptionType::String | OptionType::Path => coerce_string_option(value),
         OptionType::StringList => coerce_string_list_option(value),
         OptionType::Bool => coerce_bool_option(value),
-        OptionType::Int => coerce_int_option(value),
+        OptionType::Int => coerce_int_option(spec, value),
         OptionType::Float => coerce_float_option(value),
         OptionType::Enum => coerce_enum_option(spec, value),
         OptionType::Json => Ok(value),

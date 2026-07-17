@@ -36,9 +36,10 @@ fn position_schema(required: &[&str]) -> Value {
     json!({
         "type": "object",
         "required": required,
+        "additionalProperties": false,
         "properties": {
-            "repoPath": {"type": "string"},
-            "file": {"type": "string"},
+            "repoPath": {"type": "string", "minLength": 1, "maxLength": 16384},
+            "file": {"type": "string", "minLength": 1, "maxLength": 16384, "description": "Relative child path; absolute paths and parent traversal are rejected."},
             "line": {"type": "integer", "minimum": 1},
             "column": {"type": "integer", "minimum": 1}
         }

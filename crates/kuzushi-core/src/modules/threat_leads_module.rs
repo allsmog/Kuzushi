@@ -11,12 +11,24 @@ pub(crate) fn threat_leads_module() -> BuiltinModule {
                 "threat-leads:build",
                 "Build threat-to-code lead cards for downstream hunt modules.",
                 vec![target_option()],
-            ),
+            )
+            .with_policy(workspace_policy(
+                ToolPhase::Map,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Optional,
+            )),
             tool_with_options(
                 "threat-leads:read",
                 "Read the current threat-leads artifact.",
                 vec![target_option()],
-            ),
+            )
+            .with_policy(tool_policy(
+                ToolPhase::Map,
+                RuntimeRequirement::Never,
+                ToolEffect::Read,
+                WorkspaceRequirement::Required,
+                FindingStoreRequirement::Optional,
+            )),
         ],
         vec![dag(
             "threat-leads:build",

@@ -3,14 +3,15 @@ use crate::command::ScanModeArg;
 use crate::scan_budget::apply_scan_budget_caps;
 use anyhow::Result;
 use kuzushi_core::run_artifacts::{
-    record_tool_run_failed, record_tool_run_started_with_reproducibility, ToolRunRecord,
+    try_record_tool_run_failed_settled, try_record_tool_run_started_with_reproducibility,
+    ToolRunRecord,
 };
 use kuzushi_core::{
     config_hash, load_config_for_target, new_run_id, FindingStore, ModuleRegistry,
     ToolExecutionContext, WorkspaceTarget,
 };
 use kuzushi_openai::LangGraphRuntime;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub(crate) const SCAN_TOOL: &str = "sast:scan";
 
@@ -73,7 +74,7 @@ fn prepare_scan_command_from_bootstrap(
     let config = bootstrap.load_config_or_record_failure()?;
     let setup = bootstrap.with_config(config);
     let store = setup.finding_store()?;
-    setup.index_workspace_snapshot()?;
+    setup.prepare_workspace_state(&store)?;
     setup.apply_since_scope(since, include_worktree, json, ci)?;
     setup.apply_budget_caps(budget, json, ci)?;
     let input = setup.prepared_input(use_stored_options, &store)?;
@@ -94,13 +95,8 @@ impl ScanCommandBootstrap {
     fn from_input(target: &PathBuf, requested_input: serde_json::Value) -> Result<Self> {
         let registry = ModuleRegistry::with_v2_builtins();
         let run_id = new_run_id("scan");
-        let workspace = match WorkspaceTarget::new(target) {
-            Ok(workspace) => workspace,
-            Err(error) => {
-                record_early_scan_prepare_failure(&registry, &run_id, &requested_input, &error)?;
-                return Err(error);
-            }
-        };
+        let workspace = WorkspaceTarget::new(target)?;
+        workspace.ensure_state_dir()?;
         Ok(Self {
             workspace,
             registry,
@@ -110,11 +106,11 @@ impl ScanCommandBootstrap {
     }
 
     fn load_config_or_record_failure(&self) -> Result<kuzushi_core::V2Config> {
-        load_config_for_target(Some(self.workspace.root())).inspect_err(|error| {
-            self.record_failure(
+        load_config_for_target(Some(self.workspace.root())).map_err(|error| {
+            self.recorded_error(
+                error,
                 &kuzushi_core::V2Config::default(),
                 &self.requested_input,
-                error,
             )
         })
     }
@@ -126,33 +122,46 @@ impl ScanCommandBootstrap {
         }
     }
 
-    fn record_failure(
+    fn recorded_error(
         &self,
+        error: anyhow::Error,
         config: &kuzushi_core::V2Config,
         input: &serde_json::Value,
-        error: &anyhow::Error,
-    ) {
-        record_scan_prepare_failure(
+    ) -> anyhow::Error {
+        let persistence = record_scan_prepare_failure(
             &self.workspace,
             &self.registry,
             &self.run_id,
             input,
             config,
-            error,
+            &error,
         );
+        match persistence {
+            Ok(()) => {
+                crate::presentation::scan_error_with_recovery(error, &self.workspace, &self.run_id)
+            }
+            Err(persistence) => error_with_persistence(error, Err(persistence)),
+        }
     }
 }
 
 impl ScanCommandSetup {
     fn finding_store(&self) -> Result<FindingStore> {
         FindingStore::open(self.bootstrap.workspace.findings_db_path())
-            .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
+            .map_err(|error| self.recorded_error(error, &self.bootstrap.requested_input))
     }
 
-    fn index_workspace_snapshot(&self) -> Result<()> {
-        kuzushi_core::incremental_index::index_workspace_snapshot(&self.bootstrap.workspace)
-            .map(|_| ())
-            .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
+    fn prepare_workspace_state(&self, store: &FindingStore) -> Result<()> {
+        let summary =
+            kuzushi_core::scan::prepare_scan_workspace_state(&self.bootstrap.workspace, store)
+                .map_err(|error| self.recorded_error(error, &self.bootstrap.requested_input))?;
+        if !summary.is_noop() {
+            eprintln!(
+                "suppressions: {} added, {} reopened by expiry, {} reopened by rule removal",
+                summary.added, summary.expired, summary.removed
+            );
+        }
+        Ok(())
     }
 
     fn apply_since_scope(
@@ -163,7 +172,7 @@ impl ScanCommandSetup {
         ci: bool,
     ) -> Result<()> {
         apply_scan_since_scope(&self.bootstrap.workspace, since, include_worktree, json, ci)
-            .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
+            .map_err(|error| self.recorded_error(error, &self.bootstrap.requested_input))
     }
 
     fn apply_budget_caps(&self, budget: Option<&str>, json: bool, ci: bool) -> Result<()> {
@@ -174,7 +183,7 @@ impl ScanCommandSetup {
             json,
             ci,
         )
-        .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
+        .map_err(|error| self.recorded_error(error, &self.bootstrap.requested_input))
     }
 
     fn prepared_input(
@@ -184,9 +193,8 @@ impl ScanCommandSetup {
     ) -> Result<serde_json::Value> {
         let option_store = if use_stored_options {
             Some(
-                scan_option_store(&self.bootstrap.workspace).inspect_err(|error| {
-                    self.record_failure(&self.bootstrap.requested_input, error)
-                })?,
+                scan_option_store(&self.bootstrap.workspace)
+                    .map_err(|error| self.recorded_error(error, &self.bootstrap.requested_input))?,
             )
         } else {
             None
@@ -196,6 +204,8 @@ impl ScanCommandSetup {
             workspace: Some(&self.bootstrap.workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         self.bootstrap
             .registry
@@ -206,15 +216,16 @@ impl ScanCommandSetup {
                 option_store.as_ref(),
             )
             .map(|input| scan_input_with_run_id(input, &self.bootstrap.run_id))
-            .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
+            .map_err(|error| self.recorded_error(error, &self.bootstrap.requested_input))
     }
 
     fn runtime(&self, input: &serde_json::Value) -> Result<Option<LangGraphRuntime>> {
-        scan_runtime(&self.config, input).inspect_err(|error| self.record_failure(input, error))
+        scan_runtime(&self.config, input, &self.bootstrap.workspace)
+            .map_err(|error| self.recorded_error(error, input))
     }
 
-    fn record_failure(&self, input: &serde_json::Value, error: &anyhow::Error) {
-        self.bootstrap.record_failure(&self.config, input, error);
+    fn recorded_error(&self, error: anyhow::Error, input: &serde_json::Value) -> anyhow::Error {
+        self.bootstrap.recorded_error(error, &self.config, input)
     }
 
     fn into_prepared(
@@ -249,46 +260,35 @@ fn record_scan_prepare_failure(
     input: &serde_json::Value,
     config: &kuzushi_core::V2Config,
     error: &anyhow::Error,
-) {
+) -> Result<()> {
     let record = ToolRunRecord::new(workspace.root(), run_id, "scan", SCAN_TOOL);
-    record_tool_run_started_with_reproducibility(
+    try_record_tool_run_started_with_reproducibility(
         record,
         input,
-        config.model.clone(),
+        kuzushi_core::tool_execution_model(SCAN_TOOL, input, config),
         config_hash(config).ok(),
         registry.loaded_module_specifiers(),
-    );
-    record_tool_run_failed(record, &error.to_string());
-}
-
-fn record_early_scan_prepare_failure(
-    registry: &ModuleRegistry,
-    run_id: &str,
-    input: &serde_json::Value,
-    error: &anyhow::Error,
-) -> Result<()> {
-    let target = std::env::current_dir()?;
-    record_scan_prepare_failure_at_target(&target, registry, run_id, input, error);
-    Ok(())
-}
-
-fn record_scan_prepare_failure_at_target(
-    target: &Path,
-    registry: &ModuleRegistry,
-    run_id: &str,
-    input: &serde_json::Value,
-    error: &anyhow::Error,
-) {
-    let config = kuzushi_core::V2Config::default();
-    let record = ToolRunRecord::new(target, run_id, "scan", SCAN_TOOL);
-    record_tool_run_started_with_reproducibility(
-        record,
+    )?;
+    let observation =
+        kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(workspace.root(), run_id)?;
+    let rejection = kuzushi_core::run_lifecycle::observe_preparation_rejection(
+        &observation,
+        SCAN_TOOL,
         input,
-        config.model.clone(),
-        config_hash(&config).ok(),
-        registry.loaded_module_specifiers(),
-    );
-    record_tool_run_failed(record, &error.to_string());
+        "preparation_policy",
+        &error.to_string(),
+    )?;
+    let (observation, completion) = rejection.into_parts();
+    try_record_tool_run_failed_settled(record, &error.to_string(), &observation, completion)
+}
+
+fn error_with_persistence(error: anyhow::Error, persistence: Result<()>) -> anyhow::Error {
+    match persistence {
+        Ok(()) => error,
+        Err(persistence) => anyhow::anyhow!(
+            "{error:#}; additionally, run artifact persistence failed: {persistence:#}"
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -301,6 +301,19 @@ mod tests {
 
         assert_eq!(input["runId"], serde_json::json!("scan-123"));
         assert_eq!(input["triage"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn prepare_error_keeps_secondary_persistence_failure() {
+        let error = error_with_persistence(
+            anyhow::anyhow!("invalid target"),
+            Err(anyhow::anyhow!("ledger unavailable")),
+        )
+        .to_string();
+
+        assert!(error.contains("invalid target"), "{error}");
+        assert!(error.contains("run artifact persistence failed"), "{error}");
+        assert!(error.contains("ledger unavailable"), "{error}");
     }
 
     #[test]
@@ -318,6 +331,7 @@ mod tests {
         .unwrap();
         drop(prepared);
 
+        assert!(tmp.path().join(".kuzushi/.gitignore").is_file());
         let log =
             kuzushi_core::event_log::EventLog::open(tmp.path().join(".kuzushi/v3/log")).unwrap();
         let events = log.read_all().unwrap();
@@ -329,6 +343,47 @@ mod tests {
         assert_eq!(
             events[1].event_kind,
             kuzushi_core::event_log::EventKind::FileIndexed
+        );
+    }
+
+    #[test]
+    fn scan_prepare_rejection_has_failed_task_call_and_exact_artifacts() {
+        let target = tempfile::tempdir().unwrap();
+        let error = prepare_scan_command_with_requested_input(
+            &target.path().to_path_buf(),
+            serde_json::json!({"unknownOption": true}),
+            true,
+            true,
+        )
+        .err()
+        .expect("unknown option must be rejected");
+        assert!(error.to_string().contains("unknown"));
+
+        let entry = kuzushi_core::list_recent_run_summary_entries(target.path(), 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        let read =
+            kuzushi_core::run_lifecycle::load_run_projection(target.path(), &entry.run_id).unwrap();
+        let call = read.projection.calls.values().next().unwrap();
+        assert_eq!(
+            call.status,
+            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+        );
+        assert_eq!(
+            read.projection.terminal.as_ref().map(|item| item.status),
+            Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+        );
+        assert!(read
+            .projection
+            .artifacts
+            .values()
+            .all(|artifact| artifact.producing_item_id == call.item_id));
+        assert_eq!(
+            call.result_artifact
+                .as_ref()
+                .map(|artifact| artifact.path.as_str()),
+            Some("result.json")
         );
     }
 }

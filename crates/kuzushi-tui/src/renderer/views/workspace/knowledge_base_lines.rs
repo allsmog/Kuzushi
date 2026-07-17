@@ -62,7 +62,7 @@ fn append_attached_records(lines: &mut Vec<Line<'static>>, model: &KnowledgeBase
         lines.extend(empty_state_panel(
             "no attachments yet",
             &[
-                "kuzushi indexes attachments under .kuzushi/v2/artifact-kb.sqlite3.",
+                "kuzushi indexes attachments under .kuzushi/v3/artifact-kb.sqlite3.",
                 "this module has no path or URL attachments bound.",
             ],
             &[
@@ -110,4 +110,23 @@ pub(crate) fn kb_artifact_widths(width: u16) -> Vec<usize> {
     let gaps = 4;
     let description = total.saturating_sub(state + path + gaps).max(16);
     vec![state, path, description]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn empty_knowledge_base_names_the_current_v3_store() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let rendered = knowledge_base_lines(&app, Rect::new(0, 0, 100, 30))
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(rendered.contains(".kuzushi/v3/artifact-kb.sqlite3"));
+        assert!(!rendered.contains(".kuzushi/v2/"));
+    }
 }

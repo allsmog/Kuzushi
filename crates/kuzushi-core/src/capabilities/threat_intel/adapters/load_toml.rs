@@ -12,7 +12,7 @@ pub const SUPPORTED_SCHEMA_VERSIONS: &[&str] = &["1"];
 /// severity values — those are operator typos and silently dropping
 /// them would defeat the catalog's audit trail.
 pub fn load_catalog_from_path(path: &Path) -> Result<Vec<CatalogEntry>> {
-    let raw = std::fs::read_to_string(path)
+    let raw = crate::bounded_file::read_utf8_text(path, 8 * 1024 * 1024)
         .with_context(|| format!("threat-intel: could not read catalog at {}", path.display()))?;
     parse_catalog_str(&raw, path)
 }

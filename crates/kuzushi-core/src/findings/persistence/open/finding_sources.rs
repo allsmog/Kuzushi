@@ -11,13 +11,21 @@ impl FindingStore {
             .map(|finding| finding.sources.clone())
             .unwrap_or_default();
         merge_projected_source(&mut sources, scan_id, finding);
-        sources.sort_by(|left, right| {
-            left.tool
-                .cmp(&right.tool)
-                .then_with(|| left.source_signature.cmp(&right.source_signature))
-        });
+        sort_finding_sources(&mut sources);
         sources
     }
+}
+
+pub(super) fn merged_finding_sources(
+    earlier: &[FindingSource],
+    later: &[FindingSource],
+) -> Vec<FindingSource> {
+    let mut merged = Vec::new();
+    for source in earlier.iter().chain(later).cloned() {
+        merge_finding_source(&mut merged, source);
+    }
+    sort_finding_sources(&mut merged);
+    merged
 }
 
 fn finding_source_signature(finding: &Finding) -> String {
@@ -41,24 +49,43 @@ fn finding_seen_at(finding: &Finding) -> &str {
 fn merge_projected_source(sources: &mut Vec<FindingSource>, scan_id: &str, finding: &Finding) {
     let source_signature = finding_source_signature(finding);
     let seen_at = finding_seen_at(finding);
+    merge_finding_source(
+        sources,
+        FindingSource {
+            tool: finding.tool.clone(),
+            vuln_source: finding.vuln_source,
+            source_signature,
+            first_scan_id: scan_id.to_string(),
+            last_scan_id: scan_id.to_string(),
+            first_seen_at: seen_at.to_string(),
+            last_seen_at: seen_at.to_string(),
+        },
+    );
+}
+
+fn merge_finding_source(sources: &mut Vec<FindingSource>, incoming: FindingSource) {
     if let Some(existing) = sources
         .iter_mut()
-        .find(|source| source.tool == finding.tool && source.source_signature == source_signature)
+        .find(|source| same_finding_source(source, &incoming))
     {
         if existing.vuln_source.is_none() {
-            existing.vuln_source = finding.vuln_source;
+            existing.vuln_source = incoming.vuln_source;
         }
-        existing.last_scan_id = scan_id.to_string();
-        existing.last_seen_at = seen_at.to_string();
+        existing.last_scan_id = incoming.last_scan_id;
+        existing.last_seen_at = incoming.last_seen_at;
         return;
     }
-    sources.push(FindingSource {
-        tool: finding.tool.clone(),
-        vuln_source: finding.vuln_source,
-        source_signature,
-        first_scan_id: scan_id.to_string(),
-        last_scan_id: scan_id.to_string(),
-        first_seen_at: seen_at.to_string(),
-        last_seen_at: seen_at.to_string(),
+    sources.push(incoming);
+}
+
+fn same_finding_source(left: &FindingSource, right: &FindingSource) -> bool {
+    left.tool == right.tool && left.source_signature == right.source_signature
+}
+
+fn sort_finding_sources(sources: &mut [FindingSource]) {
+    sources.sort_by(|left, right| {
+        left.tool
+            .cmp(&right.tool)
+            .then_with(|| left.source_signature.cmp(&right.source_signature))
     });
 }

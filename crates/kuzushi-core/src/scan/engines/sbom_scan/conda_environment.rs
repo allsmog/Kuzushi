@@ -1,9 +1,11 @@
+use super::bounded_fs as fs;
 use super::python_dependency::python_dependency_name;
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use serde_yaml::{Mapping, Value};
-use std::fs;
+use serde_json::Value;
 use std::path::Path;
+
+type Mapping = serde_json::Map<String, Value>;
 
 pub(super) fn is_conda_environment_manifest(name: &str) -> bool {
     matches!(name, "environment.yml" | "environment.yaml")
@@ -20,7 +22,7 @@ pub(super) fn conda_environment_components(
     path: &Path,
     text: &str,
 ) -> Result<Vec<SbomComponent>> {
-    let value: Value = serde_yaml::from_str(text).context("sbom-scan: parse Conda environment")?;
+    let value = crate::yaml::parse_value(text).context("sbom-scan: parse Conda environment")?;
     let mut components = Vec::new();
     for dependency in dependencies(&value) {
         components.extend(conda_dependency_components(target, path, dependency));
@@ -34,7 +36,7 @@ pub(super) fn conda_environment_edges(
 ) -> Result<Vec<SbomDependencyEdge>> {
     let text =
         fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
-    let value: Value = serde_yaml::from_str(&text).context("sbom-scan: parse Conda environment")?;
+    let value = crate::yaml::parse_value(&text).context("sbom-scan: parse Conda environment")?;
     let source = relative_display(target, path);
     Ok(dependencies(&value)
         .flat_map(conda_dependency_names)
@@ -123,20 +125,17 @@ fn dependencies(value: &Value) -> impl Iterator<Item = &Value> {
 }
 
 fn sequence_child<'a>(value: &'a Value, key: &str) -> Option<&'a Vec<Value>> {
-    mapping_value(value, key)?.as_sequence()
+    mapping_value(value, key)?.as_array()
 }
 
 fn mapping_child<'a>(value: &'a Value, key: &str) -> Option<&'a Vec<Value>> {
-    mapping_value(value, key)?.as_sequence()
+    mapping_value(value, key)?.as_array()
 }
 
 fn mapping_value<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    mapping(value)?.get(Value::String(key.to_string()))
+    mapping(value)?.get(key)
 }
 
 fn mapping(value: &Value) -> Option<&Mapping> {
-    match value {
-        Value::Mapping(mapping) => Some(mapping),
-        _ => None,
-    }
+    value.as_object()
 }

@@ -14,7 +14,7 @@ pub(in crate::modules) fn register_modules(
     executor: ToolExecutor,
     visibility: PluginAdapterVisibility,
 ) {
-    registry.register(wasm_plugin_module().with_executor(executor));
+    registry.register(wasm_plugin_module().with_executor(executor).deferred());
     registry.register(visible_when(
         vuln_scout_module().with_executor(executor),
         visibility.vuln_scout,
@@ -62,11 +62,18 @@ pub(in crate::modules) fn vuln_scout_module() -> BuiltinModule {
         "Vuln Scout",
         ModuleKind::Offense,
         "Whitebox pentest wrapper around the @kuzushi/vuln-scout Claude Code plugin.",
-        vec![tool_with_options(
-            "vuln-scout:audit",
-            "Run the optional Vuln Scout whitebox-audit plugin against the target repository.",
-            vec![target_option(), plugin_root_option(), model_option()],
-        )],
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Required,
+            ),
+            vec![tool_with_options(
+                "vuln-scout:audit",
+                "Run the optional Vuln Scout whitebox-audit plugin against the target repository.",
+                vec![target_option(), plugin_root_option(), model_option()],
+            )],
+        ),
         vec![dag("vuln-scout:audit", "findings", &["context:build"])],
     )
 }
@@ -92,8 +99,21 @@ pub(in crate::modules) fn tob_module() -> BuiltinModule {
                     .advanced(),
                     model_option(),
                 ],
+            )
+            .with_policy(workspace_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Required,
+            )),
+            tool("tob:skills", "List available Trail of Bits skill modules.").with_policy(
+                tool_policy(
+                    ToolPhase::Scan,
+                    RuntimeRequirement::Never,
+                    ToolEffect::Read,
+                    WorkspaceRequirement::Required,
+                    FindingStoreRequirement::Optional,
+                ),
             ),
-            tool("tob:skills", "List available Trail of Bits skill modules."),
         ],
         vec![dag("tob:audit", "findings", &["context:build"])],
     )
@@ -106,5 +126,6 @@ pub(in crate::modules) fn plugin_root_option() -> OptionSpec {
         "Installed plugin root path.",
     )
     .aliases(&["pluginPath", "plugin_root", "plugin_path"])
+    .external_read()
     .advanced()
 }

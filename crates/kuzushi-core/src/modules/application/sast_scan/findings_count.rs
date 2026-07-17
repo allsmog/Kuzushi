@@ -1,26 +1,6 @@
 use super::*;
 
 impl SastPipelineReports {
-    pub(in crate::modules) fn findings_count(&self) -> usize {
-        self.native.as_ref().map_or(0, |run| run.findings_count)
-            + self.agentic.as_ref().map_or(0, |report| report.count)
-            + self.carlini.as_ref().map_or(0, |report| report.count)
-            + self
-                .taint_iris_next
-                .as_ref()
-                .map_or(0, |report| report.count)
-            + self.systems_hunt.as_ref().map_or(0, |report| report.count)
-    }
-
-    pub(in crate::modules) fn primary_run_id(&self) -> Result<String> {
-        self.native_run_id()
-            .or_else(|| self.agentic_run_id())
-            .or_else(|| self.carlini_run_id())
-            .or_else(|| self.taint_iris_next_run_id())
-            .or_else(|| self.systems_hunt_run_id())
-            .context("sast:scan completed without a persisted run id")
-    }
-
     pub(in crate::modules) fn run_ids(&self, primary: String) -> SastRunIds {
         SastRunIds {
             primary,
@@ -65,7 +45,13 @@ impl SastPipelineReports {
     }
 }
 
-pub(in crate::modules) fn run_sast_pipeline_reports(
+pub(in crate::modules) fn prepare_sast_task_selection(input: &Value) -> Result<SastTaskSelection> {
+    let request = parse_sast_tasks(input)?;
+    SastTaskSelection::from_tasks(request.tasks, request.source)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(in crate::modules) fn run_selected_sast_pipeline_reports(
     registry: &ModuleRegistry,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
@@ -74,23 +60,16 @@ pub(in crate::modules) fn run_sast_pipeline_reports(
     workspace: &crate::workspace::WorkspaceTarget,
     store: &crate::findings::FindingStore,
     options: &ScanRunOptions,
+    selected: &SastTaskSelection,
 ) -> Result<SastPipelineReports> {
-    let tasks = parse_sast_tasks(input)?;
-    let selected = SastTaskSelection::from_tasks(tasks)?;
     selected.ensure_non_empty()?;
-    let mut reports = SastPipelineReports {
-        native: selected.run_native(workspace, store, options)?,
-        agentic: None,
-        carlini: None,
-        taint_iris_next: None,
-        systems_hunt: None,
-        engine_ids: selected.engine_ids.clone(),
-    };
+    let native = selected.run_native(workspace, store, options, ctx)?;
+    let mut reports = initial_sast_pipeline_reports(selected, native);
     fill_agentic_reports(
         registry,
         option_store,
         &mut reports,
-        &selected,
+        selected,
         input,
         ctx,
         runtime,
@@ -98,11 +77,39 @@ pub(in crate::modules) fn run_sast_pipeline_reports(
     Ok(reports)
 }
 
+fn initial_sast_pipeline_reports(
+    selected: &SastTaskSelection,
+    native: Option<ScanRun>,
+) -> SastPipelineReports {
+    let engine_outcomes = selected
+        .engine_ids
+        .iter()
+        .map(|engine| {
+            (
+                *engine,
+                crate::run_artifacts::ScanEngineStageOutcome::Complete,
+            )
+        })
+        .collect();
+    SastPipelineReports {
+        native,
+        agentic: None,
+        carlini: None,
+        taint_iris_next: None,
+        systems_hunt: None,
+        engine_ids: selected.engine_ids.clone(),
+        engine_outcomes,
+        skipped_engines: selected.skipped_engines.clone(),
+    }
+}
+
 pub(in crate::modules) struct SastTaskSelection {
     pub(in crate::modules) scanners: Vec<Box<dyn ScanEngine>>,
+    pub(in crate::modules) explicit_native_selection: bool,
     pub(in crate::modules) run_agentic: bool,
     pub(in crate::modules) run_carlini: bool,
     pub(in crate::modules) run_taint_iris_next: bool,
     pub(in crate::modules) run_systems_hunt: bool,
     pub(in crate::modules) engine_ids: Vec<&'static str>,
+    pub(in crate::modules) skipped_engines: Vec<crate::scan::SkippedDefaultScanEngine>,
 }

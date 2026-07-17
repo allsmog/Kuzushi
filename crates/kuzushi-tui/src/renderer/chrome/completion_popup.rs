@@ -14,10 +14,11 @@ pub(crate) fn render_completion_popup(frame: &mut Frame<'_>, area: Rect, app: &S
     if area.height == 0 {
         return;
     }
-    let Some(cycle) = app.completion_cycle() else {
+    let Some(cycle) = visible_completion_cycle(app) else {
         return;
     };
-    if cycle.candidates.is_empty() {
+    if area.height <= 2 {
+        render_compact_completion_popup(frame, area, cycle);
         return;
     }
     let visible = MAX_POPUP_ROWS.min(cycle.candidates.len());
@@ -35,6 +36,11 @@ pub(crate) fn render_completion_popup(frame: &mut Frame<'_>, area: Rect, app: &S
     render_lines(frame, area, lines);
 }
 
+fn visible_completion_cycle(app: &ShellApp) -> Option<&CompletionCycle> {
+    app.completion_cycle()
+        .filter(|cycle| !cycle.candidates.is_empty())
+}
+
 pub(crate) fn completion_popup_height(app: &ShellApp, area: Rect) -> u16 {
     let Some(cycle) = app.completion_cycle() else {
         return 0;
@@ -42,8 +48,34 @@ pub(crate) fn completion_popup_height(app: &ShellApp, area: Rect) -> u16 {
     if cycle.candidates.is_empty() || area.height < 6 {
         return 0;
     }
+    if area.height <= 12 {
+        return 2;
+    }
     let visible = MAX_POPUP_ROWS.min(cycle.candidates.len());
     (visible as u16) + 1
+}
+
+fn render_compact_completion_popup(frame: &mut Frame<'_>, area: Rect, cycle: &CompletionCycle) {
+    let width = area.width as usize;
+    let title = Line::styled(
+        fit("Tab cycle · Enter select · Esc restore", width),
+        theme::muted(),
+    );
+    let index = if cycle.index == usize::MAX {
+        0
+    } else {
+        cycle.index.min(cycle.candidates.len().saturating_sub(1))
+    };
+    let selected = popup_row_line(
+        PopupRow {
+            text: &cycle.candidates[index],
+            index,
+        },
+        0,
+        cycle,
+        width,
+    );
+    render_lines(frame, area, vec![title, selected]);
 }
 
 struct PopupRow<'a> {
@@ -70,7 +102,7 @@ fn popup_rows(cycle: &CompletionCycle) -> impl Iterator<Item = PopupRow<'_>> {
 
 fn popup_title_line(total: usize, prefix: &str, width: usize) -> Line<'static> {
     let label =
-        format!(" {total} options matching `{prefix}` — Tab cycles · Enter selects · Esc restores");
+        format!(" Enter selects · Esc restores · Tab cycles · {total} options matching `{prefix}`");
     Line::styled(fit(&label, width), theme::muted())
 }
 

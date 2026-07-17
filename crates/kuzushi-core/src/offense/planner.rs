@@ -19,8 +19,10 @@ use super::play::PlayOutcome;
 use super::play_context::PlayContext;
 use super::spec::PlaySpec;
 use super::transport::PlayTransport;
-use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
+use crate::runtime::{AgentQueryRequest, AgentRuntime, RuntimeCost, RuntimeCostReport};
+use crate::structured_output::{
+    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
+};
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -48,6 +50,56 @@ pub struct PlannerBudget {
     pub max_steps: u32,
 }
 
+struct PlannedLoop<'a> {
+    goal: &'a str,
+    ctx: &'a PlayContext,
+    runtime: &'a dyn AgentRuntime,
+    model: &'a str,
+    workspace_root: &'a std::path::Path,
+    transport: &'a dyn PlayTransport,
+    observer: &'a dyn HopObserver,
+    steps: Vec<PlayOutcome>,
+    observations: Vec<String>,
+    stopped_by_planner: bool,
+    cost: RuntimeCostReport,
+}
+
+impl PlannedLoop<'_> {
+    fn run_next(&mut self) -> Result<bool> {
+        self.observer.on_planning(self.steps.len());
+        let decision = plan_next_step(
+            self.goal,
+            &self.observations,
+            self.runtime,
+            self.model,
+            self.workspace_root,
+        )?;
+        self.cost = self.cost.checked_add(
+            decision.cost_report()?,
+            "offense planner accumulated cost",
+        )?;
+        let Some(spec) = proposed_play(decision.value, &mut self.stopped_by_planner) else {
+            return Ok(false);
+        };
+        let outcome = execute_planned_step(&spec, self.ctx, self.transport)?;
+        self.observer.on_hop(self.steps.len(), &outcome);
+        self.observations.push(observation_line(&outcome));
+        let landed = outcome.exploited;
+        self.steps.push(outcome);
+        Ok(landed)
+    }
+
+    fn finish(self, chain_name: &str) -> ChainOutcome {
+        finish_planned_chain(
+            chain_name,
+            self.ctx,
+            self.steps,
+            self.stopped_by_planner,
+            self.cost,
+        )
+    }
+}
+
 /// Drive the autonomous loop. The target is already authorized (the caller
 /// holds the [`PlayContext`]); each step queries the planner, builds the
 /// proposed play, executes it through `transport`, and threads the
@@ -63,33 +115,36 @@ pub fn run_planned_chain(
     budget: PlannerBudget,
     observer: &dyn HopObserver,
 ) -> Result<ChainOutcome> {
-    let mut steps: Vec<PlayOutcome> = Vec::new();
-    let mut observations: Vec<String> = Vec::new();
-    let mut stopped_by_planner = false;
     observer.on_chain_start(chain_name, &ctx.target().to_string());
-
+    let mut planned = PlannedLoop {
+        goal,
+        ctx,
+        runtime,
+        model,
+        workspace_root,
+        transport,
+        observer,
+        steps: Vec::new(),
+        observations: Vec::new(),
+        stopped_by_planner: false,
+        cost: RuntimeCostReport::known(RuntimeCost::ZERO),
+    };
     for _ in 0..budget.max_steps.max(1) {
-        observer.on_planning(steps.len());
-        let decision = plan_next_step(goal, &observations, runtime, model, workspace_root)?;
-        if decision.done {
-            stopped_by_planner = true;
-            break;
-        }
-        let Some(spec) = decision.play else {
-            stopped_by_planner = true;
-            break;
-        };
-        let outcome = execute_planned_step(&spec, ctx, transport)?;
-        observer.on_hop(steps.len(), &outcome);
-        observations.push(observation_line(&outcome));
-        let landed = outcome.exploited;
-        steps.push(outcome);
-        if !landed {
+        if !planned.run_next()? {
             break;
         }
     }
+    Ok(planned.finish(chain_name))
+}
 
-    Ok(finish_planned_chain(chain_name, ctx, steps, stopped_by_planner))
+fn proposed_play(decision: PlannerStep, stopped_by_planner: &mut bool) -> Option<PlaySpec> {
+    match (decision.done, decision.play) {
+        (false, Some(play)) => Some(play),
+        _ => {
+            *stopped_by_planner = true;
+            None
+        }
+    }
 }
 
 fn plan_next_step(
@@ -98,9 +153,9 @@ fn plan_next_step(
     runtime: &dyn AgentRuntime,
     model: &str,
     workspace_root: &std::path::Path,
-) -> Result<PlannerStep> {
+) -> Result<CostedStructuredJson<PlannerStep>> {
     let prompt = planner_prompt(goal, observations);
-    query_required_structured_json(
+    query_required_structured_json_with_cost(
         runtime,
         AgentQueryRequest::new(
             model,
@@ -153,6 +208,7 @@ fn finish_planned_chain(
     ctx: &PlayContext,
     steps: Vec<PlayOutcome>,
     stopped_by_planner: bool,
+    cost: RuntimeCostReport,
 ) -> ChainOutcome {
     let landed = steps.iter().filter(|s| s.exploited).count();
     // A planned chain "completed" when the planner stopped on its own terms
@@ -162,7 +218,11 @@ fn finish_planned_chain(
     let summary = format!(
         "planned chain: {landed}/{} step(s) landed{}",
         steps.len(),
-        if stopped_by_planner { ", planner stopped" } else { ", step budget exhausted" }
+        if stopped_by_planner {
+            ", planner stopped"
+        } else {
+            ", step budget exhausted"
+        }
     );
     ChainOutcome {
         chain: chain_name.to_string(),
@@ -170,6 +230,8 @@ fn finish_planned_chain(
         steps,
         completed,
         summary,
+        cost_usd: cost.observed_usd(),
+        cost_usd_exact: cost.is_complete(),
     }
 }
 
@@ -187,10 +249,10 @@ fn planner_step_schema() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::engagement_scope::{EngagementScope, ScopeEntry, ScopeTarget};
     use super::super::observer::NoopObserver;
     use super::super::transport::{PlayRequest, PlayResponse};
+    use super::*;
     use crate::findings::TriageOutcome;
     use crate::runtime::{AgentQueryResponse, AgentRuntime, TriageRequest};
     use std::path::Path;

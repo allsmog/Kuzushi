@@ -28,6 +28,7 @@ pub(crate) fn ui_run_dir(target: Option<&Path>, run_id: &str) -> PathBuf {
         .unwrap_or_else(|| ui_runs_root(None).join(run_id))
 }
 
+#[cfg(test)]
 pub(crate) fn ui_latest_run_path(target: Option<&Path>) -> PathBuf {
     target
         .map(kuzushi_core::latest_run_path)

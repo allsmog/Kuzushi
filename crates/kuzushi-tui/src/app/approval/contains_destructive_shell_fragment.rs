@@ -32,57 +32,53 @@ pub(crate) fn is_split_rm_rf(cmd: &str) -> bool {
 }
 
 pub fn parse_pending_patch(data: &serde_json::Value) -> Option<PendingPatch> {
-    let alias = data
-        .get("alias")
-        .and_then(serde_json::Value::as_str)?
+    let result: kuzushi_core::PatchResult =
+        serde_json::from_value(data.get("patchResult")?.clone()).ok()?;
+    pending_patch_from_result(
+        result,
+        data.get("explanation").and_then(serde_json::Value::as_str),
+    )
+}
+
+pub(crate) fn pending_patch_from_result(
+    result: kuzushi_core::PatchResult,
+    explanation: Option<&str>,
+) -> Option<PendingPatch> {
+    let tests = patch_validation_rows(&result);
+    let diff = result.diff.filter(|diff| !diff.trim().is_empty())?;
+    let rationale = explanation
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("reviewed patch candidate")
         .to_string();
-    let rationale = data
-        .get("rationale")
-        .and_then(serde_json::Value::as_str)?
-        .to_string();
-    let diff = data
-        .get("diff")
-        .and_then(serde_json::Value::as_str)?
-        .to_string();
-    let side_effect = data
-        .get("side_effect")
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string);
-    let tests = data
-        .get("tests")
-        .and_then(serde_json::Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|t| {
-                    let name = t
-                        .get("name")
-                        .and_then(serde_json::Value::as_str)?
-                        .to_string();
-                    let blurb = t
-                        .get("blurb")
-                        .and_then(serde_json::Value::as_str)
-                        .unwrap_or("")
-                        .to_string();
-                    Some((name, blurb))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let guardrail = data
-        .get("guardrail")
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string);
-    let staged_at = data
-        .get("staged_at")
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string);
     Some(PendingPatch {
-        alias,
+        alias: result.fingerprint,
+        patch_run_id: result.patch_run_id,
+        status: result.status,
         rationale,
-        side_effect,
+        side_effect: None,
         diff,
         tests,
-        guardrail,
-        staged_at,
+        guardrail: patch_guardrail(result.status),
+        staged_at: result.updated_at.or(result.created_at),
+    })
+}
+
+fn patch_validation_rows(result: &kuzushi_core::PatchResult) -> Vec<(String, String)> {
+    [
+        ("build", result.build_command.as_deref()),
+        ("test", result.test_command.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(name, command)| command.map(|command| (name.to_string(), command.to_string())))
+    .collect()
+}
+
+fn patch_guardrail(status: kuzushi_core::PatchStatus) -> Option<String> {
+    (status != kuzushi_core::PatchStatus::Sound).then(|| {
+        format!(
+            "Apply is blocked: persisted patch status is {} (SOUND required)",
+            status.as_str()
+        )
     })
 }

@@ -3,6 +3,7 @@ use crate::agent_router::RoutedRuntime;
 use crate::capabilities::full_mode_multi::domain::{
     FailedChunkError, FullModeConfig, FullModePlan, FullModeReport,
 };
+use crate::runtime::RuntimeCost;
 use crate::spend::SpendLimiter;
 use anyhow::{Context, Result};
 
@@ -40,7 +41,7 @@ fn dispatch_full_mode_chunks(
         }
         let chunk_result =
             chunk_execution::run_full_mode_chunk(runtime, spend, cfg, chunk, model, system_prompt)?;
-        chunks.record(chunk.id, chunk_result);
+        chunks.record(chunk.id, chunk_result)?;
     }
 
     Ok(chunks.into_report(plan))
@@ -59,22 +60,29 @@ struct FullModeChunkAccumulator {
     failed: u32,
     failed_chunk_errors: Vec<FailedChunkError>,
     cost_usd: f64,
+    unresolved_provider_spend: bool,
     first_chunk_error: Option<String>,
 }
 
 impl FullModeChunkAccumulator {
-    fn record(&mut self, chunk_id: u32, result: chunk_execution::FullModeChunkResult) {
+    fn record(&mut self, chunk_id: u32, result: chunk_execution::FullModeChunkResult) -> Result<()> {
+        self.cost_usd = RuntimeCost::checked_sum(
+            [self.cost_usd, result.observed_cost_usd],
+            "full-mode observed chunk fan-out cost",
+        )?
+        .usd();
+        self.unresolved_provider_spend |= result.cost_usd.is_none();
         if result.succeeded {
             self.record_success(result);
-            return;
+            return Ok(());
         }
 
         self.record_failure(chunk_id, result.error);
+        Ok(())
     }
 
     fn record_success(&mut self, result: chunk_execution::FullModeChunkResult) {
         self.dispatched += 1;
-        self.cost_usd += result.cost_usd;
         self.findings.extend(result.findings);
     }
 
@@ -92,7 +100,9 @@ impl FullModeChunkAccumulator {
             chunks_dispatched: self.dispatched,
             chunks_failed: self.failed,
             failed_chunk_errors: self.failed_chunk_errors,
-            cost_usd: self.cost_usd,
+            cost_usd: (!self.unresolved_provider_spend).then_some(self.cost_usd),
+            observed_cost_usd: self.cost_usd,
+            unresolved_provider_spend: self.unresolved_provider_spend,
             first_chunk_error: self.first_chunk_error,
             dry_run: false,
             plan,

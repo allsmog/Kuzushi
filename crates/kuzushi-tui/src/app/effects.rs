@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context;
 use kuzushi_core::findings::ReviewDecision;
 use kuzushi_core::incremental_index::WorkspaceIndexUpdate;
 use kuzushi_core::DynamicModuleLoadOptions;
@@ -8,6 +9,8 @@ use std::path::{Path, PathBuf};
 pub(crate) enum ShellEffect {
     OpenActivity(ActivityOpen),
     ApplyReviewedPatch(ReviewedPatchApply),
+    ExportReport(ReportExport),
+    RevealReportDestination,
     ApplySastTaskOptions(SastTaskOptionsApply),
     ApplyThreatPatch(ThreatPatchApply),
     AuthLogin(AuthLoginStart),
@@ -32,6 +35,7 @@ pub(crate) enum ShellEffect {
     ListPromptOverrides(PromptOverrideList),
     LoadDynamicModule(DynamicModuleLoad),
     OpenFilePicker,
+    OpenPromptDocument(PromptDocumentOpen),
     OpenGuidedScan(GuidedScanOpen),
     ShowKnowledgeBase(KnowledgeBaseShow),
     AttachKnowledgeBaseSource(KnowledgeBaseAttach),
@@ -63,6 +67,7 @@ pub(crate) enum ShellEffect {
     Quit,
     FinishShellQuit,
     RecordReviewDecision(ReviewDecisionApply),
+    RecordProofDeferral(ProofDeferralApply),
     RecordSuppression(SuppressionApply),
     UpdatePromptMutationStatus(PromptMutationStatusUpdate),
     RefreshPwnState,
@@ -153,14 +158,16 @@ pub(crate) enum PlanningDispatchView {
 }
 
 pub(crate) struct ReviewedPatchApply {
+    pub(crate) selected_attempt_id: String,
     pub(crate) alias: String,
+    pub(crate) patch_run_id: String,
     pub(crate) diff: String,
     pub(crate) target: Option<PathBuf>,
 }
 
 pub(crate) struct ThreatPatchApply {
     pub(crate) patch: ThreatPatch,
-    pub(crate) target: Option<PathBuf>,
+    pub(crate) target: PathBuf,
 }
 
 pub(crate) struct ReviewDecisionApply {
@@ -171,10 +178,23 @@ pub(crate) struct ReviewDecisionApply {
     pub(crate) target: Option<PathBuf>,
 }
 
+pub(crate) struct ProofDeferralApply {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) reference: String,
+    pub(crate) reason: String,
+}
+
 pub(crate) struct WorkspaceExportFindings {
     pub(crate) allow_empty: bool,
     pub(crate) completeness: Option<String>,
     pub(crate) format: Option<String>,
+    pub(crate) output: PathBuf,
+    pub(crate) target: Option<PathBuf>,
+}
+
+pub(crate) struct ReportExport {
+    pub(crate) format: kuzushi_core::WorkspaceExportFormat,
+    pub(crate) completeness: kuzushi_core::WorkspaceExportCompleteness,
     pub(crate) output: PathBuf,
     pub(crate) target: Option<PathBuf>,
 }
@@ -289,6 +309,7 @@ pub(crate) struct AgentRunRecord {
 pub(crate) enum AgentRunOutcome {
     Complete { answer_chars: usize },
     Failed { error: String },
+    Canceled { reason: String },
 }
 
 pub(crate) struct ScanRunRecord {
@@ -300,7 +321,16 @@ pub(crate) struct ScanRunRecord {
 
 pub(crate) enum ScanRunOutcome {
     Complete {
-        findings_count: usize,
+        result: serde_json::Value,
+    },
+    Partial {
+        result: serde_json::Value,
+    },
+    Skipped {
+        result: serde_json::Value,
+    },
+    FailedResult {
+        result: serde_json::Value,
     },
     Failed {
         error: String,
@@ -328,11 +358,41 @@ pub(crate) struct ToolRunRecordEffect {
 }
 
 pub(crate) enum ToolRunRecordOutcome {
-    Complete { result: serde_json::Value },
-    Failed { error: String },
-    Canceled { reason: String },
-    Interrupted { reason: String },
-    Refused { reason: String },
+    Complete {
+        result: serde_json::Value,
+    },
+    Failed {
+        error: String,
+    },
+    ObservedComplete {
+        result: serde_json::Value,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    ObservedFailed {
+        error: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    ObservedCanceled {
+        reason: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    ObservedInterrupted {
+        reason: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    ObservedRefused {
+        reason: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    },
+    Canceled {
+        reason: String,
+    },
+    Interrupted {
+        reason: String,
+    },
+    Refused {
+        reason: String,
+    },
 }
 
 pub(crate) struct FindingsRefresh {
@@ -398,6 +458,8 @@ pub(crate) struct TargetRevisionSwitch {
 pub(crate) enum TargetActivationSource {
     Command,
     Picker,
+    ScriptedScan,
+    OfflineDemo,
 }
 
 pub(crate) struct HouseRulesWrite {
@@ -412,6 +474,12 @@ pub(crate) struct HouseRulesReset {
 pub(crate) struct PromptOverrideWrite {
     pub(crate) path: PathBuf,
     pub(crate) value: String,
+}
+
+pub(crate) struct PromptDocumentOpen {
+    pub(crate) prompts: Vec<kuzushi_core::modules::PromptSpec>,
+    pub(crate) prompt_index: usize,
+    pub(crate) origin: ShellView,
 }
 
 pub(crate) struct PromptOverrideReset {
@@ -464,9 +532,10 @@ pub(crate) struct RunToolPreparation {
 #[derive(Debug, Clone)]
 pub(crate) struct RunToolLaunch {
     pub(crate) tool_name: String,
-    pub(crate) input: serde_json::Value,
+    pub(crate) input: PreparedToolInput,
     pub(crate) workspace: WorkspaceTarget,
     pub(crate) thinking_level: Option<String>,
+    pub(crate) authorization: ExecutionAuthorization,
 }
 
 impl ShellApp {
@@ -480,10 +549,11 @@ impl ShellApp {
                         demo_dir.display()
                     ),
                 );
-                self.reduce_scan_start(
-                    Some(demo_dir),
-                    Some(kuzushi_core::offline_demo_scan_input()),
-                )
+                self.request_target_activation(TargetActivation {
+                    path: demo_dir,
+                    selected_scope: None,
+                    source: TargetActivationSource::OfflineDemo,
+                })
             }
             Err(error) => {
                 self.log("error", format!("could not prepare demo fixture: {error}"));
@@ -521,6 +591,56 @@ impl ShellApp {
                     ),
                 );
             }
+        }
+    }
+
+    pub(super) fn export_report_effect(&mut self, export: ReportExport) {
+        let timestamp = effect_timestamp();
+        let result = export_findings_for_target(
+            export.target.as_ref(),
+            &export.output,
+            Some(export.format.as_str()),
+            Some(export.completeness.as_str()),
+            true,
+        );
+        let receipt = match result {
+            Ok(report) => ReportReceipt {
+                format: report.format,
+                completeness: export.completeness,
+                count: Some(report.count),
+                absolute_path: Some(report.output_path),
+                error: None,
+                timestamp,
+            },
+            Err(error) => ReportReceipt {
+                format: export.format,
+                completeness: export.completeness,
+                count: None,
+                absolute_path: report_absolute_path(export.target.as_ref(), &export.output),
+                error: Some(error.to_string()),
+                timestamp,
+            },
+        };
+        self.router.report_mut().set_receipt(receipt);
+        self.set_shell_view(ShellView::Report);
+    }
+
+    pub(super) fn reveal_report_destination_effect(&mut self) {
+        let path = self
+            .router
+            .report()
+            .receipt()
+            .and_then(|receipt| receipt.absolute_path.clone());
+        let result = path
+            .as_deref()
+            .context("export the report before revealing its destination")
+            .and_then(reveal_destination);
+        match result {
+            Ok(()) => self.router.report_mut().set_reveal_error(None),
+            Err(error) => self
+                .router
+                .report_mut()
+                .set_reveal_error(Some(error.to_string())),
         }
     }
 
@@ -609,14 +729,14 @@ impl ShellApp {
     }
 
     fn log_review_decision_workspace_error(&mut self, error: anyhow::Error) {
-        self.log(
-            "error",
+        self.set_error_notice(
+            "review",
             with_next_step(error.to_string(), "target <path> then findings"),
         );
     }
 
     pub(super) fn apply_threat_patch_effect(&mut self, apply: ThreatPatchApply) {
-        let target = threat_patch_target_root(apply.target);
+        let target = apply.target;
         self.engagement.clear_pending_threat_patch();
         self.set_completed_activity("threat model", "pending patch applied");
         let mut document = kuzushi_core::load_persistent_threat_model(&target)
@@ -649,24 +769,75 @@ impl ShellApp {
                 return;
             }
         };
-        match kuzushi_core::remediation::patch::apply_reviewed_patch(workspace.root(), &apply.diff)
-        {
-            Ok(report) => {
-                self.engagement.clear_pending_patch();
-                self.set_shell_view(ShellView::Workbench);
-                self.router
-                    .workbench_mut()
-                    .set_page(Some(crate::app::WorkbenchPage::Ship));
-                self.router
-                    .workbench_mut()
-                    .set_focus(crate::app::WorkbenchPane::Details);
-                self.log("patch", applied_patch_message(&apply.alias, &report));
+        let saga = match begin_patch_application(&workspace, self.findings(), &apply) {
+            Ok(saga) => saga,
+            Err(error) => {
+                self.log("error", format!("patch apply blocked: {error}"));
+                return;
             }
-            Err(error) => self.log(
-                "error",
-                with_next_step(error.to_string(), "review the diff or patch regen"),
-            ),
+        };
+        let result = kuzushi_core::remediation::patch::apply_prepared_reviewed_patch(
+            workspace.root(),
+            &apply.diff,
+            &saga.plan,
+        );
+        match result {
+            Ok(report) => self.finish_reviewed_patch_apply(&apply.alias, saga, report),
+            Err(error) => self.fail_reviewed_patch_apply(saga, error),
         }
+    }
+
+    fn finish_reviewed_patch_apply(
+        &mut self,
+        alias: &str,
+        mut saga: PatchApplicationSaga,
+        report: kuzushi_core::remediation::patch::ReviewedPatchApplyReport,
+    ) {
+        saga.record.state = kuzushi_core::PatchLifecycleState::Applied;
+        saga.record.touched_files = report.touched_files.clone();
+        saga.record.applied_at = Some(effect_timestamp());
+        saga.record.updated_at = effect_timestamp();
+        saga.record.detail = Some("applied; re-verification required".to_string());
+        if let Err(error) = saga.store.insert_patch_lifecycle_record(&saga.record) {
+            self.invalidate_finding_patch_truth(Some(&saga.record.fingerprint));
+            self.log(
+                "error",
+                format!(
+                    "patch was applied, but terminal receipt persistence failed; recovery remains at application {}: {error}",
+                    saga.record.application_id
+                ),
+            );
+            return;
+        }
+        self.invalidate_finding_patch_truth(Some(&saga.record.fingerprint));
+        self.engagement.clear_pending_patch();
+        self.set_shell_view(ShellView::Workbench);
+        self.router
+            .workbench_mut()
+            .set_page(Some(crate::app::WorkbenchPage::Fix));
+        self.router
+            .workbench_mut()
+            .set_focus(crate::app::WorkbenchPane::Findings);
+        self.log(
+            "patch",
+            applied_patch_message(alias, &report, &saga.record.application_id),
+        );
+    }
+
+    fn fail_reviewed_patch_apply(&mut self, mut saga: PatchApplicationSaga, error: anyhow::Error) {
+        saga.record.state = kuzushi_core::PatchLifecycleState::ApplyFailed;
+        saga.record.detail = Some(error.to_string());
+        saga.record.updated_at = effect_timestamp();
+        let receipt_error = saga.store.insert_patch_lifecycle_record(&saga.record).err();
+        self.invalidate_finding_patch_truth(Some(&saga.record.fingerprint));
+        let detail = receipt_error.map_or_else(
+            || error.to_string(),
+            |receipt| format!("{error}; failed to persist terminal receipt: {receipt}"),
+        );
+        self.log(
+            "error",
+            with_next_step(detail, "review the diff or patch regen"),
+        );
     }
 
     pub(super) fn dispatch_run_tool_effect(&mut self, launch: RunToolLaunch) -> Vec<ShellEffect> {
@@ -675,6 +846,7 @@ impl ShellApp {
             launch.input,
             launch.workspace,
             launch.thinking_level,
+            launch.authorization,
         )
     }
 
@@ -724,6 +896,7 @@ impl ShellApp {
             self.log("jobs", "that job is no longer running; nothing to cancel");
             return;
         }
+        self.flush_session_transcript();
         // Only the Run slot (scan/tool) ever writes DAG rows into the
         // Activity session — Agent/Plan/Threat jobs report through a
         // separate trace-free path (see `ShellEvent::kind()`). Cancelling a
@@ -757,10 +930,11 @@ impl ShellApp {
         if self.activity().is_none() {
             let mut session =
                 ActivitySession::new(open.run_id.unwrap_or_else(manual_activity_run_id));
-            session.seed_from_registry(self.registry());
+            session.seed_from_registry_legacy(self.registry());
             self.set_activity(Some(session));
         }
         self.set_shell_view(ShellView::Activity);
+        self.set_input_mode(InputMode::Navigate);
         self.log("activity", "live module-progress dashboard");
     }
 
@@ -785,8 +959,17 @@ fn resolve_run_artifact_selector(app: &mut ShellApp, open: &OpenRunArtifact) -> 
     if open.selector != "latest" {
         return resolve_known_run_reference(app, open);
     }
-    let latest_path = latest_run_pointer_path(app, open)?;
-    read_latest_run_id(app, &latest_path)
+    let Some(target) = open.target.as_deref() else {
+        app.log(
+            "error",
+            format!(
+                "{} latest needs a target. Next: target <path> or show runs",
+                open.view.verb()
+            ),
+        );
+        return None;
+    };
+    read_latest_run_id(app, target)
 }
 
 fn resolve_known_run_reference(app: &mut ShellApp, open: &OpenRunArtifact) -> Option<String> {
@@ -825,46 +1008,28 @@ fn resolve_known_run_reference(app: &mut ShellApp, open: &OpenRunArtifact) -> Op
     }
 }
 
-fn latest_run_pointer_path(app: &mut ShellApp, open: &OpenRunArtifact) -> Option<PathBuf> {
-    let Some(target) = open.target.as_deref() else {
-        app.log(
-            "error",
-            format!(
-                "{} latest needs a target. Next: target <path> or show runs",
-                open.view.verb()
-            ),
-        );
-        return None;
-    };
-    Some(crate::ui_view_models::ui_latest_run_path(Some(target)))
-}
-
-fn read_latest_run_id(app: &mut ShellApp, latest_path: &Path) -> Option<String> {
-    let text = match std::fs::read_to_string(&latest_path) {
-        Ok(text) => text,
+fn read_latest_run_id(app: &mut ShellApp, target: &Path) -> Option<String> {
+    match kuzushi_core::read_latest_run_pointer(target) {
+        Ok(kuzushi_core::LatestRunPointerState::Ready(run_id)) => Some(run_id.as_str().to_string()),
+        Ok(kuzushi_core::LatestRunPointerState::Missing) => {
+            app.log("error", "latest run pointer is missing. Next: show runs");
+            None
+        }
+        Ok(kuzushi_core::LatestRunPointerState::Invalid(issue)) => {
+            app.log(
+                "error",
+                format!("latest run pointer is invalid: {issue:?}. Next: show runs"),
+            );
+            None
+        }
         Err(error) => {
             app.log(
                 "error",
-                format!(
-                    "could not read latest run pointer {}: {error}. Next: show runs",
-                    latest_path.display()
-                ),
+                format!("could not resolve latest run pointer: {error}. Next: show runs"),
             );
-            return None;
+            None
         }
-    };
-    let run_id = text.trim();
-    if run_id.is_empty() {
-        app.log(
-            "error",
-            format!(
-                "latest run pointer {} is empty. Next: show runs",
-                latest_path.display()
-            ),
-        );
-        return None;
     }
-    Some(run_id.to_string())
 }
 
 impl RunArtifactView {
@@ -885,12 +1050,6 @@ fn current_unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
-}
-
-fn threat_patch_target_root(target: Option<PathBuf>) -> PathBuf {
-    target
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn record_review_decision_in_workspace(
@@ -917,6 +1076,7 @@ fn record_review_decision_in_workspace(
 fn applied_patch_message(
     alias: &str,
     report: &kuzushi_core::remediation::patch::ReviewedPatchApplyReport,
+    application_id: &str,
 ) -> String {
     let files = if report.touched_paths.is_empty() {
         "0 files".to_string()
@@ -932,7 +1092,220 @@ fn applied_patch_message(
             report.touched_paths.join(", ")
         )
     };
-    format!("applied reviewed patch for {alias} to {files}")
+    format!(
+        "applied reviewed patch for {alias} to {files}; re-verification required. Next: run patch:reverify {{\"applicationId\":\"{application_id}\"}}"
+    )
+}
+
+struct PatchApplicationIdentity {
+    store: kuzushi_core::FindingStore,
+    stable_fp: String,
+    fingerprint: String,
+    finding_scan_id: String,
+    patch_run_id: String,
+    source_commit: String,
+}
+
+struct PatchApplicationSaga {
+    store: kuzushi_core::FindingStore,
+    record: kuzushi_core::PatchLifecycleRecord,
+    plan: kuzushi_core::remediation::patch::ReviewedPatchApplyPlan,
+}
+
+fn patch_application_identity(
+    workspace: &WorkspaceTarget,
+    findings: &[Finding],
+    apply: &ReviewedPatchApply,
+) -> anyhow::Result<PatchApplicationIdentity> {
+    ensure_apply_matches_durable_selection(workspace, apply)?;
+    let store = kuzushi_core::FindingStore::open(workspace.findings_db_path())?;
+    let finding = finding_for_patch_apply(&store, findings, &apply.alias)?;
+    let patch = persisted_patch_for_apply(&store, &finding, apply)?;
+    let provenance = patch
+        .provenance
+        .context("legacy patch has no source provenance; regenerate the patch")?;
+    provenance.ensure_complete_for_apply()?;
+    ensure_patch_target_matches(workspace, &provenance.target)?;
+    let finding_scan_id = finding
+        .scan_id
+        .as_deref()
+        .filter(|scan_id| !scan_id.trim().is_empty())
+        .context("current finding has no discovery generation; regenerate the patch")?
+        .to_string();
+    anyhow::ensure!(
+        provenance.detector_run_id.as_deref() == Some(finding_scan_id.as_str()),
+        "patch belongs to an earlier finding generation; regenerate it"
+    );
+    let stable_fp = store.patch_lifecycle_stable_fp(&finding.fingerprint)?;
+    Ok(PatchApplicationIdentity {
+        store,
+        stable_fp,
+        fingerprint: finding.fingerprint,
+        finding_scan_id,
+        patch_run_id: patch.patch_run_id,
+        source_commit: provenance.source_commit,
+    })
+}
+
+fn ensure_apply_matches_durable_selection(
+    workspace: &WorkspaceTarget,
+    apply: &ReviewedPatchApply,
+) -> anyhow::Result<()> {
+    let selection = load_durable_fix_selection(workspace.root())?;
+    anyhow::ensure!(
+        selection.attempt_id == apply.selected_attempt_id,
+        "durable Fix selection changed before Apply"
+    );
+    anyhow::ensure!(
+        selection.patch.patch_run_id == apply.patch_run_id
+            && selection.patch.diff == apply.diff
+            && selection.patch.alias == apply.alias,
+        "Apply request does not match the durable Fix selection"
+    );
+    Ok(())
+}
+
+fn finding_for_patch_apply(
+    store: &kuzushi_core::FindingStore,
+    findings: &[Finding],
+    alias: &str,
+) -> anyhow::Result<Finding> {
+    if let Some(finding) = kuzushi_core::resolve_finding_alias(findings, alias) {
+        return Ok(finding);
+    }
+    store
+        .get_finding_by_reference(alias)?
+        .with_context(|| format!("finding {alias:?} is not available"))
+}
+
+fn persisted_patch_for_apply(
+    store: &kuzushi_core::FindingStore,
+    finding: &Finding,
+    apply: &ReviewedPatchApply,
+) -> anyhow::Result<kuzushi_core::PatchResult> {
+    let patch = store
+        .get_patch_results_for_finding(&finding.fingerprint)?
+        .into_iter()
+        .find(|patch| patch.patch_run_id == apply.patch_run_id)
+        .context("the reviewed patch result is no longer available")?;
+    anyhow::ensure!(
+        patch.status == kuzushi_core::PatchStatus::Sound,
+        "patch {} is {}; only SOUND candidates can be applied",
+        patch.patch_run_id,
+        patch.status.as_str()
+    );
+    anyhow::ensure!(
+        patch.diff.as_deref() == Some(apply.diff.as_str()),
+        "the reviewed diff does not match its persisted patch result"
+    );
+    Ok(patch)
+}
+
+fn ensure_patch_target_matches(workspace: &WorkspaceTarget, recorded: &str) -> anyhow::Result<()> {
+    let recorded = std::fs::canonicalize(recorded)
+        .context("patch generation target is unavailable; regenerate the patch")?;
+    anyhow::ensure!(
+        recorded == workspace.root(),
+        "patch was generated for another target; regenerate it for the active target"
+    );
+    Ok(())
+}
+
+fn begin_patch_application(
+    workspace: &WorkspaceTarget,
+    findings: &[Finding],
+    apply: &ReviewedPatchApply,
+) -> anyhow::Result<PatchApplicationSaga> {
+    let identity = patch_application_identity(workspace, findings, apply)?;
+    let plan = kuzushi_core::remediation::patch::prepare_reviewed_patch_apply(
+        workspace.root(),
+        &apply.diff,
+        &identity.source_commit,
+    )?;
+    let now = effect_timestamp();
+    let record = kuzushi_core::PatchLifecycleRecord {
+        application_id: kuzushi_core::new_run_id("patch-application"),
+        stable_fp: identity.stable_fp,
+        fingerprint: identity.fingerprint,
+        finding_scan_id: Some(identity.finding_scan_id),
+        patch_run_id: identity.patch_run_id,
+        target: workspace.root().display().to_string(),
+        diff_hash: plan.diff_hash.clone(),
+        base_commit: Some(plan.source_commit.clone()),
+        touched_files: plan.touched_files.clone(),
+        state: kuzushi_core::PatchLifecycleState::Applying,
+        reverify_run_id: None,
+        detail: Some("application intent recorded; mutation pending".to_string()),
+        actor: "terminal-operator".to_string(),
+        application_started_at: now.clone(),
+        applied_at: None,
+        updated_at: now,
+    };
+    identity.store.insert_patch_lifecycle_record(&record)?;
+    Ok(PatchApplicationSaga {
+        store: identity.store,
+        record,
+        plan,
+    })
+}
+
+fn effect_timestamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string()
+}
+
+fn report_absolute_path(target: Option<&PathBuf>, output: &Path) -> Option<PathBuf> {
+    let workspace = workspace_for_target(target).ok()?;
+    Some(if output.is_absolute() {
+        output.to_path_buf()
+    } else {
+        workspace.root().join(output)
+    })
+}
+
+fn reveal_destination(path: &Path) -> anyhow::Result<()> {
+    let mut command = reveal_destination_command(path)?;
+    let status = command
+        .status()
+        .with_context(|| format!("could not reveal {}", path.display()))?;
+    anyhow::ensure!(
+        status.success(),
+        "destination reveal exited with status {status}"
+    );
+    Ok(())
+}
+
+fn reveal_destination_command(path: &Path) -> anyhow::Result<std::process::Command> {
+    platform_reveal_destination_command(path)
+}
+
+#[cfg(target_os = "macos")]
+fn platform_reveal_destination_command(path: &Path) -> anyhow::Result<std::process::Command> {
+    let mut command = std::process::Command::new("open");
+    command.arg("-R").arg(path);
+    Ok(command)
+}
+
+#[cfg(target_os = "linux")]
+fn platform_reveal_destination_command(path: &Path) -> anyhow::Result<std::process::Command> {
+    let mut command = std::process::Command::new("xdg-open");
+    command.arg(path.parent().unwrap_or(path));
+    Ok(command)
+}
+
+#[cfg(target_os = "windows")]
+fn platform_reveal_destination_command(path: &Path) -> anyhow::Result<std::process::Command> {
+    let mut command = std::process::Command::new("explorer");
+    command.arg("/select,").arg(path);
+    Ok(command)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn platform_reveal_destination_command(_path: &Path) -> anyhow::Result<std::process::Command> {
+    anyhow::bail!("Reveal Destination is unavailable on this platform")
 }
 
 fn workspace_reindex_message(update: &WorkspaceIndexUpdate) -> String {
@@ -969,6 +1342,68 @@ mod tests {
     use kuzushi_core::V2Config;
 
     #[test]
+    fn report_export_success_stays_on_report_with_a_receipt() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("report-run", workspace.root(), "completed")
+            .unwrap();
+        let finding = kuzushi_core::Finding::new_semgrep(
+            "report.rule",
+            "src/app.rs",
+            4,
+            Some(4),
+            kuzushi_core::Severity::High,
+            "report finding",
+        );
+        store.insert_finding("report-run", &finding).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        app.export_report_effect(ReportExport {
+            format: kuzushi_core::WorkspaceExportFormat::Sarif,
+            completeness: kuzushi_core::WorkspaceExportCompleteness::All,
+            output: PathBuf::from("report.sarif"),
+            target: Some(workspace.root().to_path_buf()),
+        });
+
+        assert_eq!(app.shell_view(), ShellView::Report);
+        let receipt = app.router.report().receipt().unwrap();
+        assert_eq!(receipt.count, Some(1));
+        assert!(receipt.error.is_none());
+        let expected_path = workspace.root().join("report.sarif");
+        assert_eq!(
+            receipt.absolute_path.as_deref(),
+            Some(expected_path.as_path())
+        );
+        assert!(expected_path.exists());
+    }
+
+    #[test]
+    fn report_export_failure_stays_on_report_with_retry_context() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("missing-target");
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        app.export_report_effect(ReportExport {
+            format: kuzushi_core::WorkspaceExportFormat::Json,
+            completeness: kuzushi_core::WorkspaceExportCompleteness::Complete,
+            output: PathBuf::from("findings.json"),
+            target: Some(missing),
+        });
+
+        assert_eq!(app.shell_view(), ShellView::Report);
+        let receipt = app.router.report().receipt().unwrap();
+        assert_eq!(receipt.count, None);
+        assert!(receipt.error.is_some());
+        assert_eq!(receipt.format, kuzushi_core::WorkspaceExportFormat::Json);
+        assert_eq!(
+            receipt.completeness,
+            kuzushi_core::WorkspaceExportCompleteness::Complete
+        );
+    }
+
+    #[test]
     fn effect_runtime_executes_lifecycle_effects() {
         let mut app = ShellApp::new(V2Config::default(), None);
 
@@ -1003,13 +1438,20 @@ mod tests {
     }
 
     #[test]
-    fn offline_demo_fixture_effect_returns_scan_followup_without_starting_worker() {
+    fn offline_demo_fixture_effect_returns_target_activation_without_starting_worker() {
+        let _fixture_lock = demo_fixture_test_lock();
         let mut app = ShellApp::new(V2Config::default(), None);
 
         let effects = app.start_offline_demo_fixture_scan_effect();
 
         assert_eq!(effects.len(), 1);
-        assert!(matches!(effects[0], ShellEffect::PrepareScan(_)));
+        assert!(matches!(
+            effects[0],
+            ShellEffect::ActivateTarget(TargetActivation {
+                source: TargetActivationSource::OfflineDemo,
+                ..
+            })
+        ));
         assert!(app.scan_is_none());
         assert!(!app.jobs().is_running(JobKind::Run));
         assert!(app

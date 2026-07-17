@@ -2,7 +2,7 @@ use crate::scan::ScanCancellation;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fs;
+use std::fs::read_dir;
 use std::path::{Path, PathBuf};
 
 #[cfg(test)]
@@ -14,12 +14,12 @@ mod cabal;
 mod cargo_lock;
 mod cargo_manifest;
 mod cartfile_resolved;
-mod cyclonedx;
-mod conda_environment;
-mod conanfile_txt;
 mod composer_json;
 mod composer_lock;
+mod conanfile_txt;
+mod conda_environment;
 mod cpanfile;
+mod cyclonedx;
 mod deno_json;
 mod deno_lock;
 mod dependency_graph;
@@ -46,19 +46,19 @@ mod npm_lock;
 mod npm_package_json;
 mod nuget_lock;
 mod opam;
-mod pipfile_manifest;
 mod pipfile_lock;
-mod podfile_lock;
+mod pipfile_manifest;
 mod pnpm_lock;
+mod podfile_lock;
 mod poetry_lock;
 mod poetry_pyproject;
-mod pyproject_toml;
 mod pubspec_lock;
 mod pubspec_yaml;
+mod purl;
+mod pyproject_toml;
 mod python_dependency;
 mod r_description;
 mod renv_lock;
-mod purl;
 mod report;
 mod requirements;
 mod sbt_build;
@@ -72,8 +72,25 @@ mod vcpkg_json;
 mod yarn_lock;
 
 use dependency_graph::collect_dependency_edges;
-use lockfile_components::collect_lockfile_components;
 use lockfile::collect_lockfiles;
+use lockfile_components::collect_lockfile_components;
+
+mod bounded_fs {
+    use std::io;
+    use std::path::Path;
+
+    pub(super) use std::fs::read_dir;
+
+    const MAX_SBOM_INPUT_BYTES: usize = 64 * 1024 * 1024;
+
+    pub(super) fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
+        crate::bounded_file::read_utf8_text(path.as_ref(), MAX_SBOM_INPUT_BYTES)
+    }
+
+    pub(super) fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+        crate::bounded_file::read_regular_bytes(path.as_ref(), MAX_SBOM_INPUT_BYTES)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -146,11 +163,13 @@ fn collect_manifests(
     if cancellation.is_cancelled() {
         anyhow::bail!("sbom-scan scan cancelled");
     }
-    for entry in fs::read_dir(dir).with_context(|| format!("sbom-scan: read {}", dir.display()))? {
-        let path = entry?.path();
-        if path.is_dir() && !target::ignored_dir(&path) {
+    for entry in read_dir(dir).with_context(|| format!("sbom-scan: read {}", dir.display()))? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let path = entry.path();
+        if file_type.is_dir() && !target::ignored_dir(&path) {
             collect_manifests(&path, manifests, cancellation)?;
-        } else if manifest::is_dependency_manifest(&path) {
+        } else if file_type.is_file() && manifest::is_dependency_manifest(&path) {
             manifests.push(path);
         }
     }

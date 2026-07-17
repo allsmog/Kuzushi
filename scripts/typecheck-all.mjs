@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // typecheck-all.mjs — Run every TypeScript project check in parallel.
 //
-// Drop-in replacement for `pnpm typecheck && pnpm typecheck:benchmarks &&
-// pnpm typecheck:perf`. Runs the three `tsc --noEmit` invocations concurrently
+// Runs every project declared in typescript-projects.mjs concurrently
 // and interleaves their output with short prefixes so failures are easy to
 // attribute.
 //
@@ -12,6 +11,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { TYPESCRIPT_PROJECTS } from "./typescript-projects.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const REPO_ROOT = resolve(dirname(__filename), "..");
@@ -26,11 +26,11 @@ const LOCAL_TSC = resolve(
 );
 const TSC = existsSync(LOCAL_TSC) ? LOCAL_TSC : "tsc";
 
-const projects = [
-  { name: "src", cmd: TSC, args: ["--noEmit"] },
-  { name: "benchmarks", cmd: TSC, args: ["-p", "benchmarks/tsconfig.json", "--noEmit"] },
-  { name: "perf", cmd: TSC, args: ["-p", "perf/tsconfig.json", "--noEmit"] },
-];
+const projects = TYPESCRIPT_PROJECTS.map(({ name, config }) => ({
+  name,
+  cmd: TSC,
+  args: ["-p", config, "--noEmit"],
+}));
 
 const COLORS = process.stdout.isTTY
   ? {

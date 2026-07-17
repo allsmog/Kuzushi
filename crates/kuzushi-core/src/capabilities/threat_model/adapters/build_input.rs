@@ -26,7 +26,10 @@ pub(crate) fn parse_build_input(
         max_threats: read_usize(input, &["maxThreats", "max_threats"], 30, 1),
         emit_findings: read_bool(input, &["emitFindings", "emit_findings"], false),
         preserve_user_edits: read_bool(input, &["preserveUserEdits", "preserve_user_edits"], true),
-        prompt_override: prompt_override(input, &target)?,
+        prompt_override: Some(
+            prompt_override(input, &target)?
+                .unwrap_or_else(|| DEFAULT_THREAT_MODEL_GUIDANCE.to_string()),
+        ),
         model: build_model(input, ctx, flavor)?,
         target,
     })
@@ -48,16 +51,17 @@ fn context_limit(input: &Value) -> usize {
 }
 
 fn max_source_bytes(input: &Value) -> usize {
-    read_usize(input, &["maxSourceBytes", "max_source_bytes"], 200_000, 1)
+    read_usize(input, &["maxSourceBytes", "max_source_bytes"], 200_000, 1).min(MAX_SOURCE_BYTES)
 }
 
 fn prompt_override(input: &Value, target: &Path) -> Result<Option<String>> {
     read_string(input, &["THREAT_MODEL_PROMPT"])
         .map(|value| {
-            crate::options::resolve_prompt_override_for_key(
+            crate::options::resolve_prepared_prompt_override_for_key(
                 &value,
                 target,
                 "THREAT_MODEL_PROMPT",
+                crate::capabilities::threat_model::DEFAULT_THREAT_MODEL_GUIDANCE,
             )
         })
         .transpose()
@@ -129,7 +133,9 @@ fn push_unique_source_artifact(sources: &mut Vec<String>, source: String) {
 
 fn reject_invalid_source_artifact_combo(sources: &[String]) -> Result<()> {
     if sources.iter().any(|source| source == "none") && sources.len() > 1 {
-        anyhow::bail!("threat-model:build sources value \"none\" cannot be combined with other sources");
+        anyhow::bail!(
+            "threat-model:build sources value \"none\" cannot be combined with other sources"
+        );
     }
     Ok(())
 }

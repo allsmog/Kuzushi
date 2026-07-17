@@ -35,6 +35,9 @@ impl StorageWriter {
                 self.record_verification(verification)
             }
             DecisionCommand::RecordPatchAttempt(patch) => self.record_patch_attempt(patch),
+            DecisionCommand::RecordPatchLifecycle(lifecycle) => {
+                self.record_patch_lifecycle(lifecycle)
+            }
             DecisionCommand::RecordAudit(audit) => self.record_audit_event(audit),
             DecisionCommand::RecordRunLifecycle(run) => self.record_run_lifecycle(run),
             DecisionCommand::RecordFindingLifecycle(finding) => {
@@ -88,6 +91,9 @@ impl StorageWriter {
     ) -> Result<WriteReceipt> {
         require_state(self.lifecycle.state(), WriterActorState::Live)?;
         require_run_lifecycle_event_kind(run.event_kind)?;
+        if let Some(receipt) = self.existing_terminal_bridge_receipt(&run)? {
+            return Ok(receipt);
+        }
         let event = self.log.append(
             run.event_kind,
             run.actor.clone(),
@@ -96,6 +102,33 @@ impl StorageWriter {
             run.payload(),
         )?;
         self.apply_appended_event(&event)
+    }
+
+    fn existing_terminal_bridge_receipt(
+        &self,
+        run: &RunLifecycleWrite,
+    ) -> Result<Option<WriteReceipt>> {
+        let Some(terminal_hash) = run.terminal_item_hash.as_deref() else {
+            return Ok(None);
+        };
+        let existing = self.log.read_all()?.into_iter().find(|event| {
+            event.run_id.as_deref() == Some(&run.run_id)
+                && event
+                    .payload
+                    .get("terminalItemHash")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(terminal_hash)
+        });
+        let Some(event) = existing else {
+            return Ok(None);
+        };
+        Ok(Some(WriteReceipt {
+            committed_seq: event.seq,
+            event_hash: event.event_hash.as_str().to_string(),
+            projection_generation: self.projection.meta()?.generation,
+            projected_finding_id: None,
+            projected_review_decision_id: None,
+        }))
     }
 
     pub(in crate::storage_v3::writer_actor) fn record_finding_lifecycle(
@@ -124,7 +157,10 @@ fn require_audit_event_kind(event_kind: EventKind) -> Result<()> {
     ) {
         return Ok(());
     }
-    bail!("event kind {} is not a writer audit event", event_kind.as_str())
+    bail!(
+        "event kind {} is not a writer audit event",
+        event_kind.as_str()
+    )
 }
 
 fn require_run_lifecycle_event_kind(event_kind: EventKind) -> Result<()> {

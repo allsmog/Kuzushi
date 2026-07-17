@@ -67,6 +67,39 @@ mod tests {
     }
 
     #[test]
+    fn oversized_attachment_store_fails_before_unbounded_allocation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        workspace.ensure_state_dir().unwrap();
+        fs::File::create(attachment_store_path(&workspace))
+            .unwrap()
+            .set_len(4 * 1024 * 1024 + 1)
+            .unwrap();
+
+        let error = format!("{:#}", list_attachments(&workspace).unwrap_err());
+
+        assert!(error.contains("maximum supported size"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn attachment_store_reader_rejects_an_outside_symlink_without_disclosing_content() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "OUTSIDE_ATTACHMENT_TOKEN").unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        workspace.ensure_state_dir().unwrap();
+        symlink(outside.path(), attachment_store_path(&workspace)).unwrap();
+
+        let error = list_attachments(&workspace).unwrap_err().to_string();
+
+        assert!(error.contains("symlink"), "{error}");
+        assert!(!error.contains("OUTSIDE_ATTACHMENT_TOKEN"));
+    }
+
+    #[test]
     fn known_artifacts_cover_supported_bridge_modules() {
         let tmp = tempfile::tempdir().unwrap();
         fs::create_dir_all(tmp.path().join("x-ray")).unwrap();

@@ -1,16 +1,18 @@
 use crate::content_store::{
-    ContentStore, ObjectKind, ObjectRef, TargetSnapshot, TreeEntry, TreeEntryKind,
+    object_hash, ContentStore, ObjectKind, ObjectRef, TargetSnapshot, TreeEntry, TreeEntryKind,
+    TreeObject,
 };
 use crate::identity::{hash_parts, Blake3Hash};
 use crate::storage_v3::writer_actor::{
-    AuditWrite, FileDeletedWrite, FileFactWrite, SnapshotWrite, StorageWriterActor,
-    WatcherCommand, WriterCommand,
+    AuditWrite, FileDeletedWrite, FileFactWrite, SnapshotWrite, StorageWriterActor, WatcherCommand,
+    WriterCommand,
 };
 use crate::workspace::{target_git_metadata, WorkspaceTarget};
 use anyhow::{Context, Result};
-use serde_json::json;
 use rusqlite::{params, OptionalExtension};
+use serde_json::json;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -20,8 +22,8 @@ mod watcher;
 
 pub use change_coalescing::coalesce_changes;
 pub use watcher::{
-    classify_notify_event, classify_watcher_event, classify_watcher_events,
-    workspace_watch_scope, LiveWorkspaceWatcher, WatchEvent, WatchScope,
+    classify_notify_event, classify_notify_event_with_state, classify_watcher_event,
+    classify_watcher_events, workspace_watch_scope, LiveWorkspaceWatcher, WatchEvent, WatchScope,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -36,6 +38,10 @@ pub enum WorkspaceChange {
     RuleSetChanged,
     PromptOrHouseRuleChanged,
 }
+
+pub const MAX_INDEXED_FILE_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_INDEXED_SNAPSHOT_BYTES: u64 = 1024 * 1024 * 1024;
+pub const MAX_INDEXED_SNAPSHOT_FILES: usize = 200_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReindexPlan {
@@ -59,7 +65,9 @@ pub struct IndexedWorkspaceSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceIndexUpdate {
-    Noop { change_count: usize },
+    Noop {
+        change_count: usize,
+    },
     Invalidated {
         change_count: usize,
         applied_seq: u64,
@@ -139,6 +147,56 @@ pub fn index_workspace_snapshot(workspace: &WorkspaceTarget) -> Result<IndexedWo
     commit_index_projection(workspace, &snapshot, &tree, &metadata, &files)
 }
 
+pub fn current_workspace_tree_hash(root: impl AsRef<Path>) -> Result<String> {
+    let root = root.as_ref();
+    let mut entries = Vec::new();
+    let mut budget = IndexBudget::default();
+    collect_current_tree_entries(root, root, &mut entries, &mut budget)?;
+    entries.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| left.hash.cmp(&right.hash))
+    });
+    let bytes = serde_json::to_vec(&TreeObject { entries })?;
+    Ok(object_hash(ObjectKind::Tree, &bytes).as_str().to_string())
+}
+
+fn collect_current_tree_entries(
+    root: &Path,
+    dir: &Path,
+    entries: &mut Vec<TreeEntry>,
+    budget: &mut IndexBudget,
+) -> Result<()> {
+    for entry in fs::read_dir(dir).with_context(|| format!("Could not read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if should_ignore_path(&path) {
+            continue;
+        }
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            collect_current_tree_entries(root, &path, entries, budget)?;
+        } else if kind.is_file() {
+            entries.push(current_tree_entry(root, &path, budget)?);
+        }
+    }
+    Ok(())
+}
+
+fn current_tree_entry(root: &Path, path: &Path, budget: &mut IndexBudget) -> Result<TreeEntry> {
+    let metadata =
+        fs::symlink_metadata(path).with_context(|| format!("Could not stat {}", path.display()))?;
+    validate_indexed_file(path, &metadata)?;
+    budget.record(metadata.len())?;
+    let bytes = read_indexed_file(path)?;
+    Ok(TreeEntry {
+        name: workspace_relative_path(root, path)?,
+        kind: TreeEntryKind::Blob,
+        hash: object_hash(ObjectKind::Blob, &bytes),
+        executable: false,
+    })
+}
+
 pub fn index_workspace_changes(
     workspace: &WorkspaceTarget,
     changes: &[WorkspaceChange],
@@ -193,9 +251,7 @@ pub fn plan_for_change(change: &WorkspaceChange) -> ReindexPlan {
         }
         WorkspaceChange::FileChanged(_)
         | WorkspaceChange::FileDeleted(_)
-        | WorkspaceChange::FileMoved { .. } => {
-            ReindexPlan::FileFacts
-        }
+        | WorkspaceChange::FileMoved { .. } => ReindexPlan::FileFacts,
         WorkspaceChange::ManifestChanged(_) | WorkspaceChange::LockfileChanged(_) => {
             ReindexPlan::DependencyIndex
         }
@@ -260,7 +316,10 @@ fn record_workspace_invalidation(
 }
 
 fn workspace_invalidation_summary(changes: &[WorkspaceChange]) -> String {
-    if changes.iter().any(|change| matches!(change, WorkspaceChange::RuleSetChanged)) {
+    if changes
+        .iter()
+        .any(|change| matches!(change, WorkspaceChange::RuleSetChanged))
+    {
         return "rule-set changed; deterministic scanner observations marked stale".to_string();
     }
     if changes.iter().any(|change| {
@@ -324,13 +383,14 @@ fn index_workspace_file_fact_changes(
 }
 
 pub fn should_ignore_path(path: &Path) -> bool {
-    let text = path.to_string_lossy();
-    text.contains(".kuzushi/v3/")
-        || text.contains(".git/objects/")
-        || path
-            .components()
-            .filter_map(|component| component.as_os_str().to_str())
-            .any(|part| matches!(part, "node_modules" | "target" | "dist"))
+    path.components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .any(|part| {
+            matches!(
+                part,
+                ".git" | ".kuzushi" | "node_modules" | "target" | "dist"
+            )
+        })
 }
 
 fn is_route_or_controller(path: &Path) -> bool {
@@ -344,7 +404,8 @@ fn is_route_or_controller(path: &Path) -> bool {
 
 fn collect_indexed_files(root: &Path, store: &ContentStore) -> Result<Vec<IndexedFile>> {
     let mut files = Vec::new();
-    collect_indexed_files_from(root, root, store, &mut files)?;
+    let mut budget = IndexBudget::default();
+    collect_indexed_files_from(root, root, store, &mut files, &mut budget)?;
     files.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(files)
 }
@@ -354,6 +415,7 @@ fn collect_indexed_files_from(
     dir: &Path,
     store: &ContentStore,
     files: &mut Vec<IndexedFile>,
+    budget: &mut IndexBudget,
 ) -> Result<()> {
     for entry in fs::read_dir(dir).with_context(|| format!("Could not read {}", dir.display()))? {
         let entry = entry?;
@@ -363,16 +425,18 @@ fn collect_indexed_files_from(
         }
         let kind = entry.file_type()?;
         if kind.is_dir() {
-            collect_indexed_files_from(root, &path, store, files)?;
+            collect_indexed_files_from(root, &path, store, files, budget)?;
         } else if kind.is_file() {
-            files.push(index_file(root, &path, store)?);
+            let indexed = index_file(root, &path, store)?;
+            budget.record(indexed.file_size)?;
+            files.push(indexed);
         }
     }
     Ok(())
 }
 
 fn latest_projected_snapshot(workspace: &WorkspaceTarget) -> Result<Vec<IndexedFile>> {
-    let conn = rusqlite::Connection::open(workspace.findings_db_path())?;
+    let conn = crate::sqlite_connection::open_file(&workspace.findings_db_path())?;
     let snapshot_hash = conn
         .query_row(
             "select snapshot_hash from target_snapshots order by created_at desc, rowid desc limit 1",
@@ -453,6 +517,7 @@ fn replace_indexed_file(
     let absolute_path = root.join(relative_path);
     let indexed = index_file(root, &absolute_path, store)?;
     remove_indexed_file(files, relative_path);
+    IndexBudget::from_files(files).record(indexed.file_size)?;
     files.push(indexed);
     Ok(())
 }
@@ -463,8 +528,10 @@ fn remove_indexed_file(files: &mut Vec<IndexedFile>, relative_path: &Path) {
 }
 
 fn index_file(root: &Path, path: &Path, store: &ContentStore) -> Result<IndexedFile> {
-    let bytes = fs::read(path).with_context(|| format!("Could not read {}", path.display()))?;
-    let metadata = fs::metadata(path).with_context(|| format!("Could not stat {}", path.display()))?;
+    let metadata =
+        fs::symlink_metadata(path).with_context(|| format!("Could not stat {}", path.display()))?;
+    validate_indexed_file(path, &metadata)?;
+    let bytes = read_indexed_file(path)?;
     let blob = store.put_blob(&bytes)?;
     let storage_path = store.object_path(&blob.hash);
     Ok(IndexedFile {
@@ -475,6 +542,84 @@ fn index_file(root: &Path, path: &Path, store: &ContentStore) -> Result<IndexedF
         mtime_ns: modified_time_ns(&metadata),
         language: language::language_for_path(path),
     })
+}
+
+#[derive(Default)]
+struct IndexBudget {
+    files: usize,
+    bytes: u64,
+}
+
+impl IndexBudget {
+    fn from_files(files: &[IndexedFile]) -> Self {
+        Self {
+            files: files.len(),
+            bytes: files
+                .iter()
+                .fold(0_u64, |total, file| total.saturating_add(file.file_size)),
+        }
+    }
+
+    fn record(&mut self, bytes: u64) -> Result<()> {
+        self.files = self.files.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes);
+        anyhow::ensure!(
+            self.files <= MAX_INDEXED_SNAPSHOT_FILES,
+            "workspace index exceeds the {MAX_INDEXED_SNAPSHOT_FILES}-file safety limit"
+        );
+        anyhow::ensure!(
+            self.bytes <= MAX_INDEXED_SNAPSHOT_BYTES,
+            "workspace index exceeds the {MAX_INDEXED_SNAPSHOT_BYTES}-byte safety limit"
+        );
+        Ok(())
+    }
+}
+
+fn validate_indexed_file(path: &Path, metadata: &fs::Metadata) -> Result<()> {
+    anyhow::ensure!(
+        metadata.is_file(),
+        "Indexed path is not a regular file: {}",
+        path.display()
+    );
+    anyhow::ensure!(
+        !metadata.file_type().is_symlink(),
+        "Indexed path must not be a symlink: {}",
+        path.display()
+    );
+    anyhow::ensure!(
+        metadata.len() <= MAX_INDEXED_FILE_BYTES,
+        "Indexed file exceeds the {MAX_INDEXED_FILE_BYTES}-byte safety limit: {}",
+        path.display()
+    );
+    Ok(())
+}
+
+fn read_indexed_file(path: &Path) -> Result<Vec<u8>> {
+    let file =
+        open_indexed_file(path).with_context(|| format!("Could not read {}", path.display()))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_INDEXED_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= MAX_INDEXED_FILE_BYTES,
+        "Indexed file grew beyond the {MAX_INDEXED_FILE_BYTES}-byte safety limit: {}",
+        path.display()
+    );
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn open_indexed_file(path: &Path) -> std::io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_indexed_file(path: &Path) -> std::io::Result<fs::File> {
+    fs::File::open(path)
 }
 
 fn commit_incremental_projection(
@@ -492,7 +637,11 @@ fn commit_incremental_projection(
     commands.extend(files.iter().map(|file| {
         WriterCommand::Watcher(WatcherCommand::FileIndexed(file_write(snapshot, file)))
     }));
-    commands.extend(changes.iter().filter_map(|change| deleted_file_write(snapshot, change)));
+    commands.extend(
+        changes
+            .iter()
+            .filter_map(|change| deleted_file_write(snapshot, change)),
+    );
     let receipts = StorageWriterActor::commit_blocking_many(
         workspace.event_log_dir(),
         workspace.findings_db_path(),
@@ -545,14 +694,21 @@ fn indexed_snapshot_file(file: &IndexedFile) -> IndexedSnapshotFile {
     }
 }
 
-fn snapshot_write(snapshot: &ObjectRef, tree: &ObjectRef, metadata: &SnapshotMetadata) -> SnapshotWrite {
+fn snapshot_write(
+    snapshot: &ObjectRef,
+    tree: &ObjectRef,
+    metadata: &SnapshotMetadata,
+) -> SnapshotWrite {
     SnapshotWrite {
         snapshot_hash: snapshot.hash.as_str().to_string(),
         tree_hash: tree.hash.as_str().to_string(),
         workspace_root_fingerprint: metadata.workspace_root_fingerprint.clone(),
         git_commit: metadata.git_commit.clone(),
         git_branch: metadata.git_branch.clone(),
-        dirty_hash: metadata.dirty_hash.as_ref().map(|hash| hash.as_str().to_string()),
+        dirty_hash: metadata
+            .dirty_hash
+            .as_ref()
+            .map(|hash| hash.as_str().to_string()),
         index_hash: None,
         config_hash: None,
         actor: "incremental-index".to_string(),
@@ -601,7 +757,7 @@ fn tree_entries(files: &[IndexedFile]) -> Vec<TreeEntry> {
         .collect()
 }
 
-fn workspace_root_fingerprint(root: &Path) -> String {
+pub(crate) fn workspace_root_fingerprint(root: &Path) -> String {
     hash_parts("workspace-root", &[root.to_string_lossy().as_bytes()])
         .as_str()
         .to_string()
@@ -622,7 +778,14 @@ fn snapshot_metadata(root: &Path, files: &[IndexedFile]) -> SnapshotMetadata {
 fn dirty_files_hash(files: &[IndexedFile]) -> crate::identity::Blake3Hash {
     let payload = files
         .iter()
-        .map(|file| format!("{}\0{}\0{}", file.path, file.blob.hash.as_str(), file.file_size))
+        .map(|file| {
+            format!(
+                "{}\0{}\0{}",
+                file.path,
+                file.blob.hash.as_str(),
+                file.file_size
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     hash_parts("workspace-dirty-files", &[payload.as_bytes()])

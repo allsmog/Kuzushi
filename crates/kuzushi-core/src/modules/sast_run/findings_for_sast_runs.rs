@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 pub(in crate::modules) fn findings_for_sast_runs(
     store: &FindingStore,
@@ -8,7 +9,7 @@ pub(in crate::modules) fn findings_for_sast_runs(
     let mut seen = BTreeSet::new();
     for run_id in run_ids.all() {
         for finding in store.list_findings_for_scan_id(run_id)? {
-            if seen.insert(finding.fingerprint.clone()) {
+            if seen.insert(finding_dedupe_key(&finding)) {
                 findings.push(finding);
             }
         }
@@ -16,14 +17,32 @@ pub(in crate::modules) fn findings_for_sast_runs(
     Ok(findings)
 }
 
+fn finding_dedupe_key(finding: &Finding) -> String {
+    finding
+        .identity_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&finding.fingerprint)
+        .to_string()
+}
+
 pub(in crate::modules) fn write_sast_scan_input(
+    workspace: &WorkspaceTarget,
+    run_id: &str,
     artifacts: &SastRunArtifacts,
     input: &Value,
 ) -> Result<()> {
-    fs::write(
-        &artifacts.scan_input,
-        format!("{}\n", serde_json::to_string_pretty(input)?),
+    let spec = crate::run_artifacts::scan_pipeline_artifact_spec(SAST_SCAN_INPUT_FILE)
+        .context("scan input artifact must be declared")?;
+    crate::run_artifacts::write_run_artifact_json(
+        workspace.root(),
+        run_id,
+        SAST_SCAN_INPUT_FILE,
+        spec.label,
+        input,
     )
+    .map(|_| ())
     .with_context(|| format!("Could not write {}", artifacts.scan_input.display()))
 }
 
@@ -34,26 +53,68 @@ pub(in crate::modules) fn write_static_ranking_json(
     artifacts: &SastRunArtifacts,
 ) -> Result<Value> {
     let findings = findings_for_sast_runs(store, run_ids)?;
-    let attack_surface = crate::attack_surface::build_attack_surface_map(workspace.root()).ok();
-    let evidence_store = StaticEvidenceStore::open(workspace).ok();
-    let threat_model = crate::load_persistent_threat_model(workspace.root());
-    let ranked = rank_static_findings_with_threats(
+    let mut enrichments = load_static_ranking_enrichments(workspace);
+    let (ranked, evidence_warnings) = rank_static_findings_with_threats_degraded(
         &findings,
-        attack_surface.as_ref(),
-        evidence_store.as_ref(),
-        threat_model.as_ref(),
+        enrichments.attack_surface.as_ref(),
+        enrichments.evidence_store.as_ref(),
+        enrichments.threat_model.as_ref(),
     )?;
+    enrichments.warnings.extend(evidence_warnings);
     let artifact_path = artifacts.dir.join("static-ranking.json");
-    let report = json!({
+    let report = static_ranking_report(ranked, enrichments, &artifact_path);
+    artifacts.write_json("static-ranking.json", "static ranking", &report)?;
+    Ok(report)
+}
+
+struct StaticRankingEnrichments {
+    attack_surface: Option<crate::attack_surface::AttackSurfaceMap>,
+    evidence_store: Option<StaticEvidenceStore>,
+    threat_model: Option<Value>,
+    warnings: Vec<String>,
+}
+
+fn load_static_ranking_enrichments(workspace: &WorkspaceTarget) -> StaticRankingEnrichments {
+    let mut warnings = Vec::new();
+    let attack_surface = optional_enrichment(
+        "attack surface",
+        crate::attack_surface::build_attack_surface_map(workspace.root()),
+        &mut warnings,
+    );
+    let evidence_store = optional_enrichment(
+        "static evidence store",
+        StaticEvidenceStore::open(workspace),
+        &mut warnings,
+    );
+    let threat_model = optional_enrichment(
+        "threat model",
+        crate::try_load_persistent_threat_model(workspace.root()),
+        &mut warnings,
+    )
+    .flatten();
+    StaticRankingEnrichments {
+        attack_surface,
+        evidence_store,
+        threat_model,
+        warnings,
+    }
+}
+
+fn static_ranking_report(
+    ranked: Vec<StaticRankedFinding>,
+    enrichments: StaticRankingEnrichments,
+    artifact_path: &Path,
+) -> Value {
+    json!({
         "count": ranked.len(),
         "ranked": ranked,
-        "attackSurfaceAvailable": attack_surface.is_some(),
-        "threatModelAvailable": threat_model.is_some(),
-        "evidenceDb": evidence_store
-            .as_ref()
+        "attackSurfaceAvailable": enrichments.attack_surface.is_some(),
+        "threatModelAvailable": enrichments.threat_model.is_some(),
+        "evidenceDb": enrichments.evidence_store.as_ref()
             .map(|store| store.db_path().to_string()),
         "artifact": artifact_path.display().to_string(),
         "deterministic": true,
+        "warnings": enrichments.warnings,
         "factors": [
             "attackSurfaceReachability",
             "sourceSinkClass",
@@ -65,13 +126,36 @@ pub(in crate::modules) fn write_static_ranking_json(
             "confidence",
             "threatModelPriority"
         ],
-    });
-    fs::write(
-        &artifact_path,
-        format!("{}\n", serde_json::to_string_pretty(&report)?),
-    )
-    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
-    Ok(report)
+    })
+}
+
+fn optional_enrichment<T>(label: &str, result: Result<T>, warnings: &mut Vec<String>) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(error) => {
+            warnings.push(format!("{label} unavailable: {error:#}"));
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_enrichment_records_degraded_state_without_failing() {
+        let mut warnings = Vec::new();
+        let value = optional_enrichment::<usize>(
+            "fixture",
+            Err(anyhow::anyhow!("malformed optional artifact")),
+            &mut warnings,
+        );
+
+        assert_eq!(value, None);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("malformed optional artifact"));
+    }
 }
 
 pub(in crate::modules) fn write_static_narratives_json(
@@ -94,10 +178,6 @@ pub(in crate::modules) fn write_static_narratives_json(
         "artifact": artifact_path.display().to_string(),
         "deterministic": narrative_report.deterministic,
     });
-    fs::write(
-        &artifact_path,
-        format!("{}\n", serde_json::to_string_pretty(&report)?),
-    )
-    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    artifacts.write_json("static-narratives.json", "static narratives", &report)?;
     Ok(report)
 }

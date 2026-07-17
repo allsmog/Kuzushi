@@ -19,6 +19,8 @@ mod tests {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         }
     }
 
@@ -297,6 +299,8 @@ HTTP
             workspace: None,
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let error = execute_recon_tool(
             "recon:http-fingerprint",
@@ -413,6 +417,37 @@ HTTP
     }
 
     #[test]
+    fn import_httpx_derives_common_fields_from_a_url_only_record() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("httpx-url-only.jsonl");
+        fs::write(
+            &dump,
+            "{\"url\":\"https://example.com\",\"status-code\":200,\"title\":\"Example\"}\n",
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("httpx", &dump), &ctx)
+            .expect("url-only httpx import succeeds");
+
+        let hosts = result["data"]["hosts"].as_array().unwrap();
+        let services = result["data"]["services"].as_array().unwrap();
+        let notes = result["data"]["notes"].as_array().unwrap();
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0]["address"], "example.com");
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0]["port"], 443);
+        assert!(notes
+            .iter()
+            .any(|note| note["data"]["status_code"] == 200));
+        assert!(notes
+            .iter()
+            .any(|note| note["data"]["imported"] == 1));
+    }
+
+    #[test]
     fn import_nuclei_jsonl_creates_notes_with_severity() {
         let workspace_dir = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
@@ -478,10 +513,43 @@ HTTP
         let ctx = context(&config, &workspace);
         let dump = workspace_dir.path().join("anything.jsonl");
         fs::write(&dump, "{}\n").unwrap();
-        let err = execute_recon_tool("recon:import", import_input("burp", &dump), &ctx)
+        let err = execute_recon_tool("recon:import", import_input("unsupported", &dump), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("amass, httpx, nuclei, nmap-xml"));
+        assert!(err.contains("amass, httpx, nuclei, nmap-xml, burp-xml, har"));
+    }
+
+    #[test]
+    fn recon_import_har_folds_bounty_evidence_into_the_canonical_route() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("traffic.har");
+        fs::write(
+            &dump,
+            json!({
+                "log": {
+                    "version": "1.2",
+                    "entries": [{
+                        "request": {
+                            "method": "GET",
+                            "url": "https://api.lab.test/health",
+                            "headers": []
+                        },
+                        "response": {"status": 200, "headers": []}
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("har", &dump), &ctx)
+            .expect("HAR import succeeds through recon");
+
+        assert_eq!(result["data"]["imported"], 1);
+        assert!(result["output"].as_str().unwrap().contains("recon:import har"));
     }
 
     #[test]

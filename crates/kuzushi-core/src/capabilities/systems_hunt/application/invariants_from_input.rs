@@ -1,4 +1,5 @@
 use super::*;
+use crate::workspace::WorkspaceTarget;
 
 pub(crate) fn invariants_from_input(input: &Value) -> Option<Result<SystemsInvariantOutput>> {
     let value = input
@@ -85,33 +86,32 @@ pub(crate) fn resolve_model(
 
 pub(crate) fn resolve_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     match input.get("target").and_then(Value::as_str) {
-        Some(target) => resolve_explicit_target(target),
+        Some(target) => resolve_explicit_target(target, ctx),
         None => resolve_context_target(ctx),
     }
 }
 
-fn resolve_explicit_target(target: &str) -> Result<PathBuf> {
+fn resolve_explicit_target(target: &str, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     let trimmed = target.trim();
     if trimmed.is_empty() {
-        return current_dir_target();
+        anyhow::bail!("systems-hunt target may not be blank")
     }
-    resolve_target_candidate(PathBuf::from(trimmed))
+    resolve_target_candidate(PathBuf::from(trimmed), ctx)
 }
 
-fn resolve_target_candidate(candidate: PathBuf) -> Result<PathBuf> {
+fn resolve_target_candidate(candidate: PathBuf, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     if candidate.is_absolute() {
         return Ok(candidate);
     }
-    Ok(current_dir_target()?.join(candidate))
+    Ok(required_context_workspace(ctx)?.join(candidate))
 }
 
 fn resolve_context_target(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    match ctx.workspace {
-        Some(workspace) => Ok(workspace.root().to_path_buf()),
-        None => current_dir_target(),
-    }
+    Ok(required_context_workspace(ctx)?.to_path_buf())
 }
 
-fn current_dir_target() -> Result<PathBuf> {
-    std::env::current_dir().context("Could not resolve current directory")
+fn required_context_workspace<'a>(ctx: &'a ToolExecutionContext<'_>) -> Result<&'a Path> {
+    ctx.workspace
+        .map(WorkspaceTarget::root)
+        .context("systems-hunt requires an explicit active workspace")
 }

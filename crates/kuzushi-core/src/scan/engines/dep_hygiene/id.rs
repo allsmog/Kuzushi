@@ -1,47 +1,81 @@
 use super::*;
 
+const CARGO_AUDIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 impl ScanEngine for CargoAuditScanner {
     fn id(&self) -> &'static str {
         "cargo-audit"
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {
-        if cancellation.is_cancelled() {
-            anyhow::bail!("cargo-audit scan cancelled");
-        }
-
-        let lockfile = target.join("Cargo.lock");
-        if !lockfile.exists() {
+        let Some(lockfile) = cargo_audit_lockfile(target, cancellation)? else {
             return Ok(Vec::new());
-        }
+        };
         ensure_cargo_audit_available()?;
-
-        let output = Command::new("cargo")
-            .args(["audit", "--json"])
-            .arg("--file")
-            .arg(&lockfile)
-            .current_dir(target)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .with_context(|| "cargo-audit: failed to invoke `cargo audit`")?;
-
-        // cargo-audit exits non-zero when vulnerabilities are found; that's
-        // expected. Any output that fails to parse is treated as no findings.
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(parse_cargo_audit_output(&stdout))
+        let output = run_cargo_audit(target, &lockfile, cancellation)?;
+        cargo_audit_findings_from_output(output)
     }
 }
 
-pub fn parse_cargo_audit_output(json: &str) -> Vec<Finding> {
-    let Some(value) = parse_cargo_audit_json(json) else {
-        return Vec::new();
-    };
-    cargo_audit_entries(&value).map_or_else(Vec::new, cargo_audit_findings)
+fn cargo_audit_lockfile(target: &Path, cancellation: &ScanCancellation) -> Result<Option<PathBuf>> {
+    if cancellation.is_cancelled() {
+        anyhow::bail!("cargo-audit scan cancelled");
+    }
+    let lockfile = target.join("Cargo.lock");
+    Ok(lockfile.exists().then_some(lockfile))
 }
 
-fn parse_cargo_audit_json(json: &str) -> Option<Value> {
-    serde_json::from_str(json).ok()
+fn run_cargo_audit(
+    target: &Path,
+    lockfile: &Path,
+    cancellation: &ScanCancellation,
+) -> Result<std::process::Output> {
+    let mut command = Command::new("cargo");
+    command
+        .args(["audit", "--json"])
+        .arg("--file")
+        .arg(lockfile)
+        .current_dir(target)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::bounded_subprocess::output_with_control(
+        &mut command,
+        "cargo audit",
+        Some(cancellation),
+        CARGO_AUDIT_TIMEOUT,
+    )
+    .with_context(|| "cargo-audit: failed to invoke `cargo audit`")
+}
+
+fn cargo_audit_findings_from_output(output: std::process::Output) -> Result<Vec<Finding>> {
+    // cargo-audit exits non-zero when vulnerabilities are found; that's
+    // expected. Malformed or shape-invalid output is never a clean scan.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let findings = parse_cargo_audit_output(&stdout)?;
+    if !cargo_audit_status_is_usable(output.status.success(), output.status.code()) {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("cargo-audit failed: {}", stderr.trim());
+    }
+    anyhow::ensure!(
+        output.status.success() || !findings.is_empty(),
+        "cargo-audit reported vulnerabilities but emitted no usable advisory entries"
+    );
+    Ok(findings)
+}
+
+pub fn parse_cargo_audit_output(json: &str) -> Result<Vec<Finding>> {
+    let value: Value = serde_json::from_str(json).context("cargo-audit returned malformed JSON")?;
+    if let Some(entries) = cargo_audit_entries(&value) {
+        return cargo_audit_findings(entries);
+    }
+    if value
+        .pointer("/vulnerabilities/found")
+        .and_then(Value::as_bool)
+        == Some(false)
+    {
+        return Ok(Vec::new());
+    }
+    anyhow::bail!("cargo-audit JSON is missing vulnerabilities.list")
 }
 
 fn cargo_audit_entries(value: &Value) -> Option<&[Value]> {
@@ -52,48 +86,66 @@ fn cargo_audit_entries(value: &Value) -> Option<&[Value]> {
         .map(Vec::as_slice)
 }
 
-fn cargo_audit_findings(entries: &[Value]) -> Vec<Finding> {
-    entries.iter().filter_map(cargo_audit_finding).collect()
+fn cargo_audit_findings(entries: &[Value]) -> Result<Vec<Finding>> {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            cargo_audit_finding(entry)
+                .with_context(|| format!("cargo-audit advisory entry {} is invalid", index + 1))
+        })
+        .collect()
 }
 
-fn cargo_audit_finding(entry: &Value) -> Option<Finding> {
-    let advisory = entry.get("advisory")?;
-    let id = cargo_audit_advisory_field(advisory, "id", "RUSTSEC-UNKNOWN").to_string();
-    let title = cargo_audit_advisory_field(advisory, "title", "(no title)");
-    let package = cargo_audit_package_field(entry, "name");
-    let version = cargo_audit_package_field(entry, "version");
+fn cargo_audit_finding(entry: &Value) -> Result<Finding> {
+    let advisory = entry.get("advisory").context("missing advisory object")?;
+    let id = required_cargo_audit_field(advisory, "id")?.to_string();
+    let title = required_cargo_audit_field(advisory, "title")?;
+    let package = entry.get("package").context("missing package object")?;
+    let package_name = required_cargo_audit_field(package, "name")?;
+    let version = required_cargo_audit_field(package, "version")?;
     let severity = severity_from_cvss(advisory.get("cvss").and_then(Value::as_str));
-    let message = format!("{id}: {package}@{version} — {title}");
+    let message = format!("{id}: {package_name}@{version} — {title}");
 
-    Some(Finding::new_tool(
-        "cargo-audit",
-        id,
-        "Cargo.lock",
-        1,
-        None,
-        severity,
-        message,
+    Ok(
+        Finding::new_tool("cargo-audit", id, "Cargo.lock", 1, None, severity, message)
+            .with_static_proof_state(StaticProofState::SignalOnly),
     )
-    .with_static_proof_state(StaticProofState::SignalOnly))
 }
 
-fn cargo_audit_advisory_field<'a>(
-    advisory: &'a Value,
-    field: &str,
-    fallback: &'static str,
-) -> &'a str {
-    advisory
+fn required_cargo_audit_field<'a>(value: &'a Value, field: &str) -> Result<&'a str> {
+    value
         .get(field)
         .and_then(Value::as_str)
-        .unwrap_or(fallback)
+        .filter(|value| !value.trim().is_empty())
+        .with_context(|| format!("missing non-empty {field}"))
 }
 
-fn cargo_audit_package_field<'a>(entry: &'a Value, field: &str) -> &'a str {
-    entry
-        .get("package")
-        .and_then(|package| package.get(field))
-        .and_then(Value::as_str)
-        .unwrap_or("?")
+fn cargo_audit_status_is_usable(success: bool, code: Option<i32>) -> bool {
+    success || code == Some(1)
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_documented_vulnerability_exit_is_accepted() {
+        assert!(cargo_audit_status_is_usable(true, Some(0)));
+        assert!(cargo_audit_status_is_usable(false, Some(1)));
+        assert!(!cargo_audit_status_is_usable(false, Some(2)));
+        assert!(!cargo_audit_status_is_usable(false, None));
+    }
+
+    #[test]
+    fn cancelled_scan_stops_before_cargo_audit_preflight() {
+        let cancellation = ScanCancellation::default();
+        cancellation.cancel();
+
+        let error = cargo_audit_lockfile(Path::new("."), &cancellation).unwrap_err();
+
+        assert!(error.to_string().contains("cancelled"));
+    }
 }
 
 fn ensure_cargo_audit_available() -> Result<()> {
@@ -101,7 +153,7 @@ fn ensure_cargo_audit_available() -> Result<()> {
         return Ok(());
     }
     anyhow::bail!(
-        "cargo-audit: `cargo audit` was not found. Install cargo-audit with `cargo install cargo-audit`, then rerun `kuzushi scan --tasks cargo-audit` or `kuzushi run sast:scan --input '{{\"tasks\":[\"cargo-audit\"]}}'`."
+        "cargo-audit: `cargo audit` was not found. Install cargo-audit with `cargo install cargo-audit`, then rerun `kuzushi scan <repo> --tasks cargo-audit` or `kuzushi --target <repo> run sast:scan --input '{{\"tasks\":[\"cargo-audit\"]}}'`."
     )
 }
 

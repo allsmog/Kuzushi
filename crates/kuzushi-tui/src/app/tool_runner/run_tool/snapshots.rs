@@ -38,24 +38,42 @@ impl ShellApp {
     }
 
     fn hydrate_persisted_taint_flow(&mut self, root: &std::path::Path) {
-        if let Some(flow) = kuzushi_core::capabilities::load_persistent_taint_flow(root)
+        let snapshot = match kuzushi_core::capabilities::try_load_persistent_taint_flow(root) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.log("scene", format!("Could not hydrate taint flow: {error}"));
+                None
+            }
+        };
+        let flows = snapshot
             .as_ref()
-            .and_then(taint_flow_from_data)
-        {
-            self.domain_mut().set_taint_flow(Some(flow));
-        }
+            .map(taint_flows_from_data)
+            .unwrap_or_default();
+        self.domain_mut().set_taint_flows(flows);
     }
 
     fn hydrate_persisted_exploit_chains(&mut self, root: &std::path::Path) {
-        let Some(chain_data) = kuzushi_core::capabilities::load_persistent_exploit_chains(root)
-        else {
-            return;
+        let chain_data = match kuzushi_core::capabilities::try_load_persistent_exploit_chains(root)
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                self.log(
+                    "scene",
+                    format!("Could not hydrate exploit chains: {error}"),
+                );
+                None
+            }
         };
-        let details = exploit_chain_details(&chain_data);
-        if !details.is_empty() {
-            self.domain_mut().set_exploit_chains(details);
-            self.set_chain_aliases(exploit_chain_aliases(&chain_data));
-        }
+        let details = chain_data
+            .as_ref()
+            .map(exploit_chain_details)
+            .unwrap_or_default();
+        let aliases = chain_data
+            .as_ref()
+            .map(exploit_chain_aliases)
+            .unwrap_or_default();
+        self.domain_mut().set_exploit_chains(details);
+        self.set_chain_aliases(aliases);
     }
 }
 
@@ -79,17 +97,27 @@ const MAX_RECON_SERVICES: usize = 500;
 const MAX_RECON_NOTES: usize = 200;
 
 fn cache_recon_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::Value) -> bool {
-    if !tool_name.starts_with("recon:") {
+    let Some(snapshot) = recon_snapshot_from_data(tool_name, data) else {
         return false;
-    }
-    app.domain_mut().set_recon_snapshot(ReconSnapshot {
+    };
+    app.domain_mut().set_recon_snapshot(snapshot);
+    true
+}
+
+pub(crate) fn recon_snapshot_from_result(result: &serde_json::Value) -> Option<ReconSnapshot> {
+    let data = result.get("data")?;
+    let tool_name = data_string(data, "tool")?;
+    recon_snapshot_from_data(&tool_name, data)
+}
+
+fn recon_snapshot_from_data(tool_name: &str, data: &serde_json::Value) -> Option<ReconSnapshot> {
+    tool_name.starts_with("recon:").then(|| ReconSnapshot {
         hosts: recon_hosts(data),
         services: recon_services(data),
         notes: recon_notes(data),
         last_tool: Some(data_string(data, "tool").unwrap_or_else(|| tool_name.to_string())),
         last_target: data_string(data, "target"),
-    });
-    true
+    })
 }
 
 fn cache_exploit_chain_snapshot(
@@ -175,18 +203,25 @@ fn cache_taint_flow_snapshot(
     if tool_name != "taint-iris:hunt" {
         return false;
     }
-    if let Some(flow) = taint_flow_from_data(data) {
-        app.domain_mut().set_taint_flow(Some(flow));
-    }
+    app.domain_mut()
+        .set_taint_flows(taint_flows_from_data(data));
     true
 }
 
-fn taint_flow_from_data(data: &serde_json::Value) -> Option<TaintFlowSnapshot> {
-    let flow = data
-        .get("flows")
-        .and_then(serde_json::Value::as_array)?
-        .first()?;
+fn taint_flows_from_data(data: &serde_json::Value) -> Vec<TaintFlowSnapshot> {
+    data.get("flows")
+        .and_then(serde_json::Value::as_array)
+        .map(|flows| flows.iter().filter_map(taint_flow_from_value).collect())
+        .unwrap_or_default()
+}
+
+fn taint_flow_from_value(flow: &serde_json::Value) -> Option<TaintFlowSnapshot> {
     Some(TaintFlowSnapshot {
+        finding_fingerprint: data_string(flow, "findingFingerprint")
+            .or_else(|| data_string(flow, "fingerprint")),
+        finding_identity_id: data_string(flow, "findingIdentityId")
+            .or_else(|| data_string(flow, "identityId"))
+            .or_else(|| data_string(flow, "stableFp")),
         cwe: data_string(flow, "cwe").unwrap_or_else(|| "CWE".to_string()),
         severity: data_string(flow, "severity").unwrap_or_else(|| "medium".to_string()),
         stages: flow

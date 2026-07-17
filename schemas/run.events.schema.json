@@ -41,7 +41,10 @@
     "eventKind": {
       "type": "string",
       "enum": [
-        "tool"
+        "tool",
+        "scan",
+        "run",
+        "shell"
       ]
     },
     "eventStatus": {

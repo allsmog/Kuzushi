@@ -56,9 +56,7 @@ fn resolve_explicit_output_path(raw: &str, ctx: &ToolExecutionContext<'_>) -> Re
     if let Some(workspace) = ctx.workspace {
         return Ok(workspace.root().join(path));
     }
-    Ok(std::env::current_dir()
-        .context("threat-intel: could not resolve current directory")?
-        .join(path))
+    anyhow::bail!("threat-intel:harvest requires an explicit active workspace")
 }
 
 #[cfg(test)]

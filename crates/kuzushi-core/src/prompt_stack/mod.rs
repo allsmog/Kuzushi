@@ -1,11 +1,14 @@
-use crate::fs_atomic::{load_jsonl, now_ms, save_jsonl, slug, write_atomic};
-use crate::options::{prompt_content_sha256, prompt_override_path};
+use crate::fs_atomic::{now_ms, slug};
+#[cfg(test)]
+use crate::options::prompt_override_path;
+use crate::options::{prompt_content_sha256, relative_prompt_override_path};
 use crate::workspace::WorkspaceTarget;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const PROMPT_MUTATIONS_FILE: &str = "prompt-mutations.jsonl";
+const MAX_PROMPT_MUTATIONS_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -83,18 +86,44 @@ pub fn prompt_mutations_path(workspace: &WorkspaceTarget) -> PathBuf {
 }
 
 pub fn load_prompt_mutations(workspace: &WorkspaceTarget) -> Result<Vec<PromptMutation>> {
-    load_jsonl(&prompt_mutations_path(workspace), "prompt mutation")
+    let path = prompt_mutations_path(workspace);
+    let Some(text) = crate::workspace::read_optional_workspace_text(
+        workspace.root(),
+        &path,
+        MAX_PROMPT_MUTATIONS_BYTES,
+    )?
+    else {
+        return Ok(Vec::new());
+    };
+    text.lines()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .map(|(index, line)| {
+            serde_json::from_str(line)
+                .with_context(|| format!("Could not parse prompt mutation line {}", index + 1))
+        })
+        .collect()
 }
 
 pub fn save_prompt_mutations(
     workspace: &WorkspaceTarget,
     mutations: &[PromptMutation],
 ) -> Result<()> {
-    save_jsonl(
-        &prompt_mutations_path(workspace),
-        mutations,
-        "prompt mutation",
-    )
+    let mut lines = Vec::with_capacity(mutations.len());
+    for mutation in mutations {
+        lines.push(serde_json::to_string(mutation).context("Could not serialize prompt mutation")?);
+    }
+    let body = if lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", lines.join("\n"))
+    };
+    let path = prompt_mutations_path(workspace);
+    let relative = path
+        .strip_prefix(workspace.root())
+        .context("Prompt mutation path escaped the workspace")?;
+    crate::workspace::write_workspace_state_file(workspace.root(), relative, body.as_bytes())?;
+    Ok(())
 }
 
 pub fn append_prompt_mutation(
@@ -152,10 +181,12 @@ fn update_prompt_mutation_status(
 }
 
 fn write_prompt_override(workspace: &WorkspaceTarget, mutation: &PromptMutation) -> Result<()> {
-    write_atomic(
-        &prompt_override_path(workspace.root(), &mutation.module_id, &mutation.verb),
-        &mutation.text,
+    crate::workspace::write_workspace_state_file(
+        workspace.root(),
+        relative_prompt_override_path(&mutation.module_id, &mutation.verb),
+        mutation.text.as_bytes(),
     )
+    .map(|_| ())
 }
 
 impl PromptMutation {
@@ -248,5 +279,31 @@ mod tests {
             None
         )
         .unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prompt_mutation_store_rejects_an_outside_symlink_for_reads_and_writes() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(outside.path(), "OUTSIDE_PROMPT_STACK_TOKEN").unwrap();
+        workspace.ensure_state_dir().unwrap();
+        symlink(outside.path(), prompt_mutations_path(&workspace)).unwrap();
+
+        let read_error = load_prompt_mutations(&workspace).unwrap_err().to_string();
+        let write_error = save_prompt_mutations(&workspace, &[])
+            .unwrap_err()
+            .to_string();
+
+        assert!(read_error.contains("symlink"), "{read_error}");
+        assert!(write_error.contains("symlink"), "{write_error}");
+        assert!(!read_error.contains("OUTSIDE_PROMPT_STACK_TOKEN"));
+        assert_eq!(
+            std::fs::read_to_string(outside.path()).unwrap(),
+            "OUTSIDE_PROMPT_STACK_TOKEN"
+        );
     }
 }

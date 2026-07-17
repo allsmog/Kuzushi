@@ -30,6 +30,7 @@ fn detail_lines_for_model(
 ) -> Vec<Line<'static>> {
     let mut lines = detail_title_lines(detail, budget);
     push_signals_section(&mut lines, detail, budget);
+    push_decision_section(&mut lines, detail, budget);
     push_next_section(&mut lines, detail, budget, report_command);
     push_evidence_section(
         &mut lines,
@@ -40,7 +41,6 @@ fn detail_lines_for_model(
     push_verification_section(&mut lines, detail, budget);
     push_analysis_section(&mut lines, detail, budget);
     push_claim_section(&mut lines, detail, budget);
-    push_decision_section(&mut lines, detail, budget);
     push_fix_section(&mut lines, detail, budget);
     push_message_section(&mut lines, detail, budget);
     push_provenance_section(&mut lines, detail, budget);
@@ -596,12 +596,12 @@ mod tests {
             &text,
             &[
                 "STATUS",
+                "DECISION",
                 "NEXT",
                 "EVIDENCE",
                 "VERIFICATION",
                 "ANALYSIS",
                 "CLAIM",
-                "DECISION",
                 "SCANNER MESSAGE",
                 "PROVENANCE",
             ],
@@ -668,10 +668,7 @@ mod tests {
     fn detail_actions_include_report_command_when_available() {
         let text = detail_text(Some(WORKBENCH_REPORT_COMMAND));
 
-        assert!(
-            text.contains("`findings export report.sarif sarif`"),
-            "{text}"
-        );
+        assert!(text.contains("report: `report`"), "{text}");
         assert!(text.contains("validate: `verify F-0001`"), "{text}");
         assert!(text.contains("report:"), "{text}");
         assert!(!text.contains("o open in editor"), "{text}");

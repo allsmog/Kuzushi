@@ -42,7 +42,8 @@ fn mix_dependency(line: &str) -> Option<MixDependency> {
 }
 
 fn atom_after(line: &str, marker: &str) -> Option<String> {
-    line.split_once(marker).and_then(|(_, tail)| atom_name(tail))
+    line.split_once(marker)
+        .and_then(|(_, tail)| atom_name(tail))
 }
 
 fn atom_name(value: &str) -> Option<String> {

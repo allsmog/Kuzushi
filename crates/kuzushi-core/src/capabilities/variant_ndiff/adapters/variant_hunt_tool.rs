@@ -14,9 +14,15 @@ pub fn run_variant_hunt(
         VariantHuntPreparation::Response(response) => return Ok(response),
     };
     let findings = query_variant_hunt_findings(&run, ctx)?;
-    let persisted = persist_findings(&run.target, &findings, ctx)?;
-    emit_variant_hunt_done(ctx, findings.len());
-    Ok(variant_hunt_response(&run, findings, persisted))
+    let persisted = persist_findings(&run.target, &findings.value, ctx)?;
+    emit_variant_hunt_done(ctx, findings.value.len());
+    let cost = findings.cost_report()?;
+    Ok(variant_hunt_response(
+        &run,
+        findings.value,
+        persisted,
+        cost,
+    ))
 }
 
 fn variant_hunt_fingerprint(input: &Value) -> Option<String> {
@@ -182,19 +188,29 @@ fn include_vendored_variants(input: &Value) -> bool {
 fn query_variant_hunt_findings(
     run: &VariantHuntRun<'_>,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<Vec<Finding>> {
+) -> Result<CostedStructuredJson<Vec<Finding>>> {
     let raw = query_variant_hunt_json(run, ctx)?;
     let repo_name = repo_name(&run.target);
-    normalize_variant_findings(raw, &run.target, &repo_name, &run.finding, run.max_findings)
+    Ok(CostedStructuredJson {
+        value: normalize_variant_findings(
+            raw.value,
+            &run.target,
+            &repo_name,
+            &run.finding,
+            run.max_findings,
+        )?,
+        cost_usd: raw.cost_usd,
+        cost_usd_exact: raw.cost_usd_exact,
+    })
 }
 
 fn query_variant_hunt_json(
     run: &VariantHuntRun<'_>,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
+) -> Result<CostedStructuredJson<Value>> {
     let prompt = build_variant_hunt_prompt(&run.finding, run.include_vendored, &run.vendor_paths);
     let _llm_scope = begin_variant_hunt_scope(ctx);
-    let raw = query_required_structured_json(
+    let raw = query_required_structured_json_with_cost(
         run.runtime,
         AgentQueryRequest::new(
             run.model.clone(),
@@ -248,6 +264,7 @@ fn variant_hunt_response(
     run: &VariantHuntRun<'_>,
     findings: Vec<Finding>,
     persisted: Option<PersistedRun>,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Value {
     let output = render_variant_hunt_output(
         &run.finding,
@@ -271,7 +288,7 @@ fn variant_hunt_response(
         "persisted": persisted,
     });
     let mut result = crate::module_result::completed_output_result(summary, output, data);
-    result["costUsd"] = json!(0.0);
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
     result
 }
 

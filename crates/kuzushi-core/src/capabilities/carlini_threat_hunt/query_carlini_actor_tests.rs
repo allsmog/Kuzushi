@@ -63,6 +63,27 @@ fn carlini_extracts_findings_from_concatenated_tool_transcript() {
 }
 
 #[test]
+fn carlini_refuses_oversized_text_before_direct_extraction() {
+    let response = AgentQueryResponse {
+        text: format!(
+            "{}{{\"findings\":[]}}",
+            "x".repeat(crate::structured_output::MAX_STRUCTURED_RESPONSE_BYTES)
+        ),
+        ..AgentQueryResponse::default()
+    };
+
+    assert!(extract_carlini_findings_response(&response).is_none());
+
+    let artifact =
+        carlini_actor_response_artifact_payload("carlini-threat-hunt:User:0", "initial", &response);
+    assert_eq!(artifact["ignoredToolPrelude"]["present"], json!(false));
+    assert!(artifact["ignoredToolPrelude"]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("exceeded"));
+}
+
+#[test]
 fn carlini_response_artifact_marks_tool_shaped_preludes_as_ignored() {
     let response = AgentQueryResponse {
         text: r#"{"cmd":["bash","-lc","grep -R token ."]}{"findings":[]}"#.to_string(),

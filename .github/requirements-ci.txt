@@ -1,4 +1,4 @@
-# CI-only Python dependencies for Kuzushi.
+# Shared Python tooling dependencies for Kuzushi CI and development containers.
 # Pinning is for cache stability; bump periodically via Renovate/Dependabot.
-# Used by .github/workflows/ci.yml and .github/workflows/benchmark-regression.yml.
+# Used by CI workflows and .devcontainer/devcontainer.json.
 semgrep==1.146.0

@@ -7,9 +7,17 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn reduce_auth_status(&mut self) -> Vec<ShellEffect> {
-        // `/auth` now lands on the dedicated Auth surface
-        // (`design/mockups/auth.jsx`) instead of the generic Config panel.
-        self.set_shell_view(ShellView::Auth);
+        if let Some(provider) = self
+            .config()
+            .model
+            .as_deref()
+            .and_then(|model| model.split(':').next())
+            .map(str::to_string)
+        {
+            self.open_credential_entry(provider);
+        } else {
+            self.open_model_picker();
+        }
         vec![ShellEffect::ShowAuthStatus(AuthStatusShow {
             api_key_env: self.config().runtime.api_key_env.clone(),
         })]
@@ -46,7 +54,14 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_picker_auth_login(&mut self, provider: &str) -> Vec<ShellEffect> {
-        self.reduce_auth_login(Some(provider), true)
+        let Some(provider) = AuthProvider::from_scene_provider(provider) else {
+            self.log(
+                "error",
+                format!("unsupported onboarding auth provider {provider:?}"),
+            );
+            return Vec::new();
+        };
+        self.reduce_auth_login(Some(provider.login_command_name()), true)
     }
 
     fn reduce_auth_login(
@@ -96,9 +111,9 @@ impl ShellApp {
     /// the read-only Auth view with no exit — the exact keyless dead-end
     /// this onboarding surface exists to remove.
     fn recover_from_missing_auth_login_bridge(&mut self, provider: &str) -> Vec<ShellEffect> {
-        self.log(
-            "onboarding",
-            "OAuth bridge unavailable — pick another method, or press d for the offline demo",
+        self.set_error_notice(
+            "auth",
+            "OAuth bridge unavailable — choose API key, retry OAuth after fixing the bridge, or move to Offline demo and press Enter",
         );
         self.open_credential_entry(provider.to_string());
         Vec::new()
@@ -110,18 +125,28 @@ impl ShellApp {
             // it errored). Reopen the inline credential-entry step instead of
             // stranding them on the read-only Auth view — the reopen is
             // one-shot per Enter, and Esc always exits.
-            self.log(
-                "onboarding",
-                format!(
-                    "OAuth not completed for {provider} — pick another method, or press d for the offline demo"
-                ),
-            );
+            self.report_incomplete_picker_oauth(provider);
             self.open_credential_entry(provider.to_string());
             return Vec::new();
         }
         let effects = self.select_oauth_model_for_provider(provider);
         self.transition_after_auth_ready();
         effects
+    }
+
+    fn report_incomplete_picker_oauth(&mut self, provider: &str) {
+        let message = format!(
+            "OAuth not completed for {} — choose API key, retry OAuth, or move to Offline demo and press Enter",
+            auth_provider_label(provider)
+        );
+        let precise_failure_is_visible = self.advisory().notice.as_ref().is_some_and(|notice| {
+            notice.source == "auth" && notice.severity == crate::app::NoticeSeverity::Error
+        });
+        if precise_failure_is_visible {
+            self.log("onboarding", message);
+        } else {
+            self.set_error_notice("onboarding", message);
+        }
     }
 
     pub(crate) fn auth_login_provider_and_method(
@@ -216,7 +241,11 @@ impl ShellApp {
             };
         }
         let (prefix, message) = auth_login_status_message(provider, method, status);
-        self.log(prefix, message);
+        if success {
+            self.log(prefix, message);
+        } else {
+            self.set_error_notice("auth", message);
+        }
     }
 }
 
@@ -231,8 +260,7 @@ fn auth_login_detail(provider: &str, method: &str) -> &'static str {
 }
 
 fn oauth_credential_provider_for_login(provider: &str) -> &str {
-    match provider {
-        "openai" | "openai-codex" => "openai-codex",
-        other => other,
-    }
+    AuthProvider::from_scene_provider(provider)
+        .map(AuthProvider::oauth_credential_key)
+        .unwrap_or(provider)
 }

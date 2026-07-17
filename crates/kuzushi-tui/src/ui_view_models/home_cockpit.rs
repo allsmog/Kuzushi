@@ -1,17 +1,23 @@
 use super::findings::{cached_sorted_finding_alias_indices, relativize_location, target_base};
 use super::review_state::{indexed_review_decision_complete, EffectiveReviewStateIndex};
 use super::{
-    attack_surface_risk_model, context_snapshot_state, journey_model, ui_latest_run_path,
-    ui_run_dir, AttackSurfaceRiskModel, JourneyModel, SeverityCounts, SeverityTone,
+    attack_surface_risk_model, context_snapshot_state, journey_model, ui_run_dir,
+    AttackSurfaceRiskModel, JourneyModel, SeverityCounts, SeverityTone,
 };
-use crate::ShellApp;
+use crate::{
+    app::{JsonFileState, ViewDataState},
+    ShellApp,
+};
 use kuzushi_core::run_artifacts::{
     canonical_run_artifact_spec, canonical_run_artifact_specs, RunArtifactSpec,
 };
-use kuzushi_core::{project_finding, Finding};
+use kuzushi_core::{
+    project_finding, Finding, LatestRunPointerState, RunArtifactRead, RunArtifactTextRead,
+};
 use std::path::{Path, PathBuf};
 
-const HOME_TIMELINE_ARTIFACTS: [&str; 3] = ["run.json", "events.jsonl", "trace.jsonl"];
+const HOME_TIMELINE_ARTIFACTS: [&str; 4] =
+    ["run.json", "items.jsonl", "events.jsonl", "trace.jsonl"];
 const HOME_ARTIFACT_COLUMN_COUNT: usize = 4;
 const HOME_TOP_RISK_LIMIT: usize = 3;
 const HOME_COMMANDS: [&str; 6] = [
@@ -43,7 +49,7 @@ pub struct HomeCockpitModel {
     pub run_card: HomeRunCard,
     pub workspace_line: String,
     pub command_labels: [&'static str; 6],
-    /// The engagement spine (組 map → 崩 hunt → 作 confirm → 掛 fix), derived
+    /// The engagement spine (組 map → 崩 scan → 査 review → 作 prove → 掛 fix), derived
     /// from workspace state. `None` without a target.
     pub journey: Option<JourneyModel>,
 }
@@ -96,19 +102,36 @@ pub struct HomeArtifactRow {
 
 pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
     let run = HomeRunModel::from_app(app);
-    let artifacts = home_artifact_rows(&run.run_dir);
+    let artifacts = home_artifact_rows(app, &run);
     let journey = journey_model(app);
     let module_count = app.registry().modules().count();
     HomeCockpitModel {
         title: "HOME",
-        attack_surface: attack_surface_risk_model(&run.run_dir),
+        attack_surface: attack_surface_model_for_run(app, &run),
         next_card: home_next_card(journey.as_ref()),
         findings_card: home_findings_card(app),
         top_risks: home_top_risks(app),
-        run_card: home_run_card(&run, &artifacts),
+        run_card: home_run_card(app, &run, &artifacts),
         workspace_line: home_workspace_line(app, module_count),
         command_labels: home_command_labels(journey.as_ref()),
         journey,
+    }
+}
+
+/// Project only the attack-surface artifact needed by the durable Map page.
+/// This avoids constructing Home cards, finding summaries, and journey state
+/// merely to obtain one already-hydrated artifact projection.
+pub(crate) fn attack_surface_model(app: &ShellApp) -> Option<AttackSurfaceRiskModel> {
+    attack_surface_model_for_run(app, &HomeRunModel::from_app(app))
+}
+
+fn attack_surface_model_for_run(
+    app: &ShellApp,
+    run: &HomeRunModel,
+) -> Option<AttackSurfaceRiskModel> {
+    match run_artifact_json(app, run, "attack-surface.json") {
+        ViewDataState::Ready(artifact) => attack_surface_risk_model(artifact),
+        ViewDataState::NotRequested | ViewDataState::Loading => None,
     }
 }
 
@@ -192,10 +215,10 @@ fn home_top_risk_row(alias: String, finding: &Finding, base: Option<&str>) -> Ho
     }
 }
 
-fn home_run_card(run: &HomeRunModel, artifacts: &[HomeArtifactRow]) -> HomeRunCard {
+fn home_run_card(app: &ShellApp, run: &HomeRunModel, artifacts: &[HomeArtifactRow]) -> HomeRunCard {
     HomeRunCard {
         run_id: run.latest_run_label(),
-        status: run_status_label(&run.run_dir),
+        status: run_status_label(app, run),
         recorded: recorded_artifact_count(artifacts),
         total: artifacts.len(),
         artifacts: artifacts.iter().map(home_run_artifact_chip).collect(),
@@ -256,11 +279,11 @@ fn home_path_label(path: &Path) -> String {
     }
 }
 
-fn home_artifact_rows(run_dir: &Path) -> Vec<HomeArtifactRow> {
+fn home_artifact_rows(app: &ShellApp, run: &HomeRunModel) -> Vec<HomeArtifactRow> {
     canonical_run_artifact_specs()
         .into_iter()
         .filter(home_artifact_belongs_in_rail)
-        .map(|artifact| home_artifact_row(run_dir, artifact))
+        .map(|artifact| home_artifact_row(app, run, artifact))
         .collect()
 }
 
@@ -268,35 +291,78 @@ fn home_artifact_belongs_in_rail(artifact: &RunArtifactSpec) -> bool {
     !HOME_TIMELINE_ARTIFACTS.contains(&artifact.leaf)
 }
 
-fn home_artifact_row(run_dir: &Path, artifact: RunArtifactSpec) -> HomeArtifactRow {
-    let path = run_dir.join(artifact.leaf);
-    let state = artifact_state(&path, &artifact);
+fn home_artifact_row(
+    app: &ShellApp,
+    run: &HomeRunModel,
+    artifact: RunArtifactSpec,
+) -> HomeArtifactRow {
+    let read = run_artifact_text(app, run, artifact.leaf);
+    let state = artifact_state(&read, &artifact);
     HomeArtifactRow {
         cells: [
             state.glyph.to_string(),
             home_artifact_label(artifact.label).to_string(),
             state.label.to_string(),
-            path.display().to_string(),
+            run.run_dir.join(artifact.leaf).display().to_string(),
         ],
     }
 }
 
-fn artifact_state(path: &Path, artifact: &RunArtifactSpec) -> HomeArtifactState {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return HomeArtifactState::non_file(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return HomeArtifactState::missing();
+fn artifact_state(
+    read: &ViewDataState<RunArtifactTextRead>,
+    artifact: &RunArtifactSpec,
+) -> HomeArtifactState {
+    let ViewDataState::Ready(read) = read else {
+        return HomeArtifactState::loading();
+    };
+    let text = match read {
+        RunArtifactRead::Ready { value, .. } => value,
+        RunArtifactRead::Missing { .. } => return HomeArtifactState::missing(),
+        RunArtifactRead::NonFile { .. } => return HomeArtifactState::non_file(),
+        RunArtifactRead::Unsafe { .. } | RunArtifactRead::Unreadable { .. } => {
+            return HomeArtifactState::malformed()
         }
-        Err(_) => return HomeArtifactState::malformed(),
-    }
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return HomeArtifactState::malformed();
     };
     if is_json_artifact(artifact) {
         return artifact_state_from_json_text(&text);
     }
     artifact_state_from_text(&text)
+}
+
+fn run_artifact_text(
+    app: &ShellApp,
+    run: &HomeRunModel,
+    leaf: &str,
+) -> ViewDataState<RunArtifactTextRead> {
+    let (Some(target), Some(run_id)) = (run.target.as_deref(), run.run_id.as_deref()) else {
+        return if run.hydration_pending {
+            ViewDataState::Loading
+        } else {
+            ViewDataState::Ready(RunArtifactRead::Missing {
+                path: run.run_dir.join(leaf),
+            })
+        };
+    };
+    app.workbench_cache()
+        .borrow()
+        .cached_run_artifact_text(target, run_id, leaf)
+}
+
+fn run_artifact_json(
+    app: &ShellApp,
+    run: &HomeRunModel,
+    leaf: &str,
+) -> ViewDataState<JsonFileState> {
+    let (Some(target), Some(run_id)) = (run.target.as_deref(), run.run_id.as_deref()) else {
+        return if run.hydration_pending {
+            ViewDataState::Loading
+        } else {
+            ViewDataState::Ready(JsonFileState::Missing)
+        };
+    };
+    app.workbench_cache()
+        .borrow()
+        .cached_run_artifact_json(target, run_id, leaf)
 }
 
 fn artifact_state_from_json_text(text: &str) -> HomeArtifactState {
@@ -344,18 +410,22 @@ fn state_for_unstructured_artifact(text: &str) -> HomeArtifactState {
     HomeArtifactState::recorded()
 }
 
-fn run_status_label(run_dir: &Path) -> String {
-    let path = run_dir.join(run_metadata_artifact_leaf());
-    match std::fs::metadata(&path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return format!("{} is not a file", run_metadata_artifact_leaf()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return "no runs yet".to_string();
+fn run_status_label(app: &ShellApp, run: &HomeRunModel) -> String {
+    let read = run_artifact_text(app, run, run_metadata_artifact_leaf());
+    let text = match read {
+        ViewDataState::NotRequested | ViewDataState::Loading => {
+            return "loading run metadata".to_string()
         }
-        Err(_) => return malformed_run_metadata_label(),
-    }
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return malformed_run_metadata_label();
+        ViewDataState::Ready(read) => match read {
+            RunArtifactRead::Ready { value, .. } => value,
+            RunArtifactRead::Missing { .. } => return "no runs yet".to_string(),
+            RunArtifactRead::NonFile { .. } => {
+                return format!("{} is not a file", run_metadata_artifact_leaf())
+            }
+            RunArtifactRead::Unsafe { .. } | RunArtifactRead::Unreadable { .. } => {
+                return malformed_run_metadata_label()
+            }
+        },
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
         return malformed_run_metadata_label();
@@ -398,30 +468,50 @@ fn is_json_artifact(artifact: &RunArtifactSpec) -> bool {
 }
 
 struct HomeRunModel {
+    target: Option<PathBuf>,
     run_id: Option<String>,
     latest_pointer_invalid: bool,
+    hydration_pending: bool,
     run_dir: PathBuf,
+}
+
+struct HomeLatestRunState {
+    run_id: Option<String>,
+    invalid: bool,
+    pending: bool,
 }
 
 impl HomeRunModel {
     fn from_app(app: &ShellApp) -> Self {
         let Some(root) = app.target_path_buf() else {
-            return Self {
-                run_id: None,
-                latest_pointer_invalid: false,
-                run_dir: ui_run_dir(None, "latest"),
-            };
+            return Self::without_target();
         };
-        let latest = home_latest_run_id(root);
+        let latest = app
+            .workbench_cache()
+            .borrow()
+            .cached_latest_run_pointer(Some(root));
+        let latest = home_latest_run_state(latest);
         let run_dir = latest
             .run_id
             .as_ref()
             .map(|id| ui_run_dir(Some(root), id))
             .unwrap_or_else(|| ui_run_dir(Some(root), "latest"));
         Self {
+            target: Some(root.clone()),
             run_id: latest.run_id,
             latest_pointer_invalid: latest.invalid,
+            hydration_pending: latest.pending,
             run_dir,
+        }
+    }
+
+    fn without_target() -> Self {
+        Self {
+            target: None,
+            run_id: None,
+            latest_pointer_invalid: false,
+            hydration_pending: false,
+            run_dir: ui_run_dir(None, "latest"),
         }
     }
 
@@ -434,47 +524,24 @@ impl HomeRunModel {
     }
 }
 
-struct HomeLatestRunId {
-    run_id: Option<String>,
-    invalid: bool,
-}
-
-fn home_latest_run_id(root: &Path) -> HomeLatestRunId {
-    let latest_path = ui_latest_run_path(Some(root));
-    match std::fs::metadata(&latest_path) {
-        Ok(metadata) if metadata.is_file() => home_latest_run_file(&latest_path),
-        Ok(_) => HomeLatestRunId {
-            run_id: None,
-            invalid: true,
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => HomeLatestRunId {
-            run_id: None,
-            invalid: false,
-        },
-        Err(_) => HomeLatestRunId {
-            run_id: None,
-            invalid: true,
-        },
-    }
-}
-
-fn home_latest_run_file(path: &Path) -> HomeLatestRunId {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return HomeLatestRunId {
-            run_id: None,
-            invalid: true,
-        };
+fn home_latest_run_state(latest: ViewDataState<LatestRunPointerState>) -> HomeLatestRunState {
+    let run_id = match &latest {
+        ViewDataState::Ready(LatestRunPointerState::Ready(run_id)) => {
+            Some(run_id.as_str().to_string())
+        }
+        ViewDataState::Ready(
+            LatestRunPointerState::Missing | LatestRunPointerState::Invalid(_),
+        )
+        | ViewDataState::NotRequested
+        | ViewDataState::Loading => None,
     };
-    let run_id = text.trim();
-    if run_id.is_empty() {
-        return HomeLatestRunId {
-            run_id: None,
-            invalid: true,
-        };
-    }
-    HomeLatestRunId {
-        run_id: Some(run_id.to_string()),
-        invalid: false,
+    HomeLatestRunState {
+        run_id,
+        invalid: matches!(
+            latest,
+            ViewDataState::Ready(LatestRunPointerState::Invalid(_))
+        ),
+        pending: matches!(latest, ViewDataState::NotRequested | ViewDataState::Loading),
     }
 }
 
@@ -502,6 +569,10 @@ impl HomeArtifactState {
 
     const fn missing() -> Self {
         Self::new("■", "missing")
+    }
+
+    const fn loading() -> Self {
+        Self::new("…", "loading")
     }
 
     const fn partial() -> Self {

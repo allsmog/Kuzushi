@@ -41,10 +41,7 @@ fn parse_requirement(line: &str) -> Option<ConanRequirement> {
     })
 }
 
-fn conan_finding(
-    file_path: &Path,
-    requirement: ConanRequirement,
-) -> Option<DepHygieneFinding> {
+fn conan_finding(file_path: &Path, requirement: ConanRequirement) -> Option<DepHygieneFinding> {
     if is_floating_conan_version(&requirement.version) {
         return Some(DepHygieneFinding::new(
             ManifestKind::ConanfileTxt,
@@ -84,7 +81,10 @@ fn is_floating_conan_version(version: &str) -> bool {
 }
 
 fn is_open_ended_conan_range(version: &str) -> bool {
-    let Some(range) = version.strip_prefix('[').and_then(|value| value.strip_suffix(']')) else {
+    let Some(range) = version
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+    else {
         return false;
     };
     range.contains(">=") && !range.contains('<')

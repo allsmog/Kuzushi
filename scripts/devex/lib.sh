@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared helpers for the tmux DevEx journey harness. Sourced by run-journey.sh.
 # Kept macOS /bin/bash 3.2 compatible: no `set -u`, no assoc arrays, no ${var^^}.
 
@@ -48,16 +49,67 @@ devex_send_line() {
   tmux send-keys -t "$1" Enter
 }
 
-# devex_capture <session> <out.txt> <out.ansi>
-# Plain capture for content/honesty checks; -e capture for palette audits.
-devex_capture() {
+# devex_alternate_active <session>
+devex_alternate_active() {
+  [ "$(tmux display-message -p -t "$1" '#{alternate_on}' 2>/dev/null)" = 1 ]
+}
+
+# devex_capture_live <session> <out.txt> <out.ansi>
+# Strict evidence path: fail instead of silently substituting a saved screen.
+devex_capture_live() {
+  devex_alternate_active "$1" || return 1
+  # Capture ANSI first so a following plain content match cannot pair the
+  # matched frame with a later completion.
+  tmux capture-pane -t "$1" -e -p > "$3" || return 1
   tmux capture-pane -t "$1" -p > "$2"
+}
+
+# devex_capture_saved <session> <out.txt> <out.ansi>
+# Explicit post-exit evidence path. An absent/empty saved alternate screen is
+# an error; callers that want ordinary shell output must use devex_capture.
+devex_capture_saved() {
+  tmux capture-pane -t "$1" -a -q -e -p > "$3" || return 1
+  tmux capture-pane -t "$1" -a -q -p > "$2" || return 1
+  LC_ALL=C grep -aq '[^[:space:]]' "$2"
+}
+
+# devex_capture <session> <out.txt> <out.ansi>
+# Compatibility path for mixed TUI/headless journeys. New fullscreen evidence
+# should call devex_capture_live or devex_capture_saved explicitly.
+devex_capture() {
+  if devex_alternate_active "$1"; then
+    devex_capture_live "$@"
+    return
+  fi
+  if devex_capture_saved "$@"; then
+    return
+  fi
   tmux capture-pane -t "$1" -e -p > "$3"
+  tmux capture-pane -t "$1" -p > "$2"
 }
 
 # devex_pane_contains <session> <fixed-substring>  (case-insensitive)
 devex_pane_contains() {
-  tmux capture-pane -t "$1" -p 2>/dev/null | grep -Fiq -- "$2"
+  if [ "$(tmux display-message -p -t "$1" '#{alternate_on}' 2>/dev/null)" = 1 ]; then
+    tmux capture-pane -t "$1" -p 2>/dev/null | grep -Fiq -- "$2"
+  else
+    tmux capture-pane -t "$1" -p 2>/dev/null | grep -Fiq -- "$2" \
+      || tmux capture-pane -t "$1" -a -q -p 2>/dev/null | grep -Fiq -- "$2"
+  fi
+}
+
+# devex_ansi_has_profile <capture.ansi> <indexed|truecolor>
+# Looks only for SGR color forms emitted by Ratatui. Keeping this in the
+# capture layer means content checks remain independent of terminal styling.
+devex_ansi_has_profile() {
+  local esc pattern
+  esc=$(printf '\033')
+  case $2 in
+    indexed)   pattern="${esc}\\[[0-9;]*(38|48);5;[0-9]+m";;
+    truecolor) pattern="${esc}\\[[0-9;]*(38|48);2;[0-9]+;[0-9]+;[0-9]+m";;
+    *) return 2;;
+  esac
+  LC_ALL=C grep -aEq "$pattern" "$1"
 }
 
 # devex_shell_quote <word...>  — printf %q each word onto one line.

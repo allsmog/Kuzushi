@@ -129,6 +129,35 @@ mod tests {
         assert_eq!(loaded, store);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn persistent_store_rejects_an_outside_symlink_for_reads_and_writes() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(outside.path(), "OUTSIDE_OPTION_TOKEN").unwrap();
+        let path = tmp.path().join(".kuzushi/v3/options.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        symlink(outside.path(), &path).unwrap();
+
+        let read_error = ToolOptionStore::load_from_path(&path)
+            .unwrap_err()
+            .to_string();
+        let write_error = ToolOptionStore::new()
+            .save_to_path(&path)
+            .unwrap_err()
+            .to_string();
+
+        assert!(read_error.contains("symlink"), "{read_error}");
+        assert!(write_error.contains("symlink"), "{write_error}");
+        assert!(!read_error.contains("OUTSIDE_OPTION_TOKEN"));
+        assert_eq!(
+            std::fs::read_to_string(outside.path()).unwrap(),
+            "OUTSIDE_OPTION_TOKEN"
+        );
+    }
+
     #[test]
     fn persistent_store_loads_only_global_and_workspace_scopes() {
         let tmp = tempfile::tempdir().unwrap();

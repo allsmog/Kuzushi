@@ -100,8 +100,9 @@ mod tests {
 
     #[test]
     fn governance_accepts_provider_models_with_default_credential_envs() {
-        assert!(validate_model_api_key_env("anthropic:claude-sonnet-4-6", "ANTHROPIC_API_KEY")
-            .is_ok());
+        assert!(
+            validate_model_api_key_env("anthropic:claude-sonnet-4-6", "ANTHROPIC_API_KEY").is_ok()
+        );
         assert!(validate_model_api_key_env("openai:gpt-5.5", "OPENAI_API_KEY").is_ok());
 
         assert_eq!(
@@ -113,16 +114,14 @@ mod tests {
             bridge_api_key_env_for_model("openai:gpt-5.5", "OPENAI_API_KEY").unwrap(),
             "OPENAI_API_KEY"
         );
-        let custom =
-            validate_model_api_key_env("anthropic:claude-sonnet-4-6", "CUSTOM_KEY")
-                .unwrap_err()
-                .to_string();
+        let custom = validate_model_api_key_env("anthropic:claude-sonnet-4-6", "CUSTOM_KEY")
+            .unwrap_err()
+            .to_string();
         assert!(custom.contains("requires ANTHROPIC_API_KEY"));
 
-        let mismatch =
-            validate_model_api_key_env("anthropic:claude-sonnet-4-6", "OPENAI_API_KEY")
-                .unwrap_err()
-                .to_string();
+        let mismatch = validate_model_api_key_env("anthropic:claude-sonnet-4-6", "OPENAI_API_KEY")
+            .unwrap_err()
+            .to_string();
         assert!(mismatch.contains("requires ANTHROPIC_API_KEY"));
         assert!(mismatch.contains("will not silently switch"));
 
@@ -145,6 +144,7 @@ mod tests {
         assert_eq!(outcome.steps_used, 1);
         assert!(!outcome.truncated);
         assert_eq!(outcome.cost_usd, 0.01);
+        assert!(outcome.cost_usd_exact);
         assert_eq!(outcome.transcript.len(), 1);
         assert!(matches!(
             outcome.transcript[0],
@@ -181,6 +181,7 @@ mod tests {
         let outcome = run_tool_loop(&runtime, &req(), &mut tb).unwrap();
         assert_eq!(outcome.text, "saw foo");
         assert_eq!(outcome.steps_used, 2);
+        assert!(!outcome.cost_usd_exact);
         // Transcript: ToolCall, ToolResult, AssistantText.
         assert_eq!(outcome.transcript.len(), 3);
         assert!(matches!(
@@ -233,7 +234,109 @@ mod tests {
             })
         });
         let outcome = run_tool_loop(&runtime, &req(), &mut tb).unwrap();
-        assert!((outcome.cost_usd - 0.06).abs() < 1e-9, "got {}", outcome.cost_usd);
+        assert!(
+            (outcome.cost_usd - 0.06).abs() < 1e-9,
+            "got {}",
+            outcome.cost_usd
+        );
+        assert!(outcome.cost_usd_exact);
+    }
+
+    #[test]
+    fn observed_driver_preserves_partial_token_lower_bound() {
+        struct UsageRuntime {
+            steps: Mutex<Vec<Observed<AgentLoopStep>>>,
+        }
+
+        impl AgentRuntime for UsageRuntime {
+            fn triage_finding_blocking(&self, _: TriageRequest) -> Result<TriageOutcome> {
+                unreachable!("not used in this test")
+            }
+
+            fn supports_tools(&self) -> bool {
+                true
+            }
+
+            fn next_step_observed_blocking(
+                &self,
+                _request: &AgentToolLoopRequest,
+                _history: &[LoopHistoryEntry],
+            ) -> Result<Observed<AgentLoopStep>> {
+                Ok(self.steps.lock().unwrap().remove(0))
+            }
+        }
+
+        let runtime = UsageRuntime {
+            steps: Mutex::new(vec![
+                Observed::new(
+                    AgentLoopStep::ToolCall {
+                        call: ToolCall {
+                            name: "read_source".to_string(),
+                            input: serde_json::Value::Null,
+                            call_id: "c1".to_string(),
+                        },
+                        cost_usd: None,
+                    },
+                    ModelTokenUsage::reported(12, 3),
+                ),
+                Observed::new(
+                    AgentLoopStep::Final {
+                        text: "done".to_string(),
+                        structured: None,
+                        cost_usd: None,
+                    },
+                    ModelTokenUsage::unavailable_call(),
+                ),
+            ]),
+        };
+        let mut toolbox = ToolBox::new();
+        toolbox.register("read_source", |call| {
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                output: serde_json::Value::Null,
+                is_error: false,
+            })
+        });
+
+        let observed = run_tool_loop_observed(&runtime, &req(), &mut toolbox).unwrap();
+
+        assert_eq!(observed.value.text, "done");
+        assert_eq!(observed.usage.observed_counts(), (Some(12), Some(3)));
+        assert_eq!(observed.usage.fully_reported_calls(), 1);
+        assert_eq!(observed.usage.total_calls, 2);
+        assert!(!observed.usage.is_complete());
+    }
+
+    #[test]
+    fn driver_keeps_observed_subtotal_but_marks_mixed_cost_unknown() {
+        let runtime = ScriptedRuntime::new(vec![
+            AgentLoopStep::ToolCall {
+                call: ToolCall {
+                    name: "read_source".to_string(),
+                    input: serde_json::Value::Null,
+                    call_id: "c1".to_string(),
+                },
+                cost_usd: None,
+            },
+            AgentLoopStep::Final {
+                text: "done".to_string(),
+                structured: None,
+                cost_usd: Some(0.03),
+            },
+        ]);
+        let mut tb = ToolBox::new();
+        tb.register("read_source", |call| {
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                output: serde_json::Value::Null,
+                is_error: false,
+            })
+        });
+
+        let outcome = run_tool_loop(&runtime, &req(), &mut tb).unwrap();
+
+        assert_eq!(outcome.cost_usd, 0.03);
+        assert!(!outcome.cost_usd_exact);
     }
 
     #[test]
@@ -270,7 +373,12 @@ mod tests {
         request.max_steps = 2;
         let outcome = run_tool_loop(&runtime, &request, &mut tb).unwrap();
         assert!(outcome.truncated);
-        assert!((outcome.cost_usd - 0.10).abs() < 1e-9, "got {}", outcome.cost_usd);
+        assert!(
+            (outcome.cost_usd - 0.10).abs() < 1e-9,
+            "got {}",
+            outcome.cost_usd
+        );
+        assert!(outcome.cost_usd_exact);
     }
 
     #[test]
@@ -338,6 +446,26 @@ mod tests {
             "got {:?}",
             result.output
         );
+    }
+
+    #[test]
+    fn headless_operator_question_returns_interaction_required_without_answering() {
+        let call = ToolCall {
+            name: REQUEST_USER_INPUT_TOOL_NAME.to_string(),
+            input: serde_json::json!({"questions": []}),
+            call_id: "question_call".to_string(),
+        };
+        let mut toolbox = ToolBox::new();
+
+        let result = toolbox.run(&call).unwrap();
+
+        assert!(result.is_error);
+        assert_eq!(result.call_id, "question_call");
+        assert_eq!(result.output["code"], INTERACTION_REQUIRED_CODE);
+        assert!(result.output["error"]
+            .as_str()
+            .unwrap()
+            .contains("interactive"));
     }
 
     #[test]
@@ -450,6 +578,37 @@ mod tests {
         // No leading newline when base was empty.
         assert!(recorded.starts_with("You are a focused Rust FFI-boundary reasoner."));
         assert!(!recorded.contains("\n\n"));
+    }
+
+    struct InvalidAsyncSubagentCostRuntime;
+
+    impl AgentRuntime for InvalidAsyncSubagentCostRuntime {
+        fn spawn_subagent_blocking(
+            &self,
+            _role: SubagentRole,
+            _request: AgentQueryRequest,
+        ) -> Result<AgentQueryResponse> {
+            Ok(AgentQueryResponse {
+                cost_usd: f64::NAN,
+                cost_usd_reported: true,
+                ..Default::default()
+            })
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            unreachable!("not exercised in this test")
+        }
+    }
+
+    #[tokio::test]
+    async fn async_subagent_wrapper_rejects_invalid_override_cost() {
+        let error = InvalidAsyncSubagentCostRuntime
+            .spawn_subagent(SubagentRole::Generic, request("base"))
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("finite non-negative"), "{error}");
     }
 
     #[test]

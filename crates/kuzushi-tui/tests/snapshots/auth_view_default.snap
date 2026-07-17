@@ -1,7 +1,7 @@
 ---
 view: auth
 ---
- KUZUSHI › auth · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › auth · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- BACKEND ------------------------------------------------------------------------------------------------------------
   x  LangGraph       missing    OPENAI_API_KEY=missing

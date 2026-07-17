@@ -90,9 +90,15 @@ fn builds_markdown_report_from_latest_completed_non_report_run() {
         "threat-model.json: present - methodology stride, 2 threat(s), DFD nodes=2, flows=1, boundaries=1, CWEs CWE-20=2, CWE-918=1"
     ));
     assert!(report.report_markdown.contains("findings.json: present"));
-    assert!(report.report_markdown.contains("events.jsonl: present - 1 line(s)"));
-    assert!(report.report_markdown.contains("trace.jsonl: present - 2 line(s)"));
-    assert!(report.report_markdown.contains("report.md: present - generated report"));
+    assert!(report
+        .report_markdown
+        .contains("events.jsonl: present - 1 line(s)"));
+    assert!(report
+        .report_markdown
+        .contains("trace.jsonl: present - 2 line(s)"));
+    assert!(report
+        .report_markdown
+        .contains("report.md: present - generated report"));
     assert!(report
         .report_markdown
         .contains("report.sarif: present - SARIF report, 1 run(s), 2 result(s), levels error=1, warning=1, rules secret=2, files src/app.ts=2, src/config.ts=1"));
@@ -291,11 +297,7 @@ fn report_summarizes_non_object_jsonl_rows_as_malformed() {
     .unwrap();
     fs::write(
         dir.join("trace.jsonl"),
-        [
-            r#"{"n":1,"kind":"reasoning","label":"query"}"#,
-            "[]",
-        ]
-        .join("\n"),
+        [r#"{"n":1,"kind":"reasoning","label":"query"}"#, "[]"].join("\n"),
     )
     .unwrap();
 
@@ -304,9 +306,9 @@ fn report_summarizes_non_object_jsonl_rows_as_malformed() {
     assert!(report.report_markdown.contains(
         "events.jsonl: present - 1 event(s), kinds tool=1, status started=1, tools sast:scan, malformed line(s) 1"
     ));
-    assert!(report.report_markdown.contains(
-        "trace.jsonl: present - 1 step(s), kinds reasoning=1, malformed line(s) 1"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("trace.jsonl: present - 1 step(s), kinds reasoning=1, malformed line(s) 1"));
 }
 
 #[test]
@@ -358,6 +360,30 @@ fn report_surfaces_non_file_declared_json_artifacts_as_present_malformed() {
     assert!(!report
         .report_markdown
         .contains("canonical artifact context.json is missing"));
+}
+
+#[test]
+fn report_bounds_declared_artifact_reads() {
+    let temp = tempdir().unwrap();
+    let source = completed_summary(temp.path(), "run-oversized-json", "context:build");
+    write_run_summary(temp.path(), &source).unwrap();
+    let artifact = run_dir(temp.path(), "run-oversized-json").join("context.json");
+    fs::File::create(&artifact)
+        .unwrap()
+        .set_len(crate::run_artifacts::MAX_RUN_ARTIFACT_READ_BYTES + 1)
+        .unwrap();
+    write_declared_json_artifact_manifest(
+        temp.path(),
+        "run-oversized-json",
+        "context.json",
+        "context snapshot",
+    );
+
+    let report = build_run_report(temp.path(), Some("run-oversized-json")).unwrap();
+
+    assert!(report
+        .report_markdown
+        .contains("context.json: present - unreadable JSON artifact"));
 }
 
 #[test]
@@ -479,6 +505,55 @@ fn report_summarizes_canonical_trace_cost() {
 }
 
 #[test]
+fn report_marks_overflowing_trace_totals_invalid() {
+    let temp = tempdir().unwrap();
+    let source = completed_summary(temp.path(), "run-trace-overflow", "agentic-sast:scan");
+    write_run_summary(temp.path(), &source).unwrap();
+    let dir = run_dir(temp.path(), "run-trace-overflow");
+    fs::write(
+        dir.join("trace.jsonl"),
+        [
+            serde_json::to_string(&json!({
+                "n": 1,
+                "kind": "reasoning",
+                "label": "first",
+                "cost_usd": f64::MAX,
+                "latency_ms": u64::MAX,
+            }))
+            .unwrap(),
+            serde_json::to_string(&json!({
+                "n": 2,
+                "kind": "done",
+                "label": "second",
+                "cost_usd": f64::MAX,
+                "latency_ms": 1,
+            }))
+            .unwrap(),
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+
+    let report = build_run_report(temp.path(), Some("run-trace-overflow")).unwrap();
+
+    assert!(
+        report.report_markdown.contains("latency invalid"),
+        "{}",
+        report.report_markdown
+    );
+    assert!(
+        report.report_markdown.contains("cost invalid"),
+        "{}",
+        report.report_markdown
+    );
+    assert!(
+        !report.report_markdown.contains("cost $inf"),
+        "{}",
+        report.report_markdown
+    );
+}
+
+#[test]
 fn report_counts_prompt_hash_only_trace_llm_calls() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-trace-prompt-hash", "triage:run");
@@ -497,9 +572,9 @@ fn report_counts_prompt_hash_only_trace_llm_calls() {
 
     let report = build_run_report(temp.path(), Some("run-trace-prompt-hash")).unwrap();
 
-    assert!(report.report_markdown.contains(
-        "trace.jsonl: present - 3 step(s), kinds done=1, reasoning=2, llm calls 2"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("trace.jsonl: present - 3 step(s), kinds done=1, reasoning=2, llm calls 2"));
 }
 
 #[test]
@@ -521,9 +596,9 @@ fn report_ignores_empty_trace_llm_metadata() {
 
     let report = build_run_report(temp.path(), Some("run-trace-empty-llm")).unwrap();
 
-    assert!(report.report_markdown.contains(
-        "trace.jsonl: present - 3 step(s), kinds done=1, reasoning=2, llm calls 1"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("trace.jsonl: present - 3 step(s), kinds done=1, reasoning=2, llm calls 1"));
 }
 
 #[test]
@@ -650,7 +725,11 @@ fn report_summarizes_root_level_attack_surface_snapshot_fields() {
 #[test]
 fn report_ignores_attack_surface_array_aliases() {
     let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-attack-surface-array-aliases", "context:build");
+    let source = completed_summary(
+        temp.path(),
+        "run-attack-surface-array-aliases",
+        "context:build",
+    );
     write_run_summary(temp.path(), &source).unwrap();
     write_run_artifact_json(
         temp.path(),
@@ -879,6 +958,9 @@ fn report_summarizes_run_metadata_and_artifact_manifest() {
             prompt_hash: "fnv1a64:abc123".to_string(),
             latency_ms: Some(10),
             cost_usd: Some(0.125),
+            observed_cost_usd: None,
+            provider_spend_unresolved: false,
+            call_attempted: Some(true),
         }]);
     write_run_summary(temp.path(), &source).unwrap();
     write_run_artifact_json(
@@ -1098,11 +1180,7 @@ fn report_artifact_manifest_summary_uses_only_canonical_fields() {
     )
     .unwrap();
 
-    let report = build_run_report(
-        temp.path(),
-        Some("run-manifest-canonical-fields-only"),
-    )
-    .unwrap();
+    let report = build_run_report(temp.path(), Some("run-manifest-canonical-fields-only")).unwrap();
 
     assert!(report.report_markdown.contains(
         "artifacts.json: present - 2 artifact(s), kinds json=1, jsonl=1, canonical 2, labels run metadata, runtime trace"
@@ -1126,11 +1204,7 @@ fn report_fails_on_malformed_artifact_manifest() {
 #[test]
 fn report_fails_on_non_object_artifact_manifest() {
     let temp = tempdir().unwrap();
-    let source = completed_summary(
-        temp.path(),
-        "run-non-object-manifest",
-        "agentic-sast:scan",
-    );
+    let source = completed_summary(temp.path(), "run-non-object-manifest", "agentic-sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
     let dir = run_dir(temp.path(), "run-non-object-manifest");
     fs::write(dir.join("artifacts.json"), "[]").unwrap();
@@ -1162,7 +1236,8 @@ fn report_fails_on_non_array_manifest_artifacts() {
     )
     .unwrap();
 
-    let error = build_run_report(temp.path(), Some("run-non-array-manifest-artifacts")).unwrap_err();
+    let error =
+        build_run_report(temp.path(), Some("run-non-array-manifest-artifacts")).unwrap_err();
     let message = error.to_string();
 
     assert!(message.contains("Artifact manifest artifacts is not a JSON array"));
@@ -1331,11 +1406,8 @@ fn report_fails_on_unknown_manifest_artifact_field() {
     )
     .unwrap();
 
-    let error = build_run_report(
-        temp.path(),
-        Some("run-unknown-manifest-artifact-field"),
-    )
-    .unwrap_err();
+    let error =
+        build_run_report(temp.path(), Some("run-unknown-manifest-artifact-field")).unwrap_err();
     let message = error.to_string();
 
     assert!(message.contains("Artifact manifest is not canonical"));
@@ -1368,11 +1440,8 @@ fn report_fails_on_missing_manifest_artifact_path() {
     )
     .unwrap();
 
-    let error = build_run_report(
-        temp.path(),
-        Some("run-missing-manifest-artifact-path"),
-    )
-    .unwrap_err();
+    let error =
+        build_run_report(temp.path(), Some("run-missing-manifest-artifact-path")).unwrap_err();
     let message = error.to_string();
 
     assert!(message.contains("Artifact manifest artifact at index 0 is missing path"));
@@ -1405,14 +1474,13 @@ fn report_fails_on_blank_manifest_artifact_path() {
     )
     .unwrap();
 
-    let error = build_run_report(
-        temp.path(),
-        Some("run-blank-manifest-artifact-path"),
-    )
-    .unwrap_err();
+    let error =
+        build_run_report(temp.path(), Some("run-blank-manifest-artifact-path")).unwrap_err();
     let message = error.to_string();
 
-    assert!(message.contains("Artifact manifest artifact at index 0 path is not a non-empty string"));
+    assert!(
+        message.contains("Artifact manifest artifact at index 0 path is not a non-empty string")
+    );
     assert!(message.contains("artifacts.json"));
 }
 
@@ -1442,14 +1510,13 @@ fn report_fails_on_blank_manifest_artifact_kind() {
     )
     .unwrap();
 
-    let error = build_run_report(
-        temp.path(),
-        Some("run-blank-manifest-artifact-kind"),
-    )
-    .unwrap_err();
+    let error =
+        build_run_report(temp.path(), Some("run-blank-manifest-artifact-kind")).unwrap_err();
     let message = error.to_string();
 
-    assert!(message.contains("Artifact manifest artifact at index 0 kind is not a non-empty string"));
+    assert!(
+        message.contains("Artifact manifest artifact at index 0 kind is not a non-empty string")
+    );
     assert!(message.contains("artifacts.json"));
 }
 
@@ -1462,10 +1529,7 @@ fn report_fails_on_manifest_canonical_artifact_kind_mismatch() {
         "agentic-sast:scan",
     );
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(
-        temp.path(),
-        "run-canonical-manifest-artifact-kind-mismatch",
-    );
+    let dir = run_dir(temp.path(), "run-canonical-manifest-artifact-kind-mismatch");
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
@@ -1542,7 +1606,9 @@ fn report_fails_on_non_file_artifact_manifest() {
 
     let error = build_run_report(temp.path(), Some("run-non-file-manifest")).unwrap_err();
 
-    assert!(error.to_string().contains("Artifact manifest is not a file"));
+    assert!(error
+        .to_string()
+        .contains("Artifact manifest is not a file"));
     assert!(error.to_string().contains("artifacts.json"));
 }
 
@@ -1973,9 +2039,9 @@ fn report_summarizes_findings_with_canonical_severity_buckets() {
 
     let report = build_run_report(temp.path(), Some("run-findings-severity")).unwrap();
 
-    assert!(report.report_markdown.contains(
-        "findings.json: present - 5 finding(s), severity high=2, medium=1, info=2"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("findings.json: present - 5 finding(s), severity high=2, medium=1, info=2"));
 }
 
 #[test]
@@ -2049,9 +2115,9 @@ fn report_ignores_nested_properties_proof_state() {
 
     let report = build_run_report(temp.path(), Some("run-findings-properties")).unwrap();
 
-    assert!(report.report_markdown.contains(
-        "findings.json: present - 2 finding(s), severity high=1, medium=1"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("findings.json: present - 2 finding(s), severity high=1, medium=1"));
     assert!(!report.report_markdown.contains("proof runtime_confirmed"));
     assert!(!report.report_markdown.contains("proof source_sink_linked"));
 }
@@ -2320,7 +2386,10 @@ fn tool_json_exposes_standard_envelope_and_report_markdown() {
 
     assert_eq!(output["ok"], json!(true));
     assert_eq!(output["status"], json!("completed"));
-    assert!(output["reportMarkdown"].as_str().unwrap().contains("run-source"));
+    assert!(output["reportMarkdown"]
+        .as_str()
+        .unwrap()
+        .contains("run-source"));
     assert_eq!(output["artifacts"][0]["label"], json!("report"));
     assert_eq!(output["data"]["sourceRunId"], json!("run-source"));
     assert!(!output["warnings"]
@@ -2350,18 +2419,22 @@ fn default_source_uses_run_time_not_lexical_run_id() {
 #[test]
 fn report_markdown_surfaces_llm_audit_metadata_from_run_json() {
     let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-llm", "agentic-sast:scan").with_llm_calls(vec![
-        RunLlmCallAudit {
-            n: 7,
-            kind: "reasoning".to_string(),
-            verb: Some("query".to_string()),
-            model: "openai:gpt-test".to_string(),
-            provider: "openai".to_string(),
-            prompt_hash: "fnv1a64:abc123".to_string(),
-            latency_ms: Some(42),
-            cost_usd: Some(0.0042),
-        },
-    ]);
+    let source =
+        completed_summary(temp.path(), "run-llm", "agentic-sast:scan").with_llm_calls(vec![
+            RunLlmCallAudit {
+                n: 7,
+                kind: "reasoning".to_string(),
+                verb: Some("query".to_string()),
+                model: "openai:gpt-test".to_string(),
+                provider: "openai".to_string(),
+                prompt_hash: "fnv1a64:abc123".to_string(),
+                latency_ms: Some(42),
+                cost_usd: Some(0.0042),
+                observed_cost_usd: None,
+                provider_spend_unresolved: false,
+                call_attempted: Some(true),
+            },
+        ]);
     write_run_summary(temp.path(), &source).unwrap();
 
     let report = build_run_report(temp.path(), Some("run-llm")).unwrap();
@@ -2400,14 +2473,11 @@ fn report_markdown_surfaces_run_reproducibility_metadata() {
     let report = build_run_report(temp.path(), Some("run-repro")).unwrap();
 
     assert!(report.report_markdown.contains("## Reproducibility"));
-    assert!(report.report_markdown.contains(&format!(
-        "- Kuzushi Version: {}",
-        env!("CARGO_PKG_VERSION")
-    )));
-    assert!(report.report_markdown.contains("- Platform: "));
     assert!(report
         .report_markdown
-        .contains("- Model: openai:gpt-test"));
+        .contains(&format!("- Kuzushi Version: {}", env!("CARGO_PKG_VERSION"))));
+    assert!(report.report_markdown.contains("- Platform: "));
+    assert!(report.report_markdown.contains("- Model: openai:gpt-test"));
     assert!(report
         .report_markdown
         .contains("- Config Hash: sha256:abc123"));
@@ -2544,9 +2614,13 @@ fn report_markdown_ignores_exploit_chain_step_aliases() {
 #[test]
 fn report_markdown_surfaces_failure_handoff_bounds() {
     let temp = tempdir().unwrap();
-    let source =
-        RunSummary::running("run-failed", "tool", Some("semgrep:scan".to_string()), "target")
-            .failed("semgrep binary missing");
+    let source = RunSummary::running(
+        "run-failed",
+        "tool",
+        Some("semgrep:scan".to_string()),
+        "target",
+    )
+    .failed("semgrep binary missing");
     write_run_summary(temp.path(), &source).unwrap();
     let result = write_run_artifact_json(
         temp.path(),
@@ -2570,18 +2644,18 @@ fn report_markdown_surfaces_failure_handoff_bounds() {
     let output = report.to_tool_json();
 
     assert!(report.report_markdown.contains("## Failure Handoff"));
-    assert!(report.report_markdown.contains("Failed Stage: semgrep:scan"));
+    assert!(report
+        .report_markdown
+        .contains("Failed Stage: semgrep:scan"));
     assert!(report.report_markdown.contains("semgrep binary missing"));
     assert!(report.report_markdown.contains("Available Artifacts"));
     assert!(report.report_markdown.contains("result.json"));
     assert!(report.report_markdown.contains("artifact-review-only"));
     assert!(report.report_markdown.contains("Fallback Prompt"));
     assert!(report.report_markdown.contains("Forbidden Claims"));
-    assert!(
-        report
-            .report_markdown
-            .contains("failures.json: present - status failed, 1 failure(s), stages semgrep:scan")
-    );
+    assert!(report
+        .report_markdown
+        .contains("failures.json: present - status failed, 1 failure(s), stages semgrep:scan"));
     assert!(report.report_markdown.contains("exploit proven"));
     assert!(report.report_markdown.contains("verified claim"));
     assert!(report.report_markdown.contains("false positive verdict"));
@@ -2593,9 +2667,11 @@ fn report_markdown_surfaces_failure_handoff_bounds() {
         output["data"]["failureHandoffs"][0]["allowedProofLevel"],
         json!("artifact-review-only; runtime verification did not run")
     );
-    assert!(output["data"]["failureHandoffs"][0]["artifactsAvailable"][0]["path"]
-        .as_str()
-        .is_some_and(|path| path.ends_with("result.json")));
+    assert!(
+        output["data"]["failureHandoffs"][0]["artifactsAvailable"][0]["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("result.json"))
+    );
     assert!(output["data"]["failureHandoffs"][0]["fallbackPrompt"]
         .as_str()
         .is_some_and(|prompt| prompt.contains("semgrep binary missing")));
@@ -2657,7 +2733,10 @@ fn report_summarizes_canonical_failure_handoff_stage() {
             .contains("failures.json: present - status failed, 1 failure(s), stages semgrep:scan, proof limits artifact-review-only, available artifacts 1, missing artifacts 1, next artifacts 1, what failed 1, recovery options 1, fallback prompts 1, claims forbidden 1")
     );
     assert_eq!(report.failure_handoffs[0].failed_stage, "semgrep:scan");
-    assert_eq!(report.failure_handoffs[0].allowed_proof_level, "artifact-review-only");
+    assert_eq!(
+        report.failure_handoffs[0].allowed_proof_level,
+        "artifact-review-only"
+    );
 }
 
 #[test]
@@ -2795,7 +2874,8 @@ fn report_rejects_failure_handoff_missing_stage_and_cause() {
     )
     .unwrap();
 
-    let error = build_run_report(temp.path(), Some("run-failed-missing-context-fields")).unwrap_err();
+    let error =
+        build_run_report(temp.path(), Some("run-failed-missing-context-fields")).unwrap_err();
     let message = error.to_string();
 
     assert!(message.contains("Run failures artifact is not canonical"));

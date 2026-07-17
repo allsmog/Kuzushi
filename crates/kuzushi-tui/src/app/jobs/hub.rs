@@ -5,10 +5,9 @@ use std::time::{Duration, Instant};
 
 pub(super) const JOB_EVENT_CHANNEL_CAPACITY: usize = 4096;
 
-/// Grace window between the watchdog's cooperative cancel and the synthetic
-/// terminal failure that releases the slot of a worker that never polls its
-/// cancellation token. The OS thread is left alone (killing it is unsafe);
-/// only the logical job slot is released with an honest failure.
+/// Grace window between the watchdog's cooperative cancel and quarantine of a
+/// worker that never polls its cancellation token. Rust cannot safely kill the
+/// OS thread, so the logical slot remains owned until the worker really exits.
 pub(crate) const WORKER_UNRESPONSIVE_GRACE: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
@@ -30,12 +29,10 @@ struct JobSlot {
     generation: WorkerGeneration,
     cancel: ScanCancellation,
     label: String,
-    /// When set, the watchdog's cooperative cancel went unanswered; once this
-    /// deadline passes with no terminal event, the hub emits a synthetic
-    /// failure to release the slot.
+    /// When set, the watchdog's cooperative cancel went unanswered and the
+    /// worker will be quarantined after the grace deadline.
     unresponsive_deadline: Option<Instant>,
-    #[cfg(test)]
-    cancel_requested: bool,
+    quarantined: bool,
 }
 
 #[derive(Debug)]
@@ -46,6 +43,12 @@ pub(crate) struct JobHub {
     slots: BTreeMap<JobKind, JobSlot>,
     trace_budget: LiveTraceBudget,
     wake: Option<TerminalLoopWake>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JobStartConflict {
+    pub(crate) kind: JobKind,
+    pub(crate) label: String,
 }
 
 impl Default for JobHub {
@@ -62,12 +65,54 @@ impl Default for JobHub {
     }
 }
 
+impl ShellApp {
+    pub(crate) fn try_start_exclusive_job(
+        &mut self,
+        kind: JobKind,
+        label: impl Into<String>,
+    ) -> Option<JobTicket> {
+        let label = label.into();
+        match self.jobs_mut().try_start(kind, label.clone()) {
+            Ok(ticket) => Some(ticket),
+            Err(conflict) => {
+                self.log(
+                    "jobs",
+                    format!(
+                        "{label} blocked — {} ({:?}) still owns the background execution slot",
+                        conflict.label, conflict.kind
+                    ),
+                );
+                None
+            }
+        }
+    }
+}
+
 impl JobHub {
     pub(crate) fn set_wake(&mut self, wake: Option<TerminalLoopWake>) {
         self.wake = wake;
     }
 
+    pub(crate) fn try_start(
+        &mut self,
+        kind: JobKind,
+        label: impl Into<String>,
+    ) -> Result<JobTicket, JobStartConflict> {
+        if let Some((active_kind, slot)) = self.slots.iter().next() {
+            return Err(JobStartConflict {
+                kind: *active_kind,
+                label: slot.label.clone(),
+            });
+        }
+        Ok(self.replace_slot(kind, label))
+    }
+
+    #[cfg(test)]
     pub(crate) fn start(&mut self, kind: JobKind, label: impl Into<String>) -> JobTicket {
+        self.replace_slot(kind, label)
+    }
+
+    fn replace_slot(&mut self, kind: JobKind, label: impl Into<String>) -> JobTicket {
         let generation = WorkerGeneration::next(&mut self.next_generation);
         let cancel = ScanCancellation::default();
         let label = label.into();
@@ -78,8 +123,7 @@ impl JobHub {
                 cancel: cancel.clone(),
                 label: label.clone(),
                 unresponsive_deadline: None,
-                #[cfg(test)]
-                cancel_requested: false,
+                quarantined: false,
             },
         );
         JobTicket::new(
@@ -96,26 +140,34 @@ impl JobHub {
         self.slots.contains_key(&kind)
     }
 
+    pub(crate) fn has_running_job(&self) -> bool {
+        !self.slots.is_empty()
+    }
+
     #[cfg(test)]
     pub(crate) fn running_label(&self, kind: JobKind) -> Option<&str> {
         self.slots.get(&kind).map(|slot| slot.label.as_str())
     }
 
-    #[cfg(test)]
     pub(crate) fn cancel_requested(&self, kind: JobKind) -> bool {
         self.slots
             .get(&kind)
-            .is_some_and(|slot| slot.cancel_requested)
+            .is_some_and(|slot| slot.cancel.is_cancelled())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_quarantined(&self, kind: JobKind) -> bool {
+        self.slots.get(&kind).is_some_and(|slot| slot.quarantined)
+    }
+
+    pub(crate) fn has_quarantined_slot(&self) -> bool {
+        self.slots.values().any(|slot| slot.quarantined)
     }
 
     pub(crate) fn cancel(&mut self, kind: JobKind) -> bool {
         let Some(slot) = self.slots.get_mut(&kind) else {
             return false;
         };
-        #[cfg(test)]
-        {
-            slot.cancel_requested = true;
-        }
         slot.cancel.cancel();
         true
     }
@@ -138,44 +190,20 @@ impl JobHub {
         slot.unresponsive_deadline = Some(now + WORKER_UNRESPONSIVE_GRACE);
     }
 
-    /// Emit a synthetic terminal failure for every slot whose watchdog-cancel
-    /// grace window has elapsed with no terminal event, so the slot is
-    /// released and new work can start. Returns true if any failure was sent.
-    pub(crate) fn fail_unresponsive_slots(&mut self, now: Instant) -> bool {
-        let due: Vec<JobKind> = self
-            .slots
-            .iter()
-            .filter(|(_, slot)| slot.unresponsive_deadline.is_some_and(|d| d <= now))
-            .map(|(kind, _)| *kind)
-            .collect();
-        let mut failed_any = false;
-        for kind in due {
-            failed_any |= self.fail_unresponsive_slot(kind);
+    /// Quarantine every slot whose watchdog-cancel grace window elapsed. The
+    /// slot intentionally remains occupied: accepting new work while the OS
+    /// thread is alive would permit overlapping workspace side effects.
+    pub(crate) fn quarantine_unresponsive_slots(&mut self, now: Instant) -> bool {
+        let mut quarantined = false;
+        for slot in self.slots.values_mut().filter(|slot| {
+            slot.unresponsive_deadline
+                .is_some_and(|deadline| deadline <= now)
+        }) {
+            slot.unresponsive_deadline = None;
+            slot.quarantined = true;
+            quarantined = true;
         }
-        failed_any
-    }
-
-    fn fail_unresponsive_slot(&mut self, kind: JobKind) -> bool {
-        let Some(slot) = self.slots.get_mut(&kind) else {
-            return false;
-        };
-        let event = ShellEvent::failure(
-            kind,
-            &slot.label,
-            "worker unresponsive: no terminal event after watchdog cancel; releasing job slot"
-                .to_string(),
-        );
-        let stamped = StampedShellEvent {
-            kind,
-            generation: slot.generation,
-            event,
-        };
-        if self.tx.try_send(stamped).is_err() {
-            // Channel full: keep the deadline armed and retry next tick.
-            return false;
-        }
-        slot.unresponsive_deadline = None;
-        true
+        quarantined
     }
 
     pub(crate) fn finish(&mut self, kind: JobKind) {
@@ -184,6 +212,10 @@ impl JobHub {
 
     pub(crate) fn trace_budget(&self) -> LiveTraceBudget {
         self.trace_budget.clone()
+    }
+
+    pub(crate) fn take_dropped_live_trace_count(&self) -> usize {
+        self.trace_budget.take_dropped_live()
     }
 
     #[cfg(test)]

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) fn persist_tool_findings(
-    tool_slug: &str,
+    run_id: String,
     target: &Path,
     findings: &[Finding],
     workspace: Option<&WorkspaceTarget>,
@@ -11,16 +11,57 @@ pub(crate) fn persist_tool_findings(
         return Ok(None);
     };
     workspace.ensure_state_dir()?;
-    let run_id = format!("{tool_slug}-{}", Uuid::new_v4());
-    store.record_run_started(&run_id, target, "running")?;
-    for finding in findings {
-        store.insert_finding(&run_id, finding)?;
-    }
-    store.record_run_finished(&run_id, "completed", findings.len())?;
+    store.with_run_lifecycle(&run_id, target, || {
+        for finding in findings {
+            store.insert_finding(&run_id, finding)?;
+        }
+        Ok(((), findings.len()))
+    })?;
     Ok(Some(GenericPersistedRun {
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn findings_use_the_canonical_execution_run_id() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        workspace.ensure_state_dir().unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let finding = Finding::new_tool(
+            "secret-scan",
+            "secret-scan/test",
+            "src/config.rs",
+            1,
+            None,
+            Severity::High,
+            "test finding",
+        );
+
+        let persisted = persist_tool_findings(
+            "run-canonical".to_string(),
+            target.path(),
+            &[finding],
+            Some(&workspace),
+            Some(&store),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(persisted.run_id, "run-canonical");
+        assert_eq!(
+            store
+                .list_findings_for_scan_id("run-canonical")
+                .unwrap()
+                .len(),
+            1
+        );
+    }
 }
 
 pub(crate) fn render_generic_findings_output(

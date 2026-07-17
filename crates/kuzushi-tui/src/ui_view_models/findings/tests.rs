@@ -9,6 +9,79 @@ use kuzushi_core::{
 use std::collections::BTreeMap;
 
 #[test]
+fn visible_projection_cache_reuses_shared_storage_until_findings_change() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_findings(vec![Finding::new_semgrep(
+        "demo.rule",
+        "src/lib.rs",
+        7,
+        None,
+        Severity::High,
+        "finding",
+    )]);
+
+    let first = projected_visible_findings(&app);
+    let cached = projected_visible_findings(&app);
+    assert!(std::sync::Arc::ptr_eq(&first, &cached));
+
+    app.findings_mut()[0].severity = Severity::Critical;
+    let refreshed = projected_visible_findings(&app);
+    assert!(!std::sync::Arc::ptr_eq(&cached, &refreshed));
+    assert_eq!(refreshed[0].finding.severity, Severity::Critical);
+}
+
+#[test]
+fn provenance_filtered_projection_refreshes_when_run_history_finishes_loading() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let run_id = "run-provenance-hydration";
+    let mut summary =
+        RunSummary::running(run_id, "scan", None, workspace.root().display().to_string());
+    summary.target_git = Some(RunTargetGitMetadata {
+        sha: "abcdef1234567890".to_string(),
+        branch: Some("main".to_string()),
+        dirty: false,
+    });
+    write_run_summary(workspace.root(), &summary.complete()).unwrap();
+
+    let mut finding = Finding::new_tool(
+        "semgrep",
+        "demo.provenance-filter",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "finding with delayed run provenance",
+    );
+    finding.scan_id = Some(run_id.to_string());
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_findings(vec![finding]);
+    app.set_active_findings_filter(Some("branch:main dirty:clean".to_string()));
+
+    let key = crate::app::ViewHydrationKey::RunSummaryEntries;
+    app.workbench_cache()
+        .borrow_mut()
+        .mark_view_hydration_loading(workspace.root(), std::slice::from_ref(&key));
+    let loading = projected_visible_findings(&app);
+    assert!(loading.is_empty());
+
+    let entries = kuzushi_core::list_recent_run_summary_entries(workspace.root(), 100).unwrap();
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(crate::app::ViewHydrationResult {
+            target: workspace.root().to_path_buf(),
+            key,
+            value: crate::app::ViewHydrationValue::RunSummaryEntries(
+                crate::app::RunSummaryEntriesState::Ready(entries),
+            ),
+        });
+    let ready = projected_visible_findings(&app);
+
+    assert_eq!(ready.len(), 1);
+    assert!(!std::sync::Arc::ptr_eq(&loading, &ready));
+}
+
+#[test]
 fn findings_model_projects_counts_rows_and_selection() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let mut high = Finding::new_semgrep(
@@ -24,6 +97,7 @@ fn findings_model_projects_counts_rows_and_selection() {
         confidence: 0.91,
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     high.identity_id = Some("fi_0123456789abcdef0123456789abcdef".to_string());
     let medium = Finding::new_tool(
@@ -50,25 +124,43 @@ fn findings_model_projects_counts_rows_and_selection() {
         model.reconciliation_header,
         "showing 2 of 2 · filters:all · review:all · sorted by priority"
     );
-    assert_eq!(model.rows[0].alias, "F-0001");
-    assert_eq!(model.rows[0].identity_label, "FI-01234567");
-    assert_eq!(model.rows[0].severity_label, "HIGH");
-    assert_eq!(model.rows[0].location, "src/search.ts:12-14");
-    assert_eq!(model.rows[0].run_label, "run:unknown");
-    assert_eq!(model.rows[0].revision_label, "rev:unknown");
-    assert_eq!(model.rows[0].verdict, "tp");
-    assert_eq!(model.rows[0].confidence, "91%");
-    assert_eq!(model.rows[0].priority_label, "p:1");
-    assert_eq!(model.rows[0].lifecycle_status, "candidate");
-    assert_eq!(model.rows[0].decision, "confirmed");
-    assert_eq!(model.rows[0].proof_label, "signal-only");
-    assert_eq!(model.rows[0].proof_marker, "?");
-    assert_eq!(model.rows[0].proof_tier, ProofTier::Suspected);
-    assert_eq!(model.rows[0].source, "semgrep:demo.sql");
-    assert!(model.rows[0].selected);
-    assert_eq!(model.rows[1].proof_label, "unverified");
-    assert_eq!(model.rows[1].proof_marker, "?");
-    assert_eq!(model.rows[1].proof_tier, ProofTier::Suspected);
+    assert_eq!(
+        model
+            .rows
+            .iter()
+            .map(|row| row.alias.as_str())
+            .collect::<Vec<_>>(),
+        vec!["F-0001", "F-0002"],
+        "finding rows keep the documented confidence-first projection"
+    );
+    let high = model
+        .rows
+        .iter()
+        .find(|row| row.alias == "F-0001")
+        .expect("confirmed high row");
+    assert_eq!(high.identity_label, "FI-01234567");
+    assert_eq!(high.severity_label, "HIGH");
+    assert_eq!(high.location, "src/search.ts:12-14");
+    assert_eq!(high.run_label, "run:unknown");
+    assert_eq!(high.revision_label, "rev:unknown");
+    assert_eq!(high.verdict, "tp");
+    assert_eq!(high.confidence, "91%");
+    assert_eq!(high.priority_label, "p:1");
+    assert_eq!(high.lifecycle_status, "candidate");
+    assert_eq!(high.decision, "confirmed");
+    assert_eq!(high.proof_label, "signal-only");
+    assert_eq!(high.proof_marker, "?");
+    assert_eq!(high.proof_tier, ProofTier::Suspected);
+    assert_eq!(high.source, "semgrep:demo.sql");
+    assert!(high.selected);
+    let medium = model
+        .rows
+        .iter()
+        .find(|row| row.alias == "F-0002")
+        .expect("needs-review medium row");
+    assert_eq!(medium.proof_label, "unverified");
+    assert_eq!(medium.proof_marker, "?");
+    assert_eq!(medium.proof_tier, ProofTier::Suspected);
     assert_eq!(model.preview.header, "FINDINGS · 1 triaged · 1 pending");
     assert_eq!(model.preview.rows.len(), 2);
     assert!(model.preview.overflow.is_none());
@@ -123,6 +215,7 @@ fn findings_model_applies_active_filter_to_visible_rows() {
         confidence: 0.86,
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     *app.findings_mut() = vec![open, confirmed];
 
@@ -182,6 +275,7 @@ fn findings_model_counts_reviewed_by_durable_identity() {
         confidence: 0.91,
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     let mut rerun = Finding::new_tool(
         "semgrep",
@@ -228,6 +322,7 @@ fn selected_finding_detail_uses_durable_identity_review_decision() {
         confidence: 0.91,
         rationale: "operator confirmed this identity".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     reviewed.triaged_by = Some(TriageAuthor::Human);
 
@@ -300,6 +395,7 @@ fn selected_finding_detail_includes_run_summary_provenance() {
     finding.scan_id = Some("run-detail".to_string());
 
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.hydrate_all_view_data_for_test();
     *app.findings_mut() = vec![finding];
 
     let detail = selected_finding_detail_model(&app).expect("selected finding");
@@ -462,6 +558,7 @@ fn findings_model_filters_rows_to_active_component_scope() {
             "cli finding",
         ),
     ];
+    app.hydrate_all_view_data_for_test();
 
     let model = findings_model(&app);
 
@@ -493,6 +590,8 @@ fn finding_proof_label_prioritizes_runtime_and_static_evidence() {
         duration_ms: 12,
         cost_usd: 0.0,
         notes: vec![],
+        verification_run_id: None,
+        verified_scan_id: None,
         created_at: "2026-01-01T00:00:00Z".to_string(),
     });
     assert_eq!(finding_proof_label(&verified), "verified L4");
@@ -762,6 +861,7 @@ fn selected_finding_detail_uses_same_proof_badge_as_list() {
         confidence: 0.91,
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
     *app.findings_mut() = vec![finding];
@@ -813,6 +913,8 @@ fn selected_finding_detail_recommends_patch_for_runtime_verified_findings() {
         duration_ms: 12,
         cost_usd: 0.0,
         notes: vec![],
+        verification_run_id: None,
+        verified_scan_id: None,
         created_at: "2026-01-01T00:00:00Z".to_string(),
     });
     *app.findings_mut() = vec![finding];

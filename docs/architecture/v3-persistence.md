@@ -26,11 +26,17 @@ Target-owned state lives under:
   log/checkpoints/checkpoint-000000000123.json
   runs/<runId>/
     run.json
+    items.jsonl
     events.jsonl
     trace.jsonl
+    input.json
+    result.json
+    failures.json
+    report.md
     artifacts.json
-    diagnostics/failures and report exports
+    scan-input.json, triage.jsonl, verify.jsonl, patch.jsonl  # sast:scan only
   latest
+  workflow/phase-attempts.v2.jsonl
 ```
 
 The run directory remains an operator-facing replay/export bundle. It is not a
@@ -39,6 +45,13 @@ second mutable state store. Snapshot-style files such as `context.json`,
 synthesized as fixed run leaves. A producer may declare those files explicitly
 in `artifacts.json`, but otherwise those payloads live in `result.json`, CAS
 objects, events, or rebuilt SQLite projections.
+
+The run id created by the caller is the canonical identity for an umbrella
+scan. Per-engine ids are retained as child provenance, and scan policy/export
+queries read the parent/child union. Run lifecycle rows are written as
+`running` before fallible finding persistence and are terminalized as
+`completed` or `failed`; import and scanner writers use the same guarded
+start/operation/finish shape.
 
 ## Source Of Truth
 
@@ -52,7 +65,12 @@ objects, events, or rebuilt SQLite projections.
 | Verification/proof | append-only event | projected proof state |
 | Patch attempt | append-only event plus optional CAS diff | projected audit row |
 | Reports | derived export | optional cached artifact |
+| Per-run task/call/terminal lifecycle | hash-linked `runs/<runId>/items.jsonl` | pure in-memory/live/replay projection |
 | FTS rows | projection data | disposable search index |
+
+The target-wide event log remains canonical for findings and target state. A
+terminal run item is bridged to it idempotently, but run replay reduces the
+per-run typed stream and never reconstructs from the target log.
 
 Direct mutation of projected findings for human decisions is forbidden.
 `record_auto_triage` appends a v3 decision event and lets the projection update

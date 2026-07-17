@@ -7,7 +7,7 @@ pub(in crate::modules) fn write_static_variants_json(
     artifacts: &SastRunArtifacts,
 ) -> Result<Value> {
     let findings = findings_for_sast_runs(store, run_ids)?;
-    let evidence_store = StaticEvidenceStore::open(workspace).ok();
+    let evidence_store = Some(StaticEvidenceStore::open(workspace)?);
     let variant_report =
         hunt_whitebox_static_variants(workspace.root(), &findings, evidence_store.as_ref(), 50)?;
     let artifact_path = artifacts.dir.join("static-variants.json");
@@ -19,11 +19,7 @@ pub(in crate::modules) fn write_static_variants_json(
         "deterministic": variant_report.deterministic,
         "policy": "whitebox-static variants are code-cited candidates only; no variant is statically_confirmed by inheritance",
     });
-    fs::write(
-        &artifact_path,
-        format!("{}\n", serde_json::to_string_pretty(&report)?),
-    )
-    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    artifacts.write_json("static-variants.json", "static variants", &report)?;
     Ok(report)
 }
 
@@ -34,7 +30,7 @@ pub(in crate::modules) fn write_candidate_semgrep_rules_json(
     artifacts: &SastRunArtifacts,
 ) -> Result<Value> {
     let findings = findings_for_sast_runs(store, run_ids)?;
-    let evidence_store = StaticEvidenceStore::open(workspace).ok();
+    let evidence_store = Some(StaticEvidenceStore::open(workspace)?);
     let synthesis_report =
         synthesize_candidate_semgrep_rules(&findings, evidence_store.as_ref(), &[])?;
     let artifact_path = artifacts.dir.join("candidate-semgrep-rules.json");
@@ -46,11 +42,11 @@ pub(in crate::modules) fn write_candidate_semgrep_rules_json(
         "deterministic": synthesis_report.deterministic,
         "policy": "candidate Semgrep rules are generated only from statically_confirmed findings and remain disabled until fixture validation passes and an operator enables them",
     });
-    fs::write(
-        &artifact_path,
-        format!("{}\n", serde_json::to_string_pretty(&report)?),
-    )
-    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    artifacts.write_json(
+        "candidate-semgrep-rules.json",
+        "candidate Semgrep rules",
+        &report,
+    )?;
     Ok(report)
 }
 
@@ -80,10 +76,10 @@ pub(in crate::modules) fn write_whitebox_suppressions_json(
         "deterministic": true,
         "policy": "whitebox-static false-positive memory annotates suppressions only; suppressed findings remain in audit/report output",
     });
-    fs::write(
-        &artifact_path,
-        format!("{}\n", serde_json::to_string_pretty(&report)?),
-    )
-    .with_context(|| format!("Could not write {}", artifact_path.display()))?;
+    artifacts.write_json(
+        "whitebox-suppressions.json",
+        "whitebox suppressions",
+        &report,
+    )?;
     Ok(report)
 }

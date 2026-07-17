@@ -281,8 +281,9 @@ fn selected_item_scope_label(item: &ScreenSelectedItem) -> String {
 fn active_phase_chip(phase: &str) -> String {
     match phase {
         "map" => "組 map",
-        "hunt" => "崩 hunt",
-        "confirm" => "作 confirm",
+        "scan" | "hunt" => "崩 scan",
+        "review" => "査 review",
+        "prove" | "confirm" => "作 prove",
         "fix" => "掛 fix",
         other => other,
     }

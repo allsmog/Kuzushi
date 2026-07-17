@@ -58,21 +58,21 @@ pub(crate) fn model_choices() -> &'static [ModelChoice] {
 }
 
 pub(crate) fn oauth_model_choice_for_provider(provider: &str) -> Option<&'static ModelChoice> {
-    match provider {
-        "openai" | "openai-codex" => MODEL_CHOICES
-            .iter()
-            .find(|choice| choice.provider == "openai-codex"),
-        _ => None,
+    if AuthProvider::from_scene_provider(provider) != Some(AuthProvider::OpenAi) {
+        return None;
     }
+    MODEL_CHOICES
+        .iter()
+        .find(|choice| choice.provider == AuthProvider::OpenAi.oauth_model_provider())
 }
 
 pub(crate) fn api_key_model_choice_for_provider(provider: &str) -> Option<&'static ModelChoice> {
-    match provider {
-        "openai" | "openai-codex" => MODEL_CHOICES
-            .iter()
-            .find(|choice| choice.provider == "openai"),
-        _ => None,
+    if AuthProvider::from_scene_provider(provider) != Some(AuthProvider::OpenAi) {
+        return None;
     }
+    MODEL_CHOICES
+        .iter()
+        .find(|choice| choice.provider == AuthProvider::OpenAi.api_key_provider())
 }
 
 pub(crate) fn visible_model_choice_indexes(configured_model: Option<&str>) -> Vec<usize> {
@@ -107,10 +107,7 @@ pub(crate) fn display_model_selector(model: &str) -> String {
 }
 
 pub(crate) fn display_model_provider(provider: &str) -> &str {
-    match provider {
-        "openai-codex" => "openai",
-        _ => provider,
-    }
+    auth_provider_label(provider)
 }
 
 pub(crate) fn model_choice_display_selector(choice: &ModelChoice) -> String {
@@ -124,4 +121,17 @@ pub(crate) fn preferred_model_choice_index(config: &V2Config) -> usize {
         auth_ready_for_provider("openai"),
         auth_ready_for_provider("anthropic"),
     )
+}
+
+/// Cursor position inside the *visible* onboarding list for the preferred
+/// model. The preferred selector above intentionally returns an index into
+/// `MODEL_CHOICES`; the picker renders a reordered subset, so feeding that
+/// absolute index directly to its cursor can highlight one row while Enter
+/// selects another.
+pub(crate) fn preferred_visible_model_choice_cursor(config: &V2Config) -> usize {
+    let preferred = preferred_model_choice_index(config);
+    visible_model_choice_indexes(config.model.as_deref())
+        .iter()
+        .position(|index| *index == preferred)
+        .unwrap_or(0)
 }

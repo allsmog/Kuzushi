@@ -3,12 +3,7 @@ use super::*;
 impl FindingStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Could not create {}", parent.display()))?;
-        }
-        let conn =
-            Connection::open(path).with_context(|| format!("Could not open {}", path.display()))?;
+        let conn = crate::sqlite_connection::open_file(path)?;
         let store = Self {
             conn,
             db_path: Some(path.to_path_buf()),
@@ -19,12 +14,33 @@ impl FindingStore {
         Ok(store)
     }
 
+    /// Open an initialized findings projection without running migrations or
+    /// changing journal/schema state. Interactive read paths use this so a
+    /// workspace watcher cannot observe a read as a new state mutation.
+    pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref();
+        let conn = crate::sqlite_connection::open_read_only_file(path)?;
+        validate_schema_version(&conn)?;
+        Ok(Self {
+            conn,
+            db_path: Some(path.to_path_buf()),
+            event_log_dir: path.parent().map(|parent| parent.join("log")),
+            _ephemeral_dir: None,
+        })
+    }
+
+    pub fn projection_meta(&self) -> Result<crate::storage_v3::ProjectionMeta> {
+        crate::storage_v3::projection_meta(&self.conn)
+    }
+
     pub fn open_in_memory() -> Result<Self> {
         // Kept as a test-facing convenience name, but backed by a temporary
         // v3 store so writes still flow through the event log and writer actor.
         let ephemeral_dir =
             tempfile::tempdir().context("Could not create ephemeral findings DB")?;
-        let path = ephemeral_dir.path().join("findings.sqlite3");
+        let canonical_dir = std::fs::canonicalize(ephemeral_dir.path())
+            .context("Could not canonicalize ephemeral findings DB directory")?;
+        let path = canonical_dir.join("findings.sqlite3");
         let store = Self {
             conn: Connection::open(&path)
                 .with_context(|| format!("Could not open {}", path.display()))?,
@@ -48,8 +64,30 @@ impl FindingStore {
 const FINDINGS_SCHEMA_VERSION: i32 = 1;
 
 fn record_schema_version(conn: &Connection) -> Result<()> {
+    let current = schema_version(conn)?;
+    anyhow::ensure!(
+        current <= FINDINGS_SCHEMA_VERSION,
+        "findings DB schema version {current} is newer than supported version {FINDINGS_SCHEMA_VERSION}"
+    );
+    if current == FINDINGS_SCHEMA_VERSION {
+        return Ok(());
+    }
     conn.pragma_update(None, "user_version", FINDINGS_SCHEMA_VERSION)
         .context("Could not record findings DB schema version")
+}
+
+fn validate_schema_version(conn: &Connection) -> Result<()> {
+    let current = schema_version(conn)?;
+    anyhow::ensure!(
+        current == FINDINGS_SCHEMA_VERSION,
+        "findings DB schema version {current} requires initialization at version {FINDINGS_SCHEMA_VERSION}"
+    );
+    Ok(())
+}
+
+fn schema_version(conn: &Connection) -> Result<i32> {
+    conn.pragma_query_value(None, "user_version", |row| row.get(0))
+        .context("Could not read findings DB schema version")
 }
 
 /// Concurrency posture for the findings DB. Scan workers, the shell, and MCP
@@ -58,8 +96,10 @@ fn record_schema_version(conn: &Connection) -> Result<()> {
 /// failing with "database is locked". In-memory stores report
 /// `journal_mode=memory` — that's expected; the pragma result is informational.
 fn configure_connection(conn: &Connection) -> Result<()> {
-    let _journal_mode: String =
-        conn.query_row("pragma journal_mode = wal", [], |row| row.get(0))?;
+    let journal_mode: String = conn.query_row("pragma journal_mode", [], |row| row.get(0))?;
+    if !journal_mode.eq_ignore_ascii_case("wal") && journal_mode != "memory" {
+        let _: String = conn.query_row("pragma journal_mode = wal", [], |row| row.get(0))?;
+    }
     conn.busy_timeout(std::time::Duration::from_millis(5_000))?;
     Ok(())
 }

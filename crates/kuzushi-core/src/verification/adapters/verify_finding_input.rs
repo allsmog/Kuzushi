@@ -31,10 +31,11 @@ impl VerifyFindingInput {
         };
         let prompt_template = match input.get("VERIFY_PROMPT") {
             Some(Value::String(value)) if !value.trim().is_empty() => {
-                Some(crate::options::resolve_prompt_override_for_key(
+                Some(crate::options::resolve_prepared_prompt_override_for_key(
                     value.trim(),
                     cwd,
                     "VERIFY_PROMPT",
+                    crate::verification::DEFAULT_VERIFY_PROMPT,
                 )?)
             }
             Some(Value::String(_)) | None => None,
@@ -55,9 +56,7 @@ impl VerifyFindingInput {
 }
 
 fn parse_verify_passes(input: &Value) -> Result<u32> {
-    let raw = input
-        .get("VERIFY_PASSES")
-        .or_else(|| input.get("passes"));
+    let raw = input.get("VERIFY_PASSES").or_else(|| input.get("passes"));
     let passes = match raw {
         None | Some(Value::Null) => 1,
         Some(value) => value
@@ -96,7 +95,8 @@ fn parse_mcp_tool_timeout_ms(input: &Value) -> Result<Option<u64>> {
     }
 }
 
-const VERIFY_HEADER: &str = "You are Kuzushi's independent exploitability verifier. You did not discover this finding and \
+const VERIFY_HEADER: &str =
+    "You are Kuzushi's independent exploitability verifier. You did not discover this finding and \
 must not assume it is real. Your job is adversarial falsification: try to disprove the claim \
 by finding the mitigation, guard, validator, type constraint, privilege gate, or reachability \
 barrier that makes it unexploitable.

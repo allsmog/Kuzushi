@@ -7,8 +7,144 @@ pub(crate) use envelope::{
     completed_output_result, failed_output_result, partial_output_result, skipped_output_result,
 };
 
+/// Attach checked runtime spend without turning an unavailable cost into an
+/// exact zero. Mirror the fields into object-shaped `data` for consumers that
+/// read either the envelope or its payload.
+pub(crate) fn apply_runtime_cost_report(
+    result: &mut Value,
+    cost: crate::runtime::RuntimeCostReport,
+) {
+    apply_cost_fields(result, cost);
+    if let Some(data) = result.get_mut("data") {
+        apply_cost_fields(data, cost);
+    }
+}
+
+fn apply_cost_fields(value: &mut Value, cost: crate::runtime::RuntimeCostReport) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    if cost.is_unavailable() {
+        object.remove("costUsd");
+        object.remove("observedCostUsd");
+        object.remove("providerSpendUnresolved");
+        return;
+    }
+    if let Some(exact) = cost.exact_usd() {
+        object.insert("costUsd".to_string(), json!(exact));
+        object.remove("observedCostUsd");
+        object.remove("providerSpendUnresolved");
+    } else {
+        object.remove("costUsd");
+        object.insert("observedCostUsd".to_string(), json!(cost.observed_usd()));
+        object.insert("providerSpendUnresolved".to_string(), json!(true));
+    }
+}
+
+#[cfg(test)]
+mod runtime_cost_tests {
+    use super::*;
+    use crate::runtime::{RuntimeCost, RuntimeCostReport};
+
+    #[test]
+    fn unavailable_cost_removes_all_monetary_claims() {
+        let mut result = json!({
+            "costUsd": 1.0,
+            "observedCostUsd": 1.0,
+            "providerSpendUnresolved": true,
+            "data": {
+                "costUsd": 1.0,
+                "observedCostUsd": 1.0,
+                "providerSpendUnresolved": true
+            }
+        });
+
+        apply_runtime_cost_report(&mut result, RuntimeCostReport::UNAVAILABLE);
+
+        for value in [&result, &result["data"]] {
+            assert!(value.get("costUsd").is_none());
+            assert!(value.get("observedCostUsd").is_none());
+            assert!(value.get("providerSpendUnresolved").is_none());
+        }
+    }
+
+    #[test]
+    fn incomplete_zero_is_presented_as_observed_unresolved_spend() {
+        let mut result = json!({"data": {}});
+
+        apply_runtime_cost_report(&mut result, RuntimeCostReport::INCOMPLETE_ZERO);
+
+        for value in [&result, &result["data"]] {
+            assert_eq!(value["observedCostUsd"], json!(0.0));
+            assert_eq!(value["providerSpendUnresolved"], json!(true));
+            assert!(value.get("costUsd").is_none());
+        }
+    }
+
+    #[test]
+    fn exact_zero_is_presented_as_an_exact_cost() {
+        let mut result = json!({"data": {}});
+
+        apply_runtime_cost_report(&mut result, RuntimeCostReport::known(RuntimeCost::ZERO));
+
+        for value in [&result, &result["data"]] {
+            assert_eq!(value["costUsd"], json!(0.0));
+            assert!(value.get("observedCostUsd").is_none());
+            assert!(value.get("providerSpendUnresolved").is_none());
+        }
+    }
+}
+
 #[cfg(test)]
 mod subprocess_failure_summary_tests;
+
+/// Canonical semantic outcome carried by a normalized tool-result envelope.
+///
+/// Executors return `Result<Value>` for transport/dispatch failures, while
+/// product failures such as a missing scanner are represented inside the JSON
+/// envelope. Consumers must classify both layers instead of treating every
+/// Rust `Ok` as a successful tool run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolResultStatus {
+    Completed,
+    Partial,
+    Skipped,
+    Failed,
+}
+
+impl ToolResultStatus {
+    pub const fn is_completed(self) -> bool {
+        matches!(self, Self::Completed)
+    }
+
+    pub const fn is_failure_like(self) -> bool {
+        matches!(self, Self::Partial | Self::Failed)
+    }
+}
+
+/// Classify a raw or normalized result envelope without inventing success from
+/// the outer Rust `Result`. Top-level `ok: false` is authoritative; canonical
+/// top-level status wins over the legacy nested `data.status` spelling.
+pub fn tool_result_status(output: &Value) -> ToolResultStatus {
+    if output.get("ok").and_then(Value::as_bool) == Some(false) {
+        return ToolResultStatus::Failed;
+    }
+    output
+        .get("status")
+        .and_then(Value::as_str)
+        .or_else(|| output.pointer("/data/status").and_then(Value::as_str))
+        .map(canonical_tool_result_status)
+        .unwrap_or(ToolResultStatus::Completed)
+}
+
+fn canonical_tool_result_status(status: &str) -> ToolResultStatus {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "failed" => ToolResultStatus::Failed,
+        "partial" => ToolResultStatus::Partial,
+        "skipped" => ToolResultStatus::Skipped,
+        _ => ToolResultStatus::Completed,
+    }
+}
 
 /// Distill captured subprocess stderr into a single actionable line for an
 /// error message or banner — skipping JVM/stack-frame noise (`at …`,
@@ -321,6 +457,26 @@ const MAX_SUMMARY_CHARS: usize = 160;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn semantic_status_distinguishes_non_error_failure_envelopes() {
+        assert_eq!(
+            tool_result_status(&json!({"ok": false, "status": "completed"})),
+            ToolResultStatus::Failed
+        );
+        assert_eq!(
+            tool_result_status(&json!({"ok": true, "status": "partial"})),
+            ToolResultStatus::Partial
+        );
+        assert_eq!(
+            tool_result_status(&json!({"data": {"status": "skipped"}})),
+            ToolResultStatus::Skipped
+        );
+        assert_eq!(
+            tool_result_status(&json!({"status": "completed"})),
+            ToolResultStatus::Completed
+        );
+    }
 
     #[test]
     fn non_object_output_normalizes_through_completed_envelope() {

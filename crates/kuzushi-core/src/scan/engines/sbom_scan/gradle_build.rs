@@ -1,6 +1,6 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 const GRADLE_DEPENDENCY_SCOPES: &[&str] = &[
@@ -116,7 +116,8 @@ fn gradle_coordinate(value: &str) -> Option<(String, Option<String>)> {
 
 fn gradle_map_coordinate(line: &str) -> Option<(String, Option<String>)> {
     let group = gradle_named_value(line, "group")?;
-    let artifact = gradle_named_value(line, "name").or_else(|| gradle_named_value(line, "artifact"))?;
+    let artifact =
+        gradle_named_value(line, "name").or_else(|| gradle_named_value(line, "artifact"))?;
     let version = gradle_named_value(line, "version");
     coordinate_parts(&group, &artifact, version.as_deref())
 }

@@ -6,7 +6,14 @@ pub(crate) fn triage_module() -> BuiltinModule {
         "Triage",
         ModuleKind::Defense,
         "LLM-driven triage of scanner findings with evidence-backed verdicts.",
-        vec![triage_run_tool()],
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Review,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Required,
+            ),
+            vec![triage_run_tool()],
+        ),
         vec![dag("triage:run", "triage", &["semgrep:scan"])],
     )
 }
@@ -17,6 +24,13 @@ fn triage_run_tool() -> ToolDescriptor {
         "Review scanner findings with evidence-backed model verdicts and persist triage state.",
         triage_run_options(),
     )
+    .with_prompt(editable_prompt(
+        "triage instructions",
+        "triage",
+        "run",
+        "TRIAGE_PROMPT",
+        crate::runtime::DEFAULT_TRIAGE_PROMPT.to_string(),
+    ))
 }
 
 fn triage_run_options() -> Vec<OptionSpec> {
@@ -161,5 +175,6 @@ fn triage_prompt_option() -> OptionSpec {
         OptionType::String,
         "Prompt text or path override for triage.",
     )
+    .inline_or_workspace_file()
     .advanced()
 }

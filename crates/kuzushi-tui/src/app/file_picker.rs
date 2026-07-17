@@ -1,9 +1,15 @@
 use super::*;
 use crate::app::state_transitions::InputUpdate;
-use std::fs;
 use std::path::{Path, PathBuf};
 
-const FILE_PICKER_MAX_FILES: usize = 5_000;
+mod discovery;
+#[cfg(test)]
+use discovery::{
+    synthetic_file_candidates, FileDiscovery, FileDiscoveryBudget, FILE_PICKER_DIRECTORY_CHUNK,
+};
+pub(crate) use discovery::{workspace_file_candidates, workspace_file_candidates_cancellable};
+
+pub(crate) const FILE_PICKER_MAX_FILES: usize = 5_000;
 const FILE_PICKER_PAGE_STEP: usize = 10;
 
 impl ShellApp {
@@ -15,21 +21,21 @@ impl ShellApp {
                 return;
             }
         };
-        let (files, truncated) = workspace_file_candidates(workspace.root(), FILE_PICKER_MAX_FILES);
+        let index = self.workspace_file_completion_index();
+        let truncation_hint = index.truncation_hint();
+        let truncated = index.is_truncated();
         let origin = self.shell_view();
         self.router.navigation_mut().push_overlay_origin(origin);
-        self.router.file_picker_mut().open(files, truncated);
+        self.router.file_picker_mut().open(index.values, truncated);
         self.set_shell_view(ShellView::FilePicker);
-        self.log_file_picker_open(workspace.root());
+        self.log_file_picker_open(workspace.root(), truncation_hint);
     }
 
-    fn log_file_picker_open(&mut self, root: &Path) {
+    fn log_file_picker_open(&mut self, root: &Path, truncation_hint: Option<&str>) {
         let route = self.router.file_picker();
-        let suffix = if route.truncated() {
-            format!(" (capped at {FILE_PICKER_MAX_FILES})")
-        } else {
-            String::new()
-        };
+        let suffix = truncation_hint
+            .map(|hint| format!(" ({hint})"))
+            .unwrap_or_default();
         self.log(
             "files",
             format!(
@@ -70,11 +76,23 @@ impl ShellApp {
         self.router.file_picker().filtered_paths()
     }
 
-    pub(crate) fn workspace_file_completion_values(&self) -> Vec<String> {
-        let Some(root) = self.target() else {
-            return Vec::new();
-        };
-        workspace_file_candidates(root, FILE_PICKER_MAX_FILES).0
+    pub(crate) fn workspace_file_completion_index(&self) -> FileCompletionIndex {
+        self.workbench_cache()
+            .borrow()
+            .cached_file_completion_index(self.target())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn refresh_open_file_picker_candidates(&mut self) {
+        if self.shell_view() != ShellView::FilePicker {
+            return;
+        }
+        let index = self.workspace_file_completion_index();
+        let truncated = index.is_truncated();
+        self.router
+            .file_picker_mut()
+            .replace_files(index.values, truncated);
     }
 
     pub(crate) fn attachment_effects_from_paste(&mut self, text: &str) -> Option<Vec<ShellEffect>> {
@@ -107,76 +125,12 @@ fn attachment_effect(source: String) -> ShellEffect {
     ShellEffect::AttachKnowledgeBaseSource(KnowledgeBaseAttach { source })
 }
 
-pub(crate) fn file_completion_values_for(app: &ShellApp) -> Vec<String> {
-    app.workspace_file_completion_values()
-}
-
-fn workspace_file_candidates(root: &Path, limit: usize) -> (Vec<String>, bool) {
-    let mut files = Vec::new();
-    let truncated = collect_workspace_files(root, root, limit, &mut files);
-    files.sort();
-    (files, truncated)
-}
-
-fn collect_workspace_files(
-    root: &Path,
-    current: &Path,
-    limit: usize,
-    out: &mut Vec<String>,
-) -> bool {
-    if out.len() >= limit {
-        return true;
-    }
-    let Ok(entries) = fs::read_dir(current) else {
-        return false;
-    };
-    for entry in sorted_dir_entries(entries) {
-        if collect_workspace_entry(root, entry, limit, out) {
-            return true;
-        }
-    }
-    false
-}
-
-fn sorted_dir_entries(entries: fs::ReadDir) -> Vec<fs::DirEntry> {
-    let mut entries = entries.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry.file_name().to_string_lossy().into_owned());
-    entries
-}
-
-fn collect_workspace_entry(
-    root: &Path,
-    entry: fs::DirEntry,
-    limit: usize,
-    out: &mut Vec<String>,
-) -> bool {
-    let path = entry.path();
-    let Ok(file_type) = entry.file_type() else {
-        return false;
-    };
-    if file_type.is_dir() {
-        return !ignored_picker_dir(&path) && collect_workspace_files(root, &path, limit, out);
-    }
-    if file_type.is_file() {
-        push_relative_file(root, &path, out);
-    }
-    out.len() >= limit
-}
-
-fn push_relative_file(root: &Path, path: &Path, out: &mut Vec<String>) {
-    if let Ok(relative) = path.strip_prefix(root) {
-        out.push(relative.to_string_lossy().into_owned());
-    }
-}
-
-fn ignored_picker_dir(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return true;
-    };
-    matches!(
-        name,
-        ".git" | ".kuzushi" | "node_modules" | "target" | "dist" | "build" | ".next" | "coverage"
-    )
+pub(crate) fn file_completion_values_for(app: &ShellApp) -> CompletionValues<'_> {
+    let target = app.target();
+    CompletionValues::Borrowed(std::cell::Ref::map(
+        app.workbench_cache().borrow(),
+        |cache| cache.cached_file_completion_values(target),
+    ))
 }
 
 fn pasted_workspace_files(text: &str, root: &Path) -> Option<Vec<String>> {

@@ -2,13 +2,15 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const OFFLINE_DEMO_TASKS: [&str; 2] = ["secret-scan", "iac-scan"];
 
 /// Offline first-wow fixture used by both CLI and shell demo paths.
 /// The fixture is recreated on each run so repeated demos stay deterministic.
 pub fn prepare_demo_fixture() -> Result<PathBuf> {
-    let demo_dir = std::env::temp_dir().join("kuzushi-demo");
+    let demo_dir = demo_fixture_path();
     if demo_dir.exists() {
         fs::remove_dir_all(&demo_dir)
             .with_context(|| format!("could not reset {}", demo_dir.display()))?;
@@ -31,6 +33,23 @@ pub fn prepare_demo_fixture() -> Result<PathBuf> {
          CMD [\"node\", \"server.js\"]\n",
     )?;
     Ok(demo_dir)
+}
+
+/// Process-scoped demo location. Separate Kuzushi processes must not delete
+/// each other's active fixture while recreating the deterministic demo.
+pub fn demo_fixture_path() -> PathBuf {
+    static DEMO_FIXTURE_PATH: OnceLock<PathBuf> = OnceLock::new();
+    DEMO_FIXTURE_PATH
+        .get_or_init(|| {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            std::env::temp_dir()
+                .join(format!("kuzushi-demo-{}-{nonce}", std::process::id()))
+                .join("kuzushi-demo")
+        })
+        .clone()
 }
 
 pub fn offline_demo_scan_input() -> Value {
@@ -69,5 +88,23 @@ mod tests {
         assert_eq!(input["verify"], json!(false));
         assert_eq!(input["autoPatch"], json!(false));
         assert!(!wants_sast_runtime(&input));
+    }
+
+    #[test]
+    fn demo_fixture_path_is_process_scoped_with_a_readable_leaf() {
+        let path = demo_fixture_path();
+        let parent = path
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_string_lossy();
+
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("kuzushi-demo")
+        );
+        assert!(parent.contains(&std::process::id().to_string()), "{parent}");
+        assert_eq!(demo_fixture_path(), path, "path stays stable in-process");
     }
 }

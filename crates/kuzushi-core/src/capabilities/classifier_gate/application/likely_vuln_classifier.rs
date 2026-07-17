@@ -15,12 +15,21 @@ impl<'a> LikelyVulnClassifier<'a> {
 
     /// Score a finding via the cheap classifier model.
     pub fn score(&self, finding: &Finding, cwd: &Path) -> Result<Score> {
+        self.score_with_cost(finding, cwd).map(|(score, _)| score)
+    }
+
+    pub(crate) fn score_with_cost(
+        &self,
+        finding: &Finding,
+        cwd: &Path,
+    ) -> Result<(Score, crate::runtime::RuntimeCostReport)> {
         let response = self.query_classifier(finding, cwd)?;
+        let cost = response.checked_cost_report()?;
         let parsed_score = parsed_classifier_score(&response);
         let parsed_response = parsed_score.is_some();
         let raw = parsed_score.unwrap_or_else(neutral_classifier_score);
         self.observe_parsed_score(parsed_response, raw);
-        Ok(raw)
+        Ok((raw, cost))
     }
 
     fn query_classifier(&self, finding: &Finding, cwd: &Path) -> Result<AgentQueryResponse> {
@@ -33,8 +42,7 @@ impl<'a> LikelyVulnClassifier<'a> {
             CLASSIFIER_SYSTEM_PROMPT,
             render_prompt(finding),
         );
-        self.runtime
-            .query_blocking(request)
+        crate::runtime::query_blocking_checked(self.runtime, request)
             .context("classifier gate query failed")
     }
 
@@ -69,6 +77,17 @@ impl<'a> LikelyVulnClassifier<'a> {
     /// Used when the score is below the threshold and we don't want to
     /// spend the deep auditor's budget.
     pub fn skip_outcome(&self, score: Score) -> TriageOutcome {
+        self.skip_outcome_with_cost(
+            score,
+            crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        )
+    }
+
+    pub(crate) fn skip_outcome_with_cost(
+        &self,
+        score: Score,
+        cost: crate::runtime::RuntimeCostReport,
+    ) -> TriageOutcome {
         TriageOutcome {
             verdict: TriageVerdict::NeedsReview,
             confidence: score.clamp(0.0, 1.0),
@@ -78,7 +97,8 @@ impl<'a> LikelyVulnClassifier<'a> {
                 self.current_threshold(),
                 self.quantile.lock().unwrap().count
             ),
-            cost_usd: 0.0,
+            cost_usd: cost.observed_usd(),
+            cost_usd_exact: cost.is_complete(),
         }
     }
 
@@ -117,7 +137,9 @@ fn classifier_response_score(response: ClassifierResponse) -> Score {
 }
 
 fn neutral_classifier_score() -> Score {
-    eprintln!("classifier gate response was unparseable; using neutral score without training quantile");
+    eprintln!(
+        "classifier gate response was unparseable; using neutral score without training quantile"
+    );
     // Conservative fallback: if we can't parse, score in the middle so the
     // gate doesn't reject a real bug just because the model burped.
     0.5

@@ -74,7 +74,7 @@ impl<'a> ReconImportContext<'a> {
 
 pub(crate) fn read_jsonl_path(input: &Value, message: &str) -> Result<(std::path::PathBuf, String)> {
     let path = required_path(input, "path", message)?;
-    let body = std::fs::read_to_string(&path)
+    let body = crate::bounded_file::read_utf8_text(&path, 64 * 1024 * 1024)
         .with_context(|| format!("Could not read {}", path.display()))?;
     Ok((path, body))
 }

@@ -14,6 +14,7 @@ pub enum ShellCommand {
     /// shell's default landing surface; `findings` and `open` also route here
     /// with the appropriate pane focus / selection.
     Workbench(WorkbenchPane),
+    Report,
     Aim(Option<String>),
     Findings,
     FindingsFilter(String),
@@ -78,6 +79,12 @@ pub enum ShellCommand {
     Activity,
     FailureHandoff,
     Plan(String),
+    /// Free-form prose submitted from a durable Workbench phase. The selected
+    /// page is carried explicitly; it never mutates workflow reality.
+    PhaseIntent {
+        selected_phase: WorkflowPhase,
+        text: String,
+    },
     PlanApply,
     PlanDiscard,
     Quickstart,
@@ -114,6 +121,11 @@ pub enum ShellCommand {
     ProjectModel,
     Strategy(StrategyCommand),
     ReviewDecision(ReviewDecisionCommand),
+    /// Explicit human deferral of empirical proof for one finding generation.
+    ProofDeferral {
+        reference: String,
+        reason: String,
+    },
     Patch(PatchCommand),
     Workspace(WorkspaceCommand),
     Pwn(PwnCommand),
@@ -123,6 +135,8 @@ pub enum ShellCommand {
     Detach(String),
     Reparse(String),
     History,
+    /// Show the durable transcript id, path, and writer health for this shell.
+    SessionInfo,
     Clear,
     Load(Option<String>),
     Resume(Option<String>),

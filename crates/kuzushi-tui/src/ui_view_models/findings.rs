@@ -7,7 +7,7 @@ use super::review_state::{
 };
 use super::workspace::findings_db_relative_path;
 use super::{context_snapshot_state, SeverityCounts, SeverityTone};
-use crate::{ShellApp, VisibleFindingProjection, VisibleFindingsCacheKey};
+use crate::{ShellApp, ViewDataState, VisibleFindingProjection, VisibleFindingsCacheKey};
 use kuzushi_core::findings::{FindingSource, ReviewDecision};
 use kuzushi_core::{
     compare_findings_by_confidence, finding_next_action, finding_remediation_hint,
@@ -15,7 +15,8 @@ use kuzushi_core::{
     Finding, FindingListFilter, FindingNextAction, FindingProjection, PersistedProofVerdict,
     ProofConfidence, RunSummary, RunTargetGitMetadata, StaticProofState, TriageVerdict,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const FINDINGS_PREVIEW_LIMIT: usize = 8;
@@ -86,6 +87,7 @@ pub(crate) struct FindingListRow {
     pub(crate) decision: String,
     pub(crate) decision_conflict: Option<String>,
     pub(crate) proof_label: String,
+    pub(crate) proof_meter: String,
     pub(crate) proof_marker: &'static str,
     pub(crate) proof_tier: ProofTier,
     pub(crate) proof_confidence: ProofConfidence,
@@ -109,6 +111,7 @@ pub(crate) struct FindingDetailModel {
     pub(crate) tool: String,
     pub(crate) source_signature: String,
     pub(crate) corroboration: String,
+    pub(crate) source_count: usize,
     pub(crate) fingerprint: String,
     pub(crate) run_label: String,
     pub(crate) run_status: String,
@@ -118,6 +121,7 @@ pub(crate) struct FindingDetailModel {
     pub(crate) run_kuzushi_version: String,
     pub(crate) revision_label: String,
     pub(crate) proof_label: String,
+    pub(crate) proof_meter: String,
     pub(crate) proof_marker: &'static str,
     pub(crate) proof_tier: ProofTier,
     pub(crate) proof_confidence: ProofConfidence,
@@ -269,20 +273,28 @@ fn severity_count_segments(counts: SeverityCounts) -> Vec<String> {
 
 pub(crate) fn selected_finding_detail_model(app: &ShellApp) -> Option<FindingDetailModel> {
     let (alias, finding) = current_finding_for_detail(app)?;
+    Some(finding_detail_model_for_projection(app, alias, &finding))
+}
+
+pub(crate) fn finding_detail_model_for_projection(
+    app: &ShellApp,
+    alias: Option<String>,
+    finding: &Finding,
+) -> FindingDetailModel {
     let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
         app.findings(),
         app.review_decisions(),
     );
-    let decision = review_index.effective_decision_for(&finding);
+    let decision = review_index.effective_decision_for(finding);
     let runs = run_summary_index(app);
-    let provenance = finding_run_provenance(&finding, &runs);
-    Some(FindingDetailModel::from_finding(
-        &finding,
+    let provenance = finding_run_provenance(finding, &runs);
+    FindingDetailModel::from_finding(
+        finding,
         alias,
         target_base(app).as_deref(),
         decision.as_ref(),
         provenance,
-    ))
+    )
 }
 
 pub(crate) fn current_finding_for_detail(app: &ShellApp) -> Option<(Option<String>, Finding)> {
@@ -385,7 +397,7 @@ fn finding_rows(
 pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
     app.workbench_cache()
         .borrow_mut()
-        .sorted_finding_alias_indices(app.findings())
+        .sorted_finding_alias_indices(app.findings(), app.findings_revision())
 }
 
 pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
@@ -396,10 +408,12 @@ pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(Strin
 }
 
 /// Re-order the severity-major aliased pairs into confidence-first *display*
-/// order (`Confirmed` before `Unverified`, severity as the tie-break). Alias
-/// strings stay attached to their findings, so `F-0001` identity — and every
-/// export/CLI ordering keyed off `sorted_finding_alias_indices` — is unchanged;
-/// only the Workbench row/cursor order moves.
+/// order (`Confirmed` before `Unverified`, severity as the tie-break). The
+/// engagement projection preserves that order after duplicate folding;
+/// workflow groups remain row metadata only.
+/// Alias strings stay attached to their findings, so `F-0001` identity — and
+/// every export/CLI ordering keyed off `sorted_finding_alias_indices` — is
+/// unchanged; only the Workbench row/cursor order moves.
 fn confidence_first_display_order(
     app: &ShellApp,
     mut sorted: Vec<(String, usize)>,
@@ -492,9 +506,16 @@ fn cached_alias_for_fingerprint(app: &ShellApp, fingerprint: &str) -> Option<Str
 
 /// The canonical absolute target path, used to relativize finding locations so
 /// the list shows `crates/foo.rs:12` instead of a full `/Users/...` path. Shared
-/// with the Workbench SOURCE tree so both surfaces relativize identically.
+/// with the Map and Review projections so every surface relativizes identically.
 pub(crate) fn target_base(app: &ShellApp) -> Option<String> {
-    app.workbench_cache().borrow_mut().target_base(app.target())
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_target_base(app.target())
+    {
+        crate::app::ViewDataState::Ready(base) => Some(base),
+        crate::app::ViewDataState::NotRequested | crate::app::ViewDataState::Loading => None,
+    }
 }
 
 /// Strip the target prefix from a `path:line` location when present, leaving a
@@ -511,22 +532,23 @@ pub(crate) fn relativize_location(location: String, base: Option<&str>) -> Strin
 
 type ProjectedFinding = VisibleFindingProjection;
 
-pub(crate) fn projected_visible_findings(app: &ShellApp) -> Vec<ProjectedFinding> {
+pub(crate) fn projected_visible_findings(app: &ShellApp) -> Arc<[ProjectedFinding]> {
     let key = visible_findings_cache_key(app);
     if let Some(cached) = app.workbench_cache().borrow().visible_findings(&key) {
         return cached;
     }
-    let projected = engagement_projected_findings(app, visible_sorted_finding_alias_indices(app));
+    let projected: Arc<[ProjectedFinding]> =
+        engagement_projected_findings(app, visible_sorted_finding_alias_indices(app)).into();
     app.workbench_cache()
         .borrow_mut()
-        .cache_visible_findings(key, projected.clone());
+        .cache_visible_findings(key, Arc::clone(&projected));
     projected
 }
 
-fn visible_findings_cache_key(app: &ShellApp) -> VisibleFindingsCacheKey {
+pub(crate) fn visible_findings_cache_key(app: &ShellApp) -> VisibleFindingsCacheKey {
     VisibleFindingsCacheKey::from_app_parts(
-        app.findings(),
-        app.review_decisions(),
+        app.findings_revision(),
+        app.review_decisions_revision(),
         target_base(app),
         active_component_rel_path(app),
         active_findings_filter_cache_value(app),
@@ -541,10 +563,11 @@ fn active_findings_filter_cache_value(app: &ShellApp) -> Option<String> {
         .map(ToString::to_string)
 }
 
+#[cfg(test)]
 pub(crate) fn projected_visible_finding_pairs(app: &ShellApp) -> Vec<(String, Finding)> {
     projected_visible_findings(app)
-        .into_iter()
-        .map(|projected| (projected.alias, projected.finding))
+        .iter()
+        .map(|projected| (projected.alias.clone(), projected.finding.clone()))
         .collect()
 }
 
@@ -670,8 +693,11 @@ fn active_component_rel_path(app: &ShellApp) -> Option<String> {
     let target = app.target()?;
     let state = app
         .workbench_cache()
-        .borrow_mut()
-        .project_scope_tree(Some(target))?;
+        .borrow()
+        .cached_project_scope_tree(Some(target));
+    let ViewDataState::Ready(state) = state else {
+        return None;
+    };
     let tree = match &state {
         crate::app::ProjectScopeTreeState::Persisted(tree) => tree,
         crate::app::ProjectScopeTreeState::RootOnly
@@ -725,7 +751,7 @@ fn filtered_empty_state(app: &ShellApp) -> Option<FilteredFindingsEmptyState> {
 fn context_empty_state(context_state: &'static str) -> FindingsEmptyState {
     let (hint, context_cta) = match context_state {
         "present" => (
-            "opens the guided hunt workflow for the active target.",
+            "opens the guided Scan workflow for the active target.",
             None,
         ),
         "malformed" => (
@@ -834,6 +860,7 @@ impl FindingListRow {
             decision: effective_review_decision_label(finding, decision),
             decision_conflict: effective_review_decision_conflict_label(finding, decision),
             proof_label: proof.label,
+            proof_meter: finding_proof_meter(finding),
             proof_marker: proof.marker,
             proof_tier: proof.tier,
             proof_confidence: ProofConfidence::classify(finding),
@@ -863,6 +890,25 @@ fn finding_proof_badge(finding: &Finding) -> ProofBadge {
     runtime_proof_label(finding)
         .or_else(|| static_proof_label(finding))
         .unwrap_or_else(|| proof_badge("unverified", ProofTier::Suspected))
+}
+
+pub(crate) fn finding_proof_meter(finding: &Finding) -> String {
+    match finding_proof_badge(finding).tier {
+        ProofTier::RuntimeVerified => "[●●●]".to_string(),
+        ProofTier::StaticLinked => "[●●○]".to_string(),
+        ProofTier::Suspected => "[●○○]".to_string(),
+        ProofTier::Rejected => "[×××]".to_string(),
+    }
+}
+
+pub(crate) fn finding_unique_source_count(finding: &Finding) -> usize {
+    let unique = finding
+        .sources
+        .iter()
+        .map(|source| (&source.tool, &source.source_signature))
+        .collect::<BTreeSet<_>>()
+        .len();
+    unique.max(finding.corroboration_count as usize)
 }
 
 fn runtime_proof_label(finding: &Finding) -> Option<ProofBadge> {
@@ -934,20 +980,14 @@ struct FindingRunProvenance {
 }
 
 fn run_summary_index(app: &ShellApp) -> BTreeMap<String, RunSummary> {
-    app.workbench_cache()
-        .borrow_mut()
-        .run_summary_index(app.target(), finding_scan_ids(app))
-}
-
-fn finding_scan_ids(app: &ShellApp) -> Vec<String> {
-    app.findings()
-        .iter()
-        .filter_map(|finding| finding.scan_id.as_deref())
-        .filter(|scan_id| !scan_id.is_empty())
-        .map(ToString::to_string)
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect()
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_run_summary_index(app.target())
+    {
+        ViewDataState::Ready(index) => index,
+        ViewDataState::NotRequested | ViewDataState::Loading => BTreeMap::new(),
+    }
 }
 
 fn finding_run_provenance(
@@ -1079,7 +1119,21 @@ impl FindingDetailModel {
         base: Option<&str>,
         provenance: FindingRunProvenance,
     ) -> Self {
-        let mut detail = Self {
+        let mut detail = Self::from_projection(finding, projection, base);
+        detail.apply_proof_fields(finding, proof);
+        detail.apply_provenance_fields(provenance);
+        detail.apply_status_fields(status);
+        detail.apply_body_fields(body);
+        detail
+    }
+
+    fn from_projection(
+        finding: &Finding,
+        projection: FindingProjection,
+        base: Option<&str>,
+    ) -> Self {
+        let confidence = ProofConfidence::classify(finding);
+        Self {
             alias: projection.alias,
             identity_label: finding_identity_label(finding),
             severity_tone: SeverityTone::from_severity(projection.severity),
@@ -1090,26 +1144,31 @@ impl FindingDetailModel {
             tool: projection.tool,
             source_signature: source_signature_label(finding),
             corroboration: corroboration_label(finding),
+            source_count: finding_unique_source_count(finding),
             fingerprint: projection.fingerprint,
-            run_label: provenance.run_label,
-            run_status: provenance.status_label,
-            run_tool: provenance.tool_label,
-            run_model: provenance.model_label,
-            run_runtime: provenance.runtime_label,
-            run_kuzushi_version: provenance.kuzushi_version_label,
-            revision_label: provenance.revision_label,
-            proof_label: proof.label,
-            proof_marker: proof.marker,
-            proof_tier: proof.tier,
-            proof_confidence: ProofConfidence::classify(finding),
-            proof_confidence_label: ProofConfidence::classify(finding).label().to_string(),
+            proof_confidence: confidence,
+            proof_confidence_label: confidence.label().to_string(),
             proof_state: projection.proof_state,
             runtime_verification: projection.runtime_validation,
             ..Self::default()
-        };
-        detail.apply_status_fields(status);
-        detail.apply_body_fields(body);
-        detail
+        }
+    }
+
+    fn apply_provenance_fields(&mut self, provenance: FindingRunProvenance) {
+        self.run_label = provenance.run_label;
+        self.run_status = provenance.status_label;
+        self.run_tool = provenance.tool_label;
+        self.run_model = provenance.model_label;
+        self.run_runtime = provenance.runtime_label;
+        self.run_kuzushi_version = provenance.kuzushi_version_label;
+        self.revision_label = provenance.revision_label;
+    }
+
+    fn apply_proof_fields(&mut self, finding: &Finding, proof: ProofBadge) {
+        self.proof_label = proof.label;
+        self.proof_meter = finding_proof_meter(finding);
+        self.proof_marker = proof.marker;
+        self.proof_tier = proof.tier;
     }
 
     fn apply_status_fields(&mut self, status: DetailStatusFields) {

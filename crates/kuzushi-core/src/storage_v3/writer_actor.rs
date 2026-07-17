@@ -1,9 +1,9 @@
 use super::ProjectionDb;
 use crate::event_log::{EventEnvelope, EventKind, EventLog};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 mod commands;
 mod dispatch;
@@ -11,16 +11,17 @@ mod lifecycle;
 mod staleness;
 mod writes;
 
-pub use commands::{StorageWriterActor, StorageWriterActorConfig, StorageWriterActorHandle};
 pub use commands::{
     ControlCommand, DecisionCommand, WatcherCommand, WriteLane, WriterCommand, WriterLaneScheduler,
 };
+pub use commands::{StorageWriterActor, StorageWriterActorConfig, StorageWriterActorHandle};
 use lifecycle::require_state;
 pub use lifecycle::{WriterActorState, WriterLifecycle};
 pub use writes::{
     AttackSurfaceWrite, AuditWrite, CandidateObservationWrite, DecisionWrite, FileDeletedWrite,
-    FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite, RekeyWrite,
-    RunLifecycleWrite, SnapshotWrite, SuppressionEventMeta, VerificationWrite,
+    FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite,
+    PatchLifecycleWrite, RekeyWrite, RunLifecycleWrite, SnapshotWrite, SuppressionEventMeta,
+    VerificationWrite,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +35,7 @@ pub struct WriteReceipt {
 }
 
 struct StorageWriter {
+    _ownership: crate::file_lock::ExclusiveFileLock,
     log: EventLog,
     projection: ProjectionDb,
     lifecycle: WriterLifecycle,
@@ -41,12 +43,18 @@ struct StorageWriter {
 
 impl StorageWriter {
     fn open(log_dir: impl AsRef<Path>, projection_path: impl AsRef<Path>) -> Result<Self> {
-        let log = EventLog::open(log_dir)?;
+        let (log_dir, projection_path) =
+            normalize_storage_paths(log_dir.as_ref(), projection_path.as_ref())?;
+        initialize_workspace_storage(&log_dir, &projection_path)?;
+        let ownership =
+            crate::file_lock::ExclusiveFileLock::acquire(&log_dir.join(".storage-writer.lock"))?;
+        let log = EventLog::open(&log_dir)?;
         log.verify_chain()?;
-        let projection = ProjectionDb::open(projection_path)?;
+        let projection = ProjectionDb::open(&projection_path)?;
         let mut lifecycle = WriterLifecycle::recovering();
         lifecycle.recover(log.head_seq()?, projection.meta()?.applied_seq)?;
         let mut writer = Self {
+            _ownership: ownership,
             log,
             projection,
             lifecycle,
@@ -104,6 +112,23 @@ impl StorageWriter {
         self.apply_appended_event(&event)
     }
 
+    fn record_patch_lifecycle(&mut self, lifecycle: PatchLifecycleWrite) -> Result<WriteReceipt> {
+        require_state(self.lifecycle.state(), WriterActorState::Live)?;
+        let record = lifecycle.record;
+        let run_id = record
+            .reverify_run_id
+            .clone()
+            .unwrap_or_else(|| record.patch_run_id.clone());
+        let event = self.log.append(
+            EventKind::PatchLifecycleRecorded,
+            record.actor.clone(),
+            Some(run_id),
+            None,
+            PatchLifecycleWrite { record }.payload(),
+        )?;
+        self.apply_appended_event(&event)
+    }
+
     fn record_checkpoint(&mut self) -> Result<WriteReceipt> {
         require_state(self.lifecycle.state(), WriterActorState::Live)?;
         let meta = self.projection.meta()?;
@@ -153,7 +178,10 @@ impl StorageWriter {
         })
     }
 
-    fn record_finding_observation(&mut self, observation: ObservationWrite) -> Result<WriteReceipt> {
+    fn record_finding_observation(
+        &mut self,
+        observation: ObservationWrite,
+    ) -> Result<WriteReceipt> {
         require_state(self.lifecycle.state(), WriterActorState::Live)?;
         let event = self.log.append(
             EventKind::FindingObserved,
@@ -291,7 +319,99 @@ impl StorageWriter {
         }
         Ok(())
     }
+}
 
+pub(crate) struct StorageWriterSession {
+    writer: StorageWriter,
+}
+
+impl StorageWriterSession {
+    pub(crate) fn open(
+        log_dir: impl AsRef<Path>,
+        projection_path: impl AsRef<Path>,
+    ) -> Result<Self> {
+        Ok(Self {
+            writer: StorageWriter::open(log_dir, projection_path)?,
+        })
+    }
+
+    pub(crate) fn commit_many(
+        &mut self,
+        commands: Vec<WriterCommand>,
+    ) -> Result<Vec<WriteReceipt>> {
+        commands
+            .into_iter()
+            .map(|command| self.writer.execute_command(command))
+            .collect()
+    }
+}
+
+fn initialize_workspace_storage(log_dir: &Path, projection_path: &Path) -> Result<()> {
+    let log_root = validate_workspace_storage_path(log_dir)?;
+    let projection_root = validate_workspace_storage_path(projection_path)?;
+    if let Some(root) = log_root.as_deref() {
+        crate::workspace::initialize_workspace_state(root)?;
+    }
+    if projection_root != log_root {
+        if let Some(root) = projection_root.as_deref() {
+            crate::workspace::initialize_workspace_state(root)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_workspace_storage_path(path: &Path) -> Result<Option<PathBuf>> {
+    let Some(state_dir) = workspace_state_ancestor(path) else {
+        return Ok(None);
+    };
+    let workspace_root = state_dir
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace state ancestor includes target root");
+    let relative = path.strip_prefix(workspace_root)?;
+    crate::workspace::validated_workspace_descendant(workspace_root, relative)?;
+    std::fs::canonicalize(workspace_root)
+        .with_context(|| {
+            format!(
+                "Could not resolve storage workspace root {}",
+                workspace_root.display()
+            )
+        })
+        .map(Some)
+}
+
+fn normalize_storage_paths(log_dir: &Path, projection_path: &Path) -> Result<(PathBuf, PathBuf)> {
+    if log_dir.is_absolute() && projection_path.is_absolute() {
+        return Ok((log_dir.to_path_buf(), projection_path.to_path_buf()));
+    }
+    let current = std::env::current_dir()
+        .context("Could not resolve relative storage paths from the current directory")?;
+    Ok((
+        absolute_from(&current, log_dir),
+        absolute_from(&current, projection_path),
+    ))
+}
+
+fn absolute_from(current: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        current.join(path)
+    }
+}
+
+fn workspace_state_ancestor(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .find(|ancestor| {
+            ancestor.file_name().and_then(|name| name.to_str())
+                == Some(crate::workspace::WORKSPACE_STATE_VERSION_DIR)
+                && ancestor
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+                    == Some(crate::workspace::KUZUSHI_STATE_DIR)
+        })
+        .map(Path::to_path_buf)
 }
 
 #[cfg(test)]

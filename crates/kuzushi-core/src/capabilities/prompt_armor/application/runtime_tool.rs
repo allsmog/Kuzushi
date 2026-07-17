@@ -6,14 +6,16 @@ use crate::findings::{
     normalize_agent_json_findings, persist_tool_findings, Finding, FindingStore,
 };
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
+use crate::structured_output::{
+    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
+};
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct PromptArmorRuntimeInput<'a> {
+    pub(crate) finding_run_id: String,
     pub(crate) tool_name: &'a str,
     pub(crate) command: &'a str,
     pub(crate) input: &'a Value,
@@ -26,47 +28,59 @@ pub(crate) struct PromptArmorRuntimeInput<'a> {
 }
 
 pub(crate) fn run_runtime_tool(request: PromptArmorRuntimeInput<'_>) -> Result<Value> {
-    query_prompt_armor(&request).and_then(|raw| runtime_tool_response(request, raw))
+    let output_dir = ensure_output_dir(request.target)?;
+    query_prompt_armor(&request).and_then(|raw| {
+        let cost = raw.cost_report()?;
+        runtime_tool_response(request, raw.value, cost, output_dir)
+    })
 }
 
-fn query_prompt_armor(request: &PromptArmorRuntimeInput<'_>) -> Result<Value> {
+fn query_prompt_armor(request: &PromptArmorRuntimeInput<'_>) -> Result<CostedStructuredJson<Value>> {
     let inventory = collect_agentic_repo_inventory(request.target, 100, 4096)?;
-    query_required_structured_json(
+    query_required_structured_json_with_cost(
         request.runtime,
         AgentQueryRequest::new(
             request.model.clone(),
             request.target.to_path_buf(),
             prompt_armor_system_prompt(),
-            build_prompt(request.command, request.plugin_root, request.input, &inventory),
+            build_prompt(
+                request.command,
+                request.plugin_root,
+                request.input,
+                &inventory,
+            ),
         ),
         StructuredJsonContract::new(request.tool_name, "PromptArmorFindings", findings_schema()),
         require_json_object,
     )
 }
 
-fn runtime_tool_response(request: PromptArmorRuntimeInput<'_>, raw: Value) -> Result<Value> {
+fn runtime_tool_response(
+    request: PromptArmorRuntimeInput<'_>,
+    raw: Value,
+    cost: crate::runtime::RuntimeCostReport,
+    output_dir: PathBuf,
+) -> Result<Value> {
     let findings = normalize_agent_json_findings(raw, request.target, "prompt-armor", 100)?;
     let persisted = persist_tool_findings(
-        "prompt-armor",
+        request.finding_run_id.clone(),
         request.target,
         &findings,
         request.workspace,
         request.findings_store,
     )?;
-    let output_dir = ensure_output_dir(request.target)?;
     Ok(runtime_success_response(RuntimeSuccess {
         request,
         output_dir,
         findings,
         persisted,
+        cost,
     }))
 }
 
 fn ensure_output_dir(target: &Path) -> Result<PathBuf> {
-    let output_dir = output_dir(target);
-    fs::create_dir_all(&output_dir)
-        .with_context(|| format!("Could not create {}", output_dir.display()))?;
-    Ok(output_dir)
+    crate::workspace::ensure_workspace_output_dir(target, ".prompt-armor")
+        .with_context(|| format!("Could not create {}", output_dir(target).display()))
 }
 
 struct RuntimeSuccess<'a, Persisted> {
@@ -74,6 +88,7 @@ struct RuntimeSuccess<'a, Persisted> {
     output_dir: PathBuf,
     findings: Vec<Finding>,
     persisted: Persisted,
+    cost: crate::runtime::RuntimeCostReport,
 }
 
 fn runtime_success_response<Persisted: serde::Serialize>(
@@ -98,6 +113,6 @@ fn runtime_success_response<Persisted: serde::Serialize>(
             "persisted": success.persisted,
         }),
     );
-    result["costUsd"] = json!(0.0);
+    crate::module_result::apply_runtime_cost_report(&mut result, success.cost);
     result
 }

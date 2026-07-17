@@ -1,6 +1,8 @@
 use super::{
     AbortReason, JobHub, ProjectScopeDiscoveryResult, ProjectScopeDiscoveryRuntime,
-    TerminalLoopWake, ToolRunState, WorkerHandleRegistry,
+    TargetCandidateDiscoveryResult, TargetCandidateDiscoveryRuntime, TargetCandidateFacts,
+    TerminalLoopWake, ToolRunState, ViewArtifactReader, ViewHydrationDrain, ViewHydrationKey,
+    ViewHydrationRuntime, WorkerHandleRegistry,
 };
 use kuzushi_core::ScanCancellation;
 use std::path::PathBuf;
@@ -12,11 +14,21 @@ pub(crate) struct RuntimeState {
     scan_cancel: Option<ScanCancellation>,
     scan_abort_reason: Option<AbortReason>,
     agent_cancel: Option<ScanCancellation>,
+    cleared_agent_run: Option<ClearedAgentRun>,
     plan_cancel: Option<ScanCancellation>,
     threat_cancel: Option<ScanCancellation>,
     tool_run: ToolRunState,
     jobs: JobHub,
     project_scope_discovery: ProjectScopeDiscoveryRuntime,
+    target_candidate_discovery: TargetCandidateDiscoveryRuntime,
+    view_hydration: ViewHydrationRuntime,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ClearedAgentRun {
+    pub(crate) run_id: Option<String>,
+    pub(crate) started_secs: u64,
+    pub(crate) artifact_target: Option<PathBuf>,
 }
 
 impl RuntimeState {
@@ -42,6 +54,72 @@ impl RuntimeState {
         self.project_scope_discovery.drain_current()
     }
 
+    pub(crate) fn project_scope_discovery_running(&self) -> bool {
+        self.project_scope_discovery.is_running()
+    }
+
+    pub(crate) fn schedule_view_hydration(
+        &mut self,
+        target: PathBuf,
+        keys: Vec<ViewHydrationKey>,
+    ) -> Vec<ViewHydrationKey> {
+        self.view_hydration
+            .schedule(target, keys, self.loop_wake.clone())
+    }
+
+    pub(crate) fn hydrate_view_blocking(
+        &mut self,
+        target: PathBuf,
+        keys: Vec<ViewHydrationKey>,
+    ) -> ViewHydrationDrain {
+        self.view_hydration.hydrate_blocking(target, keys)
+    }
+
+    pub(crate) fn drain_view_hydration(&mut self) -> ViewHydrationDrain {
+        self.view_hydration.drain_current()
+    }
+
+    pub(crate) fn invalidate_view_hydration(&mut self) {
+        self.view_hydration.invalidate();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_view_artifact_reader(
+        &mut self,
+        reader: std::sync::Arc<dyn ViewArtifactReader>,
+    ) {
+        self.view_hydration.set_reader(reader);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn register_blocked_project_scope_discovery(
+        &mut self,
+        release: std::sync::mpsc::Receiver<()>,
+    ) {
+        self.project_scope_discovery
+            .register_blocked_handle(release);
+    }
+
+    pub(crate) fn start_target_candidate_discovery(&mut self, cwd: PathBuf) {
+        self.target_candidate_discovery
+            .start(cwd, self.loop_wake.clone());
+    }
+
+    pub(crate) fn drain_target_candidate_discovery(
+        &mut self,
+    ) -> Vec<TargetCandidateDiscoveryResult> {
+        self.target_candidate_discovery.drain_current()
+    }
+
+    pub(crate) fn start_target_candidate_facts(&mut self, path: PathBuf) {
+        self.target_candidate_discovery
+            .start_facts(path, self.loop_wake.clone());
+    }
+
+    pub(crate) fn drain_target_candidate_facts(&mut self) -> Vec<TargetCandidateFacts> {
+        self.target_candidate_discovery.drain_current_facts()
+    }
+
     pub(crate) fn scan_cancel(&self) -> Option<&ScanCancellation> {
         self.scan_cancel.as_ref()
     }
@@ -64,6 +142,18 @@ impl RuntimeState {
 
     pub(crate) fn set_agent_cancel(&mut self, cancel: Option<ScanCancellation>) {
         self.agent_cancel = cancel;
+    }
+
+    pub(crate) fn remember_cleared_agent_run(&mut self, run: ClearedAgentRun) {
+        self.cleared_agent_run = Some(run);
+    }
+
+    pub(crate) fn cleared_agent_run(&self) -> Option<&ClearedAgentRun> {
+        self.cleared_agent_run.as_ref()
+    }
+
+    pub(crate) fn clear_cleared_agent_run(&mut self) {
+        self.cleared_agent_run = None;
     }
 
     pub(crate) fn plan_cancel(&self) -> Option<&ScanCancellation> {

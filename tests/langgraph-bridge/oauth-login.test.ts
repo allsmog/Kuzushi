@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildAuthorizeUrl,
   // @ts-expect-error -- plain .mjs bridge module without type declarations
   credentialFromTokenResponse,
+  exchangeAuthorizationCode,
   mergeCredentialBag,
   parseOauthLoginArgs,
   parsePastedCode,
@@ -10,6 +11,10 @@ import {
   resolveProviderConfig,
   // @ts-expect-error -- plain .mjs bridge module without type declarations
 } from "../../scripts/langgraph-bridge/oauth-login.mjs";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("parseOauthLoginArgs", () => {
   it("extracts provider and method after the flag", () => {
@@ -130,5 +135,24 @@ describe("mergeCredentialBag", () => {
       "openai-codex": { access: "new" },
     });
     expect(bag["openai-codex"]).toBeUndefined();
+  });
+});
+
+describe("OAuth token exchange error redaction", () => {
+  it("does not expose a non-2xx token response body", async () => {
+    const sentinel = "raw-oauth-token-provider-body-sentinel";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(`{"error":"${sentinel}"}`, { status: 400 }) as never,
+    );
+    const cfg = resolveProviderConfig("anthropic");
+
+    const error = await exchangeAuthorizationCode(cfg, {
+      code: "code",
+      verifier: "verifier",
+      redirectUri: cfg.redirectUri,
+    }).catch((failure: unknown) => failure);
+
+    expect(String(error)).toBe("BridgePublicError: Provider rejected the request (HTTP 400).");
+    expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain(sentinel);
   });
 });

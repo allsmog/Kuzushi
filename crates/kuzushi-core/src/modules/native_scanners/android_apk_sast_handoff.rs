@@ -33,13 +33,14 @@ struct HandoffLayout {
 }
 
 fn resolve_handoff_layout(workspace_root: &Path) -> Result<HandoffLayout> {
-    let decompiled_root = workspace_root.join("android-decompiled");
-    if !decompiled_root.is_dir() {
-        anyhow::bail!(
-            "android-apk:sast-handoff: missing {}. Run `android-apk:prepare` first.",
-            decompiled_root.display()
-        );
-    }
+    let requested_root = workspace_root.join("android-decompiled");
+    let decompiled_root = validated_android_workspace_dir(workspace_root, &requested_root)
+        .with_context(|| {
+            format!(
+                "android-apk:sast-handoff: missing {}. Run `android-apk:prepare` first.",
+                requested_root.display()
+            )
+        })?;
     Ok(HandoffLayout {
         workspace_root: workspace_root.to_path_buf(),
         jadx_sources: existing_dir(&decompiled_root, &["jadx", "sources"]),
@@ -52,12 +53,18 @@ fn resolve_handoff_layout(workspace_root: &Path) -> Result<HandoffLayout> {
 
 fn existing_dir(root: &Path, parts: &[&str]) -> Option<PathBuf> {
     let path = parts.iter().fold(root.to_path_buf(), |acc, p| acc.join(p));
-    path.is_dir().then_some(path)
+    std::fs::symlink_metadata(&path)
+        .ok()
+        .filter(|metadata| metadata.file_type().is_dir() && !metadata.file_type().is_symlink())
+        .map(|_| path)
 }
 
 fn existing_file(root: &Path, parts: &[&str]) -> Option<PathBuf> {
     let path = parts.iter().fold(root.to_path_buf(), |acc, p| acc.join(p));
-    path.is_file().then_some(path)
+    std::fs::symlink_metadata(&path)
+        .ok()
+        .filter(|metadata| metadata.file_type().is_file() && !metadata.file_type().is_symlink())
+        .map(|_| path)
 }
 
 fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, message: &str) {

@@ -7,4 +7,7 @@ pub(in crate::modules) struct SastPipelineReports {
     pub(in crate::modules) taint_iris_next: Option<TaintIrisNextReport>,
     pub(in crate::modules) systems_hunt: Option<SystemsHuntReport>,
     pub(in crate::modules) engine_ids: Vec<&'static str>,
+    pub(in crate::modules) engine_outcomes:
+        std::collections::BTreeMap<&'static str, crate::run_artifacts::ScanEngineStageOutcome>,
+    pub(in crate::modules) skipped_engines: Vec<crate::scan::SkippedDefaultScanEngine>,
 }

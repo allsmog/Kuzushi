@@ -1,7 +1,7 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 const R_DEPENDENCY_FIELDS: &[&str] = &["Depends", "Imports", "Suggests", "LinkingTo"];

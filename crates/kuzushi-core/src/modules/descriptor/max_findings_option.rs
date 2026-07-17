@@ -22,6 +22,7 @@ pub(in crate::modules) fn fingerprint_option() -> OptionSpec {
 pub(in crate::modules) fn binary_option(description: &str) -> OptionSpec {
     opt("binary", OptionType::Path, description)
         .aliases(&["scannerBin", "scanner_bin"])
+        .executable()
         .advanced()
 }
 

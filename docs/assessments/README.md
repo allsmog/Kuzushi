@@ -1,29 +1,30 @@
-## Feature/product improvement assessments
+# Assessments
 
-Critical-assessment notes produced by parallel research agents over the
-Kuzushi codebase. These are *research outputs*, not committed product
-direction — treat them as PR-review-grade inputs that the maintainers
-can act on, push back on, or shelve.
+This directory contains current execution contracts, open audit findings, and
+one migration closure record. Completed point-in-time audits are deleted once
+their useful decisions have moved into code, tests, or a live contract.
 
-### Index
+## Current contracts and guides
 
-| Doc                                        | Scope                                                         |
-| ------------------------------------------ | ------------------------------------------------------------- |
-| [`configurability-gaps.md`](./configurability-gaps.md) | Hardcoded values that should be operator-knobs                |
-| [`new-modules.md`](./new-modules.md)                   | Proposed built-in modules sized to one PR each                |
-| [`output-reporting.md`](./output-reporting.md)         | Finding/chain shape, PR-comment, CI-stream weakness           |
-| [`replay-trace-audit.md`](./replay-trace-audit.md)     | What's persisted, queryable, reproducible from `.kuzushi/v3/runs`|
-| [`rust-tui-ux-audit.md`](./rust-tui-ux-audit.md)       | Rust Ratatui shell UX, plain mode, help/keybind drift         |
-| [`ux-dx-gaps.md`](./ux-dx-gaps.md)                     | Shell TUI friction, `/help` drift, missing back-paths         |
+- [`mode-parity.md`](./mode-parity.md) — scan, shell, and run-mode behavior.
+- [`module-extension-points.md`](./module-extension-points.md) — third-party
+  module SDK extension surface.
+- [`onboarding.md`](./onboarding.md) — current Rust CLI/TUI onboarding.
+- [`replay-trace-audit.md`](./replay-trace-audit.md) — shared run artifacts,
+  replay, and trace behavior.
 
-### Status
+## Open decision and remediation inputs
 
-The six docs above are the surviving research output from an 8-agent
-sweep. Three additional sweeps (module ecosystem extension points,
-scan/shell/run mode parity, operator onboarding) did not produce
-deliverables in this batch and should be re-run.
+- [`interaction-safety-audit.md`](./interaction-safety-audit.md) — approval,
+  cancellation, and child-process teardown risks.
+- [`silent-verdict-fallback-audit.md`](./silent-verdict-fallback-audit.md) —
+  malformed model-output and verdict fallback risks.
+- [`product-vision-alignment-audit.md`](./product-vision-alignment-audit.md) —
+  owner decisions about product-surface cuts and folds.
+- [`new-modules.md`](./new-modules.md) — candidate built-ins and remaining
+  module gaps.
 
-Implementation work tied to these assessments is intentionally *not*
-bundled here — each high-confidence recommendation needs its own focused
-PR so reviewers can evaluate the change against the assessment's
-reasoning.
+## Closure record
+
+- [`ts-runtime-island-retirement.md`](./ts-runtime-island-retirement.md) —
+  rationale and enforcement for the retired TypeScript runtime subsystems.

@@ -1,15 +1,45 @@
 use super::*;
 
 impl ShellApp {
+    #[cfg(test)]
     pub(crate) fn start_prereq_chain(
         &mut self,
         steps: Vec<PrereqStep>,
         final_tool: String,
         final_input: serde_json::Value,
+        workspace: WorkspaceTarget,
+        thinking_level: Option<String>,
+        authorization: ExecutionAuthorization,
+    ) -> Vec<ShellEffect> {
+        let prepared =
+            match self.prepare_background_tool_input(&final_tool, final_input, &workspace) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    self.log("error", format!("{final_tool} input invalid: {error}"));
+                    return Vec::new();
+                }
+            };
+        self.start_prepared_prereq_chain(
+            steps,
+            final_tool,
+            prepared,
+            workspace,
+            thinking_level,
+            authorization,
+        )
+    }
+
+    pub(crate) fn start_prepared_prereq_chain(
+        &mut self,
+        steps: Vec<PrereqStep>,
+        final_tool: String,
+        final_input: PreparedToolInput,
         _workspace: WorkspaceTarget,
         thinking_level: Option<String>,
+        authorization: ExecutionAuthorization,
     ) -> Vec<ShellEffect> {
-        let chain = PrereqChain::new(steps, final_tool, final_input, thinking_level);
+        let chain = PrereqChain::new_prepared(steps, final_tool, final_input, thinking_level)
+            .with_authorization(authorization);
         self.engagement.set_pending_chain(chain);
         self.present_or_auto_accept_prereq_plan()
     }
@@ -156,20 +186,9 @@ impl ShellApp {
         self.log_prereq_dispatch(&step, &context.final_tool);
         let status = tool_run_status(&step.tool);
         let activity = live_activity_for_prereq_step(&step, &context.final_tool);
-        let input = match self.prepared_prereq_step_input(&step.tool, &workspace) {
-            Ok(input) => input,
-            Err(error) => {
-                self.log(
-                    "error",
-                    format!("{} prerequisite input invalid: {error}", step.tool),
-                );
-                self.engagement.clear_pending_chain();
-                return;
-            }
-        };
         self.start_background_tool_with_activity(
             step.tool,
-            input,
+            serde_json::json!({}),
             workspace,
             status,
             context.thinking,
@@ -200,31 +219,30 @@ impl ShellApp {
     }
 
     fn dispatch_final_chain_tool(&mut self, workspace: WorkspaceTarget) {
-        let Some((tool, input, thinking)) = self.engagement.mark_final_chain_tool_dispatched()
+        let Some((tool, input, thinking, authorization)) =
+            self.engagement.mark_final_chain_tool_dispatched()
         else {
             return;
         };
         let status = tool_run_status(&tool);
-        self.start_background_tool(tool, input, workspace, status, thinking);
-    }
-
-    fn prepared_prereq_step_input(
-        &self,
-        tool_name: &str,
-        workspace: &WorkspaceTarget,
-    ) -> anyhow::Result<serde_json::Value> {
-        let ctx = ToolExecutionContext {
-            config: self.config(),
-            workspace: Some(workspace),
-            findings_store: None,
-            trace: None,
-        };
-        self.registry().prepare_tool_input_for_dispatch(
-            tool_name,
-            serde_json::json!({}),
-            &ctx,
-            None,
-        )
+        match input {
+            PrereqFinalInput::Prepared(input) => self.start_authorized_prepared_background_tool(
+                tool,
+                input,
+                workspace,
+                status,
+                thinking,
+                authorization,
+            ),
+            PrereqFinalInput::Raw(input) => self.start_authorized_background_tool(
+                tool,
+                input,
+                workspace,
+                status,
+                thinking,
+                authorization,
+            ),
+        }
     }
 
     fn prereq_chain_advance_effect(&self) -> Vec<ShellEffect> {

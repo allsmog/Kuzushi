@@ -77,6 +77,10 @@ mod tests {
             ShellCommand::FindingsFilter("state:new rank:high run:scan-1".to_string())
         );
         assert_eq!(
+            parse_command("findings filter clear"),
+            ShellCommand::Findings
+        );
+        assert_eq!(
             parse_command("decision suppressed reviewed under policy"),
             ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
                 verdict: "suppressed".to_string(),
@@ -95,6 +99,13 @@ mod tests {
             ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
                 "decision suppressed".to_string(),
             ))
+        );
+        assert_eq!(
+            parse_command("proof defer F-01 --reason production harness is unavailable"),
+            ShellCommand::ProofDeferral {
+                reference: "F-01".to_string(),
+                reason: "production harness is unavailable".to_string(),
+            }
         );
         assert_eq!(
             parse_command("dismiss used_in_tests only exercised in fixtures"),
@@ -368,6 +379,7 @@ mod tests {
             parse_command("reparse A-123"),
             ShellCommand::Reparse("A-123".to_string())
         );
+        assert_eq!(parse_command("/session"), ShellCommand::SessionInfo);
         assert_eq!(parse_command("/history"), ShellCommand::History);
         assert_eq!(parse_command("/clear"), ShellCommand::Clear);
         assert_eq!(
@@ -597,7 +609,7 @@ mod tests {
         assert_eq!(parse_command("?"), ShellCommand::Help(None));
         assert_eq!(
             parse_command("phase confirm"),
-            ShellCommand::Phase(WorkflowPhase::Confirm)
+            ShellCommand::Phase(WorkflowPhase::Prove)
         );
         assert_eq!(
             parse_command("/phase fix"),
@@ -656,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    fn export_aliases_report_the_complete_canonical_usage() {
+    fn export_aliases_report_the_complete_friendly_usage() {
         for command in [
             "export",
             "findings export",
@@ -670,6 +682,10 @@ mod tests {
             };
             assert!(
                 message.contains("usage: findings export <path> [format]"),
+                "unexpected usage for {command}: {message}"
+            );
+            assert!(
+                message.contains("alias: workspace export findings"),
                 "unexpected usage for {command}: {message}"
             );
         }
@@ -722,15 +738,7 @@ mod tests {
 
     #[test]
     fn retired_navigation_aliases_do_not_route() {
-        for input in [
-            "studio",
-            "cc",
-            "setup",
-            "plan-stage",
-            "diagram",
-            "3d",
-            "threats dfd",
-        ] {
+        for input in ["studio", "cc", "plan-stage", "diagram", "3d", "threats dfd"] {
             assert!(
                 matches!(parse_command(input), ShellCommand::Unknown(_)),
                 "retired alias {input:?} still routes"
@@ -814,13 +822,14 @@ mod tests {
             "plan-discard",
             "prompts",
             "prompt",
+            "proof-deferral",
             "provider",
             "project-model",
-            "pwn",
             "queue-command",
             "quickstart",
             "keymap",
             "recommend",
+            "report",
             "quit",
             "quit-confirm",
             "reparse",
@@ -831,6 +840,7 @@ mod tests {
             "run-tool",
             "scan",
             "scene",
+            "session-info",
             "set-option",
             "show-aliases",
             "show-jobs",
@@ -874,7 +884,7 @@ mod tests {
                 "run .",
                 "findings",
                 "open F-0001",
-                "model 1"
+                "findings export report.sarif sarif"
             ]
         );
 
@@ -894,6 +904,7 @@ mod tests {
         match command {
             ShellCommand::Help(_) => "help",
             ShellCommand::Home => "home",
+            ShellCommand::Report => "report",
             ShellCommand::Back => "back",
             ShellCommand::Modules => "modules",
             ShellCommand::Recommend => "recommend",
@@ -949,6 +960,7 @@ mod tests {
             ShellCommand::Activity => "activity",
             ShellCommand::FailureHandoff => "failure-handoff",
             ShellCommand::Plan(_) => "plan",
+            ShellCommand::PhaseIntent { .. } => "phase-intent",
             ShellCommand::PlanApply => "plan-apply",
             ShellCommand::PlanDiscard => "plan-discard",
             ShellCommand::Quickstart => "quickstart",
@@ -969,6 +981,7 @@ mod tests {
             ShellCommand::Workspace(_) => "workspace",
             ShellCommand::Strategy(_) => "strategy",
             ShellCommand::ReviewDecision(_) => "review-decision",
+            ShellCommand::ProofDeferral { .. } => "proof-deferral",
             ShellCommand::Patch(_) => "patch",
             ShellCommand::Pwn(_) => "pwn",
             ShellCommand::KnowledgeBase(_) => "kb",
@@ -976,6 +989,7 @@ mod tests {
             ShellCommand::Attach(_) => "attach",
             ShellCommand::Detach(_) => "detach",
             ShellCommand::Reparse(_) => "reparse",
+            ShellCommand::SessionInfo => "session-info",
             ShellCommand::History => "history",
             ShellCommand::Clear => "clear",
             ShellCommand::Load(_) => "load",
@@ -1005,8 +1019,8 @@ mod tests {
                 "<run>" | "<runId>" => "run-123".to_string(),
                 "<ref>" => "main".to_string(),
                 "<provider>" => "openai".to_string(),
-                "<map|hunt|confirm|fix>" => "confirm".to_string(),
-                "[recon|hunt|confirm|fix]" => "hunt".to_string(),
+                "<map|scan|review|prove|fix>" => "prove".to_string(),
+                "[recon|scan|review|prove|fix]" => "scan".to_string(),
                 "<choice>" => "1".to_string(),
                 "<question>" => "what now".to_string(),
                 "<specifier>" => "builtin:sast".to_string(),

@@ -146,6 +146,8 @@ mod tests {
             workspace: None,
             findings_store: None,
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let input = TriageRunInput::from_tool_input(
@@ -295,9 +297,119 @@ mod tests {
         let second = run_triage_stage2(&store, &runtime, &input, &config, vec![finding]).unwrap();
 
         assert_eq!(*runtime.calls.lock().unwrap(), 1);
-        assert_eq!(first.total_cost, 0.01);
-        assert_eq!(second.total_cost, 0.0);
+        assert_eq!(first.cost_report().exact_usd(), Some(0.01));
+        assert_eq!(second.cost_report().exact_usd(), Some(0.0));
         assert_eq!(second.results[0]["cached"], json!(true));
+    }
+
+    #[test]
+    fn duplicated_findings_triage_once_and_fan_verdict_to_all_rows() {
+        let finding = finding_with(Severity::High, "semgrep", "quadruplicated sql injection");
+        let store = store_with_scan_findings(&[
+            ("scan-a", finding.clone()),
+            ("scan-b", finding.clone()),
+            ("scan-c", finding.clone()),
+            ("scan-d", finding),
+        ]);
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+
+        let (selected, missing) = select_triage_findings(&store, &input).unwrap();
+        assert!(missing.is_empty());
+        assert_eq!(
+            selected.len(),
+            1,
+            "4x-duplicated finding must collapse to one candidate"
+        );
+
+        let runtime = CountingRuntime {
+            calls: std::sync::Mutex::new(0),
+        };
+        let config = TriageExecutionConfig::new(
+            PathBuf::from("/repo-dedup-fanout"),
+            "openai-codex:gpt-5.4".to_string(),
+        );
+        run_triage_stage2(&store, &runtime, &input, &config, selected).unwrap();
+
+        assert_eq!(
+            *runtime.calls.lock().unwrap(),
+            1,
+            "one LLM call for 4 duplicates"
+        );
+        for scan_id in ["scan-a", "scan-b", "scan-c", "scan-d"] {
+            let stored = store.list_findings_for_scan_id(scan_id).unwrap();
+            assert_eq!(
+                stored[0].triage.as_ref().map(|triage| triage.verdict),
+                Some(TriageVerdict::TruePositive),
+                "duplicate row in {scan_id} must inherit the verdict"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_fingerprint_references_collapse_to_one_candidate() {
+        let finding = finding_with(Severity::High, "semgrep", "referenced twice");
+        let fingerprint = finding.fingerprint.clone();
+        let store = store_with_scan_findings(&[("scan-z", finding)]);
+        let input = TriageRunInput::from_tool_input(
+            &json!({"fingerprints": [fingerprint.clone(), fingerprint]}),
+            Path::new("."),
+        )
+        .unwrap();
+
+        let (selected, missing) = select_triage_findings(&store, &input).unwrap();
+
+        assert!(missing.is_empty());
+        assert_eq!(selected.len(), 1);
+    }
+
+    #[test]
+    fn distinct_identity_findings_each_get_their_own_triage_call() {
+        let sqli = Finding::new_tool(
+            "semgrep",
+            "rule-sqli",
+            "src/db.rs",
+            10,
+            None,
+            Severity::High,
+            "sql injection",
+        );
+        let xss = Finding::new_tool(
+            "semgrep",
+            "rule-xss",
+            "src/web.rs",
+            20,
+            None,
+            Severity::High,
+            "cross-site scripting",
+        );
+        assert_ne!(sqli.fingerprint, xss.fingerprint);
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("scan-z", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        store.insert_finding("scan-z", &sqli).unwrap();
+        store.insert_finding("scan-z", &xss).unwrap();
+        store.record_run_finished("scan-z", "completed", 2).unwrap();
+
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        let (selected, _) = select_triage_findings(&store, &input).unwrap();
+        assert_eq!(selected.len(), 2, "distinct identities must not be merged");
+
+        let runtime = CountingRuntime {
+            calls: std::sync::Mutex::new(0),
+        };
+        let config = TriageExecutionConfig::new(
+            PathBuf::from("/repo-distinct-pair"),
+            "openai-codex:gpt-5.4".to_string(),
+        );
+        let stats = run_triage_stage2(&store, &runtime, &input, &config, selected).unwrap();
+
+        assert_eq!(*runtime.calls.lock().unwrap(), 2);
+        assert_eq!(stats.results.len(), 2);
+        assert_ne!(
+            stats.results[0]["fingerprint"],
+            stats.results[1]["fingerprint"]
+        );
     }
 
     #[test]
@@ -312,7 +424,8 @@ mod tests {
             &mut stats,
             latest,
             runtime_outcome(true_positive_outcome()),
-        );
+        )
+        .unwrap();
 
         for scan_id in ["scan-a", "scan-z"] {
             let stored = store.list_findings_for_scan_id(scan_id).unwrap();
@@ -337,15 +450,18 @@ mod tests {
             dropped: 0,
         };
         let mut stats = TriageRunStats::default();
-        stats.record_persisted_outcome(
-            finding_with(Severity::High, "semgrep", "sql injection"),
-            TriageOutcome {
-                verdict: TriageVerdict::TruePositive,
-                confidence: 0.8,
-                rationale: "reachable sink".to_string(),
-                cost_usd: 0.01,
-            },
-        );
+        stats
+            .record_persisted_outcome(
+                finding_with(Severity::High, "semgrep", "sql injection"),
+                TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.8,
+                    rationale: "reachable sink".to_string(),
+                    cost_usd: 0.01,
+                    cost_usd_exact: true,
+                },
+            )
+            .unwrap();
 
         let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
 
@@ -355,6 +471,87 @@ mod tests {
             json!("true_positive")
         );
         assert!(response["warnings"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn triage_response_preserves_unresolved_provider_spend() {
+        let (input, config, stage1) = one_finding_triage_context();
+        let mut stats = TriageRunStats::default();
+        stats
+            .record_persisted_outcome(
+                finding_with(Severity::High, "semgrep", "sql injection"),
+                TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.8,
+                    rationale: "reachable sink".to_string(),
+                    cost_usd: 0.0,
+                    cost_usd_exact: false,
+                },
+            )
+            .unwrap();
+
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+
+        assert!(response.get("costUsd").is_none());
+        assert_eq!(response["observedCostUsd"], json!(0.0));
+        assert_eq!(response["providerSpendUnresolved"], json!(true));
+        assert!(response["data"].get("costUsd").is_none());
+        assert_eq!(
+            response["data"]["results"][0]["observedCostUsd"],
+            json!(0.0)
+        );
+        assert_eq!(
+            response["data"]["stages"][1]["providerSpendUnresolved"],
+            json!(true)
+        );
+        assert!(triage_cost_cap_reached(Some(1.0), stats.cost_report()));
+        assert!(!triage_cost_cap_reached(None, stats.cost_report()));
+    }
+
+    #[test]
+    fn triage_response_preserves_explicit_reported_zero() {
+        let (input, config, stage1) = one_finding_triage_context();
+        let mut stats = TriageRunStats::default();
+        stats
+            .record_persisted_outcome(
+                finding_with(Severity::High, "semgrep", "sql injection"),
+                TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.8,
+                    rationale: "reachable sink".to_string(),
+                    cost_usd: 0.0,
+                    cost_usd_exact: true,
+                },
+            )
+            .unwrap();
+
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+
+        assert_eq!(response["costUsd"], json!(0.0));
+        assert_eq!(response["data"]["costUsd"], json!(0.0));
+        assert_eq!(response["data"]["results"][0]["costUsd"], json!(0.0));
+        assert_eq!(response["data"]["stages"][1]["costUsd"], json!(0.0));
+        assert!(!triage_cost_cap_reached(Some(1.0), stats.cost_report()));
+    }
+
+    fn one_finding_triage_context() -> (
+        TriageRunInput,
+        TriageExecutionConfig,
+        PrefilteredTriageFindings,
+    ) {
+        (
+            TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap(),
+            TriageExecutionConfig::new(
+                PathBuf::from("/repo"),
+                "anthropic:claude-sonnet-4-6".to_string(),
+            ),
+            PrefilteredTriageFindings {
+                total: 1,
+                kept_count: 1,
+                kept: Vec::new(),
+                dropped: 0,
+            },
+        )
     }
 
     #[test]
@@ -391,6 +588,7 @@ mod tests {
             confidence: 0.9,
             rationale: "confirmed once".to_string(),
             cost_usd: 0.01,
+            cost_usd_exact: true,
         }
     }
 

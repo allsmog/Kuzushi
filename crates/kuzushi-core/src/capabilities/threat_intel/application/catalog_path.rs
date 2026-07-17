@@ -33,10 +33,7 @@ fn resolve_explicit_catalog_path(path: PathBuf, ctx: &ToolExecutionContext<'_>) 
 fn catalog_relative_base(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     ctx.workspace
         .map(|workspace| workspace.root().to_path_buf())
-        .map_or_else(
-            || std::env::current_dir().context("threat-intel: could not resolve current directory"),
-            Ok,
-        )
+        .context("threat-intel requires an explicit active workspace")
 }
 
 fn require_existing_catalog_path(path: &Path) -> Result<()> {
@@ -50,14 +47,25 @@ fn require_existing_catalog_path(path: &Path) -> Result<()> {
 }
 
 fn default_catalog_path(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    let dir = default_catalog_dir(ctx)?;
+    let (workspace_root, dir) = default_catalog_dir(ctx)?;
     ensure_catalog_dir_exists(&dir)?;
+    let relative = dir.strip_prefix(&workspace_root).with_context(|| {
+        format!(
+            "threat-intel catalog directory {} is outside workspace {}",
+            dir.display(),
+            workspace_root.display()
+        )
+    })?;
+    let dir = crate::workspace::validated_workspace_descendant(&workspace_root, relative)?;
     first_toml_catalog_under(&dir)
 }
 
-fn default_catalog_dir(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
+fn default_catalog_dir(ctx: &ToolExecutionContext<'_>) -> Result<(PathBuf, PathBuf)> {
     let workspace = ctx.workspace.ok_or_else(missing_workspace_catalog_error)?;
-    Ok(super::threat_intel_catalogs_dir(workspace.root()))
+    Ok((
+        workspace.root().to_path_buf(),
+        super::threat_intel_catalogs_dir(workspace.root()),
+    ))
 }
 
 fn missing_workspace_catalog_error() -> anyhow::Error {
@@ -80,7 +88,13 @@ fn first_toml_catalog_under(dir: &Path) -> Result<PathBuf> {
     let mut candidates: Vec<PathBuf> = std::fs::read_dir(dir)
         .with_context(|| format!("threat-intel: could not read {}", dir.display()))?
         .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
+        .filter_map(|entry| {
+            entry
+                .file_type()
+                .ok()
+                .filter(|file_type| file_type.is_file() && !file_type.is_symlink())
+                .map(|_| entry.path())
+        })
         .filter(|path| is_toml_catalog_path(path))
         .collect();
     candidates.sort();

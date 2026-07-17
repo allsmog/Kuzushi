@@ -5,11 +5,13 @@ pub(crate) fn execute_trigger_synth(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let output = run_systems_trigger_synth(input, ctx, runtime)?;
-    Ok(tool_json(
-        format!("systems-hunt triggers: {}", output.triggers.len()),
-        output,
-    ))
+    let output = run_systems_trigger_synth_with_cost(input, ctx, runtime)?;
+    let mut result = tool_json(
+        format!("systems-hunt triggers: {}", output.value.triggers.len()),
+        &output.value,
+    );
+    crate::module_result::apply_runtime_cost_report(&mut result, output.cost_report()?);
+    Ok(result)
 }
 
 pub(crate) fn execute_systems_report(
@@ -26,10 +28,19 @@ pub(crate) fn execute_deep_semantic_cwe(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     let output = run_deep_semantic_cwe_select(input, ctx, runtime)?;
-    Ok(tool_json(
+    let mut result = tool_json(
         format!("deep-semantic cwes: {}", output.cwes.len()),
-        output,
-    ))
+        &output,
+    );
+    let observed =
+        crate::runtime::RuntimeCost::from_usd(output.cost_usd, "deep-semantic CWE selection cost")?;
+    let cost = if output.cost_usd_exact {
+        crate::runtime::RuntimeCostReport::known(observed)
+    } else {
+        crate::runtime::RuntimeCostReport::incomplete(observed)
+    };
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
+    Ok(result)
 }
 
 pub(crate) fn execute_deep_semantic_report(

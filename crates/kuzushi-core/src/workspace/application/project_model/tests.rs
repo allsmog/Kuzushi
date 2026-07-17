@@ -146,7 +146,59 @@ fn cyclic_project_scope_parent_chain_returns_error() {
     let error =
         build_project_model_document_from_tree(temp.path(), &tree, "scope-a", None).unwrap_err();
 
-    assert!(error
-        .to_string()
-        .contains("cyclic project scope parent chain"));
+    assert!(format!("{error:#}").contains("cyclic project scope parent chain"));
+}
+
+#[cfg(unix)]
+#[test]
+fn project_model_state_rejects_an_outside_symlink_for_reads_and_writes() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    fs::write(outside.path(), "OUTSIDE_MODEL_TOKEN").unwrap();
+    let path = project_model_scope_path(workspace.path(), ROOT_SCOPE_ID);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    symlink(outside.path(), &path).unwrap();
+    let document = ProjectModelDocument {
+        schema_version: PROJECT_MODEL_SCHEMA_VERSION,
+        scope_id: ROOT_SCOPE_ID.to_string(),
+        scope_path: ".".to_string(),
+        built_at_revision: None,
+        sections: Vec::new(),
+    };
+
+    let read_error = load_project_model_document(workspace.path(), ROOT_SCOPE_ID, None)
+        .unwrap_err()
+        .to_string();
+    let write_error = save_project_model_document(workspace.path(), &document)
+        .unwrap_err()
+        .to_string();
+
+    assert!(read_error.contains("symlink"), "{read_error}");
+    assert!(write_error.contains("symlink"), "{write_error}");
+    assert!(!read_error.contains("OUTSIDE_MODEL_TOKEN"));
+    assert_eq!(
+        fs::read_to_string(outside.path()).unwrap(),
+        "OUTSIDE_MODEL_TOKEN"
+    );
+}
+
+#[test]
+fn project_model_rejects_scope_ids_that_can_escape_the_state_directory() {
+    let workspace = tempfile::tempdir().unwrap();
+    let document = ProjectModelDocument {
+        schema_version: PROJECT_MODEL_SCHEMA_VERSION,
+        scope_id: "../../outside".to_string(),
+        scope_path: ".".to_string(),
+        built_at_revision: None,
+        sections: Vec::new(),
+    };
+
+    let error = save_project_model_document(workspace.path(), &document)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("Invalid project scope id"), "{error}");
+    assert!(!workspace.path().join("outside.json").exists());
 }

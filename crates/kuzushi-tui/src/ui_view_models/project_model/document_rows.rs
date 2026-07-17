@@ -1,8 +1,6 @@
 use super::{ProjectModelOrigin, ProjectModelRow};
-use crate::ShellApp;
-use kuzushi_core::workspace::{
-    load_project_model_document, ProjectModelSection, ProjectModelSectionOrigin, ROOT_SCOPE_ID,
-};
+use crate::{ShellApp, ViewDataState};
+use kuzushi_core::workspace::{ProjectModelSection, ProjectModelSectionOrigin, ROOT_SCOPE_ID};
 
 pub(super) fn project_model_document_rows(app: &ShellApp) -> Option<Vec<ProjectModelRow>> {
     let target = app.target_path_buf()?;
@@ -10,14 +8,23 @@ pub(super) fn project_model_document_rows(app: &ShellApp) -> Option<Vec<ProjectM
         .active_scope()
         .map(|scope| scope.id.as_str())
         .unwrap_or(ROOT_SCOPE_ID);
-    let revision = app
+    let revision = match app
         .workbench_cache()
-        .borrow_mut()
-        .git_metadata(Some(target.as_path()))
-        .map(|git| git.sha);
-    let document = load_project_model_document(target, scope_id, revision.as_deref())
-        .ok()
-        .flatten()?;
+        .borrow()
+        .cached_git_metadata(Some(target.as_path()))
+    {
+        ViewDataState::Ready(Some(git)) => Some(git.sha),
+        ViewDataState::Ready(None) => None,
+        ViewDataState::NotRequested | ViewDataState::Loading => return None,
+    };
+    let document = match app
+        .workbench_cache()
+        .borrow()
+        .cached_project_model_document(Some(target), scope_id, revision.as_deref())
+    {
+        ViewDataState::Ready(document) => document?,
+        ViewDataState::NotRequested | ViewDataState::Loading => return None,
+    };
     Some(document.sections.iter().map(document_section_row).collect())
 }
 

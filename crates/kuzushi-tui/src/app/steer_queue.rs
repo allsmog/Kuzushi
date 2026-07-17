@@ -13,6 +13,12 @@ pub(crate) struct QueuedCommand {
     pub(crate) summary: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QueuedEntry {
+    id: u64,
+    command: QueuedCommand,
+}
+
 /// The operator steer queue: the third and lowest-precedence "next tool"
 /// mechanism, after the prereq chain and the planning queue. Items only
 /// dispatch when no work is running, and only after chain + plan advance have
@@ -20,21 +26,26 @@ pub(crate) struct QueuedCommand {
 /// chain or plan.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct SteerQueue {
-    items: VecDeque<QueuedCommand>,
+    items: VecDeque<QueuedEntry>,
+    next_id: u64,
 }
 
 impl SteerQueue {
     pub(crate) fn enqueue(&mut self, cmd: QueuedCommand) {
-        self.items.push_back(cmd);
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        self.items.push_back(QueuedEntry {
+            id: self.next_id,
+            command: cmd,
+        });
     }
 
     pub(crate) fn pop_front(&mut self) -> Option<QueuedCommand> {
-        self.items.pop_front()
+        self.items.pop_front().map(|entry| entry.command)
     }
 
     #[cfg(test)]
     pub(crate) fn peek(&self) -> Option<&QueuedCommand> {
-        self.items.front()
+        self.items.front().map(|entry| &entry.command)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -46,14 +57,16 @@ impl SteerQueue {
         self.items.is_empty()
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &QueuedCommand> {
-        self.items.iter()
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (String, &QueuedCommand)> {
+        self.items
+            .iter()
+            .map(|entry| (Self::selector(entry.id), &entry.command))
     }
 
-    /// The synthetic run-id a queued row renders under in the registry:
-    /// `queued-<n>` (1-based, in queue order). Used to target `jobs -k`.
-    pub(crate) fn synthetic_id(index: usize) -> String {
-        format!("queued-{}", index + 1)
+    /// The stable selector a queued row renders under in the registry. The
+    /// sequence is assigned at enqueue time and never changes while queued.
+    fn selector(id: u64) -> String {
+        format!("queued-{id}")
     }
 
     /// Drop every pending item (operator full-stop, e.g. Ctrl+C abort).
@@ -61,17 +74,15 @@ impl SteerQueue {
     /// dropped instead of silently discarding queued work (CLAUDE.md: honest
     /// state).
     pub(crate) fn drain_all(&mut self) -> Vec<QueuedCommand> {
-        self.items.drain(..).collect()
+        self.items.drain(..).map(|entry| entry.command).collect()
     }
 
-    /// Remove a queued item named by its synthetic `queued-<n>` id (1-based).
+    /// Remove a queued item named by its stable `queued-<n>` selector.
     /// Returns the removed command so the caller can report what it dropped.
     pub(crate) fn remove_matching(&mut self, token: &str) -> Option<QueuedCommand> {
-        let index = token.strip_prefix("queued-")?.parse::<usize>().ok()?;
-        if index == 0 {
-            return None;
-        }
-        self.items.remove(index - 1)
+        let id = token.strip_prefix("queued-")?.parse::<u64>().ok()?;
+        let index = self.items.iter().position(|entry| entry.id == id)?;
+        self.items.remove(index).map(|entry| entry.command)
     }
 }
 
@@ -98,15 +109,32 @@ mod tests {
     }
 
     #[test]
-    fn remove_matching_targets_synthetic_id() {
+    fn remove_matching_targets_stable_id() {
         let mut queue = SteerQueue::default();
         queue.enqueue(cmd("run a"));
         queue.enqueue(cmd("run b"));
-        assert_eq!(SteerQueue::synthetic_id(0), "queued-1");
         let removed = queue.remove_matching("queued-1").unwrap();
         assert_eq!(removed.raw, "run a");
         assert_eq!(queue.len(), 1);
         assert_eq!(queue.peek().unwrap().raw, "run b");
+        assert_eq!(queue.iter().next().unwrap().0, "queued-2");
+    }
+
+    #[test]
+    fn selectors_do_not_renumber_after_remove_or_drain() {
+        let mut queue = SteerQueue::default();
+        queue.enqueue(cmd("run a"));
+        queue.enqueue(cmd("run b"));
+        queue.enqueue(cmd("run c"));
+
+        assert_eq!(queue.remove_matching("queued-1").unwrap().raw, "run a");
+        assert_eq!(queue.pop_front().unwrap().raw, "run b");
+        queue.enqueue(cmd("run d"));
+
+        let selectors = queue.iter().map(|(id, _)| id).collect::<Vec<_>>();
+        assert_eq!(selectors, ["queued-3", "queued-4"]);
+        assert_eq!(queue.remove_matching("queued-2"), None);
+        assert_eq!(queue.remove_matching("queued-3").unwrap().raw, "run c");
     }
 
     #[test]

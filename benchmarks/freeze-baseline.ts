@@ -4,6 +4,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { loadProvenanceInput } from "./benchmark-provenance.js";
+import { canonicalScanConfig } from "./benchmark-scan-config.js";
 import type { BaselineMetrics, BenchmarkMetrics } from "./types.js";
 
 const DEFAULT_DATASETS = ["govwa", "juice-shop"] as const;
@@ -13,6 +15,7 @@ const { values: args } = parseArgs({
     datasets: { type: "string" },
     output: { type: "string", default: "benchmarks/baseline.json" },
     "results-dir": { type: "string", default: "benchmarks/results" },
+    provenance: { type: "string", default: "benchmarks/baseline-provenance.json" },
   },
   strict: true,
 });
@@ -23,6 +26,10 @@ const datasets = (args.datasets ?? DEFAULT_DATASETS.join(","))
   .filter(Boolean);
 const outputPath = resolve(args.output ?? "benchmarks/baseline.json");
 const resultsDir = resolve(args["results-dir"] ?? "benchmarks/results");
+const provenancePath = resolve(args.provenance ?? "benchmarks/baseline-provenance.json");
+if (!existsSync(provenancePath)) throw new Error(`Provenance input missing: ${provenancePath}`);
+const provenance = loadProvenanceInput(provenancePath);
+const scanConfig = canonicalScanConfig(provenance.scanConfig);
 
 if (!existsSync(resultsDir)) {
   mkdirSync(resultsDir, { recursive: true });
@@ -39,31 +46,23 @@ for (const dataset of datasets) {
     );
   }
 
-  const sarifPath = join(resultsDir, `${dataset}.sarif`);
   const metricsPath = join(resultsDir, `${dataset}.json`);
-  const cliPath = resolve("bin/kuzushi-rs.mjs");
 
   execFileSync(
     process.execPath,
-    [cliPath, "scan", repoDir, "--tasks", "semgrep", "--sarif", sarifPath],
-    {
-      stdio: "inherit",
-      encoding: "utf-8",
-      env: process.env,
-    },
-  );
-
-  execFileSync(
-    "npx",
     [
+      "--import",
       "tsx",
       "benchmarks/harness.ts",
       "--dataset",
       datasetDir,
-      "--sarif",
-      sarifPath,
+      "--run",
+      "--config",
+      scanConfig,
       "--output",
       metricsPath,
+      "--provenance",
+      provenancePath,
     ],
     {
       stdio: "inherit",
@@ -77,7 +76,11 @@ for (const dataset of datasets) {
 }
 
 const baseline: BaselineMetrics = {
-  updatedAt: new Date().toISOString(),
+  schemaVersion: 2,
+  updatedAt: Object.values(metricsByDataset)
+    .map((metrics) => metrics.provenance.observed.generatedAt)
+    .sort()
+    .at(-1)!,
   datasets: metricsByDataset,
 };
 

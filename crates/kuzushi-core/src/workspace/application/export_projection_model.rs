@@ -11,6 +11,8 @@ pub struct WorkspaceFindingExportRecord {
     pub kind: String,
     pub rule_id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwe: Option<String>,
     pub location: WorkspaceFindingExportLocation,
     pub severity: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,9 +55,53 @@ pub struct WorkspaceFindingExportRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
     pub provenance: WorkspaceFindingProvenanceSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remediation: Option<WorkspaceRemediationExportSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub references: Vec<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRemediationExportSummary {
+    pub application_id: String,
+    pub patch_run_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finding_scan_id: Option<String>,
+    pub application_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverify_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverify_run_id: Option<String>,
+    pub diff_hash: String,
+    pub touched_paths: Vec<String>,
+}
+
+impl From<&crate::findings::PatchLifecycleRecord> for WorkspaceRemediationExportSummary {
+    fn from(record: &crate::findings::PatchLifecycleRecord) -> Self {
+        let reverify_outcome = matches!(
+            record.state,
+            crate::findings::PatchLifecycleState::Verified
+                | crate::findings::PatchLifecycleState::StillVulnerable
+                | crate::findings::PatchLifecycleState::NotRediscovered
+                | crate::findings::PatchLifecycleState::Inconclusive
+                | crate::findings::PatchLifecycleState::Failed
+                | crate::findings::PatchLifecycleState::Interrupted
+                | crate::findings::PatchLifecycleState::ChangedSinceApply
+        )
+        .then(|| record.state.as_str().to_string());
+        Self {
+            application_id: record.application_id.clone(),
+            patch_run_id: record.patch_run_id.clone(),
+            finding_scan_id: record.finding_scan_id.clone(),
+            application_state: record.state.as_str().to_string(),
+            reverify_outcome,
+            reverify_run_id: record.reverify_run_id.clone(),
+            diff_hash: record.diff_hash.clone(),
+            touched_paths: record.touched_paths().map(str::to_string).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

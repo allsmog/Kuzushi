@@ -11,12 +11,29 @@ pub(crate) fn verify_module() -> BuiltinModule {
                 "verify:finding",
                 "Verify whether a finding is exploitable (LLM-driven; consults runtime for PoC reasoning).",
                 verify_finding_options(),
-            ),
+            )
+            .with_prompt(editable_prompt(
+                "verification instructions",
+                "verify",
+                "finding",
+                "VERIFY_PROMPT",
+                crate::verification::DEFAULT_VERIFY_PROMPT.to_string(),
+            ))
+            .with_policy(workspace_policy(
+                ToolPhase::Prove,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Required,
+            )),
             hidden_tool_with_options(
                 "verify:exploit",
                 "Compatibility alias for verify:finding with mode=empirical.",
                 vec![fingerprint_option()],
-            ),
+            )
+            .with_policy(workspace_policy(
+                ToolPhase::Prove,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Required,
+            )),
         ],
         vec![dag("verify:finding", "verification", &["triage:run"])],
     )
@@ -47,6 +64,7 @@ fn verify_prompt_option() -> OptionSpec {
         OptionType::String,
         "Prompt text or path override for verification.",
     )
+    .inline_or_workspace_file()
     .advanced()
 }
 

@@ -1,7 +1,7 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 const DEPENDENCY_BLOCKS: &[&str] = &[
@@ -65,7 +65,14 @@ fn package_edges(value: &Value, source: &str) -> Vec<SbomDependencyEdge> {
 
 fn package_component(target: &Path, path: &Path, source: &str, key: &str) -> Option<SbomComponent> {
     let (name, version) = package_parts(key)?;
-    Some(component(target, path, "npm", source, &name, Some(&version)))
+    Some(component(
+        target,
+        path,
+        "npm",
+        source,
+        &name,
+        Some(&version),
+    ))
 }
 
 fn package_parts(key: &str) -> Option<(String, String)> {

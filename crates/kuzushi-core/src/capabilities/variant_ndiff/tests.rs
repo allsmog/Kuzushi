@@ -382,6 +382,84 @@ mod tests {
     }
 
     #[test]
+    fn whitebox_variant_search_is_deterministic_and_marks_result_cap() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/source.ts"),
+            "const q = req.query.q;\nreturn db.query(q);\n",
+        )
+        .unwrap();
+        for name in ["a.ts", "b.ts"] {
+            fs::write(
+                temp.path().join("src").join(name),
+                "const q = req.query.q;\nreturn db.query(q);\n",
+            )
+            .unwrap();
+        }
+        let confirmed = Finding::new_tool(
+            "agentic-sast",
+            "js/sql-injection",
+            "src/source.ts",
+            2,
+            Some(2),
+            Severity::High,
+            "req.query reaches db.query",
+        )
+        .with_static_proof_state(StaticProofState::StaticallyConfirmed);
+
+        let first = hunt_whitebox_static_variants(temp.path(), &[confirmed.clone()], None, 1)
+            .unwrap();
+        let second = hunt_whitebox_static_variants(temp.path(), &[confirmed], None, 1).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(first.count, 1);
+        assert!(first.truncated);
+        assert_eq!(first.truncation_reasons, vec!["variant_limit"]);
+    }
+
+    #[test]
+    fn whitebox_variant_search_reports_inventory_and_byte_caps() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/a.ts"), "req.query; db.query(q);\n").unwrap();
+        fs::write(temp.path().join("src/b.ts"), "req.query; db.query(q);\n").unwrap();
+        let confirmed = Finding::new_tool(
+            "agentic-sast",
+            "js/sql-injection",
+            "src/original.ts",
+            1,
+            Some(1),
+            Severity::High,
+            "req.query reaches db.query",
+        )
+        .with_static_proof_state(StaticProofState::StaticallyConfirmed);
+        let limits = VariantSearchLimits {
+            max_source_files: 1,
+            max_walk_entries: 10,
+            max_file_bytes: 1024,
+            max_total_bytes: 1,
+        };
+
+        let report = hunt_whitebox_static_variants_with_limits(
+            temp.path(),
+            &[confirmed],
+            None,
+            10,
+            limits,
+        )
+        .unwrap();
+
+        assert!(report.truncated);
+        assert!(report
+            .truncation_reasons
+            .contains(&"source_file_limit".to_string()));
+        assert!(report
+            .truncation_reasons
+            .contains(&"total_byte_limit".to_string()));
+    }
+
+    #[test]
     fn registry_dispatches_variant_lift_and_hunt_through_runtime() {
         let (_temp, workspace, store, fingerprint) = seeded_workspace();
         let mut config = V2Config::default();
@@ -391,6 +469,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let registry = ModuleRegistry::with_v2_builtins();
         let runtime = MockRuntime::new();
@@ -450,6 +530,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let lift = run_variant_lift_pattern(json!({}), &ctx, Some(&MockRuntime::new())).unwrap();
@@ -461,12 +543,8 @@ mod tests {
         let fetch = run_ndiff_fetch_cve(json!({})).unwrap();
         assert_failed_rejection(&fetch, "missing-id");
 
-        let extract = run_ndiff_extract_fix_pattern(
-            json!({}),
-            &ctx,
-            Some(&MockRuntime::new()),
-        )
-        .unwrap();
+        let extract =
+            run_ndiff_extract_fix_pattern(json!({}), &ctx, Some(&MockRuntime::new())).unwrap();
         assert_failed_rejection(&extract, "missing-source");
 
         let ndiff_hunt =
@@ -528,6 +606,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let result = run_variant_hunt(
             json!({"fingerprint": fingerprint}),
@@ -591,18 +671,24 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let registry = ModuleRegistry::with_v2_builtins();
         let runtime = MockRuntime::new();
 
-        let extract = registry
-            .execute_tool_with_runtime(
+        let prepared = registry
+            .prepare_dispatch_input(
                 "ndiff:extract-fix-pattern",
                 json!({"patchText": "--- a/parser.c\n+++ b/parser.c\n+if (len > cap) return -1;\n"}),
                 &ctx,
-                Some(&runtime),
-        )
-        .unwrap();
+                None,
+            )
+            .unwrap()
+            .authorize_explicit_headless();
+        let extract = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
+            .unwrap();
         assert_eq!(extract.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             extract.pointer("/status").and_then(Value::as_str),
@@ -652,6 +738,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+            cancellation: None,
+            authorization: Default::default(),
         };
         let err = run_ndiff_hunt_variants(
             json!({"pattern": {"fixShape":"guard","vulnerableShape":"unguarded"}}),

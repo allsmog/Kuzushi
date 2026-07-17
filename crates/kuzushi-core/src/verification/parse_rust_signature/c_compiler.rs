@@ -62,8 +62,9 @@ pub(in crate::verification) async fn verify_c_like(
     backend: SandboxBackend,
     opts: &VerifyOptions,
     compiler: CCompiler,
+    workspace_root: &Path,
 ) -> Result<VerificationOutcome> {
-    let project = match scaffold_c_project(finding, compiler).await {
+    let project = match scaffold_c_project(finding, compiler, workspace_root).await {
         Ok(p) => p,
         Err(err) => return Ok(scaffold_error(backend, "c scaffold", err)),
     };

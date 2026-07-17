@@ -228,7 +228,11 @@ impl ShellApp {
         Some((row.id, spec))
     }
 
-    fn planning_option_spec(&self, task: PlanningTaskId, option_name: &str) -> Option<OptionSpec> {
+    pub(crate) fn planning_option_spec(
+        &self,
+        task: PlanningTaskId,
+        option_name: &str,
+    ) -> Option<OptionSpec> {
         let tool = self.registry().resolve_tool(task.tool_name())?;
         tool.options
             .iter()
@@ -236,7 +240,7 @@ impl ShellApp {
             .cloned()
     }
 
-    fn set_planning_option_override(
+    pub(crate) fn set_planning_option_override(
         &mut self,
         task: PlanningTaskId,
         spec: &OptionSpec,

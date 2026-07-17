@@ -6,7 +6,7 @@ mod subcommands;
 pub(crate) use pr_comment_args::PrCommentArgs;
 pub(crate) use subcommands::{
     AuthCommand, ConfigCommand, FailOnArg, KwpCommand, McpBackend, McpCommand, RunsCommand,
-    ScanModeArg,
+    ScanModeArg, SessionExportFormat, SessionsCommand,
 };
 
 #[derive(Debug, Subcommand)]
@@ -129,6 +129,11 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: RunsCommand,
     },
+    /// Inspect and manage global shell session transcripts.
+    Sessions {
+        #[command(subcommand)]
+        command: SessionsCommand,
+    },
     /// Export persisted workspace findings.
     Export {
         /// Export format: json, jsonl, sarif, csv, or markdown-bundle.
@@ -207,8 +212,9 @@ pub(crate) enum Command {
         json: bool,
     },
     /// Scan a vendored vulnerable fixture offline — no API key, no model,
-    /// no external scanners. A real finding with evidence in seconds. The
-    /// fixture is self-contained, so `--target` is ignored here.
+    /// no external scanners. Records scanner signals at the honest signal_only
+    /// proof state without claiming source-grounded proof. The fixture is
+    /// self-contained, so `--target` is ignored here.
     Demo {
         /// Emit the demo result as machine-readable JSON.
         #[arg(long)]
@@ -225,8 +231,9 @@ pub(crate) enum Command {
         /// Override a canonical tool option. Repeat as `--option key=value`.
         #[arg(long = "option")]
         options: Vec<String>,
-        /// Autonomy ceiling for this run (`recon|hunt|confirm|fix`). Refuses
-        /// tools above the rung instead of running them; omitted = unconstrained.
+        /// Autonomy ceiling (`recon|scan|review|prove|fix`). Deprecated aliases:
+        /// `hunt` = scan and `confirm` = prove. Refuses tools above the rung;
+        /// omitted = unconstrained.
         #[arg(long)]
         autonomy: Option<String>,
     },

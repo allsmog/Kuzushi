@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 307
 ---
- KUZUSHI › options[sast:scan] · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › options[sast:scan] · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- OPTIONS ------------------------------------------------------------------------------------------------------------
 tool: sast:scan

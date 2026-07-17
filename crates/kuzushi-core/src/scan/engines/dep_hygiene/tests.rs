@@ -321,9 +321,7 @@ SafePkg = "1, < 2"
         assert_eq!(by_package["requests"].severity, DepHygieneSeverity::Medium);
         assert_eq!(by_package["pytest"].severity, DepHygieneSeverity::High);
         assert!(!by_package.contains_key("safe-lib"));
-        assert!(findings
-            .iter()
-            .all(|finding| finding.manifest == "Pipfile"));
+        assert!(findings.iter().all(|finding| finding.manifest == "Pipfile"));
     }
 
     #[test]
@@ -343,7 +341,10 @@ SafePkg = "1, < 2"
             by_package["guzzlehttp/guzzle"].severity,
             DepHygieneSeverity::Medium
         );
-        assert_eq!(by_package["phpunit/phpunit"].severity, DepHygieneSeverity::High);
+        assert_eq!(
+            by_package["phpunit/phpunit"].severity,
+            DepHygieneSeverity::High
+        );
         assert!(!by_package.contains_key("php"));
         assert!(!by_package.contains_key("ext-json"));
         assert!(!by_package.contains_key("safe/package"));
@@ -361,7 +362,10 @@ SafePkg = "1, < 2"
         );
         let by_package = finding_map(&findings);
 
-        assert_eq!(by_package["Newtonsoft.Json"].severity, DepHygieneSeverity::High);
+        assert_eq!(
+            by_package["Newtonsoft.Json"].severity,
+            DepHygieneSeverity::High
+        );
         assert_eq!(by_package["Dapper"].severity, DepHygieneSeverity::Medium);
         assert_eq!(by_package["NUnit"].severity, DepHygieneSeverity::High);
         assert!(!by_package.contains_key("Serilog"));
@@ -372,8 +376,11 @@ SafePkg = "1, < 2"
 
     #[test]
     fn analyzes_maven_pom_dependency_versions() {
-        let findings =
-            analyze_manifest(ManifestKind::MavenPom, Path::new("/repo/pom.xml"), MAVEN_POM);
+        let findings = analyze_manifest(
+            ManifestKind::MavenPom,
+            Path::new("/repo/pom.xml"),
+            MAVEN_POM,
+        );
         let by_package = finding_map(&findings);
 
         assert_eq!(
@@ -386,9 +393,7 @@ SafePkg = "1, < 2"
         );
         assert!(!by_package.contains_key("junit/junit"));
         assert!(!by_package.contains_key("org.example/managed"));
-        assert!(findings
-            .iter()
-            .all(|finding| finding.manifest == "pom.xml"));
+        assert!(findings.iter().all(|finding| finding.manifest == "pom.xml"));
     }
 
     #[test]
@@ -429,15 +434,16 @@ SafePkg = "1, < 2"
         assert_eq!(by_package["debug"].severity, DepHygieneSeverity::High);
         assert!(!by_package.contains_key("puma"));
         assert!(!by_package.contains_key("safe_gem"));
-        assert!(findings
-            .iter()
-            .all(|finding| finding.manifest == "Gemfile"));
+        assert!(findings.iter().all(|finding| finding.manifest == "Gemfile"));
     }
 
     #[test]
     fn analyzes_bower_json_version_constraints() {
-        let findings =
-            analyze_manifest(ManifestKind::BowerJson, Path::new("/repo/bower.json"), BOWER_JSON);
+        let findings = analyze_manifest(
+            ManifestKind::BowerJson,
+            Path::new("/repo/bower.json"),
+            BOWER_JSON,
+        );
         let by_package = finding_map(&findings);
 
         assert_eq!(by_package["jquery"].severity, DepHygieneSeverity::High);
@@ -514,7 +520,11 @@ SafePkg = "1, < 2"
 
     #[test]
     fn analyzes_cpanfile_requirement_versions() {
-        let findings = analyze_manifest(ManifestKind::Cpanfile, Path::new("/repo/cpanfile"), CPANFILE);
+        let findings = analyze_manifest(
+            ManifestKind::Cpanfile,
+            Path::new("/repo/cpanfile"),
+            CPANFILE,
+        );
         let by_package = finding_map(&findings);
 
         assert_eq!(by_package["Moo"].severity, DepHygieneSeverity::High);
@@ -620,18 +630,13 @@ SafePkg = "1, < 2"
         assert_eq!(by_package["alcotest"].severity, DepHygieneSeverity::High);
         assert!(!by_package.contains_key("dune"));
         assert!(!by_package.contains_key("base64"));
-        assert!(findings
-            .iter()
-            .all(|finding| finding.manifest == "opam"));
+        assert!(findings.iter().all(|finding| finding.manifest == "opam"));
     }
 
     #[test]
     fn analyzes_elm_json_dependency_versions() {
-        let findings = analyze_manifest(
-            ManifestKind::ElmJson,
-            Path::new("/repo/elm.json"),
-            ELM_JSON,
-        );
+        let findings =
+            analyze_manifest(ManifestKind::ElmJson, Path::new("/repo/elm.json"), ELM_JSON);
         let by_package = finding_map(&findings);
 
         assert_eq!(by_package["elm/core"].severity, DepHygieneSeverity::Medium);
@@ -660,9 +665,7 @@ SafePkg = "1, < 2"
         assert!(!by_package.contains_key("phoenix"));
         assert!(!by_package.contains_key("plug"));
         assert!(!by_package.contains_key("telemetry"));
-        assert!(findings
-            .iter()
-            .all(|finding| finding.manifest == "mix.exs"));
+        assert!(findings.iter().all(|finding| finding.manifest == "mix.exs"));
     }
 
     #[test]
@@ -676,13 +679,14 @@ SafePkg = "1, < 2"
 
         assert_eq!(by_package["nim"].severity, DepHygieneSeverity::Medium);
         assert_eq!(by_package["jester"].severity, DepHygieneSeverity::High);
-        assert_eq!(by_package["chronicles"].severity, DepHygieneSeverity::Medium);
+        assert_eq!(
+            by_package["chronicles"].severity,
+            DepHygieneSeverity::Medium
+        );
         assert_eq!(by_package["latestlib"].severity, DepHygieneSeverity::High);
         assert!(!by_package.contains_key("safe_pkg"));
         assert!(!by_package.contains_key("pinned"));
-        assert!(findings
-            .iter()
-            .all(|finding| finding.manifest == "nimble"));
+        assert!(findings.iter().all(|finding| finding.manifest == "nimble"));
     }
 
     #[test]
@@ -698,9 +702,7 @@ SafePkg = "1, < 2"
         assert_eq!(by_package["aeson"].severity, DepHygieneSeverity::High);
         assert!(!by_package.contains_key("base"));
         assert!(!by_package.contains_key("bytestring"));
-        assert!(findings
-            .iter()
-            .all(|finding| finding.manifest == "cabal"));
+        assert!(findings.iter().all(|finding| finding.manifest == "cabal"));
     }
 
     #[test]
@@ -843,6 +845,37 @@ SafePkg = "1, < 2"
         assert!(report.output().contains("dep-hygiene: 86 risky specifiers"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn dependency_hygiene_rejects_symlinked_manifest_outside_target() {
+        const OUTSIDE_TOKEN: &str = "OUTSIDE-DEPENDENCY-TOKEN";
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), OUTSIDE_TOKEN).unwrap();
+        std::os::unix::fs::symlink(outside.path(), target.path().join("requirements.txt")).unwrap();
+
+        let error = check_dependency_hygiene(target.path()).unwrap_err();
+
+        assert!(!format!("{error:#}").contains(OUTSIDE_TOKEN));
+    }
+
+    #[test]
+    fn dependency_hygiene_rejects_oversized_manifest_before_reading() {
+        let target = tempfile::tempdir().unwrap();
+        let path = target.path().join("requirements.txt");
+        fs::write(&path, "safe==1\n").unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(16 * 1024 * 1024 + 1)
+            .unwrap();
+
+        let error = check_dependency_hygiene(target.path()).unwrap_err();
+
+        assert!(format!("{error:#}").contains("maximum supported size"));
+    }
+
     #[test]
     fn scanner_converts_report_to_core_findings() {
         let tmp = tempfile::tempdir().unwrap();
@@ -932,7 +965,7 @@ SafePkg = "1, < 2"
 
     #[test]
     fn parse_cargo_audit_emits_finding_per_advisory() {
-        let findings = parse_cargo_audit_output(CARGO_AUDIT_FIXTURE);
+        let findings = parse_cargo_audit_output(CARGO_AUDIT_FIXTURE).unwrap();
         assert_eq!(findings.len(), 2);
         let by_rule: std::collections::BTreeMap<_, _> = findings
             .iter()
@@ -957,12 +990,31 @@ SafePkg = "1, < 2"
 
     #[test]
     fn parse_cargo_audit_returns_empty_for_invalid_json() {
-        assert!(parse_cargo_audit_output("{ this is not json").is_empty());
+        assert!(parse_cargo_audit_output("{ this is not json").is_err());
     }
 
     #[test]
     fn parse_cargo_audit_returns_empty_when_no_vulnerabilities_key() {
-        assert!(parse_cargo_audit_output(r#"{"vulnerabilities":{"found":false}}"#).is_empty());
+        assert!(
+            parse_cargo_audit_output(r#"{"vulnerabilities":{"found":false}}"#)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn parse_cargo_audit_rejects_a_partially_invalid_advisory_list() {
+        let output = r#"{
+          "vulnerabilities": {
+            "found": true,
+            "list": [
+              {"advisory":{"id":"RUSTSEC-1","title":"valid"},"package":{"name":"x","version":"1"}},
+              {}
+            ]
+          }
+        }"#;
+
+        assert!(parse_cargo_audit_output(output).is_err());
     }
 
     #[test]

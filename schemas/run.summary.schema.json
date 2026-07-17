@@ -55,8 +55,19 @@
       "type": "number",
       "minimum": 0
     },
+    "observedCostUsd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "providerSpendUnresolved": {
+      "type": "boolean"
+    },
     "error": {
       "type": "string"
+    },
+    "terminalResultSha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
     },
     "processId": {
       "type": "integer",
@@ -136,6 +147,50 @@
       }
     }
   },
+  "allOf": [
+    {
+      "not": {
+        "required": [
+          "costUsd",
+          "observedCostUsd"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "observedCostUsd"
+        ]
+      },
+      "then": {
+        "required": [
+          "providerSpendUnresolved"
+        ],
+        "properties": {
+          "providerSpendUnresolved": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "providerSpendUnresolved"
+        ],
+        "properties": {
+          "providerSpendUnresolved": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "observedCostUsd"
+        ]
+      }
+    }
+  ],
   "definitions": {
     "runKind": {
       "type": "string",
@@ -153,7 +208,10 @@
         "reasoning",
         "tool-progress",
         "done",
-        "refused"
+        "refused",
+        "plan",
+        "llm",
+        "critic"
       ]
     },
     "artifact": {
@@ -262,8 +320,95 @@
         "costUsd": {
           "type": "number",
           "minimum": 0
+        },
+        "observedCostUsd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "providerSpendUnresolved": {
+          "type": "boolean"
+        },
+        "callAttempted": {
+          "type": "boolean"
         }
-      }
+      },
+      "allOf": [
+        {
+          "not": {
+            "required": [
+              "costUsd",
+              "observedCostUsd"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "observedCostUsd"
+            ]
+          },
+          "then": {
+            "required": [
+              "providerSpendUnresolved"
+            ],
+            "properties": {
+              "providerSpendUnresolved": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "providerSpendUnresolved"
+            ],
+            "properties": {
+              "providerSpendUnresolved": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "observedCostUsd"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "callAttempted"
+            ],
+            "properties": {
+              "callAttempted": {
+                "const": false
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "costUsd"
+                  ]
+                },
+                {
+                  "required": [
+                    "observedCostUsd"
+                  ]
+                },
+                {
+                  "required": [
+                    "providerSpendUnresolved"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
     },
     "promptOverrideFingerprint": {
       "type": "object",

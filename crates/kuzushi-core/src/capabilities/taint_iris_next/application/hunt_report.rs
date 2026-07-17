@@ -29,46 +29,62 @@ pub(crate) fn taint_iris_next_hunt_data(
     agent: &TaintIrisNextAgentResult,
 ) -> Value {
     let mut data = taint_iris_next_base_data(plan, evidence, status, agent_prompt);
-    if let Value::Object(object) = &mut data {
-        object.insert("outcome".to_string(), json!(agent.outcome));
-        object.insert("agentStatus".to_string(), json!(agent.agent_status));
-        object.insert("selectedCwes".to_string(), json!(agent.selected_cwes));
-        object.insert("findings".to_string(), json!(agent.findings));
-        object.insert(
-            "reviewCandidates".to_string(),
-            json!(agent.review_candidates),
-        );
-        object.insert("triage".to_string(), json!(agent.triage));
-        object.insert("triageSummary".to_string(), agent.triage_summary.clone());
-        object.insert("warnings".to_string(), json!(agent.warnings));
-        object.insert("rawAgentOutput".to_string(), agent.raw_output.clone());
-        object.insert(
-            "structuredOutputValid".to_string(),
-            json!(agent.structured_output_valid),
-        );
-        object.insert(
-            "structuredOutputRetryCount".to_string(),
-            json!(agent.structured_output_retry_count),
-        );
-        if let Some(parse_error) = &agent.parse_error {
-            object.insert("parseError".to_string(), json!(parse_error));
-        }
-        if let Some(excerpt) = &agent.result_text_excerpt {
-            object.insert("resultTextExcerpt".to_string(), json!(excerpt));
-        }
-        object.insert(
-            "stats".to_string(),
-            json!({
-                "totalFindings": agent.findings.len().saturating_sub(agent.review_candidates.len()),
-                "totalReviewCandidates": agent.review_candidates.len(),
-                "totalCandidates": evidence.candidates.len(),
-                "totalLinkedStories": evidence.linked_story_count,
-                "backendPathCount": evidence.backend_path_count,
-                "totalCostUsd": agent.cost_usd,
-            }),
-        );
-    }
+    let Value::Object(object) = &mut data else {
+        return data;
+    };
+    insert_agent_hunt_fields(object, agent);
+    insert_agent_hunt_diagnostics(object, agent);
+    object.insert("stats".to_string(), agent_hunt_stats(evidence, agent));
     data
+}
+
+fn insert_agent_hunt_fields(object: &mut Map<String, Value>, agent: &TaintIrisNextAgentResult) {
+    object.insert("outcome".to_string(), json!(agent.outcome));
+    object.insert("agentStatus".to_string(), json!(agent.agent_status));
+    object.insert("selectedCwes".to_string(), json!(agent.selected_cwes));
+    object.insert("findings".to_string(), json!(agent.findings));
+    object.insert("reviewCandidates".to_string(), json!(agent.review_candidates));
+    object.insert("triage".to_string(), json!(agent.triage));
+    object.insert("triageSummary".to_string(), agent.triage_summary.clone());
+    object.insert("warnings".to_string(), json!(agent.warnings));
+    object.insert("rawAgentOutput".to_string(), agent.raw_output.clone());
+}
+
+fn insert_agent_hunt_diagnostics(
+    object: &mut Map<String, Value>,
+    agent: &TaintIrisNextAgentResult,
+) {
+    object.insert("structuredOutputValid".to_string(), json!(agent.structured_output_valid));
+    object.insert(
+        "structuredOutputRetryCount".to_string(),
+        json!(agent.structured_output_retry_count),
+    );
+    if let Some(parse_error) = &agent.parse_error {
+        object.insert("parseError".to_string(), json!(parse_error));
+    }
+    if let Some(excerpt) = &agent.result_text_excerpt {
+        object.insert("resultTextExcerpt".to_string(), json!(excerpt));
+    }
+}
+
+fn agent_hunt_stats(
+    evidence: &TaintIrisNextEvidenceResult,
+    agent: &TaintIrisNextAgentResult,
+) -> Value {
+    let mut stats = json!({
+        "totalFindings": agent.findings.len().saturating_sub(agent.review_candidates.len()),
+        "totalReviewCandidates": agent.review_candidates.len(),
+        "totalCandidates": evidence.candidates.len(),
+        "totalLinkedStories": evidence.linked_story_count,
+        "backendPathCount": evidence.backend_path_count,
+    });
+    if agent.cost_usd_exact {
+        stats["totalCostUsd"] = json!(agent.cost_usd);
+    } else {
+        stats["observedCostUsd"] = json!(agent.cost_usd);
+        stats["providerSpendUnresolved"] = json!(true);
+    }
+    stats
 }
 
 pub(crate) fn taint_iris_next_hunt_report(
@@ -92,6 +108,7 @@ pub(crate) fn taint_iris_next_hunt_report(
         selected_cwes: agent.selected_cwes.clone(),
         persisted,
         cost_usd: agent.cost_usd,
+        cost_usd_exact: agent.cost_usd_exact,
         ok: status != "agent-output-invalid",
         output,
         data,

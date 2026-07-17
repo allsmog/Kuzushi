@@ -1,6 +1,6 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 pub(super) fn is_mix_exs(path: &Path) -> bool {
@@ -154,7 +154,8 @@ fn tuple_atoms(line: &str) -> Vec<String> {
 }
 
 fn atom_after(line: &str, marker: &str) -> Option<String> {
-    line.split_once(marker).and_then(|(_, tail)| atom_name(tail))
+    line.split_once(marker)
+        .and_then(|(_, tail)| atom_name(tail))
 }
 
 fn atom_name(value: &str) -> Option<String> {

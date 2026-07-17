@@ -99,4 +99,29 @@ mod tests {
         .to_string();
         assert!(err.contains("read_source"));
     }
+
+    #[test]
+    fn rejects_oversized_source_without_reading_it_whole() {
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("huge.rs");
+        fs::write(&path, "fn main() {}\n").unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(8 * 1024 * 1024 + 1)
+            .unwrap();
+
+        let error = read_source(
+            tmp.path(),
+            &ReadSourceInput {
+                file: "huge.rs".to_string(),
+                start_line: Some(1),
+                end_line: Some(2),
+            },
+        )
+        .unwrap_err();
+
+        assert!(format!("{error:#}").contains("maximum supported size"));
+    }
 }

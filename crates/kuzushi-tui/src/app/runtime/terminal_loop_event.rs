@@ -1,5 +1,7 @@
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::Arc;
 use std::thread;
 
 pub(crate) enum TerminalLoopEvent {
@@ -9,23 +11,34 @@ pub(crate) enum TerminalLoopEvent {
 
 pub(crate) struct TerminalLoopInbox {
     rx: Receiver<Result<TerminalLoopEvent, String>>,
+    wake_pending: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct TerminalLoopWake {
     tx: Sender<Result<TerminalLoopEvent, String>>,
+    pending: Arc<AtomicBool>,
 }
 
 impl TerminalLoopWake {
     pub(crate) fn notify(&self) {
-        let _ = self.tx.send(Ok(TerminalLoopEvent::Wake));
+        if self.pending.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        if self.tx.send(Ok(TerminalLoopEvent::Wake)).is_err() {
+            self.pending.store(false, Ordering::Release);
+        }
     }
 }
 
 impl TerminalLoopInbox {
     pub(crate) fn spawn_crossterm_reader() -> (Self, TerminalLoopWake) {
         let (tx, rx) = mpsc::channel();
-        let wake = TerminalLoopWake { tx: tx.clone() };
+        let wake_pending = Arc::new(AtomicBool::new(false));
+        let wake = TerminalLoopWake {
+            tx: tx.clone(),
+            pending: wake_pending.clone(),
+        };
         thread::spawn(move || loop {
             let event = event::read()
                 .map(terminal_loop_event_from_crossterm)
@@ -34,23 +47,36 @@ impl TerminalLoopInbox {
                 break;
             }
         });
-        (Self { rx }, wake)
+        (Self { rx, wake_pending }, wake)
     }
 
     #[cfg(test)]
     pub(crate) fn from_receiver(rx: Receiver<Result<TerminalLoopEvent, String>>) -> Self {
-        Self { rx }
+        Self {
+            rx,
+            wake_pending: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn channel_for_test() -> (Self, TerminalLoopWake) {
         let (tx, rx) = mpsc::channel();
-        (Self { rx }, TerminalLoopWake { tx })
+        let wake_pending = Arc::new(AtomicBool::new(false));
+        let wake = TerminalLoopWake {
+            tx,
+            pending: wake_pending.clone(),
+        };
+        (Self { rx, wake_pending }, wake)
     }
 
     pub(crate) fn recv_timeout(&self, timeout: Duration) -> Result<Option<TerminalLoopEvent>> {
         match self.rx.recv_timeout(timeout) {
-            Ok(Ok(event)) => Ok(Some(event)),
+            Ok(Ok(event)) => {
+                if matches!(event, TerminalLoopEvent::Wake) {
+                    self.wake_pending.store(false, Ordering::Release);
+                }
+                Ok(Some(event))
+            }
             Ok(Err(error)) => anyhow::bail!("terminal event reader failed: {error}"),
             Err(RecvTimeoutError::Timeout) => Ok(None),
             Err(RecvTimeoutError::Disconnected) => anyhow::bail!("terminal event reader stopped"),

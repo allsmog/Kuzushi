@@ -25,7 +25,7 @@ pub(in crate::modules) fn run_hybrid_detect(
         }
     };
     let persisted = persist_tool_findings(
-        "android-apk",
+        ctx.finding_run_id(),
         &target,
         &outcome.findings,
         ctx.workspace,
@@ -70,24 +70,21 @@ fn detect_hybrid_frameworks(input: &Value, workspace_root: &Path) -> Result<Hybr
 }
 
 fn resolve_raw_root(input: &Value, workspace_root: &Path) -> Result<PathBuf> {
-    if let Some(raw) = input
+    let candidate = if let Some(raw) = input
         .get("rawRoot")
         .or_else(|| input.get("raw_root"))
         .and_then(Value::as_str)
     {
-        let path = PathBuf::from(raw);
-        if path.is_dir() {
-            return Ok(path);
-        }
-    }
-    let candidate = workspace_root.join("android-decompiled").join("raw");
-    if !candidate.is_dir() {
-        anyhow::bail!(
+        PathBuf::from(raw)
+    } else {
+        workspace_root.join("android-decompiled").join("raw")
+    };
+    validated_android_workspace_dir(workspace_root, &candidate).with_context(|| {
+        format!(
             "android-apk:hybrid-detect: missing {}. Run `android-apk:prepare` first.",
             candidate.display()
-        );
-    }
-    Ok(candidate)
+        )
+    })
 }
 
 fn probe_frameworks(raw_root: &Path) -> Vec<HybridEvidence> {
@@ -103,10 +100,13 @@ fn probe_one(raw_root: &Path, probe: &FrameworkProbe) -> Vec<HybridEvidence> {
         .iter()
         .filter_map(|relative| {
             let path = raw_root.join(relative);
-            path.exists().then(|| HybridEvidence {
-                framework: probe.name.to_string(),
-                indicator_path: path,
-            })
+            std::fs::symlink_metadata(&path)
+                .ok()
+                .filter(|metadata| !metadata.file_type().is_symlink())
+                .map(|_| HybridEvidence {
+                    framework: probe.name.to_string(),
+                    indicator_path: path,
+                })
         })
         .collect()
 }

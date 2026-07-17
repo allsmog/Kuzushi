@@ -61,6 +61,7 @@ fn taint_iris_legacy_input(input: &Value) -> Value {
     let Value::Object(object) = &mut normalized else {
         return normalized;
     };
+    forward_legacy_taint_prompt(object);
     if object.contains_key("cweFocus") || object.contains_key("cwe_focus") {
         return normalized;
     }
@@ -68,6 +69,15 @@ fn taint_iris_legacy_input(input: &Value) -> Value {
         object.insert("cweFocus".to_string(), cwe);
     }
     normalized
+}
+
+fn forward_legacy_taint_prompt(object: &mut serde_json::Map<String, Value>) {
+    if object.contains_key("TAINT_IRIS_NEXT_PROMPT") {
+        return;
+    }
+    if let Some(prompt) = object.get("TAINT_IRIS_PROMPT").cloned() {
+        object.insert("TAINT_IRIS_NEXT_PROMPT".to_string(), prompt);
+    }
 }
 
 pub(in crate::modules) fn run_taint_iris_next_catalog_tool(

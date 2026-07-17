@@ -2,15 +2,28 @@ use super::*;
 use crate::runbooks::prompt_spine::PROMPT_SPINE_UNTRUSTED_REPO;
 use crate::runbooks::untrusted::{render_untrusted_derived_block, render_untrusted_repo_blocks};
 
+pub(crate) const DEFAULT_CARLINI_MISSION: &str = "Your mission: find additional evidence for the linked threat surface, discover new attack vectors in the same surface, or identify variants the threat model missed.\nDo not re-confirm only what is already documented. Find something new or deeper.\nOnly report findings with concrete evidence of exploitability.";
+
+/// Render the shared repository inventory into its untrusted-repo block
+/// exactly once per carlini run. The inventory is identical for every actor,
+/// so this is hoisted out of the per-actor loop: the rendered block is built
+/// here and threaded into `build_actor_prompt` as a `&str`, instead of being
+/// re-rendered (and re-embedded) once per actor. Each actor prompt still
+/// carries the full inventory content byte-for-byte; we simply stop
+/// reconstructing the identical payload K times.
+pub(crate) fn render_carlini_inventory_block(inventory: &[(String, String)]) -> String {
+    render_untrusted_repo_blocks(inventory)
+}
+
 pub(crate) fn build_actor_prompt(
     target: &Path,
     hunt: &ActorHunt,
     options: &CarliniInput,
-    inventory: &[(String, String)],
+    inventory_block: &str,
     actor_fingerprint: &str,
 ) -> String {
     let mut lines = actor_prompt_preamble(target, options);
-    append_actor_inventory(&mut lines, inventory);
+    append_actor_inventory(&mut lines, inventory_block);
     lines.extend(actor_identity_lines(hunt, actor_fingerprint));
     append_actor_flows(&mut lines, hunt);
     append_actor_threats(&mut lines, hunt, options);
@@ -74,24 +87,24 @@ fn actor_identity_lines(hunt: &ActorHunt, actor_fingerprint: &str) -> [String; 8
 fn append_actor_mission(lines: &mut Vec<String>, options: &CarliniInput) {
     lines.push(String::new());
     if let Some(override_prompt) = &options.prompt_override {
+        if override_prompt.trim() == DEFAULT_CARLINI_MISSION.trim() {
+            lines.extend(DEFAULT_CARLINI_MISSION.lines().map(str::to_string));
+            return;
+        }
         lines.push(render_untrusted_derived_block(
             "operator-prompt-override",
             override_prompt.trim(),
         ));
     } else {
-        lines.extend([
-            "Your mission: find additional evidence for the linked threat surface, discover new attack vectors in the same surface, or identify variants the threat model missed.".to_string(),
-            "Do not re-confirm only what is already documented. Find something new or deeper.".to_string(),
-            "Only report findings with concrete evidence of exploitability.".to_string(),
-        ]);
+        lines.extend(DEFAULT_CARLINI_MISSION.lines().map(str::to_string));
     }
 }
 
-fn append_actor_inventory(lines: &mut Vec<String>, inventory: &[(String, String)]) {
+fn append_actor_inventory(lines: &mut Vec<String>, inventory_block: &str) {
     lines.push(String::new());
     lines.push(PROMPT_SPINE_UNTRUSTED_REPO.to_string());
     lines.push(String::new());
     lines.push("Repository inventory and snippets:".to_string());
-    lines.push(render_untrusted_repo_blocks(inventory));
+    lines.push(inventory_block.to_string());
     lines.push(String::new());
 }

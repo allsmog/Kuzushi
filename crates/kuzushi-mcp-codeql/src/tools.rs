@@ -27,7 +27,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use kuzushi_mcp_common::{Tool, ToolHandler, ToolRegistry};
+use kuzushi_mcp_common::{ReadRootCapability, Tool, ToolHandler, ToolRegistry};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -35,11 +35,25 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
-pub(crate) fn build_registry() -> ToolRegistry {
+const DEFAULT_RESULT_LIMIT: usize = 50;
+const MAX_RESULT_LIMIT: usize = 500;
+const MAX_DATABASE_METADATA_BYTES: usize = 1024 * 1024;
+const MAX_SARIF_BYTES: usize = 64 * 1024 * 1024;
+
+pub(crate) fn build_registry() -> Result<ToolRegistry> {
+    Ok(build_registry_with_capability(
+        ReadRootCapability::from_environment()?,
+    ))
+}
+
+fn build_registry_with_capability(read_capability: ReadRootCapability) -> ToolRegistry {
     ToolRegistry::new()
-        .register(flows_for_cwe_descriptor(), FlowsForCweHandler)
-        .register(db_info_descriptor(), DbInfoHandler)
-        .register(query_descriptor(), QueryHandler)
+        .register(
+            flows_for_cwe_descriptor(),
+            FlowsForCweHandler(read_capability.clone()),
+        )
+        .register(db_info_descriptor(), DbInfoHandler(read_capability.clone()))
+        .register(query_descriptor(), QueryHandler(read_capability))
 }
 
 fn flows_for_cwe_descriptor() -> Tool {
@@ -53,7 +67,7 @@ fn flows_for_cwe_descriptor() -> Tool {
                 "db": {"type": "string", "description": "Absolute or workspace-relative path to a built CodeQL DB (the directory containing codeql-database.yml + db-<lang>/)."},
                 "cwe": {"type": "string", "description": "CWE identifier, e.g. \"CWE-89\" or \"89\"."},
                 "language": {"type": "string", "description": "Optional: cpp, python, javascript, java, go, ruby, csharp. Inferred from the DB if omitted."},
-                "limit": {"type": "integer", "minimum": 1, "default": 50, "description": "Cap returned flows (default 50)."}
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50, "description": "Cap returned flows (default 50, maximum 500)."}
             }
         }),
     }
@@ -83,27 +97,23 @@ fn query_descriptor() -> Tool {
             "properties": {
                 "db": {"type": "string"},
                 "query": {"type": "string", "description": "Query selector (pack:relative-path or absolute .ql path)."},
-                "limit": {"type": "integer", "minimum": 1, "default": 50}
+                "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 50}
             }
         }),
     }
 }
 
-struct FlowsForCweHandler;
-struct DbInfoHandler;
-struct QueryHandler;
+struct FlowsForCweHandler(ReadRootCapability);
+struct DbInfoHandler(ReadRootCapability);
+struct QueryHandler(ReadRootCapability);
 
 #[async_trait]
 impl ToolHandler for FlowsForCweHandler {
     async fn call(&self, args: Value) -> Result<Value> {
-        let db = read_required_path(&args, "db")?;
+        let db = authorized_database(&self.0, &args)?;
         let cwe = read_required_string(&args, "cwe")?;
-        let language = args
-            .get("language")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .or_else(|| db_language(&db));
-        let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize;
+        let language = requested_or_database_language(&self.0, &db, &args)?;
+        let limit = result_limit(&args);
 
         let pack = language
             .as_deref()
@@ -126,13 +136,11 @@ impl ToolHandler for FlowsForCweHandler {
 #[async_trait]
 impl ToolHandler for DbInfoHandler {
     async fn call(&self, args: Value) -> Result<Value> {
-        let db = read_required_path(&args, "db")?;
-        let yaml_path = db.join("codeql-database.yml");
-        let metadata = std::fs::read_to_string(&yaml_path)
-            .with_context(|| format!("could not read {}", yaml_path.display()))?;
+        let db = authorized_database(&self.0, &args)?;
+        let metadata = database_metadata(&self.0, &db)?;
         Ok(json!({
             "db": db.display().to_string(),
-            "language": db_language(&db),
+            "language": language_from_database_metadata(&metadata),
             "metadata_excerpt": metadata.chars().take(800).collect::<String>(),
             "exists": db.is_dir(),
         }))
@@ -142,9 +150,9 @@ impl ToolHandler for DbInfoHandler {
 #[async_trait]
 impl ToolHandler for QueryHandler {
     async fn call(&self, args: Value) -> Result<Value> {
-        let db = read_required_path(&args, "db")?;
-        let query = read_required_string(&args, "query")?;
-        let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize;
+        let db = authorized_database(&self.0, &args)?;
+        let query = authorized_query_selector(&self.0, &args)?;
+        let limit = result_limit(&args);
         let flows = run_codeql_and_parse(&db, &query, limit).await?;
         Ok(json!({
             "db": db.display().to_string(),
@@ -225,10 +233,17 @@ async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result
     if !status.success() {
         anyhow::bail!("codeql database analyze exited with {status}");
     }
-    let raw = std::fs::read_to_string(sarif.path()).context("could not read SARIF output")?;
+    let raw = read_generated_sarif(sarif.path())?;
     let flows = parse_sarif(&raw, limit);
     store_memo(db, selector, limit, &flows);
     Ok(flows)
+}
+
+fn read_generated_sarif(path: &Path) -> Result<String> {
+    let parent = path.parent().context("SARIF output path has no parent")?;
+    ReadRootCapability::new([parent.to_path_buf()])?
+        .read_utf8(path, MAX_SARIF_BYTES)
+        .context("could not read SARIF output")
 }
 
 fn parse_sarif(raw: &str, limit: usize) -> Vec<Value> {
@@ -446,9 +461,29 @@ fn find_executable_on_path(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn db_language(db: &Path) -> Option<String> {
-    let yaml = std::fs::read_to_string(db.join("codeql-database.yml")).ok()?;
-    for line in yaml.lines() {
+fn requested_or_database_language(
+    read_capability: &ReadRootCapability,
+    db: &Path,
+    args: &Value,
+) -> Result<Option<String>> {
+    if let Some(language) = args.get("language").and_then(Value::as_str) {
+        return Ok(Some(language.to_string()));
+    }
+    Ok(language_from_database_metadata(&database_metadata(
+        read_capability,
+        db,
+    )?))
+}
+
+fn database_metadata(read_capability: &ReadRootCapability, db: &Path) -> Result<String> {
+    let yaml_path = db.join("codeql-database.yml");
+    read_capability
+        .read_utf8(&yaml_path, MAX_DATABASE_METADATA_BYTES)
+        .with_context(|| format!("could not read {}", yaml_path.display()))
+}
+
+fn language_from_database_metadata(metadata: &str) -> Option<String> {
+    for line in metadata.lines() {
         if let Some(rest) = line.strip_prefix("primaryLanguage:") {
             let trimmed = rest.trim().trim_matches('"').to_string();
             if !trimmed.is_empty() {
@@ -491,6 +526,66 @@ fn read_required_string(args: &Value, field: &str) -> Result<String> {
 
 fn read_required_path(args: &Value, field: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(read_required_string(args, field)?))
+}
+
+fn authorized_database(read_capability: &ReadRootCapability, args: &Value) -> Result<PathBuf> {
+    let requested = read_required_path(args, "db")?;
+    let database = read_capability.resolve(&requested)?;
+    anyhow::ensure!(
+        database.is_dir(),
+        "CodeQL database is not a directory: {}",
+        database.display()
+    );
+    Ok(database)
+}
+
+fn authorized_query_selector(read_capability: &ReadRootCapability, args: &Value) -> Result<String> {
+    let selector = read_required_string(args, "query")?;
+    if is_pack_selector(&selector) {
+        return Ok(selector);
+    }
+    let query = read_capability.resolve(Path::new(&selector))?;
+    anyhow::ensure!(
+        query.is_file() && query.extension().and_then(|value| value.to_str()) == Some("ql"),
+        "local CodeQL query must be an existing .ql file: {}",
+        query.display()
+    );
+    Ok(query.display().to_string())
+}
+
+fn is_pack_selector(selector: &str) -> bool {
+    let Some((pack, query)) = selector.split_once(':') else {
+        return false;
+    };
+    selector.len() <= 2_048 && safe_pack_name(pack) && safe_pack_query_path(query)
+}
+
+fn safe_pack_name(pack: &str) -> bool {
+    !pack.is_empty()
+        && pack
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || "/_.@^-~".contains(ch))
+        && Path::new(pack)
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+}
+
+fn safe_pack_query_path(query: &str) -> bool {
+    !query.is_empty()
+        && !query.contains('\\')
+        && Path::new(query).components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+}
+
+fn result_limit(args: &Value) -> usize {
+    args.get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_RESULT_LIMIT as u64)
+        .clamp(1, MAX_RESULT_LIMIT as u64) as usize
 }
 
 #[cfg(test)]
@@ -548,6 +643,10 @@ fi
         std::fs::create_dir_all(db.join("db-cpp")).unwrap();
         std::fs::write(db.join("codeql-database.yml"), "primaryLanguage: cpp\n").unwrap();
         db
+    }
+
+    fn capability(temp: &tempfile::TempDir) -> ReadRootCapability {
+        ReadRootCapability::new([temp.path().to_path_buf()]).unwrap()
     }
 
     #[test]
@@ -613,7 +712,7 @@ fi
         let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
         std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
 
-        let response = QueryHandler
+        let response = QueryHandler(capability(&temp))
             .call(json!({
                 "db": db.display().to_string(),
                 "query": "codeql/cpp-queries:Security/CWE/CWE-089",
@@ -639,7 +738,7 @@ fi
         let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
         std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
 
-        let response = FlowsForCweHandler
+        let response = FlowsForCweHandler(capability(&temp))
             .call(json!({"db": db.display().to_string(), "cwe": "89", "limit": 5}))
             .await
             .unwrap();
@@ -651,6 +750,133 @@ fi
             json!("codeql/cpp-queries:Security/CWE/CWE-089")
         );
         assert_eq!(response["flow_count"], json!(1));
+    }
+
+    #[tokio::test]
+    async fn db_info_rejects_databases_outside_the_read_root() {
+        let root = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let db = codeql_db(&outside);
+
+        let error = DbInfoHandler(capability(&root))
+            .call(json!({"db": db}))
+            .await
+            .unwrap_err();
+
+        assert!(format!("{error:#}").contains("outside the MCP read roots"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn db_info_rejects_a_database_symlink_that_escapes_the_read_root() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let db = codeql_db(&outside);
+        let link = root.path().join("escaped-db");
+        symlink(&db, &link).unwrap();
+
+        let error = DbInfoHandler(capability(&root))
+            .call(json!({"db": link}))
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("outside the MCP read roots"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn db_info_rejects_an_escaping_metadata_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().unwrap();
+        let db = codeql_db(&root);
+        let metadata = db.join("codeql-database.yml");
+        std::fs::remove_file(&metadata).unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        symlink(outside.path(), &metadata).unwrap();
+
+        let error = DbInfoHandler(capability(&root))
+            .call(json!({"db": db}))
+            .await
+            .unwrap_err();
+
+        assert!(format!("{error:#}").contains("outside the MCP read roots"));
+    }
+
+    #[test]
+    fn query_selector_allows_pack_selectors_and_authorized_local_files() {
+        let root = tempdir().unwrap();
+        let query = root.path().join("queries/check.ql");
+        std::fs::create_dir_all(query.parent().unwrap()).unwrap();
+        std::fs::write(&query, "select 1").unwrap();
+        let capability = capability(&root);
+
+        assert_eq!(
+            authorized_query_selector(
+                &capability,
+                &json!({"query": "codeql/cpp-queries:Security/CWE/CWE-089/SqlTainted.ql"}),
+            )
+            .unwrap(),
+            "codeql/cpp-queries:Security/CWE/CWE-089/SqlTainted.ql"
+        );
+        assert_eq!(
+            authorized_query_selector(&capability, &json!({"query": "queries/check.ql"})).unwrap(),
+            std::fs::canonicalize(query).unwrap().display().to_string()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn query_selector_rejects_outside_and_symlinked_local_queries() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().unwrap();
+        let outside_root = tempdir().unwrap();
+        let outside = outside_root.path().join("outside.ql");
+        std::fs::write(&outside, "select 1").unwrap();
+        let link = root.path().join("escaped.ql");
+        symlink(&outside, &link).unwrap();
+        let capability = capability(&root);
+
+        for path in [outside.as_path(), link.as_path()] {
+            let error = authorized_query_selector(
+                &capability,
+                &json!({"query": path.display().to_string()}),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("outside the MCP read roots"));
+        }
+    }
+
+    #[test]
+    fn query_selector_rejects_pack_path_traversal_and_clamps_limits() {
+        let root = tempdir().unwrap();
+        let capability = capability(&root);
+
+        let error = authorized_query_selector(
+            &capability,
+            &json!({"query": "codeql/cpp-queries:../../outside.ql"}),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("outside the MCP read roots"));
+        assert_eq!(result_limit(&json!({"limit": 0})), 1);
+        assert_eq!(result_limit(&json!({"limit": u64::MAX})), MAX_RESULT_LIMIT);
+    }
+
+    #[test]
+    fn sarif_reader_rejects_oversized_output_before_json_parsing() {
+        let root = tempdir().unwrap();
+        let sarif = root.path().join("results.sarif");
+        let file = std::fs::File::create(&sarif).unwrap();
+        file.set_len(MAX_SARIF_BYTES as u64 + 1).unwrap();
+
+        let error = read_generated_sarif(&sarif).unwrap_err();
+
+        assert!(error.to_string().contains("could not read SARIF output"));
+        assert!(format!("{error:#}").contains("maximum supported size"));
     }
 
     #[tokio::test]

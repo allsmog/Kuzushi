@@ -45,7 +45,7 @@ impl Default for SemgrepScanner {
     fn default() -> Self {
         Self {
             binary: "semgrep".to_string(),
-            config: vec!["auto".to_string()],
+            config: vec![DEFAULT_SEMGREP_CONFIG.to_string()],
         }
     }
 }

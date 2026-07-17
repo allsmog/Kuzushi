@@ -1,16 +1,28 @@
-use std::path::Path;
-use std::{collections::BTreeMap, fs};
+use crate::app::JsonFileState;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttackSurfaceRiskModel {
     pub(crate) summary: String,
+    pub(crate) hot_surfaces: Vec<AttackSurfaceRow>,
 }
 
-pub(crate) fn attack_surface_risk_model(run_dir: &Path) -> Option<AttackSurfaceRiskModel> {
-    let value = match read_attack_surface(run_dir)? {
-        AttackSurfaceRead::Present(value) => value,
-        AttackSurfaceRead::Malformed => return Some(malformed_attack_surface_model()),
-        AttackSurfaceRead::NonFile => return Some(non_file_attack_surface_model()),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AttackSurfaceRow {
+    pub(crate) title: String,
+    pub(crate) framework: String,
+    pub(crate) tier: String,
+    pub(crate) score: u64,
+}
+
+pub(crate) fn attack_surface_risk_model(artifact: JsonFileState) -> Option<AttackSurfaceRiskModel> {
+    let value = match artifact {
+        JsonFileState::Present(value) if value.is_object() => value,
+        JsonFileState::Missing => return None,
+        JsonFileState::NonFile => return Some(non_file_attack_surface_model()),
+        JsonFileState::Present(_) | JsonFileState::Malformed | JsonFileState::Unreadable => {
+            return Some(malformed_attack_surface_model())
+        }
     };
     if attack_surface_status(&value).as_deref() == Some("skipped") {
         return None;
@@ -26,43 +38,21 @@ pub(crate) fn attack_surface_risk_model(run_dir: &Path) -> Option<AttackSurfaceR
             &frameworks,
             top_surface.as_deref(),
         ),
+        hot_surfaces: hot_surface_rows(&value),
     })
-}
-
-fn read_attack_surface(run_dir: &Path) -> Option<AttackSurfaceRead> {
-    let path = run_dir.join(attack_surface_artifact_leaf());
-    match fs::metadata(&path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return Some(AttackSurfaceRead::NonFile),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(_) => return Some(AttackSurfaceRead::Malformed),
-    }
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(_) => return Some(AttackSurfaceRead::Malformed),
-    };
-    match serde_json::from_str::<serde_json::Value>(&text) {
-        Ok(value) if value.is_object() => Some(AttackSurfaceRead::Present(value)),
-        Ok(_) => Some(AttackSurfaceRead::Malformed),
-        Err(_) => Some(AttackSurfaceRead::Malformed),
-    }
-}
-
-enum AttackSurfaceRead {
-    Present(serde_json::Value),
-    Malformed,
-    NonFile,
 }
 
 fn malformed_attack_surface_model() -> AttackSurfaceRiskModel {
     AttackSurfaceRiskModel {
         summary: format!("malformed {}", attack_surface_artifact_leaf()),
+        hot_surfaces: Vec::new(),
     }
 }
 
 fn non_file_attack_surface_model() -> AttackSurfaceRiskModel {
     AttackSurfaceRiskModel {
         summary: format!("{} is not a file", attack_surface_artifact_leaf()),
+        hot_surfaces: Vec::new(),
     }
 }
 
@@ -150,6 +140,41 @@ fn surface_label(tier: Option<&str>, title: Option<&str>) -> Option<String> {
     }
 }
 
+fn hot_surface_rows(value: &serde_json::Value) -> Vec<AttackSurfaceRow> {
+    value
+        .get("surfaces")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(surface_row)
+        .take(8)
+        .collect()
+}
+
+fn surface_row(value: &serde_json::Value) -> Option<AttackSurfaceRow> {
+    let title = value.get("title")?.as_str()?.trim();
+    if title.is_empty() {
+        return None;
+    }
+    Some(AttackSurfaceRow {
+        title: title.to_string(),
+        framework: value
+            .get("framework")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_string(),
+        tier: value
+            .pointer("/risk/tier")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_string(),
+        score: value
+            .pointer("/risk/score")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default(),
+    })
+}
+
 fn attack_surface_risk_summary(
     high_risk: usize,
     max_risk_score: u64,
@@ -220,38 +245,31 @@ mod tests {
 
     #[test]
     fn attack_surface_model_reads_risk_tier_distribution() {
-        let temp = tempfile::tempdir().unwrap();
-        fs::write(
-            temp.path().join(attack_surface_artifact_leaf()),
-            serde_json::json!({
-                "summary": {
-                    "highRisk": 2,
-                    "maxRiskScore": 100,
-                    "byRiskTier": {"critical": 1, "high": 1, "medium": 2}
-                },
-                "surfaces": [{
-                    "framework": "Spring",
-                    "title": "POST /admin",
-                    "risk": {"tier": "critical"}
-                }, {
-                    "framework": "Rails",
-                    "title": "POST /admin/jobs",
-                    "risk": {"tier": "high"}
-                }, {
-                    "framework": "Next.js",
-                    "title": "POST /api/session",
-                    "risk": {"tier": "medium"}
-                }, {
-                    "framework": "Spring",
-                    "title": "POST /admin/users",
-                    "risk": {"tier": "medium"}
-                }]
-            })
-            .to_string(),
-        )
+        let model = attack_surface_risk_model(JsonFileState::Present(serde_json::json!({
+            "summary": {
+                "highRisk": 2,
+                "maxRiskScore": 100,
+                "byRiskTier": {"critical": 1, "high": 1, "medium": 2}
+            },
+            "surfaces": [{
+                "framework": "Spring",
+                "title": "POST /admin",
+                "risk": {"tier": "critical"}
+            }, {
+                "framework": "Rails",
+                "title": "POST /admin/jobs",
+                "risk": {"tier": "high"}
+            }, {
+                "framework": "Next.js",
+                "title": "POST /api/session",
+                "risk": {"tier": "medium"}
+            }, {
+                "framework": "Spring",
+                "title": "POST /admin/users",
+                "risk": {"tier": "medium"}
+            }]
+        })))
         .unwrap();
-
-        let model = attack_surface_risk_model(temp.path()).unwrap();
 
         assert_eq!(
             model.summary,
@@ -261,14 +279,7 @@ mod tests {
 
     #[test]
     fn attack_surface_model_surfaces_malformed_artifact() {
-        let temp = tempfile::tempdir().unwrap();
-        fs::write(
-            temp.path().join(attack_surface_artifact_leaf()),
-            "{not-json",
-        )
-        .unwrap();
-
-        let model = attack_surface_risk_model(temp.path()).unwrap();
+        let model = attack_surface_risk_model(JsonFileState::Malformed).unwrap();
 
         assert_eq!(
             model.summary,
@@ -278,10 +289,8 @@ mod tests {
 
     #[test]
     fn attack_surface_model_surfaces_non_object_artifact() {
-        let temp = tempfile::tempdir().unwrap();
-        fs::write(temp.path().join(attack_surface_artifact_leaf()), "[]").unwrap();
-
-        let model = attack_surface_risk_model(temp.path()).unwrap();
+        let model =
+            attack_surface_risk_model(JsonFileState::Present(serde_json::json!([]))).unwrap();
 
         assert_eq!(
             model.summary,
@@ -291,10 +300,7 @@ mod tests {
 
     #[test]
     fn attack_surface_model_surfaces_non_file_artifact() {
-        let temp = tempfile::tempdir().unwrap();
-        fs::create_dir(temp.path().join(attack_surface_artifact_leaf())).unwrap();
-
-        let model = attack_surface_risk_model(temp.path()).unwrap();
+        let model = attack_surface_risk_model(JsonFileState::NonFile).unwrap();
 
         assert_eq!(
             model.summary,
@@ -304,20 +310,14 @@ mod tests {
 
     #[test]
     fn attack_surface_model_keeps_missing_artifact_empty() {
-        let temp = tempfile::tempdir().unwrap();
-
-        assert!(attack_surface_risk_model(temp.path()).is_none());
+        assert!(attack_surface_risk_model(JsonFileState::Missing).is_none());
     }
 
     #[test]
     fn attack_surface_model_keeps_skipped_placeholder_empty() {
-        let temp = tempfile::tempdir().unwrap();
-        fs::write(
-            temp.path().join(attack_surface_artifact_leaf()),
-            r#"{"status":"skipped"}"#,
-        )
-        .unwrap();
-
-        assert!(attack_surface_risk_model(temp.path()).is_none());
+        assert!(attack_surface_risk_model(JsonFileState::Present(
+            serde_json::json!({"status": "skipped"}),
+        ))
+        .is_none());
     }
 }

@@ -9,6 +9,7 @@
  */
 
 import type { AgentMessage, AgentQueryRequest, AgentRuntime } from "../../agent-runtime/types.js";
+import { repeatableRegexTest } from "../regex.js";
 
 export interface FakeRuntimeResponse {
   /**
@@ -43,7 +44,7 @@ export interface FakeRuntime extends AgentRuntime {
 }
 
 const matches = (prompt: string, match: string | RegExp): boolean =>
-  typeof match === "string" ? prompt.includes(match) : match.test(prompt);
+  typeof match === "string" ? prompt.includes(match) : repeatableRegexTest(match, prompt);
 
 /**
  * Build an `AgentRuntime` that scripts assistant output by prompt match.

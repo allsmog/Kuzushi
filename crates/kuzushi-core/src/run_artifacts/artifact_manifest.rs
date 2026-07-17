@@ -2,6 +2,7 @@ use super::*;
 use crate::artifact_contract::{
     canonical_run_artifact_spec, optional_run_artifact_spec, tool_input_artifact_spec,
     tool_result_artifact_spec, CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS,
+    OPTIONAL_RUN_ARTIFACTS, SCAN_PIPELINE_ARTIFACTS, TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
 };
 use crate::content_store::ObjectRef;
 use serde_json::Value;
@@ -24,13 +25,12 @@ pub struct RunArtifactObject {
 }
 
 pub fn load_run_artifacts(target: impl AsRef<Path>, run_id: &str) -> Result<Vec<RunArtifact>> {
-    Ok(normalized_artifacts(load_manifest(target, run_id)?.artifacts))
+    Ok(normalized_artifacts(
+        load_manifest(target, run_id)?.artifacts,
+    ))
 }
 
-pub(crate) fn record_canonical_run_artifacts(
-    target: impl AsRef<Path>,
-    run_id: &str,
-) -> Result<()> {
+pub(crate) fn record_canonical_run_artifacts(target: impl AsRef<Path>, run_id: &str) -> Result<()> {
     let target = target.as_ref();
     for artifact in canonical_run_artifacts(target, run_id) {
         record_run_artifact(target, run_id, &artifact)?;
@@ -43,24 +43,30 @@ pub(crate) fn record_run_artifact(
     run_id: &str,
     artifact: &RunArtifact,
 ) -> Result<PathBuf> {
-    let mut manifest = load_manifest(&target, run_id)?;
+    let target = target.as_ref();
+    let _guard = super::run_ledger::acquire_run_ledger_lock(target, run_id)?;
+    let mut manifest = load_manifest(target, run_id)?;
     let artifact = artifact
         .normalized()
         .context("run artifact path must not be empty")?;
+    validate_manifest_artifact_path(target, run_id, &artifact.path)?;
     upsert_artifact(&mut manifest.artifacts, artifact);
     write_manifest(target, &manifest)
 }
 
-pub(crate) fn record_run_artifact_object(
+pub(crate) fn record_run_artifact_object_under_lock(
     target: impl AsRef<Path>,
     run_id: &str,
     artifact: &RunArtifact,
     object_ref: ObjectRef,
+    _guard: &crate::file_lock::ExclusiveFileLock,
 ) -> Result<PathBuf> {
-    let mut manifest = load_manifest(&target, run_id)?;
+    let target = target.as_ref();
+    let mut manifest = load_manifest(target, run_id)?;
     let artifact = artifact
         .normalized()
         .context("run artifact path must not be empty")?;
+    validate_manifest_artifact_path(target, run_id, &artifact.path)?;
     upsert_artifact(&mut manifest.artifacts, artifact.clone());
     upsert_artifact_object(
         &mut manifest.objects,
@@ -74,19 +80,10 @@ pub(crate) fn record_run_artifact_object(
 }
 
 fn load_manifest(target: impl AsRef<Path>, run_id: &str) -> Result<RunArtifactManifest> {
-    let path = manifest_path(&target, run_id);
-    let metadata = match fs::metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(empty_manifest(run_id)),
-        Err(error) => {
-            return Err(error).with_context(|| format!("Could not inspect {}", path.display()));
-        }
+    let target = target.as_ref();
+    let Some((path, text)) = read_manifest_text(target, run_id)? else {
+        return Ok(empty_manifest(run_id));
     };
-    if !metadata.is_file() {
-        anyhow::bail!("Artifact manifest is not a file: {}", path.display());
-    }
-    let text =
-        fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
     let manifest = parse_manifest_body(&text, &path)?;
     if manifest.run_id != run_id {
         anyhow::bail!(
@@ -94,12 +91,81 @@ fn load_manifest(target: impl AsRef<Path>, run_id: &str) -> Result<RunArtifactMa
             path.display()
         );
     }
+    validate_manifest_artifact_paths(target, run_id, &manifest)?;
     Ok(manifest)
 }
 
+fn read_manifest_text(target: &Path, run_id: &str) -> Result<Option<(PathBuf, String)>> {
+    let read = super::read_run_artifact_text(target, run_id, manifest_artifact_spec().leaf);
+    if matches!(&read, super::RunArtifactRead::Missing { .. }) {
+        return Ok(None);
+    }
+    read.require("Artifact manifest").map(Some)
+}
+
+fn validate_manifest_artifact_paths(
+    target: &Path,
+    run_id: &str,
+    manifest: &RunArtifactManifest,
+) -> Result<()> {
+    for artifact in &manifest.artifacts {
+        validate_manifest_artifact_path(target, run_id, &artifact.path)?;
+    }
+    for object in &manifest.objects {
+        validate_manifest_artifact_path(target, run_id, &object.path)?;
+    }
+    validate_known_run_artifact_paths(target, run_id)?;
+    Ok(())
+}
+
+fn validate_known_run_artifact_paths(target: &Path, run_id: &str) -> Result<()> {
+    for spec in CANONICAL_RUN_ARTIFACTS
+        .iter()
+        .chain(OPTIONAL_RUN_ARTIFACTS.iter())
+        .chain(TOOL_INPUT_ARTIFACTS.iter())
+        .chain(TOOL_RESULT_ARTIFACTS.iter())
+        .chain(SCAN_PIPELINE_ARTIFACTS.iter())
+    {
+        checked_run_artifact_path(target, run_id, spec.leaf)?;
+    }
+    Ok(())
+}
+
+fn validate_manifest_artifact_path(target: &Path, run_id: &str, value: &str) -> Result<()> {
+    let path = Path::new(value);
+    if !path.is_absolute() {
+        ArtifactPath::parse(path)?;
+        checked_run_artifact_path(target, run_id, path)?;
+        return Ok(());
+    }
+    let root = fs::canonicalize(target)
+        .with_context(|| format!("Could not resolve artifact target {}", target.display()))?;
+    let relative = path
+        .strip_prefix(target)
+        .or_else(|_| path.strip_prefix(&root))
+        .with_context(|| {
+            format!(
+                "run artifact path escapes target {}: {}",
+                root.display(),
+                path.display()
+            )
+        })?;
+    let checked = crate::workspace::validated_workspace_descendant(&root, relative)?;
+    let canonical = fs::canonicalize(&checked)
+        .with_context(|| format!("Could not resolve run artifact {}", path.display()))?;
+    canonical.strip_prefix(&root).with_context(|| {
+        format!(
+            "run artifact path escapes target {}: {}",
+            root.display(),
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
 fn parse_manifest_body(text: &str, path: &Path) -> Result<RunArtifactManifest> {
-    let value: Value =
-        serde_json::from_str(text).with_context(|| format!("Could not parse {}", path.display()))?;
+    let value: Value = serde_json::from_str(text)
+        .with_context(|| format!("Could not parse {}", path.display()))?;
     if !value.is_object() {
         anyhow::bail!("Artifact manifest is not a JSON object: {}", path.display());
     }
@@ -147,7 +213,10 @@ fn require_manifest_artifacts_array(value: &Value, path: &Path) -> Result<()> {
             "Artifact manifest artifacts is not a JSON array: {}",
             path.display()
         ),
-        None => anyhow::bail!("Artifact manifest is missing artifacts array: {}", path.display()),
+        None => anyhow::bail!(
+            "Artifact manifest is missing artifacts array: {}",
+            path.display()
+        ),
     }
 }
 
@@ -251,7 +320,8 @@ fn empty_manifest(run_id: &str) -> RunArtifactManifest {
 }
 
 fn write_manifest(target: impl AsRef<Path>, manifest: &RunArtifactManifest) -> Result<PathBuf> {
-    let path = manifest_path(target, &manifest.run_id);
+    ensure_run_artifact_parent(&target, &manifest.run_id, manifest_artifact_spec().leaf)?;
+    let path = manifest_path(target, &manifest.run_id)?;
     let body = format!("{}\n", serde_json::to_string_pretty(manifest)?);
     crate::fs_atomic::write_atomic(&path, &body)
         .with_context(|| format!("Could not write {}", path.display()))?;
@@ -292,17 +362,18 @@ impl CanonicalRunArtifactSpec {
     fn artifact(&self, target: &Path, run_id: &str) -> RunArtifact {
         RunArtifact {
             label: self.label.to_string(),
-            path: run_artifact_path(target, run_id, self.leaf).display().to_string(),
+            path: run_artifact_path(target, run_id, self.leaf)
+                .display()
+                .to_string(),
             kind: self.kind.to_string(),
         }
     }
 }
 
-fn manifest_path(target: impl AsRef<Path>, run_id: &str) -> PathBuf {
-    run_artifact_path(target, run_id, manifest_artifact_spec().leaf)
+fn manifest_path(target: impl AsRef<Path>, run_id: &str) -> Result<PathBuf> {
+    checked_run_artifact_path(target, run_id, manifest_artifact_spec().leaf)
 }
 
 fn manifest_artifact_spec() -> &'static CanonicalRunArtifactSpec {
-    canonical_run_artifact_spec("artifacts.json")
-        .expect("artifact manifest must be in shared spec")
+    canonical_run_artifact_spec("artifacts.json").expect("artifact manifest must be in shared spec")
 }

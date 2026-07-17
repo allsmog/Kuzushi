@@ -31,6 +31,22 @@ describe("KWP dynamic host context", () => {
     try {
       const result = await runSmokeModule(modulePath);
       expect(result.initialize.hidden).toBe(false);
+      expect(result.initialize.tools[0]?.prompts).toEqual([
+        {
+          role: "scan instructions",
+          moduleId: "kwp-smoke",
+          verb: "run",
+          optionKey: "KWP_PROMPT",
+          defaultContent: "Review the target.",
+          contextNote: "Runtime context is appended separately.",
+        },
+      ]);
+      expect(result.initialize.tools[0]?.options?.[1]).toMatchObject({
+        name: "maxBytes",
+        type: "int",
+        minimum: 1024,
+        maximum: 67108864,
+      });
       expect(result.output).toEqual({
         aliases: ["symcc"],
         body: "network-body",
@@ -113,7 +129,7 @@ function handleWorkerMessage(
     return;
   }
   if (message.id === 1 && message.result) {
-    state.initialize = message.result as { hidden: boolean };
+    state.initialize = message.result as SmokeInitialize;
     send(child, toolCallRequest());
     return;
   }
@@ -187,14 +203,19 @@ interface BrokerRequest extends RpcMessage {
 }
 
 interface SmokeResult {
-  initialize: { hidden: boolean };
+  initialize: SmokeInitialize;
   output: Record<string, unknown>;
   requests: BrokerRequest[];
 }
 
 interface SmokeState {
-  initialize: { hidden: boolean } | null;
+  initialize: SmokeInitialize | null;
   requests: BrokerRequest[];
+}
+
+interface SmokeInitialize {
+  hidden: boolean;
+  tools: Array<{ options?: unknown[]; prompts?: unknown[] }>;
 }
 
 interface Deferred<T> {
@@ -228,6 +249,25 @@ export default {
     effect: "workspace-write",
     approval: "none",
     workspaceRequirement: "required",
+    options: [{
+      name: "KWP_PROMPT",
+      type: "string",
+      description: "Editable instructions.",
+    }, {
+      name: "maxBytes",
+      type: "int",
+      description: "Maximum bytes.",
+      minimum: 1024,
+      maximum: 67108864,
+    }],
+    prompts: [{
+      role: "scan instructions",
+      moduleId: "kwp-smoke",
+      verb: "run",
+      optionKey: "KWP_PROMPT",
+      defaultContent: "Review the target.",
+      contextNote: "Runtime context is appended separately.",
+    }],
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     async run(_input, ctx) {
       if (!ctx.mcp.has("symcc") || ctx.mcp.has("missing")) throw new Error("MCP grant state drifted");

@@ -1,7 +1,7 @@
-use super::{SbomComponent, SbomDependencyEdge, component, relative_display};
+use super::bounded_fs as fs;
+use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 const BOWER_DEPENDENCY_SCOPES: &[&str] = &["dependencies", "devDependencies"];

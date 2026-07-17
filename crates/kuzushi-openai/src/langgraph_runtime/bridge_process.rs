@@ -4,11 +4,18 @@ use serde::Serialize;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::bridge_payloads::{
     BridgeRequest, BridgeResponse, NextStepBridgeRequest, NextStepBridgeResponse,
 };
+
+const LEGACY_ERROR_PATTERNS: &[(&[&str], &str)] = &[
+    (&["timed out", "timeout"], "timeout"),
+    (&["cancelled", "canceled"], "cancelled"),
+    (&["fetch failed", "econnreset"], "transport"),
+];
 
 pub(crate) fn run_next_step_bridge(
     command: &[String],
@@ -69,9 +76,97 @@ fn mcp_artifact_env_for_attachments(
 }
 
 pub(crate) fn public_bridge_error(message: &str) -> String {
-    message
-        .replace("auth login openai-codex", "auth login openai")
-        .replace("openai-codex", "OpenAI OAuth")
+    let class = legacy_error_class(message);
+    if class == "openai_authentication" {
+        return "OpenAI OAuth authentication failed; run `kuzushi auth login openai`.".to_string();
+    }
+    public_failure_message(class, None)
+}
+
+pub(crate) fn public_bridge_failure(
+    error_class: Option<&str>,
+    status: Option<u16>,
+    fallback: Option<&str>,
+) -> String {
+    let class = error_class
+        .and_then(allowed_error_class)
+        .or_else(|| status.map(error_class_for_status));
+    match class {
+        Some(class) => public_failure_message(class, status),
+        None => public_bridge_error(fallback.unwrap_or_default()),
+    }
+}
+
+fn public_failure_message(class: &str, status: Option<u16>) -> String {
+    let base = match class {
+        "authentication" => "Provider authentication failed",
+        "cancelled" => "Bridge operation was cancelled",
+        "provider_rejected" => "Provider rejected the request",
+        "provider_response_invalid" => "Provider returned an invalid response",
+        "provider_unavailable" => "Provider is temporarily unavailable",
+        "rate_limited" => "Provider rate limited the request",
+        "timeout" => "Provider request timed out",
+        "transport" => "Provider request failed before a response was received",
+        _ => "Bridge operation failed; raw error details were suppressed",
+    };
+    match status.filter(|status| (100..=599).contains(status)) {
+        Some(status) => format!("{base} (HTTP {status})."),
+        None => format!("{base}."),
+    }
+}
+
+fn allowed_error_class(class: &str) -> Option<&str> {
+    matches!(
+        class,
+        "authentication"
+            | "bridge_internal"
+            | "cancelled"
+            | "provider_rejected"
+            | "provider_response_invalid"
+            | "provider_unavailable"
+            | "rate_limited"
+            | "timeout"
+            | "transport"
+    )
+    .then_some(class)
+}
+
+fn error_class_for_status(status: u16) -> &'static str {
+    match status {
+        401 | 403 => "authentication",
+        408 => "timeout",
+        425 | 429 => "rate_limited",
+        500..=599 => "provider_unavailable",
+        _ => "provider_rejected",
+    }
+}
+
+fn legacy_error_class(message: &str) -> &'static str {
+    let lower = message
+        .chars()
+        .take(512)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if lower.contains("openai-codex") || lower.contains("auth login openai") {
+        return "openai_authentication";
+    }
+    if lower.contains("429") || lower.contains("rate limit") {
+        return "rate_limited";
+    }
+    legacy_error_class_non_rate_limited(&lower)
+}
+
+fn legacy_error_class_non_rate_limited(lower: &str) -> &'static str {
+    let parsed =
+        (lower.contains("parse") && lower.contains("json")).then_some("provider_response_invalid");
+    parsed
+        .or_else(|| {
+            LEGACY_ERROR_PATTERNS
+                .iter()
+                .find(|(needles, _)| needles.iter().any(|needle| lower.contains(needle)))
+                .map(|(_, class)| *class)
+        })
+        .unwrap_or("bridge_internal")
 }
 
 fn run_json_bridge<T, R>(
@@ -104,6 +199,8 @@ where
 /// a timeout error instead. Generous default: a single invocation can span a
 /// long agent step with MCP tool calls.
 const DEFAULT_BRIDGE_TIMEOUT: Duration = Duration::from_secs(600);
+const MAX_BRIDGE_STDOUT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_BRIDGE_STDERR_BYTES: usize = 1024 * 1024;
 
 fn bridge_timeout() -> Duration {
     std::env::var("KUZUSHI_BRIDGE_TIMEOUT_MS")
@@ -118,22 +215,51 @@ fn bridge_timeout() -> Duration {
 /// (so a full pipe can't deadlock the child), polls for exit, and kills the
 /// process when the deadline passes.
 fn wait_with_output_deadline(
-    mut child: Child,
+    child: Child,
     label: &str,
     timeout: Duration,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<Output> {
+    wait_with_output_deadline_limits(
+        child,
+        label,
+        timeout,
+        cancellation,
+        MAX_BRIDGE_STDOUT_BYTES,
+        MAX_BRIDGE_STDERR_BYTES,
+    )
+}
+
+pub(super) fn wait_with_output_deadline_limits(
+    mut child: Child,
+    label: &str,
+    timeout: Duration,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<Output> {
     // Match `wait_with_output` semantics: close the child's stdin so a bridge
     // reading until EOF sees the request end instead of blocking forever.
     drop(child.stdin.take());
-    let stdout = spawn_pipe_reader(child.stdout.take());
-    let stderr = spawn_pipe_reader(child.stderr.take());
+    let pipe_failure = Arc::new(Mutex::new(None));
+    let stdout = spawn_pipe_reader(
+        child.stdout.take(),
+        stdout_limit,
+        "stdout",
+        Arc::clone(&pipe_failure),
+    );
+    let stderr = spawn_pipe_reader(
+        child.stderr.take(),
+        stderr_limit,
+        "stderr",
+        Arc::clone(&pipe_failure),
+    );
     let registered = register_bridge_child(child, cancellation)?;
-    let status = wait_status_deadline(&registered, label, timeout, cancellation)?;
+    let status = wait_status_deadline(&registered, label, timeout, cancellation, &pipe_failure)?;
     Ok(Output {
         status,
-        stdout: join_pipe_reader(stdout),
-        stderr: join_pipe_reader(stderr),
+        stdout: join_pipe_reader(stdout, "stdout")?,
+        stderr: join_pipe_reader(stderr, "stderr")?,
     })
 }
 
@@ -153,22 +279,52 @@ fn register_bridge_child(
     registry.register_child(child, process_group_id)
 }
 
+type BridgePipeFailure = Arc<Mutex<Option<String>>>;
+type BridgePipeReader = Option<std::thread::JoinHandle<Result<Vec<u8>>>>;
+
 fn spawn_pipe_reader<R: Read + Send + 'static>(
     pipe: Option<R>,
-) -> Option<std::thread::JoinHandle<Vec<u8>>> {
+    limit: usize,
+    stream: &'static str,
+    failure: BridgePipeFailure,
+) -> BridgePipeReader {
     pipe.map(|mut pipe| {
-        std::thread::spawn(move || {
-            let mut buffer = Vec::new();
-            let _ = pipe.read_to_end(&mut buffer);
-            buffer
+        std::thread::spawn(move || match read_bounded_pipe(&mut pipe, limit, stream) {
+            Ok(bytes) => Ok(bytes),
+            Err(error) => {
+                if let Ok(mut slot) = failure.lock() {
+                    *slot = Some(error.to_string());
+                }
+                Err(error)
+            }
         })
     })
 }
 
-fn join_pipe_reader(handle: Option<std::thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+pub(super) fn read_bounded_pipe(
+    reader: &mut impl Read,
+    limit: usize,
+    stream: &str,
+) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader
+        .take((limit + 1) as u64)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("could not read LangGraph bridge {stream}"))?;
+    anyhow::ensure!(
+        bytes.len() <= limit,
+        "LangGraph bridge {stream} exceeded the {limit}-byte capture limit"
+    );
+    Ok(bytes)
+}
+
+fn join_pipe_reader(handle: BridgePipeReader, stream: &str) -> Result<Vec<u8>> {
+    let Some(handle) = handle else {
+        return Ok(Vec::new());
+    };
     handle
-        .and_then(|handle| handle.join().ok())
-        .unwrap_or_default()
+        .join()
+        .map_err(|_| anyhow::anyhow!("LangGraph bridge {stream} reader panicked"))?
 }
 
 fn wait_status_deadline(
@@ -176,16 +332,33 @@ fn wait_status_deadline(
     label: &str,
     timeout: Duration,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
+    pipe_failure: &BridgePipeFailure,
 ) -> Result<ExitStatus> {
     let deadline = Instant::now() + timeout;
     loop {
         kill_cancelled_bridge(child, label, cancellation)?;
+        kill_bridge_on_pipe_failure(child, pipe_failure)?;
         if let Some(status) = poll_bridge_status(child, label)? {
             return Ok(status);
         }
         kill_expired_bridge(child, label, deadline, timeout)?;
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn kill_bridge_on_pipe_failure(
+    child: &kuzushi_core::scan::RegisteredChild,
+    failure: &BridgePipeFailure,
+) -> Result<()> {
+    let failure = failure
+        .lock()
+        .map_err(|_| anyhow::anyhow!("LangGraph bridge pipe failure state was poisoned"))?
+        .clone();
+    if let Some(failure) = failure {
+        kill_child(child);
+        anyhow::bail!(failure);
+    }
+    Ok(())
 }
 
 fn poll_bridge_status(
@@ -244,7 +417,7 @@ fn configured_bridge_command(command: &[String]) -> Command {
 }
 
 #[cfg(unix)]
-fn configure_bridge_process_group(command: &mut Command) {
+pub(super) fn configure_bridge_process_group(command: &mut Command) {
     use std::os::unix::process::CommandExt;
 
     unsafe {
@@ -258,7 +431,7 @@ fn configure_bridge_process_group(command: &mut Command) {
 }
 
 #[cfg(not(unix))]
-fn configure_bridge_process_group(_command: &mut Command) {}
+pub(super) fn configure_bridge_process_group(_command: &mut Command) {}
 
 #[cfg(unix)]
 fn bridge_process_group_id(child: &Child) -> Option<u32> {
@@ -278,12 +451,8 @@ fn parse_bridge_output<R: DeserializeOwned>(output: Output, label: &str) -> Resu
 }
 
 fn parse_successful_bridge_output<R: DeserializeOwned>(stdout: &[u8], label: &str) -> Result<R> {
-    serde_json::from_slice::<R>(stdout).with_context(|| {
-        format!(
-            "could not parse {label} JSON: {}",
-            public_bridge_bytes(stdout)
-        )
-    })
+    serde_json::from_slice::<R>(stdout)
+        .map_err(|_| anyhow::anyhow!("could not parse {label} JSON response"))
 }
 
 fn parse_failed_bridge_output<R: DeserializeOwned>(output: Output, label: &str) -> Result<R> {
@@ -291,9 +460,8 @@ fn parse_failed_bridge_output<R: DeserializeOwned>(output: Output, label: &str) 
         return Ok(response);
     }
     anyhow::bail!(
-        "{label} exited with {}: {}",
-        output.status,
-        bridge_error_detail(&output.stdout, &output.stderr)
+        "{label} exited with {}; bridge stdout/stderr details were suppressed",
+        output.status
     );
 }
 
@@ -302,18 +470,6 @@ fn parse_error_response<R: DeserializeOwned>(stdout: &[u8]) -> Option<R> {
         return None;
     }
     serde_json::from_slice::<R>(stdout).ok()
-}
-
-fn bridge_error_detail(stdout: &[u8], stderr: &[u8]) -> String {
-    if stderr.is_empty() {
-        return public_bridge_bytes(stdout);
-    }
-    public_bridge_bytes(stderr)
-}
-
-fn public_bridge_bytes(bytes: &[u8]) -> String {
-    let raw = String::from_utf8_lossy(bytes);
-    public_bridge_error(raw.as_ref())
 }
 
 fn write_bridge_request<T: Serialize>(
@@ -438,4 +594,27 @@ pub(super) fn bridge_near_executable(exe: &Path) -> Option<PathBuf> {
         dir = parent.parent();
     }
     None
+}
+
+#[cfg(test)]
+mod telemetry_safety_tests {
+    use super::*;
+
+    #[derive(Debug, serde::Deserialize)]
+    struct ExpectedResponse {
+        _ok: bool,
+    }
+
+    #[test]
+    fn successful_bridge_parse_error_does_not_echo_stdout() {
+        let sentinel = br#"{"_ok":"raw-model-response-sentinel"}"#;
+
+        let error = format!(
+            "{:#}",
+            parse_successful_bridge_output::<ExpectedResponse>(sentinel, "bridge").unwrap_err()
+        );
+
+        assert!(error.contains("could not parse bridge JSON response"));
+        assert!(!error.contains("raw-model-response-sentinel"));
+    }
 }

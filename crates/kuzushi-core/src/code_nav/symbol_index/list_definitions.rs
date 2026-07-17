@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_DEFINITION_SOURCE_BYTES: usize = 8 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListDefinitionsInput {
     pub file: String,
@@ -26,7 +28,7 @@ pub fn list_definitions(
 ) -> Result<ListDefinitionsOutput> {
     let canonical = canonicalise_within(root, &input.file)
         .with_context(|| format!("list_definitions: path {:?}", input.file))?;
-    let body = fs::read_to_string(&canonical)
+    let body = crate::bounded_file::read_utf8_text(&canonical, MAX_DEFINITION_SOURCE_BYTES)
         .with_context(|| format!("list_definitions: could not read {}", input.file))?;
 
     let language = detect_language(&input.file);

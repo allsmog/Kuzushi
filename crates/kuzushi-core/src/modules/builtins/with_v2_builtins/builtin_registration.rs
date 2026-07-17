@@ -1,6 +1,5 @@
 use super::*;
 use crate::modules::registry::ToolDispatchResult;
-use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, Default)]
 struct OptionalAdapterVisibility {
@@ -13,16 +12,10 @@ struct OptionalAdapterVisibility {
 impl OptionalAdapterVisibility {
     fn detect() -> Self {
         Self {
-            prompt_armor: optional_adapter_present(
-                "promptarmor-plugin",
-                "KUZUSHI_PROMPT_ARMOR_PLUGIN",
-            ),
-            shinsa: optional_adapter_present("shinsa-plugin", "KUZUSHI_SHINSA_PLUGIN"),
-            tob: optional_adapter_present("@kuzushi/tob-skills", "KUZUSHI_TOB_SKILLS_DIR"),
-            vuln_scout: optional_adapter_present(
-                "@kuzushi/vuln-scout",
-                "KUZUSHI_VULN_SCOUT_PLUGIN",
-            ),
+            prompt_armor: adapter_env_configured("KUZUSHI_PROMPT_ARMOR_PLUGIN"),
+            shinsa: adapter_env_configured("KUZUSHI_SHINSA_PLUGIN"),
+            tob: adapter_env_configured("KUZUSHI_TOB_SKILLS_DIR"),
+            vuln_scout: adapter_env_configured("KUZUSHI_VULN_SCOUT_PLUGIN"),
         }
     }
 
@@ -61,7 +54,9 @@ impl ModuleRegistry {
     }
 
     pub fn register(&mut self, builtin: BuiltinModule) {
-        let builtin = builtin.with_stamped_phases();
+        builtin.validate_declared_policy().unwrap_or_else(|error| {
+            panic!("invalid built-in descriptor policy: {error:#}")
+        });
         self.register_builtin_tools(&builtin);
         self.register_builtin_dag_executors(&builtin);
         self.modules.insert(builtin.metadata().id.clone(), builtin);
@@ -69,8 +64,7 @@ impl ModuleRegistry {
 
     fn register_builtin_tools(&mut self, builtin: &BuiltinModule) {
         for tool in builtin.tools() {
-            self.tools
-                .insert(tool.name.clone(), descriptor_with_runtime_policy(tool));
+            self.tools.insert(tool.name.clone(), tool.clone());
             let executor = tool.executor.unwrap_or_else(|| {
                 panic!(
                     "built-in tool {:?} in module {:?} has no descriptor executor",
@@ -224,12 +218,20 @@ fn execute_runtime_analysis_tool(
 }
 
 fn execute_finding_action_tool(
-    _registry: &ModuleRegistry,
+    registry: &ModuleRegistry,
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
+    if name == "patch:reverify" {
+        return crate::remediation::patch::run_patch_reverify(
+            registry,
+            input.clone(),
+            ctx,
+            runtime,
+        );
+    }
     dispatch_result(
         dispatch_finding_action_tool(name, input, ctx, runtime),
         name,
@@ -277,30 +279,22 @@ fn dispatch_result(result: ToolDispatchResult, name: &str) -> Result<Value> {
     result.with_context(|| format!("registered tool {name:?} has no executor mapping"))?
 }
 
-fn descriptor_with_runtime_policy(tool: &ToolDescriptor) -> ToolDescriptor {
-    let mut descriptor = tool.clone();
-    descriptor.runtime_requirement = runtime_requirement_for_tool(&descriptor.name);
-    descriptor
-}
-
-fn runtime_requirement_for_tool(name: &str) -> RuntimeRequirement {
-    if matches!(name, "sast:scan" | "full-mode:hunt" | "threat-model:build") {
-        return RuntimeRequirement::InputAware;
-    }
-    if tool_uses_agent_runtime(name) || name == "pwn:auto-solve" {
-        return RuntimeRequirement::Always;
-    }
-    RuntimeRequirement::Never
-}
-
 fn register_workspace_catalog_modules(registry: &mut ModuleRegistry) {
     registry.register(workspace_module().with_executor(execute_context_workspace_tool));
     registry.register(engagement_module().with_executor(execute_context_workspace_tool));
-    registry.register(module_recommender_module().with_executor(execute_module_recommender_tool));
+    registry.register(
+        module_recommender_module()
+            .with_executor(execute_module_recommender_tool)
+            .deferred(),
+    );
 }
 
 fn register_foundation_modules(registry: &mut ModuleRegistry) {
-    registry.register(catalog_module().with_executor(execute_catalog_tool));
+    registry.register(
+        catalog_module()
+            .with_executor(execute_catalog_tool)
+            .deferred(),
+    );
     registry.register(config_module().with_executor(execute_context_workspace_tool));
     registry.register(router_module().with_executor(execute_context_workspace_tool));
     registry.register(
@@ -405,7 +399,11 @@ fn register_misc_security_modules(registry: &mut ModuleRegistry) {
     registry.register(pipeline_module().with_executor(execute_pipeline_tool));
     registry.register(variant_module().with_executor(execute_agentic_security_tool));
     registry.register(ndiff_module().with_executor(execute_agentic_security_tool));
-    registry.register(randori_module().with_executor(execute_runtime_analysis_tool));
+    registry.register(
+        randori_module()
+            .with_executor(execute_runtime_analysis_tool)
+            .deferred(),
+    );
 }
 
 fn register_deferred_adapter_modules(
@@ -417,7 +415,11 @@ fn register_deferred_adapter_modules(
         adapters.prompt_armor,
     ));
     registry.register(recon_module().with_executor(execute_recon_assessment_tool));
-    registry.register(bounty_module().with_executor(execute_context_workspace_tool));
+    registry.register(
+        bounty_module()
+            .with_executor(execute_context_workspace_tool)
+            .deferred(),
+    );
 }
 
 fn visible_when(module: BuiltinModule, visible: bool) -> BuiltinModule {
@@ -428,39 +430,8 @@ fn visible_when(module: BuiltinModule, visible: bool) -> BuiltinModule {
     }
 }
 
-fn optional_adapter_present(package_name: &str, env_var: &str) -> bool {
-    adapter_env_configured(env_var) || node_package_installed(package_name)
-}
-
 fn adapter_env_configured(env_var: &str) -> bool {
     std::env::var_os(env_var).is_some_and(|value| !value.is_empty())
-}
-
-fn node_package_installed(package_name: &str) -> bool {
-    package_search_roots()
-        .into_iter()
-        .any(|root| root.join("node_modules").join(package_name).exists())
-}
-
-fn package_search_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Ok(current) = std::env::current_dir() {
-        push_package_roots(&mut roots, &current);
-    }
-    push_package_roots(&mut roots, Path::new(env!("CARGO_MANIFEST_DIR")));
-    roots
-}
-
-fn push_package_roots(roots: &mut Vec<PathBuf>, start: &Path) {
-    for ancestor in start
-        .ancestors()
-        .filter(|path| path.join("package.json").exists())
-    {
-        let candidate = ancestor.to_path_buf();
-        if !roots.contains(&candidate) {
-            roots.push(candidate);
-        }
-    }
 }
 
 #[cfg(test)]

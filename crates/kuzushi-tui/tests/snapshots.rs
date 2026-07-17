@@ -9,6 +9,7 @@ use kuzushi_core::{
     latest_run_path, run_dir, Finding, ModuleRegistry, ScanCancellation, Severity, ToolOptionStore,
     TriageOutcome, TriageVerdict, V2Config,
 };
+use kuzushi_core::{write_run_summary, RunSummary};
 use kuzushi_tui::{
     render_plain_app, OptionsFilter, OptionsView, ShellApp, ShellCommand, ShellView, ThreatView,
 };
@@ -17,6 +18,7 @@ const SNAPSHOT_WIDTH: usize = 120;
 const SNAPSHOT_LOG_TIME: u64 = 55_277;
 
 fn render_at_120(app: &mut ShellApp) -> String {
+    app.hydrate_all_view_data_for_test();
     for line in app.log_lines_mut_for_test() {
         if line.time_secs != 0 {
             line.time_secs = SNAPSHOT_LOG_TIME;
@@ -79,8 +81,8 @@ impl Drop for ScopedHome {
 }
 
 fn reset_snapshot_target(name: &str) -> PathBuf {
-    let root = PathBuf::from("target")
-        .join("kuzushi-tui-snapshots")
+    let root = std::env::temp_dir()
+        .join(format!("kuzushi-tui-snapshots-{}", std::process::id()))
         .join(name);
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root)
@@ -94,6 +96,24 @@ fn snapshot_run_dir(root: &std::path::Path, run_id: &str) -> PathBuf {
 
 fn snapshot_latest_run_path(root: &std::path::Path) -> PathBuf {
     latest_run_path(root)
+}
+
+fn write_snapshot_run_metadata(
+    root: &std::path::Path,
+    run_id: &str,
+    status: &str,
+    findings: u64,
+    target: &str,
+) {
+    let mut summary = RunSummary::running(run_id, "scan", None, target);
+    summary.started_at_unix = 1;
+    summary.findings = Some(findings);
+    let summary = match status {
+        "completed" => summary.complete(),
+        "failed" => summary.failed("snapshot fixture failure"),
+        other => panic!("unsupported snapshot run status {other}"),
+    };
+    write_run_summary(root, &summary).unwrap();
 }
 
 fn assert_plain_snapshot(name: &str, actual: &str) {
@@ -159,6 +179,7 @@ fn recommend_view_with_artifact() {
     let root = reset_snapshot_target("recommend");
     let run_dir = snapshot_run_dir(&root, "run-rec");
     fs::create_dir_all(&run_dir).unwrap();
+    write_snapshot_run_metadata(&root, "run-rec", "completed", 0, "./recommend");
     fs::write(snapshot_latest_run_path(&root), "run-rec\n").unwrap();
     fs::write(
         run_dir.join("recommendations.json"),
@@ -283,6 +304,7 @@ fn workbench_list_view_with_two_findings() {
         confidence: 0.91,
         rationale: "concatenated input".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     let untriaged = Finding::new_tool(
         "codeql",
@@ -305,16 +327,20 @@ fn run_timeline_view_with_past_runs() {
     let failed_run_dir = snapshot_run_dir(&root, "r-2026-05-06T15-18");
     fs::create_dir_all(&completed_run_dir).unwrap();
     fs::create_dir_all(&failed_run_dir).unwrap();
-    fs::write(
-        completed_run_dir.join("run.json"),
-        r#"{"status":"completed","findings":18,"target":"~/work/acme-checkout"}"#,
-    )
-    .unwrap();
-    fs::write(
-        failed_run_dir.join("run.json"),
-        r#"{"status":"failed","findings":0,"target":"~/work/acme-checkout"}"#,
-    )
-    .unwrap();
+    write_snapshot_run_metadata(
+        &root,
+        "r-2026-05-06T14-31",
+        "completed",
+        18,
+        "~/work/acme-checkout",
+    );
+    write_snapshot_run_metadata(
+        &root,
+        "r-2026-05-06T15-18",
+        "failed",
+        0,
+        "~/work/acme-checkout",
+    );
 
     let mut app = fresh_app();
     app.set_target(Some(root));
@@ -327,6 +353,7 @@ fn failure_handoff_view_with_artifact() {
     let root = reset_snapshot_target("failure");
     let run_dir = snapshot_run_dir(&root, "run-failed");
     fs::create_dir_all(&run_dir).unwrap();
+    write_snapshot_run_metadata(&root, "run-failed", "failed", 0, "./failure");
     fs::write(snapshot_latest_run_path(&root), "run-failed\n").unwrap();
     fs::write(
         run_dir.join("failures.json"),
@@ -380,6 +407,7 @@ fn module_run_view_with_findings_and_active_scan() {
         confidence: 0.92,
         rationale: "input concatenated".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     app.set_findings(vec![finding]);
     app.set_scan_panel(Some(kuzushi_tui::ScanPanelState {

@@ -1,8 +1,8 @@
+use super::bounded_fs as fs;
 use super::python_dependency::python_dependency_name;
 use super::toml_manifest::toml_value_at;
-use super::{SbomDependencyEdge, relative_display};
+use super::{relative_display, SbomDependencyEdge};
 use anyhow::{Context, Result};
-use std::fs;
 use std::path::Path;
 
 const PYTHON_RUNTIME_KEY: &str = "python";

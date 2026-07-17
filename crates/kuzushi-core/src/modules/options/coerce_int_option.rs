@@ -1,19 +1,49 @@
 use super::*;
 
-pub(in crate::modules) fn coerce_int_option(value: Value) -> Result<Value> {
-    match value {
+pub(in crate::modules) fn coerce_int_option(spec: &OptionSpec, value: Value) -> Result<Value> {
+    let value = match value {
         Value::Number(number) if number.as_i64().is_some() || number.as_u64().is_some() => {
-            Ok(Value::Number(number))
+            Value::Number(number)
         }
         Value::String(value) => {
             let parsed = value
                 .trim()
                 .parse::<i64>()
                 .with_context(|| format!("must be an integer, got {value:?}"))?;
-            Ok(Value::Number(parsed.into()))
+            Value::Number(parsed.into())
         }
         other => anyhow::bail!("must be an integer, got {}", json_summary(&other)),
+    };
+    validate_integer_range(spec, value)
+}
+
+fn validate_integer_range(spec: &OptionSpec, value: Value) -> Result<Value> {
+    let number = integer_as_i128(&value)?;
+    validate_integer_minimum(spec.minimum, number)?;
+    validate_integer_maximum(spec.maximum, number)?;
+    Ok(value)
+}
+
+fn integer_as_i128(value: &Value) -> Result<i128> {
+    value
+        .as_i64()
+        .map(i128::from)
+        .or_else(|| value.as_u64().map(i128::from))
+        .context("must be a JSON integer")
+}
+
+fn validate_integer_minimum(minimum: Option<i64>, value: i128) -> Result<()> {
+    if let Some(minimum) = minimum {
+        anyhow::ensure!(value >= i128::from(minimum), "must be at least {minimum}, got {value}");
     }
+    Ok(())
+}
+
+fn validate_integer_maximum(maximum: Option<i64>, value: i128) -> Result<()> {
+    if let Some(maximum) = maximum {
+        anyhow::ensure!(value <= i128::from(maximum), "must be at most {maximum}, got {value}");
+    }
+    Ok(())
 }
 
 pub(in crate::modules) fn coerce_float_option(value: Value) -> Result<Value> {

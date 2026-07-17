@@ -10,12 +10,19 @@ pub(in crate::modules) fn entry_points_module() -> BuiltinModule {
         ModuleKind::Intel,
         "Deterministic extractor that normalizes attack-surface routes from \
          the context snapshot into a stable .kuzushi/entry-points.json.",
-        vec![tool_with_options(
-            "entry-points:extract",
-            "Extract entry points (routes, handlers, outbound clients) from the latest \
-             context snapshot. Writes .kuzushi/entry-points.json. Deterministic; no model cost.",
-            vec![target_option()],
-        )],
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Map,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Optional,
+            ),
+            vec![tool_with_options(
+                "entry-points:extract",
+                "Extract entry points (routes, handlers, outbound clients) from the latest \
+                 context snapshot. Writes .kuzushi/entry-points.json. Deterministic; no model cost.",
+                vec![target_option()],
+            )],
+        ),
         vec![dag(
             "entry-points:extract",
             "entry-points",
@@ -106,10 +113,6 @@ fn write_entry_points_json(
     snapshot: &Value,
     entry_points: &[Value],
 ) -> Result<PathBuf> {
-    let dir = target.join(".kuzushi");
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("creating {} for entry-points artifact", dir.display()))?;
-    let path = dir.join("entry-points.json");
     let body = json!({
         "target": target.display().to_string(),
         "timestamp": now_ms()?,
@@ -117,12 +120,12 @@ fn write_entry_points_json(
         "total": entry_points.len(),
         "entryPoints": entry_points,
     });
-    fs::write(
-        &path,
-        serde_json::to_string_pretty(&body).unwrap_or_default(),
+    let contents = serde_json::to_vec_pretty(&body).context("serializing entry-points artifact")?;
+    crate::workspace::write_workspace_state_file(
+        target,
+        Path::new(crate::workspace::KUZUSHI_STATE_DIR).join("entry-points.json"),
+        &contents,
     )
-    .with_context(|| format!("writing entry-points artifact at {}", path.display()))?;
-    Ok(path)
 }
 
 fn entry_points_response(target: &Path, path: &Path, entry_points: &[Value]) -> Value {
@@ -155,5 +158,31 @@ fn now_ms() -> Result<u64> {
 fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, label: impl Into<String>) {
     if let Some(trace) = ctx.trace {
         let _ = trace.step(kind, verb, label.into()).emit();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn entry_points_writer_rejects_a_symlinked_artifact() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
+        fs::write(outside.path(), "outside").unwrap();
+        symlink(
+            outside.path(),
+            workspace.path().join(".kuzushi/entry-points.json"),
+        )
+        .unwrap();
+
+        let error = write_entry_points_json(workspace.path(), &json!({}), &[]).unwrap_err();
+
+        assert!(error.to_string().contains("symlink"));
+        assert_eq!(fs::read_to_string(outside.path()).unwrap(), "outside");
     }
 }

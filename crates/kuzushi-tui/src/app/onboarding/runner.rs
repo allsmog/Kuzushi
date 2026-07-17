@@ -16,7 +16,8 @@ use crate::app::{
 use crate::{ShellApp, ShellView};
 use anyhow::Result;
 use kuzushi_core::{
-    Finding, NestedProjectKind, ToolExecutionContext, TriageVerdict, WorkspaceTarget,
+    ExecutionAuthorization, Finding, NestedProjectKind, ToolExecutionContext, TriageVerdict,
+    WorkspaceTarget,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -48,19 +49,24 @@ impl ShellApp {
 
     fn apply_planning_dispatch_view(&mut self, view: Option<PlanningDispatchView>) {
         match view {
-            Some(PlanningDispatchView::Activity) => self.set_shell_view(ShellView::Activity),
+            // The background-run attachment captures the exact workflow
+            // origin before it opens Run Focus. Switching here would reduce
+            // every Setup/Planning launch origin to Activity.
+            Some(PlanningDispatchView::Activity) => {}
             Some(PlanningDispatchView::Catalog) => self.set_shell_view(ShellView::Catalog),
             None => {}
         }
     }
 
     /// Dispatch the head of the planning queue (if any) on `workspace`.
-    /// No-op when the queue is empty or another tool is already running.
+    /// No-op when the queue is empty or any live job still owns an execution
+    /// slot. Holding the step here keeps it queued instead of popping it and
+    /// then losing it at the background-tool admission boundary.
     pub(crate) fn dispatch_next_planning_task(
         &mut self,
         workspace: WorkspaceTarget,
     ) -> Vec<ShellEffect> {
-        if self.tool_is_running() {
+        if self.has_running_work() {
             self.log_planning_queue_stalled();
             return Vec::new();
         }
@@ -94,7 +100,7 @@ impl ShellApp {
                         "error",
                         format!("{} input invalid: {error:#}", task.tool_name()),
                     );
-                    return Err(self.fail_planning_task(task.tool_name(), &format!("{error:#}")));
+                    return Err(self.fail_planning_task_id(task, &format!("{error:#}")));
                 }
             }
         }
@@ -105,13 +111,14 @@ impl ShellApp {
         step: PlanningRunStep,
         workspace: WorkspaceTarget,
     ) -> Vec<ShellEffect> {
+        self.engagement
+            .set_running_planning_step(step.task, step.tool_name.clone());
         if let Some(error) =
             self.langgraph_background_tool_launch_blocker(&step.tool_name, &step.input)
         {
             self.log("error", error.clone());
             return self.fail_planning_task(&step.tool_name, &error);
         }
-        self.engagement.set_running_tool(step.tool_name.clone());
         self.log(
             "planning",
             format!(
@@ -120,12 +127,14 @@ impl ShellApp {
                 self.pending_planning_step_count(),
             ),
         );
-        self.start_background_tool(
+        let authorization = planning_step_authorization(step.task);
+        self.start_authorized_background_tool(
             step.tool_name,
             step.input,
             workspace,
             "planning queue task in flight",
             self.session_thinking_level_owned(),
+            authorization,
         );
         Vec::new()
     }
@@ -140,18 +149,16 @@ impl ShellApp {
                 task,
                 eligible_verify_fingerprints(self.findings()),
                 "no triaged findings ready for verification",
-                workspace,
             ),
             PlanningTaskId::PatchFindings => self.expand_finding_batch(
                 task,
                 eligible_patch_fingerprints(self.findings()),
                 "no confirmed true-positive findings ready for patching",
-                workspace,
             ),
             PlanningTaskId::ReverseEngineerBinary => {
                 self.expand_reverse_engineering_task(task, workspace)
             }
-            _ => self.expand_single_planning_task(task, workspace),
+            _ => self.expand_single_planning_task(task),
         }
     }
 
@@ -160,7 +167,6 @@ impl ShellApp {
         task: PlanningTaskId,
         fingerprints: Vec<String>,
         empty_reason: &str,
-        workspace: &WorkspaceTarget,
     ) -> Result<Vec<PlanningRunStep>> {
         if fingerprints.is_empty() {
             self.log(
@@ -172,7 +178,7 @@ impl ShellApp {
         fingerprints
             .into_iter()
             .map(|fingerprint| {
-                self.step_with_extra_input(task, json!({ "fingerprint": fingerprint }), workspace)
+                self.step_with_extra_input(task, json!({ "fingerprint": fingerprint }))
             })
             .collect()
     }
@@ -193,23 +199,13 @@ impl ShellApp {
             );
             return Ok(Vec::new());
         };
-        self.step_with_extra_input(
-            task,
-            json!({ "binary": binary.display().to_string() }),
-            workspace,
-        )
-        .map(|step| vec![step])
+        self.step_with_extra_input(task, json!({ "binary": binary.display().to_string() }))
+            .map(|step| vec![step])
     }
 
-    fn expand_single_planning_task(
-        &self,
-        task: PlanningTaskId,
-        workspace: &WorkspaceTarget,
-    ) -> Result<Vec<PlanningRunStep>> {
+    fn expand_single_planning_task(&self, task: PlanningTaskId) -> Result<Vec<PlanningRunStep>> {
         self.input_for_planning_task(task)
-            .and_then(|input| {
-                self.dispatch_input_for_planning_task(task.tool_name(), input, workspace)
-            })
+            .and_then(|input| self.validated_input_for_planning_task(task.tool_name(), input))
             .map(|input| {
                 vec![PlanningRunStep {
                     task,
@@ -219,14 +215,9 @@ impl ShellApp {
             })
     }
 
-    fn step_with_extra_input(
-        &self,
-        task: PlanningTaskId,
-        extra: Value,
-        workspace: &WorkspaceTarget,
-    ) -> Result<PlanningRunStep> {
+    fn step_with_extra_input(&self, task: PlanningTaskId, extra: Value) -> Result<PlanningRunStep> {
         let input = self.input_for_planning_task_with_extra(task, extra)?;
-        let input = self.dispatch_input_for_planning_task(task.tool_name(), input, workspace)?;
+        let input = self.validated_input_for_planning_task(task.tool_name(), input)?;
         Ok(PlanningRunStep {
             task,
             tool_name: task.tool_name().to_string(),
@@ -251,7 +242,9 @@ impl ShellApp {
         if queued == 0 {
             return;
         }
-        let running = self.running_tool_name_owned().unwrap_or_default();
+        let running = self
+            .running_tool_name_owned()
+            .unwrap_or_else(|| "active work".to_string());
         self.log(
             "planning",
             format!("plan queued ({queued} step(s)) — waiting for {running} to finish first",),
@@ -390,18 +383,45 @@ impl ShellApp {
     /// drop the queued tasks that transitively depended on it, and keep running
     /// the independent remainder — failure of one task no longer kills the run.
     pub(crate) fn fail_planning_task(&mut self, tool_name: &str, error: &str) -> Vec<ShellEffect> {
-        self.engagement.clear_running_tool();
-        if let Some(task) = planning_task_for_tool(tool_name) {
-            let skipped = self.skip_queued_dependents(task);
-            self.log_skipped_dependents(task, &skipped);
-            self.engagement.record_failed_task(FailedPlanningTask {
-                task,
-                error: first_line(error),
-                adjustment: retry_adjustment_from_error(error),
-                blocked: skipped,
-            });
-        }
+        self.record_planning_task_failure(tool_name, error);
         self.resume_or_advance_planning_queue()
+    }
+
+    fn fail_planning_task_id(&mut self, task: PlanningTaskId, error: &str) -> Vec<ShellEffect> {
+        self.record_planning_task_failure_for(task, error);
+        self.resume_or_advance_planning_queue()
+    }
+
+    pub(crate) fn pause_planning_task_after_failure(&mut self, tool_name: &str, error: &str) {
+        self.record_planning_task_failure(tool_name, error);
+        self.engagement.pause_planning_queue();
+        self.log(
+            "planning",
+            format!("plan paused after {tool_name} failed; resume explicitly after review"),
+        );
+    }
+
+    fn record_planning_task_failure(&mut self, tool_name: &str, error: &str) {
+        let task = self
+            .engagement
+            .running_planning_task()
+            .or_else(|| unambiguous_planning_task_for_tool(tool_name));
+        self.engagement.clear_running_tool();
+        let Some(task) = task else {
+            return;
+        };
+        self.record_planning_task_failure_for(task, error);
+    }
+
+    fn record_planning_task_failure_for(&mut self, task: PlanningTaskId, error: &str) {
+        let skipped = self.skip_queued_dependents(task);
+        self.log_skipped_dependents(task, &skipped);
+        self.engagement.record_failed_task(FailedPlanningTask {
+            task,
+            error: first_line(error),
+            adjustment: retry_adjustment_from_error(error),
+            blocked: skipped,
+        });
     }
 
     /// Remove from the queue every task that transitively depends on `failed`.
@@ -497,10 +517,7 @@ impl ShellApp {
 
     fn should_refresh_recommendations_after_map(&self, completed: Option<WorkflowPhase>) -> bool {
         completed == Some(WorkflowPhase::Map)
-            && !self
-                .engagement
-                .skipped_phases()
-                .contains(&WorkflowPhase::Map)
+            && !self.engagement.phase_is_skipped(WorkflowPhase::Map)
             && !self.tool_is_running()
             && self.target().is_some()
     }
@@ -521,17 +538,10 @@ impl ShellApp {
 
     fn start_deterministic_recommender(&mut self, workspace: WorkspaceTarget) {
         let input = json!({ "useModelRanking": false });
-        let ctx = ToolExecutionContext {
-            config: self.config(),
-            workspace: Some(&workspace),
-            findings_store: None,
-            trace: None,
-        };
-        let prepared = match self.registry().prepare_tool_input_for_dispatch(
+        let prepared = match self.prepare_background_tool_input(
             "module-recommender:recommend",
             input,
-            &ctx,
-            Some(self.option_store()),
+            &workspace,
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -541,12 +551,13 @@ impl ShellApp {
         };
         let previous_auto_open = self.ui().auto_open_activity();
         self.ui_mut().set_auto_open_activity(false);
-        self.start_background_tool(
+        self.start_authorized_prepared_background_tool(
             "module-recommender:recommend".to_string(),
             prepared,
             workspace,
             "deterministic module recommendations in flight",
             None,
+            ExecutionAuthorization::default(),
         );
         self.ui_mut().set_auto_open_activity(previous_auto_open);
     }
@@ -564,10 +575,24 @@ impl ShellApp {
     }
 
     fn should_auto_open_next_phase(&self) -> bool {
-        matches!(
-            self.shell_view(),
-            ShellView::Activity | ShellView::PlanningPicker
-        )
+        if self.run_focus_is_background_owned() {
+            return false;
+        }
+        match self.shell_view() {
+            ShellView::PlanningPicker => true,
+            ShellView::Activity => !self.foreground_run_focus_owns_activity(),
+            _ => false,
+        }
+    }
+
+    fn foreground_run_focus_owns_activity(&self) -> bool {
+        self.shell_view() == ShellView::Activity
+            && self.activity().is_some_and(|session| {
+                !session.run_focus_backgrounded
+                    && session
+                        .run_focus_origin
+                        .is_some_and(|origin| origin.auto_return)
+            })
     }
 
     /// End of the engagement (past 掛 KAKE). When tasks failed, offer a yes/no
@@ -721,24 +746,9 @@ impl ShellApp {
         Ok(input)
     }
 
-    fn dispatch_input_for_planning_task(
-        &self,
-        tool_name: &str,
-        input: Value,
-        workspace: &WorkspaceTarget,
-    ) -> Result<Value> {
-        let ctx = ToolExecutionContext {
-            config: self.config(),
-            workspace: Some(workspace),
-            findings_store: None,
-            trace: None,
-        };
-        self.registry().prepare_tool_input_for_dispatch(
-            tool_name,
-            input,
-            &ctx,
-            Some(self.option_store()),
-        )
+    fn validated_input_for_planning_task(&self, tool_name: &str, input: Value) -> Result<Value> {
+        self.registry()
+            .prepare_tool_input(tool_name, input, Some(self.option_store()))
     }
 
     /// Planning is done. Return to the Workbench cockpit and leave the module
@@ -746,12 +756,21 @@ impl ShellApp {
     fn finish_planning(&mut self) {
         self.engagement.clear_planning_queue();
         self.log("planning", "planning complete");
-        self.open_workbench(crate::app::WorkbenchPane::Findings);
+        if !self.foreground_run_focus_owns_activity() && !self.run_focus_is_background_owned() {
+            self.open_workbench(crate::app::WorkbenchPane::Findings);
+        }
         self.log(
             "recommend",
             "run `recommend` when you want suggested next modules",
         );
     }
+}
+
+fn planning_step_authorization(task: PlanningTaskId) -> ExecutionAuthorization {
+    if task == PlanningTaskId::PatchFindings {
+        return ExecutionAuthorization::interactive_request();
+    }
+    ExecutionAuthorization::default()
 }
 
 fn map_recommendation_notice(root: &Path) -> String {
@@ -906,9 +925,16 @@ fn is_reverse_engineering_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Resolve a tool name back to its planning task. STRIDE/PASTA share a tool
-/// name; the first match (STRIDE) is fine for failure bookkeeping.
-fn planning_task_for_tool(tool_name: &str) -> Option<PlanningTaskId> {
+fn unambiguous_planning_task_for_tool(tool_name: &str) -> Option<PlanningTaskId> {
+    let mut matches = PlanningTaskId::ALL
+        .iter()
+        .copied()
+        .filter(|task| task.tool_name() == tool_name);
+    let task = matches.next()?;
+    matches.next().is_none().then_some(task)
+}
+
+fn recommended_planning_task_for_tool(tool_name: &str) -> Option<PlanningTaskId> {
     PlanningTaskId::ALL
         .iter()
         .copied()
@@ -958,7 +984,7 @@ fn model_tasks_from_recommendation_result(result: &Value) -> BTreeSet<PlanningTa
     recommendations
         .iter()
         .filter_map(|rec| rec.get("tool").and_then(Value::as_str))
-        .filter_map(planning_task_for_tool)
+        .filter_map(recommended_planning_task_for_tool)
         .collect()
 }
 
@@ -967,6 +993,43 @@ mod tests {
     use super::*;
     use kuzushi_core::{Severity, TriageOutcome, V2Config};
     use PlanningTaskId::*;
+
+    #[test]
+    fn shared_threat_model_tool_records_the_running_methodology() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.engagement
+            .set_running_planning_step(BuildPastaThreatModel, "threat-model:build".to_string());
+
+        app.pause_planning_task_after_failure("threat-model:build", "no topology");
+
+        assert_eq!(app.engagement.failed_tasks()[0].task, BuildPastaThreatModel);
+    }
+
+    #[test]
+    fn shared_threat_model_tool_keeps_distinct_activity_identity() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.engagement.queue_plan(vec![BuildPastaThreatModel]);
+        app.engagement
+            .set_running_planning_step(BuildStrideThreatModel, "threat-model:build".to_string());
+
+        assert_eq!(
+            app.engagement.planning_tool_sequence(),
+            vec![
+                "threat-model:build[stride]".to_string(),
+                "threat-model:build[pasta]".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn planning_activity_view_waits_until_run_attachment_captures_setup_origin() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Setup);
+
+        app.apply_planning_dispatch_view(Some(PlanningDispatchView::Activity));
+
+        assert_eq!(app.shell_view(), ShellView::Setup);
+    }
 
     #[test]
     fn retry_hint_parses_raise_heap_token() {
@@ -1047,6 +1110,18 @@ mod tests {
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].tool_name, "patch:finding");
         assert_eq!(steps[0].input["fingerprint"], expected);
+    }
+
+    #[test]
+    fn confirmed_patch_plan_requests_scoped_interactive_authorization() {
+        assert_eq!(
+            planning_step_authorization(PatchFindings),
+            ExecutionAuthorization::interactive_request()
+        );
+        assert_eq!(
+            planning_step_authorization(VerifyFindings),
+            ExecutionAuthorization::default()
+        );
     }
 
     #[test]

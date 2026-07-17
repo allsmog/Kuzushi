@@ -4,6 +4,7 @@ use crate::findings::{Finding, Severity, StaticProofState};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{
     AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions, AgentToolPolicy,
+    RuntimeCost, RuntimeCostReport,
 };
 use crate::whitebox_static::{
     agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
@@ -14,7 +15,6 @@ use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use uuid::Uuid;
 
 mod adapters;
 mod application;

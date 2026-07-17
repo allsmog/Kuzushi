@@ -7,13 +7,32 @@ use kuzushi_core::{
     findings::ReviewDecisionRecord,
     incremental_index::{coalesce_changes, plan_for_change, ReindexPlan, WorkspaceChange},
     workspace::ToolShelf,
-    AgenticSastReport, CarliniThreatHuntReport, Finding, ProgramScope, ScanProgress,
+    AgenticSastReport, CarliniThreatHuntReport, Finding, PatchLifecycleRecord, PatchLifecycleState,
+    ProgramScope, ScanProgress, WorkspaceTarget,
 };
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkspaceStaleSummary {
     strongest_plan: ReindexPlan,
     pending_changes: Vec<WorkspaceChange>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct FindingLedgerCounts {
+    pub(crate) total: usize,
+    pub(crate) reviewed: usize,
+    pub(crate) confirmed: usize,
+    pub(crate) proven: usize,
+    /// Human proof deferrals bound to the current finding generations.
+    pub(crate) proof_deferred: usize,
+    pub(crate) proof_backed: usize,
+    pub(crate) remediated: usize,
+    pub(crate) remediation_projection_complete: bool,
+    /// At least one unfiltered, store-backed finding names its discovery run.
+    /// This is sufficient to project a pre-attempt Scan checkpoint, but never
+    /// overrides a modern phase attempt for the same target.
+    pub(crate) durable_scan_evidence: bool,
 }
 
 impl WorkspaceStaleSummary {
@@ -103,12 +122,16 @@ pub struct DomainCache {
     scan_progress: Option<ScanProgress>,
     chain_aliases: Vec<ExploitChain>,
     exploit_chains: Vec<ExploitChainDetail>,
-    taint_flow: Option<TaintFlowSnapshot>,
+    taint_flows: Vec<TaintFlowSnapshot>,
     program_scope: Option<ProgramScope>,
     findings: Vec<Finding>,
+    findings_revision: u64,
     findings_total: usize,
     findings_read_watermark: Option<u64>,
     review_decisions: Vec<ReviewDecisionRecord>,
+    review_decisions_revision: u64,
+    finding_ledger_counts: Option<FindingLedgerCounts>,
+    patch_lifecycles_by_reverify_run: BTreeMap<String, PatchLifecycleRecord>,
     workspace_stale: Option<WorkspaceStaleSummary>,
     /// Cached "YOUR TOOLS" shelf (favorites + recents). Loaded from disk on
     /// target wiring and favorite toggles — never read per frame.
@@ -140,15 +163,68 @@ impl DomainCache {
             scan_progress: None,
             chain_aliases: Vec::new(),
             exploit_chains: Vec::new(),
-            taint_flow: None,
+            taint_flows: Vec::new(),
             program_scope: None,
             findings: Vec::new(),
+            findings_revision: 0,
             findings_total: 0,
             findings_read_watermark: None,
             review_decisions: Vec::new(),
+            review_decisions_revision: 0,
+            finding_ledger_counts: None,
+            patch_lifecycles_by_reverify_run: BTreeMap::new(),
             workspace_stale: None,
             tool_shelf: ToolShelf::default(),
         }
+    }
+
+    /// Drop every projection whose meaning is rooted in the active target.
+    /// The transcript and session-wide preferences survive; repository data
+    /// never does. Call this before hydrating a newly activated workspace so a
+    /// missing or unreadable artifact honestly renders empty rather than
+    /// leaking the previous target's state.
+    pub(crate) fn reset_for_target(&mut self, workspace: &WorkspaceTarget) {
+        let root = workspace.root();
+        self.context_view = empty_context_view(root);
+        self.workspace_view = empty_workspace_view(workspace);
+        self.kb_view = empty_knowledge_base_view();
+        self.reset_target_runtime(root);
+        self.clear_target_artifacts();
+        self.clear_target_findings();
+        self.workspace_stale = None;
+        self.tool_shelf = ToolShelf::default();
+    }
+
+    fn reset_target_runtime(&mut self, root: &std::path::Path) {
+        self.pwn_view = PwnView::default();
+        self.agent_chat = AgentChatState::default();
+        self.scan = ScanState::default();
+        self.task_durations = TaskDurationStore::load(Some(root));
+        self.workbench_cache = std::cell::RefCell::new(WorkbenchCache::default());
+        self.activity = None;
+        self.live_activity = None;
+        self.recon_snapshot = None;
+        self.carlini_snapshot = None;
+        self.agentic_sast_snapshot = None;
+        self.scan_progress = None;
+    }
+
+    fn clear_target_artifacts(&mut self) {
+        self.chain_aliases.clear();
+        self.exploit_chains.clear();
+        self.taint_flows.clear();
+        self.program_scope = None;
+    }
+
+    fn clear_target_findings(&mut self) {
+        self.findings.clear();
+        self.bump_findings_revision();
+        self.findings_total = 0;
+        self.findings_read_watermark = None;
+        self.review_decisions.clear();
+        self.bump_review_decisions_revision();
+        self.finding_ledger_counts = None;
+        self.patch_lifecycles_by_reverify_run.clear();
     }
 
     pub(crate) fn tool_shelf(&self) -> &ToolShelf {
@@ -239,6 +315,14 @@ impl DomainCache {
         self.agent_chat.set(agent);
     }
 
+    pub(crate) fn agent_artifact_target(&self) -> Option<&std::path::Path> {
+        self.agent_chat.artifact_target()
+    }
+
+    pub(crate) fn set_agent_artifact_target(&mut self, target: Option<std::path::PathBuf>) {
+        self.agent_chat.set_artifact_target(target);
+    }
+
     pub(crate) fn clear_agent_chat(&mut self) {
         self.agent_chat.clear();
     }
@@ -263,8 +347,12 @@ impl DomainCache {
         self.task_durations.estimate_secs(task_id)
     }
 
-    pub(crate) fn record_task_duration_secs(&mut self, task_id: &str, secs: u64) {
-        self.task_durations.record_secs(task_id, secs);
+    pub(crate) fn record_task_duration_secs(
+        &mut self,
+        task_id: &str,
+        secs: u64,
+    ) -> anyhow::Result<()> {
+        self.task_durations.record_secs(task_id, secs)
     }
 
     pub(crate) fn workbench_cache(&self) -> &std::cell::RefCell<WorkbenchCache> {
@@ -352,11 +440,21 @@ impl DomainCache {
     }
 
     pub(crate) fn taint_flow(&self) -> Option<&TaintFlowSnapshot> {
-        self.taint_flow.as_ref()
+        self.taint_flows.first()
     }
 
-    pub(crate) fn set_taint_flow(&mut self, flow: Option<TaintFlowSnapshot>) {
-        self.taint_flow = flow;
+    pub(crate) fn set_taint_flows(&mut self, flows: Vec<TaintFlowSnapshot>) {
+        self.taint_flows = flows;
+    }
+
+    pub(crate) fn taint_flow_for_finding(&self, finding: &Finding) -> Option<&TaintFlowSnapshot> {
+        self.taint_flows.iter().find(|flow| {
+            flow.finding_identity_id
+                .as_deref()
+                .zip(finding.identity_id.as_deref())
+                .is_some_and(|(flow_id, finding_id)| flow_id == finding_id)
+                || flow.finding_fingerprint.as_deref() == Some(finding.fingerprint.as_str())
+        })
     }
 
     pub(crate) fn program_scope(&self) -> Option<&ProgramScope> {
@@ -402,12 +500,18 @@ impl DomainCache {
     }
 
     pub(crate) fn findings_mut(&mut self) -> &mut Vec<Finding> {
+        self.bump_findings_revision();
         &mut self.findings
     }
 
     pub(crate) fn set_findings(&mut self, findings: Vec<Finding>) {
         self.findings_total = findings.len();
         self.findings = findings;
+        self.bump_findings_revision();
+    }
+
+    pub(crate) fn findings_revision(&self) -> u64 {
+        self.findings_revision
     }
 
     pub(crate) fn set_findings_total_count(&mut self, total: usize) {
@@ -424,5 +528,90 @@ impl DomainCache {
 
     pub(crate) fn set_review_decisions(&mut self, decisions: Vec<ReviewDecisionRecord>) {
         self.review_decisions = decisions;
+        self.bump_review_decisions_revision();
+    }
+
+    pub(crate) fn review_decisions_revision(&self) -> u64 {
+        self.review_decisions_revision
+    }
+
+    pub(crate) fn finding_ledger_counts(&self) -> Option<FindingLedgerCounts> {
+        self.finding_ledger_counts
+    }
+
+    pub(crate) fn set_finding_ledger_counts(&mut self, counts: FindingLedgerCounts) {
+        self.finding_ledger_counts = Some(counts);
+    }
+
+    pub(crate) fn set_patch_lifecycle_records(&mut self, records: &[PatchLifecycleRecord]) {
+        self.patch_lifecycles_by_reverify_run.clear();
+        for record in records {
+            let Some(run_id) = record.reverify_run_id.as_ref() else {
+                continue;
+            };
+            self.patch_lifecycles_by_reverify_run
+                .entry(run_id.clone())
+                .or_insert_with(|| record.clone());
+        }
+    }
+
+    pub(crate) fn matching_verified_reverify_run<'a>(
+        &self,
+        run_refs: &'a [String],
+    ) -> Option<&'a str> {
+        // `patch:reverify` writes its execution-context run id into the
+        // application lifecycle. Phase attempt run refs have already crossed
+        // descriptor/phase validation, so this exact intersection binds the
+        // result to its durable application without consulting UI selection.
+        run_refs.iter().find_map(|run_id| {
+            self.patch_lifecycles_by_reverify_run
+                .get(run_id)
+                .is_some_and(|record| record.state == PatchLifecycleState::Verified)
+                .then_some(run_id.as_str())
+        })
+    }
+
+    fn bump_findings_revision(&mut self) {
+        self.findings_revision = self.findings_revision.wrapping_add(1);
+    }
+
+    fn bump_review_decisions_revision(&mut self) {
+        self.review_decisions_revision = self.review_decisions_revision.wrapping_add(1);
+    }
+}
+
+fn empty_context_view(root: &std::path::Path) -> ContextSnapshotView {
+    ContextSnapshotView {
+        snapshot_path: Some(kuzushi_core::context_snapshot_path(root)),
+        exists: false,
+        status: "missing. Next: context build".to_string(),
+        target: None,
+        discovery: None,
+        files_indexed: None,
+        total_files: None,
+        languages: Vec::new(),
+        frameworks: Vec::new(),
+        generated_slices: Vec::new(),
+        stale_slices: Vec::new(),
+    }
+}
+
+fn empty_workspace_view(workspace: &WorkspaceTarget) -> WorkspaceView {
+    WorkspaceView {
+        root: Some(workspace.root().to_path_buf()),
+        state_dir: Some(workspace.state_dir()),
+        findings_db: Some(workspace.findings_db_path()),
+        findings_count: None,
+        last_export: None,
+        status: "workspace ready. Next: workspace status".to_string(),
+    }
+}
+
+fn empty_knowledge_base_view() -> KnowledgeBaseView {
+    KnowledgeBaseView {
+        module_id: "context".to_string(),
+        store_path: None,
+        attachments: Vec::new(),
+        artifacts: Vec::new(),
     }
 }

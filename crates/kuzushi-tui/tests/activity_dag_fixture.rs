@@ -207,10 +207,9 @@ fn pane_focus_routes_jk_to_focused_scroll_offset() {
 
     // Tab to right pane and scroll
     app.activity_route_mut().toggle_pane_focus();
-    app.scroll_down(7);
+    app.scroll_up(7);
     let route = app.activity_route();
-    assert_eq!(route.deck_cursor, 7);
-    assert_eq!(route.feed_scroll, 0, "feed rows now live in TASKS/ACTIONS");
+    assert_eq!(route.feed_scroll, 7);
     assert_eq!(route.task_scroll, 3, "DAG must not move");
     assert!(
         !route.feed_auto_tail,
@@ -223,7 +222,7 @@ fn pane_focus_routes_jk_to_focused_scroll_offset() {
 }
 
 #[test]
-fn pause_toggle_preserves_pinned_output_cursor() {
+fn pause_toggle_preserves_pinned_live_output_scroll() {
     use kuzushi_tui::ActivitySession;
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
@@ -240,37 +239,31 @@ fn pause_toggle_preserves_pinned_output_cursor() {
     }
     app.activity_route_mut().pane_focus = kuzushi_tui::PaneFocus::Right;
 
-    // Operator scrolls OUTPUT by 5 — moves the artifact cursor and unpins
-    // auto-tail. The live event feed itself now lives under TASKS/ACTIONS.
-    app.scroll_down(5);
+    // Operator scrolls OUTPUT up by 5 lines and unpins auto-tail.
+    app.scroll_up(5);
     let route = app.activity_route();
-    assert_eq!(route.deck_cursor, 5);
-    assert_eq!(route.feed_scroll, 0);
+    assert_eq!(route.feed_scroll, 5);
     assert!(!route.feed_auto_tail);
 
-    // Toggle pause on, then off — output cursor and feed_auto_tail must be
+    // Toggle pause on, then off — output scroll and feed_auto_tail must be
     // preserved (R4.D contract).
     let event_count = app.activity().unwrap().events.len();
     app.activity_route_mut().toggle_paused(event_count);
     app.activity_route_mut().toggle_paused(event_count);
     let route = app.activity_route();
-    assert_eq!(
-        route.deck_cursor, 5,
-        "pause toggle must not reset output cursor position"
-    );
+    assert_eq!(route.feed_scroll, 5, "pause must preserve output scroll");
     assert!(
         !route.feed_auto_tail,
         "pause toggle must not re-engage auto-tail"
     );
 
-    // G on OUTPUT jumps to the bottom of the output view; it does not re-arm
-    // feed auto-tail because the feed is no longer the focused right pane.
+    // G on OUTPUT jumps to the bottom and re-arms live auto-tail.
     app.scroll_to_bottom();
     let route = app.activity_route();
-    assert_eq!(route.deck_cursor, 9);
+    assert_eq!(route.feed_scroll, 0);
     assert!(
-        !route.feed_auto_tail,
-        "OUTPUT bottom should not reset live auto-tail"
+        route.feed_auto_tail,
+        "OUTPUT bottom should resume live tail"
     );
 }
 
@@ -282,7 +275,7 @@ fn seed_from_registry_pre_populates_dag_pane() {
     let mut session = ActivitySession::new("scan-pending");
     assert!(session.tasks.is_empty());
 
-    session.seed_from_registry(&registry);
+    session.seed_from_registry_legacy(&registry);
 
     assert!(
         !session.tasks.is_empty(),

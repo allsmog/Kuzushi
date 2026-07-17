@@ -27,21 +27,22 @@ fn home_keybindings() -> Vec<FooterKeybinding> {
 fn collapsed_catalog_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("Ctrl+G", "palette"),
-        bind("modules", "browse"),
-        bind("use <id>", "focus module"),
-        bind("scan", "run scanners"),
-        bind("Ctrl+C", "exit"),
+        bind("j/k", "action"),
+        bind("Enter", "load"),
+        bind("e", "expert"),
+        bind("tools", "inventory"),
+        bind("Esc", "back"),
     ]
 }
 
 fn expanded_catalog_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("Ctrl+G", "palette"),
-        bind("j/k", "row"),
+        bind("j/k", "action"),
         bind("PgUp/PgDn", "scroll"),
-        bind("Enter", "use selected row"),
-        bind("use <id>", "focus module"),
-        bind("findings", "list"),
+        bind("Enter", "load"),
+        bind("e", "phase only"),
+        bind("tools", "full inventory"),
         bind("?", "help"),
     ]
 }

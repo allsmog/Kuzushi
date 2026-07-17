@@ -1,7 +1,7 @@
 ---
 view: home_narrow
 ---
-KUZUSHI mode:shell · view:home · target:none ·...
+KUZUSHI route:shell · view:home · target:none ·...
 
  -- HOME ---------------------------------------------------
 
@@ -16,6 +16,6 @@ KUZUSHI mode:shell · view:home · target:none ·...
         failures ■  report ■  manifest ■
         .kuzushi/v3/runs/latest · `show runs` for detail
 
-  WORKSPACE   target none · modules 39 · context not built
+  WORKSPACE   target none · modules 34 · context not built
 
 > try: target . · options sast:scan · tasks · next · …

@@ -100,11 +100,9 @@ pub fn artifact_kb_path(workspace: &WorkspaceTarget) -> PathBuf {
 
 pub fn index_workspace_artifacts(workspace: &WorkspaceTarget) -> Result<ArtifactIndexReport> {
     let store = ArtifactKnowledgeStore::open(workspace)?;
-    let mut indexed = 0usize;
-    for record in discover_workspace_artifact_records(workspace)? {
-        store.upsert_record(&record)?;
-        indexed += 1;
-    }
+    let candidates = artifact_record_candidates(workspace)?;
+    let sources = index_artifact_sources(&store, workspace, candidates)?;
+    let mut indexed = sources.indexed;
     indexed += store.index_findings_database(workspace)?;
     let stale = store.stale_records(workspace)?;
     Ok(ArtifactIndexReport {

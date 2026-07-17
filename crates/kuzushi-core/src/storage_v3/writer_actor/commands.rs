@@ -1,18 +1,16 @@
 use super::{
     AttackSurfaceWrite, AuditWrite, CandidateObservationWrite, DecisionWrite, FileDeletedWrite,
-    FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite, RekeyWrite,
-    RunLifecycleWrite, SnapshotWrite, VerificationWrite,
+    FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite,
+    PatchLifecycleWrite, RekeyWrite, RunLifecycleWrite, SnapshotWrite, VerificationWrite,
 };
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::mpsc;
-use std::thread;
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 
 mod actor_loop;
-use actor_loop::{run_actor, run_actor_blocking, ActorEnvelope, ActorReceivers};
+use actor_loop::{run_actor, ActorEnvelope, ActorReceivers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteLane {
@@ -30,11 +28,12 @@ pub enum ControlCommand {
     Shutdown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DecisionCommand {
     ReviewDecision(DecisionWrite),
     RecordVerification(VerificationWrite),
     RecordPatchAttempt(PatchAttemptWrite),
+    RecordPatchLifecycle(PatchLifecycleWrite),
     RecordAudit(AuditWrite),
     RecordRunLifecycle(RunLifecycleWrite),
     RecordFindingLifecycle(FindingLifecycleWrite),
@@ -54,7 +53,7 @@ pub enum WatcherCommand {
     ObservationBatch { payload: Value },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum WriterCommand {
     Control(ControlCommand),
     Decision(DecisionCommand),
@@ -218,17 +217,9 @@ impl StorageWriterActor {
         projection_path: impl Into<PathBuf>,
         commands: Vec<WriterCommand>,
     ) -> Result<Vec<super::WriteReceipt>> {
-        let log_dir = log_dir.into();
-        let projection_path = projection_path.into();
-        let (tx, rx) = mpsc::channel();
-        thread::Builder::new()
-            .name("kuzushi-storage-writer".to_string())
-            .spawn(move || {
-                let result = run_actor_blocking(log_dir, projection_path, commands);
-                let _ = tx.send(result);
-            })
-            .context("could not spawn storage writer actor thread")?;
-        rx.recv().context("storage writer actor thread stopped")?
+        let mut session =
+            super::StorageWriterSession::open(log_dir.into(), projection_path.into())?;
+        session.commit_many(commands)
     }
 }
 
@@ -286,7 +277,9 @@ impl StorageWriterActorHandle {
         tx.send(ActorEnvelope::new(command, reply_tx))
             .await
             .context("storage writer actor is stopped")?;
-        reply_rx.await.context("storage writer actor dropped reply")?
+        reply_rx
+            .await
+            .context("storage writer actor dropped reply")?
     }
 
     async fn try_send(
@@ -297,6 +290,8 @@ impl StorageWriterActorHandle {
         let (reply_tx, reply_rx) = oneshot::channel();
         tx.try_send(ActorEnvelope::new(command, reply_tx))
             .context("storage writer actor lane is busy")?;
-        reply_rx.await.context("storage writer actor dropped reply")?
+        reply_rx
+            .await
+            .context("storage writer actor dropped reply")?
     }
 }

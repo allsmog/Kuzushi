@@ -57,6 +57,7 @@ pub(crate) fn load_caps(conn: &Connection) -> Result<BTreeMap<Operation, f64>> {
     for row in rows {
         let (op_str, cap) = row?;
         if let Some(op) = Operation::from_db_str(&op_str) {
+            let cap = crate::runtime::RuntimeCost::from_usd(cap, "stored spend cap")?.usd();
             out.insert(op, cap);
         }
         // Unknown ops in the table are ignored — supports rolling
@@ -77,7 +78,11 @@ pub(crate) fn total_committed_for(conn: &Connection, op: Operation) -> Result<f6
         )
         .optional()?
         .flatten();
-    Ok(value.unwrap_or(0.0))
+    crate::runtime::RuntimeCost::from_usd(
+        value.unwrap_or(0.0),
+        "spend ledger committed total",
+    )
+    .map(crate::runtime::RuntimeCost::usd)
 }
 
 pub(crate) fn total_committed_all(conn: &Connection) -> Result<f64> {
@@ -89,7 +94,11 @@ pub(crate) fn total_committed_all(conn: &Connection) -> Result<f64> {
         )
         .optional()?
         .flatten();
-    Ok(value.unwrap_or(0.0))
+    crate::runtime::RuntimeCost::from_usd(
+        value.unwrap_or(0.0),
+        "global spend ledger committed total",
+    )
+    .map(crate::runtime::RuntimeCost::usd)
 }
 
 pub(crate) fn unix_seconds() -> i64 {

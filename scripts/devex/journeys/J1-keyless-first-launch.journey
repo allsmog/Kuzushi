@@ -29,4 +29,4 @@ keys: d
 wait-for: 90 run completed
 snap: offline-demo-result
 expect: findings
-ask: Offline escape hatch — did `d` land on a real finding with evidence (value legible), not just a log dump?
+ask: Offline escape hatch — did `d` make a real scanner signal, redacted location, and signal_only proof state legible, not just dump logs?

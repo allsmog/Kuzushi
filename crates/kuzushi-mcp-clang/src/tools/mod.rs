@@ -6,17 +6,18 @@ mod file_macro_handlers;
 mod health_compile_handlers;
 mod health_handle;
 mod navigation_handlers;
-mod stub;
 mod tool_types;
 mod type_ast_handlers;
 
 #[cfg(test)]
 mod tests;
 pub use build_registry::build_registry;
+#[cfg(test)]
+pub(crate) use build_registry::build_registry_with_capability;
 pub use health_handle::health_summary;
 
 #[cfg(test)]
-pub(crate) use arguments::PositionRequest;
+pub(crate) use arguments::{FileRequest, PositionRequest};
 #[cfg(test)]
 pub(crate) use call_hierarchy::{extend_with_json_array, json_array};
 #[cfg(test)]

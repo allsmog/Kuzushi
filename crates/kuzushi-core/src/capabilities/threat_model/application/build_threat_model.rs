@@ -25,9 +25,24 @@ fn build_agentic_threat_model(
     emit_threat_model_start(ctx, verb, flavor, &input);
     let source_bundle = load_threat_model_source_bundle(ctx, &input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
-    let mut generated =
+    let generated =
         generate_threat_model_document(runtime, ctx, flavor, verb, &input, &source_bundle)?;
-    let artifacts = write_threat_model_outputs(flavor, &input, &generated.document)?;
+    finish_agentic_threat_model(ctx, flavor, verb, input, generated, source_bundle)
+}
+
+fn finish_agentic_threat_model(
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+    verb: &str,
+    input: BuildInput,
+    mut generated: GeneratedThreatModel,
+    source_bundle: ThreatModelSourceBundle,
+) -> Result<Value> {
+    let has_concrete_content =
+        crate::workflow_attempts::threat_model_has_concrete_content(&generated.document);
+    let cost = generated_threat_model_cost(&generated)?;
+    let artifacts =
+        write_threat_model_outputs(flavor, &input, &generated.document, has_concrete_content)?;
     emit_artifact_write(ctx, verb, &artifacts);
     let findings = take_threat_model_findings(&input, &mut generated);
     let summary = threat_model_summary(&generated.document);
@@ -37,29 +52,28 @@ fn build_agentic_threat_model(
         &summary,
         findings.len(),
         artifacts.persisted,
+        has_concrete_content,
+        cost,
     );
-    emit_threat_model_done(ctx, verb, flavor, &summary);
-    Ok(threat_model_response(
+    emit_threat_model_terminal(ctx, verb, flavor, &summary, has_concrete_content);
+    threat_model_response(
         input,
         flavor,
         generated,
         artifacts,
         findings,
-        summary,
+        has_concrete_content,
+        cost,
         lines,
         source_bundle,
-    ))
+    )
 }
 
 fn take_threat_model_findings(
     input: &BuildInput,
     generated: &mut GeneratedThreatModel,
 ) -> Vec<Value> {
-    threat_model_findings(
-        input,
-        generated.bridge_findings.take(),
-        &generated.document,
-    )
+    threat_model_findings(input, generated.bridge_findings.take(), &generated.document)
 }
 
 fn should_build_deterministically(
@@ -70,7 +84,10 @@ fn should_build_deterministically(
     runtime.is_none() || (read_string(input, &["model"]).is_none() && ctx.config.model.is_none())
 }
 
-fn reject_source_options_without_runtime(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<()> {
+fn reject_source_options_without_runtime(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<()> {
     if has_runtime_only_source_option(input, ctx) {
         anyhow::bail!(
             "threat-model:build seed/design/source prompt options require a configured model/runtime; deterministic no-runtime threat modeling cannot consume them"
@@ -113,11 +130,10 @@ fn nondefault_context_controls_requested(input: &Value) -> bool {
     read_string(input, &["contextMode", "context_mode"]).is_some_and(|mode| {
         let mode = mode.to_ascii_lowercase();
         mode != "auto" && mode != "off"
-    })
-        || input
-            .get("contextLimit")
-            .and_then(Value::as_u64)
-            .is_some_and(|limit| limit != 200)
+    }) || input
+        .get("contextLimit")
+        .and_then(Value::as_u64)
+        .is_some_and(|limit| limit != 200)
         || input
             .get("maxSourceBytes")
             .and_then(Value::as_u64)
@@ -128,7 +144,8 @@ fn explicit_prompt_override_requested(input: &Value, ctx: &ToolExecutionContext<
     let Some(prompt) = read_string(input, &["THREAT_MODEL_PROMPT"]) else {
         return false;
     };
-    !prompt_matches_workspace_default_prompt(input, ctx, &prompt)
+    !prompt_text_matches(DEFAULT_THREAT_MODEL_GUIDANCE, &prompt)
+        && !prompt_matches_workspace_default_prompt(input, ctx, &prompt)
 }
 
 fn prompt_matches_workspace_default_prompt(
@@ -144,7 +161,19 @@ fn prompt_matches_workspace_default_prompt(
         return false;
     };
     let path = crate::options::prompt_override_path(&target, "threat-model", "build");
-    std::fs::read_to_string(path).is_ok_and(|content| prompt_text_matches(&content, prompt))
+    let Ok(content) = crate::bounded_file::read_utf8_text(&path, MAX_SOURCE_BYTES) else {
+        return false;
+    };
+    if prompt_text_matches(&content, prompt) {
+        return true;
+    }
+    let relative = crate::options::relative_prompt_override_path("threat-model", "build");
+    let composed = crate::prompts::compose_target_prompt_context(
+        DEFAULT_THREAT_MODEL_GUIDANCE,
+        &relative.display().to_string(),
+        &content,
+    );
+    prompt_text_matches(&composed, prompt)
 }
 
 fn prompt_text_matches(file_content: &str, prompt: &str) -> bool {
@@ -229,6 +258,7 @@ struct GeneratedThreatModel {
     document: Value,
     bridge_findings: Option<Vec<Value>>,
     cost_usd: f64,
+    cost_usd_exact: bool,
 }
 
 fn generate_threat_model_document(
@@ -243,12 +273,16 @@ fn generate_threat_model_document(
     let costed = query_threat_model_document(runtime, ctx, flavor, verb, input, prompt)?;
     let mut generated = normalize_threat_model_raw(costed.value, &input.methodology)?;
     generated.cost_usd = costed.cost_usd;
+    generated.cost_usd_exact = costed.cost_usd_exact;
     emit_validation_done(ctx, verb);
     Ok(generated)
 }
 
-fn threat_model_prompt(input: &BuildInput, source_bundle: &ThreatModelSourceBundle) -> Result<String> {
-    let previous_model = load_persistent_threat_model(&input.target);
+fn threat_model_prompt(
+    input: &BuildInput,
+    source_bundle: &ThreatModelSourceBundle,
+) -> Result<String> {
+    let previous_model = try_load_persistent_threat_model(&input.target)?;
     build_agent_prompt(input, previous_model.as_ref(), source_bundle)
 }
 
@@ -310,6 +344,7 @@ fn normalize_threat_model_raw(raw: Value, methodology: &str) -> Result<Generated
         document,
         bridge_findings,
         cost_usd: 0.0,
+        cost_usd_exact: true,
     })
 }
 
@@ -322,10 +357,11 @@ fn write_threat_model_outputs(
     flavor: BuildFlavor,
     input: &BuildInput,
     document: &Value,
+    has_concrete_content: bool,
 ) -> Result<ThreatModelArtifacts> {
     let normalized_artifact =
         write_normalized_artifact(&input.target, &input.output_dir, document)?;
-    let persisted = persist_threat_model_document(flavor, input, document)?;
+    let persisted = persist_threat_model_document(flavor, input, document, has_concrete_content)?;
     Ok(ThreatModelArtifacts {
         normalized_artifact,
         persisted,
@@ -336,8 +372,9 @@ fn persist_threat_model_document(
     flavor: BuildFlavor,
     input: &BuildInput,
     document: &Value,
+    has_concrete_content: bool,
 ) -> Result<bool> {
-    if !flavor.persists_document() {
+    if !flavor.persists_document() || !has_concrete_content {
         return Ok(false);
     }
     save_persistent_threat_model(&input.target, document, !input.preserve_user_edits)
@@ -361,36 +398,93 @@ fn threat_model_response(
     generated: GeneratedThreatModel,
     artifacts: ThreatModelArtifacts,
     findings: Vec<Value>,
-    summary: ThreatModelSummary,
+    has_concrete_content: bool,
+    cost: crate::runtime::RuntimeCostReport,
     mut lines: Vec<String>,
     source_bundle: ThreatModelSourceBundle,
-) -> Value {
+) -> Result<Value> {
     append_top_threats(&mut lines, &generated.document);
+    let target = input.target.clone();
     let persistent_artifact = persistent_threat_model_path(&input.target);
     let artifact_items = threat_model_artifacts(
         &artifacts.normalized_artifact,
         &persistent_artifact,
         artifacts.persisted,
     );
+    let data = threat_model_result_data(
+        input,
+        flavor,
+        generated,
+        artifacts,
+        findings,
+        source_bundle,
+        persistent_artifact,
+    );
+    let mut result =
+        threat_model_result_envelope(flavor, &target, has_concrete_content, lines, data);
+    result["artifacts"] = json!(artifact_items);
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
+    Ok(result)
+}
+
+fn threat_model_result_envelope(
+    flavor: BuildFlavor,
+    target: &Path,
+    has_concrete_content: bool,
+    mut lines: Vec<String>,
+    data: Value,
+) -> Value {
+    if has_concrete_content {
+        let output = lines.join("\n");
+        return crate::module_result::completed_output_result(output.clone(), output, data);
+    }
+    let guidance = crate::workflow_attempts::insufficient_map_evidence_message(target);
+    lines.push(guidance.clone());
+    crate::module_result::partial_output_result(
+        format!(
+            "{} produced no concrete threat-model evidence",
+            flavor.tool_name()
+        ),
+        lines.join("\n"),
+        vec![json!(guidance)],
+        data,
+    )
+}
+
+fn generated_threat_model_cost(
+    generated: &GeneratedThreatModel,
+) -> Result<crate::runtime::RuntimeCostReport> {
+    let observed =
+        crate::runtime::RuntimeCost::from_usd(generated.cost_usd, "threat-model generated cost")?;
+    Ok(if generated.cost_usd_exact {
+        crate::runtime::RuntimeCostReport::known(observed)
+    } else {
+        crate::runtime::RuntimeCostReport::incomplete(observed)
+    })
+}
+
+fn threat_model_result_data(
+    input: BuildInput,
+    flavor: BuildFlavor,
+    generated: GeneratedThreatModel,
+    artifacts: ThreatModelArtifacts,
+    findings: Vec<Value>,
+    source_bundle: ThreatModelSourceBundle,
+    persistent_artifact: PathBuf,
+) -> Value {
     json!({
-        "ok": summary.threat_count > 0 || summary.node_count > 0 || summary.flow_count > 0,
-        "output": lines.join("\n"),
-        "artifacts": artifact_items,
-        "data": {
-            "target": input.target.display().to_string(),
-            "repoName": input.repo_name,
-            "artifactDir": input.output_dir,
-            "normalizedArtifact": artifacts.normalized_artifact.display().to_string(),
-            "threatModelPath": persistent_artifact.display().to_string(),
-            "provider": flavor.provider(),
-            "methodology": input.methodology,
-            "slice": input.slice,
-            "stages": input.stages,
-            "sources": source_bundle.metadata_json(),
-            "document": generated.document,
-            "findings": findings,
-            "persisted": artifacts.persisted,
-        },
-        "costUsd": generated.cost_usd,
+        "target": input.target.display().to_string(),
+        "repoName": input.repo_name,
+        "artifactDir": input.output_dir,
+        "normalizedArtifact": artifacts.normalized_artifact.display().to_string(),
+        "threatModelPath": persistent_artifact.display().to_string(),
+        "provider": flavor.provider(),
+        "methodology": input.methodology,
+        "slice": input.slice,
+        "stages": input.stages,
+        "sources": source_bundle.metadata_json(),
+        "document": generated.document,
+        "findings": findings,
+        "persisted": artifacts.persisted,
     })
 }

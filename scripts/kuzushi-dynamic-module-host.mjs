@@ -8,7 +8,7 @@ const DYNAMIC_HOST_PROTOCOL_VERSION = 1;
 // Baked at release time and checked by scripts/check-release-contract.mjs.
 // Do not derive this from KUZUSHI_HOST_VERSION: that would let a stale host
 // simply echo the native process's expectation and defeat the ABI handshake.
-const HOST_PACKAGE_VERSION = "0.24.0-alpha.6";
+const HOST_PACKAGE_VERSION = "0.24.0-alpha.8";
 const OPTION_TYPES_BY_JSON_SCHEMA_TYPE = {
   string: "string",
   boolean: "bool",
@@ -113,12 +113,14 @@ function describeTool(moduleId, tool) {
   }
   toolExecutor(tool, name);
   const options = tool.options ?? optionsFromInputSchema(tool.inputSchema, name);
+  const normalizedOptions = normalizeOptions(options);
   const effect = normalizeEffect(tool.effect, name);
   const approval = normalizeApproval(tool.approval, effect, name);
+  const prompts = normalizePrompts(tool.prompts ?? [], moduleId, name, normalizedOptions);
   return {
     name,
     description: stringField(tool.description ?? name, `${name}.description`),
-    headless: optionalBooleanField(tool.headless, true, `${name}.headless`),
+    headless: booleanField(tool.headless, `${name}.headless`),
     hidden: optionalBooleanField(tool.hidden, false, `${name}.hidden`),
     runtime_requirement: normalizeRuntimeRequirement(tool, name),
     phase: normalizePhase(tool.phase, effect, name),
@@ -126,8 +128,43 @@ function describeTool(moduleId, tool) {
     approval,
     workspace_requirement: normalizeWorkspaceRequirement(tool.workspaceRequirement, name),
     finding_store_requirement: "optional",
-    options: normalizeOptions(options),
+    options: normalizedOptions,
+    ...(prompts.length > 0 ? { prompts } : {}),
   };
+}
+
+function normalizePrompts(prompts, moduleId, toolName, options) {
+  const optionNames = new Set(options.map((option) => option.name));
+  return arrayField(prompts, `${toolName}.prompts`).map((prompt) => {
+    const promptModule = stringField(
+      prompt.moduleId ?? prompt.module_id ?? moduleId,
+      `${toolName}.prompt.moduleId`,
+    );
+    if (promptModule !== moduleId) {
+      throw new Error(`${toolName} prompt moduleId must match ${moduleId}`);
+    }
+    const optionKey = stringField(
+      prompt.optionKey ?? prompt.option_key,
+      `${toolName}.prompt.optionKey`,
+    );
+    if (!optionNames.has(optionKey)) {
+      throw new Error(`${toolName} prompt optionKey ${optionKey} is not declared in options`);
+    }
+    return {
+      role: stringField(prompt.role, `${toolName}.prompt.role`),
+      moduleId: promptModule,
+      verb: stringField(prompt.verb, `${toolName}.prompt.verb`),
+      optionKey,
+      defaultContent: stringField(
+        prompt.defaultContent ?? prompt.default_content,
+        `${toolName}.prompt.defaultContent`,
+      ),
+      contextNote:
+        prompt.contextNote ??
+        prompt.context_note ??
+        "Repository context is generated at runtime and is not part of this editable instruction template.",
+    };
+  });
 }
 
 function normalizeOptions(options) {
@@ -143,6 +180,7 @@ function normalizeOptions(options) {
       ...(type === "path"
         ? { pathSemantics: normalizePathSemantics(option.pathSemantics, option.name) }
         : {}),
+      ...normalizeIntegerBounds(option, type, `option ${option.name}`),
       ...(option.default === undefined ? {} : { default: option.default }),
       choices: stringArrayField(option.choices ?? [], `${option.name}.choices`),
       aliases: stringArrayField(option.aliases ?? [], `${option.name}.aliases`),
@@ -152,6 +190,19 @@ function normalizeOptions(options) {
       ),
     };
   });
+}
+
+function normalizeIntegerBounds(source, type, label) {
+  const bounds = {};
+  for (const field of ["minimum", "maximum"]) {
+    const value = source[field];
+    if (value === undefined) continue;
+    if (type !== "int" || !Number.isSafeInteger(value)) {
+      throw new Error(`${label}.${field} requires an integer option and a safe integer value`);
+    }
+    bounds[field] = value;
+  }
+  return bounds;
 }
 
 function normalizePathSemantics(value, optionName) {
@@ -222,7 +273,7 @@ function assertObjectInputSchema(schema, toolName) {
     ]),
     `${toolName} inputSchema`,
   );
-  if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) {
+  if (schema.additionalProperties !== false) {
     throw new Error(
       `${toolName} inputSchema must declare additionalProperties: false because native option validation rejects unknown keys`,
     );
@@ -242,7 +293,7 @@ function optionFromSchemaProperty(name, property, required) {
   const schema = property;
   rejectUnsupportedSchemaKeys(
     schema,
-    new Set(["type", "description", "default", "enum", "items"]),
+    new Set(["type", "description", "default", "enum", "items", "minimum", "maximum"]),
     `inputSchema.properties.${name}`,
   );
   const choices = schemaEnumValues(schema.enum);
@@ -254,6 +305,7 @@ function optionFromSchemaProperty(name, property, required) {
     required,
     advanced: false,
     evasion: false,
+    ...normalizeIntegerBounds(schema, type, `inputSchema.properties.${name}`),
     ...(schema.default === undefined ? {} : { default: schema.default }),
     choices,
     aliases: [],
@@ -764,9 +816,10 @@ async function removeKwpFile(host, live, scope, path) {
 
 function kwpRuntimeProxy(host, live, context) {
   return {
-    async query(request) {
+    query(request) {
       const normalized = normalizeKwpRuntimeQueryRequest(request, context);
-      return await brokerCall(host, live, "kuzushi/runtime/query", { request: normalized });
+      const response = brokerCall(host, live, "kuzushi/runtime/query", { request: normalized });
+      return runtimeQueryHandle(response);
     },
   };
 }
@@ -1038,32 +1091,36 @@ function normalizePhase(phase, effect, name) {
 }
 
 function normalizeEffect(effect, name) {
-  const value = effect ?? "read";
-  if (!["read", "workspace-write", "target-write", "external-action"].includes(value)) {
+  if (
+    !["read", "workspace-write", "target-write", "repository-execute", "external-action"].includes(
+      effect,
+    )
+  ) {
     throw new Error(
-      `${name}.effect must be read, workspace-write, target-write, or external-action`,
+      `${name}.effect must be read, workspace-write, target-write, repository-execute, or external-action`,
     );
   }
-  return value;
+  return effect;
 }
 
 function normalizeApproval(approval, effect, name) {
-  const value = approval ?? "none";
-  if (!["none", "explicit"].includes(value)) {
+  if (!["none", "explicit"].includes(approval)) {
     throw new Error(`${name}.approval must be none or explicit`);
   }
-  if (["target-write", "external-action"].includes(effect) && value !== "explicit") {
+  if (
+    ["target-write", "repository-execute", "external-action"].includes(effect) &&
+    approval !== "explicit"
+  ) {
     throw new Error(`${name}.effect=${effect} requires approval=explicit`);
   }
-  return value;
+  return approval;
 }
 
 function normalizeWorkspaceRequirement(requirement, name) {
-  const value = requirement ?? "optional";
-  if (!["optional", "required"].includes(value)) {
+  if (!["optional", "required"].includes(requirement)) {
     throw new Error(`${name}.workspaceRequirement must be optional or required`);
   }
-  return value;
+  return requirement;
 }
 
 function normalizeRuntimeRequirement(tool, name) {

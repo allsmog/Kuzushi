@@ -6,7 +6,7 @@ pub(crate) fn inspect_source_file(
     builder: &mut AttackSurfaceBuilder,
 ) -> Result<()> {
     let full_path = root.join(&source_file.path);
-    let bytes = fs::read(&full_path)
+    let bytes = crate::bounded_file::read_regular_bytes_within(root, &full_path, 16 * 1024 * 1024)
         .with_context(|| format!("Could not read source file {}", full_path.display()))?;
     if bytes.iter().take(4096).any(|byte| *byte == 0) {
         return Ok(());

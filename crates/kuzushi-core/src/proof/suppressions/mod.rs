@@ -5,7 +5,6 @@ use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) use validate_whitebox_suppression::*;

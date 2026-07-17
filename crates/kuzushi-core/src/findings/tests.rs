@@ -553,6 +553,88 @@ mod tests {
     }
 
     #[test]
+    fn global_projection_collapses_identity_and_merges_cross_run_sources() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-global-a", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        store
+            .record_run_started("run-global-b", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+
+        let first = Finding::new_tool(
+            "semgrep",
+            "semgrep/cwe-79",
+            "src/render.ts",
+            20,
+            Some(20),
+            Severity::Medium,
+            "user input reaches the HTML sink, CWE-79",
+        );
+        let second = Finding::new_tool(
+            "codeql",
+            "codeql/cwe-79",
+            "src/render.ts",
+            24,
+            Some(24),
+            Severity::High,
+            "user input reaches the HTML sink, CWE-79",
+        );
+        let first_id = store.insert_finding("run-global-a", &first).unwrap();
+        let second_id = store.insert_finding("run-global-b", &second).unwrap();
+
+        let first_run = store.list_findings_for_scan_id("run-global-a").unwrap();
+        let second_run = store.list_findings_for_scan_id("run-global-b").unwrap();
+        assert_eq!(first_run.len(), 1);
+        assert_eq!(second_run.len(), 1);
+        assert_eq!(first_run[0].id, Some(first_id));
+        assert_eq!(second_run[0].id, Some(second_id));
+        assert_eq!(first_run[0].identity_id, second_run[0].identity_id);
+        assert_ne!(first_run[0].fingerprint, second_run[0].fingerprint);
+        assert_eq!(first_run[0].corroboration_count, 1);
+        assert_eq!(second_run[0].corroboration_count, 1);
+        assert_eq!(first_run[0].sources.len(), 1);
+        assert_eq!(second_run[0].sources.len(), 1);
+
+        let global = store.list_findings(10).unwrap();
+        assert_eq!(global.len(), 1);
+        assert_eq!(global[0].id, Some(second_id));
+        assert_eq!(global[0].severity, Severity::High);
+        assert_eq!(global[0].corroboration_count, 2);
+        let source_tools = global[0]
+            .sources
+            .iter()
+            .map(|source| source.tool.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(source_tools, vec!["codeql", "semgrep"]);
+        let semgrep_source = global[0]
+            .sources
+            .iter()
+            .find(|source| source.tool == "semgrep")
+            .unwrap();
+        assert_eq!(semgrep_source.first_scan_id, "run-global-a");
+        assert_eq!(semgrep_source.last_scan_id, "run-global-a");
+        let codeql_source = global[0]
+            .sources
+            .iter()
+            .find(|source| source.tool == "codeql")
+            .unwrap();
+        assert_eq!(codeql_source.first_scan_id, "run-global-b");
+        assert_eq!(codeql_source.last_scan_id, "run-global-b");
+        assert_eq!(
+            stable_finding_alias(&global, &global[0].fingerprint).as_deref(),
+            Some("F-0001")
+        );
+        let resolved = resolve_finding_alias(&global, "F-0001").unwrap();
+        assert_eq!(resolved.id, global[0].id);
+        assert_eq!(
+            stable_finding_alias(&global, &resolved.fingerprint).as_deref(),
+            Some("F-0001")
+        );
+        assert!(resolve_finding_alias(&global, "F-0002").is_none());
+    }
+
+    #[test]
     fn stores_and_lists_findings_with_triage() {
         let store = FindingStore::open_in_memory().unwrap();
         let run_id = "run-1";
@@ -725,6 +807,64 @@ mod tests {
         assert_eq!(rebuilt_identity_count, identity_count);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn file_backed_insert_omits_provenance_for_outside_symlink() {
+        const OUTSIDE_TOKEN: &str = "OUTSIDE-REQUIREMENTS-TOKEN-MUST-NOT-PERSIST";
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let workspace_root = workspace.path().canonicalize().unwrap();
+        let outside_file = outside.path().join("requirements.txt");
+        std::fs::write(&outside_file, OUTSIDE_TOKEN).unwrap();
+        std::os::unix::fs::symlink(&outside_file, workspace_root.join("requirements.txt")).unwrap();
+        let db_path = workspace_root.join(".kuzushi/v3/index.sqlite3");
+        let log_path = workspace_root.join(".kuzushi/v3/log");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let store = FindingStore::open(&db_path).unwrap();
+        let run_id = "run-symlink-provenance";
+        store
+            .record_run_started(run_id, &workspace_root, "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "dep-hygiene",
+            "dep-hygiene/unpinned",
+            "requirements.txt",
+            1,
+            Some(1),
+            Severity::Medium,
+            "Dependency is not pinned",
+        );
+
+        store.insert_finding(run_id, &finding).unwrap();
+
+        let events = crate::event_log::EventLog::open(&log_path)
+            .unwrap()
+            .read_all()
+            .unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[1].event_kind,
+            crate::event_log::EventKind::FindingObserved
+        );
+        assert!(events[1]
+            .payload
+            .get("blobHash")
+            .is_none_or(serde_json::Value::is_null));
+        assert!(!serde_json::to_string(&events)
+            .unwrap()
+            .contains(OUTSIDE_TOKEN));
+        assert!(
+            !serde_json::to_string(&store.list_findings_for_scan_id(run_id).unwrap())
+                .unwrap()
+                .contains(OUTSIDE_TOKEN)
+        );
+        assert!(!crate::workspace::workspace_objects_dir(&workspace_root).exists());
+        assert_eq!(
+            std::fs::read_to_string(outside_file).unwrap(),
+            OUTSIDE_TOKEN
+        );
+    }
+
     #[test]
     fn file_backed_save_verification_records_v3_event_and_projection() {
         let temp = tempfile::tempdir().unwrap();
@@ -763,6 +903,8 @@ mod tests {
                     duration_ms: 250,
                     cost_usd: 0.125,
                     notes: vec!["empirical proof".to_string()],
+                    verification_run_id: Some("verify-run-v3".to_string()),
+                    verified_scan_id: Some(run_id.to_string()),
                     created_at: String::new(),
                 },
             )
@@ -781,14 +923,23 @@ mod tests {
         );
 
         let conn = rusqlite::Connection::open(db_path).unwrap();
-        let projected: (String, i64, String) = conn
+        let projected: (String, i64, String, String, String) = conn
             .query_row(
-                "select stable_fp, proof_level, proof_verdict from verification_events",
+                "select stable_fp, proof_level, proof_verdict, verification_run_id, verified_scan_id from verification_events",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )
             .unwrap();
-        assert_eq!(projected, (stable_fp, 4, "exploited".to_string()));
+        assert_eq!(
+            projected,
+            (
+                stable_fp,
+                4,
+                "exploited".to_string(),
+                "verify-run-v3".to_string(),
+                run_id.to_string(),
+            )
+        );
         let old_table_count: i64 = conn
             .query_row(
                 "select count(*) from sqlite_master where type = 'table' and name = 'verifications'",
@@ -827,7 +978,8 @@ mod tests {
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.95,
                     rationale: "operator confirmed source-to-sink evidence".to_string(),
-                    ..Default::default()
+                    cost_usd: 0.125,
+                    cost_usd_exact: false,
                 },
                 TriageAuthor::Human,
             )
@@ -839,6 +991,9 @@ mod tests {
             Some(TriageVerdict::TruePositive)
         );
         assert_eq!(stored[0].triaged_by, Some(TriageAuthor::Human));
+        let stored_triage = stored[0].triage.as_ref().unwrap();
+        assert_eq!(stored_triage.cost_usd, 0.125);
+        assert!(!stored_triage.cost_usd_exact);
         let latest = store
             .latest_review_decision(finding_id)
             .unwrap()
@@ -857,6 +1012,11 @@ mod tests {
         assert_eq!(
             events[2].payload["updatesFindingTriage"].as_bool(),
             Some(true)
+        );
+        assert_eq!(events[2].payload["triageCostUsd"].as_f64(), Some(0.125));
+        assert_eq!(
+            events[2].payload["triageCostUsdExact"].as_bool(),
+            Some(false)
         );
     }
 
@@ -896,7 +1056,8 @@ mod tests {
                 build_command: Some("cargo build".to_string()),
                 test_command: Some("cargo test".to_string()),
                 worktree_path: Some("/tmp/worktree".to_string()),
-                cost_usd: Some(0.25),
+                cost_usd: Some(0.000_000_4),
+                provider_spend_unresolved: true,
                 validator_log: Some("tests passed".to_string()),
                 history: vec![PatchAttempt {
                     attempt: 1,
@@ -904,6 +1065,14 @@ mod tests {
                     status: PatchStatus::Sound,
                     output: "ok".to_string(),
                 }],
+                provenance: Some(PatchProvenance {
+                    source_commit: "0123456789012345678901234567890123456789".to_string(),
+                    target: "/tmp/repo".to_string(),
+                    originating_run_id: Some("shell-run".to_string()),
+                    detector_tool: Some("semgrep:scan".to_string()),
+                    detector_run_id: Some(run_id.to_string()),
+                    detector_input_digest: Some("digest".to_string()),
+                }),
                 created_at: None,
                 updated_at: None,
             })
@@ -920,34 +1089,68 @@ mod tests {
             events[2].payload["stableFp"].as_str(),
             Some(stable_fp.as_str())
         );
+        assert_eq!(events[2].payload["costUsd"], json!(0.000_000_4));
+        assert_eq!(events[2].payload["costUsdMicros"], json!(0));
+        assert_eq!(events[2].payload["providerSpendUnresolved"], json!(true));
 
         let conn = rusqlite::Connection::open(db_path).unwrap();
-        let projected: (String, String, String) = conn
+        let projected: (String, String, String, i64, f64) = conn
             .query_row(
-                "select stable_fp, patch_run_id, diff_object from patch_attempt_events",
+                "select stable_fp, patch_run_id, diff_object, diff_size_bytes, cost_usd from patch_attempt_events",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )
             .unwrap();
         assert_eq!(projected.0, stable_fp);
         assert_eq!(projected.1, "patch-run-v3");
         assert!(projected.2.len() >= 4);
-        assert!(temp
+        assert_eq!(
+            projected.3,
+            "diff --git a/src/app.rs b/src/app.rs\n".len() as i64
+        );
+        assert_eq!(projected.4, 0.000_000_4);
+        let object_path = temp
             .path()
             .join(".kuzushi/v3/objects/blake3")
             .join(&projected.2[0..2])
             .join(&projected.2[2..4])
-            .join(&projected.2)
-            .is_file());
+            .join(&projected.2);
+        assert!(object_path.is_file());
         let read_back = store
             .get_patch_results_for_finding(&finding.fingerprint)
             .unwrap();
         assert_eq!(read_back.len(), 1);
         assert_eq!(read_back[0].status, PatchStatus::Verified);
+        assert_eq!(read_back[0].cost_usd, Some(0.000_000_4));
+        assert!(read_back[0].provider_spend_unresolved);
+        assert_eq!(
+            read_back[0]
+                .provenance
+                .as_ref()
+                .map(|provenance| provenance.source_commit.as_str()),
+            Some("0123456789012345678901234567890123456789")
+        );
         assert_eq!(
             read_back[0].diff.as_deref(),
             Some("diff --git a/src/app.rs b/src/app.rs\n")
         );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let outside = temp.path().join("outside-patch-secret");
+            std::fs::write(&outside, "secret").unwrap();
+            std::fs::remove_file(&object_path).unwrap();
+            symlink(&outside, &object_path).unwrap();
+            let error = store
+                .get_patch_results_for_finding(&finding.fingerprint)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("symlink") || error.contains("non-symlink"),
+                "{error}"
+            );
+            assert_eq!(std::fs::read_to_string(outside).unwrap(), "secret");
+        }
         let old_table_count: i64 = conn
             .query_row(
                 "select count(*) from sqlite_master where type = 'table' and name = 'patch_results'",
@@ -956,6 +1159,84 @@ mod tests {
             )
             .unwrap();
         assert_eq!(old_table_count, 0);
+    }
+
+    #[test]
+    fn patch_lifecycle_is_append_only_with_one_current_projection() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
+        let run_id = "run-patch-lifecycle";
+        store
+            .record_run_started(run_id, temp.path(), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "semgrep:scan",
+            "rules.cwe-89",
+            "src/app.rs",
+            42,
+            Some(42),
+            Severity::High,
+            "SQL injection reaches query builder",
+        );
+        store.insert_finding(run_id, &finding).unwrap();
+        let stable_fp = store
+            .patch_lifecycle_stable_fp(&finding.fingerprint)
+            .unwrap();
+        let mut record = PatchLifecycleRecord {
+            application_id: "application-1".to_string(),
+            stable_fp,
+            fingerprint: finding.fingerprint.clone(),
+            finding_scan_id: finding.scan_id.clone(),
+            patch_run_id: "patch-run-1".to_string(),
+            target: temp.path().display().to_string(),
+            diff_hash: "diff-hash".to_string(),
+            base_commit: Some("base-commit".to_string()),
+            touched_files: vec![PatchLifecycleFile {
+                path: "src/app.rs".to_string(),
+                before_hash: Some("before".to_string()),
+                after_hash: Some("after".to_string()),
+            }],
+            state: PatchLifecycleState::Applied,
+            reverify_run_id: None,
+            detail: None,
+            actor: "operator".to_string(),
+            application_started_at: "1".to_string(),
+            applied_at: Some("1".to_string()),
+            updated_at: "1".to_string(),
+        };
+        store.insert_patch_lifecycle_record(&record).unwrap();
+        record.state = PatchLifecycleState::Verified;
+        record.reverify_run_id = Some("reverify-1".to_string());
+        record.updated_at = "2".to_string();
+        store.insert_patch_lifecycle_record(&record).unwrap();
+
+        let loaded = store
+            .get_patch_lifecycle("application-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.state, PatchLifecycleState::Verified);
+        assert_eq!(
+            store
+                .latest_patch_lifecycle_for_finding(&finding.fingerprint)
+                .unwrap()
+                .unwrap(),
+            loaded
+        );
+        assert_eq!(store.list_patch_lifecycle_current().unwrap(), vec![loaded]);
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        let history: i64 = conn
+            .query_row("select count(*) from patch_lifecycle_events", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        let current: i64 = conn
+            .query_row("select count(*) from patch_lifecycle_current", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(history, 2);
+        assert_eq!(current, 1);
     }
 
     #[test]
@@ -1401,6 +1682,10 @@ mod tests {
             store.list_findings_for_scan_id("run-decision-b").unwrap()[0].identity_id
         );
 
+        let findings = store.list_findings(10).unwrap();
+        let batched_decisions = store.list_review_decisions_for_findings(&findings).unwrap();
+        assert_eq!(batched_decisions, second_identity_decisions);
+
         let latest = store
             .latest_review_decision_for_finding_identity(second_id)
             .unwrap()
@@ -1577,6 +1862,7 @@ mod tests {
             confidence: 0.8,
             rationale: "model signal did not match reachable code".to_string(),
             cost_usd: 0.12,
+            cost_usd_exact: true,
         };
 
         let decision = ReviewDecision::from_triage(&triage, Some(TriageAuthor::Human));
@@ -1849,6 +2135,102 @@ mod tests {
     }
 
     #[test]
+    fn repeated_observations_do_not_make_a_fingerprint_prefix_ambiguous() {
+        let store = FindingStore::open_in_memory().unwrap();
+        for run_id in ["run-prefix-first", "run-prefix-latest"] {
+            store
+                .record_run_started(run_id, Path::new("/tmp/repo"), "completed")
+                .unwrap();
+        }
+        let finding = Finding::new_semgrep(
+            "demo.repeated",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "User input reaches sink",
+        );
+        store.insert_finding("run-prefix-first", &finding).unwrap();
+        let latest_id = store.insert_finding("run-prefix-latest", &finding).unwrap();
+
+        let resolved = store
+            .get_finding_by_reference(&finding.fingerprint[..8])
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resolved.id, Some(latest_id));
+        assert_eq!(resolved.fingerprint, finding.fingerprint);
+    }
+
+    #[test]
+    fn distinct_fingerprints_with_the_same_prefix_remain_ambiguous() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-prefix-collision", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        let mut first = Finding::new_semgrep(
+            "demo.first",
+            "src/first.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "First finding",
+        );
+        first.fingerprint = "shared-prefix-11111111".to_string();
+        let mut second = Finding::new_semgrep(
+            "demo.second",
+            "src/second.ts",
+            24,
+            Some(24),
+            Severity::High,
+            "Second finding",
+        );
+        second.fingerprint = "shared-prefix-22222222".to_string();
+        store
+            .insert_finding("run-prefix-collision", &first)
+            .unwrap();
+        store
+            .insert_finding("run-prefix-collision", &second)
+            .unwrap();
+
+        let error = store
+            .get_finding_by_reference("shared-prefix-")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("ambiguous"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn finding_prefix_treats_sql_like_characters_as_literals() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-literal-prefix", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        for fingerprint in ["literal%_\\prefix-one", "literalxxprefix-two"] {
+            let mut finding = Finding::new_semgrep(
+                "demo.literal-prefix",
+                "src/app.ts",
+                12,
+                Some(12),
+                Severity::High,
+                "Literal prefix",
+            );
+            finding.fingerprint = fingerprint.to_string();
+            store
+                .insert_finding("run-literal-prefix", &finding)
+                .unwrap();
+        }
+
+        let resolved = store
+            .get_finding_by_reference("literal%_\\prefix")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resolved.fingerprint, "literal%_\\prefix-one");
+    }
+
+    #[test]
     fn reference_resolution_attaches_latest_verification_for_prefix() {
         let temp = tempfile::tempdir().unwrap();
         let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
@@ -1878,6 +2260,8 @@ mod tests {
                     duration_ms: 88,
                     cost_usd: 0.0,
                     notes: vec!["confirmed by fixture".to_string()],
+                    verification_run_id: None,
+                    verified_scan_id: None,
                     created_at: String::new(),
                 },
             )
@@ -1908,6 +2292,7 @@ mod tests {
             confidence: 0.91,
             rationale: "source and sink are linked".to_string(),
             cost_usd: 0.02,
+            cost_usd_exact: true,
         });
         finding.verification = Some(PersistedVerification {
             proof_level: 4,
@@ -1919,6 +2304,8 @@ mod tests {
             duration_ms: 321,
             cost_usd: 0.0,
             notes: vec!["browser fixture recorded runtime evidence".to_string()],
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: "now".to_string(),
         });
 
@@ -1979,6 +2366,8 @@ mod tests {
             duration_ms: 321,
             cost_usd: 0.0,
             notes: Vec::new(),
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: "now".to_string(),
         };
         let verified = runtime_validation_summary(Some(&verification));
@@ -2013,6 +2402,8 @@ mod tests {
             duration_ms: 321,
             cost_usd: 0.0,
             notes: Vec::new(),
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: "now".to_string(),
         });
         assert_eq!(
@@ -2100,6 +2491,7 @@ mod tests {
             confidence: 0.72,
             rationale: "source reaches sink".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: true,
         });
 
         let mut before_triage = confirmed.clone();
@@ -2154,6 +2546,7 @@ mod tests {
             confidence: 0.9,
             rationale: "reviewed source-linked evidence".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: true,
         });
         finding.triaged_by = Some(TriageAuthor::Human);
         finding.evidence.push(FindingEvidence {
@@ -2615,6 +3008,8 @@ mod tests {
             duration_ms: 1234,
             cost_usd: 0.05,
             notes: vec!["one".to_string(), "two".to_string()],
+            verification_run_id: Some("verify-run-roundtrip".to_string()),
+            verified_scan_id: Some("run-v1".to_string()),
             created_at: String::new(),
         };
         let row_id = store.save_verification(finding_id, &record).unwrap();
@@ -2633,6 +3028,11 @@ mod tests {
         assert_eq!(fetched.duration_ms, 1234);
         assert!((fetched.cost_usd - 0.05).abs() < 1e-9);
         assert_eq!(fetched.notes, vec!["one".to_string(), "two".to_string()]);
+        assert_eq!(
+            fetched.verification_run_id.as_deref(),
+            Some("verify-run-roundtrip")
+        );
+        assert_eq!(fetched.verified_scan_id.as_deref(), Some("run-v1"));
         assert!(!fetched.created_at.is_empty());
     }
 
@@ -2665,6 +3065,8 @@ mod tests {
             duration_ms: 100,
             cost_usd: 0.0,
             notes: vec![],
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: String::new(),
         };
         let later = PersistedVerification {
@@ -2677,6 +3079,8 @@ mod tests {
             duration_ms: 200,
             cost_usd: 0.0,
             notes: vec![],
+            verification_run_id: None,
+            verified_scan_id: None,
             created_at: String::new(),
         };
         store.save_verification(finding_id, &earlier).unwrap();
@@ -2705,6 +3109,10 @@ mod tests {
             "test",
         );
         let finding_id = store.insert_finding("run-v-bad", &finding).unwrap();
+        let stable_fp = store.list_findings_for_scan_id("run-v-bad").unwrap()[0]
+            .identity_id
+            .clone()
+            .unwrap();
         store
             .conn
             .execute(
@@ -2714,12 +3122,12 @@ mod tests {
                   proof_verdict, backend, duration_ms, cost_usd, notes_json,
                   actor, created_at, payload_json
                 ) values (
-                  'bad-verdict', 999, 'fp_bad_verdict', ?1, 4,
+                  'bad-verdict', 999, ?2, ?1, 4,
                   'surprise', 'plain', 0, 0.0, '[]',
                   'test', '2026-01-01T00:00:00Z', '{}'
                 )
                 "#,
-                rusqlite::params![finding_id],
+                rusqlite::params![finding_id, stable_fp],
             )
             .unwrap();
 
@@ -2772,6 +3180,8 @@ mod tests {
                     duration_ms: 200,
                     cost_usd: 0.0,
                     notes: vec![],
+                    verification_run_id: None,
+                    verified_scan_id: None,
                     created_at: String::new(),
                 },
             )
@@ -2791,6 +3201,58 @@ mod tests {
     }
 
     #[test]
+    fn rescan_hydrates_prior_verification_by_durable_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
+        for run_id in ["scan-a", "scan-b"] {
+            store
+                .record_run_started(run_id, Path::new("/repo"), "running")
+                .unwrap();
+        }
+        let finding = Finding::new_tool(
+            "verify-test",
+            "rule.test",
+            "src/x.rs",
+            10,
+            None,
+            Severity::High,
+            "same durable finding",
+        );
+        let finding_id = store.insert_finding("scan-a", &finding).unwrap();
+        store
+            .save_verification(
+                finding_id,
+                &PersistedVerification {
+                    proof_level: 4,
+                    proof_verdict: PersistedProofVerdict::Exploited,
+                    backend: PersistedSandboxBackend::Bwrap,
+                    language: Some("rust".to_string()),
+                    harness_path: None,
+                    crash_evidence: Some("SIGSEGV".to_string()),
+                    duration_ms: 200,
+                    cost_usd: 0.0,
+                    notes: vec![],
+                    verification_run_id: Some("verify-a".to_string()),
+                    verified_scan_id: Some("scan-a".to_string()),
+                    created_at: String::new(),
+                },
+            )
+            .unwrap();
+
+        store.insert_finding("scan-b", &finding).unwrap();
+        let rescanned = store.list_findings_for_scan_id("scan-b").unwrap();
+        let proof = rescanned[0]
+            .verification
+            .as_ref()
+            .expect("prior proof should follow durable identity");
+
+        assert_eq!(rescanned[0].scan_id.as_deref(), Some("scan-b"));
+        assert_eq!(proof.verification_run_id.as_deref(), Some("verify-a"));
+        assert_eq!(proof.verified_scan_id.as_deref(), Some("scan-a"));
+    }
+
+    #[test]
     fn record_auto_triage_against_missing_finding_id_returns_clean_fk_error() {
         // M1 §1.5: this protects against the "triage:assertions FK fault"
         // family — historically the bus worker could call `record_auto_triage`
@@ -2807,6 +3269,7 @@ mod tests {
             confidence: 0.5,
             rationale: "synthetic".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: true,
         };
         let result = store.record_auto_triage(stale_id, &outcome);
         let err = match result {
@@ -2847,6 +3310,7 @@ mod tests {
                     confidence: 0.7,
                     rationale: "ok".to_string(),
                     cost_usd: 0.0,
+                    cost_usd_exact: true,
                 },
             )
             .expect("triage insert must succeed when finding exists");

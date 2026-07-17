@@ -6,6 +6,7 @@ mod tests {
     use crate::config::V2Config;
     use crate::findings::{TriageOutcome, TriageVerdict};
     use crate::modules::{ModuleRegistry, ToolExecutionContext};
+    use crate::run_artifacts::TraceHandle;
     use crate::runtime::{AgentQueryResponse, TriageRequest};
     use crate::structured_output::parse_json_value_from_agent_text;
     use crate::workspace::WorkspaceTarget;
@@ -222,6 +223,29 @@ mod tests {
         })
     }
 
+    fn repository_scope_placeholder() -> Value {
+        json!({
+            "version": "2.0",
+            "dfd": {
+                "nodes": [{
+                    "id": "repository-scope",
+                    "type": "process",
+                    "name": "empty-target repository scope",
+                    "description": "Repository target under analysis",
+                    "trustZone": "analysis-scope"
+                }],
+                "flows": [],
+                "trustBoundaries": []
+            },
+            "threats": [],
+            "summary": {
+                "total": 0,
+                "bySeverity": {},
+                "byCategory": {}
+            }
+        })
+    }
+
     #[test]
     fn dispatches_threat_model_build_through_runtime_and_persists_artifacts() {
         let temp = tempfile::tempdir().unwrap();
@@ -240,6 +264,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -310,6 +336,9 @@ mod tests {
         assert!(requests[0].prompt.contains("DREAD-style"));
         assert!(requests[0]
             .prompt
+            .contains(DEFAULT_THREAT_MODEL_GUIDANCE));
+        assert!(requests[0]
+            .prompt
             .contains(r#"<untrusted-source label="context""#));
         assert_eq!(
             result
@@ -335,6 +364,84 @@ mod tests {
                 .and_then(Value::as_str),
             Some("skipped")
         );
+    }
+
+    #[test]
+    fn repository_scope_placeholder_is_a_partial_result_with_target_guidance() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let previous_model = sample_document();
+        save_persistent_threat_model(workspace.root(), &previous_model, true).unwrap();
+        let persistent_path = persistent_threat_model_path(workspace.root());
+        let previous_bytes = fs::read(&persistent_path).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({
+            "document": repository_scope_placeholder()
+        }));
+        let run_id = "threat-model-placeholder";
+        let trace = TraceHandle::jsonl(workspace.root(), run_id);
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: Some(&trace),
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("partial")
+        );
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        let target = workspace.root().display().to_string();
+        let output = result.get("output").and_then(Value::as_str).unwrap();
+        assert!(output.contains(&target));
+        assert!(output.contains("partial — inadequate evidence"));
+        assert!(output.contains("previous model preserved"));
+        assert!(output.contains("Cost:     >=$0.0000 (incomplete)"));
+        assert!(!output.contains("threat-model:build complete"));
+        let trace = fs::read_to_string(crate::run_artifacts::run_dir(
+            workspace.root(),
+            run_id,
+        ).join("trace.jsonl"))
+        .unwrap();
+        assert!(trace.contains("partial — inadequate evidence"));
+        assert!(!trace.contains("threat-model:build complete"));
+        let terminal = trace
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find(|step| {
+                step.get("label")
+                    .and_then(Value::as_str)
+                    .is_some_and(|label| label.contains("partial — inadequate evidence"))
+            })
+            .expect("partial terminal trace step");
+        assert_eq!(
+            terminal.get("kind").and_then(Value::as_str),
+            Some("tool-progress")
+        );
+        assert_eq!(
+            terminal.get("severity").and_then(Value::as_str),
+            Some("warn")
+        );
+        assert_eq!(
+            result.pointer("/data/persisted").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(!has_artifact_label(&result, "persistent threat model"));
+        assert_eq!(fs::read(persistent_path).unwrap(), previous_bytes);
     }
 
     #[test]
@@ -376,6 +483,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -427,6 +536,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let error = registry
@@ -463,6 +574,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -501,6 +614,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         registry
@@ -538,6 +653,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let error = registry
@@ -568,6 +685,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         registry.execute_tool_with_runtime(
             "randori:pasta",
@@ -646,7 +765,9 @@ mod tests {
             .structured_output
             .as_ref()
             .is_some_and(|contract| contract.name == "ThreatModelDocument")));
-        assert!(requests[1].prompt.contains("Raw invalid model response"));
+        assert!(requests[1]
+            .prompt
+            .contains("Invalid model response (bounded evidence"));
         assert!(requests[1]
             .prompt
             .contains("I found threats but not as JSON"));
@@ -674,8 +795,14 @@ mod tests {
 
         assert!(err.contains("randori:pasta"), "{err}");
         assert!(err.contains("ThreatModelDocument"), "{err}");
-        assert!(err.contains("Initial parse/validation failure"), "{err}");
-        assert!(err.contains("Raw initial model response"), "{err}");
+        assert!(
+            err.contains("Initial parse/validation failure (bounded evidence)"),
+            "{err}"
+        );
+        assert!(
+            err.contains("Initial model response (bounded evidence)"),
+            "{err}"
+        );
         assert!(err.contains("not json"), "{err}");
         assert!(err.contains("still not json"), "{err}");
         let requests = runtime.requests();
@@ -707,6 +834,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -859,6 +988,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -887,6 +1018,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -919,6 +1052,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -947,6 +1082,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let error = registry
@@ -983,6 +1120,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1179,6 +1318,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1229,6 +1370,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1279,6 +1422,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1331,6 +1476,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1381,6 +1528,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1431,6 +1580,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1481,6 +1632,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1531,6 +1684,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1580,6 +1735,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1629,6 +1786,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1678,6 +1837,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1727,6 +1888,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1776,6 +1939,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1825,6 +1990,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1871,6 +2038,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1917,6 +2086,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1956,6 +2127,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2000,6 +2173,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2043,6 +2218,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2092,6 +2269,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2133,6 +2312,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2185,6 +2366,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2231,6 +2414,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2273,6 +2458,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2323,6 +2510,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2363,6 +2552,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2396,6 +2587,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2437,6 +2630,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2481,6 +2676,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2527,6 +2724,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2568,6 +2767,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2614,6 +2815,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2660,6 +2863,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2701,6 +2906,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2742,6 +2949,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2783,6 +2992,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2824,6 +3035,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2870,6 +3083,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2913,6 +3128,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2960,6 +3177,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3006,6 +3225,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3052,6 +3273,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3098,6 +3321,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3141,6 +3366,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3188,6 +3415,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3237,6 +3466,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3286,6 +3517,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3335,6 +3568,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3380,6 +3615,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3424,6 +3661,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3472,6 +3711,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3521,6 +3762,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3574,6 +3817,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3622,6 +3867,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3668,6 +3915,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3716,6 +3965,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3763,6 +4014,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3812,6 +4065,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3859,6 +4114,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3903,6 +4160,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3942,6 +4201,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3976,6 +4237,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4020,6 +4283,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4070,6 +4335,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4114,6 +4381,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4160,6 +4429,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4203,6 +4474,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4248,6 +4521,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4294,6 +4569,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4339,6 +4616,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4385,6 +4664,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4434,6 +4715,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4479,6 +4762,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4521,6 +4806,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4580,6 +4867,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4635,6 +4924,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4697,6 +4988,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4753,6 +5046,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4809,6 +5104,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4865,6 +5162,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4918,6 +5217,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4973,6 +5274,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5026,6 +5329,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5080,6 +5385,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5141,6 +5448,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5204,6 +5513,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5262,6 +5573,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5320,6 +5633,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5372,6 +5687,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5426,6 +5743,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5469,6 +5788,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5511,6 +5832,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5571,6 +5894,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5628,6 +5953,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5680,6 +6007,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5734,6 +6063,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5790,6 +6121,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5842,6 +6175,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5896,6 +6231,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5949,6 +6286,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6000,6 +6339,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6053,6 +6394,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6108,6 +6451,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6165,6 +6510,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6219,6 +6566,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6272,6 +6621,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6325,6 +6676,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6394,6 +6747,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6448,6 +6803,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6509,6 +6866,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6567,6 +6926,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6629,6 +6990,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6684,6 +7047,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6749,6 +7114,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6798,6 +7165,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6855,6 +7224,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6906,6 +7277,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6957,6 +7330,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7010,6 +7385,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7066,6 +7443,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7120,6 +7499,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7182,6 +7563,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7242,6 +7625,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7310,6 +7695,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7385,6 +7772,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7458,6 +7847,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7543,6 +7934,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7613,6 +8006,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7678,6 +8073,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7741,6 +8138,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7818,6 +8217,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7890,6 +8291,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7968,6 +8371,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8039,6 +8444,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8093,6 +8500,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8141,6 +8550,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8195,6 +8606,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8250,6 +8663,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8302,6 +8717,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8358,6 +8775,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8425,6 +8844,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8472,6 +8893,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8517,6 +8940,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8567,6 +8992,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8620,6 +9047,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8686,6 +9115,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8736,6 +9167,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8792,6 +9225,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8837,6 +9272,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8891,6 +9328,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8949,6 +9388,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8995,6 +9436,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9029,6 +9472,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9068,6 +9513,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9102,6 +9549,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9145,6 +9594,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9179,6 +9630,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9254,6 +9707,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9322,6 +9777,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9388,6 +9845,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9440,6 +9899,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9494,6 +9955,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9576,6 +10039,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9633,6 +10098,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9690,6 +10157,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9733,6 +10202,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9773,6 +10244,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9866,6 +10339,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9957,6 +10432,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10002,6 +10479,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10065,6 +10544,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10148,6 +10629,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10226,6 +10709,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10284,6 +10769,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10333,6 +10820,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10391,6 +10880,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10445,6 +10936,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10499,6 +10992,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10553,6 +11048,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10597,6 +11094,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10661,6 +11160,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10715,6 +11216,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10764,6 +11267,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10812,6 +11317,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10856,6 +11363,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10915,6 +11424,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10955,6 +11466,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10995,6 +11508,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11050,6 +11565,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11090,6 +11607,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11156,6 +11675,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11205,6 +11726,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11260,6 +11783,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11332,6 +11857,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -11397,6 +11924,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = registry
@@ -11427,6 +11956,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let missing_dir =
@@ -11439,8 +11970,10 @@ mod tests {
                 json!({"outputDir": ".kuzushi/missing-threat-model"}),
                 &ctx,
             )
-            .unwrap();
-        assert_failed_result(&missing_artifacts, "artifacts-not-found");
+            .unwrap_err();
+        assert!(
+            format!("{missing_artifacts:#}").contains("could not be resolved inside workspace")
+        );
     }
 
     #[test]
@@ -11452,6 +11985,8 @@ mod tests {
             workspace: None,
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let result = registry
             .execute_tool("threat-model:methodologies", json!({}), &ctx)

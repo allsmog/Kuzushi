@@ -3,7 +3,38 @@
   "globalName": "KuzushiTui",
   "projectId": "b3691e4f-ec2f-467a-9b02-f21a78733e94",
   "shape": "package",
-  "buildCmd": "npm --prefix packages/kuzushi-tui-kit run build",
+  "buildCmd": "npm --prefix .design-sync/kit run build",
+  "entry": ".design-sync/kit/dist/index.js",
+  "srcDir": "src",
+  "tsconfig": "tsconfig.json",
   "cssEntry": "dist/styles.css",
-  "readmeHeader": ".design-sync/conventions.md"
+  "readmeHeader": ".design-sync/conventions.md",
+  "guidelinesGlob": ["../CURRENT_STATE.md"],
+  "overrides": {
+    "AttentionCard": {
+      "cardMode": "column",
+      "primaryStory": "A_OperatorQuestion",
+      "viewport": "1280x960"
+    },
+    "PhaseCockpit": {
+      "cardMode": "column",
+      "primaryStory": "A_CurrentMap120x36",
+      "viewport": "1280x960"
+    },
+    "RouteScreen": {
+      "cardMode": "column",
+      "primaryStory": "A_TargetSelection120x36",
+      "viewport": "1280x960"
+    },
+    "RunFocus": {
+      "cardMode": "column",
+      "primaryStory": "A_MapPlannerRunning120x36",
+      "viewport": "1280x960"
+    },
+    "SetupScreen": {
+      "cardMode": "column",
+      "primaryStory": "A_ReadySetup120x36",
+      "viewport": "1280x960"
+    }
+  }
 }

@@ -23,8 +23,8 @@ export interface GroundTruthDataset {
   name: string;
   language: string;
   repoUrl: string;
-  /** Git commit or tag to pin the benchmark at. */
-  repoRef?: string;
+  /** Full immutable Git commit digest, or a synthetic ref for fixture:// datasets. */
+  repoRef: string;
   entries: GroundTruthEntry[];
 }
 
@@ -50,6 +50,8 @@ export interface CweMetrics {
 /** Aggregate benchmark metrics for a single dataset evaluation. */
 export interface BenchmarkMetrics {
   dataset: string;
+  /** Self-contained identity for the inputs and contract that produced this result. */
+  provenance: BenchmarkResultProvenance;
   tp: number;
   fp: number;
   fn: number;
@@ -59,7 +61,25 @@ export interface BenchmarkMetrics {
   f1: number;
   perCwe: Record<string, CweMetrics>;
   costUsd: number;
+  /** Receipt proving costUsd came from one explicit aggregate spend record. */
+  spend: BenchmarkSpendReceipt;
   durationMs: number;
+}
+
+export type BenchmarkSpendSource = "canonical-run-summary" | "deterministic-fixture";
+
+export interface BenchmarkSpendReceipt {
+  measured: true;
+  runId: string;
+  source: BenchmarkSpendSource;
+  /** Models observed in canonical trace-backed run summaries. */
+  models: string[];
+  /** Number of observed model calls across the exported scan run set. */
+  llmCallCount: number;
+  /** False when a canonical trace could not be parsed completely. */
+  llmAuditComplete: boolean;
+  /** Hash of the resolved runtime config recorded by the outer run. */
+  configHash?: string;
 }
 
 // ── Minimal SARIF v2.1.0 type stubs for parsing ──
@@ -68,6 +88,7 @@ export interface SarifLog {
   $schema?: string;
   version: string;
   runs: SarifRun[];
+  properties?: Record<string, unknown>;
 }
 
 export interface SarifRun {
@@ -94,11 +115,13 @@ export interface SarifResult {
   level?: string;
   message: { text: string };
   locations?: SarifLocation[];
+  fingerprints?: Record<string, string>;
   properties?: {
     verdict?: string;
     confidence?: number;
     rationale?: string;
     exploitable?: boolean;
+    kuzushiCwe?: string;
     [key: string]: unknown;
   };
   suppressions?: Array<{ kind: string; justification?: string }>;
@@ -124,8 +147,61 @@ export interface SarifDiffEntry {
   };
 }
 
-/** Stored baseline metrics for regression gating. */
+export type BenchmarkExecutionMode = "deterministic-fixture" | "real-model";
+
+/** Explicit operator/fixture declaration. Digests are derived by the harness. */
+export interface BenchmarkProvenanceInput {
+  schemaVersion: 1;
+  executionMode: BenchmarkExecutionMode;
+  harnessContractVersion: string;
+  scanConfig: BenchmarkScanConfig;
+  modelIdentity: string;
+  kuzushiRevision: string;
+  generatedAt: string;
+}
+
+/** Exact command-line surface the benchmark harness owns and applies. */
+export interface BenchmarkScanConfig {
+  mode?: "standard" | "whitebox-static";
+  tasks?: string;
+  failOn?: "low" | "medium" | "high" | "critical";
+  budget?: string;
+}
+
+/** Fields that must match before metrics can be compared. */
+export interface BenchmarkComparableProvenance {
+  datasetName: string;
+  datasetDigest: string;
+  datasetRevision: string;
+  harnessContractVersion: string;
+  harnessDigest: string;
+  scanConfigDigest: string;
+  modelIdentity: string;
+  scoringMode: "strict-cwe-v1";
+}
+
+/** Fields that identify the two observations without blocking comparison. */
+export interface BenchmarkObservedProvenance {
+  kuzushiRevision: string;
+  generatedAt: string;
+  durationMs: number;
+  runId: string;
+  spendSource: BenchmarkSpendSource;
+  models: string[];
+  llmCallCount: number;
+  llmAuditComplete: boolean;
+  configHash?: string;
+}
+
+export interface BenchmarkResultProvenance {
+  schemaVersion: 1;
+  mode: BenchmarkExecutionMode;
+  comparable: BenchmarkComparableProvenance;
+  observed: BenchmarkObservedProvenance;
+}
+
 export interface BaselineMetrics {
+  schemaVersion: 2;
   updatedAt: string;
   datasets: Record<string, BenchmarkMetrics>;
 }

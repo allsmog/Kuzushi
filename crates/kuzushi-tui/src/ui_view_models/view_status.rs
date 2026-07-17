@@ -10,19 +10,31 @@ pub(crate) fn view_status_segment(app: &ShellApp) -> String {
 fn primary_view_status(app: &ShellApp) -> Option<String> {
     match &app.shell_view() {
         ShellView::Home => Some("home".to_string()),
-        ShellView::Catalog => Some("catalog".to_string()),
+        ShellView::Catalog => Some("capabilities".to_string()),
         ShellView::Recommend => Some("recommend".to_string()),
         ShellView::Module => Some(focused_or_default(app, "module")),
         ShellView::ModuleRun => Some(module_run_status(app)),
         ShellView::Workbench => Some("workbench".to_string()),
-        ShellView::ModelPicker => Some("model-picker".to_string()),
+        ShellView::Setup => Some(setup_view_status(app)),
+        ShellView::Report => Some("report".to_string()),
         ShellView::TargetPicker => Some("target-picker".to_string()),
-        ShellView::AuthMethodPicker => Some(format!(
-            "auth-picker:{}",
-            app.router.auth_picker().provider()
-        )),
         ShellView::PlanningPicker => Some("planning".to_string()),
         _ => None,
+    }
+}
+
+fn setup_view_status(app: &ShellApp) -> String {
+    match app.router.setup().editor() {
+        Some(crate::app::SetupEditor::Model) => "setup:model".to_string(),
+        Some(crate::app::SetupEditor::Credentials) => format!(
+            "setup:credentials:{}",
+            crate::app::auth_provider_label(app.router.auth_picker().provider())
+        ),
+        Some(crate::app::SetupEditor::Plan) => "setup:map-plan".to_string(),
+        Some(crate::app::SetupEditor::Prompt) => "setup:prompt".to_string(),
+        Some(crate::app::SetupEditor::Budget) => "setup:budget".to_string(),
+        Some(crate::app::SetupEditor::Target) => "setup:target".to_string(),
+        None => "setup".to_string(),
     }
 }
 
@@ -63,6 +75,7 @@ fn system_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Quickstart => Some("quickstart".to_string()),
         ShellView::Logs => Some("logs".to_string()),
         ShellView::Config => Some("config".to_string()),
+        ShellView::Permissions => Some("permissions".to_string()),
         ShellView::Health => Some("health".to_string()),
         ShellView::Tools => Some("tools".to_string()),
         ShellView::BootSplash => Some("boot".to_string()),
@@ -75,6 +88,7 @@ fn system_view_status(app: &ShellApp) -> Option<String> {
             "blocked:{}",
             interruption_slug(app.router.interruption().view())
         )),
+        ShellView::CommandPalette => Some("palette".to_string()),
         ShellView::Options => Some(format!("options[{}]", app.router.options().tool_name)),
         ShellView::SastTasks => Some("tasks".to_string()),
         _ => None,

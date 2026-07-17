@@ -25,6 +25,7 @@ mod threat_affected_file_matches;
 
 pub use rank_static_findings::rank_static_findings;
 pub use rank_static_findings::rank_static_findings_with_threats;
+pub(crate) use rank_static_findings::rank_static_findings_with_threats_degraded;
 pub use rank_static_findings::score_static_finding;
 pub use rank_static_findings::StaticImpactFactors;
 pub use rank_static_findings::StaticImpactScore;

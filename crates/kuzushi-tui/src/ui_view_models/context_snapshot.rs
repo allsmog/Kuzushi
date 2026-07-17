@@ -1,4 +1,4 @@
-use super::compact_target_path;
+use super::workspace_artifact_path_label;
 use crate::ShellApp;
 use std::sync::OnceLock;
 
@@ -49,7 +49,7 @@ pub(crate) fn context_snapshot_model(app: &ShellApp) -> ContextSnapshotModel {
         snapshot: view
             .snapshot_path
             .as_ref()
-            .map(|path| compact_target_path(&path.display().to_string()))
+            .map(|path| workspace_artifact_path_label(app, path))
             .unwrap_or_else(|| context_snapshot_relative_path().to_string()),
         snapshot_present,
         state,

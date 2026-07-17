@@ -42,9 +42,3 @@ pub(in crate::scan) fn is_credential_env_key(upper_key: &str) -> bool {
 pub(in crate::scan) struct ProcessOutput {
     pub(in crate::scan) stdout: Vec<u8>,
 }
-
-pub(in crate::scan) fn read_pipe(mut pipe: impl Read) -> Result<Vec<u8>> {
-    let mut output = Vec::new();
-    pipe.read_to_end(&mut output)?;
-    Ok(output)
-}

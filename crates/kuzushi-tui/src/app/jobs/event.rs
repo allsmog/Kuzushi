@@ -3,9 +3,32 @@ use super::*;
 #[derive(Debug)]
 pub(crate) enum ShellEvent {
     Trace(RunTraceStep),
+    RunItem(kuzushi_core::run_lifecycle::RunItemEnvelopeV1),
+    RunItemsDurable {
+        run_id: String,
+        range: kuzushi_core::run_lifecycle::CommittedRange,
+    },
+    RunItemsDerivativesApplied {
+        run_id: String,
+        range: kuzushi_core::run_lifecycle::CommittedRange,
+    },
+    RunItemsFault {
+        run_id: String,
+        fault: kuzushi_core::run_lifecycle::RunItemWriterFault,
+    },
+    RunItemsDeliveryFault {
+        run_id: String,
+        fault: kuzushi_core::run_lifecycle::RunItemDeliveryFault,
+    },
     Scan(ScanEvent),
     Tool(ToolEvent),
     Agent(AgentEvent),
+    OperatorQuestion(OperatorQuestionEnvelope),
+    OperatorQuestionCompleted(OperatorQuestionCompleted),
+    CredentialQuestionRouted {
+        request_id: String,
+        run_id: String,
+    },
     Plan(PlanEvent),
     Threat(ThreatPatchEvent),
 }
@@ -19,10 +42,40 @@ pub(crate) enum JobKind {
 }
 
 impl ShellEvent {
+    pub(crate) fn is_run_lifecycle(&self) -> bool {
+        matches!(
+            self,
+            Self::RunItem(_)
+                | Self::RunItemsDurable { .. }
+                | Self::RunItemsDerivativesApplied { .. }
+                | Self::RunItemsFault { .. }
+                | Self::RunItemsDeliveryFault { .. }
+        )
+    }
+
+    pub(crate) fn is_operator_interaction(&self) -> bool {
+        matches!(
+            self,
+            Self::OperatorQuestion(_)
+                | Self::OperatorQuestionCompleted(_)
+                | Self::CredentialQuestionRouted { .. }
+        )
+    }
+
     pub(crate) fn kind(&self) -> JobKind {
         match self {
-            Self::Trace(_) | Self::Scan(_) | Self::Tool(_) => JobKind::Run,
-            Self::Agent(_) => JobKind::Agent,
+            Self::Trace(_)
+            | Self::RunItem(_)
+            | Self::RunItemsDurable { .. }
+            | Self::RunItemsDerivativesApplied { .. }
+            | Self::RunItemsFault { .. }
+            | Self::RunItemsDeliveryFault { .. }
+            | Self::Scan(_)
+            | Self::Tool(_) => JobKind::Run,
+            Self::Agent(_)
+            | Self::OperatorQuestion(_)
+            | Self::OperatorQuestionCompleted(_)
+            | Self::CredentialQuestionRouted { .. } => JobKind::Agent,
             Self::Plan(_) => JobKind::Plan,
             Self::Threat(_) => JobKind::Threat,
         }
@@ -30,15 +83,28 @@ impl ShellEvent {
 
     pub(crate) fn is_terminal(&self) -> bool {
         match self {
-            Self::Trace(_) | Self::Scan(ScanEvent::Stage(_)) => false,
+            Self::Trace(_)
+            | Self::RunItem(_)
+            | Self::RunItemsDurable { .. }
+            | Self::RunItemsDerivativesApplied { .. }
+            | Self::RunItemsFault { .. }
+            | Self::RunItemsDeliveryFault { .. }
+            | Self::Scan(ScanEvent::Stage(_))
+            | Self::OperatorQuestion(_)
+            | Self::OperatorQuestionCompleted(_)
+            | Self::CredentialQuestionRouted { .. } => false,
             Self::Scan(ScanEvent::Finished { .. } | ScanEvent::Failed { .. }) => true,
             Self::Tool(
-                ToolEvent::Finished { .. } | ToolEvent::Failed { .. } | ToolEvent::Refused { .. },
+                ToolEvent::Finished { .. }
+                | ToolEvent::Failed { .. }
+                | ToolEvent::Refused { .. }
+                | ToolEvent::ObservedFinished { .. }
+                | ToolEvent::ObservedFailed { .. },
             ) => true,
             Self::Agent(AgentEvent::Answered { .. } | AgentEvent::Failed { .. }) => true,
-            Self::Plan(PlanEvent::Proposed(_) | PlanEvent::Failed { .. }) => true,
+            Self::Plan(PlanEvent::Proposed { .. } | PlanEvent::Failed { .. }) => true,
             Self::Threat(
-                ThreatPatchEvent::Proposed(_)
+                ThreatPatchEvent::Proposed { .. }
                 | ThreatPatchEvent::Answer { .. }
                 | ThreatPatchEvent::Failed { .. },
             ) => true,
@@ -56,8 +122,14 @@ impl ShellEvent {
                 error,
                 audit: disconnected_job_audit(),
             }),
-            JobKind::Plan => Self::Plan(PlanEvent::Failed { error }),
-            JobKind::Threat => Self::Threat(ThreatPatchEvent::Failed { error }),
+            JobKind::Plan => Self::Plan(PlanEvent::Failed {
+                error,
+                audit: disconnected_job_audit(),
+            }),
+            JobKind::Threat => Self::Threat(ThreatPatchEvent::Failed {
+                error,
+                audit: disconnected_job_audit(),
+            }),
         }
     }
 }
@@ -67,6 +139,7 @@ fn disconnected_job_audit() -> AgentCallAudit {
         model: "unknown".to_string(),
         provider: "unknown".to_string(),
         prompt_hash: "jobhub-panic-guard".to_string(),
-        cost_usd: None,
+        cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+        call_attempted: true,
     }
 }

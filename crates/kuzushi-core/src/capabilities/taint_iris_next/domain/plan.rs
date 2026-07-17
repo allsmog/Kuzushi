@@ -60,10 +60,18 @@ pub(crate) struct TaintIrisNextBackendChoice {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct TaintIrisNextSourcePath {
+    pub(crate) absolute_path: PathBuf,
+    pub(crate) relative_path: String,
+    pub(crate) language: String,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct TaintIrisNextPlan {
     pub(crate) target: PathBuf,
     pub(crate) scan_root: PathBuf,
     pub(crate) repo_root: PathBuf,
+    pub(crate) source_paths: std::sync::Arc<[TaintIrisNextSourcePath]>,
     pub(crate) mode: TaintIrisNextMode,
     pub(crate) caps: TaintIrisNextCaps,
     pub(crate) languages: Vec<String>,
@@ -77,6 +85,7 @@ pub(crate) struct TaintIrisNextPlan {
     pub(crate) backend: TaintIrisNextBackendChoice,
     pub(crate) max_budget_usd: Option<f64>,
     pub(crate) allow_deterministic_fallback: bool,
+    pub(crate) system_prompt: String,
     pub(crate) cwe_focus: Vec<String>,
     pub(crate) discovered_signals: DiscoveredSignals,
 }

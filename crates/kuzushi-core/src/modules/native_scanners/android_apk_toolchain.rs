@@ -116,7 +116,11 @@ fn probe_tool(name: &'static str, binary: &str, version_args: &[&str]) -> Toolch
 }
 
 fn which_binary(binary: &str) -> Option<String> {
-    let output = Command::new("which").arg(binary).output().ok()?;
+    let mut command = Command::new("which");
+    command.arg(binary);
+    let output =
+        crate::bounded_subprocess::output_with_limits(&mut command, "which", 64 * 1024, 64 * 1024)
+            .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -129,7 +133,11 @@ fn which_binary(binary: &str) -> Option<String> {
 }
 
 fn run_version_probe(binary: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(binary).args(args).output().ok()?;
+    let mut command = Command::new(binary);
+    command.args(args);
+    let output =
+        crate::bounded_subprocess::output_with_limits(&mut command, binary, 64 * 1024, 64 * 1024)
+            .ok()?;
     let combined = [&output.stdout[..], &output.stderr[..]].concat();
     String::from_utf8_lossy(&combined)
         .lines()

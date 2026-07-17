@@ -1,0 +1,132 @@
+use super::*;
+
+pub(crate) fn report_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let route = app.router.report();
+    let mut lines = report_header_lines(app, area);
+    append_report_formats(&mut lines, route);
+    append_report_destination(&mut lines, route);
+    append_report_status(&mut lines, route, area.width);
+    lines.push(blank());
+    lines.push(command_list_line(
+        &report_actions(route.receipt().is_some()),
+        area.width as usize,
+    ));
+    lines
+}
+
+fn report_header_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+    lines.push(divider("REPORT · EXPORT EXIT", area.width));
+    lines.push(Line::from(Span::styled(
+        "Choose one durable export. Success and failure stay here as receipts.",
+        theme::muted(),
+    )));
+    lines.push(blank());
+    lines
+}
+
+fn append_report_formats(lines: &mut Vec<Line<'static>>, route: &crate::app::ReportRouteState) {
+    for (index, format) in crate::app::ReportRouteState::FORMATS.iter().enumerate() {
+        let marker = if index == route.format_index() {
+            "▸"
+        } else {
+            " "
+        };
+        let style = if index == route.format_index() {
+            theme::accent()
+        } else {
+            theme::primary()
+        };
+        lines.push(Line::from(Span::styled(
+            format!(
+                "{marker} {:<16} {}",
+                format.as_str(),
+                format_description(*format)
+            ),
+            style,
+        )));
+    }
+}
+
+fn append_report_destination(lines: &mut Vec<Line<'static>>, route: &crate::app::ReportRouteState) {
+    lines.push(blank());
+    lines.push(detail("completeness", route.completeness().as_str()));
+    let cursor = if route.editing_path() { "▏" } else { "" };
+    lines.push(detail(
+        "destination",
+        &format!("{}{}", route.path_draft(), cursor),
+    ));
+}
+
+fn append_report_status(
+    lines: &mut Vec<Line<'static>>,
+    route: &crate::app::ReportRouteState,
+    width: u16,
+) {
+    if let Some(receipt) = route.receipt() {
+        append_report_receipt(lines, receipt, width);
+    }
+    if let Some(error) = route.reveal_error() {
+        lines.push(Line::from(vec![
+            Span::styled("reveal  ", theme::danger()),
+            Span::styled(error.to_string(), theme::primary()),
+        ]));
+    }
+}
+
+fn report_actions(has_receipt: bool) -> [&'static str; 6] {
+    if has_receipt {
+        [
+            "j/k format",
+            "c completeness",
+            "e edit path",
+            "Enter Retry",
+            "o Reveal Destination",
+            "Esc Return",
+        ]
+    } else {
+        [
+            "j/k format",
+            "c completeness",
+            "e edit path",
+            "Enter export",
+            "o reveal after export",
+            "Esc Return",
+        ]
+    }
+}
+
+fn format_description(format: kuzushi_core::WorkspaceExportFormat) -> &'static str {
+    match format {
+        kuzushi_core::WorkspaceExportFormat::Sarif => "tooling interchange",
+        kuzushi_core::WorkspaceExportFormat::MarkdownBundle => "human review bundle",
+        kuzushi_core::WorkspaceExportFormat::Jsonl => "streaming records",
+        kuzushi_core::WorkspaceExportFormat::Json => "structured document",
+        kuzushi_core::WorkspaceExportFormat::Csv => "flat spreadsheet",
+    }
+}
+
+fn append_report_receipt(
+    lines: &mut Vec<Line<'static>>,
+    receipt: &crate::app::ReportReceipt,
+    width: u16,
+) {
+    lines.push(blank());
+    lines.push(divider("EXPORT RECEIPT", width));
+    lines.push(detail("format", receipt.format.as_str()));
+    lines.push(detail("completeness", receipt.completeness.as_str()));
+    lines.push(detail("timestamp", &receipt.timestamp));
+    if let Some(count) = receipt.count {
+        lines.push(detail("findings", &count.to_string()));
+    }
+    if let Some(path) = receipt.absolute_path.as_ref() {
+        lines.push(detail("path", &path.display().to_string()));
+    }
+    if let Some(error) = receipt.error.as_ref() {
+        lines.push(Line::from(vec![
+            Span::styled("error  ", theme::danger()),
+            Span::styled(error.clone(), theme::primary()),
+        ]));
+    }
+}

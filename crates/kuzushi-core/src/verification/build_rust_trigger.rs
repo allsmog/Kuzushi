@@ -16,18 +16,67 @@ name = "trigger"
 path = "tests/trigger.rs"
 "#;
 
-pub(in crate::verification) fn build_rust_trigger(finding: &Finding) -> RustTriggerSource {
+pub(in crate::verification) fn build_rust_trigger(
+    finding: &Finding,
+    workspace_root: &Path,
+) -> Result<RustTriggerSource> {
     let payload = synth_payload_from_finding(finding);
-    let suspect_path = std::path::Path::new(&finding.file_path);
-    let suspect = extract_enclosing_function(suspect_path, finding.start_line);
-    let suspect_source = std::fs::read_to_string(suspect_path).ok();
+    let suspect = plan_rust_suspect(finding, workspace_root)?;
+    let suspect_comment = rust_suspect_comment(finding, &suspect);
+    let (lib_rs, call_block) = rust_harness_modules(&suspect);
+    let trigger_test = rust_trigger_body(finding, &payload, &suspect_comment, &call_block);
+    Ok(RustTriggerSource {
+        cargo_toml: HARNESS_CARGO_TOML.to_string(),
+        lib_rs,
+        trigger_test,
+        suspect_source: suspect.source,
+    })
+}
 
-    let parsed_sig = suspect
+struct RustSuspectPlan {
+    enclosing: Option<EnclosingFunction>,
+    source: Option<String>,
+    call: Option<CallPlan>,
+}
+
+fn plan_rust_suspect(finding: &Finding, workspace_root: &Path) -> Result<RustSuspectPlan> {
+    let suspect_path = Path::new(&finding.file_path);
+    let source = read_finding_source(workspace_root, suspect_path, "Rust")?;
+    let enclosing = source
+        .as_deref()
+        .and_then(|body| extract_enclosing_function_from_source(body, finding.start_line));
+    let call = enclosing
         .as_ref()
-        .and_then(|f| parse_rust_signature(&f.signature));
-    let call_plan = parsed_sig.as_ref().and_then(plan_call_expression);
+        .and_then(|function| parse_rust_signature(&function.signature))
+        .and_then(|signature| plan_call_expression(&signature));
+    Ok(RustSuspectPlan {
+        enclosing,
+        source,
+        call,
+    })
+}
 
-    let suspect_comment = match (&suspect, &call_plan) {
+pub(in crate::verification) fn read_finding_source(
+    workspace_root: &Path,
+    suspect_path: &Path,
+    language: &str,
+) -> Result<Option<String>> {
+    match crate::bounded_file::read_utf8_text_within(workspace_root, suspect_path, 8 * 1024 * 1024)
+    {
+        Ok(source) => Ok(Some(source)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "could not read {language} finding source {} inside workspace {}",
+                suspect_path.display(),
+                workspace_root.display()
+            )
+        }),
+    }
+}
+
+fn rust_suspect_comment(finding: &Finding, suspect: &RustSuspectPlan) -> String {
+    match (&suspect.enclosing, &suspect.call) {
         (Some(f), Some(plan)) => format!(
             "// Suspect: {file}:{line} (signature at {sig_line}) — calling `{name}(...)` via {kind}",
             file = finding.file_path,
@@ -49,9 +98,11 @@ pub(in crate::verification) fn build_rust_trigger(finding: &Finding) -> RustTrig
             "// No enclosing function located near {}:{}; payload-only harness.",
             finding.file_path, finding.start_line
         ),
-    };
+    }
+}
 
-    let (lib_rs, call_block) = match (&suspect_source, &call_plan) {
+fn rust_harness_modules(suspect: &RustSuspectPlan) -> (String, String) {
+    match (&suspect.source, &suspect.call) {
         (Some(src), Some(plan)) if rust_source_appears_self_contained(src) => {
             // Wrap the suspect file as `pub mod suspect;` inside the
             // harness lib so the test can name-resolve into it.
@@ -73,9 +124,16 @@ pub(in crate::verification) fn build_rust_trigger(finding: &Finding) -> RustTrig
              let _ = std::hint::black_box(payload);\n"
                 .to_string(),
         ),
-    };
+    }
+}
 
-    let body = format!(
+fn rust_trigger_body(
+    finding: &Finding,
+    payload: &[u8],
+    suspect_comment: &str,
+    call_block: &str,
+) -> String {
+    format!(
         "// Synthesised by kuzushi verify for finding {fp}\n\
          {suspect_comment}\n\
          #[test]\n\
@@ -88,12 +146,5 @@ pub(in crate::verification) fn build_rust_trigger(finding: &Finding) -> RustTrig
         suspect_comment = suspect_comment,
         payload = payload,
         call_block = call_block,
-    );
-
-    RustTriggerSource {
-        cargo_toml: HARNESS_CARGO_TOML.to_string(),
-        lib_rs,
-        trigger_test: body,
-        suspect_source: suspect_source.clone(),
-    }
+    )
 }

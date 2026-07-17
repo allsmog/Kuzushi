@@ -21,7 +21,7 @@ pub fn run_deep_auditor(
     for _ in 0..passes {
         outcomes.push(run_deep_audit_pass(runtime, spend, cfg, finding)?);
     }
-    Ok(consensus_outcome(outcomes))
+    consensus_outcome(outcomes)
 }
 
 fn run_deep_audit_pass(
@@ -52,10 +52,16 @@ fn run_deep_audit_pass(
     // NO tools and a forcing prompt; the absence of tools means the only
     // valid response is an assistant message, which the bridge surfaces as
     // a Final step with `text`.
-    outcome = synthesize_truncated_deep_audit(runtime, &request, cfg, outcome);
+    let completion = synthesize_truncated_deep_audit(runtime, &request, outcome);
+    outcome = completion.outcome;
 
     // 5. Settle spend.
-    settle_deep_audit_spend(spend, ticket, cfg, &outcome)?;
+    settle_deep_audit_spend(
+        spend,
+        ticket,
+        &outcome,
+        completion.provider_spend_unresolved,
+    )?;
 
     // 6. Parse final structured output.
     let analysis = parse_vuln_analysis(&outcome);
@@ -65,6 +71,7 @@ fn run_deep_audit_pass(
         triage,
         evidence: analysis.evidence,
         cost_usd: outcome.cost_usd,
+        cost_usd_exact: outcome.cost_usd_exact,
         steps_used: outcome.steps_used,
         truncated: outcome.truncated,
     })
@@ -144,51 +151,63 @@ fn append_static_evidence_prompt(
 fn synthesize_truncated_deep_audit(
     runtime: &RoutedRuntime<'_>,
     request: &AgentToolLoopRequest,
-    cfg: &DeepAuditConfig,
     outcome: AgentLoopOutcome,
-) -> AgentLoopOutcome {
+) -> DeepAuditCompletion {
     if !needs_deep_audit_synthesis(&outcome) {
-        return outcome;
+        return DeepAuditCompletion {
+            outcome,
+            provider_spend_unresolved: false,
+        };
     }
-    force_verdict_synthesis(runtime as &dyn AgentRuntime, request, outcome)
-        .unwrap_or_else(|err| failed_synthesis_outcome(cfg, err))
+    match force_verdict_synthesis(runtime as &dyn AgentRuntime, request, &outcome) {
+        Ok(outcome) => DeepAuditCompletion {
+            outcome,
+            provider_spend_unresolved: false,
+        },
+        Err(error) => DeepAuditCompletion {
+            outcome: failed_synthesis_outcome(outcome, error),
+            provider_spend_unresolved: true,
+        },
+    }
+}
+
+struct DeepAuditCompletion {
+    outcome: AgentLoopOutcome,
+    provider_spend_unresolved: bool,
 }
 
 fn needs_deep_audit_synthesis(outcome: &AgentLoopOutcome) -> bool {
     outcome.truncated && outcome.structured.is_none() && outcome.text.trim().is_empty()
 }
 
-fn failed_synthesis_outcome(cfg: &DeepAuditConfig, error: anyhow::Error) -> AgentLoopOutcome {
-    AgentLoopOutcome {
-        text: format!("synthesis pass failed: {error}"),
-        structured: None,
-        steps_used: cfg.max_steps,
-        truncated: true,
-        cost_usd: 0.0,
-        transcript: Vec::new(),
-    }
+fn failed_synthesis_outcome(
+    mut outcome: AgentLoopOutcome,
+    error: anyhow::Error,
+) -> AgentLoopOutcome {
+    outcome.text = format!("synthesis pass failed: {error}");
+    outcome.structured = None;
+    outcome.truncated = true;
+    outcome
 }
 
 fn settle_deep_audit_spend(
     spend: Option<&SpendLimiter>,
     ticket: Option<crate::spend::SpendTicket>,
-    cfg: &DeepAuditConfig,
     outcome: &AgentLoopOutcome,
+    provider_spend_unresolved: bool,
 ) -> Result<()> {
     let (Some(limiter), Some(ticket)) = (spend, ticket) else {
         return Ok(());
     };
-    limiter
-        .refund(ticket, actual_deep_audit_cost(cfg, outcome))
-        .context("deep_audit refund failed")
-}
-
-fn actual_deep_audit_cost(cfg: &DeepAuditConfig, outcome: &AgentLoopOutcome) -> f64 {
-    if outcome.cost_usd > 0.0 {
-        outcome.cost_usd
-    } else {
-        cfg.deposit_usd
+    if provider_spend_unresolved || !outcome.cost_usd_exact {
+        // Dropping an unsettled ticket intentionally keeps its estimate in the
+        // durable ledger. Unknown provider spend must never be refunded to an
+        // observed subtotal (including zero).
+        return Ok(());
     }
+    limiter
+        .refund(ticket, outcome.cost_usd)
+        .context("deep_audit refund failed")
 }
 
 /// Combine N independent deep-audit outcomes into one consensus verdict.
@@ -206,25 +225,55 @@ fn actual_deep_audit_cost(cfg: &DeepAuditConfig, outcome: &AgentLoopOutcome) -> 
 ///     pass's evidence so the human reviewer sees the full audit trail.
 ///   - cost_usd / steps_used / truncated are summed-or-OR'd in the
 ///     intuitive way (sum cost, max steps, OR truncated).
-fn consensus_outcome(outcomes: Vec<DeepAuditOutcome>) -> DeepAuditOutcome {
+fn consensus_outcome(outcomes: Vec<DeepAuditOutcome>) -> Result<DeepAuditOutcome> {
     debug_assert!(!outcomes.is_empty(), "consensus_outcome needs >= 1 pass");
     let vote = consensus_vote(&outcomes);
     let winning_passes = winning_consensus_passes(&outcomes, &vote.winning_label);
     let best_winning = highest_confidence_pass(&winning_passes);
     let mean_confidence = mean_consensus_confidence(&outcomes, &winning_passes, vote.is_tie);
 
-    DeepAuditOutcome {
+    let triage_cost = outcomes.iter().try_fold(
+        crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        |total, outcome| {
+            total.checked_add(
+                crate::runtime::triage_cost_report(&outcome.triage)?,
+                "deep-audit consensus triage cost",
+            )
+        },
+    )?;
+    let total_cost = outcomes.iter().try_fold(
+        crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        |total, outcome| {
+            total.checked_add(
+                deep_audit_cost_report(outcome)?,
+                "deep-audit consensus cost",
+            )
+        },
+    )?;
+    Ok(DeepAuditOutcome {
         triage: crate::findings::TriageOutcome {
             verdict: consensus_verdict(vote.is_tie, best_winning),
             confidence: mean_confidence,
             rationale: consensus_rationale(&vote, outcomes.len(), best_winning),
-            cost_usd: outcomes.iter().map(|o| o.triage.cost_usd).sum(),
+            cost_usd: triage_cost.observed_usd(),
+            cost_usd_exact: triage_cost.is_complete(),
         },
         evidence: consensus_evidence(&outcomes),
-        cost_usd: outcomes.iter().map(|o| o.cost_usd).sum(),
+        cost_usd: total_cost.observed_usd(),
+        cost_usd_exact: total_cost.is_complete(),
         steps_used: outcomes.iter().map(|o| o.steps_used).max().unwrap_or(0),
         truncated: outcomes.iter().any(|o| o.truncated),
-    }
+    })
+}
+
+fn deep_audit_cost_report(outcome: &DeepAuditOutcome) -> Result<crate::runtime::RuntimeCostReport> {
+    let observed =
+        crate::runtime::RuntimeCost::from_usd(outcome.cost_usd, "deep-audit observed cost")?;
+    Ok(if outcome.cost_usd_exact {
+        crate::runtime::RuntimeCostReport::known(observed)
+    } else {
+        crate::runtime::RuntimeCostReport::incomplete(observed)
+    })
 }
 
 struct ConsensusVote {
@@ -406,10 +455,50 @@ fn evidence_key(citation: &EvidenceCitation) -> (String, u32, u32, String) {
 fn force_verdict_synthesis(
     runtime: &dyn AgentRuntime,
     original_request: &AgentToolLoopRequest,
-    truncated_outcome: AgentLoopOutcome,
+    truncated_outcome: &AgentLoopOutcome,
 ) -> Result<AgentLoopOutcome> {
-    let summary = summarize_transcript_for_synthesis(&truncated_outcome.transcript);
-    let synthesis_prompt = format!(
+    let synthesis_request = verdict_synthesis_request(original_request, truncated_outcome);
+    let response = crate::runtime::query_blocking_checked(runtime, synthesis_request)?;
+    let total_cost = deep_audit_synthesis_cost(truncated_outcome, &response)?;
+    Ok(AgentLoopOutcome {
+        text: response.text,
+        structured: response.structured,
+        steps_used: truncated_outcome.steps_used,
+        truncated: truncated_outcome.truncated,
+        cost_usd: total_cost.observed_usd(),
+        cost_usd_exact: total_cost.is_complete(),
+        transcript: truncated_outcome.transcript.clone(),
+    })
+}
+
+fn verdict_synthesis_request(
+    original: &AgentToolLoopRequest,
+    truncated: &AgentLoopOutcome,
+) -> AgentQueryRequest {
+    let prompt = verdict_synthesis_prompt(original, truncated);
+    let request = AgentQueryRequest::new(
+        original.model.clone(),
+        original.cwd.clone(),
+        original.system_prompt.clone(),
+        prompt,
+    );
+    match original.temperature {
+        Some(temperature) => request.with_temperature(temperature),
+        None => request,
+    }
+}
+
+fn verdict_synthesis_prompt(
+    original: &AgentToolLoopRequest,
+    truncated: &AgentLoopOutcome,
+) -> String {
+    let summary = summarize_transcript_for_synthesis(&truncated.transcript);
+    let summary = if summary.trim().is_empty() {
+        "(no source regions recorded)".to_string()
+    } else {
+        summary
+    };
+    format!(
         "{original}\n\n\
          --- SYNTHESIS PASS ---\n\
          You exhausted your tool budget without emitting the verdict. Based ONLY \
@@ -427,31 +516,27 @@ fn force_verdict_synthesis(
            never reached the relevant code.\n\n\
          Regions read in this audit:\n{summary}\n\n\
          Emit the JSON verdict now.",
-        original = original_request.prompt,
-        summary = if summary.trim().is_empty() {
-            "(no source regions recorded)".to_string()
-        } else {
-            summary
-        },
-    );
-    let mut synthesis_request = AgentQueryRequest::new(
-        original_request.model.clone(),
-        original_request.cwd.clone(),
-        original_request.system_prompt.clone(),
-        synthesis_prompt,
-    );
-    if let Some(temperature) = original_request.temperature {
-        synthesis_request = synthesis_request.with_temperature(temperature);
-    }
-    let response = runtime.query_blocking(synthesis_request)?;
-    Ok(AgentLoopOutcome {
-        text: response.text,
-        structured: response.structured,
-        steps_used: truncated_outcome.steps_used,
-        truncated: truncated_outcome.truncated,
-        cost_usd: truncated_outcome.cost_usd,
-        transcript: truncated_outcome.transcript,
-    })
+        original = original.prompt,
+    )
+}
+
+fn deep_audit_synthesis_cost(
+    truncated: &AgentLoopOutcome,
+    response: &crate::runtime::AgentQueryResponse,
+) -> Result<crate::runtime::RuntimeCostReport> {
+    let observed = crate::runtime::RuntimeCost::from_usd(
+        truncated.cost_usd,
+        "deep-audit tool-loop observed cost",
+    )?;
+    let prior = if truncated.cost_usd_exact {
+        crate::runtime::RuntimeCostReport::known(observed)
+    } else {
+        crate::runtime::RuntimeCostReport::incomplete(observed)
+    };
+    prior.checked_add(
+        response.checked_cost_report()?,
+        "deep-audit tool loop plus synthesis cost",
+    )
 }
 
 fn summarize_transcript_for_synthesis(transcript: &[LoopHistoryEntry]) -> String {
@@ -528,9 +613,11 @@ mod consensus_tests {
                 confidence: conf,
                 rationale: rationale.to_string(),
                 cost_usd: 0.0,
+                cost_usd_exact: true,
             },
             evidence: vec![],
             cost_usd: 0.5,
+            cost_usd_exact: true,
             steps_used: 8,
             truncated: false,
         }
@@ -543,7 +630,7 @@ mod consensus_tests {
             outcome(TriageVerdict::TruePositive, 0.7, "real"),
             outcome(TriageVerdict::TruePositive, 0.8, "real"),
         ];
-        let c = consensus_outcome(outcomes);
+        let c = consensus_outcome(outcomes).unwrap();
         assert_eq!(c.triage.verdict, TriageVerdict::TruePositive);
         // 3/3 winners, mean = 0.8
         assert!((c.triage.confidence - 0.8).abs() < 1e-4);
@@ -557,7 +644,7 @@ mod consensus_tests {
             outcome(TriageVerdict::FalsePositive, 0.7, "guard at X"),
             outcome(TriageVerdict::TruePositive, 0.5, "looked unguarded"),
         ];
-        let c = consensus_outcome(outcomes);
+        let c = consensus_outcome(outcomes).unwrap();
         assert_eq!(c.triage.verdict, TriageVerdict::FalsePositive);
         // mean of winning pair = 0.775
         assert!((c.triage.confidence - 0.775).abs() < 1e-3);
@@ -571,7 +658,7 @@ mod consensus_tests {
             outcome(TriageVerdict::FalsePositive, 0.6, "guarded"),
             outcome(TriageVerdict::NeedsReview, 0.4, "unsure"),
         ];
-        let c = consensus_outcome(outcomes);
+        let c = consensus_outcome(outcomes).unwrap();
         assert_eq!(c.triage.verdict, TriageVerdict::NeedsReview);
         assert!(c.triage.rationale.contains("disagree"));
     }
@@ -614,7 +701,7 @@ mod consensus_tests {
                 kind: "guard".into(),
             },
         ];
-        let c = consensus_outcome(vec![o1, o2]);
+        let c = consensus_outcome(vec![o1, o2]).unwrap();
         assert_eq!(c.evidence.len(), 3);
     }
 

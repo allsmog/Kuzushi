@@ -7,7 +7,7 @@ pub(crate) fn read_manifest_summary(root: &Path) -> Result<String> {
         if !path.exists() {
             continue;
         }
-        let raw = fs::read_to_string(&path)
+        let raw = crate::bounded_file::read_utf8_text_within(root, &path, 256 * 1024)
             .with_context(|| format!("Could not read manifest {}", path.display()))?;
         let snippet = raw
             .lines()
@@ -112,4 +112,25 @@ pub(crate) fn number_field(record: &Map<String, Value>, keys: &[&str]) -> Option
                     .and_then(|value| value.parse::<u64>().ok())
             })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn manifest_summary_rejects_symlink_outside_target_without_exposing_content() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        let outside = temp.path().join("outside-package.json");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(&outside, r#"{"name":"OUTSIDE_MANIFEST_TOKEN"}"#).unwrap();
+        symlink(&outside, target.join("package.json")).unwrap();
+
+        let error = read_manifest_summary(&target).unwrap_err();
+
+        assert!(!error.to_string().contains("OUTSIDE_MANIFEST_TOKEN"));
+    }
 }

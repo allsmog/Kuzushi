@@ -6,7 +6,8 @@ pub(super) fn missing_patch_finding_response(fingerprint: &str) -> Value {
 }
 
 pub(super) fn untriaged_patch_finding_response(fingerprint: &str) -> Value {
-    let output = format!("[-] Finding '{fingerprint}' has no triage verdict. Run triage:run first.");
+    let output =
+        format!("[-] Finding '{fingerprint}' has no triage verdict. Run triage:run first.");
     refused_patch_response(fingerprint, "missing-triage", output)
 }
 

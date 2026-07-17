@@ -1,10 +1,9 @@
 use super::*;
 pub(crate) use super::*;
 
-use self::artifacts::{
-    append_run_status_event, append_trace_step, short_label, write_run_failure_handoff,
-    write_run_summary,
-};
+#[cfg(test)]
+use self::artifacts::{append_run_status_event, write_run_failure_handoff};
+use self::artifacts::{append_trace_step, short_label};
 use self::findings::short_fingerprint;
 use self::workers::{scan_worker, LiveTraceBudget};
 use self::{with_next_step, ScanEvent, ScanPanelState, ShellApp, ShellView};

@@ -32,6 +32,14 @@ screen (`sast`/`sast-running`, `catalog`/`catalog-active`, etc.). The Phase 1
 snapshot harness should collapse those into one fixture family per Rust view
 rather than one bespoke renderer per file.
 
+The updated `Kuzushi TUI.pdf` (SHA-256
+`fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545`) is a
+separate four-composition reference for the Map, Hunt, Confirm, and Fix cockpit
+pages. It does not add mockups, routes, or rows to the 114-state parity
+denominator. Its semantic/geometry contract is owned by the phase-composition
+fixture family and the J17 DevEx captures; `ParityContract` continues to own
+the mapped Atlas states below.
+
 ## Matrix
 
 | Mockup | Bucket | Current target | Phase 0 note |
@@ -52,9 +60,9 @@ rather than one bespoke renderer per file.
 | `budget-stop.jsx` | Implement | cost-cap halt / retry card / activity prefix | Budget stop variant. |
 | `carlini-running.jsx` | Defer | deferred `carlini-threat-hunt` exact-name module | Product-quarantined module; do not block core fidelity. |
 | `carlini.jsx` | Defer | deferred `carlini-threat-hunt` exact-name module | Needs graduation/fixture contract before parity gate. |
-| `catalog-active.jsx` | Implement | `ShellView::Catalog` / home cockpit | Active-run state variant. |
-| `catalog-recent.jsx` | Implement | `ShellView::Catalog` / home cockpit | Recent activity state variant. |
-| `catalog.jsx` | Implement | `ShellView::Catalog` / `ShellView::Home` | Core entry surface. |
+| `catalog-active.jsx` | Implement | Workbench + contextual Capabilities overlay | Active-run capability state variant. |
+| `catalog-recent.jsx` | Implement | Workbench + contextual Capabilities overlay | Recent activity capability state variant. |
+| `catalog.jsx` | Implement | `ShellView::Catalog` capability overlay over Workbench | Phase-native entry surface; never a raw registry dump. |
 | `chrome-rce-no-target.jsx` | Defer | deferred `chrome-rce` module | Deferred recon-assessment surface; needs product commitment. |
 | `chrome-rce-target.jsx` | Defer | deferred `chrome-rce` module | Target-picker state is module-specific and not yet a shell contract. |
 | `chrome-rce.jsx` | Defer | deferred `chrome-rce` module | Keep as design input for the deferred module. |
@@ -95,8 +103,8 @@ rather than one bespoke renderer per file.
 | `load-gh.jsx` | Implement | `ShellCommand::Load`, session load result state | Keep generic load-specifier state; no GitHub-specific backend assumption. |
 | `mcp-tools.jsx` | Defer | CLI `kuzushi mcp ...` | No shell `/mcp list` route yet; CLI-only for now. |
 | `module-options.jsx` | Implement | `ShellView::Options` | Existing descriptor-backed options surface. |
-| `modules-detail.jsx` | Implement | `ShellView::Module` | Module detail variant. |
-| `modules.jsx` | Implement | `ShellView::Catalog` / module catalog | Existing modules catalog. |
+| `modules-detail.jsx` | Implement | Capabilities Expert drawer / `ShellView::Tools` | Engine detail without restoring catalog-era navigation. |
+| `modules.jsx` | Implement | contextual Capabilities overlay | Current phase actions plus explicit Expert/Integrations drawers. |
 | `multi-target.jsx` | Cut | none | Conflicts with explicit target consent and no silent cwd/multi-target fallback. |
 | `ndiff-running.jsx` | Implement | `ndiff:*` plus Activity/ModuleRun | Running variant. |
 | `ndiff.jsx` | Implement | `ndiff:*` | Visible built-in module. |
@@ -119,7 +127,7 @@ rather than one bespoke renderer per file.
 | `prompt.jsx` | Implement | prompt editor/show/tune state | Existing prompt command surface. |
 | `prompts.jsx` | Implement | `ShellView::PromptsEditor` | Existing prompt editor surface. |
 | `quit-confirm.jsx` | Implement | exit request / confirmation state | Overlay parity target. |
-| `randori.jsx` | Implement | `randori:pasta`, threat-model artifact view | Visible built-in module. |
+| `randori.jsx` | Implement | `threat-model:build` with PASTA methodology | Folded methodology, not a standalone module card. |
 | `rate-limited.jsx` | Implement | retry/throttle banner state | Common runtime error state. |
 | `recon.jsx` | Implement | `recon:*`, bounty/recon import surfaces | Existing recon module path; keep generic. |
 | `replay-scrub.jsx` | Implement | `ShellView::Replay` | Replay scrubber/state variant. |
@@ -137,7 +145,7 @@ rather than one bespoke renderer per file.
 | `secrets-hits.jsx` | Implement | `secret-scan:scan` | Hits/detail variant; likely collapse with `secret-scan-hits`. |
 | `semgrep.jsx` | Implement | `semgrep:scan` | Visible native scanner. |
 | `share-gen.jsx` | Cut | none | Signed URL sharing is not part of the local-first product contract. |
-| `shinsa.jsx` | Implement | optional adapter `shinsa:*` | Adapter-backed, but product-relevant when configured. |
+| `shinsa.jsx` | Implement | explicit Integration drawer, optional `shinsa:*` adapter | Never auto-surfaced from an installed package. |
 | `show-runs.jsx` | Implement | `ShellCommand::ShowRuns`, `ShellView::Runs` | Same fixture family as `runs`. |
 | `since.jsx` | Implement | `ShellCommand::Since`, diff-scoped findings | Existing command surface. |
 | `snapshot-rollback.jsx` | Defer | run/workspace snapshots | Snapshot indexing exists, rollback UI/domain is not committed. |
@@ -153,7 +161,7 @@ rather than one bespoke renderer per file.
 | `threats-stories.jsx` | Implement | `ShellView::Threat(ThreatView::Stories)` | Existing threat stories tab. |
 | `threats-stride.jsx` | Implement | `ShellView::Threat(ThreatView::Stride)` | Existing STRIDE tab. |
 | `threats-summary.jsx` | Implement | `ShellView::Threat(ThreatView::Summary)` | Existing summary tab. |
-| `tob.jsx` | Implement | optional adapter `tob:*` | Adapter-backed, but product-relevant when configured. |
+| `tob.jsx` | Implement | explicit Integration drawer, optional `tob:*` adapter | Never auto-surfaced from an installed package. |
 | `tools.jsx` | Implement | `ShellView::Tools` | Existing tools surface. |
 | `trace.jsx` | Implement | `ShellView::Trace` | Existing trace surface. |
 | `triage-queue.jsx` | Implement | triage activity/queue state | Fixture over existing triage + Activity concepts. |
@@ -166,8 +174,8 @@ rather than one bespoke renderer per file.
 | `verify-sandbox-spinning.jsx` | Implement | verify/proof ladder sandbox state | Verification state variant. |
 | `verify-sandbox.jsx` | Implement | verify/proof ladder sandbox state | Verification state variant. |
 | `verify.jsx` | Implement | `verify:finding` | Existing finding lifecycle module. |
-| `vuln-scout-audit.jsx` | Implement | optional adapter `vuln-scout:*`, audit/run ledger state | Adapter-backed, but product-relevant when configured. |
-| `vuln-scout.jsx` | Implement | optional adapter `vuln-scout:*` | Adapter-backed, but product-relevant when configured. |
+| `vuln-scout-audit.jsx` | Implement | explicit Integration drawer plus audit/run ledger state | Adapter-backed only when explicitly configured. |
+| `vuln-scout.jsx` | Implement | explicit Integration drawer, optional `vuln-scout:*` | Never auto-surfaced from an installed package. |
 | `workspace-manage.jsx` | Implement | `ShellView::Workspace` | Workspace management variant; stay within existing commands. |
 | `workspace.jsx` | Implement | `ShellView::Workspace` | Existing workspace surface. |
 | `x-ray-scanning.jsx` | Implement | `x-ray:run`, Activity/ModuleRun | Running variant. |
@@ -187,3 +195,6 @@ rather than one bespoke renderer per file.
    design/PARITY_STATUS.md --verified`.
 4. Add `Defer` rows only when their backend/command contract graduates, and
    keep `Cut` rows out of `PARITY_STATUS.md`.
+5. Keep the PDF phase-composition contract separate from the 114-state count.
+   Verify its four pages at canonical widths and capture the real offline-demo
+   path with `scripts/devex/run-journey.sh J17`.

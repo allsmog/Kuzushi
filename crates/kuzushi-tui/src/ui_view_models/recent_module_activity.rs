@@ -1,5 +1,5 @@
 use crate::{LogLine, ReconSnapshot, ShellApp};
-use kuzushi_core::{AgenticSastReport, CarliniThreatHuntReport, ReconService, Severity};
+use kuzushi_core::{AgenticSastReport, CarliniThreatHuntReport, ReconNote, ReconService, Severity};
 
 pub(crate) const MODULE_ACTIVITY_COLUMN_COUNT: usize = 4;
 
@@ -13,6 +13,7 @@ pub(crate) enum ModuleActivityKind {
     Transcript,
     ReconService,
     ReconHost,
+    ReconNote,
     Finding,
 }
 
@@ -95,10 +96,25 @@ fn agentic_activity_rows(app: &ShellApp, module_id: &str) -> Option<Vec<ModuleAc
         .map(agentic_sast_snapshot_rows)
 }
 fn recon_snapshot_rows(snapshot: &ReconSnapshot, take: usize) -> Vec<ModuleActivityRow> {
-    if !snapshot.services.is_empty() {
-        return recon_service_rows(snapshot, take);
+    let mut rows = if snapshot.services.is_empty() {
+        recon_host_rows(snapshot, take)
+    } else {
+        recon_service_rows(snapshot, take)
+    };
+    let remaining = take.saturating_sub(rows.len());
+    if remaining > 0 {
+        rows.extend(recon_note_rows(snapshot, remaining));
     }
-    recon_host_rows(snapshot, take)
+    rows
+}
+
+pub(crate) fn recon_snapshot_activity_model(
+    snapshot: &ReconSnapshot,
+    take: usize,
+) -> ModuleActivityModel {
+    ModuleActivityModel {
+        rows: recon_snapshot_rows(snapshot, take),
+    }
 }
 fn recon_service_rows(snapshot: &ReconSnapshot, take: usize) -> Vec<ModuleActivityRow> {
     snapshot
@@ -135,6 +151,36 @@ fn recon_host_rows(snapshot: &ReconSnapshot, take: usize) -> Vec<ModuleActivityR
             )
         })
         .collect()
+}
+
+fn recon_note_rows(snapshot: &ReconSnapshot, take: usize) -> Vec<ModuleActivityRow> {
+    snapshot
+        .notes
+        .iter()
+        .take(take)
+        .map(recon_note_row)
+        .collect()
+}
+
+fn recon_note_row(note: &ReconNote) -> ModuleActivityRow {
+    ModuleActivityRow {
+        kind: ModuleActivityKind::ReconNote,
+        tone: ModuleActivityTone::Default,
+        cells: [
+            note.ntype.clone(),
+            recon_note_scope(note),
+            serde_json::to_string(&note.data).unwrap_or_else(|_| "unreadable note".to_string()),
+            String::new(),
+        ],
+    }
+}
+
+fn recon_note_scope(note: &ReconNote) -> String {
+    note.service_id
+        .as_ref()
+        .map(|id| format!("service {id}"))
+        .or_else(|| note.host_id.as_ref().map(|id| format!("host {id}")))
+        .unwrap_or_else(|| "workspace".to_string())
 }
 fn recon_service_host_label(snapshot: &ReconSnapshot, service: &ReconService) -> String {
     snapshot

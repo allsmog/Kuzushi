@@ -3,6 +3,7 @@
 //! (`kuzushi --version`, the `/config` view). Builds outside a git checkout
 //! (published tarballs) fall back to "unknown" rather than failing.
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
@@ -17,10 +18,30 @@ fn main() {
         if dirty { "1" } else { "0" }
     );
     println!("cargo:rustc-env=KUZUSHI_BUILD_PROFILE={profile}");
-    // Refresh the sha on commit/checkout. The dirty flag is inherently a
-    // snapshot of the tree at build time — any edit after the build stales
-    // the binary regardless, so we don't chase every file change.
-    println!("cargo:rerun-if-changed=../../.git/HEAD");
+    emit_git_rerun_paths();
+}
+
+fn emit_git_rerun_paths() {
+    let Some(git_dir) = git_path(&["rev-parse", "--absolute-git-dir"]) else {
+        return;
+    };
+    // A symbolic HEAD file does not change when its branch advances. Watch the
+    // resolved branch ref too; the common dir keeps this correct in worktrees.
+    let common_dir = git_path(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .unwrap_or_else(|| git_dir.clone());
+    emit_rerun_path(&git_dir.join("HEAD"));
+    emit_rerun_path(&common_dir.join("packed-refs"));
+    if let Some(head_ref) = git(&["symbolic-ref", "-q", "HEAD"]) {
+        emit_rerun_path(&common_dir.join(head_ref));
+    }
+}
+
+fn git_path(args: &[&str]) -> Option<PathBuf> {
+    git(args).map(PathBuf::from)
+}
+
+fn emit_rerun_path(path: &Path) {
+    println!("cargo:rerun-if-changed={}", path.display());
 }
 
 fn git(args: &[&str]) -> Option<String> {

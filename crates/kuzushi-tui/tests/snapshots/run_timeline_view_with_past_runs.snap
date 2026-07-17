@@ -2,11 +2,11 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
-KUZUSHI mode:shell · view:run-timeline · phase:組 map 1/4 · target:./runs · model:unconfigured · ctx:not built ·...
+KUZUSHI route:shell · view:run-timeline · phase:崩 scan 2/5 · report ready · target:./runs · model:unconfigured ·...
 
  -- RUN TIMELINE -------------------------------------------------------------------------------------------------------
 runId           status        findings   revision       target
-r-2026…T15-18   failed        0          rev:unknown    ~/work/acme-checkout
-r-2026…T14-31   completed     18         rev:unknown    ~/work/acme-checkout
+06T15-18        failed        0          rev:unknown    ~/work/acme-checkout
+06T14-31        completed     18         rev:unknown    ~/work/acme-checkout
 
 > try: runs diff <left> <right> · replay <runId> · trace <runId> · findings · back

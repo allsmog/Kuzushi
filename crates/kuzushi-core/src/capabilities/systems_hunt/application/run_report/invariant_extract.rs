@@ -1,15 +1,27 @@
 use super::*;
 
+#[cfg(test)]
 pub(crate) fn run_systems_invariant_extract(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<SystemsInvariantOutput> {
+    Ok(run_systems_invariant_extract_with_cost(input, ctx, runtime)?.value)
+}
+
+pub(crate) fn run_systems_invariant_extract_with_cost(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<CostedStructuredJson<SystemsInvariantOutput>> {
     let target = resolve_target(input, ctx)?;
     let options = SystemsHuntInput::from_tool_input(input)?;
     let context = systems_context_from_input_or_gather(input, &target, &options)?;
     if systems_context_is_empty(&context) {
-        return Ok(empty_systems_invariants());
+        return Ok(CostedStructuredJson::from_cost_report(
+            empty_systems_invariants(),
+            crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
+        ));
     }
     query_systems_invariants_for_context(input, ctx, runtime, target, context, options)
 }
@@ -27,7 +39,7 @@ fn query_systems_invariants_for_context(
     target: PathBuf,
     context: SystemsContextOutput,
     options: SystemsHuntInput,
-) -> Result<SystemsInvariantOutput> {
+) -> Result<CostedStructuredJson<SystemsInvariantOutput>> {
     let runtime = required_systems_runtime(runtime, "systems-hunt:systems-invariant-extract")?;
     let request = systems_invariant_query_request(input, ctx, &options, &target)?;
     let _llm_scope = ctx.trace.map(|trace| {
@@ -40,7 +52,7 @@ fn query_systems_invariants_for_context(
             .emit();
         trace.parent_scope(phase)
     });
-    query_systems_invariants(
+    query_systems_invariants_with_cost(
         runtime,
         &request.model,
         &target,

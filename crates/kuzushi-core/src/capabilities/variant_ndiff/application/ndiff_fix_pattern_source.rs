@@ -203,6 +203,7 @@ pub(crate) fn unfetched_ndiff_patch_response(patch_url: &str, input: &Value) -> 
 pub(crate) fn ndiff_fix_pattern_response(
     source: NdiffFixPatternSource,
     pattern: Value,
+    cost: crate::runtime::RuntimeCostReport,
 ) -> Result<Value> {
     let object = pattern
         .as_object()
@@ -216,6 +217,6 @@ pub(crate) fn ndiff_fix_pattern_response(
     });
     let mut result =
         crate::module_result::completed_output_result("ndiff:extract-fix-pattern completed", output, data);
-    result["costUsd"] = json!(0.0);
+    crate::module_result::apply_runtime_cost_report(&mut result, cost);
     Ok(result)
 }

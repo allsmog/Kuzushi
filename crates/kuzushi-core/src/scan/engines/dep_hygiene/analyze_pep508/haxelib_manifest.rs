@@ -16,11 +16,7 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_haxelib_json(
         .collect()
 }
 
-fn haxelib_finding(
-    file_path: &Path,
-    name: &str,
-    constraint: &str,
-) -> Option<DepHygieneFinding> {
+fn haxelib_finding(file_path: &Path, name: &str, constraint: &str) -> Option<DepHygieneFinding> {
     let trimmed = constraint.trim();
     if is_floating_haxelib_constraint(trimmed) {
         return Some(DepHygieneFinding::new(

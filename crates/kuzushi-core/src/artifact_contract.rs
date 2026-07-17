@@ -37,12 +37,18 @@ pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 6] = [
     },
 ];
 
-pub(crate) const OPTIONAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 1] =
-    [CanonicalRunArtifactSpec {
+pub(crate) const OPTIONAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 2] = [
+    CanonicalRunArtifactSpec {
         leaf: "report.sarif",
         label: "SARIF report",
         kind: "sarif",
-    }];
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "items.jsonl",
+        label: "semantic run items",
+        kind: "jsonl",
+    },
+];
 
 pub(crate) const TOOL_RESULT_ARTIFACTS: [CanonicalRunArtifactSpec; 1] =
     [CanonicalRunArtifactSpec {
@@ -56,6 +62,34 @@ pub(crate) const TOOL_INPUT_ARTIFACTS: [CanonicalRunArtifactSpec; 1] = [Canonica
     label: "tool input",
     kind: "json",
 }];
+
+pub(crate) const SCAN_PIPELINE_ARTIFACTS: [CanonicalRunArtifactSpec; 5] = [
+    CanonicalRunArtifactSpec {
+        leaf: "scan-input.json",
+        label: "scan input",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "triage.jsonl",
+        label: "scan triage events",
+        kind: "jsonl",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "verify.jsonl",
+        label: "scan verification events",
+        kind: "jsonl",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "patch.jsonl",
+        label: "scan patch events",
+        kind: "jsonl",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "phase-stages.jsonl",
+        label: "scan phase stage receipts",
+        kind: "jsonl",
+    },
+];
 
 pub(crate) fn canonical_run_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
     CANONICAL_RUN_ARTIFACTS
@@ -73,4 +107,10 @@ pub(crate) fn tool_result_artifact_spec(leaf: &str) -> Option<&'static Canonical
 
 pub(crate) fn tool_input_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
     TOOL_INPUT_ARTIFACTS.iter().find(|spec| spec.leaf == leaf)
+}
+
+pub(crate) fn scan_pipeline_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
+    SCAN_PIPELINE_ARTIFACTS
+        .iter()
+        .find(|spec| spec.leaf == leaf)
 }

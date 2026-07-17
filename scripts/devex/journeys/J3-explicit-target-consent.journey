@@ -8,6 +8,7 @@ cwd: @TMP_TARGET
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch:
 wait-for: 25 CHOOSE A TARGET
+wait-for: 5 git repo
 snap: picker-offers-cwd
 expect: Nothing defaults to cwd silently
 expect: git repo

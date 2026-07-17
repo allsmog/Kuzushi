@@ -3,7 +3,7 @@ use crate::findings::{Finding, FindingStore, Severity};
 use crate::modules::ToolExecutionContext;
 use crate::repository_inventory::{build_repository_inventory, RepositoryInventory};
 use crate::runtime::AgentRuntime;
-use crate::threat_model::{load_persistent_threat_model, persistent_threat_model_path};
+use crate::threat_model::{persistent_threat_model_path, try_load_persistent_threat_model};
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
 use serde::Serialize;

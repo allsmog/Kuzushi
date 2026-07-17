@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
-use kuzushi_core::{append_structured_output_contract, AgentQueryRequest, AgentQueryResponse};
+use kuzushi_core::{
+    append_structured_output_contract, AgentQueryRequest, AgentQueryResponse, ModelTokenUsage,
+    Observed,
+};
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -44,15 +47,15 @@ impl AnthropicOAuthRuntime {
         Self::new(AnthropicOAuthRuntimeOptions::from_token_file(path)?)
     }
 
-    pub(crate) async fn send_messages(
+    pub(crate) async fn send_messages_observed(
         &self,
         request: AgentQueryRequest,
-    ) -> Result<AgentQueryResponse> {
+    ) -> Result<Observed<AgentQueryResponse>> {
         let model = strip_provider_prefix(&request.model);
         let max_tokens = request.max_output_tokens.unwrap_or(self.max_tokens);
         let body = anthropic_messages_body(&model, max_tokens, &request);
         let resp = self.send_anthropic_messages_request(&body).await?;
-        parse_anthropic_messages_http_response(&model, resp).await
+        parse_anthropic_messages_http_response_observed(&model, resp).await
     }
 
     pub(crate) async fn send_anthropic_messages_request(
@@ -72,14 +75,14 @@ impl AnthropicOAuthRuntime {
     }
 }
 
-pub(crate) async fn parse_anthropic_messages_http_response(
+async fn parse_anthropic_messages_http_response_observed(
     model: &str,
     resp: reqwest::Response,
-) -> Result<AgentQueryResponse> {
+) -> Result<Observed<AgentQueryResponse>> {
     let status = resp.status();
     let raw = read_anthropic_response_body(resp).await?;
     ensure_anthropic_success(status, &raw)?;
-    parse_anthropic_messages_response(model, &raw)
+    parse_anthropic_messages_response_observed(model, &raw)
 }
 
 pub(crate) async fn read_anthropic_response_body(resp: reqwest::Response) -> Result<String> {
@@ -88,9 +91,9 @@ pub(crate) async fn read_anthropic_response_body(resp: reqwest::Response) -> Res
         .context("Anthropic OAuth: could not read response body")
 }
 
-pub(crate) fn ensure_anthropic_success(status: reqwest::StatusCode, raw: &str) -> Result<()> {
+pub(crate) fn ensure_anthropic_success(status: reqwest::StatusCode, _raw: &str) -> Result<()> {
     if !status.is_success() {
-        anyhow::bail!("Anthropic OAuth: HTTP {status}: {raw}");
+        anyhow::bail!("Anthropic OAuth: HTTP {status}");
     }
     Ok(())
 }
@@ -112,26 +115,99 @@ pub(crate) fn anthropic_messages_body(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn parse_anthropic_messages_response(
     model: &str,
     raw: &str,
 ) -> Result<AgentQueryResponse> {
+    parse_anthropic_messages_response_observed(model, raw).map(Observed::into_value)
+}
+
+fn parse_anthropic_messages_response_observed(
+    model: &str,
+    raw: &str,
+) -> Result<Observed<AgentQueryResponse>> {
     let parsed: ApiResponse = serde_json::from_str(raw)
-        .with_context(|| format!("Anthropic OAuth: could not parse response: {raw}"))?;
+        .map_err(|_| anyhow::anyhow!("Anthropic OAuth: could not parse response"))?;
+    let usage = parsed
+        .usage
+        .as_ref()
+        .map_or_else(ModelTokenUsage::unavailable_call, |usage| {
+            ModelTokenUsage::from_reported_options(
+                usage.input_tokens.map(u64::from),
+                usage.output_tokens.map(u64::from),
+            )
+        });
     let text = super::response::anthropic_response_text(&parsed);
     let structured = maybe_parse_json(&text);
     let (input_tokens, output_tokens) = super::response::anthropic_response_usage(&parsed);
-    let cost_usd = estimate_cost_usd(model, input_tokens, output_tokens);
+    let estimated_cost_usd = estimate_cost_usd(model, input_tokens, output_tokens);
     let stop_reason = parsed.stop_reason.clone();
     let truncated = stop_reason.as_deref() == Some("max_tokens");
 
-    Ok(AgentQueryResponse {
-        text,
-        structured,
-        cost_usd,
-        input_tokens,
-        output_tokens,
-        truncated,
-        stop_reason,
-    })
+    Ok(Observed::new(
+        AgentQueryResponse {
+            text,
+            structured,
+            cost_usd: 0.0,
+            cost_usd_reported: false,
+            estimated_cost_usd,
+            input_tokens,
+            output_tokens,
+            truncated,
+            stop_reason,
+        },
+        usage,
+    ))
+}
+
+#[cfg(test)]
+mod observed_usage_tests {
+    use super::*;
+
+    #[test]
+    fn provider_reported_zero_usage_is_preserved() {
+        let observed = parse_anthropic_messages_response_observed(
+            "claude-test",
+            r#"{"content":[],"usage":{"input_tokens":0,"output_tokens":0}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(observed.usage.observed_counts(), (Some(0), Some(0)));
+        assert!(observed.usage.is_complete());
+    }
+
+    #[test]
+    fn absent_usage_is_not_synthesized_as_zero() {
+        let observed =
+            parse_anthropic_messages_response_observed("claude-test", r#"{"content":[]}"#).unwrap();
+
+        assert_eq!(observed.usage.observed_counts(), (None, None));
+        assert!(observed.usage.is_unavailable());
+    }
+
+    #[test]
+    fn partial_usage_keeps_missing_direction_unavailable() {
+        let observed = parse_anthropic_messages_response_observed(
+            "claude-test",
+            r#"{"content":[],"usage":{"input_tokens":5}}"#,
+        )
+        .unwrap();
+
+        assert_eq!(observed.usage.observed_counts(), (Some(5), None));
+        assert!(!observed.usage.is_complete());
+    }
+
+    #[test]
+    fn parse_errors_do_not_echo_provider_response() {
+        let sentinel = "raw-model-response-sentinel";
+        let raw = format!(r#"{{"content":"{sentinel}"}}"#);
+        let error = format!(
+            "{:#}",
+            parse_anthropic_messages_response_observed("claude-test", &raw).unwrap_err()
+        );
+
+        assert!(error.contains("could not parse response"));
+        assert!(!error.contains(sentinel));
+    }
 }

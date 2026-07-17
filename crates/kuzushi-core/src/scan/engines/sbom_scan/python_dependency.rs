@@ -1,4 +1,4 @@
-use super::{SbomComponent, component};
+use super::{component, SbomComponent};
 use std::path::Path;
 
 pub(super) fn python_dependency_name(raw: &str) -> &str {

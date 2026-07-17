@@ -16,9 +16,14 @@ pub struct RunbookBudget {
 }
 
 impl RunbookBudget {
-    pub fn record_call(&mut self, cost_usd: f64) {
-        self.spent_cost_usd += cost_usd.max(0.0);
+    pub fn record_call(&mut self, cost_usd: f64) -> anyhow::Result<()> {
+        self.spent_cost_usd = crate::runtime::RuntimeCost::checked_sum(
+            [self.spent_cost_usd, cost_usd],
+            "runbook accumulated cost",
+        )?
+        .usd();
         self.model_calls = self.model_calls.saturating_add(1);
+        Ok(())
     }
 
     pub fn remaining_cost_usd(&self) -> Option<f64> {
@@ -117,5 +122,13 @@ mod tests {
             decision.degradation,
             BudgetDegradation::ReduceVotes { from: 5, to: 3 }
         );
+    }
+
+    #[test]
+    fn record_call_rejects_invalid_and_overflowing_cost() {
+        let mut budget = RunbookBudget::default();
+        assert!(budget.record_call(-1.0).is_err());
+        budget.record_call(f64::MAX).unwrap();
+        assert!(budget.record_call(f64::MAX).is_err());
     }
 }

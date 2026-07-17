@@ -11,7 +11,7 @@ pub(crate) fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     let model = catalog_model(app);
-    append_modules_header(&mut lines, model.module_count);
+    append_capabilities_header(&mut lines, &model);
     if model.module_count == 0 {
         empty_state::append_empty_catalog(area, &mut lines);
         return lines;
@@ -27,14 +27,28 @@ pub(crate) fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines
 }
 
-fn append_modules_header(lines: &mut Vec<Line<'static>>, module_count: usize) {
-    // View title only — the cockpit strip directly above already carries the
-    // KUZUSHI brand, so repeating it here was pure noise.
+fn append_capabilities_header(lines: &mut Vec<Line<'static>>, model: &CatalogModel) {
     lines.push(Line::from(vec![
-        Span::styled("MODULES", theme::heading()),
+        Span::styled("CAPABILITIES", theme::heading()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
-        Span::styled(format!("{module_count} modules"), theme::muted()),
+        Span::styled(model.phase_label, theme::accent()),
+        Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
+        Span::styled(
+            format!(
+                "{} actions{}",
+                model.module_count,
+                if model.expanded { " · expert" } else { "" }
+            ),
+            theme::muted(),
+        ),
     ]));
+    if let Some(warning) = model.collapsed.target_warning {
+        lines.push(styled(warning, theme::warn()));
+    } else {
+        lines.push(muted(
+            "Phase-native actions first. Press e for engines and installed integrations.",
+        ));
+    }
     lines.push(blank());
 }
 
@@ -64,5 +78,24 @@ fn append_module_group(lines: &mut Vec<Line<'static>>, group: &CatalogModuleGrou
             module.focused,
             &widths,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn targetless_catalog_shows_target_and_demo_recovery() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let text = catalog_lines(&app, Rect::new(0, 0, 120, 40))
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert!(text.contains("target <path>"), "{text}");
+        assert!(text.contains("demo"), "{text}");
     }
 }

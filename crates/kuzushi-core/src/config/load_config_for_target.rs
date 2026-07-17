@@ -1,3 +1,4 @@
+use super::config_file_io::{read_optional_config, write_config_body};
 use super::*;
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -22,6 +23,8 @@ pub(crate) struct PartialOperatorConfig {
     pub(crate) signature_keys: Option<Vec<crate::worker_protocol::SignatureTrustKey>>,
     pub(crate) mcp_mounts: Option<Vec<McpMountConfig>>,
     pub(crate) fuzz_executors: Option<Vec<FuzzExecutorConfig>>,
+    pub(crate) keybindings: Option<Vec<KeybindingOverrideConfig>>,
+    pub(crate) session_retention_days: Option<u64>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -29,8 +32,11 @@ pub(crate) struct PartialOperatorConfig {
 pub(crate) struct PartialGuidedPhaseConfig {
     pub(crate) stop_after: Option<Option<GuidedPhase>>,
     pub(crate) map: Option<PartialPhaseTemplateConfig>,
-    pub(crate) hunt: Option<PartialPhaseTemplateConfig>,
-    pub(crate) confirm: Option<PartialPhaseTemplateConfig>,
+    #[serde(alias = "hunt")]
+    pub(crate) scan: Option<PartialPhaseTemplateConfig>,
+    pub(crate) review: Option<PartialPhaseTemplateConfig>,
+    #[serde(alias = "confirm")]
+    pub(crate) prove: Option<PartialPhaseTemplateConfig>,
     pub(crate) fix: Option<PartialPhaseTemplateConfig>,
 }
 
@@ -100,11 +106,9 @@ pub fn persist_global_model_selection(
 }
 
 fn global_config_for_write(path: &Path) -> Result<V2Config> {
-    if !path.exists() {
+    let Some(raw) = read_optional_config(path)? else {
         return Ok(V2Config::default());
-    }
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
+    };
     toml::from_str(&raw).with_context(|| format!("Could not parse {}", path.display()))
 }
 
@@ -124,10 +128,6 @@ pub(crate) fn default_config_body() -> Result<String> {
     ))
 }
 
-pub(crate) fn write_config_body(path: &Path, body: String) -> Result<()> {
-    fs::write(path, body).with_context(|| format!("Could not write {}", path.display()))
-}
-
 fn merge_project_file(config: &mut V2Config, path: Option<PathBuf>) -> Result<()> {
     match path {
         Some(path) => merge_existing_file(config, path, ConfigSource::Project),
@@ -136,20 +136,46 @@ fn merge_project_file(config: &mut V2Config, path: Option<PathBuf>) -> Result<()
 }
 
 fn merge_existing_file(config: &mut V2Config, path: PathBuf, source: ConfigSource) -> Result<()> {
-    if !path.exists() {
+    let Some(raw) = read_optional_config(&path)? else {
         return Ok(());
-    }
-    merge_file(config, &path, source)
+    };
+    merge_config_body(config, &path, source, &raw)
 }
 
-pub(crate) fn merge_file(config: &mut V2Config, path: &Path, source: ConfigSource) -> Result<()> {
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
+fn merge_config_body(
+    config: &mut V2Config,
+    path: &Path,
+    source: ConfigSource,
+    raw: &str,
+) -> Result<()> {
     let patch: PartialConfig =
-        toml::from_str(&raw).with_context(|| format!("Could not parse {}", path.display()))?;
+        toml::from_str(raw).with_context(|| format!("Could not parse {}", path.display()))?;
+    warn_deprecated_phase_config(path, raw);
     reject_untrusted_runtime_overrides(path, &patch, source)?;
     merge_config(config, patch);
     Ok(())
+}
+
+fn warn_deprecated_phase_config(path: &Path, raw: &str) {
+    let Ok(value) = toml::from_str::<toml::Value>(raw) else {
+        return;
+    };
+    let Some(phases) = value.get("phases").and_then(toml::Value::as_table) else {
+        return;
+    };
+    for (old, replacement) in [("hunt", "scan"), ("confirm", "prove")] {
+        if phases.contains_key(old)
+            || phases
+                .get("stop_after")
+                .and_then(toml::Value::as_str)
+                .is_some_and(|value| value.eq_ignore_ascii_case(old))
+        {
+            eprintln!(
+                "warning: {} uses deprecated phases.{old}/{old}; use phases.{replacement}/{replacement}",
+                path.display()
+            );
+        }
+    }
 }
 
 /// A target repository's `.kuzushi/v3/config.toml` is loaded as part of the
@@ -237,14 +263,13 @@ fn forbidden_operator_fields(operator: Option<&PartialOperatorConfig>) -> Vec<&'
             "operator.trusted_modules",
             operator.trusted_modules.is_some(),
         ),
-        (
-            "operator.signature_keys",
-            operator.signature_keys.is_some(),
-        ),
+        ("operator.signature_keys", operator.signature_keys.is_some()),
         ("operator.mcp_mounts", operator.mcp_mounts.is_some()),
+        ("operator.fuzz_executors", operator.fuzz_executors.is_some()),
+        ("operator.keybindings", operator.keybindings.is_some()),
         (
-            "operator.fuzz_executors",
-            operator.fuzz_executors.is_some(),
+            "operator.session_retention_days",
+            operator.session_retention_days.is_some(),
         ),
     ]
     .into_iter()
@@ -295,13 +320,19 @@ fn merge_operator_config(config: &mut OperatorConfig, patch: PartialOperatorConf
     apply_patch_field(&mut config.signature_keys, patch.signature_keys);
     apply_patch_field(&mut config.mcp_mounts, patch.mcp_mounts);
     apply_patch_field(&mut config.fuzz_executors, patch.fuzz_executors);
+    apply_patch_field(&mut config.keybindings, patch.keybindings);
+    apply_patch_field(
+        &mut config.session_retention_days,
+        patch.session_retention_days,
+    );
 }
 
 fn merge_guided_phase_config(config: &mut GuidedPhaseConfig, patch: PartialGuidedPhaseConfig) {
     apply_patch_field(&mut config.stop_after, patch.stop_after);
     merge_phase_template_config(&mut config.map, patch.map);
-    merge_phase_template_config(&mut config.hunt, patch.hunt);
-    merge_phase_template_config(&mut config.confirm, patch.confirm);
+    merge_phase_template_config(&mut config.scan, patch.scan);
+    merge_phase_template_config(&mut config.review, patch.review);
+    merge_phase_template_config(&mut config.prove, patch.prove);
     merge_phase_template_config(&mut config.fix, patch.fix);
 }
 

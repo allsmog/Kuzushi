@@ -120,9 +120,11 @@ impl ShellApp {
     ) {
         match kuzushi_core::approve_prompt_mutation(workspace, id, reason) {
             Ok(Some(_)) => {
-                self.workbench_cache()
-                    .borrow_mut()
-                    .invalidate_prompt_mutations();
+                {
+                    let mut cache = self.workbench_cache().borrow_mut();
+                    cache.invalidate_prompt_mutations();
+                }
+                self.invalidate_prompt_view_cache();
                 self.log("prompt", format!("approved prompt mutation {id}"));
             }
             Ok(None) => self.log("prompt", format!("no prompt mutation named {id}")),
@@ -199,7 +201,8 @@ fn prompt_mutation_args(args: &str) -> Option<(&str, &str)> {
     if prompt_mutation_verb_invalid(verb) || text.is_empty() {
         return None;
     }
-    Some((verb, unquote_prompt_mutation_text(text)))
+    let text = unquote_prompt_mutation_text(text);
+    (!text.trim().is_empty()).then_some((verb, text))
 }
 
 fn prompt_mutation_status_args(args: &str) -> Option<(&str, Option<&str>)> {

@@ -28,5 +28,6 @@ pub(crate) fn build_triage_outcome(
         confidence: analysis.confidence,
         rationale,
         cost_usd: outcome.cost_usd,
+        cost_usd_exact: outcome.cost_usd_exact,
     }
 }

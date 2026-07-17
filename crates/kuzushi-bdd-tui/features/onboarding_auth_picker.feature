@@ -1,12 +1,14 @@
-Feature: Auth-method picker
-  After the model picker resolves to a provider with multiple auth
-  methods, the auth-method picker should open and label both rows.
+Feature: Credential readiness is an editor inside aggregate Setup
+  Credentials block only selected model-backed Map tasks. Setup routes the
+  explicit provider to API-key, stored-OAuth, session, or offline choices and
+  returns without discarding the Map plan.
 
-  Scenario: Selecting Anthropic opens the auth picker
+  Scenario: Enter on missing Anthropic credentials opens its auth methods
     Given a fresh kuzushi workspace
-    And no model is configured
+    And the model is set to "anthropic:claude-sonnet-4-6"
     When I launch the shell
-    And I press "Down"
+    Then I see "SETUP · READY THE MAP RUN"
+    When I press "Down"
     And I press "Down"
     And I press "Down"
     And I press "Enter"
@@ -14,16 +16,18 @@ Feature: Auth-method picker
     And I see "API key (ANTHROPIC_API_KEY)"
     And I see "Claude.ai OAuth login"
     And I see "Offline demo"
-    And the status segment shows "auth-picker:anthropic"
+    And the status segment shows "setup:credentials:anthropic"
 
-  Scenario: Esc on the auth picker defers and goes to Workbench
+  Scenario: Esc returns from credentials to the same Setup screen
     Given a fresh kuzushi workspace
-    And no model is configured
+    And the model is set to "anthropic:claude-sonnet-4-6"
     When I launch the shell
-    And I press "Down"
+    Then I see "SETUP · READY THE MAP RUN"
+    When I press "Down"
     And I press "Down"
     And I press "Down"
     And I press "Enter"
     And I press "Esc"
-    Then I see "AIM - ATTACK SURFACE"
-    And the status segment shows "workbench"
+    Then I see "SETUP · READY THE MAP RUN"
+    And I see "Map plan"
+    And the status segment shows "setup"

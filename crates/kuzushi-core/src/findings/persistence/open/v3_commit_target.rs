@@ -6,6 +6,7 @@ pub(in crate::findings::persistence::open) struct V3FindingTarget {
     pub stable_fp: String,
     pub fingerprint: String,
     pub identity_id: Option<String>,
+    pub scan_id: Option<String>,
 }
 
 impl FindingStore {
@@ -20,12 +21,21 @@ impl FindingStore {
         let Some(identity) = self.finding_identity_for_id(finding_id, context)? else {
             return Ok(None);
         };
+        let scan_id = self
+            .conn
+            .query_row(
+                "select run_id from finding_current where id = ?1",
+                params![finding_id],
+                |row| row.get(0),
+            )
+            .optional()?;
         Ok(Some(V3FindingTarget {
             event_log_dir,
             db_path,
             stable_fp: identity.stable_fp(),
             fingerprint: identity.fingerprint,
             identity_id: identity.identity_id,
+            scan_id,
         }))
     }
 
@@ -49,6 +59,7 @@ impl FindingStore {
             stable_fp: identity.stable_fp(),
             fingerprint: identity.fingerprint,
             identity_id: identity.identity_id,
+            scan_id: None,
         }))
     }
 

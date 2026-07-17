@@ -19,12 +19,7 @@ pub(crate) fn taint_iris_next_context_keywords(
     context: Option<&Value>,
     target: &Path,
 ) -> Result<String> {
-    let mut parts = Vec::new();
-    if let Some(context) = context {
-        if let Some(repo_context) = context.get("repoContext") {
-            parts.push(repo_context.to_string());
-        }
-    }
+    let mut parts = repo_context_keyword_parts(context);
     for file in [
         "package.json",
         "Cargo.toml",
@@ -33,11 +28,20 @@ pub(crate) fn taint_iris_next_context_keywords(
         "pom.xml",
     ] {
         let path = target.join(file);
-        if let Ok(raw) = fs::read_to_string(path) {
+        if let Ok(Some(raw)) =
+            crate::bounded_file::read_source_text_prefix_within(target, &path, 512 * 1024)
+        {
             parts.push(raw);
         }
     }
     Ok(parts.join("\n").to_ascii_lowercase())
+}
+
+fn repo_context_keyword_parts(context: Option<&Value>) -> Vec<String> {
+    context
+        .and_then(|value| value.get("repoContext"))
+        .map(|repo_context| vec![repo_context.to_string()])
+        .unwrap_or_default()
 }
 
 pub(crate) fn collect_taint_iris_next_cwes(value: Option<&Value>) -> BTreeSet<String> {
@@ -176,4 +180,25 @@ fn extract_attack_surface_name(item: &Value) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn context_keywords_skip_manifest_symlinks_outside_target() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        let outside = temp.path().join("outside-package.json");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(&outside, r#"{"name":"OUTSIDE_CONTEXT_TOKEN"}"#).unwrap();
+        symlink(&outside, target.join("package.json")).unwrap();
+
+        let keywords = taint_iris_next_context_keywords(None, &target).unwrap();
+
+        assert!(!keywords.contains("outside_context_token"));
+    }
 }

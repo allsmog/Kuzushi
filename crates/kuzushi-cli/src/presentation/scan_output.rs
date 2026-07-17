@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 pub(crate) fn scan_result_or_report_ci_error(
     result: Result<serde_json::Value>,
+    workspace: &WorkspaceTarget,
+    run_id: &str,
     ci: bool,
     started: Instant,
     elapsed: Duration,
@@ -12,10 +14,33 @@ pub(crate) fn scan_result_or_report_ci_error(
     match result {
         Ok(value) => Ok(value),
         Err(error) => {
+            let error = scan_error_with_recovery(error, workspace, run_id);
             emit_scan_ci_error(ci, started, elapsed, &error);
             Err(error)
         }
     }
+}
+
+pub(crate) fn scan_error_with_recovery(
+    error: anyhow::Error,
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+) -> anyhow::Error {
+    let Some(recovery) = scan_failure_recovery(workspace, run_id) else {
+        return error;
+    };
+    anyhow::anyhow!("{error:#}; {recovery}")
+}
+
+pub(crate) fn scan_failure_recovery(workspace: &WorkspaceTarget, run_id: &str) -> Option<String> {
+    let summary = kuzushi_core::load_run_summary(workspace.root(), run_id).ok()?;
+    if summary.status == "running" {
+        return None;
+    }
+    Some(format!(
+        "persisted run {run_id} at {}; from the target directory, inspect it with `kuzushi --target . runs show {run_id}`",
+        run_dir(workspace.root(), run_id).display(),
+    ))
 }
 
 pub(crate) fn emit_scan_output(
@@ -32,7 +57,7 @@ pub(crate) fn emit_scan_output(
         return Ok(());
     }
     if json {
-        println!("{}", scan_json_output(workspace, &data));
+        println!("{}", scan_json_output(workspace, result, &data));
     } else if let Some(android) = super::android_apk_report::format_android_apk_scan_plain(result) {
         print_plain_scan_body_and_footer(workspace, &data, &android);
     } else if let Some(output) = result.get("output").and_then(serde_json::Value::as_str) {
@@ -70,9 +95,15 @@ pub(crate) fn scan_result_data(result: &serde_json::Value) -> serde_json::Value 
 
 pub(crate) fn scan_json_output(
     workspace: &WorkspaceTarget,
+    result: &serde_json::Value,
     data: &serde_json::Value,
 ) -> serde_json::Value {
     serde_json::json!({
+        "ok": result.get("ok").cloned(),
+        "status": result.get("status").cloned(),
+        "summary": result.get("summary").cloned(),
+        "warnings": result.get("warnings").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "errors": result.get("errors").cloned().unwrap_or_else(|| serde_json::json!([])),
         "runId": data.get("runId").cloned(),
         "target": data.get("target").cloned(),
         "findingsCount": data.get("findingsCount").cloned(),
@@ -92,11 +123,10 @@ pub(crate) fn scan_plain_artifact_footer(
         .and_then(serde_json::Value::as_str)
         .unwrap_or("latest");
     format!(
-        "Artifacts: {}\nFindings DB: {}\nNext: kuzushi runs show {} --target {}\n",
+        "Artifacts: {}\nFindings DB: {}\nNext (from the target directory): kuzushi --target . runs show {}\n",
         run_dir(workspace.root(), run_id).display(),
         workspace.findings_db_path().display(),
         run_id,
-        workspace.root().display(),
     )
 }
 
@@ -181,5 +211,54 @@ mod tests {
             }
         });
         assert_eq!(scan_cost_usd(&envelope), 0.0);
+    }
+
+    #[test]
+    fn scan_error_does_not_claim_recovery_when_failure_status_was_not_persisted() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let run_id = "scan-running-only";
+        let running = kuzushi_core::RunSummary::running(
+            run_id,
+            "scan",
+            Some("sast:scan".to_string()),
+            workspace.root().display().to_string(),
+        )
+        .with_process_id(std::process::id());
+        kuzushi_core::write_run_summary(workspace.root(), &running).unwrap();
+
+        let error =
+            scan_error_with_recovery(anyhow::anyhow!("dispatch failed"), &workspace, run_id)
+                .to_string();
+
+        assert_eq!(error, "dispatch failed");
+        assert!(!error.contains("persisted run"));
+    }
+
+    #[test]
+    fn scan_recovery_command_is_cross_platform_and_target_relative() {
+        let temp = tempfile::Builder::new()
+            .prefix("kuzushi recovery target ")
+            .tempdir()
+            .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let run_id = "scan-failed";
+        let failed = kuzushi_core::RunSummary::running(
+            run_id,
+            "scan",
+            Some("sast:scan".to_string()),
+            workspace.root().display().to_string(),
+        )
+        .failed("scanner unavailable");
+        kuzushi_core::write_run_summary(workspace.root(), &failed).unwrap();
+
+        let recovery = scan_failure_recovery(&workspace, run_id).unwrap();
+
+        assert!(
+            recovery.contains("kuzushi --target . runs show scan-failed"),
+            "{recovery}"
+        );
+        assert!(!recovery.contains("--target '"), "{recovery}");
+        assert!(!recovery.contains("--target \""), "{recovery}");
     }
 }

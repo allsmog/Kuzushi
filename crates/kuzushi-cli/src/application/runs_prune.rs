@@ -1,5 +1,7 @@
 use anyhow::{bail, Context, Result};
-use kuzushi_core::{latest_run_path, list_run_summaries, run_dir, RunSummary, WorkspaceTarget};
+use kuzushi_core::{
+    list_run_summaries, repair_latest_run_pointer, run_dir, RunSummary, WorkspaceTarget,
+};
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -109,16 +111,7 @@ fn safe_run_dir(target: &Path, run_id: &str) -> Result<PathBuf> {
 }
 
 fn repair_latest_after_prune(target: &Path) -> Result<()> {
-    let latest_path = latest_run_path(target);
-    let Some(newest) = list_run_summaries(target)?
-        .first()
-        .map(|run| run.run_id.clone())
-    else {
-        let _ = fs::remove_file(latest_path);
-        return Ok(());
-    };
-    fs::write(&latest_path, format!("{newest}\n"))
-        .with_context(|| format!("Could not update {}", latest_path.display()))
+    repair_latest_run_pointer(target).map(|_| ())
 }
 
 fn runs_prune_output(

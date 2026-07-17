@@ -7,6 +7,8 @@ use crate::findings::Finding;
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 
+pub(crate) const DEFAULT_VERIFY_PROMPT: &str = "Treat this finding as a false positive until proven otherwise. Read the actual code at the cited location, then search for a reason it CANNOT be exploited — input validation, sanitization, an authentication or authorization gate, a type or length constraint, unreachable code, or no attacker control over the tainted input. Return exploitable=true only when attacker-controlled input reaches the sink with no blocking control in between; return exploitable=false when the evidence is incomplete.";
+
 /// Build the prompt for the independent exploitability verifier.
 ///
 /// Deliberately context-isolated: the verifier receives only the *claim*
@@ -25,9 +27,7 @@ pub(in crate::verification::adapters) fn build_verify_prompt(
     let prefix = template
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(
-            "Treat this finding as a false positive until proven otherwise. Read the actual code at the cited location, then search for a reason it CANNOT be exploited — input validation, sanitization, an authentication or authorization gate, a type or length constraint, unreachable code, or no attacker control over the tainted input. Return exploitable=true only when attacker-controlled input reaches the sink with no blocking control in between; return exploitable=false when the evidence is incomplete.",
-        );
+        .unwrap_or(DEFAULT_VERIFY_PROMPT);
     Ok(format!("{prefix}\n\nClaimed finding:\n{claim_json}"))
 }
 
@@ -70,8 +70,7 @@ fn required_verification_fields(
     object: &Map<String, Value>,
     fallback_fingerprint: &str,
 ) -> Result<RequiredVerificationFields> {
-    let fingerprint = read_object_string(object, &["fingerprint"])
-        .unwrap_or_else(|| fallback_fingerprint.to_string());
+    let fingerprint = canonical_verification_fingerprint(object, fallback_fingerprint)?;
     let exploitable = required_object_bool(object, &["exploitable"])?;
     let poc_payload = read_object_nullable_string(object, &["pocPayload", "poc_payload"]);
     let poc_description =
@@ -89,6 +88,31 @@ fn required_verification_fields(
         preconditions,
         confidence,
     })
+}
+
+fn canonical_verification_fingerprint(
+    object: &Map<String, Value>,
+    requested_fingerprint: &str,
+) -> Result<String> {
+    let Some(value) = object.get("fingerprint") else {
+        return Ok(requested_fingerprint.to_string());
+    };
+    let Value::String(model_fingerprint) = value else {
+        anyhow::bail!(
+            "verification output fingerprint must be a non-empty string, got {}",
+            value_type_name(value)
+        );
+    };
+    let model_fingerprint = model_fingerprint.trim();
+    anyhow::ensure!(
+        !model_fingerprint.is_empty(),
+        "verification output fingerprint must be a non-empty string"
+    );
+    anyhow::ensure!(
+        model_fingerprint == requested_fingerprint,
+        "verification output fingerprint mismatch: requested `{requested_fingerprint}`, received `{model_fingerprint}`"
+    );
+    Ok(requested_fingerprint.to_string())
 }
 
 fn insert_required_verification_fields(
@@ -221,6 +245,94 @@ mod tests {
         assert_eq!(result["confidence"], 1.0);
         assert_eq!(result["proofLevel"], 4);
         assert_eq!(result["codeCitations"][0]["filePath"], "src/admin.rs");
+    }
+
+    #[test]
+    fn rejects_model_fingerprint_that_does_not_match_requested_finding() {
+        let error = normalize_verification_result(
+            json!({
+                "fingerprint": "hallucinated-fingerprint",
+                "exploitable": true,
+                "confidence": 0.9
+            }),
+            "requested-fingerprint",
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "verification output fingerprint mismatch: requested `requested-fingerprint`, received `hallucinated-fingerprint`"
+        );
+    }
+
+    #[test]
+    fn uses_requested_fingerprint_when_model_omits_identity() {
+        let result = normalize_verification_result(
+            json!({
+                "exploitable": true,
+                "confidence": 0.9
+            }),
+            "requested-fingerprint",
+        )
+        .unwrap();
+
+        assert_eq!(result["fingerprint"], "requested-fingerprint");
+    }
+
+    #[test]
+    fn rejects_present_empty_or_whitespace_fingerprint() {
+        for fingerprint in ["", "   "] {
+            let error = normalize_verification_result(
+                json!({
+                    "fingerprint": fingerprint,
+                    "exploitable": true,
+                    "confidence": 0.9
+                }),
+                "requested-fingerprint",
+            )
+            .unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                "verification output fingerprint must be a non-empty string"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_present_non_string_fingerprint_without_echoing_value() {
+        for fingerprint in [Value::Null, json!(42)] {
+            let error = normalize_verification_result(
+                json!({
+                    "fingerprint": fingerprint,
+                    "exploitable": true,
+                    "confidence": 0.9
+                }),
+                "requested-fingerprint",
+            )
+            .unwrap_err()
+            .to_string();
+
+            assert!(error.starts_with(
+                "verification output fingerprint must be a non-empty string, got "
+            ));
+            assert!(!error.contains("42"));
+        }
+    }
+
+    #[test]
+    fn accepts_model_fingerprint_matching_requested_finding() {
+        let result = normalize_verification_result(
+            json!({
+                "fingerprint": "requested-fingerprint",
+                "exploitable": true,
+                "confidence": 0.9
+            }),
+            "requested-fingerprint",
+        )
+        .unwrap();
+
+        assert_eq!(result["fingerprint"], "requested-fingerprint");
     }
 
     #[test]

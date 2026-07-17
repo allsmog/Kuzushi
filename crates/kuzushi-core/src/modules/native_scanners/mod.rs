@@ -13,7 +13,7 @@ use crate::sbom_scan::scan_sbom;
 use crate::scan::{
     index_codeql_sarif_as_static_evidence, scan_exploit_chains_with_runtime, CodeqlPersistedRun,
     CodeqlScanReport, CodeqlScanner, ExploitChainReport, ExploitChainScanner, GovulncheckScanner,
-    ScanCancellation, ScanEngine, SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
+    ScanEngine, SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
 };
 use crate::whitebox_static::{
     mark_whitebox_static_findings, whitebox_static_profile_requested,
@@ -35,13 +35,12 @@ pub(in crate::modules) use android_apk_sast_handoff::*;
 pub(in crate::modules) use android_apk_scan::*;
 pub(in crate::modules) use android_apk_taint_sources::*;
 pub(in crate::modules) use android_apk_toolchain::*;
-use anyhow::Result;
+use anyhow::{Context, Result};
 pub(in crate::modules) use persist_semgrep_findings::*;
 pub(in crate::modules) use run_android_apk::*;
 pub(in crate::modules) use semgrep_module::*;
 use serde_json::{json, Value};
-use std::path::Path;
-use uuid::Uuid;
+use std::path::{Path, PathBuf};
 mod android_apk_code_scan;
 mod android_apk_fileprovider;
 mod android_apk_hybrid_detect;
@@ -65,3 +64,44 @@ mod run_android_apk;
 mod semgrep_module;
 use exploit_chain_output::exploit_chain_output;
 pub(in crate::modules) use register_modules::{execute_tool, register_modules};
+
+fn validated_android_workspace_path(
+    workspace_root: &Path,
+    candidate: &Path,
+    expect_directory: bool,
+) -> Result<PathBuf> {
+    let relative = candidate.strip_prefix(workspace_root).map_err(|_| {
+        anyhow::anyhow!(
+            "android-apk path {} must stay inside workspace {}",
+            candidate.display(),
+            workspace_root.display()
+        )
+    })?;
+    let path = crate::workspace::validated_workspace_descendant(workspace_root, relative)?;
+    let metadata = std::fs::symlink_metadata(&path)
+        .with_context(|| format!("Could not inspect android-apk path {}", path.display()))?;
+    anyhow::ensure!(
+        !metadata.file_type().is_symlink()
+            && if expect_directory {
+                metadata.file_type().is_dir()
+            } else {
+                metadata.file_type().is_file()
+            },
+        "android-apk path is not a real {}: {}",
+        if expect_directory {
+            "directory"
+        } else {
+            "file"
+        },
+        path.display()
+    );
+    Ok(path)
+}
+
+fn validated_android_workspace_dir(workspace_root: &Path, candidate: &Path) -> Result<PathBuf> {
+    validated_android_workspace_path(workspace_root, candidate, true)
+}
+
+fn validated_android_workspace_file(workspace_root: &Path, candidate: &Path) -> Result<PathBuf> {
+    validated_android_workspace_path(workspace_root, candidate, false)
+}

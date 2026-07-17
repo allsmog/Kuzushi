@@ -2,32 +2,16 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 164
 ---
- KUZUSHI › workbench · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › workbench · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
-Kuzushi · target:no target · page:confirm · o idle · modules:all modules
- type next guided workflow · type scan run scan · type options sast:scan tune scanners · type ask ask the agent
+Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
+ type Enter open in Prove · type findings clear projection · press z open heatmap · type scan again
 
- -- SOURCE · 2 files ---------------------------------------------------------------------------------------------------
-apps/  · 2
-  api/  · 1
-    orders.rs  · 1
-  web/  · 1
-    server.ts  · 1
-
- -- [CODE·] |  DFD·  |  CHAIN·  |  FLOW·  |  RISK  -- F-0001 · apps/api/orders.rs:142 ----------------------------------
-       ∅  source unavailable
-       could not read source file apps/api/orders.rs: No such file or directory (os error 2)
-
-       > open <id>             select another finding with source context
-
- -- REVIEW QUEUE - showing 2 of 2 - 1 open - 1 complete ----------------------------------------------------------------
-REVIEW QUEUE - showing 2 of 2 - 1 open - 1 complete · mode:all · filter:decision:all
--- NEEDS REVIEW · 1 ----------------------------------------------------------------------------------------------------
- F-0002  H unverified unassigned review-order:2 decision:needs_review source-linked next:validate...           path...
--- CONFIRMED · 1 -------------------------------------------------------------------------------------------------------
->F-0001  C unverified unassigned review-order:1 decision:confirmed source-linked next:decision_complete...     sql...
-
- -- DETAILS ------------------------------------------------------------------------------------------------------------
+ -- FINDINGS -----------------------------------------------------------------------------------------------------------
+REVIEW QUEUE - showing 2 of 2 - 1 open - 1 complete · mode:all · filter:completeness:all
+>F-0001  C [*oo] s1 @A unverified unassigned review-order:1 decision:confirmed...  sql injection via order_id...
+ F-0002  H [*oo] s1 @? unverified unassigned review-order:2 decision:needs_revi... path traversal in /assets/<file>...
+ -- SELECTED FINDING ---------------------------------------------------------------------------------------------------
 sql injection via order_id concatenation
 
 -- STATUS --
@@ -37,10 +21,17 @@ lifecycle status: candidate
 evidence state: source-linked
   proof summary: ? signal-only
 
+-- DECISION --
+  current decision: confirmed
+  decision source: selected finding
+  decision history: latest loaded decision from selected finding
+  review decision: confirmed · confidence 91% · by auto · source selected finding
+  legacy triage verdict: true_positive
+  automated/model-generated review reasoning: concatenated input
+
 -- NEXT --
   validate: `verify F-0001`
   collect runtime proof or stronger source evidence before patching
-  report: `findings export report.sarif sarif`
 
 -- EVIDENCE --
   no evidence rows recorded
@@ -56,14 +47,6 @@ alias: F-0001
 rule: demo.sqli
 location: apps/api/orders.rs:142
 producing tool: semgrep
-
--- DECISION --
-  current decision: confirmed
-  decision source: selected finding
-  decision history: latest loaded decision from selected finding
-  review decision: confirmed · confidence 91% · by auto · source selected finding
-  legacy triage verdict: true_positive
-  automated/model-generated review reasoning: concatenated input
 
 -- SCANNER MESSAGE --
   sql injection via order_id concatenation

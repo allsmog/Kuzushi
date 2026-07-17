@@ -3,21 +3,14 @@ use super::task_row::{ArtifactState, PlanningTaskRow};
 use kuzushi_core::V2Config;
 use std::path::Path;
 
-/// Distinct phases of the first-run onboarding sequence. The shell
-/// transitions through them in this order — Target → Model → Credentials →
-/// Planning — but may short-circuit when a phase is already satisfied.
+/// Front-door phases. Target consent remains separate; every other fresh
+/// workspace prerequisite is projected together on Setup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InitialOnboardingPhase {
     /// First gate: pick what to scan. Only offered from the interactive
     /// terminal launch (`allow_target_gate`); never silently defaults to cwd.
     TargetPicker,
-    ModelPicker,
-    /// Inline credential entry (API-key paste / OAuth / offline demo) for a
-    /// credentialed provider whose credentials are missing.
-    AuthMethodPicker {
-        provider: String,
-    },
-    PlanningPicker,
+    Setup,
     Catalog,
 }
 
@@ -40,14 +33,9 @@ pub struct OnboardingInputs<'a> {
     pub allow_target_gate: bool,
 }
 
-impl<'a> OnboardingInputs<'a> {
-    pub fn provider(&self) -> Option<&str> {
-        self.model.and_then(|model| model.split(':').next())
-    }
-}
-
-/// Ordered onboarding gate: Target → Model → Credentials → Planning. Each
-/// stage is skipped once it is already satisfied.
+/// Ordered onboarding gate: explicit Target consent, then aggregate Setup.
+/// Model and credential requirements are plan-aware inside Setup, so a
+/// deterministic Map plan is never blocked by absent provider configuration.
 pub fn initial_onboarding_phase(inputs: &OnboardingInputs<'_>) -> InitialOnboardingPhase {
     if inputs.skip_onboarding_env {
         return InitialOnboardingPhase::Catalog;
@@ -59,36 +47,11 @@ pub fn initial_onboarding_phase(inputs: &OnboardingInputs<'_>) -> InitialOnboard
             InitialOnboardingPhase::Catalog
         };
     }
-    if inputs.model.is_none() {
-        return InitialOnboardingPhase::ModelPicker;
-    }
-    if let Some(phase) = auth_phase(inputs) {
-        return phase;
-    }
     if inputs.workspace_is_fresh {
-        InitialOnboardingPhase::PlanningPicker
+        InitialOnboardingPhase::Setup
     } else {
         InitialOnboardingPhase::Catalog
     }
-}
-
-/// Credentials gate: open inline credential entry when a *credentialed*
-/// provider has no wired credentials. Providers that need no credentials
-/// (e.g. `local:`) are never gated.
-fn auth_phase(inputs: &OnboardingInputs<'_>) -> Option<InitialOnboardingPhase> {
-    if inputs.provider_auth_ready {
-        return None;
-    }
-    let provider = credentialed_provider(inputs.provider()?)?;
-    Some(InitialOnboardingPhase::AuthMethodPicker {
-        provider: provider.to_string(),
-    })
-}
-
-/// The providers whose credentials are gated by the onboarding flow. Anything
-/// else (`local:`, unknown) needs no credentials and returns `None`.
-pub fn credentialed_provider(provider: &str) -> Option<&str> {
-    matches!(provider, "anthropic" | "openai" | "openai-codex").then_some(provider)
 }
 
 /// Convenience wrapper that builds `OnboardingInputs` from live config +
@@ -193,45 +156,24 @@ mod tests {
     }
 
     #[test]
-    fn targeted_session_without_model_opens_model_picker() {
-        let i = targeted_inputs();
-        assert_eq!(
-            initial_onboarding_phase(&i),
-            InitialOnboardingPhase::ModelPicker
-        );
+    fn fresh_target_without_model_opens_plan_aware_setup() {
+        let mut i = targeted_inputs();
+        i.workspace_is_fresh = true;
+        assert_eq!(initial_onboarding_phase(&i), InitialOnboardingPhase::Setup);
     }
 
     #[test]
-    fn credentialed_provider_with_no_creds_opens_credential_entry() {
+    fn fresh_target_with_missing_credentials_still_opens_setup() {
         let mut i = targeted_inputs();
         i.model = Some("anthropic:claude-sonnet-4-6");
         i.provider_auth_ready = false;
-        match initial_onboarding_phase(&i) {
-            InitialOnboardingPhase::AuthMethodPicker { provider } => {
-                assert_eq!(provider, "anthropic");
-            }
-            other => panic!("expected AuthMethodPicker, got {other:?}"),
-        }
+        i.workspace_is_fresh = true;
+        assert_eq!(initial_onboarding_phase(&i), InitialOnboardingPhase::Setup);
     }
 
     #[test]
-    fn openai_with_no_creds_opens_credential_entry() {
-        let mut i = targeted_inputs();
-        i.model = Some("openai:gpt-5.5");
-        i.provider_auth_ready = false;
-        match initial_onboarding_phase(&i) {
-            InitialOnboardingPhase::AuthMethodPicker { provider } => {
-                assert_eq!(provider, "openai");
-            }
-            other => panic!("expected AuthMethodPicker, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn uncredentialed_provider_never_gates_on_auth() {
-        let mut i = targeted_inputs();
-        i.model = Some("local:llama");
-        i.provider_auth_ready = false;
+    fn returning_target_without_model_resumes_instead_of_reopening_setup() {
+        let i = targeted_inputs();
         assert_eq!(
             initial_onboarding_phase(&i),
             InitialOnboardingPhase::Catalog
@@ -239,23 +181,12 @@ mod tests {
     }
 
     #[test]
-    fn credentialed_provider_recognizes_the_gated_set() {
-        assert_eq!(credentialed_provider("anthropic"), Some("anthropic"));
-        assert_eq!(credentialed_provider("openai"), Some("openai"));
-        assert_eq!(credentialed_provider("openai-codex"), Some("openai-codex"));
-        assert_eq!(credentialed_provider("local"), None);
-    }
-
-    #[test]
-    fn auth_ready_with_a_fresh_target_opens_the_phase_walker() {
+    fn auth_ready_with_a_fresh_target_opens_setup() {
         let mut i = targeted_inputs();
         i.model = Some("anthropic:claude-sonnet-4-6");
         i.provider_auth_ready = true;
         i.workspace_is_fresh = true;
-        assert_eq!(
-            initial_onboarding_phase(&i),
-            InitialOnboardingPhase::PlanningPicker
-        );
+        assert_eq!(initial_onboarding_phase(&i), InitialOnboardingPhase::Setup);
     }
 
     #[test]

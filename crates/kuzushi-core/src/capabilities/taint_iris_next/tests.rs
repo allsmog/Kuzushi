@@ -164,6 +164,8 @@ mod tests {
             self.queries.lock().unwrap().push(request);
             Ok(AgentQueryResponse {
                 cost_usd: TAINT_NEXT_TEST_CALL_COST_USD,
+                cost_usd_reported: true,
+                estimated_cost_usd: None,
                 input_tokens: 500,
                 output_tokens: 120,
                 truncated: false,
@@ -245,7 +247,11 @@ mod tests {
         fs::write(kuzushi.join("cpg.bin"), b"CPG\0stub").unwrap();
         let db = kuzushi.join("codeql-db");
         fs::create_dir_all(&db).unwrap();
-        fs::write(db.join("placeholder"), "stub").unwrap();
+        fs::write(
+            db.join("codeql-database.yml"),
+            "primaryLanguage: javascript\n",
+        )
+        .unwrap();
     }
 
     fn evidence_row(cwe: &str, evidence_level: &str) -> TaintIrisNextEvidence {
@@ -339,6 +345,7 @@ mod tests {
             target: PathBuf::from("."),
             scan_root: PathBuf::from("."),
             repo_root: PathBuf::from("."),
+            source_paths: std::sync::Arc::from([]),
             mode: TaintIrisNextMode::Hunt,
             caps: TaintIrisNextCaps {
                 max_catalog_entries: 1,
@@ -376,6 +383,7 @@ mod tests {
             },
             max_budget_usd: None,
             allow_deterministic_fallback,
+            system_prompt: taint_iris_next_system_prompt(),
             cwe_focus: Vec::new(),
             discovered_signals: DiscoveredSignals::default(),
         }
@@ -428,7 +436,7 @@ mod tests {
             &evidence,
             anyhow::anyhow!("bad json"),
             1,
-            0.25,
+            RuntimeCostReport::known(RuntimeCost::from_usd(0.25, "test cost").unwrap()),
             None,
         );
 
@@ -451,7 +459,7 @@ mod tests {
             &evidence,
             anyhow::anyhow!("bad json"),
             1,
-            0.25,
+            RuntimeCostReport::known(RuntimeCost::from_usd(0.25, "test cost").unwrap()),
             None,
         );
 
@@ -476,6 +484,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = run_taint_iris_next_report(
@@ -526,6 +536,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: Some(&trace),
+cancellation: None,
+authorization: Default::default(),
         };
 
         run_taint_iris_next_report(
@@ -570,6 +582,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = ModuleRegistry::with_v2_builtins()
@@ -606,6 +620,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = run_taint_iris_next_report(
@@ -693,6 +709,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let err = run_taint_iris_next_report(
@@ -817,6 +835,16 @@ mod tests {
             .any(|r| r.contains("operator-supplied")));
     }
 
+    #[test]
+    fn input_preserves_declared_taint_review_prompt() {
+        let parsed = TaintIrisNextInput::from_tool_input(&json!({
+            "TAINT_IRIS_NEXT_PROMPT": "custom taint review"
+        }))
+        .unwrap();
+
+        assert_eq!(parsed.system_prompt, "custom taint review");
+    }
+
     /// rg-backed structural matcher must produce the *same* deterministic
     /// candidate ids as the in-process matcher on the same fixture. This
     /// catches drift between the alias table in `taint_iris_next_line_matches`
@@ -896,6 +924,8 @@ mod tests {
             self.queries.lock().unwrap().push(request);
             Ok(AgentQueryResponse {
                 cost_usd: TAINT_NEXT_TEST_CALL_COST_USD,
+                cost_usd_reported: true,
+                estimated_cost_usd: None,
                 input_tokens: 800,
                 output_tokens: 200,
                 truncated: false,
@@ -938,6 +968,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
 
         let result = run_taint_iris_next_report(
@@ -1176,6 +1208,8 @@ mod tests {
         fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             Ok(AgentQueryResponse {
                 cost_usd: TAINT_NEXT_TEST_CALL_COST_USD,
+                cost_usd_reported: true,
+                estimated_cost_usd: None,
                 input_tokens: 800,
                 output_tokens: 200,
                 truncated: false,
@@ -1208,6 +1242,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
+cancellation: None,
+authorization: Default::default(),
         };
         let result = run_taint_iris_next_report(
             &json!({

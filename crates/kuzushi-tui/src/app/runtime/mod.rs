@@ -14,25 +14,31 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use kuzushi_core::{ModuleRegistry, V2Config, WorkspaceTarget};
-use ratatui::backend::CrosstermBackend;
+pub(crate) use plain_scripted_session::*;
+use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::Terminal;
 pub(crate) use refresh_terminal_redraw_state::*;
 pub(crate) use render_plain_scripted_session::*;
+pub(crate) use run_focus_visibility_hold::*;
 pub(crate) use run_shell::*;
 use std::env;
 use std::io::{self, IsTerminal, Read, Stdout};
 use std::time::Duration;
+mod plain_scripted_session;
 mod refresh_terminal_redraw_state;
 mod render_plain_scripted_session;
+mod run_focus_visibility_hold;
 mod run_shell;
 mod terminal_loop_event;
 #[cfg(test)]
 mod tests;
 mod workspace_watcher;
-pub(super) use render_plain_scripted_session::mouse_capture_setting_enabled;
 #[cfg(test)]
-pub(super) use render_plain_scripted_session::render_plain_scripted_session;
+pub(super) use plain_scripted_session::render_plain_scripted_session;
+pub(super) use render_plain_scripted_session::mouse_capture_setting_enabled;
 pub use run_shell::run_shell;
+pub use run_shell::run_shell_with_context;
 pub use run_shell::run_shell_with_plain;
+pub use run_shell::{ShellLaunchContext, ShellTargetSource};
 pub(crate) use terminal_loop_event::*;
 pub(crate) use workspace_watcher::*;

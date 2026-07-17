@@ -2,13 +2,13 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 57
 ---
- KUZUSHI › threats:summary · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › threats:summary · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
 1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY
 
  -- THREAT MODEL REVIEW ------------------------------------------------------------------------------------------------
-status             no threat model artifact
-summary            build or import a threat model to populate this view
+status             no target selected
+summary            select a target before loading threat-model artifacts
 threats            —
 
  -- SURFACE ------------------------------------------------------------------------------------------------------------
@@ -18,8 +18,8 @@ data flows         —
 trust boundaries   —
 
  -- ASSUMPTIONS / MISSING INPUTS ---------------------------------------------------------------------------------------
-assumption         build or import a threat model first
-missing            —
+assumption         targetless browsing does not inspect cwd
+missing            target <path> (or target .)
 
  -- PROPOSED CHANGES ---------------------------------------------------------------------------------------------------
 change             none pending
@@ -31,4 +31,4 @@ edit               /threats edit
 export             .kuzushi/threat-model.json
 
  -- EVIDENCE / PROOF LIMITS --------------------------------------------------------------------------------------------
-limit              evidence coverage is unknown until a threat model artifact exists
+limit              no workspace artifacts were read

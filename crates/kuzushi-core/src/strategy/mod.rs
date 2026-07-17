@@ -1,4 +1,4 @@
-use crate::fs_atomic::{load_jsonl, now_ms, save_jsonl, slug};
+use crate::fs_atomic::{now_ms, slug};
 use crate::workspace::WorkspaceTarget;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,12 @@ use std::path::PathBuf;
 pub const STRATEGY_QUEUE_FILE: &str = "strategy-queue.jsonl";
 
 mod correction;
+mod persistence;
 pub use correction::*;
+use persistence::{
+    acquire_strategy_ledger_lock, load_strategy_jsonl, recover_strategy_transaction,
+    save_strategy_jsonl, strategy_state_path,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -296,19 +301,43 @@ pub fn calibrated_cost_per_round(previous: f64, observed: f64) -> f64 {
 }
 
 pub fn strategy_queue_path(workspace: &WorkspaceTarget) -> PathBuf {
-    workspace.state_dir().join(STRATEGY_QUEUE_FILE)
+    strategy_state_path(workspace, STRATEGY_QUEUE_FILE)
 }
 
 pub fn load_strategy_queue(workspace: &WorkspaceTarget) -> Result<Vec<StrategyProposal>> {
-    load_jsonl(&strategy_queue_path(workspace), "strategy proposal")
+    let _guard = acquire_recovered_strategy_lock(workspace)?;
+    load_strategy_queue_unlocked(workspace)
+}
+
+pub(crate) fn acquire_recovered_strategy_lock(
+    workspace: &WorkspaceTarget,
+) -> Result<crate::file_lock::ExclusiveFileLock> {
+    let guard = acquire_strategy_ledger_lock(workspace)?;
+    recover_strategy_transaction(workspace, STRATEGY_QUEUE_FILE, STRATEGY_CORRECTIONS_FILE)?;
+    Ok(guard)
+}
+
+pub(crate) fn load_strategy_queue_unlocked(
+    workspace: &WorkspaceTarget,
+) -> Result<Vec<StrategyProposal>> {
+    load_strategy_jsonl(workspace, STRATEGY_QUEUE_FILE, "strategy proposal")
 }
 
 pub fn save_strategy_queue(
     workspace: &WorkspaceTarget,
     proposals: &[StrategyProposal],
 ) -> Result<()> {
-    save_jsonl(
-        &strategy_queue_path(workspace),
+    let _guard = acquire_recovered_strategy_lock(workspace)?;
+    save_strategy_queue_unlocked(workspace, proposals)
+}
+
+pub(crate) fn save_strategy_queue_unlocked(
+    workspace: &WorkspaceTarget,
+    proposals: &[StrategyProposal],
+) -> Result<()> {
+    save_strategy_jsonl(
+        workspace,
+        STRATEGY_QUEUE_FILE,
         proposals,
         "strategy proposal",
     )
@@ -318,9 +347,10 @@ pub fn append_strategy_proposal(
     workspace: &WorkspaceTarget,
     proposal: &StrategyProposal,
 ) -> Result<()> {
-    let mut proposals = load_strategy_queue(workspace)?;
+    let _guard = acquire_recovered_strategy_lock(workspace)?;
+    let mut proposals = load_strategy_queue_unlocked(workspace)?;
     proposals.push(proposal.clone());
-    save_strategy_queue(workspace, &proposals)
+    save_strategy_queue_unlocked(workspace, &proposals)
 }
 
 pub fn set_strategy_proposal_status(
@@ -328,13 +358,14 @@ pub fn set_strategy_proposal_status(
     id: &str,
     status: StrategyProposalStatus,
 ) -> Result<bool> {
-    let mut proposals = load_strategy_queue(workspace)?;
+    let _guard = acquire_recovered_strategy_lock(workspace)?;
+    let mut proposals = load_strategy_queue_unlocked(workspace)?;
     let Some(proposal) = proposals.iter_mut().find(|proposal| proposal.id == id) else {
         return Ok(false);
     };
     proposal.status = status;
     proposal.updated_at_ms = now_ms();
-    save_strategy_queue(workspace, &proposals)?;
+    save_strategy_queue_unlocked(workspace, &proposals)?;
     Ok(true)
 }
 

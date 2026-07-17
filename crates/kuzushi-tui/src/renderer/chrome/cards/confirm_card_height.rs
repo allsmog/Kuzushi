@@ -105,26 +105,49 @@ fn confirm_detail_line(label: &'static str, value: String, style: Style) -> Line
 }
 
 fn confirm_action_line(confirm: &ConfirmCardModel) -> Line<'static> {
-    if confirm.allows_decision {
-        return Line::from(vec![
-            Span::raw("  "),
-            Span::styled("y", theme::success()),
-            Span::raw(" "),
-            Span::styled("allow once", theme::muted()),
-            Span::raw("   "),
-            Span::styled("Y", theme::success()),
-            Span::raw(" "),
-            Span::styled("allow + remember", theme::muted()),
-            Span::raw("   "),
-            Span::styled("n/Esc", theme::danger()),
-            Span::raw(" "),
-            Span::styled("deny once", theme::muted()),
-            Span::raw("   "),
-            Span::styled("N", theme::danger()),
-            Span::raw(" "),
-            Span::styled("deny + add to denylist", theme::muted()),
-        ]);
+    if !confirm.allows_decision {
+        return unconditional_refusal_line();
     }
+    let mut spans = allow_once_spans();
+    if confirm.allows_remembered_yes {
+        spans.extend(remember_allow_spans());
+    }
+    spans.extend(deny_spans());
+    Line::from(spans)
+}
+
+fn allow_once_spans() -> Vec<Span<'static>> {
+    vec![
+        Span::raw("  "),
+        Span::styled("y", theme::success()),
+        Span::raw(" "),
+        Span::styled("allow once", theme::muted()),
+    ]
+}
+
+fn remember_allow_spans() -> Vec<Span<'static>> {
+    vec![
+        Span::raw("   "),
+        Span::styled("Y", theme::success()),
+        Span::raw(" "),
+        Span::styled("allow + remember", theme::muted()),
+    ]
+}
+
+fn deny_spans() -> Vec<Span<'static>> {
+    vec![
+        Span::raw("   "),
+        Span::styled("n/Esc", theme::danger()),
+        Span::raw(" "),
+        Span::styled("deny once", theme::muted()),
+        Span::raw("   "),
+        Span::styled("N", theme::danger()),
+        Span::raw(" "),
+        Span::styled("deny + add to denylist", theme::muted()),
+    ]
+}
+
+fn unconditional_refusal_line() -> Line<'static> {
     Line::from(vec![
         Span::raw("  "),
         Span::styled("rule      ", theme::muted()),

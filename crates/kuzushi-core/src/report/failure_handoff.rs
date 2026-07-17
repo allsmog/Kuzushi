@@ -7,7 +7,7 @@ pub(super) fn load_report_failure_handoffs(
     target: &Path,
     run_id: &str,
 ) -> Result<Vec<ReportFailureHandoff>> {
-    if !run_failure_artifact_path(target, run_id).exists() {
+    if !run_failure_artifact_path(target, run_id)?.exists() {
         return Ok(Vec::new());
     }
     Ok(load_run_failures(target, run_id)?

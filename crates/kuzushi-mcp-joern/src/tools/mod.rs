@@ -5,12 +5,13 @@ mod graph_handlers;
 mod health;
 mod method_at;
 mod parse_query_handlers;
-mod stub;
 mod tool_types;
 
 #[cfg(test)]
 mod tests;
 pub use build_registry::build_registry;
+#[cfg(test)]
+pub(crate) use build_registry::build_registry_with_capability;
 pub use health::health_summary;
 
 #[cfg(test)]

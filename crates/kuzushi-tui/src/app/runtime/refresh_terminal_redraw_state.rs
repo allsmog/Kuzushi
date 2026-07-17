@@ -5,51 +5,96 @@ pub(crate) fn refresh_terminal_redraw_state(
     app: &mut ShellApp,
     state: &mut TerminalLoopState,
     watcher: Option<&mut WorkspaceWatcherRuntime>,
-) -> Result<()> {
-    state.needs_redraw |= app_background_changed(app, watcher);
+) -> Result<bool> {
+    let background = apply_runtime_messages_and_sync_view(app, Instant::now(), watcher);
+    state.needs_redraw |= background.changed;
+    sync_terminal_title(terminal, app, state)?;
     state.needs_redraw |= clear_terminal_after_external_output(terminal, app)?;
+    state.needs_redraw |= app.schedule_active_view_hydration();
     state.needs_redraw = draw_terminal_if_needed(terminal, app, state.needs_redraw)?;
+    Ok(background.work_tail_may_remain)
+}
+
+fn sync_terminal_title(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &ShellApp,
+    state: &mut TerminalLoopState,
+) -> Result<()> {
+    let title = crate::ui_view_models::terminal_title(app);
+    if state.last_title.as_deref() == Some(&title) {
+        return Ok(());
+    }
+    execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::SetTitle(&title)
+    )
+    .context("Could not update terminal title")?;
+    state.last_title = Some(title);
     Ok(())
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct RuntimeMessageOutcome {
+    pub(crate) changed: bool,
+    pub(crate) work_tail_may_remain: bool,
 }
 
 pub(crate) fn app_background_changed(
     app: &mut ShellApp,
     watcher: Option<&mut WorkspaceWatcherRuntime>,
 ) -> bool {
-    let drain_changed = apply_runtime_messages(app, Instant::now(), watcher);
-    let view_changed = app.sync_view_change();
-    drain_changed || view_changed
+    apply_runtime_messages_and_sync_view(app, Instant::now(), watcher).changed
 }
 
-pub(crate) fn apply_runtime_messages(
+pub(crate) fn apply_runtime_messages_and_sync_view(
     app: &mut ShellApp,
     now: Instant,
     watcher: Option<&mut WorkspaceWatcherRuntime>,
-) -> bool {
+) -> RuntimeMessageOutcome {
+    let mut outcome = apply_runtime_messages_with_outcome(app, now, watcher);
+    outcome.changed |= app.sync_view_change();
+    outcome
+}
+
+pub(crate) fn apply_runtime_messages_with_outcome(
+    app: &mut ShellApp,
+    now: Instant,
+    watcher: Option<&mut WorkspaceWatcherRuntime>,
+) -> RuntimeMessageOutcome {
     let maintenance_changed = app.run_background_maintenance();
-    let watcher_changed = apply_watcher_messages(app, watcher);
-    let mut messages = Vec::with_capacity(1);
-    messages.push(Msg::Tick(now));
-    messages.extend(app.drain_job_messages());
-    update_many_and_execute_effects(app, messages) || maintenance_changed || watcher_changed
+    let watcher = apply_watcher_messages_with_outcome(app, watcher);
+    let tick_changed = update_and_execute_effects(app, Msg::Tick(now));
+    let jobs = app.drain_job_events_with_outcome();
+    RuntimeMessageOutcome {
+        changed: maintenance_changed || watcher.changed || tick_changed || jobs.changed,
+        work_tail_may_remain: watcher.tail_may_remain || jobs.time_slice_exhausted,
+    }
 }
 
 pub(crate) fn apply_pending_background_events(app: &mut ShellApp) -> bool {
     let maintenance_changed = app.run_background_maintenance();
-    let messages = app.drain_job_messages();
-    update_many_and_execute_effects(app, messages) || maintenance_changed
+    app.drain_job_events() || maintenance_changed
 }
 
-pub(crate) fn clear_terminal_after_external_output(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+pub(crate) fn clear_terminal_after_external_output<B>(
+    terminal: &mut Terminal<B>,
     app: &mut ShellApp,
-) -> Result<bool> {
+) -> Result<bool>
+where
+    B: Backend,
+    B::Error: Send + Sync + 'static,
+{
     if !app.ui_mut().take_force_full_redraw() {
         return Ok(false);
     }
     // A subprocess wrote to our terminal while we were paused (e.g. OAuth
     // bridge). Drop ratatui's diff buffer so the next draw repaints every cell.
-    terminal.clear()?;
+    // Ratatui 0.30's `Terminal::clear` queries the cursor first. Fullscreen
+    // Kuzushi does not need to preserve that cursor, and some terminals do not
+    // answer the query. Resizing to the current area clears and resets the
+    // buffers without issuing a terminal cursor-position request.
+    let area = terminal.size()?.into();
+    terminal.resize(area)?;
     Ok(true)
 }
 
@@ -87,9 +132,29 @@ pub(crate) fn run_plain_shell(
     stdin: &mut io::Stdin,
     stdin_is_terminal: bool,
     registry: ModuleRegistry,
+    transcript: Option<kuzushi_core::session_transcript::SessionRecorder>,
+    transcript_warning: Option<String>,
 ) -> Result<()> {
-    let mut app = ShellApp::with_registry(config, target, registry);
+    let mut app = ShellApp::with_registry_and_transcript(config, target, registry, transcript);
+    if let Some(warning) = transcript_warning {
+        app.surface_session_start_warning(warning);
+    }
     apply_launch_start_view(&mut app);
+    let result = run_plain_shell_session(&mut app, stdin, stdin_is_terminal);
+    let reason = if result.is_ok() {
+        "completed"
+    } else {
+        "failed"
+    };
+    app.finish_session_transcript(reason);
+    result
+}
+
+fn run_plain_shell_session(
+    app: &mut ShellApp,
+    stdin: &mut io::Stdin,
+    stdin_is_terminal: bool,
+) -> Result<()> {
     let mut script = String::new();
     if !stdin_is_terminal {
         stdin
@@ -104,13 +169,13 @@ pub(crate) fn run_plain_shell(
         .collect::<Vec<_>>();
 
     if commands.is_empty() {
-        print!("{}", plain_launch_summary(&app));
+        print!("{}", plain_launch_summary(app));
         return Ok(());
     }
 
-    let report = execute_plain_scripted_session(&mut app, &commands, 80);
+    let report = execute_plain_scripted_session(app, &commands, 80);
     print!("{}", report.output);
-    if report.failed {
+    if report.outcome.exit_code() != 0 {
         anyhow::bail!("plain scripted session failed; see the result above");
     }
     Ok(())
@@ -122,9 +187,9 @@ fn plain_launch_summary(app: &ShellApp) -> String {
         .map(|target| target.display().to_string())
         .unwrap_or_else(|| "none".to_string());
     let next = if app.target().is_some() {
-        "printf 'findings\n' | kuzushi --plain --target <path>"
+        "printf 'findings\\n' | kuzushi --plain --target <path>"
     } else {
-        "printf 'scan .\n' | kuzushi --plain"
+        "printf 'scan .\\n' | kuzushi --plain"
     };
     format!(
         "KUZUSHI PLAIN SESSION SUMMARY\nstatus: idle\ntarget: {target}\ncommands: 0\nNext: {next}\n"
@@ -144,6 +209,8 @@ mod plain_summary_tests {
         assert!(output.contains("status: idle"));
         assert!(output.contains("target: none"));
         assert!(output.contains("commands: 0"));
+        assert!(output.contains("Next: printf 'scan .\\n' | kuzushi --plain"));
+        assert_eq!(output.lines().count(), 5);
         assert!(!output.contains("press "));
         assert!(!output.contains("kuzushi>"));
     }

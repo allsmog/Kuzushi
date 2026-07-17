@@ -1,0 +1,30 @@
+---
+source: Kuzushi Cockpit Spine
+contract: cockpit-spine-v1
+phase: prove
+size: 80x24
+---
+KUZUSHI · VIEW PROVE · REALITY REVIEW · target ./phase-target · ● LIVE
+ 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
+ ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
+ v verify displayed · x suppress displayed · z attack path / replay
+│STATUS / NEXT                     │▸ EVIDENCE · z attack path
+│F-0001  CRITICAL  ✓ [●●●] ·       │evidence:1 · 1 source(s) · 1
+│CONFIRMED · 1 source(s)  ru...    │1. observed code evidence · source-sink...
+│SQL injection reaches query       │request_input -> database_query
+│src/auth/login.rs:17              │attacker-controlled input reaches a...
+│STATUS runtime_verified ·...      │
+│NEXT   patch · patch F-0001       │
+│                                  │
+│                                  │
+│                                  │
+│                                  │
+│                                  │
+│                                  │
+│                                  │
+│                                  │
+│                                  │
+route:run · 査  review 3/5 · ⛭ 掛  fix ·...   6 findings / 1 crit / 2 high / 2 med
+────────────────────────────────────────────────────────────────────────────────
+ Ctrl+C request abort   Esc prompt
+◎ PROVE › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

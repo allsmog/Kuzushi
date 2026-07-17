@@ -1,0 +1,30 @@
+---
+source: Kuzushi Cockpit Spine
+contract: cockpit-spine-v1
+phase: map
+size: 80x24
+---
+KUZUSHI · VIEW MAP · REALITY REVIEW · target ./phase-target · ● LIVE · cost $0.37
+ 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
+ ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
+ next continue Map · context build build context · z open visualization
+│▸ PROJECT CONTEXT                 │ATTACK SURFACE · z terrain
+│./phase-target · rev:unknown        │2 high/critical, max 91, tiers...
+│context:present · ⠋ context:bu... │criticalAxum · POST /login · 91
+│○ scope tree    no persisted...   │high    Axum · GET /orders/:id · 72
+│◆ context feed  ./.kuzushi/co...  │▸ z open terrain visualization
+│◆ inventory     indexed=3...      │
+│◆ threat model  current threa...  │
+│◆ data flow     3 nodes · 2...    │
+│◆ review surface6 items · 0...    │
+│                                  │
+│                                  │
+│                                  │
+│                                  │
+│                                  │
+│                                  │
+│                                  │
+route:run · 査  review 3/5 · ⛭ 掛  fix ·...   6 findings / 1 crit / 2 high / 2 med
+────────────────────────────────────────────────────────────────────────────────
+ Ctrl+C request abort   Esc prompt
+◇ MAP › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

@@ -50,5 +50,10 @@ pub(in crate::capabilities::carlini_threat_hunt) fn resolve_prompt_override(
     value: &str,
     cwd: &Path,
 ) -> Result<String> {
-    crate::options::resolve_prompt_override_for_key(value, cwd, "CARLINI_THREAT_HUNT_PROMPT")
+    crate::options::resolve_prepared_prompt_override_for_key(
+        value,
+        cwd,
+        "CARLINI_THREAT_HUNT_PROMPT",
+        crate::capabilities::carlini_threat_hunt::DEFAULT_CARLINI_MISSION,
+    )
 }

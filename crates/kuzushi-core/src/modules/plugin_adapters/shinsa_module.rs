@@ -6,34 +6,56 @@ pub(in crate::modules) fn shinsa_module() -> BuiltinModule {
         "Shinsa Compliance",
         ModuleKind::Governance,
         "Compliance assessment wrapper around the shinsa-plugin Claude Code plugin.",
-        vec![
-            tool_with_options(
-                "shinsa:scan",
-                "Run a full ISO 27001 Annex A compliance assessment.",
-                shinsa_tool_options(),
-            ),
-            hidden_tool_with_options(
-                "shinsa:quick-check",
-                "Run a fast ISO 27001 Annex A check.",
-                shinsa_tool_options(),
-            ),
-            tool_with_options(
-                "shinsa:nist-scan",
-                "Run a full NIST SP 800-53 Rev 5 compliance assessment.",
-                shinsa_tool_options(),
-            ),
-            hidden_tool_with_options(
-                "shinsa:nist-quick-check",
-                "Run a fast NIST SP 800-53 Rev 5 check.",
-                shinsa_tool_options(),
-            ),
-            tool("shinsa:frameworks", "List supported compliance frameworks."),
-        ],
+        shinsa_tools(),
         vec![
             dag("shinsa:scan", "assessment", &["context:build"]),
             dag("shinsa:nist-scan", "assessment", &["context:build"]),
         ],
     )
+}
+
+fn shinsa_tools() -> Vec<ToolDescriptor> {
+    vec![
+        shinsa_assessment_tool(
+            "shinsa:scan",
+            "Run a full ISO 27001 Annex A compliance assessment.",
+            false,
+        ),
+        shinsa_assessment_tool(
+            "shinsa:quick-check",
+            "Run a fast ISO 27001 Annex A check.",
+            true,
+        ),
+        shinsa_assessment_tool(
+            "shinsa:nist-scan",
+            "Run a full NIST SP 800-53 Rev 5 compliance assessment.",
+            false,
+        ),
+        shinsa_assessment_tool(
+            "shinsa:nist-quick-check",
+            "Run a fast NIST SP 800-53 Rev 5 check.",
+            true,
+        ),
+        tool("shinsa:frameworks", "List supported compliance frameworks.").with_policy(
+            tool_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::Never,
+                ToolEffect::Read,
+                WorkspaceRequirement::Required,
+                FindingStoreRequirement::Optional,
+            ),
+        ),
+    ]
+}
+
+fn shinsa_assessment_tool(name: &str, description: &str, hidden: bool) -> ToolDescriptor {
+    let mut descriptor = tool_with_options(name, description, shinsa_tool_options());
+    descriptor.hidden = hidden;
+    descriptor.with_policy(target_write_policy(
+        ToolPhase::Scan,
+        RuntimeRequirement::Always,
+        FindingStoreRequirement::Required,
+    ))
 }
 
 fn shinsa_tool_options() -> Vec<OptionSpec> {
@@ -45,6 +67,7 @@ fn shinsa_tool_options() -> Vec<OptionSpec> {
             "Directory for shinsa assessment artifacts.",
         )
         .aliases(&["output_dir"])
+        .target_write()
         .default(json!("shinsa-output"))
         .advanced(),
         opt(

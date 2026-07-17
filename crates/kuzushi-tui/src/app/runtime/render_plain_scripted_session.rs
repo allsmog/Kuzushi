@@ -1,128 +1,39 @@
 use super::*;
 
-#[cfg(test)]
-pub(crate) fn render_plain_scripted_session(
-    app: &mut ShellApp,
-    commands: &[&str],
-    width: usize,
-) -> String {
-    execute_plain_scripted_session(app, commands, width).output
-}
-
-pub(crate) struct PlainSessionReport {
-    pub(crate) output: String,
-    pub(crate) failed: bool,
-}
-
-pub(crate) fn execute_plain_scripted_session(
-    app: &mut ShellApp,
-    commands: &[&str],
-    width: usize,
-) -> PlainSessionReport {
-    let mut output = String::new();
-    let mut failed = false;
-    for (index, command) in commands.iter().enumerate() {
-        if index > 0 {
-            output.push('\n');
-        }
-        let log_start = app.log_len();
-        submit_plain_scripted_command(app, command);
-        wait_for_plain_work(app);
-        failed |= plain_command_failed(app, log_start);
-        output.push_str(&render_plain_command_result(app, width, command, log_start));
-        if app.should_quit() {
-            break;
-        }
-    }
-    PlainSessionReport { output, failed }
-}
-
-fn wait_for_plain_work(app: &mut ShellApp) {
-    app_background_changed(app, None);
-    while app.has_running_work() {
-        std::thread::sleep(Duration::from_millis(10));
-        app_background_changed(app, None);
-    }
-    app_background_changed(app, None);
-}
-
-fn plain_command_failed(app: &ShellApp, log_start: usize) -> bool {
-    app.log_lines().iter().skip(log_start).any(|line| {
-        line.prefix == "error"
-            || (line.prefix == "result"
-                && matches!(
-                    line.body.split_whitespace().next(),
-                    Some("failed" | "canceled" | "interrupted")
-                ))
+pub(crate) fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
+    let stdout = setup_terminal_stdout()?;
+    Terminal::new(CrosstermBackend::new(stdout)).map_err(|error| {
+        rollback_terminal_mode();
+        anyhow::Error::new(error).context("Could not initialize terminal")
     })
 }
 
-fn submit_plain_scripted_command(app: &mut ShellApp, command: &str) {
-    match crate::commands::parse_command(command) {
-        ShellCommand::Scan(None) if app.target().is_none() => app.log(
-            "error",
-            "scripted scan needs an explicit target; use `scan .` to consent to cwd",
-        ),
-        ShellCommand::Scan(target) => {
-            update_and_execute_effects(app, Msg::Cmd(ShellCommand::ScriptedScan(target)));
-        }
-        _ => {
-            submit_plain_line(app, command);
-        }
+pub(crate) struct TerminalSession {
+    terminal: Terminal<CrosstermBackend<Stdout>>,
+}
+
+impl TerminalSession {
+    pub(crate) fn setup() -> Result<Self> {
+        setup_terminal().map(|terminal| Self { terminal })
+    }
+
+    pub(crate) fn terminal_mut(&mut self) -> &mut Terminal<CrosstermBackend<Stdout>> {
+        &mut self.terminal
     }
 }
 
-fn submit_plain_line(app: &mut ShellApp, command: &str) {
-    app.set_input(command);
-    update_and_execute_effects(
-        app,
-        Msg::Term(TermEvent::Key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::empty(),
-        ))),
-    );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn scripted_scan_starts_worker_instead_of_opening_picker() {
-        let temp = tempfile::tempdir().unwrap();
-        let mut app = ShellApp::new(V2Config::default(), None);
-
-        submit_plain_scripted_command(&mut app, &format!("scan {}", temp.path().display()));
-
-        assert!(app.scan().is_some_and(|scan| scan.running));
-        assert_eq!(app.shell_view(), ShellView::Activity);
-        assert_ne!(app.shell_view(), ShellView::PlanningPicker);
+impl Drop for TerminalSession {
+    fn drop(&mut self) {
+        let _ = restore_terminal(&mut self.terminal);
     }
-
-    #[test]
-    fn targetless_scripted_scan_is_a_failed_plain_outcome() {
-        let mut app = ShellApp::new(V2Config::default(), None);
-
-        let report = execute_plain_scripted_session(&mut app, &["scan"], 80);
-
-        assert!(report.failed);
-        assert!(
-            report.output.contains("explicit target"),
-            "{}",
-            report.output
-        );
-        assert!(!app.has_running_work());
-    }
-}
-
-pub(crate) fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
-    let stdout = setup_terminal_stdout()?;
-    Terminal::new(CrosstermBackend::new(stdout)).context("Could not initialize terminal")
 }
 
 pub(crate) fn setup_terminal_stdout() -> Result<Stdout> {
     let mut stdout = raw_terminal_stdout()?;
-    enable_mouse_capture_if_configured(&mut stdout)?;
+    if let Err(error) = enable_mouse_capture_if_configured(&mut stdout) {
+        rollback_terminal_mode();
+        return Err(error);
+    }
     Ok(stdout)
 }
 
@@ -131,8 +42,22 @@ fn raw_terminal_stdout() -> Result<Stdout> {
     // Enter the alternate screen so the shell owns a dedicated full-screen
     // buffer: the terminal has no scrollback to drift through, the view stays
     // locked in place, and rendered frames don't pile into the user's history.
-    execute!(io::stdout(), EnterAlternateScreen).context("Could not enter alternate screen")?;
-    reset_terminal_viewport()
+    if let Err(error) = execute!(io::stdout(), EnterAlternateScreen) {
+        rollback_terminal_mode();
+        return Err(error).context("Could not enter alternate screen");
+    }
+    reset_terminal_viewport().inspect_err(|_| rollback_terminal_mode())
+}
+
+fn rollback_terminal_mode() {
+    let _ = execute!(
+        io::stdout(),
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        crossterm::terminal::SetTitle("Kuzushi"),
+        LeaveAlternateScreen
+    );
+    let _ = disable_raw_mode();
 }
 
 pub(crate) fn reset_terminal_viewport() -> Result<Stdout> {
@@ -171,14 +96,40 @@ pub(crate) fn mouse_capture_setting_enabled(value: Option<&str>) -> bool {
 }
 
 pub(crate) fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
-    let _ = execute!(
+    let escape_result = execute!(
         terminal.backend_mut(),
         DisableMouseCapture,
         DisableBracketedPaste,
+        crossterm::terminal::SetTitle("Kuzushi"),
         LeaveAlternateScreen
     );
-    disable_raw_mode().context("Could not disable raw mode")?;
-    terminal
-        .show_cursor()
-        .context("Could not show terminal cursor")
+    let raw_result = disable_raw_mode();
+    let cursor_result = terminal.show_cursor();
+    let mut failures = Vec::new();
+    record_terminal_failure(
+        &mut failures,
+        escape_result,
+        "could not leave terminal screen",
+    );
+    record_terminal_failure(&mut failures, raw_result, "could not disable raw mode");
+    record_terminal_failure(
+        &mut failures,
+        cursor_result,
+        "could not show terminal cursor",
+    );
+    terminal_restore_result(failures)
+}
+
+fn record_terminal_failure(failures: &mut Vec<String>, result: std::io::Result<()>, context: &str) {
+    if let Err(error) = result {
+        failures.push(format!("{context}: {error}"));
+    }
+}
+
+fn terminal_restore_result(failures: Vec<String>) -> Result<()> {
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(failures.join("; "))
+    }
 }

@@ -145,7 +145,7 @@ impl TrackedWorkerWatchdog {
             return None;
         }
         self.timeout_reported = true;
-        self.cancel.cancel();
+        self.cancel.interrupt();
         Some(TimedOutWorkerHandle {
             label,
             generation,

@@ -86,7 +86,7 @@ pub(crate) fn risk_by_module(findings: &[Finding]) -> RiskByModule {
 }
 
 pub(crate) fn cached_risk_by_module(app: &ShellApp) -> RiskByModule {
-    let key = RiskByModuleCacheKey::from_findings(app.findings());
+    let key = RiskByModuleCacheKey::from_findings_revision(app.findings_revision());
     if let Some(cached) = app.workbench_cache().borrow().risk_by_module(&key) {
         return cached;
     }
@@ -231,34 +231,28 @@ pub(crate) fn taint_flow_path(app: &ShellApp) -> TaintFlowPath {
     taint_flow_path_from_snapshot(flow)
 }
 
+#[cfg(test)]
 pub(crate) fn selected_taint_flow_path(app: &ShellApp) -> TaintFlowPath {
-    let Some(selected) = app.selected_finding().as_ref() else {
+    let selected = super::current_finding_for_detail(app).map(|(_, finding)| finding);
+    taint_flow_path_for_finding(app, selected.as_ref())
+}
+
+pub(crate) fn taint_flow_path_for_finding(
+    app: &ShellApp,
+    selected: Option<&kuzushi_core::Finding>,
+) -> TaintFlowPath {
+    let Some(selected) = selected else {
         return taint_flow_path(app);
     };
-    let Some(flow) = app.domain().taint_flow() else {
+    let Some(flow) = app.domain().taint_flow_for_finding(selected) else {
         return TaintFlowPath {
             empty_hint: Some(
-                "no taint flow for the selected finding yet — run `taint-iris:hunt`".to_string(),
+                "no finding-keyed taint flow for this finding — run `taint-iris:hunt`".to_string(),
             ),
             ..Default::default()
         };
     };
-    if flow_matches_finding(flow, selected) {
-        return taint_flow_path_from_snapshot(flow);
-    }
-    TaintFlowPath {
-        empty_hint: Some(
-            "cached taint flow does not match the selected finding — run `taint-iris:hunt`"
-                .to_string(),
-        ),
-        ..Default::default()
-    }
-}
-
-fn flow_matches_finding(flow: &TaintFlowSnapshot, finding: &Finding) -> bool {
-    flow.stages
-        .iter()
-        .any(|stage| stage.file == finding.file_path || stage.file.ends_with(&finding.file_path))
+    taint_flow_path_from_snapshot(flow)
 }
 
 fn taint_flow_path_from_snapshot(flow: &TaintFlowSnapshot) -> TaintFlowPath {
@@ -290,7 +284,8 @@ fn short_file(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuzushi_core::Finding;
+    use crate::{TaintFlowSnapshot, TaintStage};
+    use kuzushi_core::{Finding, V2Config};
 
     fn finding(path: &str, severity: Severity) -> Finding {
         Finding::new_tool(
@@ -330,5 +325,53 @@ mod tests {
         assert!(findings_heatmap(&[finding("a/b.rs", Severity::High)])
             .empty_hint
             .is_none());
+    }
+
+    #[test]
+    fn selected_path_uses_finding_identity_not_shared_file_name() {
+        let first = Finding::new_tool(
+            "tool",
+            "rule.first",
+            "src/shared.rs",
+            10,
+            None,
+            Severity::High,
+            "first finding",
+        );
+        let second = Finding::new_tool(
+            "tool",
+            "rule.second",
+            "src/shared.rs",
+            20,
+            None,
+            Severity::High,
+            "second finding",
+        );
+        let mut app = ShellApp::new(V2Config::default(), None);
+        *app.findings_mut() = vec![first.clone(), second.clone()];
+        *app.selected_finding_mut() = Some(second.clone());
+        app.domain_mut().set_taint_flows(vec![
+            keyed_flow(&first, "first source"),
+            keyed_flow(&second, "second source"),
+        ]);
+
+        let path = selected_taint_flow_path(&app);
+
+        assert_eq!(path.stages[0].title, "second source");
+    }
+
+    fn keyed_flow(finding: &Finding, message: &str) -> TaintFlowSnapshot {
+        TaintFlowSnapshot {
+            finding_fingerprint: Some(finding.fingerprint.clone()),
+            finding_identity_id: finding.identity_id.clone(),
+            cwe: "CWE-89".to_string(),
+            severity: "high".to_string(),
+            stages: vec![TaintStage {
+                message: message.to_string(),
+                file: finding.file_path.clone(),
+                line: finding.start_line,
+                snippet: None,
+            }],
+        }
     }
 }

@@ -3,10 +3,7 @@ use crate::findings::Finding;
 use crate::modules::ToolExecutionContext;
 use crate::runtime::LoopHistoryEntry;
 use anyhow::{Context, Result};
-use std::fs;
-use std::io::Write;
 use std::path::Path;
-use uuid::Uuid;
 
 pub fn persist_uaf_hunt_findings(
     target: &Path,
@@ -18,8 +15,15 @@ pub fn persist_uaf_hunt_findings(
         return Ok(None);
     };
     workspace.ensure_state_dir()?;
-    let run_id = persist_uaf_findings_run(target, findings, store)?;
-    let transcript_path = write_uaf_hunt_transcript(&workspace.state_dir(), &run_id, transcript)?;
+    let run_id = ctx.finding_run_id();
+    if !transcript.is_empty() {
+        crate::workspace::prepare_workspace_output_path(
+            workspace.root(),
+            transcript_relative_path(&run_id),
+        )?;
+    }
+    persist_uaf_findings_run(&run_id, target, findings, store)?;
+    let transcript_path = write_uaf_hunt_transcript(workspace.root(), &run_id, transcript)?;
 
     Ok(Some(UafHuntPersistedRun {
         run_id,
@@ -29,32 +33,16 @@ pub fn persist_uaf_hunt_findings(
 }
 
 fn persist_uaf_findings_run(
-    target: &Path,
-    findings: &[Finding],
-    store: &crate::findings::FindingStore,
-) -> Result<String> {
-    let run_id = Uuid::new_v4().to_string();
-    start_uaf_findings_run(&run_id, target, findings, store)?;
-    complete_uaf_findings_run(&run_id, findings.len(), store)?;
-    Ok(run_id)
-}
-
-fn start_uaf_findings_run(
     run_id: &str,
     target: &Path,
     findings: &[Finding],
     store: &crate::findings::FindingStore,
 ) -> Result<()> {
-    store.record_run_started(run_id, target, "running")?;
-    insert_uaf_findings(run_id, findings, store)
-}
-
-fn complete_uaf_findings_run(
-    run_id: &str,
-    finding_count: usize,
-    store: &crate::findings::FindingStore,
-) -> Result<()> {
-    store.record_run_finished(run_id, "completed", finding_count)
+    store.with_run_lifecycle(run_id, target, || {
+        insert_uaf_findings(run_id, findings, store)?;
+        Ok(((), findings.len()))
+    })?;
+    Ok(())
 }
 
 fn insert_uaf_findings(
@@ -74,31 +62,83 @@ fn insert_uaf_findings(
 /// the CLI's `.kuzushi/v3/runs/<run-id>` tree so the transcript survives
 /// independently of how the tool was launched (CLI, TUI, scan worker).
 fn write_uaf_hunt_transcript(
-    state_dir: &Path,
+    workspace_root: &Path,
     run_id: &str,
     transcript: &[LoopHistoryEntry],
 ) -> Result<Option<String>> {
     if transcript.is_empty() {
         return Ok(None);
     }
-    let dir = state_dir.join("uaf-hunt-runs").join(run_id);
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("uaf-hunt: could not create {}", dir.display()))?;
-    let path = dir.join("transcript.jsonl");
-    let mut file = fs::File::create(&path)
-        .with_context(|| format!("uaf-hunt: could not create {}", path.display()))?;
+    let relative = transcript_relative_path(run_id);
+    let mut body = Vec::new();
+    let max_bytes = usize::try_from(crate::run_artifacts::MAX_RUN_ARTIFACT_READ_BYTES)
+        .context("run artifact byte limit does not fit this platform")?;
     for entry in transcript {
         let line = serde_json::to_string(entry).context("uaf-hunt: serialise transcript entry")?;
-        writeln!(file, "{line}")
-            .with_context(|| format!("uaf-hunt: could not write {}", path.display()))?;
+        anyhow::ensure!(
+            body.len().saturating_add(line.len()).saturating_add(1) <= max_bytes,
+            "uaf-hunt transcript exceeds {} bytes",
+            crate::run_artifacts::MAX_RUN_ARTIFACT_READ_BYTES
+        );
+        body.extend_from_slice(line.as_bytes());
+        body.push(b'\n');
     }
+    let path = crate::workspace::write_workspace_state_file(workspace_root, relative, &body)
+        .context("uaf-hunt: could not persist transcript")?;
     Ok(Some(path.display().to_string()))
+}
+
+fn transcript_relative_path(run_id: &str) -> std::path::PathBuf {
+    Path::new(".kuzushi/v3/uaf-hunt-runs")
+        .join(run_id)
+        .join("transcript.jsonl")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::V2Config;
+    use crate::findings::{FindingStore, Severity};
+    use crate::run_artifacts::TraceHandle;
     use crate::runtime::{ToolCall, ToolResult};
+    use crate::workspace::WorkspaceTarget;
+
+    #[test]
+    fn persistence_uses_the_canonical_trace_run_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config::default();
+        let trace = TraceHandle::jsonl(temp.path(), "run-uaf-canonical");
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: Some(&trace),
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let finding = Finding::new_tool(
+            "uaf-hunt",
+            "CWE-416",
+            "src/lib.c",
+            7,
+            None,
+            Severity::High,
+            "use after free",
+        );
+
+        let persisted = persist_uaf_hunt_findings(temp.path(), &[finding], &[], &ctx)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(persisted.run_id, "run-uaf-canonical");
+        let findings = store
+            .list_findings_for_scan_id("run-uaf-canonical")
+            .unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].scan_id.as_deref(), Some("run-uaf-canonical"));
+    }
 
     #[test]
     fn transcript_writer_skips_empty_and_writes_jsonl() {
@@ -128,5 +168,28 @@ mod tests {
         assert_eq!(raw.lines().count(), 2);
         assert!(raw.contains("\"grep\""));
         assert!(raw.contains("\"matches\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn transcript_writer_rejects_symlinked_state_parent() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(workspace.path().join(".kuzushi/v3")).unwrap();
+        symlink(
+            outside.path(),
+            workspace.path().join(".kuzushi/v3/uaf-hunt-runs"),
+        )
+        .unwrap();
+        let transcript = vec![LoopHistoryEntry::ToolResult(ToolResult {
+            call_id: "call-1".to_string(),
+            output: serde_json::json!({"safe": true}),
+            is_error: false,
+        })];
+
+        assert!(write_uaf_hunt_transcript(workspace.path(), "run-1", &transcript).is_err());
+        assert!(std::fs::read_dir(outside.path()).unwrap().next().is_none());
     }
 }

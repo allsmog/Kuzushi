@@ -1,7 +1,7 @@
+use super::bounded_fs as fs;
 use super::{component, relative_display, SbomComponent, SbomDependencyEdge};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 
 const COMPOSER_PACKAGE_SECTIONS: &[&str] = &["packages", "packages-dev"];
@@ -89,7 +89,11 @@ fn package_edges(package: &Value, source: &str) -> Vec<SbomDependencyEdge> {
     edges
 }
 
-fn require_edges(package_name: &str, value: Option<&Value>, source: &str) -> Vec<SbomDependencyEdge> {
+fn require_edges(
+    package_name: &str,
+    value: Option<&Value>,
+    source: &str,
+) -> Vec<SbomDependencyEdge> {
     value
         .and_then(Value::as_object)
         .into_iter()

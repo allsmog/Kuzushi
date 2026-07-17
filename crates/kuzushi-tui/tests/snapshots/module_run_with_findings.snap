@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 239
 ---
- KUZUSHI › run · mode:run · target:none · ctx:not built · model:unconfigured · stage:* searching · cost:$0.00
+ KUZUSHI › run · route:run · target:none · ctx:not built · model:unconfigured · stage:* searching · cost:$0.00
 
 * ./acme-checkout · running: agentic-sast tracing · findings pending · run run-abc1
 
@@ -16,5 +16,5 @@ o triage:run              queued after scan
 
  -- TRANSCRIPT ---------------------------------------------------------------------------------------------------------
  15:21:17 · system kuzushi shell
- 15:21:17 · startup ready: 39 modules, 59 tools, target none
+ 15:21:17 · startup ready: 34 modules, 53 tools, target none
  15:21:17 · help type `next` to continue the guided workflow · `help` for commands · `?<text>` to ask the agent

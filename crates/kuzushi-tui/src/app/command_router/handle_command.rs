@@ -13,8 +13,13 @@ impl ShellApp {
     }
 
     fn reduce_command_without_effect_execution(&mut self, command: ShellCommand) -> CommandUpdate {
+        let rejected = matches!(command, ShellCommand::Unknown(_));
         if let Some(effects) = self.reduce_command_effects(&command) {
-            return CommandUpdate::handled(effects);
+            return if rejected {
+                CommandUpdate::rejected(effects)
+            } else {
+                CommandUpdate::handled(effects)
+            };
         }
         CommandUpdate::unhandled()
     }
@@ -27,7 +32,16 @@ impl ShellApp {
         if trimmed.is_empty() {
             return CommandUpdate::unhandled();
         }
+        self.reduce_nonempty_submitted_line(raw, trimmed)
+    }
+
+    fn reduce_nonempty_submitted_line(&mut self, raw: &str, trimmed: &str) -> CommandUpdate {
         self.set_last_cleared_input(None);
+        self.record_session_event(
+            kuzushi_core::session_transcript::SessionEvent::CommandSubmitted {
+                command: raw.to_string(),
+            },
+        );
         self.log(">", raw.to_string());
         let mut effects = self.reduce_remember_command(trimmed);
         if self.handle_subverb_query(trimmed) {
@@ -37,13 +51,40 @@ impl ShellApp {
             effects.append(&mut local_effects);
             return CommandUpdate::handled(effects);
         }
-        let parsed = parse_command(raw);
+        let parsed = self.phase_intent_or_parsed_command(raw);
         if self.queue_operator_submission_while_busy(trimmed, &parsed) {
             return CommandUpdate::handled(effects);
         }
         let mut command_update = self.reduce_command_message(parsed);
         effects.append(&mut command_update.effects);
-        CommandUpdate::handled(effects)
+        command_update.effects = effects;
+        command_update.handled = true;
+        command_update
+    }
+
+    fn phase_intent_or_parsed_command(&self, raw: &str) -> ShellCommand {
+        let parsed = parse_command(raw);
+        let ShellCommand::Unknown(text) = parsed else {
+            return parsed;
+        };
+        if self.shell_view() != ShellView::Workbench
+            || text.starts_with('/')
+            || known_command_head(&text)
+        {
+            return ShellCommand::Unknown(text);
+        }
+        let page = crate::ui_view_models::active_workbench_page(self);
+        let selected_phase = match page {
+            WorkbenchPage::Map => WorkflowPhase::Map,
+            WorkbenchPage::Scan => WorkflowPhase::Scan,
+            WorkbenchPage::Review => WorkflowPhase::Review,
+            WorkbenchPage::Prove => WorkflowPhase::Prove,
+            WorkbenchPage::Fix => WorkflowPhase::Fix,
+        };
+        ShellCommand::PhaseIntent {
+            selected_phase,
+            text,
+        }
     }
 
     /// Auto-queue the ergonomic path: a `run <tool>` submitted while a job is
@@ -132,6 +173,16 @@ impl ShellApp {
     }
 }
 
+fn known_command_head(raw: &str) -> bool {
+    let head = raw.split_whitespace().next().unwrap_or_default();
+    crate::commands::shell_command_specs().any(|spec| {
+        std::iter::once(spec.command)
+            .chain(spec.aliases.iter().copied())
+            .filter_map(|value| value.trim_start_matches('/').split_whitespace().next())
+            .any(|known| known == head)
+    })
+}
+
 /// A submission that dispatches a tool run — the steerable case that queues
 /// behind a live job. Deliberately excludes `Scan` (opens the guided picker,
 /// not a direct dispatch) so a busy operator isn't blocked from navigating.
@@ -141,6 +192,7 @@ fn is_steerable_submission(command: &ShellCommand) -> bool {
 
 pub(crate) struct CommandUpdate {
     pub(crate) handled: bool,
+    pub(crate) rejected: bool,
     pub(crate) effects: Vec<ShellEffect>,
 }
 
@@ -148,6 +200,15 @@ impl CommandUpdate {
     fn handled(effects: Vec<ShellEffect>) -> Self {
         Self {
             handled: true,
+            rejected: false,
+            effects,
+        }
+    }
+
+    fn rejected(effects: Vec<ShellEffect>) -> Self {
+        Self {
+            handled: true,
+            rejected: true,
             effects,
         }
     }
@@ -155,7 +216,42 @@ impl CommandUpdate {
     fn unhandled() -> Self {
         Self {
             handled: false,
+            rejected: false,
             effects: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn workbench_prose_carries_the_selected_phase_into_planning() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Scan));
+
+        assert_eq!(
+            app.phase_intent_or_parsed_command("inspect authentication paths"),
+            ShellCommand::PhaseIntent {
+                selected_phase: WorkflowPhase::Scan,
+                text: "inspect authentication paths".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn explicit_commands_are_parsed_before_phase_intent() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+
+        assert!(matches!(
+            app.phase_intent_or_parsed_command("run semgrep:scan"),
+            ShellCommand::RunTool { .. }
+        ));
     }
 }

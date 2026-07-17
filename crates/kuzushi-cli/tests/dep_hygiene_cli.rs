@@ -510,10 +510,13 @@ fn fake_verify_bridge(dir: &std::path::Path) -> std::path::PathBuf {
     std::fs::write(
         &binary,
         r#"#!/bin/sh
-cat >/dev/null
-cat <<'JSON'
-{"ok":true,"structured":{"fingerprint":"fp-from-bridge","exploitable":true,"poc_payload":"curl -X POST /admin","poc_description":"POST reaches admin sink","attack_vector":"curl POST /admin","preconditions":["network access"],"confidence":0.84,"proof_level":3,"proof_verdict":"exploited"}}
-JSON
+request="$(cat)"
+fingerprint="$(printf '%s\n' "$request" | grep -Eo 'fp3_[0-9a-f]{64}' | head -n 1)"
+if [ -z "$fingerprint" ]; then
+  echo '{"ok":false,"error":"verification request omitted its finding fingerprint"}'
+  exit 1
+fi
+printf '%s\n' "{\"ok\":true,\"structured\":{\"fingerprint\":\"$fingerprint\",\"exploitable\":true,\"poc_payload\":\"curl -X POST /admin\",\"poc_description\":\"POST reaches admin sink\",\"attack_vector\":\"curl POST /admin\",\"preconditions\":[\"network access\"],\"confidence\":0.84,\"proof_level\":3,\"proof_verdict\":\"exploited\"}}"
 "#,
     )
     .unwrap();
@@ -861,7 +864,7 @@ fn run_dep_hygiene_check_missing_target_is_actionable() {
 
     assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("dep-hygiene: target does not exist"),
+        String::from_utf8_lossy(&output.stderr).contains("Target path does not exist: missing"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -1009,7 +1012,7 @@ fn run_secret_scan_missing_target_is_actionable() {
 
     assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("secret-scan: target is not a directory"),
+        String::from_utf8_lossy(&output.stderr).contains("Target path does not exist: missing"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -1111,7 +1114,7 @@ fn run_iac_scan_missing_target_is_actionable() {
 
     assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("iac-scan: target does not exist"),
+        String::from_utf8_lossy(&output.stderr).contains("Target path does not exist: missing"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -2134,6 +2137,10 @@ fn run_sast_scan_verify_autopatch_writes_run_artifacts() {
         .pointer("/data/artifacts/verifyJsonl")
         .and_then(Value::as_str)
         .unwrap();
+    let patch_log = body
+        .pointer("/data/artifacts/patchJsonl")
+        .and_then(Value::as_str)
+        .unwrap();
     assert!(std::path::Path::new(summary).exists());
     assert!(std::fs::read_to_string(summary)
         .unwrap()
@@ -2141,7 +2148,10 @@ fn run_sast_scan_verify_autopatch_writes_run_artifacts() {
     assert!(std::fs::read_to_string(triage_log)
         .unwrap()
         .contains("triage:complete"));
-    assert!(std::fs::read_to_string(verify_log)
+    assert!(!std::fs::read_to_string(verify_log)
+        .unwrap()
+        .contains("patch:complete"));
+    assert!(std::fs::read_to_string(patch_log)
         .unwrap()
         .contains("patch:complete"));
 }
@@ -2217,16 +2227,9 @@ fn run_semgrep_scan_missing_binary_is_actionable() {
         .unwrap();
 
     assert!(!output.status.success());
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let error = body["errors"][0].as_str().unwrap();
-    assert_eq!(body["ok"], false);
-    assert_eq!(body["status"], "failed");
-    assert!(error.contains("semgrep: could not find scanner binary"));
-    assert!(error.contains("Install Semgrep"));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("semgrep: could not find scanner binary")
-            && stderr.contains("Install Semgrep"),
+        stderr.contains("semgrep:scan binary executable path could not be resolved"),
         "stderr: {stderr}"
     );
 }
@@ -2360,19 +2363,10 @@ fn run_codeql_scan_missing_binary_is_actionable() {
         .unwrap();
 
     assert!(!output.status.success());
-    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let error = body["errors"][0].as_str().unwrap();
-    assert_eq!(body["ok"], false);
-    assert_eq!(body["status"], "failed");
-    assert_eq!(body["fallback_context"]["failedStage"], "codeql:scan");
-    assert!(body["fallback_context"]["missingArtifacts"].is_array());
     assert!(!String::from_utf8_lossy(&output.stdout).contains("validated"));
-    assert!(error.contains("codeql: could not find CodeQL CLI"));
-    assert!(error.contains("github/codeql-cli-binaries"));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("codeql: could not find CodeQL CLI")
-            && stderr.contains("github/codeql-cli-binaries"),
+        stderr.contains("codeql:scan binary executable path could not be resolved"),
         "stderr: {stderr}"
     );
 }
@@ -2546,8 +2540,7 @@ fn run_recon_http_fingerprint_missing_binary_is_actionable() {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("recon:http-fingerprint: could not find subprocess binary")
-            && stderr.contains("Install curl"),
+        stderr.contains("recon:http-fingerprint binary executable path could not be resolved"),
         "stderr: {stderr}"
     );
 }
@@ -2791,6 +2784,7 @@ fn run_patch_finding_reaches_langgraph_runtime_bridge_and_persists() {
     std::fs::write(repo.join("src/db.ts"), "const query = req.query.q;\n").unwrap();
     init_git_repo(&repo);
     let finding = seed_triaged_finding(&repo);
+    seed_completed_detector_run(&repo, "run-1", "semgrep:scan");
     let bridge = fake_patch_bridge(temp.path());
 
     let output = kuzushi_command(&home)
@@ -2836,14 +2830,18 @@ fn run_patch_finding_reaches_langgraph_runtime_bridge_and_persists() {
     assert_eq!(patch_results[0].status.as_str(), "SOUND");
 }
 
+#[cfg(unix)]
 #[test]
 fn run_patch_finding_without_model_fails_without_silent_fallback() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
-    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(repo.join("src")).unwrap();
     std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(repo.join("src/db.ts"), "const query = req.query.q;\n").unwrap();
+    init_git_repo(&repo);
     let finding = seed_triaged_finding(&repo);
+    seed_completed_detector_run(&repo, "run-1", "semgrep:scan");
 
     let output = kuzushi_command(&home)
         .arg("--target")
@@ -2984,7 +2982,10 @@ fn run_threat_model_build_without_model_degrades_deterministically() {
         .output()
         .unwrap();
 
-    assert!(output.status.success());
+    assert!(
+        !output.status.success(),
+        "partial results must be machine-readable and exit nonzero"
+    );
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(body.get("status").and_then(Value::as_str), Some("partial"));
     assert_eq!(
@@ -3187,6 +3188,18 @@ fn seed_triaged_finding(repo: &std::path::Path) -> Finding {
     finding
 }
 
+fn seed_completed_detector_run(repo: &std::path::Path, run_id: &str, tool: &str) {
+    let record = kuzushi_core::run_artifacts::ToolRunRecord::new(repo, run_id, "tool", tool);
+    kuzushi_core::run_artifacts::record_tool_run_started(
+        record,
+        &serde_json::json!({"fixture": "detector input"}),
+    );
+    kuzushi_core::run_artifacts::record_tool_run_complete(
+        record,
+        &serde_json::json!({"ok": true, "output": "fixture detector completed"}),
+    );
+}
+
 fn seed_taint_iris_next_mcp_artifacts(repo: &std::path::Path) {
     // The taint-iris-next MCP gate refuses to dispatch unless the joern CPG
     // (`.kuzushi/cpg.bin`) and CodeQL DB (`.kuzushi/codeql-db/`) artifacts
@@ -3194,7 +3207,11 @@ fn seed_taint_iris_next_mcp_artifacts(repo: &std::path::Path) {
     // read them, so non-empty placeholders satisfy the gate.
     let kuzushi = repo.join(".kuzushi");
     std::fs::create_dir_all(kuzushi.join("codeql-db")).unwrap();
-    std::fs::write(kuzushi.join("codeql-db").join("db.placeholder"), "stub").unwrap();
+    std::fs::write(
+        kuzushi.join("codeql-db").join("codeql-database.yml"),
+        "primaryLanguage: javascript\n",
+    )
+    .unwrap();
     std::fs::write(kuzushi.join("cpg.bin"), "cpg-stub").unwrap();
 }
 

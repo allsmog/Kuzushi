@@ -68,7 +68,6 @@ interface and must stay `object[]` to satisfy declaration merging.
 | ----------------------------------------- | ----------------------------------------------- | ------------------------------------------------- | ---------- |
 | `src/ui/severity.ts:214`                  | `chalk as unknown as Record<string, ChalkInstance>` | `Record<InkColor, ChalkInstance>` (narrower keys) | HIGH       |
 | `src/repo-context.ts:221,224`             | `... as unknown as FileIndex`                   | `... as FileIndex` (already narrowed by isRecord) | HIGH       |
-| `src/copilot/print.ts:103-112`            | `this as unknown as Record<string, unknown>`    | Properly typed `keyof` indexing                   | HIGH       |
 | `src/agents/tasks/*-detect.ts` (~12 sites)| `item as unknown as XxxFinding`                 | `as XxxFinding` (already isRecord-checked)         | MEDIUM (per-file)|
 | `src/scoring/run-metrics.ts:51,133`       | `f as unknown as Record<string, unknown>`       | Define enriched-Finding interface                 | LOW (cross-cuts) |
 | `src/cli/scan-config.ts:142,143`          | `config as unknown as Record<string, unknown>`  | Add `githubPr`/`githubComment` to `KuzushiConfig` | LOW (schema change) |

@@ -249,6 +249,42 @@ mod tests {
     }
 
     #[test]
+    fn successful_unpriced_chunk_keeps_exact_total_unavailable() {
+        let body = "// padding\n".repeat(2_000);
+        let tmp = make_workspace(&[("src/a.c", &body), ("src/b.c", &body)]);
+        let runtime_inner = ScriptedRuntimeMixed::new(vec![
+            ScriptedItem::Costed("[]".to_string(), 0.4),
+            ScriptedItem::Unpriced("[]".to_string()),
+        ]);
+        let runtime = RoutedRuntime::new(
+            runtime_inner as Arc<dyn AgentRuntime>,
+            Arc::new(router_with_full_mode_role("anthropic:claude-haiku-4-5")),
+            None,
+        );
+        let limiter = SpendLimiter::open_in_memory().unwrap();
+        limiter.set_cap(Operation::FullModeMulti, 100.0).unwrap();
+        let cfg = FullModeConfig {
+            workspace_root: tmp.path().to_path_buf(),
+            max_tokens_per_chunk: 4_000,
+            deposit_usd_per_chunk: 1.5,
+            ..Default::default()
+        };
+
+        let report = run(&runtime, Some(&limiter), &cfg).unwrap();
+
+        assert_eq!(report.cost_usd, None);
+        assert!((report.observed_cost_usd - 0.4).abs() < 1e-9);
+        assert!(report.unresolved_provider_spend);
+        assert_eq!(report.chunks_dispatched, 2);
+        assert_eq!(report.chunks_failed, 0);
+        let spent = limiter.total_spent(Operation::FullModeMulti).unwrap();
+        assert!((spent - 1.9).abs() < 1e-9, "got {spent}");
+        let output = report_to_tool_json(&report);
+        assert!(output.get("costUsd").is_none());
+        assert_eq!(output["data"]["costUsd"], serde_json::Value::Null);
+    }
+
+    #[test]
     fn malformed_responses_mark_chunk_failed_not_panic() {
         let body = "// padding\n".repeat(2_000);
         let tmp = make_workspace(&[("src/a.c", &body)]);
@@ -311,6 +347,8 @@ mod tests {
 
     enum ScriptedItem {
         Ok(String),
+        Costed(String, f64),
+        Unpriced(String),
         Err(String),
     }
 
@@ -331,6 +369,19 @@ mod tests {
             anyhow::ensure!(!q.is_empty(), "scripted runtime exhausted");
             match q.remove(0) {
                 ScriptedItem::Ok(text) => Ok(AgentQueryResponse {
+                    text,
+                    structured: None,
+                    cost_usd_reported: true,
+                    ..Default::default()
+                }),
+                ScriptedItem::Costed(text, cost_usd) => Ok(AgentQueryResponse {
+                    text,
+                    structured: None,
+                    cost_usd,
+                    cost_usd_reported: true,
+                    ..Default::default()
+                }),
+                ScriptedItem::Unpriced(text) => Ok(AgentQueryResponse {
                     text,
                     structured: None,
                     ..Default::default()

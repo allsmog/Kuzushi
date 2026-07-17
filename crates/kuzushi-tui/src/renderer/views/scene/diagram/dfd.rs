@@ -50,12 +50,13 @@ impl Widget for DfdDiagram {
             return;
         }
         if let Some(hint) = &self.model.empty_hint {
+            let (hint, guidance) = dfd_empty_copy(area.width, hint);
             render_empty_state_panel(
                 buf,
                 area,
                 "no data-flow diagram",
                 hint,
-                &[("threat-model:build", "map trust zones and flows")],
+                &[("threat-model:build", guidance)],
             );
             return;
         }
@@ -73,6 +74,16 @@ impl Widget for DfdDiagram {
         self.draw_flows(buf, area, &anchors);
         self.draw_legend(buf, area, zone_h + 2);
     }
+}
+
+fn dfd_empty_copy<'a>(width: u16, hint: &'a str) -> (&'a str, &'static str) {
+    if width < 60 {
+        return (
+            "no threat model yet — run `threat-model:build`",
+            "map trust zones",
+        );
+    }
+    (hint, "map trust zones and flows")
 }
 
 impl DfdDiagram {

@@ -3,6 +3,7 @@ use super::threat_model_signals::{
 };
 use super::*;
 use crate::config::V2Config;
+use crate::findings::FindingStore;
 use crate::modules::{ModuleRegistry, ToolExecutionContext};
 use crate::workspace::WorkspaceTarget;
 use serde_json::{json, Value};
@@ -287,6 +288,8 @@ fn executor_reads_workspace_inventory_and_visible_capabilities() {
         workspace: Some(&workspace),
         findings_store: None,
         trace: Some(&trace),
+        cancellation: None,
+        authorization: Default::default(),
     };
 
     let output = execute_module_recommender_tool(
@@ -387,6 +390,8 @@ fn executor_applies_workspace_strategy_corrections_to_rerun_proposals() {
         workspace: Some(&workspace),
         findings_store: None,
         trace: Some(&trace),
+        cancellation: None,
+        authorization: Default::default(),
     };
 
     execute_module_recommender_tool(
@@ -501,6 +506,8 @@ fn executor_surfaces_backend_framework_signals() {
         workspace: Some(&workspace),
         findings_store: None,
         trace: None,
+        cancellation: None,
+        authorization: Default::default(),
     };
 
     let output = execute_module_recommender_tool(
@@ -569,6 +576,8 @@ fn executor_surfaces_grpc_rpc_handler_signals() {
         workspace: Some(&workspace),
         findings_store: None,
         trace: None,
+        cancellation: None,
+        authorization: Default::default(),
     };
 
     let output = execute_module_recommender_tool(
@@ -613,6 +622,8 @@ fn executor_surfaces_file_upload_attack_surface_signals() {
         workspace: Some(&workspace),
         findings_store: None,
         trace: None,
+        cancellation: None,
+        authorization: Default::default(),
     };
 
     let output = execute_module_recommender_tool(
@@ -660,6 +671,8 @@ fn executor_surfaces_python_framework_signals_on_threat_model_recommendation() {
         workspace: Some(&workspace),
         findings_store: None,
         trace: None,
+        cancellation: None,
+        authorization: Default::default(),
     };
 
     let output = execute_module_recommender_tool(
@@ -778,6 +791,8 @@ fn executor_reads_threat_model_dfd_artifact_shape() {
         workspace: Some(&workspace),
         findings_store: None,
         trace: None,
+        cancellation: None,
+        authorization: Default::default(),
     };
 
     let output = execute_module_recommender_tool(
@@ -834,12 +849,15 @@ fn registry_recommender_returns_completed_result_envelope() {
     )
     .unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let findings_store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let config = V2Config::default();
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: Some(&workspace),
-        findings_store: None,
+        findings_store: Some(&findings_store),
         trace: None,
+        cancellation: None,
+        authorization: Default::default(),
     };
     let result = ModuleRegistry::with_v2_builtins()
         .execute_tool(

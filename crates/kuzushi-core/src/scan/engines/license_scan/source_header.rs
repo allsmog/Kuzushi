@@ -1,8 +1,8 @@
 use super::*;
 
 const SOURCE_EXTENSIONS: &[&str] = &[
-    "c", "cc", "cpp", "go", "h", "hpp", "java", "js", "jsx", "kt", "php", "py", "rb", "rs",
-    "ts", "tsx",
+    "c", "cc", "cpp", "go", "h", "hpp", "java", "js", "jsx", "kt", "php", "py", "rb", "rs", "ts",
+    "tsx",
 ];
 
 pub(super) fn source_header_findings(
@@ -30,7 +30,7 @@ pub(super) fn source_header_findings(
 
 fn declared_license_kind(manifests: &[PathBuf]) -> Result<Option<String>> {
     for path in manifests {
-        let text = fs::read_to_string(path)
+        let text = crate::bounded_file::read_utf8_text(path, MAX_LICENSE_MANIFEST_BYTES)
             .with_context(|| format!("license-scan: read {}", path.display()))?;
         if let ManifestLicense::Declared(license) = manifest_license(path, &text)? {
             return Ok(Some(normalize_license_id(&license)));
@@ -50,7 +50,8 @@ fn collect_spdx_header_findings(
     if cancellation.is_cancelled() {
         anyhow::bail!("license-scan scan cancelled");
     }
-    for entry in fs::read_dir(dir).with_context(|| format!("license-scan: read {}", dir.display()))?
+    for entry in
+        fs::read_dir(dir).with_context(|| format!("license-scan: read {}", dir.display()))?
     {
         let path = entry?.path();
         inspect_path(
@@ -73,7 +74,8 @@ fn inspect_path(
     findings: &mut Vec<LicenseScanFinding>,
     cancellation: &ScanCancellation,
 ) -> Result<()> {
-    if path.is_dir() && !ignored_dir(path) {
+    let file_type = fs::symlink_metadata(path)?.file_type();
+    if file_type.is_dir() && !ignored_dir(path) {
         return collect_spdx_header_findings(
             target,
             path,
@@ -83,10 +85,16 @@ fn inspect_path(
             cancellation,
         );
     }
-    if !is_source_file(path) {
+    if !file_type.is_file() || !is_source_file(path) {
         return Ok(());
     }
-    inspect_source_path(target, path, declared, require_source_spdx_headers, findings)
+    inspect_source_path(
+        target,
+        path,
+        declared,
+        require_source_spdx_headers,
+        findings,
+    )
 }
 
 fn inspect_source_path(
@@ -97,7 +105,9 @@ fn inspect_source_path(
     findings: &mut Vec<LicenseScanFinding>,
 ) -> Result<()> {
     match source_spdx_license(path)? {
-        Some(header) if declared.is_some_and(|license| normalize_license_id(&header) != license) => {
+        Some(header)
+            if declared.is_some_and(|license| normalize_license_id(&header) != license) =>
+        {
             findings.push(spdx_header_mismatch_finding(
                 target,
                 path,
@@ -115,9 +125,9 @@ fn inspect_source_path(
 }
 
 fn source_spdx_license(path: &Path) -> Result<Option<String>> {
-    let text = fs::read_to_string(path)
+    let text = crate::bounded_file::read_utf8_text_prefix(path, MAX_SOURCE_HEADER_BYTES)
         .with_context(|| format!("license-scan: read {}", path.display()))?;
-    Ok(text.lines().take(20).find_map(spdx_license_from_line))
+    Ok(text.text.lines().take(20).find_map(spdx_license_from_line))
 }
 
 fn is_source_file(path: &Path) -> bool {

@@ -5,8 +5,8 @@ use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-mod export_markdown_bundle;
 mod export_evidence_origin;
+mod export_markdown_bundle;
 mod export_metadata;
 mod export_projection;
 mod export_projection_model;
@@ -27,10 +27,11 @@ pub use export_projection::{
 pub use export_projection_model::{
     WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary, WorkspaceFindingExportLocation,
     WorkspaceFindingExportRecord, WorkspaceFindingProvenanceSummary, WorkspaceRunExportContext,
-    WorkspaceVerificationExportSummary,
+    WorkspaceRemediationExportSummary, WorkspaceVerificationExportSummary,
 };
 pub use export_review_context::WorkspaceFindingReviewContext;
 pub use export_workspace_findings::{
+    export_scan_findings_sarif, export_scan_findings_sarif_with_run_summary,
     export_workspace_findings, export_workspace_findings_with_options,
     preview_workspace_findings_export, WorkspaceFindingsExportPreview,
 };

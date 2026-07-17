@@ -1,8 +1,7 @@
 use super::review_queue::ReviewQueueMode;
 use super::review_state::EffectiveReviewStateIndex;
-use super::{scoped_target_path_label, ui_latest_run_path};
-use crate::ShellApp;
-use kuzushi_core::run_artifacts::load_run_summary;
+use super::scoped_target_path_label;
+use crate::{ShellApp, ViewDataState};
 use kuzushi_core::workspace::{
     workspace_export_omitted_fields, workspace_finding_export_records_with_context,
     WorkspaceFindingExportRecord, WorkspaceFindingReviewContext, WorkspaceRunExportContext,
@@ -144,12 +143,19 @@ fn export_preview_run_contexts(
     let Some(target) = app.target() else {
         return HashMap::new();
     };
+    let ViewDataState::Ready(index) = app
+        .workbench_cache()
+        .borrow()
+        .cached_run_summary_index(Some(target))
+    else {
+        return HashMap::new();
+    };
     finding_run_ids(findings)
         .into_iter()
         .filter_map(|run_id| {
-            let context = load_run_summary(target, &run_id)
-                .ok()
-                .map(|summary| WorkspaceRunExportContext::from_summary(&summary))?;
+            let context = index
+                .get(&run_id)
+                .map(WorkspaceRunExportContext::from_summary)?;
             Some((run_id, context))
         })
         .collect()
@@ -214,11 +220,19 @@ fn report_preview_counts(
 
 fn latest_run_id(app: &ShellApp) -> Option<String> {
     let target = app.target()?;
-    let latest_path = ui_latest_run_path(Some(target));
-    std::fs::read_to_string(latest_path)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    match app
+        .workbench_cache()
+        .borrow()
+        .cached_latest_run_pointer(Some(target))
+    {
+        ViewDataState::Ready(kuzushi_core::LatestRunPointerState::Ready(run_id)) => {
+            Some(run_id.as_str().to_string())
+        }
+        ViewDataState::Ready(kuzushi_core::LatestRunPointerState::Missing)
+        | ViewDataState::Ready(kuzushi_core::LatestRunPointerState::Invalid(_))
+        | ViewDataState::NotRequested
+        | ViewDataState::Loading => None,
+    }
 }
 
 fn preview_generated_at() -> String {

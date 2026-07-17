@@ -1,5 +1,12 @@
 use super::*;
 
+mod balanced_scanner;
+use balanced_scanner::scan_balanced_json;
+#[cfg(test)]
+pub(crate) use balanced_scanner::{
+    BalancedJsonScanStats, MAX_BALANCED_CANDIDATES, MAX_BALANCED_CANDIDATE_BYTES,
+};
+
 #[cfg(test)]
 pub(crate) fn parse_json_value_from_agent_text(text: &str) -> Result<Value> {
     Ok(parse_json_value_from_agent_text_with_strategy(text)?.value)
@@ -38,6 +45,7 @@ pub(crate) struct ParsedAgentJson {
 pub(crate) fn parse_json_value_from_agent_text_with_strategy(
     text: &str,
 ) -> Result<ParsedAgentJson> {
+    ensure_text_parse_budget(text)?;
     let trimmed = non_empty_agent_text(text)?;
     let candidate = strip_markdown_fence(trimmed);
     parse_direct_agent_json(candidate)
@@ -70,7 +78,7 @@ fn parse_last_fenced_agent_json(text: &str) -> Option<ParsedAgentJson> {
 
 fn parse_balanced_agent_json(candidate: &str) -> Result<ParsedAgentJson> {
     let mut saw_json_like_text = false;
-    for candidate in balanced_json_candidates(candidate) {
+    for candidate in scan_balanced_json(candidate).candidates {
         saw_json_like_text = true;
         if let Ok(value) = serde_json::from_str::<Value>(candidate.slice) {
             return Ok(ParsedAgentJson {
@@ -80,46 +88,6 @@ fn parse_balanced_agent_json(candidate: &str) -> Result<ParsedAgentJson> {
         }
     }
     Err(balanced_json_parse_error(saw_json_like_text))
-}
-
-struct BalancedJsonCandidate<'a> {
-    strategy: JsonExtractionStrategy,
-    slice: &'a str,
-}
-
-fn balanced_json_candidates(text: &str) -> Vec<BalancedJsonCandidate<'_>> {
-    let mut candidates = Vec::new();
-    append_reversed_balanced_candidates(
-        &mut candidates,
-        text,
-        '{',
-        '}',
-        JsonExtractionStrategy::BalancedObject,
-    );
-    append_reversed_balanced_candidates(
-        &mut candidates,
-        text,
-        '[',
-        ']',
-        JsonExtractionStrategy::BalancedArray,
-    );
-    candidates
-}
-
-fn append_reversed_balanced_candidates<'a>(
-    candidates: &mut Vec<BalancedJsonCandidate<'a>>,
-    text: &'a str,
-    open: char,
-    close: char,
-    strategy: JsonExtractionStrategy,
-) {
-    let mut slices = balanced_json_slices(text, open, close);
-    slices.reverse();
-    candidates.extend(
-        slices
-            .into_iter()
-            .map(|slice| BalancedJsonCandidate { strategy, slice }),
-    );
 }
 
 fn balanced_json_parse_error(saw_json_like_text: bool) -> anyhow::Error {
@@ -140,8 +108,16 @@ fn balanced_json_parse_error(saw_json_like_text: bool) -> anyhow::Error {
 /// reasoning traces above it can contain C code with unbalanced braces
 /// that would defeat the simple `find('{')..rfind('}')` approach.
 fn parse_last_fenced_json(text: &str) -> Option<Value> {
+    parse_last_fenced_json_with_stats(text).value
+}
+
+fn parse_last_fenced_json_with_stats(text: &str) -> FencedJsonParse {
     let mut rest = text;
     let mut last_ok: Option<Value> = None;
+    #[cfg(test)]
+    let mut candidate_count = 0usize;
+    #[cfg(test)]
+    let mut parsed_candidate_bytes = 0usize;
     while let Some(open_pos) = rest.find("```") {
         let after_ticks = &rest[open_pos + 3..];
         // Optional `json` (or `JSON`) tag right after the opening fence.
@@ -154,13 +130,40 @@ fn parse_last_fenced_json(text: &str) -> Option<Value> {
             break;
         };
         let body = body_start[..close_off].trim();
+        #[cfg(test)]
+        {
+            candidate_count += 1;
+            parsed_candidate_bytes += body.len();
+        }
         if let Ok(value) = serde_json::from_str::<Value>(body) {
             last_ok = Some(value);
         }
         let consumed = (body_start.as_ptr() as usize - rest.as_ptr() as usize) + close_off + 3;
         rest = &rest[consumed..];
     }
-    last_ok
+    FencedJsonParse {
+        value: last_ok,
+        #[cfg(test)]
+        stats: FencedJsonScanStats {
+            inspected_bytes: text.len(),
+            candidate_count,
+            parsed_candidate_bytes,
+        },
+    }
+}
+
+struct FencedJsonParse {
+    value: Option<Value>,
+    #[cfg(test)]
+    stats: FencedJsonScanStats,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FencedJsonScanStats {
+    pub(crate) inspected_bytes: usize,
+    pub(crate) candidate_count: usize,
+    pub(crate) parsed_candidate_bytes: usize,
 }
 
 /// Typed convenience wrapper: parse the agent's text as a JSON Value, then
@@ -196,72 +199,21 @@ pub(crate) fn strip_markdown_fence(text: &str) -> &str {
         .unwrap_or(text)
 }
 
-pub(crate) fn balanced_json_slices(text: &str, open: char, close: char) -> Vec<&str> {
-    let mut slices = Vec::new();
-    for (start, ch) in text.char_indices() {
-        if ch != open {
-            continue;
-        }
-        let mut depth = 0usize;
-        let mut in_string = false;
-        let mut escaped = false;
-        for (offset, current) in text[start..].char_indices() {
-            if in_string {
-                if escaped {
-                    escaped = false;
-                } else if current == '\\' {
-                    escaped = true;
-                } else if current == '"' {
-                    in_string = false;
-                }
-                continue;
-            }
-            match current {
-                '"' => in_string = true,
-                c if c == open => depth += 1,
-                c if c == close => {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        let end = start + offset + current.len_utf8();
-                        slices.push(&text[start..end]);
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    slices
+pub(crate) fn balanced_json_slices(text: &str) -> Result<Vec<&str>> {
+    ensure_text_parse_budget(text)?;
+    Ok(scan_balanced_json(text)
+        .candidates
+        .into_iter()
+        .map(|candidate| candidate.slice)
+        .collect())
 }
 
-pub(crate) fn raw_agent_response(response: &AgentQueryResponse) -> String {
-    match &response.structured {
-        Some(structured) if response.text.trim().is_empty() => {
-            serde_json::to_string_pretty(structured).unwrap_or_else(|_| structured.to_string())
-        }
-        Some(structured) => format!(
-            "structured:\n{}\n\ntext:\n{}",
-            serde_json::to_string_pretty(structured).unwrap_or_else(|_| structured.to_string()),
-            response.text
-        ),
-        None => response.text.clone(),
-    }
+#[cfg(test)]
+pub(crate) fn balanced_json_scan_stats(text: &str) -> BalancedJsonScanStats {
+    scan_balanced_json(text).stats
 }
 
-pub(crate) fn build_repair_prompt(
-    contract: &StructuredJsonContract,
-    raw_response: &str,
-    parse_error: &str,
-) -> String {
-    let schema = serde_json::to_string_pretty(&contract.schema)
-        .unwrap_or_else(|_| contract.schema.to_string());
-    format!(
-        "The previous model response for `{tool}` did not satisfy `{schema_name}`.\n\n\
-         Parse/validation failure:\n{parse_error}\n\n\
-         Required JSON schema:\n{schema}\n\n\
-         Raw invalid model response:\n{raw_response}\n\n\
-         Return only one valid JSON value matching `{schema_name}`. Do not include markdown fences or prose.",
-        tool = contract.tool_name,
-        schema_name = contract.schema_name,
-    )
+#[cfg(test)]
+pub(crate) fn fenced_json_scan_stats(text: &str) -> FencedJsonScanStats {
+    parse_last_fenced_json_with_stats(text).stats
 }

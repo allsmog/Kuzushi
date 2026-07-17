@@ -273,6 +273,10 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
     let mut spans = vec![Span::styled("pages  ".to_string(), theme::muted())];
     append_page_tabs(&mut spans, app, page);
     spans.push(Span::styled("  ·  Tab cycles".to_string(), theme::muted()));
+    spans.push(Span::styled(
+        "  ·  Esc/q return".to_string(),
+        theme::muted(),
+    ));
     if page.is_3d() {
         let motion = if app.router.scene().paused() {
             "paused"
@@ -286,10 +290,6 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
             theme::muted(),
         ));
     }
-    spans.push(Span::styled(
-        "  ·  Esc/q return".to_string(),
-        theme::muted(),
-    ));
     spans
 }
 
@@ -353,7 +353,8 @@ mod tests {
         let temp = tempfile::tempdir().expect("temp target");
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         save_persistent_threat_model(temp.path(), &sample_dfd_doc(), true).unwrap();
-        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
 
         let lines = scene_page_lines(&app, Rect::new(0, 0, 80, 24), VizPage::Dfd);
         let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
@@ -385,6 +386,24 @@ mod tests {
 
         assert!(text.contains("no heatmap data"), "{text}");
         assert!(text.contains("run `scan`"), "{text}");
+    }
+
+    #[test]
+    fn every_empty_gallery_page_names_an_actionable_prerequisite() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let cases = [
+            (VizPage::AttackSurface, "scan"),
+            (VizPage::AttackPath, "taint-iris:hunt"),
+            (VizPage::Dfd, "threat-model:build"),
+            (VizPage::Heatmap, "scan"),
+            (VizPage::ExploitChain, "exploit-chain:scan"),
+        ];
+
+        for (page, command) in cases {
+            let lines = scene_page_lines(&app, Rect::new(0, 0, 96, 24), page);
+            let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+            assert!(text.contains(command), "{page:?} missing {command}: {text}");
+        }
     }
 
     #[test]

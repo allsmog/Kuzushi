@@ -28,11 +28,20 @@ pub(crate) fn pipeline_module() -> BuiltinModule {
 }
 
 fn pipeline_tools() -> Vec<ToolDescriptor> {
-    vec![
-        pipeline_task_selector_tool(),
-        pipeline_approval_tool(),
-        pipeline_taint_cwe_select_tool(),
-    ]
+    tools_with_policy(
+        tool_policy(
+            ToolPhase::Scan,
+            RuntimeRequirement::Never,
+            ToolEffect::WorkspaceWrite,
+            WorkspaceRequirement::Optional,
+            FindingStoreRequirement::Optional,
+        ),
+        vec![
+            pipeline_task_selector_tool(),
+            pipeline_approval_tool(),
+            pipeline_taint_cwe_select_tool(),
+        ],
+    )
 }
 
 fn pipeline_task_selector_tool() -> ToolDescriptor {
@@ -101,40 +110,56 @@ pub(crate) fn variant_module() -> BuiltinModule {
         "Variant Hunter",
         ModuleKind::Offense,
         "Lift exploit patterns from confirmed findings and hunt sibling variants.",
-        vec![
-            tool_with_options(
-                "variant:hunt",
-                "Hunt variants of a confirmed finding.",
-                vec![
-                    target_option(),
-                    fingerprint_option(),
-                    max_findings_option(25),
-                    opt(
-                        "includeVendored",
-                        OptionType::Bool,
-                        "Include vendored and third-party paths in the hunt scope.",
-                    )
-                    .aliases(&["include_vendored"])
-                    .default(json!(true))
-                    .advanced(),
-                    opt(
-                        "vendorPaths",
-                        OptionType::StringList,
-                        "Vendor path patterns for variant scope control.",
-                    )
-                    .aliases(&["vendor_paths"])
-                    .advanced(),
-                    model_option(),
-                ],
-            ),
-            tool_with_options(
-                "variant:lift-pattern",
-                "Lift a reusable vulnerability pattern from a confirmed finding.",
-                vec![fingerprint_option(), model_option()],
-            ),
-        ],
+        tools_with_policy(variant_policy(), variant_tools()),
         vec![dag("variant:hunt", "findings", &["variant:lift-pattern"])],
     )
+}
+
+fn variant_policy() -> ToolPolicy {
+    workspace_policy(
+        ToolPhase::Scan,
+        RuntimeRequirement::Always,
+        FindingStoreRequirement::Required,
+    )
+}
+
+fn variant_tools() -> Vec<ToolDescriptor> {
+    vec![
+        tool_with_options(
+            "variant:hunt",
+            "Hunt variants of a confirmed finding.",
+            variant_hunt_options(),
+        ),
+        tool_with_options(
+            "variant:lift-pattern",
+            "Lift a reusable vulnerability pattern from a confirmed finding.",
+            vec![fingerprint_option(), model_option()],
+        ),
+    ]
+}
+
+fn variant_hunt_options() -> Vec<OptionSpec> {
+    vec![
+        target_option(),
+        fingerprint_option(),
+        max_findings_option(25),
+        opt(
+            "includeVendored",
+            OptionType::Bool,
+            "Include vendored and third-party paths in the hunt scope.",
+        )
+        .aliases(&["include_vendored"])
+        .default(json!(true))
+        .advanced(),
+        opt(
+            "vendorPaths",
+            OptionType::StringList,
+            "Vendor path patterns for variant scope control.",
+        )
+        .aliases(&["vendor_paths"])
+        .advanced(),
+        model_option(),
+    ]
 }
 
 pub(crate) fn ndiff_module() -> BuiltinModule {
@@ -143,80 +168,109 @@ pub(crate) fn ndiff_module() -> BuiltinModule {
         "N-Day Diff Hunter",
         ModuleKind::Intel,
         "Fetch CVE fix context, extract fix patterns, and hunt n-day variants.",
-        vec![
-            tool_with_options(
-                "ndiff:fetch-cve",
-                "Fetch CVE and patch metadata.",
-                vec![
-                    opt("id", OptionType::String, "CVE or advisory id to fetch.").required(),
-                    opt(
-                        "offline",
-                        OptionType::Bool,
-                        "Use only supplied advisory fixtures.",
-                    )
-                    .default(json!(false))
-                    .advanced(),
-                    opt("record", OptionType::Json, "Inline advisory record JSON.").advanced(),
-                    opt(
-                        "fixtures",
-                        OptionType::Json,
-                        "Offline advisory fixture JSON.",
-                    )
-                    .advanced(),
-                    binary_option("curl binary path."),
-                ],
-            ),
-            tool_with_options(
-                "ndiff:extract-fix-pattern",
-                "Extract a vulnerability fix pattern from a patch.",
-                vec![
-                    target_option(),
-                    opt("record", OptionType::Json, "Advisory record JSON.").advanced(),
-                    opt("patchText", OptionType::String, "Patch text to analyze.")
-                        .aliases(&["patch_text"])
-                        .advanced(),
-                    opt("patchPath", OptionType::Path, "Patch file to analyze.")
-                        .aliases(&["patch_path"])
-                        .advanced(),
-                    opt("patchUrl", OptionType::String, "Patch URL to fetch.")
-                        .aliases(&["patch_url"])
-                        .advanced(),
-                    opt(
-                        "thinkingLevel",
-                        OptionType::String,
-                        "Runtime thinking-level hint.",
-                    )
-                    .aliases(&["thinking_level"])
-                    .advanced(),
-                    model_option(),
-                ],
-            ),
-            tool_with_options(
-                "ndiff:hunt-variants",
-                "Hunt variants using an extracted n-day fix pattern.",
-                vec![
-                    target_option(),
-                    max_findings_option(25),
-                    opt("advisoryId", OptionType::String, "CVE or advisory id.")
-                        .aliases(&["advisory_id", "cve"])
-                        .advanced(),
-                    opt("pattern", OptionType::Json, "Extracted fix pattern JSON.").advanced(),
-                    opt("record", OptionType::Json, "Advisory record JSON.").advanced(),
-                    opt(
-                        "fixtures",
-                        OptionType::Json,
-                        "Offline advisory fixture JSON.",
-                    )
-                    .advanced(),
-                    model_option(),
-                ],
-            ),
-        ],
+        ndiff_tools(),
         vec![dag(
             "ndiff:hunt-variants",
             "findings",
             &["ndiff:extract-fix-pattern"],
         )],
+    )
+}
+
+fn ndiff_tools() -> Vec<ToolDescriptor> {
+    vec![
+        ndiff_fetch_tool().with_policy(external_action_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
+        ndiff_extract_tool().with_policy(external_action_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Always,
+            FindingStoreRequirement::Optional,
+        )),
+        ndiff_hunt_tool().with_policy(workspace_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Always,
+            FindingStoreRequirement::Required,
+        )),
+    ]
+}
+
+fn ndiff_fetch_tool() -> ToolDescriptor {
+    tool_with_options(
+        "ndiff:fetch-cve",
+        "Fetch CVE and patch metadata.",
+        vec![
+            opt("id", OptionType::String, "CVE or advisory id to fetch.").required(),
+            opt(
+                "offline",
+                OptionType::Bool,
+                "Use only supplied advisory fixtures.",
+            )
+            .default(json!(false))
+            .advanced(),
+            opt("record", OptionType::Json, "Inline advisory record JSON.").advanced(),
+            opt(
+                "fixtures",
+                OptionType::Json,
+                "Offline advisory fixture JSON.",
+            )
+            .advanced(),
+            binary_option("curl binary path."),
+        ],
+    )
+}
+
+fn ndiff_extract_tool() -> ToolDescriptor {
+    tool_with_options(
+        "ndiff:extract-fix-pattern",
+        "Extract a vulnerability fix pattern from a patch.",
+        vec![
+            target_option(),
+            opt("record", OptionType::Json, "Advisory record JSON.").advanced(),
+            opt("patchText", OptionType::String, "Patch text to analyze.")
+                .aliases(&["patch_text"])
+                .advanced(),
+            opt("patchPath", OptionType::Path, "Patch file to analyze.")
+                .aliases(&["patch_path"])
+                .workspace_read()
+                .advanced(),
+            opt("patchUrl", OptionType::String, "Patch URL to fetch.")
+                .aliases(&["patch_url"])
+                .advanced(),
+            opt(
+                "thinkingLevel",
+                OptionType::String,
+                "Runtime thinking-level hint.",
+            )
+            .aliases(&["thinking_level"])
+            .advanced(),
+            model_option(),
+        ],
+    )
+}
+
+fn ndiff_hunt_tool() -> ToolDescriptor {
+    tool_with_options(
+        "ndiff:hunt-variants",
+        "Hunt variants using an extracted n-day fix pattern.",
+        vec![
+            target_option(),
+            max_findings_option(25),
+            opt("advisoryId", OptionType::String, "CVE or advisory id.")
+                .aliases(&["advisory_id", "cve"])
+                .advanced(),
+            opt("pattern", OptionType::Json, "Extracted fix pattern JSON.").advanced(),
+            opt("record", OptionType::Json, "Advisory record JSON.").advanced(),
+            opt(
+                "fixtures",
+                OptionType::Json,
+                "Offline advisory fixture JSON.",
+            )
+            .advanced(),
+            model_option(),
+        ],
     )
 }
 
@@ -226,7 +280,15 @@ pub(crate) fn randori_module() -> BuiltinModule {
         "Randori",
         ModuleKind::Intel,
         "Threat-model generation using PASTA stage framing and adversarial scenario review.",
-        vec![randori_pasta_tool(), randori_threat_model_tool()],
+        vec![
+            randori_pasta_tool().with_policy(workspace_policy(
+                ToolPhase::Map,
+                RuntimeRequirement::Always,
+                FindingStoreRequirement::Optional,
+            )),
+            randori_threat_model_tool()
+                .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Required)),
+        ],
         vec![dag(
             "randori:threat-model",
             "threat-model",
@@ -254,7 +316,7 @@ fn randori_threat_model_tool() -> ToolDescriptor {
 fn randori_pasta_options() -> Vec<OptionSpec> {
     let mut options = vec![
         target_option(),
-        randori_output_dir_option(false),
+        randori_output_dir_option(false, true),
         randori_slice_option(),
         opt(
             "stages",
@@ -271,7 +333,7 @@ fn randori_pasta_options() -> Vec<OptionSpec> {
 fn randori_threat_model_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
-        randori_output_dir_option(true),
+        randori_output_dir_option(true, false),
         opt(
             "methodology",
             OptionType::Enum,
@@ -284,13 +346,18 @@ fn randori_threat_model_options() -> Vec<OptionSpec> {
     ]
 }
 
-fn randori_output_dir_option(required: bool) -> OptionSpec {
+fn randori_output_dir_option(required: bool, writes_state: bool) -> OptionSpec {
     let option = opt(
         "outputDir",
         OptionType::Path,
         "Directory for randori artifacts.",
     )
     .aliases(&["output_dir"]);
+    let option = if writes_state {
+        option.state_write()
+    } else {
+        option.workspace_read()
+    };
     if required {
         option.required()
     } else {

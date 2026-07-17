@@ -58,14 +58,14 @@ pub(super) fn bind_char(
 
 pub(super) fn bind(
     trigger: HotkeyTrigger,
-    hint: &'static str,
-    label: &'static str,
+    hint: impl Into<String>,
+    label: impl Into<String>,
     action: ViewHotkeyAction,
 ) -> ViewKeybinding {
     ViewKeybinding {
         trigger,
-        hint,
-        label,
+        hint: hint.into(),
+        label: label.into(),
         action,
     }
 }

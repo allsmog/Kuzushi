@@ -21,17 +21,33 @@ impl ToolOptionStore {
         explicit: Value,
         mut include_stored_option: impl FnMut(&str) -> bool,
     ) -> Result<Value> {
+        self.effective_tool_input_with_stored_key_resolver(tool_name, explicit, |name| {
+            include_stored_option(name).then(|| name.to_string())
+        })
+    }
+
+    pub fn effective_tool_input_with_stored_key_resolver(
+        &self,
+        tool_name: &str,
+        explicit: Value,
+        mut canonical_stored_option: impl FnMut(&str) -> Option<String>,
+    ) -> Result<Value> {
         if self.bindings.is_empty() {
             return Ok(explicit);
         }
 
         let mut merged = Map::new();
-        self.merge_effective_stored_values_with_filter(
+        self.merge_effective_stored_values_with_key_resolver(
             tool_name,
             &mut merged,
-            &mut include_stored_option,
+            &mut canonical_stored_option,
         );
-        merge_explicit_input(tool_name, explicit, &mut merged)?;
+        merge_explicit_input_with_key_resolver(
+            tool_name,
+            explicit,
+            &mut merged,
+            &mut canonical_stored_option,
+        )?;
         Ok(Value::Object(merged))
     }
 
@@ -39,6 +55,39 @@ impl ToolOptionStore {
         let mut merged = Map::new();
         self.merge_effective_stored_values(tool_name, &mut merged);
         merged.into_iter().collect()
+    }
+
+    pub fn stored_values_for_scope(
+        &self,
+        scope: OptionScope,
+        tool_name: &str,
+    ) -> BTreeMap<String, Value> {
+        let mut merged = BTreeMap::new();
+        self.extend_scope_target(scope, &OptionTarget::All, &mut merged);
+        if let Some((module_id, _)) = tool_name.split_once(':') {
+            self.extend_scope_target(
+                scope,
+                &OptionTarget::Module(module_id.to_string()),
+                &mut merged,
+            );
+        }
+        self.extend_scope_target(
+            scope,
+            &OptionTarget::Tool(tool_name.to_string()),
+            &mut merged,
+        );
+        merged
+    }
+
+    fn extend_scope_target(
+        &self,
+        scope: OptionScope,
+        target: &OptionTarget,
+        merged: &mut BTreeMap<String, Value>,
+    ) {
+        if let Some(values) = self.values_for(scope, target) {
+            merged.extend(values.clone());
+        }
     }
 
     pub fn effective_stored_value_scope(
@@ -92,14 +141,16 @@ impl ToolOptionStore {
         tool_name: &str,
         merged: &mut Map<String, Value>,
     ) {
-        self.merge_effective_stored_values_with_filter(tool_name, merged, &mut |_| true);
+        self.merge_effective_stored_values_with_key_resolver(tool_name, merged, &mut |name| {
+            Some(name.to_string())
+        });
     }
 
-    fn merge_effective_stored_values_with_filter(
+    fn merge_effective_stored_values_with_key_resolver(
         &self,
         tool_name: &str,
         merged: &mut Map<String, Value>,
-        include_stored_option: &mut impl FnMut(&str) -> bool,
+        canonical_stored_option: &mut impl FnMut(&str) -> Option<String>,
     ) {
         let module_id = tool_name.split_once(':').map(|(module, _)| module);
 
@@ -108,38 +159,49 @@ impl ToolOptionStore {
             OptionScope::Workspace,
             OptionScope::Session,
         ] {
-            self.merge_target_with_filter(scope, &OptionTarget::All, merged, include_stored_option);
+            self.merge_target_with_key_resolver(
+                scope,
+                &OptionTarget::All,
+                merged,
+                canonical_stored_option,
+            );
             if let Some(module_id) = module_id {
-                self.merge_target_with_filter(
+                self.merge_target_with_key_resolver(
                     scope,
                     &OptionTarget::Module(module_id.to_string()),
                     merged,
-                    include_stored_option,
+                    canonical_stored_option,
                 );
             }
-            self.merge_target_with_filter(
+            self.merge_target_with_key_resolver(
                 scope,
                 &OptionTarget::Tool(tool_name.to_string()),
                 merged,
-                include_stored_option,
+                canonical_stored_option,
             );
         }
     }
 
-    fn merge_target_with_filter(
+    fn merge_target_with_key_resolver(
         &self,
         scope: OptionScope,
         target: &OptionTarget,
         merged: &mut Map<String, Value>,
-        include_stored_option: &mut impl FnMut(&str) -> bool,
+        canonical_stored_option: &mut impl FnMut(&str) -> Option<String>,
     ) {
-        if let Some(values) = self.values_for(scope, target) {
-            for (name, value) in values {
-                if include_stored_option(name) {
-                    merged.insert(name.clone(), value.clone());
-                }
+        let Some(values) = self.values_for(scope, target) else {
+            return;
+        };
+        let mut canonical = Map::new();
+        for (name, value) in values {
+            let Some(canonical_name) = canonical_stored_option(name) else {
+                continue;
+            };
+            if name == &canonical_name || !canonical.contains_key(&canonical_name) {
+                canonical.insert(canonical_name, value.clone());
             }
         }
+        merged.extend(canonical);
     }
 }
 
@@ -151,6 +213,34 @@ fn merge_explicit_input(
     match explicit {
         Value::Null => {}
         Value::Object(object) => merged.extend(object),
+        other => {
+            anyhow::bail!(
+                "stored options for {tool_name} require a JSON object input, got {}",
+                json_summary(&other)
+            );
+        }
+    }
+    Ok(())
+}
+
+fn merge_explicit_input_with_key_resolver(
+    tool_name: &str,
+    explicit: Value,
+    merged: &mut Map<String, Value>,
+    canonical_stored_option: &mut impl FnMut(&str) -> Option<String>,
+) -> Result<()> {
+    match explicit {
+        Value::Null => {}
+        Value::Object(object) => {
+            let mut canonical = Map::new();
+            for (name, value) in object {
+                let canonical_name = canonical_stored_option(&name).unwrap_or_else(|| name.clone());
+                if name == canonical_name || !canonical.contains_key(&canonical_name) {
+                    canonical.insert(canonical_name, value);
+                }
+            }
+            merged.extend(canonical);
+        }
         other => {
             anyhow::bail!(
                 "stored options for {tool_name} require a JSON object input, got {}",

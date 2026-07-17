@@ -9,13 +9,17 @@ pub fn report_to_tool_json(report: &FullModeReport) -> serde_json::Value {
         "chunksFailed": report.chunks_failed,
         "failedChunkErrors": report.failed_chunk_errors,
         "costUsd": report.cost_usd,
+        "observedCostUsd": report.observed_cost_usd,
+        "unresolvedProviderSpend": report.unresolved_provider_spend,
         "dryRun": report.dry_run,
         "firstChunkError": report.first_chunk_error,
         "summary": full_mode_summary(report),
     });
     let mut result =
         crate::module_result::completed_output_result(summary.clone(), summary, data);
-    result["costUsd"] = serde_json::json!(report.cost_usd);
+    if let Some(cost_usd) = report.cost_usd {
+        result["costUsd"] = serde_json::json!(cost_usd);
+    }
     result
 }
 
@@ -40,6 +44,8 @@ fn full_mode_summary(report: &FullModeReport) -> serde_json::Value {
         "chunksFailed": report.chunks_failed,
         "failedChunkErrors": report.failed_chunk_errors,
         "costUsd": report.cost_usd,
+        "observedCostUsd": report.observed_cost_usd,
+        "unresolvedProviderSpend": report.unresolved_provider_spend,
         "dryRun": report.dry_run,
         "firstChunkError": report.first_chunk_error,
     })
@@ -63,7 +69,9 @@ mod tests {
             chunks_dispatched: 0,
             chunks_failed: 0,
             failed_chunk_errors: Vec::new(),
-            cost_usd: 0.0,
+            cost_usd: Some(0.0),
+            observed_cost_usd: 0.0,
+            unresolved_provider_spend: false,
             dry_run: true,
             first_chunk_error: None,
         };

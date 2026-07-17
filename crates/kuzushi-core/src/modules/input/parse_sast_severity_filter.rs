@@ -131,5 +131,10 @@ pub(in crate::modules) fn optional_nonempty_string(
 }
 
 pub(in crate::modules) fn resolve_prompt_override(value: &str, cwd: &Path) -> Result<String> {
-    crate::options::resolve_prompt_override_for_key(value, cwd, "TRIAGE_PROMPT")
+    crate::options::resolve_prepared_prompt_override_for_key(
+        value,
+        cwd,
+        "TRIAGE_PROMPT",
+        crate::runtime::DEFAULT_TRIAGE_PROMPT,
+    )
 }

@@ -26,7 +26,7 @@ pub(in crate::modules) fn run_native_libs_scan(
         }
     };
     let persisted = persist_tool_findings(
-        "android-apk",
+        ctx.finding_run_id(),
         &target,
         &outcome.findings,
         ctx.workspace,
@@ -56,8 +56,11 @@ fn scan_native_libs(input: &Value, workspace_root: &Path) -> Result<NativeLibsOu
     let lib_paths = enumerate_so_files(&lib_root)?;
     let libs = lib_paths
         .iter()
-        .filter_map(|path| summarize_lib(path).ok())
-        .collect::<Vec<_>>();
+        .map(|path| {
+            summarize_lib(path)
+                .with_context(|| format!("could not parse native library {}", path.display()))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let findings = native_lib_findings(&libs);
     Ok(NativeLibsOutcome {
         lib_root,
@@ -67,27 +70,24 @@ fn scan_native_libs(input: &Value, workspace_root: &Path) -> Result<NativeLibsOu
 }
 
 fn resolve_lib_root(input: &Value, workspace_root: &Path) -> Result<PathBuf> {
-    if let Some(raw) = input
+    let candidate = if let Some(raw) = input
         .get("libRoot")
         .or_else(|| input.get("lib_root"))
         .and_then(Value::as_str)
     {
-        let path = PathBuf::from(raw);
-        if path.is_dir() {
-            return Ok(path);
-        }
-    }
-    let candidate = workspace_root
-        .join("android-decompiled")
-        .join("raw")
-        .join("lib");
-    if !candidate.is_dir() {
-        anyhow::bail!(
+        PathBuf::from(raw)
+    } else {
+        workspace_root
+            .join("android-decompiled")
+            .join("raw")
+            .join("lib")
+    };
+    validated_android_workspace_dir(workspace_root, &candidate).with_context(|| {
+        format!(
             "android-apk:native-libs: missing {}. APK has no native libraries or `android-apk:prepare` hasn't run.",
             candidate.display()
-        );
-    }
-    Ok(candidate)
+        )
+    })
 }
 
 fn native_lib_findings(libs: &[NativeLibSummary]) -> Vec<Finding> {

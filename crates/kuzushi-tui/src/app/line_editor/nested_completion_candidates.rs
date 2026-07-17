@@ -27,48 +27,50 @@ pub(crate) fn complete_subcommand_rules(
         .unwrap_or_default()
 }
 
-pub(crate) fn module_completion_values_for(app: &ShellApp) -> Vec<String> {
-    app.module_completion_values()
+pub(crate) fn module_completion_values_for(app: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Owned(app.module_completion_values())
 }
 
-pub(crate) fn tool_completion_values_for(app: &ShellApp) -> Vec<String> {
-    app.tool_completion_values()
+pub(crate) fn tool_completion_values_for(app: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Owned(app.tool_completion_values())
 }
 
-pub(crate) fn option_completion_values_for(app: &ShellApp) -> Vec<String> {
-    app.option_completion_values()
+pub(crate) fn option_completion_values_for(app: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Owned(app.option_completion_values())
 }
 
-pub(crate) fn attachment_id_completion_values_for(app: &ShellApp) -> Vec<String> {
-    app.attachment_id_completion_values()
+pub(crate) fn attachment_id_completion_values_for(app: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Owned(app.attachment_id_completion_values())
 }
 
-pub(crate) fn finding_completion_values_for(app: &ShellApp) -> Vec<String> {
+pub(crate) fn finding_completion_values_for(app: &ShellApp) -> CompletionValues<'_> {
     app.finding_completion_values()
 }
 
-pub(crate) fn run_id_completion_values_for(app: &ShellApp) -> Vec<String> {
+pub(crate) fn run_id_completion_values_for(app: &ShellApp) -> CompletionValues<'_> {
     app.run_id_completion_values()
 }
 
-pub(crate) fn attachment_module_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(SUPPORTED_ATTACHMENT_MODULES)
+pub(crate) fn attachment_module_completion_values(_: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Static(SUPPORTED_ATTACHMENT_MODULES)
 }
 
-pub(crate) fn config_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(config_completion_keys())
+pub(crate) fn config_completion_values(_: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Static(config_completion_keys())
 }
 
-pub(crate) fn model_completion_values(_: &ShellApp) -> Vec<String> {
-    model_choices()
-        .iter()
-        .flat_map(|choice| {
-            [
-                choice.index.to_string(),
-                crate::app::model_choice_display_selector(choice),
-            ]
-        })
-        .collect()
+pub(crate) fn model_completion_values(_: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Owned(
+        model_choices()
+            .iter()
+            .flat_map(|choice| {
+                [
+                    choice.index.to_string(),
+                    crate::app::model_choice_display_selector(choice),
+                ]
+            })
+            .collect(),
+    )
 }
 
 /// Canonical sub-verb list for a group verb. Single source of truth shared by
@@ -91,55 +93,57 @@ pub(crate) fn subverb_listing(verb: &str) -> Option<&'static [&'static str]> {
     })
 }
 
-fn subverb_values(verb: &str) -> Vec<String> {
-    string_values(subverb_listing(verb).unwrap_or(&[]))
+fn subverb_values(verb: &str) -> CompletionValues<'static> {
+    CompletionValues::Static(subverb_listing(verb).unwrap_or(&[]))
 }
 
-pub(crate) fn task_action_completion_values(_: &ShellApp) -> Vec<String> {
+pub(crate) fn task_action_completion_values(_: &ShellApp) -> CompletionValues<'_> {
     subverb_values("task")
 }
 
-pub(crate) fn threats_action_completion_values(_: &ShellApp) -> Vec<String> {
+pub(crate) fn threats_action_completion_values(_: &ShellApp) -> CompletionValues<'_> {
     subverb_values("threats")
 }
 
-pub(crate) fn prompt_action_completion_values(_: &ShellApp) -> Vec<String> {
+pub(crate) fn prompt_action_completion_values(_: &ShellApp) -> CompletionValues<'_> {
     subverb_values("prompt")
 }
 
-pub(crate) fn task_mode_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["auto", "manual", "toggle"])
+pub(crate) fn task_mode_completion_values(_: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Static(&["auto", "manual", "toggle"])
 }
 
-pub(crate) fn sast_task_id_completion_values(_: &ShellApp) -> Vec<String> {
-    valid_sast_task_ids()
-        .into_iter()
-        .map(str::to_string)
-        .collect()
+pub(crate) fn sast_task_id_completion_values(_: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Owned(
+        valid_sast_task_ids()
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+    )
 }
 
-pub(crate) fn context_action_completion_values(_: &ShellApp) -> Vec<String> {
+pub(crate) fn context_action_completion_values(_: &ShellApp) -> CompletionValues<'_> {
     subverb_values("context")
 }
 
-pub(crate) fn context_regen_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["all", "repo", "app-model"])
+pub(crate) fn context_regen_completion_values(_: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Static(&["all", "repo", "app-model"])
 }
 
-pub(crate) fn workspace_action_completion_values(_: &ShellApp) -> Vec<String> {
+pub(crate) fn workspace_action_completion_values(_: &ShellApp) -> CompletionValues<'_> {
     subverb_values("workspace")
 }
 
-pub(crate) fn workspace_export_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["findings"])
+pub(crate) fn workspace_export_completion_values(_: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Static(&["findings"])
 }
 
-pub(crate) fn auth_action_completion_values(_: &ShellApp) -> Vec<String> {
+pub(crate) fn auth_action_completion_values(_: &ShellApp) -> CompletionValues<'_> {
     subverb_values("auth")
 }
 
-pub(crate) fn auth_login_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&[
+pub(crate) fn auth_login_completion_values(_: &ShellApp) -> CompletionValues<'_> {
+    CompletionValues::Static(&[
         "openai",
         "openai browser",
         "openai headless",
@@ -148,10 +152,6 @@ pub(crate) fn auth_login_completion_values(_: &ShellApp) -> Vec<String> {
     ])
 }
 
-pub(crate) fn show_action_completion_values(_: &ShellApp) -> Vec<String> {
+pub(crate) fn show_action_completion_values(_: &ShellApp) -> CompletionValues<'_> {
     subverb_values("show")
-}
-
-pub(crate) fn string_values(values: &[&str]) -> Vec<String> {
-    values.iter().map(|value| (*value).to_string()).collect()
 }

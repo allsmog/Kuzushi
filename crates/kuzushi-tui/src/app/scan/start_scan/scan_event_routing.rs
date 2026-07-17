@@ -5,11 +5,7 @@ impl ShellApp {
     pub(crate) fn apply_scan_event(&mut self, event: ScanEvent) -> Vec<ShellEffect> {
         match event {
             ScanEvent::Stage(stage) => self.apply_scan_stage(stage),
-            ScanEvent::Finished {
-                run_id,
-                findings_count,
-                cost_usd,
-            } => self.apply_scan_finished_with_cost(run_id, findings_count, cost_usd),
+            ScanEvent::Finished { result } => self.apply_scan_result(result),
             ScanEvent::Failed { error } => self.apply_scan_failed(error),
         }
     }
@@ -42,7 +38,7 @@ impl ShellApp {
             return Vec::new();
         };
         vec![ShellEffect::RecordScanStageTrace(ScanStageTraceRecord {
-            target: self.target_owned(),
+            target: self.scan_target_owned(),
             run_id,
             stage: stage.to_string(),
         })]

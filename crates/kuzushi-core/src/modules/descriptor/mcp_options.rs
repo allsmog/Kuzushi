@@ -17,6 +17,7 @@ pub(in crate::modules) fn joern_cpg_option() -> OptionSpec {
         "Path to a Joern CPG (`cpg.bin`) for the Joern MCP server.",
     )
     .aliases(&["joern_cpg"])
+    .workspace_read()
     .advanced()
 }
 
@@ -49,6 +50,7 @@ pub(in crate::modules) fn codeql_cache_dir_option() -> OptionSpec {
         "Override CodeQL's pack cache directory for the MCP CodeQL server.",
     )
     .aliases(&["codeql_cache_dir"])
+    .external_write()
     .advanced()
 }
 
@@ -81,6 +83,7 @@ pub(in crate::modules) fn bridge_log_path_option() -> OptionSpec {
         "Append bridge and MCP child logs to this path.",
     )
     .aliases(&["bridge_log_path"])
+    .external_write()
     .advanced()
 }
 
@@ -123,5 +126,6 @@ pub(in crate::modules) fn target_subdir_option() -> OptionSpec {
         "Relative subdirectory under the target to scan.",
     )
     .aliases(&["target_subdir"])
+    .workspace_read()
     .advanced()
 }

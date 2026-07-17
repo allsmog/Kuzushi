@@ -15,6 +15,8 @@
 //! initialised on first read. Mutating after first read is a no-op so
 //! the rest of the render pipeline can treat it as effectively const.
 
+#[cfg(test)]
+use std::cell::Cell;
 #[cfg(not(test))]
 use std::sync::OnceLock;
 
@@ -131,11 +133,35 @@ pub fn active_theme() -> ThemeConfig {
     *ACTIVE_THEME.get_or_init(ThemeConfig::from_env)
 }
 
-/// Unit tests should not depend on the developer's shell theme env. Tests that
-/// need alternate palettes exercise the pure `*_for_config` helpers directly.
+#[cfg(test)]
+thread_local! {
+    static TEST_THEME: Cell<Option<ThemeConfig>> = const { Cell::new(None) };
+}
+
+/// Unit tests should not depend on the developer's shell theme env. A scoped,
+/// thread-local override lets renderer contracts exercise terminal profiles
+/// without mutating process environment or racing the rest of the test suite.
 #[cfg(test)]
 pub fn active_theme() -> ThemeConfig {
-    ThemeConfig::default()
+    TEST_THEME.with(|theme| theme.get().unwrap_or_default())
+}
+
+#[cfg(test)]
+pub(crate) struct ScopedTheme {
+    previous: Option<ThemeConfig>,
+}
+
+#[cfg(test)]
+pub(crate) fn scoped_theme_for_test(config: ThemeConfig) -> ScopedTheme {
+    let previous = TEST_THEME.with(|theme| theme.replace(Some(config)));
+    ScopedTheme { previous }
+}
+
+#[cfg(test)]
+impl Drop for ScopedTheme {
+    fn drop(&mut self) {
+        TEST_THEME.with(|theme| theme.set(self.previous));
+    }
 }
 
 #[cfg(test)]

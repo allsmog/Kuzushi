@@ -4,7 +4,9 @@ pub(crate) fn build_surface_pack(
     target: &Path,
     surface: &RankedSystemsSurface,
 ) -> Result<SystemsSurfacePack> {
-    let body = fs::read_to_string(target.join(&surface.file_path)).unwrap_or_default();
+    let path = target.join(&surface.file_path);
+    let body = crate::bounded_file::read_utf8_text_within(target, &path, 8 * 1024 * 1024)
+        .unwrap_or_default();
     let mut unsafe_sites = Vec::new();
     let mut resource_provenance_sites = Vec::new();
     let mut hardening_sites = Vec::new();

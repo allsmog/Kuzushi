@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::ScanPanelState;
+use crate::app::{ScanPanelState, WorkbenchPane};
 use kuzushi_core::{
     Finding, FindingEvidence, PersistedProofVerdict, PersistedSandboxBackend,
     PersistedVerification, Severity, StaticProofState, TriageOutcome, TriageVerdict, V2Config,
@@ -27,6 +27,7 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
         confidence: 0.75,
         rationale: "needs human review".to_string(),
         cost_usd: 0.0,
+        cost_usd_exact: true,
     });
     finding.static_proof_state = Some(StaticProofState::SourceSinkLinked);
     finding.verification = Some(PersistedVerification {
@@ -39,6 +40,8 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
         duration_ms: 42,
         cost_usd: 0.0,
         notes: vec!["runtime path did not reach the sink".to_string()],
+        verification_run_id: None,
+        verified_scan_id: None,
         created_at: "2026-07-02T00:00:00Z".to_string(),
     });
     finding.evidence = vec![FindingEvidence {
@@ -68,7 +71,7 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
     let context = screen_context_model(&app);
 
     assert_eq!(context.view, "Workbench");
-    assert_eq!(context.focused_pane.as_deref(), Some("Details"));
+    assert_eq!(context.focused_pane.as_deref(), Some("Selected Finding"));
     assert_eq!(context.selected_run.as_deref(), Some("scan-run-1"));
     assert_eq!(context.visible_rows.len(), 1);
     let selected = context.selected_item.as_ref().expect("selected item");
@@ -135,7 +138,7 @@ fn prompt_json_is_structured_and_bounded() {
     assert!(json.contains("\"focusedPane\": \"Findings\""));
     assert!(json.contains("\"selectedRun\": \"run-1\""));
     assert!(json.contains("\"dirty\": true"));
-    assert!(json.contains("\"scopeLabel\": \"scope: repo · 崩 hunt · abc123-dirty\""));
+    assert!(json.contains("\"scopeLabel\": \"scope: repo · 崩 scan · abc123-dirty\""));
     assert!(json.contains("\"cursor\""));
 }
 
@@ -182,7 +185,7 @@ fn scope_chip_prefers_selected_finding_then_phase_and_revision() {
 
     assert_eq!(
         context.scope_chip().as_deref(),
-        Some("scope: F-0001 · 作 confirm · abc1234-dirty")
+        Some("scope: F-0001 · 作 prove · abc1234-dirty")
     );
 }
 

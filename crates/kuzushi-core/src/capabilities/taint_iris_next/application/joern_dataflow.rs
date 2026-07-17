@@ -90,7 +90,7 @@ pub(crate) fn resolve_joern_cpg_path(scan_root: &Path) -> PathBuf {
 fn flow_script_path() -> Option<PathBuf> {
     configured_flow_script_path()
         .or_else(flow_script_near_current_exe)
-        .or_else(flow_script_under_current_dir)
+        .or_else(flow_script_in_source_tree)
 }
 
 fn configured_flow_script_path() -> Option<PathBuf> {
@@ -116,10 +116,10 @@ fn flow_script_candidates_above(mut dir: PathBuf) -> Vec<PathBuf> {
     candidates
 }
 
-fn flow_script_under_current_dir() -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    let cwd_candidate = cwd.join("scripts").join("taint_iris_next_flows.sc");
-    cwd_candidate.exists().then_some(cwd_candidate)
+fn flow_script_in_source_tree() -> Option<PathBuf> {
+    flow_script_candidates_above(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+        .into_iter()
+        .find(|candidate| candidate.exists())
 }
 
 /// Run Joern over the given CPG with one source/sink regex per ranked
@@ -631,17 +631,9 @@ mod tests {
             target: scan_root.clone(),
             scan_root,
             repo_root: PathBuf::from("."),
+            source_paths: std::sync::Arc::from([]),
             mode: TaintIrisNextMode::Hunt,
-            caps: TaintIrisNextCaps {
-                max_catalog_entries: 1,
-                max_candidates_per_cwe: 10,
-                max_evidence_per_cwe: 10,
-                max_files_per_query: 10,
-                max_specs_per_cwe: 10,
-                max_agent_findings: 10,
-                codeql_analyze_timeout_ms: 1000,
-                min_evidence_level: "candidate".to_string(),
-            },
+            caps: dataflow_test_caps(),
             languages: vec!["cpp".to_string()],
             context_status: TaintIrisNextArtifactStatus {
                 ok: true,
@@ -668,8 +660,22 @@ mod tests {
             },
             max_budget_usd: None,
             allow_deterministic_fallback: false,
+            system_prompt: taint_iris_next_system_prompt(),
             cwe_focus: Vec::new(),
             discovered_signals: DiscoveredSignals::default(),
+        }
+    }
+
+    fn dataflow_test_caps() -> TaintIrisNextCaps {
+        TaintIrisNextCaps {
+            max_catalog_entries: 1,
+            max_candidates_per_cwe: 10,
+            max_evidence_per_cwe: 10,
+            max_files_per_query: 10,
+            max_specs_per_cwe: 10,
+            max_agent_findings: 10,
+            codeql_analyze_timeout_ms: 1000,
+            min_evidence_level: "candidate".to_string(),
         }
     }
 

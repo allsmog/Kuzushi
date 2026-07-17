@@ -13,8 +13,20 @@ use serde_json::Value;
 use std::time::SystemTime;
 
 pub(crate) fn planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    if uses_compact_planning_layout(area) {
+        return compact_planning_picker_lines(app, area);
+    }
+    let lines = expanded_planning_picker_lines(app, area);
+    if lines.len() > area.height as usize {
+        return compact_planning_picker_lines(app, area);
+    }
+    lines
+}
+
+fn expanded_planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     push_phase_header(app, area.width, &mut lines);
+    push_target_profile_status(app, &mut lines);
     if app.engagement.planning_picker().tasks().is_empty() {
         lines.push(muted("(no tasks in this phase)"));
         return lines;
@@ -32,32 +44,337 @@ pub(crate) fn planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'sta
         lines.extend(planning_options_pane_lines(app, area.width as usize));
     }
     lines.push(blank());
-    lines.push(enter_summary_line(app));
+    push_prompt_review_hint(app, &mut lines);
+    lines.push(enter_summary_line(app, area.width as usize));
+    lines.push(planning_controls_line(app, area.width as usize));
     lines
+}
+
+fn push_prompt_review_hint(app: &ShellApp, lines: &mut Vec<Line<'static>>) {
+    if app.planning_prompt_review_available() {
+        lines.push(styled(
+            " p Review prompt · opens the selected model-backed instructions",
+            theme::accent(),
+        ));
+    }
+}
+
+fn uses_compact_planning_layout(area: Rect) -> bool {
+    area.height <= 26 || area.width < 72
+}
+
+fn compact_planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let width = area.width as usize;
+    let mut lines = compact_phase_header_lines(app, area.width);
+    if app.engagement.planning_picker().tasks().is_empty() {
+        lines.push(muted("(no tasks in this phase)"));
+        return lines;
+    }
+    let available_rows = (area.height as usize)
+        .saturating_sub(lines.len() + COMPACT_FIXED_ROWS)
+        .max(1);
+    let row_budget = available_rows.min(compact_task_row_cap(area));
+    lines.extend(compact_task_pane_lines(app, area.width, row_budget));
+    lines.push(compact_focus_detail_line(app, width));
+    lines.push(enter_summary_line(app, width));
+    lines.push(planning_controls_line(app, width));
+    lines
+}
+
+const COMPACT_FIXED_ROWS: usize = 5;
+
+fn compact_task_row_cap(area: Rect) -> usize {
+    if area.width < 72 || area.height <= 18 {
+        6
+    } else {
+        8
+    }
+}
+
+fn compact_phase_header_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    let mut lines = vec![divider(compact_phase_title(app), width)];
+    if let Some(target) = confirmed_target_line(app, width as usize) {
+        lines.push(target);
+    }
+    if !app.engagement.planning_picker().returns_to_setup() {
+        push_phase_rail(app, width, &mut lines);
+    }
+    push_target_profile_status(app, &mut lines);
+    let prior = prior_state_banner(app);
+    lines.push(fit_spans(prior.spans, width as usize));
+    lines
+}
+
+fn push_target_profile_status(app: &ShellApp, lines: &mut Vec<Line<'static>>) {
+    if app.engagement.planning_picker().profile_pending() {
+        lines.push(muted(
+            "profiling target… showing conservative tasks; recommendations refresh automatically",
+        ));
+    }
+}
+
+fn compact_phase_title(app: &ShellApp) -> &'static str {
+    if app.engagement.planning_picker().returns_to_setup() {
+        return "SETUP · MAP PLAN";
+    }
+    app.engagement
+        .current_phase()
+        .map(WorkflowPhase::label)
+        .unwrap_or("PLAN THE WORKSPACE")
+}
+
+fn compact_task_pane_lines(app: &ShellApp, width: u16, row_budget: usize) -> Vec<Line<'static>> {
+    let width = (width as usize).max(24);
+    let tasks = app.engagement.planning_picker().tasks();
+    let range = visible_task_range(
+        tasks.len(),
+        app.engagement.planning_picker().cursor(),
+        row_budget,
+    );
+    let title = compact_task_pane_title(app, range.start, range.end, tasks.len());
+    let border_style = pane_border_style(true);
+    let mut lines = vec![border_line(
+        "┌",
+        &title,
+        "┐",
+        width,
+        border_style,
+        pane_title_style(true),
+    )];
+    lines.extend(range.map(|index| {
+        let row = &tasks[index];
+        pane_line(
+            planning_row_line(app, index, row, width.saturating_sub(4) as u16),
+            width,
+            border_style,
+        )
+    }));
+    lines.push(border_line(
+        "└",
+        "",
+        "┘",
+        width,
+        border_style,
+        theme::label(),
+    ));
+    lines
+}
+
+fn visible_task_range(total: usize, cursor: usize, row_budget: usize) -> std::ops::Range<usize> {
+    let visible = row_budget.min(total).max(1);
+    let centered = cursor.saturating_sub(visible / 2);
+    let start = centered.min(total.saturating_sub(visible));
+    start..(start + visible).min(total)
+}
+
+fn compact_task_pane_title(app: &ShellApp, start: usize, end: usize, total: usize) -> String {
+    let focus = match app.engagement.planning_picker().focus() {
+        PickerFocus::OptionsPane => " · OPTION FOCUS",
+        PickerFocus::Prompt => " · PROMPT FOCUS",
+        PickerFocus::List => " · FOCUS",
+    };
+    format!(" TASKS {}-{}/{}{} ", start + 1, end, total, focus)
+}
+
+fn compact_focus_detail_line(app: &ShellApp, width: usize) -> Line<'static> {
+    let text = match app.engagement.planning_picker().focus() {
+        PickerFocus::OptionsPane => compact_option_detail(app),
+        PickerFocus::Prompt => "Command prompt active; Esc returns to task selection".to_string(),
+        PickerFocus::List => compact_task_detail(app),
+    };
+    styled(&fit(&format!(" {text}"), width), theme::muted())
+}
+
+fn compact_task_detail(app: &ShellApp) -> String {
+    let Some(row) = app.engagement.planning_picker().current_row() else {
+        return "No focused task".to_string();
+    };
+    if !row.cli_available {
+        return format!("Blocked: {}", prerequisite_message(row));
+    }
+    if row.id.is_inline_action() {
+        return compact_inline_action_detail(app, row);
+    }
+    let disposition = row_disposition(
+        row,
+        app.engagement.planning_picker().selected(),
+        app.engagement.planning_picker().rebuild(),
+    );
+    let note = planning_row_note(app, row, RowOutcome::from_disposition(disposition));
+    format!("Focused: {} · {note}", row.label)
+}
+
+fn compact_inline_action_detail(app: &ShellApp, row: &PlanningTaskRow) -> String {
+    if planning_row_selected(app, row) {
+        "Inline action selected: Enter opens the target-rooted file picker".to_string()
+    } else {
+        "Inline action unchecked: Space selects it; Enter runs the checked plan".to_string()
+    }
+}
+
+fn compact_option_detail(app: &ShellApp) -> String {
+    if let Some(error) = app.engagement.planning_picker().option_error() {
+        return format!("Option: {error}");
+    }
+    let Some(row) = app.engagement.planning_picker().current_row() else {
+        return "No focused option".to_string();
+    };
+    let Some(tool) = app.registry().resolve_tool(row.tool_name) else {
+        return "This inline action has no editable tool options".to_string();
+    };
+    let Some(spec) = tool
+        .options
+        .get(app.engagement.planning_picker().option_cursor())
+    else {
+        return "This step has no declared options".to_string();
+    };
+    let resolved = app.resolved_input_for_planning_task(row.id).ok();
+    let editing = app.engagement.planning_picker().option_edit().is_some();
+    let value = option_display_value(app, spec, resolved.as_ref(), editing);
+    if editing {
+        return format!("Editing {} = {value} · Enter save · Esc cancel", spec.name);
+    }
+    let source = option_provenance(app, row, spec, resolved.as_ref());
+    format!("Option: {} = {value} · {source}", spec.name)
+}
+
+fn planning_controls_line(app: &ShellApp, width: usize) -> Line<'static> {
+    if app.engagement.planning_picker().option_edit().is_some() {
+        let text = if width < 48 {
+            " EDITING · type · Enter save · Esc cancel"
+        } else {
+            " EDITING OPTION  Type value  Enter save  Esc cancel  Backspace edit"
+        };
+        return styled(&fit(text, width), theme::warn());
+    }
+    if width < 48 {
+        return styled(
+            &fit(ultra_compact_planning_controls(app), width),
+            theme::muted(),
+        );
+    }
+    let text = match app.engagement.planning_picker().focus() {
+        PickerFocus::OptionsPane => " ↑/↓ option  Space cycle  Enter edit  Tab tasks  Esc back",
+        PickerFocus::Prompt => " Esc tasks  Enter command  Ctrl+G palette  Ctrl+C exit",
+        PickerFocus::List => planning_list_controls(app, width),
+    };
+    styled(&fit(text, width), theme::muted())
+}
+
+fn ultra_compact_planning_controls(app: &ShellApp) -> &'static str {
+    if app.engagement.planning_picker().returns_to_setup() {
+        return " ↑/↓  Space check  Enter save  Esc setup";
+    }
+    match app.engagement.planning_picker().focus() {
+        PickerFocus::OptionsPane => " ↑/↓  Space cycle  Enter edit  Esc",
+        PickerFocus::Prompt => " Esc tasks  Enter submit  Ctrl+C exit",
+        PickerFocus::List => match current_inline_action_selected(app) {
+            Some(true) => " ↑/↓  Space uncheck  Enter attach  Esc",
+            Some(false) => " ↑/↓  Space select  Enter run  Esc",
+            None => " ↑/↓  Space check  Enter run  Esc",
+        },
+    }
+}
+
+fn planning_list_controls(app: &ShellApp, width: usize) -> &'static str {
+    if app.engagement.planning_picker().returns_to_setup() {
+        return setup_planning_controls(width);
+    }
+    if let Some(selected) = current_inline_action_selected(app) {
+        return inline_planning_controls(selected);
+    }
+    default_planning_controls(app, width)
+}
+
+fn default_planning_controls(app: &ShellApp, width: usize) -> &'static str {
+    if width < 76 {
+        return " ↑/↓ move  Space check  Tab pane  Enter run  Esc exit";
+    }
+    if app.planning_prompt_review_available() {
+        " ↑/↓ move  Space check  p Review prompt  Tab pane  Enter run  Esc exit"
+    } else {
+        " ↑/↓ move  Space check  Tab pane  h/l phase  Enter run  Esc exit"
+    }
+}
+
+fn setup_planning_controls(width: usize) -> &'static str {
+    if width < 76 {
+        " ↑/↓ move  Space check  Enter save  Esc setup"
+    } else {
+        " ↑/↓ move  Space check  p Review prompt  Tab pane  Enter save to Setup  Esc return"
+    }
+}
+
+fn inline_planning_controls(selected: bool) -> &'static str {
+    if selected {
+        " ↑/↓ move  Space uncheck  Enter attach file  Esc exit"
+    } else {
+        " ↑/↓ move  Space select attach  Enter run checked  Esc exit"
+    }
+}
+
+fn current_inline_action_selected(app: &ShellApp) -> Option<bool> {
+    let row = app.engagement.planning_picker().current_row()?;
+    row.id
+        .is_inline_action()
+        .then(|| planning_row_selected(app, row))
+}
+
+fn planning_row_selected(app: &ShellApp, row: &PlanningTaskRow) -> bool {
+    app.engagement
+        .planning_picker()
+        .selected()
+        .contains(&row.id)
 }
 
 /// Announce the current judo phase (組→崩→作→掛) and its intent.
 fn push_phase_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
-    match app.engagement.current_phase() {
-        Some(phase) => {
-            lines.push(divider(phase.label(), width));
-            lines.push(blank());
-            push_phase_rail(app, width, lines);
-            lines.push(muted(&format!(
-                "phase {} of {} — {}",
-                phase.position(),
-                WorkflowPhase::ORDER.len(),
-                phase.intent()
-            )));
-        }
-        None => {
-            lines.push(divider("PLAN THE WORKSPACE", width));
-            lines.push(blank());
-            lines.push(muted(
-                "Select tasks. Dependencies auto-toggle. Steps run in order.",
-            ));
-        }
+    if app.engagement.planning_picker().returns_to_setup() {
+        push_setup_plan_header(app, width, lines);
+        return;
     }
+    match app.engagement.current_phase() {
+        Some(phase) => push_active_phase_header(app, phase, width, lines),
+        None => push_unphased_plan_header(app, width, lines),
+    }
+}
+
+fn push_setup_plan_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
+    push_header_identity(app, "SETUP · MAP PLAN", width, lines);
+    lines.push(muted(
+        "Choose Map tasks. Model and credential blockers are evaluated back on Setup.",
+    ));
+}
+
+fn push_active_phase_header(
+    app: &ShellApp,
+    phase: WorkflowPhase,
+    width: u16,
+    lines: &mut Vec<Line<'static>>,
+) {
+    push_header_identity(app, phase.label(), width, lines);
+    push_phase_rail(app, width, lines);
+    lines.push(muted(&format!(
+        "phase {} of {} — {}",
+        phase.position(),
+        WorkflowPhase::ORDER.len(),
+        phase.intent()
+    )));
+}
+
+fn push_unphased_plan_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
+    push_header_identity(app, "PLAN THE WORKSPACE", width, lines);
+    lines.push(muted(
+        "Select tasks. Dependencies auto-toggle. Steps run in order.",
+    ));
+}
+
+fn push_header_identity(app: &ShellApp, title: &str, width: u16, lines: &mut Vec<Line<'static>>) {
+    lines.push(divider(title, width));
+    if let Some(target) = confirmed_target_line(app, width as usize) {
+        lines.push(target);
+    }
+    lines.push(blank());
 }
 
 fn push_phase_rail(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
@@ -122,8 +439,9 @@ fn fallback_phase_rail_line(current: WorkflowPhase, width: usize) -> Line<'stati
 fn fallback_phase_rail_label(phase: WorkflowPhase) -> &'static str {
     match phase {
         WorkflowPhase::Map => "組 map",
-        WorkflowPhase::Hunt => "崩 hunt",
-        WorkflowPhase::Confirm => "作 confirm",
+        WorkflowPhase::Scan => "崩 scan",
+        WorkflowPhase::Review => "査 review",
+        WorkflowPhase::Prove => "作 prove",
         WorkflowPhase::Fix => "掛 fix",
     }
 }
@@ -158,8 +476,9 @@ fn prior_state_banner(app: &ShellApp) -> Line<'static> {
         .and_then(|then| format_relative_age(SystemTime::now(), then));
     let map_artifacts_built = app
         .workbench_cache()
-        .borrow_mut()
-        .map_artifacts_built(app.target());
+        .borrow()
+        .cached_map_artifacts_built(app.target());
+    let map_artifacts_built = matches!(map_artifacts_built, crate::app::ViewDataState::Ready(true));
     match workspace_history(
         app.engagement.planning_picker().tasks(),
         app.findings().len(),
@@ -409,17 +728,21 @@ fn planning_row_label(app: &ShellApp, row: &PlanningTaskRow) -> String {
 fn planning_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) -> String {
     blocked_row_note(row, outcome)
         .or_else(|| cached_row_note(row, outcome))
-        .or_else(|| missing_model_note(app, row))
+        .or_else(|| model_readiness_note(app, row))
         .unwrap_or_else(|| outcome_row_note(app, row, outcome))
 }
 
 fn blocked_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String> {
-    (outcome == RowOutcome::Blocked).then(|| {
-        format!(
-            "blocked — install {} for this step",
-            row.required_cli.unwrap_or("a tool")
-        )
-    })
+    (outcome == RowOutcome::Blocked).then(|| format!("blocked — {}", prerequisite_message(row)))
+}
+
+fn prerequisite_message(row: &PlanningTaskRow) -> String {
+    if let Some(reason) = row.blocker.as_deref() {
+        return reason.to_string();
+    }
+    row.required_cli
+        .map(|cli| format!("install `{cli}` on PATH"))
+        .unwrap_or_else(|| "required prerequisite is unavailable".to_string())
 }
 
 fn cached_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String> {
@@ -432,9 +755,26 @@ fn cached_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String>
     (outcome == RowOutcome::Reuse).then(|| "cached — press g to rebuild".to_string())
 }
 
-fn missing_model_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
-    (row.model_backed && app.config().model.is_none())
-        .then(|| "needs model — run /model first".to_string())
+fn model_readiness_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
+    model_readiness_message(
+        row.model_backed,
+        app.config().model.is_some(),
+        app.configured_model_auth_ready(),
+    )
+}
+
+fn model_readiness_message(
+    model_backed: bool,
+    model_configured: bool,
+    provider_auth_ready: bool,
+) -> Option<String> {
+    if !model_backed {
+        return None;
+    }
+    if !model_configured {
+        return Some("needs model — run /model first".to_string());
+    }
+    (!provider_auth_ready).then(|| "needs credentials — open auth".to_string())
 }
 
 fn outcome_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) -> String {
@@ -452,7 +792,7 @@ fn artifact_reason(row: &PlanningTaskRow) -> &'static str {
         PlanningArtifactState::Cached => "cached",
         PlanningArtifactState::Missing => "not built yet",
         PlanningArtifactState::Invalid => "cached but invalid",
-        PlanningArtifactState::Action => "runs a scan/action",
+        PlanningArtifactState::Action => "inline action — Space selects",
     }
 }
 
@@ -475,8 +815,14 @@ fn planning_options_pane_lines(app: &ShellApp, width: usize) -> Vec<Line<'static
     let focused = app.engagement.planning_picker().focus() == PickerFocus::OptionsPane;
     let border_style = pane_border_style(focused);
     let title = pane_title(&format!(" {} ", row.tool_name), focused);
+    if !row.cli_available {
+        return unavailable_task_pane_lines(&title, row, width, border_style);
+    }
+    if row.id.is_inline_action() {
+        return inline_action_pane_lines(app, row, &title, width, border_style);
+    }
     let Some(tool) = app.registry().resolve_tool(row.tool_name) else {
-        return bordered_message(&title, "tool descriptor missing", width);
+        return bordered_message(&title, "options unavailable for this step", width);
     };
     let mut lines = option_pane_header(&title, focused, border_style, width);
     append_option_pane_rows(&mut lines, app, row, &tool.options, width);
@@ -492,6 +838,75 @@ fn planning_options_pane_lines(app: &ShellApp, width: usize) -> Vec<Line<'static
         theme::label(),
     ));
     lines
+}
+
+fn unavailable_task_pane_lines(
+    title: &str,
+    row: &PlanningTaskRow,
+    width: usize,
+    border_style: Style,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        border_line("┌", title, "┐", width, border_style, theme::label()),
+        pane_body_line(
+            "blocked — prerequisite missing",
+            width,
+            theme::danger(),
+            border_style,
+        ),
+    ];
+    lines.extend(
+        wrap_text(&prerequisite_message(row), width.saturating_sub(4).max(1))
+            .into_iter()
+            .map(|line| pane_body_line(&line, width, theme::primary(), border_style)),
+    );
+    lines.push(pane_body_line(
+        "Space retries after the prerequisite is available",
+        width,
+        theme::muted(),
+        border_style,
+    ));
+    lines.push(border_line(
+        "└",
+        "",
+        "┘",
+        width,
+        border_style,
+        theme::label(),
+    ));
+    lines
+}
+
+fn inline_action_pane_lines(
+    app: &ShellApp,
+    row: &PlanningTaskRow,
+    title: &str,
+    width: usize,
+    border_style: Style,
+) -> Vec<Line<'static>> {
+    let (state, action) = if planning_row_selected(app, row) {
+        (
+            "selected inline action — no module runs",
+            "Enter opens the target file picker",
+        )
+    } else {
+        (
+            "unchecked inline action — no module runs",
+            "Space selects; Enter runs checked plan",
+        )
+    };
+    vec![
+        border_line("┌", title, "┐", width, border_style, theme::label()),
+        pane_body_line(state, width, theme::accent(), border_style),
+        pane_body_line(action, width, theme::primary(), border_style),
+        pane_body_line(
+            "attachments stay rooted to this target",
+            width,
+            theme::muted(),
+            border_style,
+        ),
+        border_line("└", "", "┘", width, border_style, theme::label()),
+    ]
 }
 
 fn option_pane_header(
@@ -646,7 +1061,7 @@ fn option_display_value(
             .option_edit()
             .map(|edit| edit.draft.as_str())
             .unwrap_or_default();
-        return format!("{draft}_");
+        return format!("EDIT:{draft}_");
     }
     resolved
         .and_then(|input| input.get(&spec.name))
@@ -811,7 +1226,17 @@ fn pane_title_style(focused: bool) -> Style {
 
 /// State exactly what Enter will do, styled green only when something actually
 /// runs — a reused/skipped-only plan stays muted so the colour can't overclaim.
-fn enter_summary_line(app: &ShellApp) -> Line<'static> {
+fn enter_summary_line(app: &ShellApp, width: usize) -> Line<'static> {
+    if app.engagement.planning_picker().returns_to_setup() {
+        let selected = app.engagement.planning_picker().selected().len();
+        return styled(
+            &fit(
+                &format!(" Enter saves {selected} selected Map task(s) and returns to Setup"),
+                width,
+            ),
+            theme::success().add_modifier(Modifier::BOLD),
+        );
+    }
     let plan = enter_plan(
         app.engagement.planning_picker().tasks(),
         app.engagement.planning_picker().selected(),
@@ -822,7 +1247,49 @@ fn enter_summary_line(app: &ShellApp) -> Line<'static> {
     } else {
         theme::muted()
     };
-    styled(&format!(" {}", plan.summary_line()), style)
+    styled(&format!(" {}", enter_summary_text(plan, width)), style)
+}
+
+fn enter_summary_text(plan: crate::ui_view_models::EnterPlan, width: usize) -> String {
+    let full = plan.summary_line();
+    if display_width(&full) < width {
+        return full;
+    }
+    compact_enter_summary(plan)
+}
+
+fn compact_enter_summary(plan: crate::ui_view_models::EnterPlan) -> String {
+    if plan.run == 0 {
+        return compact_nothing_runs_summary(plan);
+    }
+    compact_running_summary(plan)
+}
+
+fn compact_running_summary(plan: crate::ui_view_models::EnterPlan) -> String {
+    let clauses = [
+        Some(format!("run {}", plan.run)),
+        compact_count_clause("reuse", plan.reuse),
+        compact_count_clause("skip", plan.skip),
+        compact_count_clause("blocked", plan.blocked),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    format!("Enter: {}", clauses.join(" · "))
+}
+
+fn compact_count_clause(label: &str, count: usize) -> Option<String> {
+    (count > 0).then(|| format!("{label} {count}"))
+}
+
+fn compact_nothing_runs_summary(plan: crate::ui_view_models::EnterPlan) -> String {
+    if plan.reuse > 0 {
+        return format!(
+            "Enter: runs nothing · reuse {} cached · g rebuild",
+            plan.reuse
+        );
+    }
+    "Enter: runs nothing · no tasks checked · skips phase".to_string()
 }
 
 fn outcome_style(outcome: RowOutcome) -> Style {
@@ -860,12 +1327,49 @@ fn planning_cursor_style(base: Style, outcome: RowOutcome) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzushi_core::{V2Config, WorkspaceTarget};
 
     fn line_text(line: &Line<'_>) -> String {
         line.spans
             .iter()
             .map(|span| span.content.as_ref())
             .collect()
+    }
+
+    fn rendered_planning_lines(width: u16, height: u16) -> String {
+        let target_dir = tempfile::tempdir().expect("temp target");
+        let target = WorkspaceTarget::new(target_dir.path()).expect("workspace target");
+        let mut app = ShellApp::new(V2Config::default(), Some(&target));
+        app.open_phase_picker(crate::app::WorkflowPhase::Map);
+        planning_picker_lines(&app, Rect::new(0, 0, width, height))
+            .iter()
+            .map(line_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn assert_essential_planning_controls(rendered: &str) {
+        for control in [
+            "↑/↓ move",
+            "Space check",
+            "Tab pane",
+            "h/l phase",
+            "Enter run",
+            "Esc exit",
+        ] {
+            assert!(
+                rendered.contains(control),
+                "missing {control:?}:\n{rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn pending_target_profile_is_visible_in_the_picker() {
+        let rendered = rendered_planning_lines(120, 40);
+
+        assert!(rendered.contains("profiling target"), "{rendered}");
+        assert!(rendered.contains("conservative tasks"), "{rendered}");
     }
 
     #[test]
@@ -895,5 +1399,65 @@ mod tests {
         assert!(line_text(&column_header(120).unwrap()).contains("TOOL"));
         assert!(!line_text(&column_header(70).unwrap()).contains("TOOL"));
         assert!(column_header(40).is_none());
+    }
+
+    #[test]
+    fn compact_task_window_tracks_the_cursor_without_losing_ends() {
+        assert_eq!(visible_task_range(9, 0, 6), 0..6);
+        assert_eq!(visible_task_range(9, 5, 6), 2..8);
+        assert_eq!(visible_task_range(9, 8, 6), 3..9);
+    }
+
+    #[test]
+    fn compact_enter_summary_keeps_every_consequential_bucket() {
+        let plan = crate::ui_view_models::EnterPlan {
+            run: 5,
+            reuse: 2,
+            skip: 3,
+            blocked: 1,
+        };
+
+        let summary = enter_summary_text(plan, 60);
+
+        assert_eq!(summary, "Enter: run 5 · reuse 2 · skip 3 · blocked 1");
+        assert!(display_width(&summary) < 60);
+    }
+
+    #[test]
+    fn full_enter_summary_requires_room_for_its_leading_space() {
+        let plan = crate::ui_view_models::EnterPlan {
+            run: 2,
+            reuse: 1,
+            skip: 0,
+            blocked: 0,
+        };
+        let full = plan.summary_line();
+
+        assert_eq!(enter_summary_text(plan, display_width(&full) + 1), full);
+        assert_ne!(enter_summary_text(plan, display_width(&full)), full);
+    }
+
+    #[test]
+    fn model_backed_row_distinguishes_missing_model_from_missing_auth() {
+        assert_eq!(
+            model_readiness_message(true, false, false).as_deref(),
+            Some("needs model — run /model first")
+        );
+        assert_eq!(
+            model_readiness_message(true, true, false).as_deref(),
+            Some("needs credentials — open auth")
+        );
+        assert_eq!(model_readiness_message(true, true, true), None);
+        assert_eq!(model_readiness_message(false, true, false), None);
+    }
+
+    #[test]
+    fn wide_planning_keeps_essential_controls_at_120x40() {
+        assert_essential_planning_controls(&rendered_planning_lines(120, 40));
+    }
+
+    #[test]
+    fn wide_planning_keeps_essential_controls_at_100x30() {
+        assert_essential_planning_controls(&rendered_planning_lines(100, 30));
     }
 }

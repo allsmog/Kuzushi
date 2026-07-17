@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_CONTEXT_WALK_ENTRIES: usize = 100_000;
+
 pub(in crate::modules) fn package_json_dependency_names(parsed: &Value) -> BTreeSet<&str> {
     let mut deps = BTreeSet::new();
     for key in ["dependencies", "devDependencies", "peerDependencies"] {
@@ -86,7 +88,7 @@ pub(in crate::modules) fn inspect_manifest_signals(
     probes: &[(&str, &'static str)],
     matches: &mut BTreeSet<&'static str>,
 ) -> Result<()> {
-    let Ok(raw) = fs::read_to_string(path) else {
+    let Some(raw) = read_optional_manifest(path)? else {
         return Ok(());
     };
     let lower = raw.to_lowercase();
@@ -98,6 +100,15 @@ pub(in crate::modules) fn inspect_manifest_signals(
     Ok(())
 }
 
+pub(in crate::modules) fn read_optional_manifest(path: &Path) -> Result<Option<String>> {
+    match crate::bounded_file::read_utf8_text(path, 8 * 1024 * 1024) {
+        Ok(raw) => Ok(Some(raw)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error)
+            .with_context(|| format!("Could not read manifest {}", path.display())),
+    }
+}
+
 pub(in crate::modules) fn collect_context_files(
     root: &Path,
     dir: &Path,
@@ -105,14 +116,68 @@ pub(in crate::modules) fn collect_context_files(
     files_indexed: &mut usize,
     files_sample: &mut Vec<String>,
 ) -> Result<()> {
-    let Ok(read_dir) = fs::read_dir(dir) else {
-        return Ok(());
-    };
-    let mut entries = read_dir.filter_map(|entry| entry.ok()).collect::<Vec<_>>();
+    collect_context_files_with_limit(
+        root,
+        dir,
+        sample_limit,
+        files_indexed,
+        files_sample,
+        MAX_CONTEXT_WALK_ENTRIES,
+    )
+}
+
+fn collect_context_files_with_limit(
+    root: &Path,
+    dir: &Path,
+    sample_limit: usize,
+    files_indexed: &mut usize,
+    files_sample: &mut Vec<String>,
+    entry_limit: usize,
+) -> Result<()> {
+    let mut entries_seen = 0usize;
+    collect_context_files_inner(
+        root,
+        dir,
+        sample_limit,
+        files_indexed,
+        files_sample,
+        &mut entries_seen,
+        entry_limit,
+    )
+}
+
+fn collect_context_files_inner(
+    root: &Path,
+    dir: &Path,
+    sample_limit: usize,
+    files_indexed: &mut usize,
+    files_sample: &mut Vec<String>,
+    entries_seen: &mut usize,
+    entry_limit: usize,
+) -> Result<()> {
+    let read_dir = fs::read_dir(dir)
+        .with_context(|| format!("Could not read context directory {}", dir.display()))?;
+    let remaining = entry_limit.saturating_sub(*entries_seen);
+    let mut entries = read_dir
+        .take(remaining.saturating_add(1))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    anyhow::ensure!(
+        entries.len() <= remaining,
+        "Context inventory exceeded the {entry_limit}-entry coverage limit"
+    );
+    *entries_seen += entries.len();
     entries.sort_by_key(|entry| entry.path());
 
     for entry in entries {
-        collect_context_entry(root, entry, sample_limit, files_indexed, files_sample)?;
+        collect_context_entry(
+            root,
+            entry,
+            sample_limit,
+            files_indexed,
+            files_sample,
+            entries_seen,
+            entry_limit,
+        )?;
     }
 
     Ok(())
@@ -124,21 +189,55 @@ fn collect_context_entry(
     sample_limit: usize,
     files_indexed: &mut usize,
     files_sample: &mut Vec<String>,
+    entries_seen: &mut usize,
+    entry_limit: usize,
 ) -> Result<()> {
     if should_skip_path(&entry.file_name().to_string_lossy()) {
         return Ok(());
     }
-    let Ok(file_type) = entry.file_type() else {
-        return Ok(());
-    };
+    let file_type = entry.file_type()?;
     let path = entry.path();
     if file_type.is_dir() {
-        return collect_context_files(root, &path, sample_limit, files_indexed, files_sample);
+        return collect_context_files_inner(
+            root,
+            &path,
+            sample_limit,
+            files_indexed,
+            files_sample,
+            entries_seen,
+            entry_limit,
+        );
     }
     if file_type.is_file() {
         collect_context_file(root, &path, sample_limit, files_indexed, files_sample);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod context_walk_limit_tests {
+    use super::*;
+
+    #[test]
+    fn context_walk_errors_instead_of_silently_truncating() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
+        fs::write(temp.path().join("b.rs"), "fn b() {}\n").unwrap();
+        let mut indexed = 0;
+        let mut sample = Vec::new();
+
+        let error = collect_context_files_with_limit(
+            temp.path(),
+            temp.path(),
+            1,
+            &mut indexed,
+            &mut sample,
+            1,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("coverage limit"));
+    }
 }
 
 fn collect_context_file(

@@ -1,4 +1,5 @@
 mod fingerprint;
+mod io;
 mod manifest;
 mod paths;
 mod sha256;
@@ -7,6 +8,7 @@ mod sha256;
 mod tests;
 
 pub use fingerprint::{repo_hash, RepoFingerprint};
+pub use io::{ensure_private_directory, read_bounded_file, write_atomic_file};
 pub use manifest::{BackendEntry, CacheManifest, RepoEntry};
 pub use paths::{index_root, manifest_path};
 pub use sha256::{sha256_file_hex, sha256_hex_bytes};

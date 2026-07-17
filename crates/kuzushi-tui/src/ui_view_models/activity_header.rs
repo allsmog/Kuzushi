@@ -1,9 +1,12 @@
 use crate::{ActivityRouteState, ActivitySession, DagTaskState};
+use kuzushi_core::WorkflowPhase;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityHeaderModel {
+    pub(crate) origin_phase: Option<WorkflowPhase>,
     pub(crate) detailed_title: String,
     pub(crate) summary_title: String,
+    pub(crate) compact_title: String,
 }
 
 /// Terminal outcome of the run behind the Activity view. While work is in
@@ -12,6 +15,7 @@ pub(crate) struct ActivityHeaderModel {
 /// "0/30 done · 0 running" wall wondering whether anything is still alive.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ActivityRunOutcome {
+    WaitingForOperator,
     Terminal {
         status: String,
         findings: Option<u64>,
@@ -42,21 +46,53 @@ pub(crate) struct ActivityLiveTool {
     pub(crate) queued_steer_steps: usize,
 }
 
+#[cfg(test)]
 pub(crate) fn activity_header_model(
     session: &ActivitySession,
     route: &ActivityRouteState,
     outcome: Option<ActivityRunOutcome>,
     live_tool: Option<&ActivityLiveTool>,
 ) -> ActivityHeaderModel {
+    activity_header_model_with_queue(
+        session,
+        route,
+        outcome,
+        live_tool,
+        live_tool.map_or(0, |tool| tool.queued_steer_steps),
+    )
+}
+
+pub(crate) fn activity_header_model_with_queue(
+    session: &ActivitySession,
+    route: &ActivityRouteState,
+    outcome: Option<ActivityRunOutcome>,
+    live_tool: Option<&ActivityLiveTool>,
+    queued_steer_steps: usize,
+) -> ActivityHeaderModel {
     let counts = ActivityTaskCounts::from_session(session);
-    let cost_usd = session.tasks.values().map(|row| row.cost_usd).sum::<f64>();
-    let progress = progress_segment(&outcome, counts, live_tool);
+    let cost = activity_cost_label(session);
+    let progress = progress_segment(&outcome, counts, live_tool, queued_steer_steps);
     ActivityHeaderModel {
-        detailed_title: detailed_title(session, route, &progress, cost_usd),
+        origin_phase: session.origin_phase,
+        detailed_title: detailed_title(session, route, &progress, &cost),
         summary_title: format!(
-            "ACTIVITY  run {run_id}  ·  {progress}",
+            "RUN FOCUS{phase}  run {run_id}  ·  {progress}",
+            phase = origin_phase_segment(session.origin_phase),
             run_id = session.run_id
         ),
+        compact_title: format!(
+            "RUN FOCUS{phase}  {progress}",
+            phase = origin_phase_segment(session.origin_phase)
+        ),
+    }
+}
+
+fn activity_cost_label(session: &ActivitySession) -> String {
+    match session.runtime_cost_report() {
+        Err(_) => "cost invalid".to_string(),
+        Ok(cost) if cost.is_unavailable() => "cost unavailable".to_string(),
+        Ok(cost) if cost.is_complete() => format!("cost ${:.4}", cost.observed_usd()),
+        Ok(cost) => format!("cost >=${:.4} (incomplete)", cost.observed_usd()),
     }
 }
 
@@ -64,8 +100,12 @@ fn progress_segment(
     outcome: &Option<ActivityRunOutcome>,
     counts: ActivityTaskCounts,
     live_tool: Option<&ActivityLiveTool>,
+    queued_steer_steps: usize,
 ) -> String {
     match outcome {
+        Some(ActivityRunOutcome::WaitingForOperator) => {
+            "? waiting for operator input · run paused safely".to_string()
+        }
         Some(ActivityRunOutcome::Terminal {
             status,
             findings,
@@ -77,7 +117,7 @@ fn progress_segment(
         // "0/0 done · 0 running" reads as a broken pipeline; a single-tool
         // run has no DAG tasks — name the tool and tick instead.
         None if counts.total == 0 => taskless_progress(live_tool),
-        None => task_progress(counts),
+        None => task_progress(counts, live_tool, queued_steer_steps),
     }
 }
 
@@ -108,7 +148,7 @@ fn finding_count_segment(findings: Option<u64>) -> String {
     match findings {
         Some(1) => "1 finding".to_string(),
         Some(count) => format!("{count} findings"),
-        None => "findings unknown".to_string(),
+        None => "run findings not recorded".to_string(),
     }
 }
 
@@ -118,6 +158,7 @@ struct ActivityTaskCounts {
     done: usize,
     running: usize,
     canceling: usize,
+    partial: usize,
     failing: usize,
     blocked: usize,
     canceled: usize,
@@ -131,6 +172,7 @@ impl ActivityTaskCounts {
             done: task_count(session, DagTaskState::Done),
             running: task_count(session, DagTaskState::Active),
             canceling: task_count(session, DagTaskState::Canceling),
+            partial: task_count(session, DagTaskState::Partial),
             failing: task_count(session, DagTaskState::Failing),
             blocked: task_count(session, DagTaskState::Blocked),
             canceled: task_count(session, DagTaskState::Canceled),
@@ -139,17 +181,29 @@ impl ActivityTaskCounts {
     }
 }
 
-fn task_progress(counts: ActivityTaskCounts) -> String {
+fn task_progress(
+    counts: ActivityTaskCounts,
+    live_tool: Option<&ActivityLiveTool>,
+    queued_steer_steps: usize,
+) -> String {
     let mut parts = vec![
         format!("{}/{} done", counts.done, counts.total),
         format!("{} running", counts.running),
     ];
+    append_terminal_count(&mut parts, counts.partial, "⚠ partial");
     append_terminal_count(&mut parts, counts.failing, "! failed");
     append_terminal_count(&mut parts, counts.blocked, "▣ blocked");
     append_terminal_count(&mut parts, counts.canceling, "× canceling");
     append_terminal_count(&mut parts, counts.canceled, "× canceled");
     append_terminal_count(&mut parts, counts.skipped, "⊘ skipped");
-    parts.join("  ·  ")
+    let mut progress = parts.join("  ·  ");
+    if let Some(tool) = live_tool {
+        progress.push_str(&queued_plan_segment(tool));
+    }
+    if queued_steer_steps > 0 {
+        progress.push_str(&format!(" · queued: {queued_steer_steps} pending"));
+    }
+    progress
 }
 
 fn append_terminal_count(parts: &mut Vec<String>, count: usize, label: &str) {
@@ -210,14 +264,19 @@ fn detailed_title(
     session: &ActivitySession,
     route: &ActivityRouteState,
     progress: &str,
-    cost_usd: f64,
+    cost: &str,
 ) -> String {
     format!(
-        "ACTIVITY  run {run}  ·  {progress}  ·  cost ${cost_usd:.4}{paused}{verbose}",
+        "RUN FOCUS{phase}  run {run}  ·  {progress}  ·  {cost}{paused}{verbose}",
+        phase = origin_phase_segment(session.origin_phase),
         run = compact_activity_run_id(&session.run_id),
         paused = paused_segment(route.paused),
         verbose = verbose_segment(route.verbose_subsystems),
     )
+}
+
+fn origin_phase_segment(phase: Option<WorkflowPhase>) -> String {
+    phase.map_or_else(String::new, |phase| format!(" · {}", phase.label()))
 }
 
 fn compact_activity_run_id(run_id: &str) -> String {
@@ -240,6 +299,22 @@ fn verbose_segment(verbose: bool) -> &'static str {
 mod tests {
     use super::*;
     use crate::DagTaskRow;
+    use kuzushi_core::RunTraceStep;
+
+    #[test]
+    fn waiting_operator_question_overrides_terminal_looking_progress() {
+        let session = ActivitySession::new("waiting-run");
+
+        let model = activity_header_model(
+            &session,
+            &ActivityRouteState::default(),
+            Some(ActivityRunOutcome::WaitingForOperator),
+            None,
+        );
+
+        assert!(model.summary_title.contains("waiting for operator input"));
+        assert!(!model.summary_title.contains("run completed"));
+    }
 
     #[test]
     fn activity_header_model_counts_tasks_and_cost() {
@@ -252,6 +327,8 @@ mod tests {
             "triage:run".to_string(),
             task("triage:run", DagTaskState::Active, 0.25),
         );
+        session.apply_step(model_cost_step(1, "context", "build", 0.125));
+        session.apply_step(model_cost_step(2, "triage", "run", 0.25));
         let mut route = ActivityRouteState::default();
         route.paused = true;
         route.verbose_subsystems = true;
@@ -260,11 +337,47 @@ mod tests {
 
         assert_eq!(
             model.summary_title,
-            "ACTIVITY  run tool-1778354160-e1b1d602a576  ·  1/2 done  ·  1 running"
+            "RUN FOCUS  run tool-1778354160-e1b1d602a576  ·  1/2 done  ·  1 running"
         );
         assert!(model.detailed_title.contains("…d602a576"));
         assert!(model.detailed_title.contains("cost $0.3750"));
         assert!(model.detailed_title.contains("feed paused"));
+    }
+
+    #[test]
+    fn activity_header_rejects_negative_cost() {
+        let mut session = ActivitySession::new("tool-negative-zero");
+        session.tasks.insert(
+            "sast:scan".to_string(),
+            task("sast:scan", DagTaskState::Active, 0.0),
+        );
+        session.apply_step(model_cost_step(1, "sast", "scan", -0.00001));
+
+        let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
+
+        assert!(model.detailed_title.contains("cost invalid"));
+    }
+
+    #[test]
+    fn activity_header_rejects_finite_cost_overflow() {
+        let mut session = ActivitySession::new("tool-overflow");
+        session.apply_step(model_cost_step(1, "sast", "scan", f64::MAX));
+        session.apply_step(model_cost_step(2, "sast", "scan", f64::MAX));
+
+        let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
+
+        assert!(model.detailed_title.contains("cost invalid"));
+        assert!(!model.detailed_title.contains("inf"));
+    }
+
+    #[test]
+    fn activity_header_surfaces_missing_provider_usage_as_incomplete() {
+        let mut session = ActivitySession::new("tool-incomplete");
+        session.apply_step(model_call_step(1, "sast", "scan", None));
+
+        let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
+
+        assert!(model.detailed_title.contains("cost >=$0.0000 (incomplete)"));
     }
 
     #[test]
@@ -355,6 +468,25 @@ mod tests {
             "queued items must not read as a second running job: {}",
             model.summary_title
         );
+    }
+
+    #[test]
+    fn queued_steer_items_remain_visible_for_dag_runs() {
+        let mut session = ActivitySession::new("scan-1");
+        session.tasks.insert(
+            "sast:scan".to_string(),
+            task("sast:scan", DagTaskState::Active, 0.0),
+        );
+        let model = activity_header_model_with_queue(
+            &session,
+            &ActivityRouteState::default(),
+            None,
+            None,
+            1,
+        );
+
+        assert!(model.summary_title.contains("1 running"));
+        assert!(model.summary_title.contains("queued: 1 pending"));
     }
 
     #[test]
@@ -455,7 +587,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_cancelled_result_reports_unknown_count_without_reason_when_absent() {
+    fn terminal_cancelled_result_scopes_an_unrecorded_finding_count_to_the_run() {
         let session = ActivitySession::new("run-1");
 
         let model = activity_header_model(
@@ -472,7 +604,7 @@ mod tests {
         assert!(
             model
                 .summary_title
-                .contains("× run canceled · findings unknown"),
+                .contains("× run canceled · run findings not recorded"),
             "{}",
             model.summary_title
         );
@@ -515,5 +647,18 @@ mod tests {
         row.state = state;
         row.cost_usd = cost_usd;
         row
+    }
+
+    fn model_cost_step(n: usize, module: &str, verb: &str, cost: f64) -> RunTraceStep {
+        model_call_step(n, module, verb, Some(cost))
+    }
+
+    fn model_call_step(n: usize, module: &str, verb: &str, cost: Option<f64>) -> RunTraceStep {
+        RunTraceStep::new(n, "reasoning", "model response")
+            .with_module_id(module)
+            .with_verb(verb)
+            .with_latency_ms(Some(10))
+            .with_cost_usd(cost)
+            .with_model_metadata("test:model", "test", format!("hash-{n}"))
     }
 }

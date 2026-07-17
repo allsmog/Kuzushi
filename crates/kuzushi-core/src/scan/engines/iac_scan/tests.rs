@@ -219,4 +219,17 @@ mod tests {
 
         assert!(err.contains("iac-scan scan cancelled"));
     }
+
+    #[test]
+    fn tool_input_cannot_remove_the_file_size_ceiling() {
+        let options = IacScanOptions::from_tool_input(&serde_json::json!({
+            "maxFileBytes": u64::MAX
+        }))
+        .unwrap();
+
+        assert_eq!(
+            options.max_file_bytes,
+            super::super::iac_scan_options::MAX_SUPPORTED_FILE_BYTES
+        );
+    }
 }

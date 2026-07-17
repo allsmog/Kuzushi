@@ -1,9 +1,6 @@
 use serde::de::DeserializeOwned;
 
-pub(crate) fn next_jsonl_number<T>(
-    body: &str,
-    number: impl Fn(&T) -> usize,
-) -> usize
+pub(crate) fn next_jsonl_number<T>(body: &str, number: impl Fn(&T) -> usize) -> usize
 where
     T: DeserializeOwned,
 {

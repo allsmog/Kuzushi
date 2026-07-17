@@ -26,10 +26,7 @@ fn gem_declaration(line: &str) -> Option<GemDependency> {
     })
 }
 
-fn gemfile_finding(
-    file_path: &Path,
-    dependency: GemDependency,
-) -> Option<DepHygieneFinding> {
+fn gemfile_finding(file_path: &Path, dependency: GemDependency) -> Option<DepHygieneFinding> {
     let constraint = dependency.constraint.trim();
     if is_floating_gem_constraint(constraint) {
         return Some(DepHygieneFinding::new(
@@ -55,17 +52,18 @@ fn gemfile_finding(
 }
 
 fn gem_constraints<'a>(parts: impl Iterator<Item = &'a str>) -> String {
-    parts
-        .filter_map(quoted_value)
-        .collect::<Vec<_>>()
-        .join(",")
+    parts.filter_map(quoted_value).collect::<Vec<_>>().join(",")
 }
 
 fn quoted_value(value: &str) -> Option<&str> {
     value
         .strip_prefix('"')
         .and_then(|value| value.split('"').next())
-        .or_else(|| value.strip_prefix('\'').and_then(|value| value.split('\'').next()))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.split('\'').next())
+        })
         .map(str::trim)
         .filter(|value| !value.is_empty())
 }

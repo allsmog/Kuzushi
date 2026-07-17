@@ -1,0 +1,14 @@
+{
+  "model": "anthropic:claude-sonnet-4-6",
+  "scanners": ["semgrep"],
+  "enabledTasks": ["context-gatherer"],
+  "verify": false,
+  "triageConcurrency": 1,
+  "triageBatchSize": 1,
+  "scanMode": "sequential",
+  "auditLog": false,
+  "enableContextGathering": false,
+  "enableContextEnrichment": false,
+  "llmRescoreEnabled": false,
+  "fpFilterEnabled": false
+}

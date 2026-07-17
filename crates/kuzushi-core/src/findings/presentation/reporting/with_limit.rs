@@ -757,6 +757,7 @@ mod triage_band_and_state_tests {
             confidence,
             rationale: "test".to_string(),
             cost_usd: 0.0,
+            cost_usd_exact: true,
         });
         finding
     }

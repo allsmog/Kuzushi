@@ -336,61 +336,58 @@ is expected to behave identically and should be filed as a parity bug.
   task. KWP descriptors may carry inert phase metadata, but dynamic DAG
   scheduling remains future scan-orchestrator work.
 
-- **Two-stage Ctrl+C, NL planner (`/plan`), prompt editor view, threat
-  views, finding alias drill, replay/trace, cost-cap halt card, module-run
-  transcript, actor-detail view, tune view** — interactive only. They
-  live in the Rust Ratatui shell under `crates/kuzushi-tui`; plain/scripted
-  output belongs in `crates/kuzushi-tui/src/renderer/plain/`.
-- **Workbench command center (`ShellView::Workbench`, verb `workbench`)** —
-  the shell's default landing surface (set in
-  `run_shell::open_start_view`, after the onboarding/target/model gates). A
-  frame-rendered cockpit: wide terminals show
-  `[SOURCE tree | CODE/DFD | FINDINGS | DETAILS]`; compact terminals collapse
-  toward the review path so findings and detail text stay readable under the
-  `Kuzushi · project · target · LIVE · phase` top bar. `Tab` cycles pane focus,
-  `Shift+Tab` reverses it, `j/k` move the focused pane, and `Enter` pins or
-  opens the focused finding. It folds the
-  old standalone findings, finding-detail, and threat-DFD-tab surfaces — the
-  `findings` and `open <id>` verbs route here. Interactive-only
-  fidelity (bordered panes), but degrades to text via
-  `renderer/views/workbench/render_workbench_view.rs::workbench_lines` for
-  plain/non-TTY. `LIVE` lights while shell work is actually running (the shared
-  `ShellApp::has_running_work` signal); pane focus lives on `app.workbench_focus`.
-- **Workbench confidence-first findings sort is shell-only and hardcoded.**
-  `confidence_first_display_order` in
-  `crates/kuzushi-tui/src/ui_view_models/findings.rs` re-orders the
-  severity-major alias list by `compare_findings_by_confidence` (`Confirmed`
-  before `Unverified`, severity as tie-break) before it reaches the Workbench
-  findings pane. There is no operator `setg` toggle back to severity-first, and
-  scan/run output and `workspace:export-findings` keep the severity-major
-  alias order untouched.
-- **Launch-time target picker (`ShellView::TargetPicker`)** — interactive
-  only, and now the **first phase of the ordered onboarding gate** (Target →
-  Model → Credentials → Planning). A bare `kuzushi` (no `--target`) on a real
-  TTY opens a picker (cwd + child repos/previous `.kuzushi` targets, via
-  `discover_target_candidates`) before the model/credentials/planning chain;
-  selection runs the same wiring as the `target <path>` verb and re-enters the
-  gate. The decision is expressed in the pure `initial_onboarding_phase` fn via
-  `OnboardingInputs::allow_target_gate`, which only the interactive launch
-  (`run_shell::apply_launch_onboarding` → `ShellApp::launch_onboarding_phase`)
-  sets `true`; construction and target activation pass `false`, so headless,
-  plain-mode, and test apps keep the targetless default. `KUZUSHI_SKIP_ONBOARDING`
-  short-circuits the whole gate inside the pure fn (no separate launch-site env
-  check). Explicit-target consent (PR #64) is preserved — the picker only
-  *offers* cwd as a candidate row, selection is an explicit Enter, and Esc
-  opts into targetless browsing; nothing silently falls back to cwd. A missing
-  API key opens the inline credential-entry step (`open_credential_entry`,
-  reusing the `AuthMethodPicker` surface: API-key paste / OAuth / `d` offline
-  demo) instead of logging a message and dumping the operator on the Workbench.
-- **Engagement journey spine (`next`, phase rail, phase chip)** —
-  shell-only operator orientation. `ui_view_models/journey.rs` derives the
-  current 組 map → 崩 hunt → 作 confirm → 掛 fix phase from workspace reality
-  (map artifacts on disk, findings, triage/verification state) and reconciles
-  the live walker against that reality instead of forging completion. Home
-  renders the rail + a phase-driven `▸ NEXT` line, status surfaces use the
-  compact `組 map 1/4` style chip, and `next` (typed alias `continue`) reopens
-  the phase walker at the derived phase. All of it is target-gated: no
-  `--target`, no journey chrome.
+- **Two-stage Ctrl+C, NL planner (`/plan`), Setup editors, Run Focus, durable
+  phase pages, Report, replay/trace, contextual visualizations, prompt tuning,
+  actor detail, and cost-cap halt cards** are interactive shell presentation.
+  Plain/scripted output belongs in `crates/kuzushi-tui/src/renderer/plain/`
+  and must serialize the same view models without inventing another workflow.
+- **Cockpit Spine (`ShellView::{Setup,Workbench,Activity,Report}`)** is the
+  canonical interactive workflow:
+  `Target → Setup → Map ↔ Run Focus → Scan ↔ Run Focus → Review → Prove ↔ Run
+  Focus → Fix ↔ Run Focus → Report`. `Workbench` hosts the five durable pages
+  `Map`, `Scan`, `Review`, `Prove`, and `Fix`, not the retired generic four-pane
+  command center. The canonical persisted/core enum is
+  `WorkflowPhase::{Map,Scan,Review,Prove,Fix}`. Legacy `hunt` and `confirm`
+  inputs load as deprecated `scan` and `prove` aliases for one major release;
+  new artifacts serialize only canonical values. Merely visiting a page never
+  advances reality.
+- **Aggregate Setup (`ShellView::Setup`)** owns Target, Map plan, Model,
+  Credentials, Prompt, Budget, and one `Start Map` action. Rows are evaluated in
+  dependency order against the selected plan: deterministic runtime-free work
+  may start without a model, while model-backed work requires an explicitly
+  selected compatible model plus its real API-key, stored-OAuth, or session
+  credential. An unset budget is `not enforced`; a set budget must be positive
+  and within the hard ceiling. Editors restore Setup with plan, cursor, scroll,
+  and prompt draft intact. Model selection is keyed by stable model id, never a
+  catalog/visible-row index. Explicit Target consent is unchanged: Enter
+  activates the selected candidate, Esc enters targetless capability browsing,
+  and cwd is never substituted. Selected-candidate facts load asynchronously
+  with a generation stamp and disclose path, repository/revision/dirty state,
+  languages/build systems, nested scope, and prior Kuzushi artifacts; stale
+  generations are discarded. Fresh or switched targets enter Setup; a
+  hydrated engagement resumes its reality-derived phase page. `/setup` always
+  reopens Setup explicitly.
+- **Durable Map/Scan/Review/Prove/Fix pages** project persisted artifacts and
+  finding truth. Map never reads live Run Focus state. Scan is a resting
+  cockpit over accepted attempts, scope/engine plan, per-engine outcomes,
+  finding/artifact deltas, cost, freshness, and run references; live progress
+  remains in Run Focus. Review keeps the confidence-first shell sort and
+  displays authority, severity, proof, source count, confidence, and decisions.
+  A pinned finding outside the current filter is disclosed by identity before
+  any verify, suppress, patch, or apply action can target it. Prove places
+  finding identity, `STATUS`, and the shared `NEXT` strip before evidence. Fix
+  keeps the full draft → staged → applied → re-verification lifecycle visible
+  rather than clearing the proof of application.
+- **Engagement journey spine (`next`, phase rail, phase chip)** derives current
+  Map/Scan/Review/Prove/Fix from durable current-target/current-revision
+  evidence. Counts come from the unfiltered ledger, so filters and page visits
+  never forge completion. Completed attempts require an explicit selection;
+  partial Scan attempts additionally require acknowledgement. Clean Scan,
+  all-rejected Review, and no-proof-backed Prove branches may truthfully offer
+  Report. `workbench` routes to the derived page; `findings` and `open <id>`
+  route to Review; `next` runs the current phase planner; `report` opens the
+  dedicated Report exit. Journey/autonomy chrome is hidden until `Start Map`
+  commits the engagement.
 - **Autonomy dial chip + `Ctrl+↑`/`Ctrl+↓` chord** — shell-only chrome over a
   *shared* gate. The always-visible `⛭ <glyph> <rung>` posture chip
   (`ui_view_models/journey.rs::autonomy_footer_segment`, beside the phase chip,
@@ -402,9 +399,11 @@ is expected to behave identically and should be filed as a parity bug.
   ceiling — it never redirects/substitutes a tool/model/runtime (no-silent-
   fallback safe). Posture rides `V2Config.autonomy` (serde-skip, in-process,
   default `Fix` = unconstrained so headless callers are unchanged). `kuzushi
-  run --autonomy <recon|hunt|confirm|fix>` and the shell `autonomy`/`posture`
-  verb set it; both clamp by `phases.stop_after`. Posture is orthogonal to the
-  reality-derived journey phase — raising the dial never forges phase progress.
+  run --autonomy <recon|scan|review|prove|fix>` and the shell
+  `autonomy`/`posture` verb set it; deprecated `hunt` and `confirm` remain input
+  aliases for Scan and Prove during the compatibility window. Both clamp by
+  `phases.stop_after`. Posture is orthogonal to the reality-derived journey
+  phase — raising the dial never forges phase progress.
 - **Security-viz gallery (`/scene`, `/viz`)** — interactive only
   (the rendering is TTY-bound), but **ungated and fed real Kuzushi data**. A
   `Tab`-cycled gallery of five pages (`scene3d::VizPage`). Pure view-model
@@ -426,18 +425,18 @@ is expected to behave identically and should be filed as a parity bug.
   - **Line diagrams** — attack path (real source→sink stages from
     `app.taint_flow`) + findings heatmap (per-module risk) as styled box-drawing
     `Line`s in `renderer/views/scene/diagrams`.
-  **Auto-open:** mirrors `auto_open_activity`. On by default; opt out with
-  `setg ui.auto_open_viz false` (the compatibility env var
-  `KUZUSHI_AUTO_OPEN_VIZ=false` is still honored at the adapter boundary). When
-  an artifact lands AND has content, the completion hooks switch the Activity
-  output deck if it has not been manually pinned, and open/log the gallery page:
-  `scan` → Heatmap (`apply_scan_finished`, only when findings > 0), and
-  `viz_page_for_tool(tool_name)` maps the artifact-*emitting* verbs exactly —
-  `taint-iris:hunt`→AttackPath, `exploit-chain:scan`→ExploitChain,
-  `threat-model:build`→Dfd — in `apply_finished_tool_event` (fires before
-  chain/queue advance so a follow-up tool's Activity view supersedes it; gated
-  by `viz_page_has_content` so a zero-result run doesn't open an empty page).
-  Prereq/read verbs (`taint-iris-next:catalog`, `threat-model:read`) and
+  **Contextual auto-open:** `ui.auto_open_viz` remains on by default and
+  `setg ui.auto_open_viz false` opts out (the compatibility environment value is
+  read only at the adapter boundary). Visualizations are contextual full-frame
+  decks over the workflow origin, not replacement workflow screens. A
+  foreground completion first restores its exact origin, then opens the
+  relevant non-empty deck; a background completion only emits a notice and
+  never steals focus. `scan` maps to Heatmap when findings exist, and
+  `viz_page_for_tool(tool_name)` maps artifact-emitting verbs exactly —
+  `taint-iris:hunt`→AttackPath and `exploit-chain:scan`→ExploitChain. DFDs,
+  terrain, heatmaps, attack trees, and trace content therefore remain available
+  without reviving the legacy Workbench layout. Prereq/read verbs
+  (`taint-iris-next:catalog`, `threat-model:read`) and
   `taint-iris-next:hunt` (which flattens its path into finding text, emitting no
   `flows[]`) are intentionally unmapped. The snapshot caches
   in `app/tool_runner/run_tool/snapshots.rs` populate `app.exploit_chains` /
@@ -455,15 +454,30 @@ is expected to behave identically and should be filed as a parity bug.
   Don't add `--ci` or `--json` to `run`.
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator
   surfaces** that *consume* shared `.kuzushi/v3/runs/<runId>/`
-  artefacts. They are read-only over a shared on-disk format.
+  artefacts. They are read-only over a shared on-disk format. Finding proof
+  stores `verification_run_id` separately from the discovery `scan_id`; the
+  Prove proof sidecar replays only the verification run and warns when the
+  proof belongs to an earlier observation of the same durable finding.
+- **Prompt/Navigate modes are interactive-only.** Prompt mode owns printable
+  input and submission. `F2` enters Navigate mode, where view bindings operate
+  without editing the prompt; `Esc` returns to Prompt mode. Runtime dispatch
+  and rendered hints consume the same resolved keymap, including question and
+  phase-result cards. A typed attention broker projects approvals, questions,
+  credential gates, partial acknowledgements, and unresolved results into the
+  footer and terminal title. Multiline paste remains one explicit submission:
+  the composer shows a placeholder and expands the complete payload only when
+  Enter is pressed.
 - **Jobs registry (`jobs`, `ShellView::Jobs`), steer queue (`queue`),
-  and background handoff (`background`/`bg`, Activity `b`)** — shell-only.
+  and background handoff (`background`/`bg`, Run Focus `b`)** — shell-only.
   `jobs` is a Metasploit-style live control surface over the shared
   `.kuzushi/v3/runs/` format: it merges the one live `Run` (from the shared
-  single-slot `JobHub` + `ActivitySession`) plus queued steer items with
+  single-slot `JobHub` + authoritative Run Focus session) plus queued items with
   recent on-disk `RunSummary` rows, de-duped by `run_id` (live supersedes its
   still-`running` disk twin; a disk `running` row with no live twin renders as
   `Stale`/"running?" muted, since its liveness can't be verified off-`/proc`).
+  Operator/budget cancellation persists as `canceled`; watchdog escalation,
+  process loss, and abnormal shutdown persist as `interrupted`. A requested
+  cancellation stays visibly `canceling` until cleanup reaches a terminal row.
   `jobs -k <id>` dequeues a pending steer item, or emits a **scoped**
   `CancelJob(JobKind)` that aborts only the addressed slot (not every live job
   the way `CancelActiveJobs` does) through the existing per-slot abort helpers —
@@ -477,7 +491,20 @@ is expected to behave identically and should be filed as a parity bug.
   explicitly). Only one live `Run` exists at a time, so queued items always
   render as **pending**, never running. `kuzushi run` stays single-shot; the
   CLI `runs list/show/trace` is the headless analogue over the same shared
-  artefacts.
+  artefacts. Run Focus captures the exact workflow origin before foreground
+  launch. `b` restores that origin without cancellation; final chain/plan/steer
+  completion restores it with one accumulated receipt. Manual Run Focus
+  inspection and background-owned runs never auto-return or hijack focus.
+- **Contextual utilities are shell-only presentation.** Help, Controls, and
+  Capabilities are modal; Jobs, Replay, Trace, and visualization pages are
+  scrollable full-frame decks. They share one non-nesting origin: replacing one
+  utility retains the original workflow view and input mode, and Esc restores
+  both exactly.
+- **Durable session transcripts are shell-only.** Interactive, plain, and
+  scripted shells append a redacted semantic timeline under the operator-owned
+  `~/.kuzushi/v3/sessions/` store. Headless `scan` and `run` keep their existing
+  target-scoped run artifacts; transcript run events link to those artifacts by
+  `runId` instead of duplicating their payloads.
 - **Pipeline-only artefacts are scan-only.** `kuzushi run` and shell tool
   dispatch now mint a `runId` and write `summary.json`, `trace.jsonl`,
   and input/result JSON. They do not produce scan-specific `triage.jsonl`,
@@ -542,15 +569,20 @@ any TypeScript/React/Ink path.
 
 ### Shell Views
 
-`ShellView` is defined in Rust, not TypeScript. Current variants include:
-`Catalog`, `Module`, `ModuleRun`, `ActorDetail`, `Findings`, `Finding`,
-`PromptsEditor`, `Plan`, `Threat`, `Replay`, `Trace`, `Activity`, `Help`,
-`Config`, `Tools`, `Options`, `SastTasks`, `Context`, `Workspace`,
-`KnowledgeBase`, `AgentChat`, `History`, and `Story`.
+`ShellView` is defined in Rust, not TypeScript (the enum lives in
+`crates/kuzushi-tui/src/app/view_state/sast_task_row.rs`). The cockpit routing
+variants are `TargetPicker`, `Setup`, `Workbench`, `Activity` (presented as Run
+Focus), and `Report`. `Workbench` owns the Map/Scan/Review/Prove/Fix page
+selection; `Report` is an exit surface and never a sixth `WorkflowPhase`. `Catalog`,
+`Keymap`, and `Help` are contextual modals; `Jobs`, `Replay`, `Trace`, and
+`Scene` are contextual full-frame decks. Other diagnostic, configuration,
+editor, picker, and approval variants remain supporting routes, not alternate
+workflow spines. Do not restore the retired standalone Findings/Finding/Plan
+routes or the generic whole-screen four-pane Workbench fallback.
 
 ### Operator Verbs
 
-The command source of truth is `SHELL_COMMAND_SPECS` in
+The command source of truth is `SHELL_COMMAND_SPEC_GROUPS` in
 `crates/kuzushi-tui/src/commands/shell_command_specs/`. Do not maintain a
 second TypeScript router. Common verbs include:
 
@@ -562,9 +594,10 @@ second TypeScript router. Common verbs include:
   `task <verb>`.
 - Context/KB: `context <verb>`, `workspace <verb>`, `kb`, `attach`, `detach`,
   `reparse`.
-- Findings/evidence: `findings`, `open <id>`, `since <ref>`, `show aliases`,
-  `show runs`, `replay <runId>`, `trace <runId>`, `activity` (`/a`,
-  `/progress`).
+- Workflow: `setup`, `workbench`, `next` (`continue`), `findings`, `open <id>`,
+  `report`, and `activity` (`/a`, `/progress`, presented as Run Focus).
+- Evidence/utilities: `since <ref>`, `show aliases`, `show runs`,
+  `replay <runId>`, `trace <runId>`, `jobs`, `scene`, and `viz`.
 - Auth/config/model/session: `auth`, `provider`, `backend`, `model`, `cost`,
   `config`, `load`, `resume`, `history`, `clear`, `story`, `quit`.
 
@@ -585,6 +618,11 @@ second TypeScript router. Common verbs include:
   `format=json|jsonl|sarif|csv|markdown-bundle`. SARIF emits one
   `runs[]` per `Finding.tool`; the markdown bundle is a directory
   (README.md from `build_pr_comment`, per-finding files, manifest.json).
+  The Report route presents the five formats in SARIF, Markdown bundle, JSONL,
+  JSON, CSV order, defaults completeness to All, permits target-relative path
+  editing, and keeps success/error receipts on screen. Finding exports
+  additively include remediation application id, patch run id, lifecycle state,
+  reverify outcome/run id, diff hash, and touched paths.
 - **Recon intake.** `recon:import {"tool": "amass|httpx|nuclei|nmap-xml",
   "path": "<file>"}` materialises the named export into the recon
   store. `doctor` warns when any of the optional binaries is missing.
@@ -598,23 +636,28 @@ second TypeScript router. Common verbs include:
 - **Adaptive footer.** Terminals below 70 columns wrap the keybind row
   to two lines instead of truncating behind a `+more` chip.
 
-### Live Module Progress (Activity view)
+### Live Module Progress (Run Focus)
 
-The `/activity` view (auto-opened on `scan` and `kuzushi run`, or via the
-slash command) is a split-pane dashboard showing every running module's
-DAG status plus an ACTIONS strip on the left, and an OUTPUT deck on the right
-with task detail, findings, and generated security artifacts. The feed rows are
-fed by `ctx.trace.step(kind, verb, label).emit()` calls in producer code,
-plumbed through `ToolExecutionContext.trace`.
+`ShellView::Activity` is presented as Run Focus. One `RunFocusModel` owns run
+and sequence identity, planned/DAG task rows, current task, one clipped output
+window, health/stall state, cost, queue depth, launch origin, steer editor, and
+terminal receipt. Planned task identities are authoritative; do not rebuild a
+second checklist from trace labels or special-case `context:build`.
+
+Run Focus has one pure geometry contract shared by render, scrolling, and hit
+testing: width ≥78 is Steps/Output side by side (Steps 32%, clamped to 28–40,
+Output at least 48); width 50–77 stacks vertically with Steps content-sized and
+capped at 40% of the body; width <50 or body height <14 uses one viewport and
+Tab switches Steps/Output. Terminal height alone must not stack a wide screen.
+Foreground Run Focus owns input in Navigate mode and reserves no generic prompt
+row. `s` opens a compact editor that accepts only valid `run <tool> …`; `b`
+backgrounds without cancellation and restores the captured origin.
 
 - **Producer authoring**: see `docs/modules.md` §7.1. Every DAG-participating
   Rust module emits at least `start` + `done` steps; multi-phase modules
   (`triage:run`, `verify:finding`, `agentic-sast:scan`, `taint-iris:hunt`,
   `taint-iris-next:finding-review`, `carlini-threat-hunt:run`, etc.) emit reasoning sub-steps via
   `trace.child(parent)`.
-- **Hidden modules** (`pipeline:*`, `systems-hunt:*`, `context-lite:index`)
-  collapse into one aggregated `subsystems` row. Their events stay out of
-  the feed unless `V` (verbose toggle) is pressed.
 - **Schema**: `RunTraceStep` (v2) carries `module_id`, `verb`,
   `parent_step`, `severity`, `started_at_ms`. All optional, backwards-
   compatible with v1 trace.jsonl files.
@@ -622,12 +665,14 @@ plumbed through `ToolExecutionContext.trace`.
   events into an `mpsc::Sender<RunTraceStep>` consumed by
   `ShellApp::drain_trace_events` and applied to `ActivitySession` via
   `apply_step`.
-- **Keys**: `j`/`k`/`g`/`G` scroll the focused pane, `Tab` toggles pane focus,
-  `←`/`→` switch output pages, `V` toggles verbose subsystem events, `p`
-  freezes/resumes the feed, `R` resets presentation state, `Enter` focuses the
-  selected task, and `o` opens the selected output artifact. Cancellation uses
-  the global `Ctrl+C` chord or the `cancel`/`stop` command, not an Activity-local
-  letter binding.
+- **Projection**: window the retained event ring before formatting and build
+  output rows once per frame. Plain output consumes the same model and emits
+  Steps followed by Output without side-by-side truncation.
+- **Completion**: intermediate prereq-chain, plan, and steer receipts accumulate
+  in deterministic chain → plan → steer order. The final terminal outcome
+  restores the exact origin and shows one receipt with outcome, run count,
+  duration, cost, changed findings/artifacts, and next action. Manual inspection
+  and background-owned work never auto-return.
 
 When adding a new producer module, follow the pattern in
 `crates/kuzushi-core/src/modules/native_scanners/register_modules.rs::run_semgrep_scan`
@@ -660,7 +705,7 @@ let _scope = match (ctx.trace, phase) {
     _ => None,
 };
 // every runtime.query_blocking(...) inside this block now emits a
-// child step under `phase` in the right-pane feed
+// child step under `phase` in the Run Focus output window
 let result = run_triage_stage2(store, runtime, &input, &config, kept)?;
 drop(_scope);
 ```
@@ -671,16 +716,21 @@ Canonical references: `triage:run`, `verify:finding`,
 `x-ray:run`, `run_plugin_finding_adapter`, `shinsa:scan`,
 `prompt-armor:*`.
 
-### Activity view auto-open
+### Patch application and re-verification
 
-`ShellApp.auto_open_activity` defaults to `true`. Both
-`start_background_tool` and `start_scan` set
-`shell_view = ShellView::Activity` when the toggle is on. Operators can
-opt out with `setg ui.auto_open_activity false`; the compatibility env var
-`KUZUSHI_AUTO_OPEN_ACTIVITY=false` is still honored at the adapter boundary.
-The view honours independent pane scroll: `Tab` toggles focus between
-TASKS/OUTPUT, `j`/`k` operates on the focused pane, and manually scrolling the
-feed pauses auto-tail until `p` resumes the feed or `G` jumps to the bottom.
+`PatchResult` describes synthesis and disposable-worktree validation only; a
+`SOUND` result is still merely a draft. Applying a reviewed diff appends a
+`PatchLifecycleRecorded` v3 event keyed by `applicationId` and records target,
+durable finding identity, patch run, diff/base commit, relative touched paths
+with before/after hashes, actor, timestamps, state, and reverify provenance.
+`patch:reverify` is descriptor-backed and headless. Its required
+`applicationId` binds the originating detector and original prepared input at
+the shared registry boundary; it refuses attribution after touched-file hashes
+change and never substitutes a detector, runtime, provider, model, or target.
+Only deterministic successful absence is `Verified`; rediscovery is
+`StillVulnerable`, nondeterministic absence is `NotRediscovered`, and unavailable
+comparison remains `Inconclusive`. Only `Verified` promotes the related patch
+result to `PatchStatus::Verified`.
 
 ### Plain And CI Output
 

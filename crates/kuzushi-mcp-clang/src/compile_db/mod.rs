@@ -1,4 +1,3 @@
-mod generators;
 mod model;
 mod resolve;
 
@@ -9,4 +8,4 @@ pub use model::{CompileDb, Generator};
 pub use resolve::resolve;
 
 #[cfg(test)]
-pub(crate) use generators::count_entries;
+pub(crate) use resolve::count_entries;

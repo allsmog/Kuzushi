@@ -8,7 +8,7 @@ pub(crate) struct ActivityEmptyStateModel {
 
 pub(crate) fn activity_empty_state_model() -> ActivityEmptyStateModel {
     ActivityEmptyStateModel {
-        title: "ACTIVITY · idle",
+        title: "RUN FOCUS · idle",
         glyph_label: "no active run",
         explanations: &[
             "live task status and agent action logs appear here during scans and runs.",
@@ -33,7 +33,7 @@ mod tests {
         assert_eq!(
             activity_empty_state_model(),
             ActivityEmptyStateModel {
-                title: "ACTIVITY · idle",
+                title: "RUN FOCUS · idle",
                 glyph_label: "no active run",
                 explanations: &[
                     "live task status and agent action logs appear here during scans and runs.",

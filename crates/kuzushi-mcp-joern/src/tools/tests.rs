@@ -47,14 +47,17 @@ mod tests {
     }
 
     #[test]
-    fn registry_includes_all_planned_tools() {
-        let r = build_registry();
+    fn registry_includes_only_typed_model_visible_tools() {
+        let root = tempfile::tempdir().unwrap();
+        let capability =
+            kuzushi_mcp_common::ReadRootCapability::new([root.path().to_path_buf()]).unwrap();
+        let r = build_registry_with_capability(capability);
         for name in [
             "joern.health",
             "joern.parse",
-            "joern.query",
             "joern.callers_of",
             "joern.callees_of",
+            "joern.definitions",
             "joern.reaching_def",
             "joern.taint_paths",
             "joern.unsafe_blocks",
@@ -64,15 +67,32 @@ mod tests {
         ] {
             assert!(r.contains(name), "missing tool: {name}");
         }
+        assert!(
+            !r.contains("joern.query"),
+            "raw Scala must not be model-visible"
+        );
     }
 
     #[test]
     fn parse_and_method_at_helpers_validate_arguments_and_shape_output() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = root.path().join("repo");
+        std::fs::create_dir(&repo).unwrap();
+        let capability =
+            kuzushi_mcp_common::ReadRootCapability::new([root.path().to_path_buf()]).unwrap();
         assert_eq!(
-            parse_repo_path(&json!({"repoPath": "/repo"})).unwrap(),
-            std::path::PathBuf::from("/repo")
+            parse_repo_path(&capability, &json!({"repoPath": "repo"})).unwrap(),
+            std::fs::canonicalize(&repo).unwrap()
         );
-        assert!(parse_repo_path(&json!({})).is_err());
+        assert!(parse_repo_path(&capability, &json!({})).is_err());
+
+        let outside = tempfile::tempdir().unwrap();
+        let error = parse_repo_path(
+            &capability,
+            &json!({"repoPath": outside.path().display().to_string()}),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("outside the MCP read roots"));
 
         let request = method_at_request(&json!({"file": "/repo/a.c", "line": 7})).unwrap();
         assert_eq!(request.file, "/repo/a.c");
@@ -112,6 +132,9 @@ mod tests {
         let callers = function_query_json("main".to_string(), "callers", "[\"f\"]".to_string());
         assert_eq!(callers["fn"], "main");
         assert_eq!(callers["callers"], json!(["f"]));
+
+        let definitions = function_query_json("main".to_string(), "matches", "[]".to_string());
+        assert_eq!(definitions["matches"], json!([]));
     }
 
     #[tokio::test]
@@ -122,8 +145,15 @@ mod tests {
 
     #[tokio::test]
     async fn parse_and_method_at_report_backend_unavailable_when_joern_missing() {
-        let parse = ParseTool;
-        assert_backend_unavailable_or_available(parse.call(json!({"repoPath": "/tmp/repo"})).await);
+        let root = tempfile::tempdir().unwrap();
+        let capability =
+            kuzushi_mcp_common::ReadRootCapability::new([root.path().to_path_buf()]).unwrap();
+        let parse = ParseTool::new(capability);
+        assert_backend_unavailable_or_available(
+            parse
+                .call(json!({"repoPath": root.path().display().to_string()}))
+                .await,
+        );
 
         let method_at = MethodAtTool;
         assert_backend_unavailable_or_available(
@@ -131,14 +161,6 @@ mod tests {
                 .call(json!({"file": "/tmp/repo/a.c", "line": 7}))
                 .await,
         );
-    }
-
-    #[tokio::test]
-    async fn stubs_marker_struct_still_returns_not_yet_implemented() {
-        // Kept for any future tool we register as a stub before wiring.
-        let tool = NotYetImplemented("future.tool");
-        let err = tool.call(json!({})).await.unwrap_err();
-        assert!(err.to_string().starts_with("NotYetImplemented:"));
     }
 
     #[tokio::test]

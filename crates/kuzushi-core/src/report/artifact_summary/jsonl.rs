@@ -9,7 +9,31 @@ pub(super) fn jsonl_summary(file: &str, body: &str) -> Option<String> {
     if file == run_trace_artifact_leaf() {
         return trace_summary(body);
     }
+    if file == "items.jsonl" {
+        return run_items_summary(body);
+    }
     None
+}
+
+fn run_items_summary(body: &str) -> Option<String> {
+    let lines = json_lines(body);
+    if lines.values.iter().any(|item| item.get("schemaVersion") == Some(&Value::from(1))) {
+        let mut parts = vec![format!("{} semantic item(s)", lines.values.len())];
+        parts.extend(count_segment("types", nested_item_type_counts(&lines.values)));
+        parts.extend(malformed_line_segment(&lines));
+        return Some(parts.join(", "));
+    }
+    malformed_jsonl_summary(&lines)
+}
+
+fn nested_item_type_counts(items: &[Value]) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for item in items {
+        if let Some(kind) = item.pointer("/item/type").and_then(Value::as_str) {
+            *counts.entry(kind.to_string()).or_insert(0) += 1;
+        }
+    }
+    counts
 }
 
 fn run_events_artifact_leaf() -> &'static str {
@@ -26,7 +50,11 @@ fn run_trace_artifact_leaf() -> &'static str {
 
 fn events_summary(body: &str) -> Option<String> {
     let lines = json_lines(body);
-    if lines.values.iter().any(|event| event.get("status").is_some()) {
+    if lines
+        .values
+        .iter()
+        .any(|event| event.get("status").is_some())
+    {
         let mut parts = vec![format!("{} event(s)", lines.values.len())];
         parts.extend(count_segment("kinds", string_counts(&lines.values, "kind")));
         parts.extend(count_segment("status", event_status_counts(&lines.values)));
@@ -44,7 +72,10 @@ fn trace_summary(body: &str) -> Option<String> {
     if lines.values.iter().any(|step| trace_label(step).is_some()) {
         let mut parts = vec![format!("{} step(s)", lines.values.len())];
         parts.extend(count_segment("kinds", string_counts(&lines.values, "kind")));
-        parts.extend(count_segment("severity", string_counts(&lines.values, "severity")));
+        parts.extend(count_segment(
+            "severity",
+            string_counts(&lines.values, "severity"),
+        ));
         parts.extend(trace_module_segment(&lines.values));
         parts.extend(trace_verb_segment(&lines.values));
         parts.extend(trace_child_step_segment(&lines.values));
@@ -191,19 +222,39 @@ fn trace_step_has_llm_metadata(step: &Value) -> bool {
 }
 
 fn trace_latency_segment(steps: &[Value]) -> Option<String> {
-    let latency = steps
+    let mut latencies = steps
         .iter()
-        .filter_map(|step| u64_at(step, &["latency_ms"]))
-        .sum::<u64>();
-    (latency > 0).then(|| format!("latency {latency}ms"))
+        .filter_map(|step| u64_at(step, &["latency_ms"]));
+    match latencies.try_fold(0_u64, u64::checked_add) {
+        Some(0) => None,
+        Some(latency) => Some(format!("latency {latency}ms")),
+        None => Some("latency invalid".to_string()),
+    }
 }
 
 fn trace_cost_segment(steps: &[Value]) -> Option<String> {
-    let cost = steps
+    let costs = steps
         .iter()
         .filter_map(|step| number_at(step, &["cost_usd"]))
-        .sum::<f64>();
-    (cost > 0.0).then(|| format!("cost ${cost:.6}"))
+        .collect::<Vec<_>>();
+    if costs.is_empty() {
+        return None;
+    }
+    match checked_trace_cost_sum(costs) {
+        Some(cost) if cost > 0.0 => Some(format!("cost ${cost:.6}")),
+        Some(_) => None,
+        None => Some("cost invalid".to_string()),
+    }
+}
+
+fn checked_trace_cost_sum(costs: impl IntoIterator<Item = f64>) -> Option<f64> {
+    costs.into_iter().try_fold(0.0, |total, cost| {
+        if !cost.is_finite() || cost < 0.0 {
+            return None;
+        }
+        let next = total + cost;
+        next.is_finite().then_some(next)
+    })
 }
 
 fn number_at<'a>(value: &'a Value, keys: &[&str]) -> Option<f64> {

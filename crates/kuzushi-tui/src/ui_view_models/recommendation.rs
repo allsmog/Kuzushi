@@ -1,5 +1,8 @@
-use super::{attack_surface_risk_model, ui_latest_run_path, ui_run_dir, AttackSurfaceRiskModel};
-use crate::ShellApp;
+#[cfg(test)]
+use super::ui_latest_run_path;
+use super::{attack_surface_risk_model, ui_run_dir, AttackSurfaceRiskModel};
+use crate::{app::JsonFileState, ShellApp, ViewDataState};
+use kuzushi_core::LatestRunPointerState;
 use std::path::{Path, PathBuf};
 
 const RECOMMENDATION_COLUMN_COUNT: usize = 5;
@@ -59,8 +62,9 @@ pub(crate) struct ComponentRecommendationRow {
 
 pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
     let source = RecommendationSource::from_app(app);
-    let report = read_recommendations(&source.path);
-    let source_detail = artifact_detail_label(&source.path);
+    let artifact = source.artifact_json(app, recommendations_artifact_leaf());
+    let report = read_recommendations(artifact.clone());
+    let source_detail = artifact_detail_label(&source.path, source.target.as_deref(), &artifact);
     let components = report
         .as_ref()
         .map(|view| view.components.clone())
@@ -74,10 +78,10 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
         title: "RECOMMEND",
         detail_rows: recommendation_detail_rows(
             source_detail,
-            source.run_id,
+            source.run_id.clone(),
             source.latest_pointer_invalid,
         ),
-        attack_surface: source.path.parent().and_then(attack_surface_risk_model),
+        attack_surface: attack_surface_risk_model(source.artifact_json(app, "attack-surface.json")),
         summary: report.as_ref().and_then(|view| view.summary.clone()),
         report_headers: RECOMMENDATION_REPORT_HEADERS,
         report_commands,
@@ -89,7 +93,7 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
 
 pub(crate) fn recommendation_components(app: &ShellApp) -> Vec<ComponentRecommendationRow> {
     let source = RecommendationSource::from_app(app);
-    read_recommendations(&source.path)
+    read_recommendations(source.artifact_json(app, recommendations_artifact_leaf()))
         .map(|view| view.components)
         .unwrap_or_default()
 }
@@ -99,10 +103,10 @@ pub(crate) fn recommendation_artifact_needs_refresh(app: &ShellApp) -> bool {
         return false;
     }
     let source = RecommendationSource::from_app(app);
-    match std::fs::metadata(&source.path) {
-        Ok(metadata) => !metadata.is_file(),
-        Err(_) => true,
-    }
+    matches!(
+        source.artifact_json(app, recommendations_artifact_leaf()),
+        JsonFileState::Missing | JsonFileState::NonFile | JsonFileState::Unreadable
+    )
 }
 
 /// True while the deterministic recommender is in flight, so the view can show
@@ -198,32 +202,27 @@ fn missing_recommendation_empty_state() -> RecommendationEmptyState {
     }
 }
 
-fn artifact_detail_label(path: &Path) -> String {
-    let display = path.display().to_string();
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => display,
-        Ok(_) => format!("{display} (not a file)"),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            format!("{display} (missing)")
-        }
-        Err(_) => format!("{display} (unreadable)"),
+fn artifact_detail_label(path: &Path, target: Option<&Path>, artifact: &JsonFileState) -> String {
+    let display_path = target
+        .and_then(|root| path.strip_prefix(root).ok())
+        .unwrap_or(path);
+    let display = display_path.display().to_string();
+    match artifact {
+        JsonFileState::Present(_) | JsonFileState::Malformed => display,
+        JsonFileState::Missing => format!("{display} (missing)"),
+        JsonFileState::NonFile => format!("{display} (not a file)"),
+        JsonFileState::Unreadable => format!("{display} (unreadable)"),
     }
 }
 
-fn read_recommendations(path: &Path) -> Option<RecommendationView> {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return Some(non_file_recommendations_view()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(_) => return Some(malformed_recommendations_view()),
-    }
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(_) => return Some(malformed_recommendations_view()),
-    };
-    let value = match serde_json::from_str::<serde_json::Value>(&text) {
-        Ok(value) => value,
-        Err(_) => return Some(malformed_recommendations_view()),
+fn read_recommendations(artifact: JsonFileState) -> Option<RecommendationView> {
+    let value = match artifact {
+        JsonFileState::Present(value) => value,
+        JsonFileState::Missing => return None,
+        JsonFileState::NonFile => return Some(non_file_recommendations_view()),
+        JsonFileState::Malformed | JsonFileState::Unreadable => {
+            return Some(malformed_recommendations_view())
+        }
     };
     let report = recommendation_report_value(&value);
     Some(RecommendationView {
@@ -434,6 +433,7 @@ fn runtime_label(requires_runtime: bool) -> &'static str {
 }
 
 struct RecommendationSource {
+    target: Option<PathBuf>,
     run_id: Option<String>,
     latest_pointer_invalid: bool,
     path: PathBuf,
@@ -441,67 +441,55 @@ struct RecommendationSource {
 
 impl RecommendationSource {
     fn from_app(app: &ShellApp) -> Self {
-        let root = app.target().unwrap_or_else(|| Path::new("."));
-        let latest = recommendation_latest_run_id(root);
-        let run_dir = latest
-            .run_id
+        let Some(root) = app.target() else {
+            return Self {
+                target: None,
+                run_id: None,
+                latest_pointer_invalid: false,
+                path: ui_run_dir(None, "latest").join(recommendations_artifact_leaf()),
+            };
+        };
+        let latest = match app
+            .workbench_cache()
+            .borrow()
+            .cached_latest_run_pointer(app.target())
+        {
+            ViewDataState::Ready(latest) => latest,
+            ViewDataState::NotRequested | ViewDataState::Loading => LatestRunPointerState::Missing,
+        };
+        let run_id = match &latest {
+            LatestRunPointerState::Ready(run_id) => Some(run_id.as_str().to_string()),
+            LatestRunPointerState::Missing | LatestRunPointerState::Invalid(_) => None,
+        };
+        let run_dir = run_id
             .as_ref()
             .map(|id| ui_run_dir(Some(root), id))
             .unwrap_or_else(|| ui_run_dir(Some(root), "latest"));
         Self {
-            run_id: latest.run_id,
-            latest_pointer_invalid: latest.invalid,
+            target: app.target_path_buf().cloned(),
+            run_id,
+            latest_pointer_invalid: matches!(latest, LatestRunPointerState::Invalid(_)),
             path: run_dir.join(recommendations_artifact_leaf()),
+        }
+    }
+
+    fn artifact_json(&self, app: &ShellApp, leaf: &str) -> JsonFileState {
+        let (Some(target), Some(run_id)) = (self.target.as_deref(), self.run_id.as_deref()) else {
+            return JsonFileState::Missing;
+        };
+        match app
+            .workbench_cache()
+            .borrow()
+            .cached_run_artifact_json(target, run_id, leaf)
+        {
+            ViewDataState::Ready(state) => state,
+            ViewDataState::NotRequested | ViewDataState::Loading => JsonFileState::Missing,
         }
     }
 }
 
 fn recommendations_artifact_leaf() -> &'static str {
     "recommendations.json"
-}
-
-struct RecommendationLatestRunId {
-    run_id: Option<String>,
-    invalid: bool,
-}
-
-fn recommendation_latest_run_id(root: &Path) -> RecommendationLatestRunId {
-    let latest_path = ui_latest_run_path(Some(root));
-    match std::fs::metadata(&latest_path) {
-        Ok(metadata) if metadata.is_file() => recommendation_latest_run_file(&latest_path),
-        Ok(_) => RecommendationLatestRunId {
-            run_id: None,
-            invalid: true,
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => RecommendationLatestRunId {
-            run_id: None,
-            invalid: false,
-        },
-        Err(_) => RecommendationLatestRunId {
-            run_id: None,
-            invalid: true,
-        },
-    }
-}
-
-fn recommendation_latest_run_file(path: &Path) -> RecommendationLatestRunId {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return RecommendationLatestRunId {
-            run_id: None,
-            invalid: true,
-        };
-    };
-    let run_id = text.trim();
-    if run_id.is_empty() {
-        return RecommendationLatestRunId {
-            run_id: None,
-            invalid: true,
-        };
-    }
-    RecommendationLatestRunId {
-        run_id: Some(run_id.to_string()),
-        invalid: false,
-    }
 }
 
 struct RecommendationView {
@@ -513,6 +501,7 @@ struct RecommendationView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui_view_models::ui_latest_run_path;
     use serde_json::json;
     use std::fs;
 
@@ -521,6 +510,15 @@ mod tests {
     }
 
     fn write_latest_run(root: &Path, run_id: &str) {
+        let run_dir = test_run_dir(root, run_id);
+        fs::create_dir_all(&run_dir).unwrap();
+        let summary =
+            kuzushi_core::RunSummary::running(run_id, "tool", None, root.display().to_string());
+        fs::write(
+            run_dir.join("run.json"),
+            serde_json::to_string(&summary).unwrap(),
+        )
+        .unwrap();
         fs::write(ui_latest_run_path(Some(root)), run_id).unwrap();
     }
 
@@ -551,6 +549,17 @@ mod tests {
         let targetless = recommendation_empty_state(false, false);
         assert_eq!(targetless.title, "choose a target first");
         assert_eq!(targetless.commands, ["target <path>", "demo", "back"]);
+    }
+
+    #[test]
+    fn targetless_recommendation_source_does_not_resolve_cwd_as_a_run_root() {
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+
+        let source = RecommendationSource::from_app(&app);
+
+        assert_eq!(source.target, None);
+        assert_eq!(source.run_id, None);
+        assert!(!source.latest_pointer_invalid);
     }
 
     #[test]
@@ -687,10 +696,15 @@ mod tests {
         .unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = recommendation_model(&app);
 
         assert_eq!(model.summary.as_deref(), Some("1 recommendation for /repo"));
+        assert_eq!(
+            model.detail_rows[0].cells[1],
+            ".kuzushi/v3/runs/run-rec/recommendations.json"
+        );
         assert_eq!(model.detail_rows[1].cells[1], "run-rec");
         assert_eq!(model.rows.len(), 1);
         assert_eq!(model.rows[0].cells[1], "threat-model:build");
@@ -709,6 +723,7 @@ mod tests {
         fs::write(run_dir.join(recommendations_artifact_leaf()), "{not-json").unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = recommendation_model(&app);
 
@@ -731,6 +746,7 @@ mod tests {
         fs::create_dir(run_dir.join(recommendations_artifact_leaf())).unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = recommendation_model(&app);
 
@@ -751,6 +767,7 @@ mod tests {
         create_invalid_latest_pointer(temp.path());
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = recommendation_model(&app);
 
@@ -768,6 +785,7 @@ mod tests {
         write_blank_latest_pointer(temp.path());
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = recommendation_model(&app);
 
@@ -817,6 +835,13 @@ mod tests {
             serde_json::json!({"recommendations": []}).to_string(),
         )
         .unwrap();
+        {
+            let mut cache = app.workbench_cache().borrow_mut();
+            cache.invalidate_run_summaries();
+            cache.invalidate_workspace_files();
+        }
+        app.invalidate_view_hydration();
+        app.hydrate_all_view_data_for_test();
 
         assert!(!recommendation_artifact_needs_refresh(&app));
     }
@@ -827,6 +852,7 @@ mod tests {
         write_component_recommendation_artifact(temp.path());
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = recommendation_model(&app);
 

@@ -51,14 +51,6 @@ export const PROOF_STATES = [
 ] as const;
 export type ProofState = (typeof PROOF_STATES)[number];
 
-export const PROOF_STATE_PRECEDENCE = {
-  symbolic_only: 0,
-  inconclusive: 1,
-  execution_attempted: 2,
-  execution_rejected: 3,
-  execution_confirmed: 4,
-} as const satisfies Record<ProofState, number>;
-
 export const ENGINE_PROVENANCE_KINDS = [
   "semgrep",
   "codeql",
@@ -84,34 +76,3 @@ export const PATCH_STATUSES = [
   "UNKNOWN",
 ] as const;
 export type PatchStatus = (typeof PATCH_STATUSES)[number];
-
-export const PIPELINE_RUN_STATUSES = [
-  "scanning",
-  "triaging",
-  "verifying",
-  "poc-harnessing",
-  "dynamic-analyzing",
-  "interrupted",
-  "complete",
-  "error",
-  "aborted",
-] as const;
-export type PipelineRunStatus = (typeof PIPELINE_RUN_STATUSES)[number];
-
-export const ACTIVE_PIPELINE_RUN_STATUSES = [
-  "scanning",
-  "triaging",
-  "verifying",
-  "poc-harnessing",
-  "dynamic-analyzing",
-] as const satisfies readonly PipelineRunStatus[];
-
-export const REPORT_MODES = ["full", "suppress"] as const;
-export type ReportMode = (typeof REPORT_MODES)[number];
-
-export function isOneOf<const T extends readonly string[]>(
-  values: T,
-  value: string | null | undefined,
-): value is T[number] {
-  return typeof value === "string" && (values as readonly string[]).includes(value);
-}

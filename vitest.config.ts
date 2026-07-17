@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     include: [
       "tests/modules/public-surface.test.ts",
+      "tests/testing/public-surface.test.ts",
       "tests/modules/define.test.ts",
       "tests/modules/loader.test.ts",
       "tests/modules/loader-import.test.ts",
@@ -15,14 +16,16 @@ export default defineConfig({
       "tests/langgraph-bridge/mcp-plan.test.ts",
       "tests/langgraph-bridge/schema.test.ts",
       "tests/langgraph-bridge/oauth-models.test.ts",
+      "tests/langgraph-bridge/error-safety.test.ts",
+      "tests/langgraph-bridge/diagnostics.test.ts",
       "tests/langgraph-bridge/oauth-login.test.ts",
+      "tests/native-wrapper.test.ts",
     ],
     exclude: [
       "**/node_modules/**",
       "**/.claude/worktrees/**",
       "**/.worktrees/**",
       ".codex-active/**",
-      ".ralph/**",
       "benchmarks/**",
     ],
     coverage: {
@@ -60,6 +63,15 @@ export default defineConfig({
         statements: 65,
         branches: 76,
         functions: 40,
+        // The published `kuzushi/testing` surface is a consumer contract.
+        // Keep a dedicated floor so a newly exported, unexercised helper
+        // cannot hide inside the broader SDK-host aggregate.
+        "src/testing/**": {
+          lines: 90,
+          statements: 90,
+          branches: 85,
+          functions: 90,
+        },
       },
     },
   },

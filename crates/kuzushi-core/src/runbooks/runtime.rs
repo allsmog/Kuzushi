@@ -5,11 +5,11 @@ use super::manifest::RunbookManifest;
 use anyhow::{Context, Result};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
-use std::fs;
 use std::path::Path;
 
 use crate::run_artifacts::{
-    run_artifact_path, write_run_artifact_json, ParentScope, RunArtifact, TraceHandle,
+    read_run_artifact_text, write_run_artifact_json, ParentScope, RunArtifact, RunArtifactRead,
+    TraceHandle,
 };
 
 pub struct RunbookRuntime<'a> {
@@ -149,12 +149,12 @@ impl<'a> RunbookRuntime<'a> {
         step_id: &str,
         key: &WorkItemKey,
     ) -> Result<Option<T>> {
-        let path = run_artifact_path(
+        let read = read_run_artifact_text(
             self.target,
             self.run_id,
             &item_leaf(self.manifest.id, step_id, key),
         );
-        let Ok(text) = fs::read_to_string(&path) else {
+        let RunArtifactRead::Ready { path, value: text } = read else {
             return Ok(None);
         };
         let json: Value = serde_json::from_str(&text)
@@ -221,7 +221,10 @@ fn item_leaf(runbook_id: &str, step_id: &str, key: &WorkItemKey) -> String {
 fn with_runbook_metadata(value: Value, manifest: &RunbookManifest, run_id: &str) -> Value {
     match value {
         Value::Object(mut object) => {
-            object.insert("schemaVersion".to_string(), json!(manifest.output_schema_version));
+            object.insert(
+                "schemaVersion".to_string(),
+                json!(manifest.output_schema_version),
+            );
             object.insert("runbookId".to_string(), json!(manifest.id));
             object.insert("runbookVersion".to_string(), json!(manifest.version));
             object.insert("toolName".to_string(), json!(manifest.owner_tool));

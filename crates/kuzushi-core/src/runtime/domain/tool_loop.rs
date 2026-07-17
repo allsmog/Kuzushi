@@ -1,5 +1,11 @@
 use super::*;
 
+/// Reserved root-shell interaction tool. Headless toolboxes deliberately do
+/// not implement it; an unexpected call receives a structured refusal instead
+/// of reading stdin or choosing an answer on the operator's behalf.
+pub const REQUEST_USER_INPUT_TOOL_NAME: &str = "request_user_input";
+pub const INTERACTION_REQUIRED_CODE: &str = "INTERACTION_REQUIRED";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentTool {
     /// Tool identifier exposed to the model (e.g. `read_source`).
@@ -76,6 +82,25 @@ pub enum AgentLoopStep {
     },
 }
 
+impl AgentLoopStep {
+    pub fn validate_cost(self) -> Result<Self> {
+        if let Some(cost_usd) = self.cost_usd() {
+            super::RuntimeCost::from_usd(cost_usd, "agent loop step cost")?;
+        }
+        Ok(self)
+    }
+
+    pub fn cost_usd(&self) -> Option<f64> {
+        match self {
+            Self::ToolCall { cost_usd, .. } | Self::Final { cost_usd, .. } => *cost_usd,
+        }
+    }
+
+    pub fn checked_cost_report(&self) -> Result<super::RuntimeCostReport> {
+        super::RuntimeCostReport::from_optional(self.cost_usd(), "agent loop step cost")
+    }
+}
+
 pub trait ToolCallHandler: Send {
     fn run(&mut self, call: &ToolCall) -> Result<ToolResult>;
 }
@@ -119,6 +144,9 @@ impl ToolCallHandler for ToolBox {
     fn run(&mut self, call: &ToolCall) -> Result<ToolResult> {
         match self.tools.get_mut(&call.name) {
             Some(handler) => handler(call),
+            None if call.name == REQUEST_USER_INPUT_TOOL_NAME => {
+                Ok(headless_interaction_required(call))
+            }
             None => Ok(ToolResult {
                 call_id: call.call_id.clone(),
                 output: serde_json::json!({
@@ -127,5 +155,16 @@ impl ToolCallHandler for ToolBox {
                 is_error: true,
             }),
         }
+    }
+}
+
+fn headless_interaction_required(call: &ToolCall) -> ToolResult {
+    ToolResult {
+        call_id: call.call_id.clone(),
+        output: serde_json::json!({
+            "code": INTERACTION_REQUIRED_CODE,
+            "error": "operator input is required; rerun in the interactive Kuzushi shell"
+        }),
+        is_error: true,
     }
 }

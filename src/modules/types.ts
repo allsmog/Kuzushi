@@ -9,7 +9,6 @@
  * They work identically across all three execution modes (pipeline, shell, run).
  */
 
-import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { MessageBus } from "../bus/types.js";
 import type { KuzushiConfig, SecurityProfile } from "../public-types.js";
@@ -93,16 +92,6 @@ export interface TriageAgentConfig {
  *  - excellent : production-grade; very high signal
  */
 export type ModuleRank = "manual" | "low" | "normal" | "good" | "great" | "excellent";
-
-/** Numeric ordering matching msf::RankingName. */
-export const RANK_VALUE: Record<ModuleRank, number> = {
-  manual: 0,
-  low: 100,
-  normal: 300,
-  good: 400,
-  great: 500,
-  excellent: 600,
-};
 
 /** Qualitative notes about runtime behavior (msf::Notes). */
 export interface ModuleNotes {
@@ -212,9 +201,27 @@ export interface DagContext {
   gitRoot?: string;
   repoName: string;
   /** Optional findings DB for regression detection + historical lookups. */
-  db?: Database.Database;
+  db?: DagDatabase;
   /** Outputs from completed dependency nodes, keyed by qualified tool name. */
   upstreamOutputs: ReadonlyMap<string, unknown>;
+}
+
+/**
+ * Minimal prepared-statement surface exposed to DAG tools.
+ *
+ * The SDK deliberately owns this structural contract instead of exporting a
+ * concrete SQLite driver's types. Database implementations such as
+ * `better-sqlite3` remain assignable when they provide this common subset.
+ */
+export interface DagDatabaseStatement {
+  run(...parameters: unknown[]): unknown;
+  get(...parameters: unknown[]): unknown;
+  all(...parameters: unknown[]): unknown[];
+}
+
+/** Minimal structural database handle accepted by `DagContext.db`. */
+export interface DagDatabase {
+  prepare(source: string): DagDatabaseStatement;
 }
 
 // Module tool types
@@ -229,6 +236,10 @@ export interface ToolResult {
   data?: unknown;
   /** Optional cost in USD for this tool invocation. */
   costUsd?: number;
+  /** Provider-observed subtotal when the complete charge is unavailable. */
+  observedCostUsd?: number;
+  /** True when at least one paid provider call did not return trustworthy usage. */
+  providerSpendUnresolved?: boolean;
 }
 
 /** Context provided to every tool execution. */
@@ -421,6 +432,71 @@ export interface ExecutionContext {
  * A tool exposed by a module — callable from shell mode (via LLM tool dispatch),
  * run mode (direct headless invocation), or pipeline mode (if wrapped as a task).
  */
+export type NativeDynamicOptionType =
+  | "string"
+  | "bool"
+  | "int"
+  | "float"
+  | "path"
+  | "enum"
+  | "string-list"
+  | "json";
+
+export type NativeDynamicPathSemantics =
+  | "workspace-read"
+  | "state-write"
+  | "target-write"
+  | "external-read"
+  | "external-write"
+  | "executable";
+
+interface NativeDynamicOptionSpecBase {
+  readonly name: string;
+  readonly description: string;
+  readonly required?: boolean;
+  readonly advanced?: boolean;
+  readonly evasion?: boolean;
+  readonly default?: unknown;
+  readonly choices?: readonly string[];
+  readonly aliases?: readonly string[];
+  readonly deprecatedAliases?: readonly string[];
+}
+
+/** Descriptor-native option metadata accepted by the trusted Node bridge. */
+export type NativeDynamicOptionSpec = NativeDynamicOptionSpecBase &
+  (
+    | {
+        readonly type: "path";
+        /** Controls containment and stored-option provenance. */
+        readonly pathSemantics: NativeDynamicPathSemantics;
+        readonly minimum?: never;
+        readonly maximum?: never;
+      }
+    | {
+        readonly type: "int";
+        readonly pathSemantics?: never;
+        /** Inclusive descriptor-owned bounds enforced before dispatch. */
+        readonly minimum?: number;
+        readonly maximum?: number;
+      }
+    | {
+        readonly type: Exclude<NativeDynamicOptionType, "path" | "int">;
+        readonly pathSemantics?: never;
+        readonly minimum?: never;
+        readonly maximum?: never;
+      }
+  );
+
+/** Editable instruction template projected into the native prompt preflight. */
+export interface NativeDynamicPromptSpec {
+  readonly role: string;
+  readonly moduleId: string;
+  readonly verb: string;
+  readonly optionKey: string;
+  readonly defaultContent: string;
+  readonly contextNote?: string;
+}
+
 export interface ModuleTool {
   /** Fully qualified name: "module:action" (e.g. "blackbox:recon"). */
   readonly name: string;
@@ -429,11 +505,42 @@ export interface ModuleTool {
   /** JSON Schema for the tool's input parameters. */
   readonly inputSchema: JSONSchema;
   /**
+   * Optional native descriptor projection. When present, the trusted dynamic
+   * host uses this instead of deriving options from `inputSchema`.
+   */
+  readonly options?: ReadonlyArray<NativeDynamicOptionSpec>;
+  /** Optional operator-reviewable prompt templates for model-backed tools. */
+  readonly prompts?: ReadonlyArray<NativeDynamicPromptSpec>;
+  /**
    * Whether this tool can run without interactive confirmation.
    * Tools marked headless: true work in all three modes.
    * Tools marked headless: false require shell mode (approval gate in run/pipeline modes).
    */
   readonly headless: boolean;
+  /**
+   * Native runtime requirement carried into the Rust ToolDescriptor.
+   * `always` makes every mode construct the operator-selected runtime before
+   * dispatch; omitted/`never` keeps deterministic tools runtime-free.
+   */
+  readonly runtimeRequirement?: "never" | "always";
+  /** Journey/catalog grouping metadata consumed by native and SDK hosts. */
+  /**
+   * Durable workflow phase. Hosts serialize the canonical five-phase tokens.
+   * `hunt` and `confirm` are deprecated input aliases retained for one major
+   * compatibility window; they normalize to `scan` and `prove` respectively.
+   */
+  readonly phase?: "map" | "scan" | "review" | "prove" | "fix" | "operate" | "hunt" | "confirm";
+  /** Native dispatch side-effect contract. Required when loaded through `--load`. */
+  readonly effect?:
+    | "read"
+    | "workspace-write"
+    | "target-write"
+    | "repository-execute"
+    | "external-action";
+  /** Native approval contract. Required when loaded through `--load`. */
+  readonly approval?: "none" | "explicit";
+  /** Active-workspace capability requirement. Required when loaded through `--load`. */
+  readonly workspaceRequirement?: "optional" | "required";
   /**
    * Optional reliability tier — defaults to the module's rank if unset.
    * Used by `search rank:...` and `info` output.

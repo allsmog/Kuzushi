@@ -6,6 +6,7 @@ pub struct PrCommentInput {
     pub findings: Vec<Finding>,
     pub chains: Vec<PrCommentChain>,
     pub cost_usd: f64,
+    pub provider_spend_unresolved: bool,
     pub phase_costs: Vec<PrCommentPhaseCost>,
     pub elapsed: Option<Duration>,
     pub run_url: Option<String>,

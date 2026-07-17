@@ -14,7 +14,7 @@ pub(crate) use tree::TreeDiagram;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget, Wrap};
 
 /// Set one cell's glyph + colour, clipped to `area` (coords are area-relative).
 pub(super) fn put(buf: &mut Buffer, area: Rect, x: u16, y: u16, ch: &str, color: Color) {
@@ -22,7 +22,8 @@ pub(super) fn put(buf: &mut Buffer, area: Rect, x: u16, y: u16, ch: &str, color:
     if ax < area.right() && ay < area.bottom() {
         if let Some(cell) = buf.cell_mut((ax, ay)) {
             cell.set_symbol(ch);
-            if !crate::theme::active_theme().no_color {
+            let color = crate::theme::terminal_color(color);
+            if color != Color::Reset {
                 cell.set_fg(color);
             }
         }
@@ -65,6 +66,7 @@ pub(super) fn render_empty_state_panel(
         &[hint],
         ctas,
     ))
+    .wrap(Wrap { trim: false })
     .render(area, buf);
 }
 
@@ -139,7 +141,8 @@ pub(super) fn panel(
 }
 
 fn diagram_style(color: Color) -> Style {
-    if crate::theme::active_theme().no_color {
+    let color = crate::theme::terminal_color(color);
+    if color == Color::Reset {
         Style::default()
     } else {
         Style::default().fg(color)

@@ -50,6 +50,7 @@ mod cursor_and_view_keys;
 mod exit_requests;
 mod key_dispatch;
 mod keybinding_types;
+mod operator_question_keys;
 mod page_scroll;
 mod pending_plan_keys;
 mod picker_keys;

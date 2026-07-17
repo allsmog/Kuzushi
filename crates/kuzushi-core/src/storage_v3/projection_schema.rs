@@ -222,6 +222,8 @@ create table if not exists verification_events (
   stable_fp text not null,
   finding_id integer,
   identity_id text,
+  verification_run_id text,
+  verified_scan_id text,
   proof_level integer not null,
   proof_verdict text not null,
   backend text not null,
@@ -256,6 +258,7 @@ create table if not exists patch_attempt_events (
   test_command text,
   worktree_path text,
   cost_usd real,
+  provider_spend_unresolved integer,
   validator_log text,
   history_json text not null,
   actor text not null,
@@ -266,6 +269,57 @@ create index if not exists idx_patch_attempt_events_stable_fp
   on patch_attempt_events(stable_fp, seq desc);
 create index if not exists idx_patch_attempt_events_run
   on patch_attempt_events(patch_run_id);
+
+create table if not exists patch_lifecycle_events (
+  event_hash text primary key,
+  seq integer not null unique,
+  application_id text not null,
+  stable_fp text not null,
+  fingerprint text not null,
+  finding_scan_id text,
+  patch_run_id text not null,
+  target text not null,
+  diff_hash text not null,
+  base_commit text,
+  touched_files_json text not null,
+  state text not null,
+  reverify_run_id text,
+  detail text,
+  actor text not null,
+  application_started_at text not null,
+  applied_at text not null,
+  updated_at text not null,
+  created_at text not null,
+  payload_json text not null
+);
+create index if not exists idx_patch_lifecycle_events_application
+  on patch_lifecycle_events(application_id, seq desc);
+create index if not exists idx_patch_lifecycle_events_stable_fp
+  on patch_lifecycle_events(stable_fp, seq desc);
+
+create table if not exists patch_lifecycle_current (
+  application_id text primary key,
+  latest_seq integer not null,
+  stable_fp text not null,
+  fingerprint text not null,
+  finding_scan_id text,
+  patch_run_id text not null,
+  target text not null,
+  diff_hash text not null,
+  base_commit text,
+  touched_files_json text not null,
+  state text not null,
+  reverify_run_id text,
+  detail text,
+  actor text not null,
+  application_started_at text not null,
+  applied_at text not null,
+  updated_at text not null
+);
+create index if not exists idx_patch_lifecycle_current_stable_fp
+  on patch_lifecycle_current(stable_fp, latest_seq desc);
+create index if not exists idx_patch_lifecycle_current_fingerprint
+  on patch_lifecycle_current(fingerprint, latest_seq desc);
 
 create table if not exists audit_events (
   event_hash text primary key,

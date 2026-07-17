@@ -130,7 +130,10 @@ pub(crate) const SHOW_COMPLETION_RULES: &[SubcommandCompletionRule] = &[
     },
 ];
 
-pub(crate) fn primary_completion_values(app: &ShellApp, command: &str) -> Option<Vec<String>> {
+pub(crate) fn primary_completion_values<'a>(
+    app: &'a ShellApp,
+    command: &str,
+) -> Option<CompletionValues<'a>> {
     PRIMARY_COMPLETION_PROVIDERS
         .iter()
         .find(|provider| provider.commands.contains(&command))

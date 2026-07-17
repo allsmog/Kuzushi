@@ -1,9 +1,8 @@
-use super::{
-    ui_latest_run_path, ui_latest_run_relative_path, ui_run_artifact_relative_path, ui_run_dir,
-};
-use crate::ShellApp;
+use super::{ui_latest_run_relative_path, ui_run_artifact_relative_path};
+use crate::{ShellApp, ViewDataState};
 use kuzushi_core::run_artifacts::{canonical_run_artifact_spec, FailureToLlmContext, RunFailures};
-use std::path::{Path, PathBuf};
+use kuzushi_core::{LatestRunPointerState, RunArtifactRead};
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FailureHandoffModel {
@@ -109,25 +108,43 @@ fn live_failure_context(app: &ShellApp) -> Option<FailureToLlmContext> {
 
 fn persisted_failure_model(app: &ShellApp) -> Option<FailureHandoffModel> {
     let root = app.target()?;
-    let latest = failure_latest_run_id(root);
-    if latest.invalid {
-        return Some(invalid_latest_pointer_model());
+    let latest = match app
+        .workbench_cache()
+        .borrow()
+        .cached_latest_run_pointer(Some(root))
+    {
+        ViewDataState::Ready(latest) => latest,
+        ViewDataState::NotRequested | ViewDataState::Loading => return None,
+    };
+    match latest {
+        LatestRunPointerState::Missing => None,
+        LatestRunPointerState::Invalid(_) => Some(invalid_latest_pointer_model()),
+        LatestRunPointerState::Ready(run_id) => {
+            load_latest_failure_model(app, root, run_id.as_str())
+        }
     }
-    let run_id = latest.run_id?;
-    load_latest_failure_model(root, &run_id)
 }
 
-fn load_latest_failure_model(root: &Path, run_id: &str) -> Option<FailureHandoffModel> {
-    let path = failure_artifact_path(root, run_id);
-    match std::fs::metadata(&path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return Some(non_file_failure_artifact_model(run_id)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(_) => return Some(malformed_failure_artifact_model(run_id)),
-    }
-    let body = match std::fs::read_to_string(path) {
-        Ok(body) => body,
-        Err(_) => return Some(malformed_failure_artifact_model(run_id)),
+fn load_latest_failure_model(
+    app: &ShellApp,
+    root: &Path,
+    run_id: &str,
+) -> Option<FailureHandoffModel> {
+    let read = match app.workbench_cache().borrow().cached_run_artifact_text(
+        root,
+        run_id,
+        failures_artifact_leaf(),
+    ) {
+        ViewDataState::Ready(read) => read,
+        ViewDataState::NotRequested | ViewDataState::Loading => return None,
+    };
+    let body = match read {
+        RunArtifactRead::Ready { value, .. } => value,
+        RunArtifactRead::Missing { .. } => return None,
+        RunArtifactRead::NonFile { .. } => return Some(non_file_failure_artifact_model(run_id)),
+        RunArtifactRead::Unsafe { .. } | RunArtifactRead::Unreadable { .. } => {
+            return Some(malformed_failure_artifact_model(run_id))
+        }
     };
     let report = match serde_json::from_str::<RunFailures>(&body) {
         Ok(report) => report,
@@ -138,54 +155,6 @@ fn load_latest_failure_model(root: &Path, run_id: &str) -> Option<FailureHandoff
         .into_iter()
         .next()
         .map(|failure| failure_handoff_model_from_context(&failure.agent_thread_context))
-}
-
-fn failure_artifact_path(root: &Path, run_id: &str) -> PathBuf {
-    ui_run_dir(Some(root), run_id).join(failures_artifact_leaf())
-}
-
-struct FailureLatestRunId {
-    run_id: Option<String>,
-    invalid: bool,
-}
-
-fn failure_latest_run_id(root: &Path) -> FailureLatestRunId {
-    let latest_path = ui_latest_run_path(Some(root));
-    match std::fs::metadata(&latest_path) {
-        Ok(metadata) if metadata.is_file() => failure_latest_run_file(&latest_path),
-        Ok(_) => FailureLatestRunId {
-            run_id: None,
-            invalid: true,
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => FailureLatestRunId {
-            run_id: None,
-            invalid: false,
-        },
-        Err(_) => FailureLatestRunId {
-            run_id: None,
-            invalid: true,
-        },
-    }
-}
-
-fn failure_latest_run_file(path: &Path) -> FailureLatestRunId {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return FailureLatestRunId {
-            run_id: None,
-            invalid: true,
-        };
-    };
-    let run_id = text.trim();
-    if run_id.is_empty() {
-        return FailureLatestRunId {
-            run_id: None,
-            invalid: true,
-        };
-    }
-    FailureLatestRunId {
-        run_id: Some(run_id.to_string()),
-        invalid: false,
-    }
 }
 
 fn invalid_latest_pointer_model() -> FailureHandoffModel {
@@ -297,13 +266,28 @@ fn failures_artifact_leaf() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui_view_models::{ui_latest_run_path, ui_run_dir};
     use kuzushi_core::run_artifacts::{
         record_tool_run_failed, record_tool_run_started, RunArtifact, ToolRunRecord,
     };
     use kuzushi_core::V2Config;
+    use std::path::PathBuf;
 
     fn test_run_dir(root: &Path, run_id: &str) -> PathBuf {
         ui_run_dir(Some(root), run_id)
+    }
+
+    fn write_latest_run(root: &Path, run_id: &str) {
+        let run_dir = test_run_dir(root, run_id);
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let summary =
+            kuzushi_core::RunSummary::running(run_id, "tool", None, root.display().to_string());
+        std::fs::write(
+            run_dir.join("run.json"),
+            serde_json::to_string(&summary).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(ui_latest_run_path(Some(root)), format!("{run_id}\n")).unwrap();
     }
 
     #[test]
@@ -376,6 +360,7 @@ mod tests {
 
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = failure_handoff_model(&app).unwrap();
 
@@ -395,12 +380,12 @@ mod tests {
     fn failure_handoff_model_surfaces_malformed_failures_artifact() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = test_run_dir(temp.path(), "run-bad-failure");
-        std::fs::create_dir_all(&run_dir).unwrap();
-        std::fs::write(ui_latest_run_path(Some(temp.path())), "run-bad-failure\n").unwrap();
+        write_latest_run(temp.path(), "run-bad-failure");
         std::fs::write(run_dir.join(failures_artifact_leaf()), "{not-json").unwrap();
 
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = failure_handoff_model(&app).unwrap();
 
@@ -419,16 +404,12 @@ mod tests {
     fn failure_handoff_model_surfaces_non_file_failures_artifact() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = test_run_dir(temp.path(), "run-unreadable-failure");
-        std::fs::create_dir_all(&run_dir).unwrap();
-        std::fs::write(
-            ui_latest_run_path(Some(temp.path())),
-            "run-unreadable-failure\n",
-        )
-        .unwrap();
+        write_latest_run(temp.path(), "run-unreadable-failure");
         std::fs::create_dir(run_dir.join(failures_artifact_leaf())).unwrap();
 
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = failure_handoff_model(&app).unwrap();
 
@@ -451,6 +432,7 @@ mod tests {
 
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = failure_handoff_model(&app).unwrap();
 
@@ -468,6 +450,7 @@ mod tests {
 
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
 
         let model = failure_handoff_model(&app).unwrap();
 

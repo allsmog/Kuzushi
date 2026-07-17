@@ -31,7 +31,7 @@ pub(crate) const FEATURED_HELP_EXAMPLES: &[&str] = &[
     "run .",
     "findings",
     "open F-0001",
-    "model 1",
+    "findings export report.sarif sarif",
 ];
 
 pub fn shell_command_specs() -> impl Iterator<Item = &'static ShellCommandSpec> {
@@ -126,6 +126,7 @@ fn parse_catalog_command(verb: &str) -> Option<ShellCommand> {
 fn parse_session_command(verb: &str) -> Option<ShellCommand> {
     match verb {
         "workbench" => Some(ShellCommand::Workbench(WorkbenchPane::Findings)),
+        "report" => Some(ShellCommand::Report),
         "doctor" | "health" => Some(ShellCommand::Health),
         "cost" => Some(ShellCommand::Cost),
         "config" => Some(ShellCommand::Config),
@@ -135,12 +136,13 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "keys" | "keymap" => Some(ShellCommand::Keymap),
         "update" | "updates" | "changelog" => Some(ShellCommand::UpdateAvailable),
         "history" => Some(ShellCommand::History),
+        "session" => Some(ShellCommand::SessionInfo),
         "clear" => Some(ShellCommand::Clear),
         "pause" => Some(ShellCommand::Pause),
         "cancel" | "c" | "stop" => Some(ShellCommand::Cancel),
         "story" => Some(ShellCommand::Story),
         "quickstart" => Some(ShellCommand::Quickstart),
-        "onboarding" | "planning" => Some(ShellCommand::Onboarding),
+        "setup" | "onboarding" | "planning" => Some(ShellCommand::Onboarding),
         "next" | "continue" => Some(ShellCommand::Next),
         "logs" | "log" | "transcript" => Some(ShellCommand::Logs),
         "background" | "bg" => Some(ShellCommand::Background),
