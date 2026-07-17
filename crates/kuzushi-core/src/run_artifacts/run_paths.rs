@@ -13,7 +13,7 @@ pub fn new_run_id(prefix: &str) -> String {
         prefix.as_str()
     };
     let suffix = Uuid::new_v4().simple().to_string();
-    format!("{prefix}-{}-{}", now_unix(), &suffix[..12])
+    format!("{prefix}-{}-{}", now_unix_millis(), &suffix[..12])
 }
 
 pub fn runs_root(target: impl AsRef<Path>) -> PathBuf {
@@ -233,16 +233,25 @@ fn sanitize_run_id_prefix(prefix: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn now_unix() -> u64 {
+fn now_unix_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs()
+        .as_millis()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_run_ids_embed_millisecond_ordering_time() {
+        let run_id = new_run_id("run");
+        let (without_suffix, _) = run_id.rsplit_once('-').unwrap();
+        let (_, timestamp) = without_suffix.rsplit_once('-').unwrap();
+
+        assert!(timestamp.parse::<u128>().unwrap() >= 1_000_000_000_000);
+    }
 
     #[test]
     fn run_artifact_paths_use_workspace_v3_state_dir() {

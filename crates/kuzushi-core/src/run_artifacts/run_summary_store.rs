@@ -618,10 +618,9 @@ fn compare_run_summary_entries(
     right: &RunSummaryEntry,
 ) -> std::cmp::Ordering {
     match (&left.state, &right.state) {
-        (RunSummaryEntryState::Ready(left), RunSummaryEntryState::Ready(right)) => right
-            .started_at_unix
-            .cmp(&left.started_at_unix)
-            .then_with(|| right.run_id.cmp(&left.run_id)),
+        (RunSummaryEntryState::Ready(left), RunSummaryEntryState::Ready(right)) => {
+            compare_run_recency(right, left)
+        }
         (RunSummaryEntryState::Ready(_), RunSummaryEntryState::Issue(_)) => {
             std::cmp::Ordering::Less
         }
@@ -735,7 +734,7 @@ fn candidate_is_latest(target: &Path, latest_path: &Path, candidate: &RunSummary
     let Some(current) = read_run_summary_file(target, current_id, &current_path) else {
         return true;
     };
-    (candidate.started_at_unix, &candidate.run_id) > (current.started_at_unix, &current.run_id)
+    compare_run_recency(candidate, &current).is_gt()
 }
 
 pub fn repair_latest_run_pointer(target: impl AsRef<Path>) -> Result<Option<String>> {
@@ -781,12 +780,22 @@ fn reject_non_file_target(path: &Path, label: &str) -> Result<()> {
 }
 
 fn sort_run_summaries(summaries: &mut [RunSummary]) {
-    summaries.sort_by(|left, right| {
-        right
-            .started_at_unix
-            .cmp(&left.started_at_unix)
-            .then_with(|| right.run_id.cmp(&left.run_id))
-    });
+    summaries.sort_by(|left, right| compare_run_recency(right, left));
+}
+
+fn compare_run_recency(left: &RunSummary, right: &RunSummary) -> std::cmp::Ordering {
+    // Keep the seconds field schema-compatible while generated IDs provide
+    // the finer tie-break needed by consecutive runs in the same second.
+    left.started_at_unix
+        .cmp(&right.started_at_unix)
+        .then_with(|| run_id_timestamp_millis(&left.run_id).cmp(&run_id_timestamp_millis(&right.run_id)))
+        .then_with(|| left.run_id.cmp(&right.run_id))
+}
+
+fn run_id_timestamp_millis(run_id: &str) -> Option<u128> {
+    let (without_suffix, _) = run_id.rsplit_once('-')?;
+    let (_, timestamp) = without_suffix.rsplit_once('-')?;
+    timestamp.parse().ok()
 }
 
 fn repair_stale_running_summary(

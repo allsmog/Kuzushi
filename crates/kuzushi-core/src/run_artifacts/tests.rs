@@ -5998,6 +5998,34 @@ mod tests {
     }
 
     #[test]
+    fn latest_pointer_uses_generated_milliseconds_for_same_second_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut older = RunSummary::running(
+            "zscan-1784252228000-ffffffffffff",
+            "scan",
+            None,
+            "target",
+        );
+        older.started_at_unix = 1_784_252_228;
+        let mut newer = RunSummary::running(
+            "areport-1784252228001-000000000000",
+            "tool",
+            Some("report:build".to_string()),
+            "target",
+        );
+        newer.started_at_unix = older.started_at_unix;
+
+        write_run_summary(tmp.path(), &older).unwrap();
+        write_run_summary(tmp.path(), &newer).unwrap();
+        write_run_summary(tmp.path(), &older.complete()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(latest_run_path(tmp.path())).unwrap(),
+            "areport-1784252228001-000000000000\n"
+        );
+    }
+
+    #[test]
     fn latest_pointer_uses_persisted_start_time_when_terminal_summary_is_rebuilt() {
         let tmp = tempfile::tempdir().unwrap();
         let mut older = RunSummary::running("scan-rebuilt", "scan", None, "target");
