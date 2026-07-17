@@ -5,7 +5,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 const GUARD_SCRIPT: &str = r#"
 trap '' HUP INT TERM
 while IFS= read -r _; do :; done
-kill -KILL -- -"$$"
+/bin/kill -KILL -- -"$$"
 "#;
 
 /// Owns the Unix process group that contains one scanner and all descendants.
@@ -88,5 +88,10 @@ mod tests {
         assert_eq!(group, guard.process.id() as libc::pid_t);
 
         guard.finish();
+    }
+
+    #[test]
+    fn guard_uses_external_kill_for_process_group_syntax() {
+        assert!(GUARD_SCRIPT.contains("/bin/kill -KILL --"));
     }
 }
