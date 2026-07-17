@@ -834,7 +834,7 @@ const publicIdentityRequirements = [
   "OpenAI bridge safe public failure boundary",
   "public_bridge_failure(",
   ".and_then(allowed_error_class)",
-  'fn allowed_error_class(class: &str) -> Option<&str>',
+  "fn allowed_error_class(class: &str) -> Option<&str>",
   "Bridge operation failed; raw error details were suppressed",
   "bridge stdout/stderr details were suppressed",
   "OpenAI OAuth authentication failed; run `kuzushi auth login openai`.",

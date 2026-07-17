@@ -25,10 +25,7 @@ export function createPublicIdentitySourceScanner(contract) {
 
 export function requiredIdentityReferenceFailures(root, contract) {
   const source = readFileSync(path.join(root, contract.file), "utf8");
-  return [
-    ...missingNeedleFailures(source, contract),
-    ...forbiddenNeedleFailures(source, contract),
-  ];
+  return [...missingNeedleFailures(source, contract), ...forbiddenNeedleFailures(source, contract)];
 }
 
 function publicFiles(root, publicSurfaces) {
@@ -85,9 +82,7 @@ function gitLines(root, args) {
 }
 
 function isPublicSurface(file, publicSurfaces) {
-  return publicSurfaces.some(
-    (candidate) => file === candidate || file.startsWith(`${candidate}/`),
-  );
+  return publicSurfaces.some((candidate) => file === candidate || file.startsWith(`${candidate}/`));
 }
 
 function isIgnored(file) {

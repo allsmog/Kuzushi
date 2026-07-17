@@ -8,26 +8,14 @@ function readSource(file) {
 }
 
 const required = [
-  [
-    "crates/kuzushi-core/src/run_lifecycle/domain/item.rs",
-    "pub enum RunItemV1",
-  ],
-  [
-    "crates/kuzushi-core/src/run_lifecycle/application/reducer.rs",
-    "pub fn reduce_run_items",
-  ],
+  ["crates/kuzushi-core/src/run_lifecycle/domain/item.rs", "pub enum RunItemV1"],
+  ["crates/kuzushi-core/src/run_lifecycle/application/reducer.rs", "pub fn reduce_run_items"],
   [
     "crates/kuzushi-core/src/run_lifecycle/persistence/writer_commit.rs",
-    "context(\"sync run-item batch\")",
+    'context("sync run-item batch")',
   ],
-  [
-    "crates/kuzushi-tui/src/app/view_state/activity.rs",
-    "run_projection",
-  ],
-  [
-    "crates/kuzushi-tui/src/renderer/views/runs/replay_lines.rs",
-    "RunProjectionSource::TypedV1",
-  ],
+  ["crates/kuzushi-tui/src/app/view_state/activity.rs", "run_projection"],
+  ["crates/kuzushi-tui/src/renderer/views/runs/replay_lines.rs", "RunProjectionSource::TypedV1"],
 ];
 
 const forbidden = [
@@ -62,7 +50,9 @@ for (const [file, marker, reason] of forbidden) {
 
 if (failures.length > 0) {
   console.error("Run lifecycle boundary contract failed:");
-  failures.forEach((failure) => console.error(`- ${failure}`));
+  for (const failure of failures) {
+    console.error(`- ${failure}`);
+  }
   process.exit(1);
 }
 

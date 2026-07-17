@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 8 * * *"
-  # The benchmark is deterministic (mock Anthropic server + vendored
-  # fixtures), so it can gate merges that touch detection quality.
+  # The benchmark is deterministic (pinned corpus + declared semgrep-only
+  # execution), so it can gate merges that touch detection quality.
   pull_request:
     branches: [main]
     paths:
@@ -29,7 +29,6 @@ on:
       - "scripts/langgraph-bridge/**"
       - "scripts/kuzushi-dynamic-module-host.mjs"
       - "scripts/taint_iris_next_flows.sc"
-      - "tests/fixtures/mock-anthropic-server.mjs"
       - ".github/workflows/benchmark-regression.yml"
 
 # Scheduled + manual overlap: let both finish instead of cancelling a live
@@ -70,55 +69,6 @@ jobs:
       - run: cargo build -p kuzushi-cli
       - run: bash benchmarks/govwa/setup.sh
 
-      - name: Start mock Anthropic API server
-        run: |
-          set -euo pipefail
-          echo "Benchmark regression uses a deterministic mock Anthropic server; not a real LLM integration test."
-          MOCK_URL_FILE="${RUNNER_TEMP}/mock-url.txt"
-          : > "${MOCK_URL_FILE}"
-          node tests/fixtures/mock-anthropic-server.mjs > "${MOCK_URL_FILE}" &
-          MOCK_PID=$!
-          echo "MOCK_PID=${MOCK_PID}" >> "${GITHUB_ENV}"
-
-          # Poll up to 15s for the URL file to populate and the server to respond.
-          deadline=$(( $(date +%s) + 15 ))
-          MOCK_BASE_URL=""
-          while [ "$(date +%s)" -lt "${deadline}" ]; do
-            if [ -s "${MOCK_URL_FILE}" ]; then
-              MOCK_BASE_URL="$(head -n 1 "${MOCK_URL_FILE}")"
-              if [ -n "${MOCK_BASE_URL}" ] \
-                && curl -sSf -o /dev/null --max-time 2 -X POST \
-                     -H 'content-type: application/json' -d '{}' \
-                     "${MOCK_BASE_URL}/v1/messages"; then
-                break
-              fi
-            fi
-            # Bail early if the mock crashed before becoming ready.
-            if ! kill -0 "${MOCK_PID}" 2>/dev/null; then
-              echo "mock server exited before becoming ready" >&2
-              exit 1
-            fi
-            sleep 0.25
-          done
-
-          if [ -z "${MOCK_BASE_URL}" ]; then
-            echo "mock server did not become ready within 15s" >&2
-            exit 1
-          fi
-          echo "MOCK_BASE_URL=${MOCK_BASE_URL}" >> "${GITHUB_ENV}"
-          echo "mock server ready at ${MOCK_BASE_URL}"
-
-      - name: Write benchmark scan config
-        run: |
-          set -euo pipefail
-          mkdir -p benchmarks/govwa/repo/.kuzushi
-          # Keep the checked-in config as the behavior contract; inject only
-          # the ephemeral mock transport address and fake credential.
-          jq --arg baseUrl "${MOCK_BASE_URL}" \
-            '. + {agentRuntimeConfig: {baseUrl: $baseUrl, apiKey: "fake-key"}}' \
-            benchmarks/mock-regression.config.json \
-            > benchmarks/govwa/repo/.kuzushi/config.json
-
       - name: Run the declared deterministic benchmark command
         run: >-
           pnpm benchmark --run
@@ -127,25 +77,18 @@ jobs:
           --provenance benchmarks/baseline-provenance.json
           --output benchmarks/govwa/results/metrics-ci.json
 
-      - name: Write benchmark mock-mode note
+      - name: Write benchmark execution note
         run: |
           mkdir -p benchmarks/govwa/results
-          cat > benchmarks/govwa/results/mock-mode.txt <<'EOF'
-          Deterministic benchmark run using tests/fixtures/mock-anthropic-server.mjs.
-          Metrics reflect mock-backed fixture coverage, not a real LLM integration test.
+          cat > benchmarks/govwa/results/execution-mode.txt <<'EOF'
+          Deterministic semgrep-only benchmark over the pinned GoVWA corpus.
+          The declared execution makes no model-provider request.
           EOF
 
       - run: pnpm benchmark:regression --results benchmarks/govwa/results/metrics-ci.json
 
       - name: Render detection scoreboard
         run: pnpm benchmark:scoreboard --results benchmarks/govwa/results/metrics-ci.json --output benchmarks/govwa/results/SCOREBOARD.md
-
-      - name: Stop mock Anthropic server
-        if: always()
-        run: |
-          if [ -n "${MOCK_PID:-}" ]; then
-            kill "${MOCK_PID}" 2>/dev/null || true
-          fi
 
       - uses: actions/upload-artifact@v7
         if: always()

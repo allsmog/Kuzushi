@@ -2,9 +2,9 @@
 import process from "node:process";
 import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
-import { mcpToolsForRequest } from "./langgraph-bridge/mcp.mjs";
 import { debugDumpBridgeCall } from "./langgraph-bridge/diagnostics.mjs";
 import { bridgeErrorResponse } from "./langgraph-bridge/errors.mjs";
+import { mcpToolsForRequest } from "./langgraph-bridge/mcp.mjs";
 import {
   appendStructuredOutputContract,
   isAiMessage,

@@ -120,7 +120,7 @@ const requiredIdentityReferences = [
     needles: [
       "public_bridge_failure(",
       ".and_then(allowed_error_class)",
-      'fn allowed_error_class(class: &str) -> Option<&str>',
+      "fn allowed_error_class(class: &str) -> Option<&str>",
       '"authentication"\n            | "bridge_internal"',
       '| "cancelled"',
       '| "provider_rejected"',
