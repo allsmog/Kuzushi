@@ -1,47 +1,83 @@
-# design-sync notes — @kuzushi/tui-kit → "Kuzushi TUI Kit"
+# design-sync maintenance notes — Kuzushi current TUI
 
-This project syncs a **hand-authored** React kit (`packages/kuzushi-tui-kit`)
-that reproduces the live Rust Ratatui shell's design language for the web. The
-live TUI itself (`crates/kuzushi-tui`) cannot be synced — Claude Design renders
-web React, not a native terminal binary. The kit's tokens mirror
-`crates/kuzushi-tui/src/theme/mod.rs` and its primitives mirror
-`design/mockups/_shared.jsx`. Keep them in step when the shell theme changes.
+This project is deliberately self-contained under `.design-sync/`. The live TUI
+is Rust/Ratatui and cannot be imported into Claude Design, so
+`.design-sync/kit` is a small React projection of the current renderer contract.
+It replaces the deleted `packages/kuzushi-tui-kit` path that made the previous
+sync configuration non-buildable.
 
-## Build / run quirks
+## Provenance
 
-- The kit is **isolated from the Kuzushi CLI**: it is not a pnpm-workspace
-  member (`pnpm-workspace.yaml` declares no `packages:` globs) and carries its
-  own npm-installed `node_modules`, so React never enters the CLI build.
-- Build command: `npm --prefix packages/kuzushi-tui-kit run build`
-  (`tsc` → `dist/` + `cp src/styles.css dist/styles.css`). `cfg.buildCmd`.
-- Converter invocation (from repo root):
-  `--node-modules ./packages/kuzushi-tui-kit/node_modules`
-  `--entry ./packages/kuzushi-tui-kit/dist/index.js`
-- `cfg.cssEntry` = `dist/styles.css` (package-relative; holds the `:root`
-  tokens + `kz-*` classes; appended into `_ds_bundle.css`).
+- Audited branch: `codex/atlas-native-cockpit`
+- Audited HEAD: `ccb29faec323b52300b3f28e35bd85473ad841d7`
+- Phase inventory: `app/view_state/sast_task_row.rs::ShellView`
+- Primary dispatch: `renderer/render_app.rs`
+- Phase composition: `renderer/views/workbench/`
+- Bottom proposal card: `renderer/chrome/cards/render_plan_card.rs`
+- Phase composer: `ui_view_models/prompt.rs` and
+  `renderer/chrome/prompt/mod.rs`
+- Run Focus: `renderer/views/activity/` and `ui_view_models/activity_*.rs`
+- Setup: `renderer/views/onboarding/setup.rs` and
+  `ui_view_models/setup/`
+- Responsive goldens:
+  `renderer/snapshots/phase_cockpit/phase_<phase>_<size>.snap`
+- Route-family goldens: `tests/snapshots/*.snap`
 
-## Known render warns (triaged — not failures)
+Do not use `design/mockups/` or the old `ds-bundle/` as current truth. They
+contain retired transcript/status-strip assumptions. The Rust sources and
+committed renderer snapshots win whenever they disagree with this kit.
 
-- `[FONT_REMOTE] "JetBrains Mono"` — styles.css `@import`s the family from
-  Google Fonts. Expected: the kit ships no local `@font-face`. Designs get
-  JetBrains Mono when the host has network, else fall back to `ui-monospace`
-  (the monospace grid is preserved either way). Re-sync should keep ignoring it.
+## Build
 
-## Re-sync risks (watch-list for the next run)
+From the repository root:
 
-- **Fresh clone needs a kit build first.** `packages/kuzushi-tui-kit/dist` and
-  `node_modules` are gitignored. Before re-running the converter on a clean
-  checkout: `npm --prefix packages/kuzushi-tui-kit install` then `cfg.buildCmd`.
-  Without `node_modules`, esbuild can't resolve `react` and the bundle fails.
-- **Playwright ↔ chromium pin.** This run used playwright `1.61.1`, which pins
-  the cached chromium build `1228` (`~/Library/Caches/ms-playwright`). Another
-  machine may need a playwright version matching whatever chromium it has
-  cached, or `DS_CHROMIUM_PATH` set to a known binary.
-- **Grid-width fidelity.** `TermFrame` sizes its body to
-  `calc(cols ch + 28px)` so the content grid is exactly `cols` monospace cells
-  (the 14px×2 padding would otherwise clip full-width rows). The status strip is
-  ~100 cells of content, so strip-bearing previews use `cols={100..112}`. If the
-  strip fields change, revisit those preview widths.
-- **Hand-authored kit, not a published dist.** There is no upstream package —
-  the source of truth is this repo. Edits to `src/*` require a rebuild before
-  the converter sees them.
+```sh
+npm --prefix .design-sync/kit ci
+npm --prefix .design-sync/kit run build
+```
+
+The sync driver invocation is:
+
+```sh
+node .ds-sync/resync.mjs \
+  --config .design-sync/config.json \
+  --node-modules .design-sync/kit/node_modules \
+  --entry .design-sync/kit/dist/index.js \
+  --out /tmp/kuzushi-ds-bundle
+```
+
+The driver does not execute `buildCmd`; run the package build first. Keep the
+generated bundle outside the repository so refreshing Claude Design does not
+mutate `ds-bundle/` or any other Kuzushi artifact.
+
+`dist/` and `node_modules/` are generated and ignored inside the nested kit.
+The package lock is committed so a fresh checkout resolves the same React and
+TypeScript toolchain.
+
+## Preview contract
+
+Package-shape preview discovery is strict: every top-level component needs an
+authored `.design-sync/previews/<Component>.tsx`. Each PascalCase export in the
+preview becomes a Claude Design example cell.
+
+The previews must show current implementation states only. In particular:
+
+- Five canonical phases are Map, Scan, Review, Prove, Fix.
+- The phase prompt remains the last row.
+- The returned `◆ PLAN` card is conditional and sits above that prompt.
+- Planner-running state is Run Focus, not a permanent dock or transcript.
+- `40×12`, `80×24`, `120×36`, and `160×48` examples exercise the real
+  responsive cutovers.
+- Example evidence, proof, artifacts, cost, and outcomes must be explicitly
+  fixture data and internally consistent.
+
+## Refresh checklist
+
+1. Record branch and HEAD.
+2. Compare `theme/mod.rs`, phase snapshots, prompt tokens, Plan card, Run Focus,
+   Setup, attention, and route snapshots with the kit.
+3. Update the kit and previews only where the renderer changed.
+4. Build the nested package.
+5. Run the design-sync driver and inspect every changed preview.
+6. Confirm the git diff is confined to `.design-sync/**` unless the operator
+   explicitly authorized a broader change.
