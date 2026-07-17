@@ -150,6 +150,10 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
+      - name: Install patch-validation sandbox
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap
       - run: cargo test --workspace
       - run: cargo build --workspace
       - run: node scripts/build-native-runtime.mjs
