@@ -218,27 +218,31 @@ fn mockup_text(mockup: &str) -> String {
 }
 
 fn mockup_texts() -> &'static BTreeMap<String, String> {
-    static MOCKUP_TEXTS: OnceLock<BTreeMap<String, String>> = OnceLock::new();
-    MOCKUP_TEXTS.get_or_init(extract_mockup_texts)
+    static MOCKUP_TEXTS: OnceLock<Result<BTreeMap<String, String>, String>> = OnceLock::new();
+    MOCKUP_TEXTS
+        .get_or_init(extract_mockup_texts)
+        .as_ref()
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
-fn extract_mockup_texts() -> BTreeMap<String, String> {
+fn extract_mockup_texts() -> Result<BTreeMap<String, String>, String> {
     let repo = repo_root();
     let output = Command::new("node")
         .arg("scripts/mockup-to-text.mjs")
         .arg("--json")
         .current_dir(&repo)
         .output()
-        .unwrap_or_else(|error| panic!("failed to run mockup extractor: {error}"));
+        .map_err(|error| format!("failed to run mockup extractor: {error}"))?;
     if !output.status.success() {
-        panic!(
+        return Err(format!(
             "mockup extractor failed with {}\nstdout:\n{}\nstderr:\n{}",
             output.status,
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
-        );
+        ));
     }
-    serde_json::from_slice(&output.stdout).expect("mockup extractor returned invalid JSON")
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("mockup extractor returned invalid JSON: {error}"))
 }
 
 fn repo_root() -> PathBuf {

@@ -140,13 +140,17 @@ jobs:
   # ── Rust CLI build + tests ───────────────────────────────────────────────
   rust-cli:
     name: rust-cli
+    needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
