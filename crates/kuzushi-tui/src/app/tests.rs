@@ -45,6 +45,17 @@ fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn wait_for_file_text(path: &Path, expected: &str) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let text = fs::read_to_string(path).unwrap();
+        if text.contains(expected) || std::time::Instant::now() >= deadline {
+            return text;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 struct EnvVarGuard {
     key: &'static str,
     prior: Option<OsString>,
@@ -14956,9 +14967,10 @@ fn agent_failure_event_records_bounded_failure_handoff() {
                 .unwrap();
         assert!(!contents.contains("RAW_RESPONSE_SENTINEL"), "{artifact}");
     }
-    let events =
-        fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "agent-failed").join("events.jsonl"))
-            .unwrap();
+    let events = wait_for_file_text(
+        &kuzushi_core::run_dir(tmp.path(), "agent-failed").join("events.jsonl"),
+        r#""status":"failed""#,
+    );
     assert!(events.contains(r#""status":"failed""#));
     assert!(events.contains(r#""tool":"agent:ask""#));
     app.finish_session_transcript("completed");
@@ -15155,9 +15167,10 @@ fn scan_failure_event_records_bounded_failure_handoff() {
         .agent_thread_context
         .fallback_prompt
         .contains("semgrep binary missing"));
-    let events =
-        fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "scan-failed").join("events.jsonl"))
-            .unwrap();
+    let events = wait_for_file_text(
+        &kuzushi_core::run_dir(tmp.path(), "scan-failed").join("events.jsonl"),
+        r#""status":"failed""#,
+    );
     assert!(events.contains(r#""status":"failed""#));
     assert!(events.contains(r#""tool":"sast:scan""#));
 }

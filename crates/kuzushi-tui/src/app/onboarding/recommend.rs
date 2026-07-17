@@ -126,10 +126,8 @@ mod tests {
             .into_iter()
             .map(|task| {
                 let mut row = PlanningTaskRow::for_task(task, Path::new("/nonexistent-target"));
-                if task == PlanningTaskId::HuntUseAfterFree {
-                    row.cli_available = true;
-                    row.blocker = None;
-                }
+                row.cli_available = true;
+                row.blocker = None;
                 row
             })
             .collect()
