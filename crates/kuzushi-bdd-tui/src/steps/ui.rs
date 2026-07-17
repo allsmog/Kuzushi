@@ -255,10 +255,7 @@ async fn log_contains(world: &mut OnboardingWorld, needle: String) {
 async fn row_checked(world: &mut OnboardingWorld, label: String) {
     let session = world.require_session();
     let snapshot = session.snapshot().expect("snapshot failed");
-    let matched = snapshot.lines().any(|line| {
-        line.contains(&label)
-            && (line.contains("[x]") || line.contains(" RUN ") || line.contains(" REUSE "))
-    });
+    let matched = planning_row_is_checked(&snapshot, &label);
     assert!(
         matched,
         "expected `{label}` row to be checked; pane was:\n{snapshot}"
@@ -269,13 +266,25 @@ async fn row_checked(world: &mut OnboardingWorld, label: String) {
 async fn row_unchecked(world: &mut OnboardingWorld, label: String) {
     let session = world.require_session();
     let snapshot = session.snapshot().expect("snapshot failed");
-    let matched = snapshot
-        .lines()
-        .any(|line| line.contains(&label) && (line.contains("[ ]") || line.contains(" SKIP ")));
+    let matched = planning_row_is_unchecked(&snapshot, &label);
     assert!(
         matched,
         "expected `{label}` row to be unchecked; pane was:\n{snapshot}"
     );
+}
+
+fn planning_row_is_checked(snapshot: &str, label: &str) -> bool {
+    snapshot.lines().any(|line| {
+        line.contains(label)
+            && (line.contains("[x]") || line.contains(" RUN ") || line.contains(" REUSE "))
+    })
+}
+
+fn planning_row_is_unchecked(snapshot: &str, label: &str) -> bool {
+    snapshot.lines().any(|line| {
+        line.contains(label)
+            && (line.contains("[ ]") || line.contains(" SKIP ") || line.contains(" BLOCKED "))
+    })
 }
 
 #[then(regex = r#"^the status segment shows "([^"]+)"$"#)]
@@ -355,7 +364,10 @@ fn translate_key(key: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{compact_run_focus_matches, run_focus_shows_both};
+    use super::{
+        compact_run_focus_matches, planning_row_is_checked, planning_row_is_unchecked,
+        run_focus_shows_both,
+    };
 
     const STACKED_RUN_FOCUS: &str = "\
 RUN FOCUS · MAP\n\
@@ -389,6 +401,20 @@ OUTPUT\n";
             "entry-points:extract",
             "TASKS",
             "OUTPUT"
+        ));
+    }
+
+    #[test]
+    fn unavailable_planning_rows_are_not_checked() {
+        let snapshot = "  BLOCKED Build code property graph · needs a tool on PATH\n";
+
+        assert!(planning_row_is_unchecked(
+            snapshot,
+            "Build code property graph"
+        ));
+        assert!(!planning_row_is_checked(
+            snapshot,
+            "Build code property graph"
         ));
     }
 }

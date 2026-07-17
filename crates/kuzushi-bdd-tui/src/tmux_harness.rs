@@ -283,18 +283,38 @@ impl TmuxSession {
         }
     }
 
-    /// Capture only the live alternate screen, polling through startup races
-    /// but never weakening the fullscreen contract to a saved-buffer capture.
-    pub fn wait_for_alternate_screen_snapshot(&self, timeout: Duration) -> Result<String> {
+    /// Poll the live alternate screen until one coherent frame satisfies the
+    /// caller's assertion. This avoids observing an intermediate paint while
+    /// asynchronous workspace state or a resize is still being rendered.
+    pub fn wait_for_alternate_screen_matching<F>(
+        &self,
+        expected: &str,
+        timeout: Duration,
+        matches: F,
+    ) -> Result<String>
+    where
+        F: Fn(&str) -> bool,
+    {
         let deadline = Instant::now() + timeout;
         loop {
             self.fail_if_pane_dead("while waiting for its alternate screen")?;
-            if self.alternate_screen_active()? {
-                return self.capture_live_pane();
+            if let Some(snapshot) = self.matching_live_snapshot(&matches)? {
+                return Ok(snapshot);
             }
-            self.fail_if_wait_expired(deadline, timeout, "tmux alternate_on=1")?;
+            self.fail_if_wait_expired(deadline, timeout, expected)?;
             thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    fn matching_live_snapshot<F>(&self, matches: &F) -> Result<Option<String>>
+    where
+        F: Fn(&str) -> bool,
+    {
+        if !self.alternate_screen_active()? {
+            return Ok(None);
+        }
+        let snapshot = self.capture_live_pane()?;
+        Ok(matches(&snapshot).then_some(snapshot))
     }
 
     fn interactive_snapshot(&self) -> Result<Option<String>> {

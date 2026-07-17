@@ -25,12 +25,16 @@ async fn same_shell_process_is_running(world: &mut OnboardingWorld) {
 
 #[then(regex = r#"^the resized live frame shows \"([^\"]+)\"$"#)]
 async fn resized_live_frame_shows(world: &mut OnboardingWorld, needle: String) {
-    let capture = world
-        .last_live_capture
-        .as_deref()
-        .expect("scenario did not resize before inspecting the live frame");
     assert!(
-        capture.contains(&needle),
-        "resized live frame did not show `{needle}`:\n{capture}"
+        world.last_live_capture.is_some(),
+        "scenario did not resize before inspecting the live frame"
     );
+    let expected = format!("`{needle}` in the resized live frame");
+    let capture = world
+        .require_session()
+        .wait_for_alternate_screen_matching(&expected, Duration::from_secs(5), |snapshot| {
+            snapshot.contains(&needle)
+        })
+        .unwrap_or_else(|error| panic!("resized live-frame capture failed: {error:#}"));
+    world.last_live_capture = Some(capture);
 }

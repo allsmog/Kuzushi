@@ -1,4 +1,4 @@
-use crate::{tmux_harness::TmuxSession, OnboardingWorld};
+use crate::OnboardingWorld;
 use cucumber::{then, when};
 use std::time::Duration;
 
@@ -16,26 +16,24 @@ async fn send_literal_xterm_backtab(world: &mut OnboardingWorld) {
 
 #[then(regex = r#"^an alternate-screen capture shows \"([^\"]+)\"$"#)]
 async fn alternate_screen_capture_shows(world: &mut OnboardingWorld, needle: String) {
-    let snapshot = alternate_screen_snapshot(world.require_session());
-    assert!(
-        snapshot.contains(&needle),
-        "alternate-screen capture did not show `{needle}`:\n{snapshot}"
-    );
+    let expected = format!("`{needle}` in one live alternate-screen frame");
+    world
+        .require_session()
+        .wait_for_alternate_screen_matching(&expected, Duration::from_secs(5), |snapshot| {
+            snapshot.contains(&needle)
+        })
+        .unwrap_or_else(|error| panic!("alternate-screen capture failed: {error:#}"));
 }
 
 #[then(regex = r#"^one alternate-screen row shows \"([^\"]+)\" and \"([^\"]+)\"$"#)]
 async fn alternate_screen_row_shows_both(world: &mut OnboardingWorld, left: String, right: String) {
-    let snapshot = alternate_screen_snapshot(world.require_session());
-    assert!(
-        snapshot
-            .lines()
-            .any(|line| line.contains(&left) && line.contains(&right)),
-        "alternate-screen capture had no row containing `{left}` and `{right}`:\n{snapshot}"
-    );
-}
-
-fn alternate_screen_snapshot(session: &TmuxSession) -> String {
-    session
-        .wait_for_alternate_screen_snapshot(Duration::from_secs(5))
-        .expect("capturing the active alternate screen failed")
+    let expected = format!("one live row containing `{left}` and `{right}`");
+    world
+        .require_session()
+        .wait_for_alternate_screen_matching(&expected, Duration::from_secs(5), |snapshot| {
+            snapshot
+                .lines()
+                .any(|line| line.contains(&left) && line.contains(&right))
+        })
+        .unwrap_or_else(|error| panic!("alternate-screen row capture failed: {error:#}"));
 }
