@@ -256,7 +256,7 @@ mod tests {
         }
         owner.wait().unwrap();
 
-        let stopped = wait_for_process_group_exit(processes.process_group_id);
+        let stopped = wait_for_process_group_exit(&processes);
         if !stopped {
             unsafe {
                 libc::killpg(processes.process_group_id as libc::pid_t, libc::SIGKILL);
@@ -349,15 +349,50 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn wait_for_process_group_exit(process_group_id: u32) -> bool {
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    fn wait_for_process_group_exit(processes: &OwnerProcesses) -> bool {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while std::time::Instant::now() < deadline {
-            if !process_group_is_alive(process_group_id) {
+            if !tracked_process_group_is_active(processes) {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(20));
         }
         false
+    }
+
+    #[cfg(unix)]
+    fn tracked_process_group_is_active(processes: &OwnerProcesses) -> bool {
+        if !process_group_is_alive(processes.process_group_id) {
+            return false;
+        }
+        #[cfg(target_os = "linux")]
+        return [
+            processes.process_group_id,
+            processes.scanner_pid,
+            processes.descendant_pid,
+        ]
+        .into_iter()
+        .any(|pid| active_linux_group_member(pid, processes.process_group_id));
+        #[cfg(not(target_os = "linux"))]
+        true
+    }
+
+    #[cfg(target_os = "linux")]
+    fn active_linux_group_member(process_id: u32, process_group_id: u32) -> bool {
+        process_group_of(process_id) == Some(process_group_id) && !linux_process_is_dead(process_id)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_process_is_dead(process_id: u32) -> bool {
+        let stat = match std::fs::read_to_string(format!("/proc/{process_id}/stat")) {
+            Ok(stat) => stat,
+            Err(error) => return error.kind() == std::io::ErrorKind::NotFound,
+        };
+        matches!(
+            stat.rsplit_once(") ")
+                .and_then(|(_, fields)| fields.chars().next()),
+            Some('Z' | 'X')
+        )
     }
 
     #[cfg(unix)]

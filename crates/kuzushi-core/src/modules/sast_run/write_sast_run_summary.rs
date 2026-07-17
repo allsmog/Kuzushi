@@ -185,7 +185,7 @@ mod tests {
         )
         .unwrap();
         let summary = crate::run_artifacts::load_run_summary(workspace.root(), &run_id).unwrap();
-        let events = read_run_text(&workspace, &run_id, "events.jsonl");
+        let events = wait_for_run_text(&workspace, &run_id, "events.jsonl", status);
         let trace = read_run_text(&workspace, &run_id, "trace.jsonl");
         (summary, events, trace)
     }
@@ -193,6 +193,22 @@ mod tests {
     fn read_run_text(workspace: &WorkspaceTarget, run_id: &str, leaf: &str) -> String {
         let path = crate::run_artifacts::run_artifact_path(workspace.root(), run_id, leaf);
         std::fs::read_to_string(path).unwrap()
+    }
+
+    fn wait_for_run_text(
+        workspace: &WorkspaceTarget,
+        run_id: &str,
+        leaf: &str,
+        expected: &str,
+    ) -> String {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let text = read_run_text(workspace, run_id, leaf);
+            if text.contains(expected) || std::time::Instant::now() >= deadline {
+                return text;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     #[test]
@@ -217,12 +233,7 @@ mod tests {
         )
         .unwrap();
 
-        let events = std::fs::read_to_string(crate::run_artifacts::run_artifact_path(
-            workspace.root(),
-            run_id,
-            "events.jsonl",
-        ))
-        .unwrap();
+        let events = wait_for_run_text(&workspace, run_id, "events.jsonl", "completed");
         let trace = std::fs::read_to_string(crate::run_artifacts::run_artifact_path(
             workspace.root(),
             run_id,
