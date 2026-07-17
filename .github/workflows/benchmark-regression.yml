@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 8 * * *"
-  # The benchmark is deterministic (pinned corpus + declared semgrep-only
-  # execution), so it can gate merges that touch detection quality.
+  # The committed fixture is the deterministic regression gate. The live
+  # Semgrep run below is a smoke check because registry rule content can move
+  # independently of this repository.
   pull_request:
     branches: [main]
     paths:
@@ -69,7 +70,7 @@ jobs:
       - run: cargo build -p kuzushi-cli
       - run: bash benchmarks/govwa/setup.sh
 
-      - name: Run the declared deterministic benchmark command
+      - name: Run the live Semgrep benchmark smoke check
         run: >-
           pnpm benchmark --run
           --dataset benchmarks/govwa
@@ -81,11 +82,14 @@ jobs:
         run: |
           mkdir -p benchmarks/govwa/results
           cat > benchmarks/govwa/results/execution-mode.txt <<'EOF'
-          Deterministic semgrep-only benchmark over the pinned GoVWA corpus.
-          The declared execution makes no model-provider request.
+          Live semgrep-only smoke check over the pinned GoVWA corpus.
+          It makes no model-provider request. Results are diagnostic and are
+          not compared with the committed deterministic-fixture baseline
+          because Semgrep registry rule content is not repository-pinned.
           EOF
 
-      - run: pnpm benchmark:regression --results benchmarks/govwa/results/metrics-ci.json
+      - name: Require a non-empty live detector result
+        run: jq -e '(.tp + .fp) > 0' benchmarks/govwa/results/metrics-ci.json
 
       - name: Render detection scoreboard
         run: pnpm benchmark:scoreboard --results benchmarks/govwa/results/metrics-ci.json --output benchmarks/govwa/results/SCOREBOARD.md
