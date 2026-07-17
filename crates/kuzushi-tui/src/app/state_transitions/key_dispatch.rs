@@ -1763,23 +1763,15 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn restart_projects_matching_verified_reverify_as_acknowledgement() {
+    fn assert_verified_fix_result_card(app: &ShellApp, expected_attempt_id: &str) {
         use kuzushi_core::workflow_attempts::PhaseResultAction;
 
-        let fixture = seed_verified_fix_result(
-            "reverify-result-run",
-            "patch:reverify",
-            "reverify-result-run",
-        );
-        let mut app = restart_fix_result_app(fixture.target.path());
-        let model = crate::ui_view_models::phase_cockpit_model_for_phase(&app, WorkflowPhase::Fix);
+        let model = crate::ui_view_models::phase_cockpit_model_for_phase(app, WorkflowPhase::Fix);
         let card = model.header.result_card.expect("unresolved Fix result");
         let crate::ui_view_models::PhaseCockpitBody::Fix(fix) = model.body else {
             panic!("expected Fix body");
         };
-
-        assert_eq!(card.attempt_id, fixture.attempt_id);
+        assert_eq!(card.attempt_id, expected_attempt_id);
         assert_eq!(
             fix.remediation.stage,
             crate::ui_view_models::RemediationLifecycleStage::Verified
@@ -1800,7 +1792,9 @@ mod tests {
             card.recommended,
             "re-verification passed; acknowledge this verified remediation"
         );
+    }
 
+    fn select_unrelated_fix_finding(app: &mut ShellApp) {
         let unrelated = app
             .findings()
             .iter()
@@ -1808,12 +1802,19 @@ mod tests {
             .cloned()
             .unwrap();
         app.set_selected_finding(Some(unrelated));
-        let card = crate::ui_view_models::phase_cockpit_model_for_phase(&app, WorkflowPhase::Fix)
-            .header
-            .result_card
-            .expect("unresolved Fix result after finding selection changed");
-        assert!(card.control_hint.contains("u Acknowledge verified"));
-        assert!(!card.control_hint.contains("Select patch"));
+    }
+
+    #[test]
+    fn restart_projects_matching_verified_reverify_as_acknowledgement() {
+        let fixture = seed_verified_fix_result(
+            "reverify-result-run",
+            "patch:reverify",
+            "reverify-result-run",
+        );
+        let mut app = restart_fix_result_app(fixture.target.path());
+        assert_verified_fix_result_card(&app, &fixture.attempt_id);
+        select_unrelated_fix_finding(&mut app);
+        assert_verified_fix_result_card(&app, &fixture.attempt_id);
 
         let update = app.reduce_key(plain_key(KeyCode::Char('f')));
         assert!(update.handled);

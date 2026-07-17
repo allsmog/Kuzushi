@@ -23,13 +23,18 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     }
     bindings = input_mode_bindings(bindings, app.input_mode());
     push_input_mode_binding(&mut bindings, app);
-    if app.input_mode() == crate::InputMode::Prompt {
-        let tab = bind("Tab", "complete");
-        if !bindings.contains(&tab) {
-            bindings.insert(after_critical_binding(&bindings), tab);
-        }
-    }
+    insert_prompt_completion_binding(&mut bindings, app.input_mode());
     apply_operator_chrome_overrides(bindings, app)
+}
+
+fn insert_prompt_completion_binding(bindings: &mut Vec<FooterKeybinding>, mode: crate::InputMode) {
+    if mode != crate::InputMode::Prompt {
+        return;
+    }
+    let tab = bind("Tab", "complete");
+    if !bindings.contains(&tab) {
+        bindings.insert(after_critical_binding(bindings), tab);
+    }
 }
 
 fn apply_operator_chrome_overrides(
