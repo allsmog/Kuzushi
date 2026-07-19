@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isMcpToolTimeoutError,
   mcpConnectionFailureMessage,
@@ -8,6 +8,8 @@ import {
 } from "../../scripts/langgraph-bridge/mcp.mjs";
 
 describe("MCP connection error formatting", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("normalizes the single-object callback shape", () => {
     const message = mcpConnectionFailureMessage(
       { name: "joern", error: new Error("spawn ENOENT") },
@@ -76,5 +78,19 @@ describe("MCP connection error formatting", () => {
 
     expect(result).toBe(receipt);
     expect(closeCalls).toBe(1);
+  });
+
+  it("keeps a computed timeout spend receipt when MCP cleanup never settles", async () => {
+    vi.useFakeTimers();
+    const receipt = { ok: true, stopReason: "mcp_tool_timeout", cost_usd: 0.02 };
+    const result = withMcpClientCleanup(
+      async () => receipt,
+      () => new Promise(() => {}),
+      25,
+    );
+
+    await vi.advanceTimersByTimeAsync(25);
+
+    await expect(result).resolves.toBe(receipt);
   });
 });

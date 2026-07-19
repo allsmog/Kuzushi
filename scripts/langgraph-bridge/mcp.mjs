@@ -4,6 +4,7 @@ import process from "node:process";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
 const MCP_TOOL_TIMEOUT_CODE = "KUZUSHI_MCP_TOOL_TIMEOUT";
+const MCP_CLOSE_GRACE_MS = 1_000;
 
 export class McpToolTimeoutError extends Error {
   constructor(cause) {
@@ -22,19 +23,31 @@ export function isMcpToolTimeoutError(error) {
   return errorChain(error).some(timeoutErrorSignal);
 }
 
-export async function withMcpClientCleanup(operation, close) {
+export async function withMcpClientCleanup(
+  operation,
+  close,
+  cleanupTimeoutMs = MCP_CLOSE_GRACE_MS,
+) {
   try {
     return await operation();
   } finally {
-    await ignoreMcpCloseFailure(close);
+    await ignoreMcpCloseFailure(close, cleanupTimeoutMs);
   }
 }
 
-async function ignoreMcpCloseFailure(close) {
+async function ignoreMcpCloseFailure(close, timeoutMs) {
+  let timer;
   try {
-    await close();
+    await Promise.race([
+      Promise.resolve().then(close),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
   } catch {
     // The primary result owns the spend receipt; cleanup cannot replace it.
+  } finally {
+    clearTimeout(timer);
   }
 }
 
