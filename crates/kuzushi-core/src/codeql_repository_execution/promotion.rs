@@ -1,6 +1,11 @@
 use anyhow::{Context, Result};
+use secure_tree::{SecureDirectory, SecureEntry};
+use std::ffi::OsStr;
 use std::fs;
+use std::io::{Read, Write};
 use std::path::Path;
+
+mod secure_tree;
 
 const MAX_DATABASE_ENTRIES: u64 = 500_000;
 const MAX_DATABASE_BYTES: u64 = 64_u64 * 1024 * 1024 * 1024;
@@ -107,12 +112,14 @@ struct CopyBudget {
 }
 
 fn copy_database_tree(source: &Path, destination: &Path) -> Result<()> {
+    let source = SecureDirectory::open(source)
+        .with_context(|| format!("opening CodeQL database {}", source.display()))?;
     let mut budget = CopyBudget::default();
-    copy_directory_contents(source, destination, 0, &mut budget)
+    copy_directory_contents(&source, destination, 0, &mut budget)
 }
 
 fn copy_directory_contents(
-    source: &Path,
+    source: &SecureDirectory,
     destination: &Path,
     depth: usize,
     budget: &mut CopyBudget,
@@ -121,37 +128,92 @@ fn copy_directory_contents(
         depth <= MAX_DATABASE_DEPTH,
         "CodeQL database nesting is too deep"
     );
-    for entry in fs::read_dir(source).with_context(|| format!("reading {}", source.display()))? {
-        copy_database_entry(entry?, destination, depth, budget)?;
+    for name in source
+        .entry_names(remaining_entry_capacity(budget))
+        .with_context(|| format!("reading {}", source.path().display()))?
+    {
+        copy_database_entry(source, &name, destination, depth, budget)?;
     }
     Ok(())
 }
 
 fn copy_database_entry(
-    entry: fs::DirEntry,
+    source: &SecureDirectory,
+    name: &OsStr,
     destination: &Path,
     depth: usize,
     budget: &mut CopyBudget,
 ) -> Result<()> {
     reserve_entry(budget)?;
-    let kind = entry.file_type()?;
-    let target = destination.join(entry.file_name());
-    if kind.is_dir() && !kind.is_symlink() {
-        fs::create_dir(&target)?;
-        return copy_directory_contents(&entry.path(), &target, depth + 1, budget);
+    let source_path = source.path().join(name);
+    let target = destination.join(name);
+    match source.open_entry(name) {
+        Ok(SecureEntry::Directory(directory)) => {
+            fs::create_dir(&target)?;
+            copy_directory_contents(&directory, &target, depth + 1, budget)
+        }
+        Ok(SecureEntry::File(file, metadata)) => {
+            copy_regular_file(file, metadata, &source_path, &target, budget)
+        }
+        Err(error) => Err(error).with_context(|| format!("opening {}", source_path.display())),
     }
-    copy_regular_file(entry, &target, budget)
 }
 
-fn copy_regular_file(entry: fs::DirEntry, target: &Path, budget: &mut CopyBudget) -> Result<()> {
-    let kind = entry.file_type()?;
+fn copy_regular_file(
+    mut source: fs::File,
+    metadata: fs::Metadata,
+    source_path: &Path,
+    target: &Path,
+    budget: &mut CopyBudget,
+) -> Result<()> {
+    reserve_file_bytes(budget, metadata.len())?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)?;
+    stream_exact_file(&mut source, metadata.len(), |bytes| output.write_all(bytes))
+        .with_context(|| format!("copying {}", source_path.display()))?;
+    verify_source_unchanged(&source, &metadata, source_path)?;
+    drop(output);
+    fs::set_permissions(target, metadata.permissions())?;
+    Ok(())
+}
+
+fn stream_exact_file<F>(source: &mut fs::File, expected: u64, mut consume: F) -> Result<()>
+where
+    F: FnMut(&[u8]) -> std::io::Result<()>,
+{
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let remaining = expected.saturating_sub(total);
+        let limit = (remaining.saturating_add(1)).min(buffer.len() as u64) as usize;
+        let count = source.read(&mut buffer[..limit])?;
+        if count == 0 {
+            break;
+        }
+        anyhow::ensure!(
+            count as u64 <= remaining,
+            "CodeQL database file grew while reading"
+        );
+        consume(&buffer[..count])?;
+        total += count as u64;
+    }
     anyhow::ensure!(
-        kind.is_file() && !kind.is_symlink(),
-        "CodeQL database contains a non-regular entry"
+        total == expected,
+        "CodeQL database file shrank while reading"
     );
-    reserve_file_bytes(budget, entry.metadata()?.len())?;
-    fs::copy(entry.path(), target)
-        .with_context(|| format!("copying {}", entry.path().display()))?;
+    Ok(())
+}
+
+fn verify_source_unchanged(source: &fs::File, before: &fs::Metadata, path: &Path) -> Result<()> {
+    let after = source.metadata()?;
+    let same_modified = before.modified().ok() == after.modified().ok();
+    anyhow::ensure!(
+        before.len() == after.len() && same_modified,
+        "CodeQL database file changed while copying: {}",
+        path.display()
+    );
     Ok(())
 }
 
@@ -162,6 +224,10 @@ fn reserve_entry(budget: &mut CopyBudget) -> Result<()> {
         "CodeQL database exceeds the file-count limit"
     );
     Ok(())
+}
+
+fn remaining_entry_capacity(budget: &CopyBudget) -> usize {
+    MAX_DATABASE_ENTRIES.saturating_sub(budget.entries) as usize
 }
 
 fn reserve_file_bytes(budget: &mut CopyBudget, bytes: u64) -> Result<()> {
@@ -221,28 +287,93 @@ fn restore_changed_database(destination: &Path, backup: &Path) -> Result<()> {
 }
 
 pub(super) fn database_identity(path: &Path) -> Result<String> {
+    let root = SecureDirectory::open(path)
+        .with_context(|| format!("opening CodeQL database {}", path.display()))?;
     let mut hasher = blake3::Hasher::new();
-    let marker = path.join("codeql-database.yml");
-    let marker_bytes = crate::bounded_file::read_regular_bytes_within(path, &marker, 1024 * 1024)?;
-    hasher.update(&marker_bytes);
-    if let Ok(provenance) = super::provenance::read_codeql_database_provenance(path) {
-        hasher.update(&serde_json::to_vec(&provenance)?);
-    }
-    let mut entries = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+    hasher.update(b"kuzushi-codeql-database-content-v1\0");
+    let mut budget = CopyBudget::default();
+    hash_directory_contents(&root, 0, &mut budget, &mut hasher)?;
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn hash_directory_contents(
+    directory: &SecureDirectory,
+    depth: usize,
+    budget: &mut CopyBudget,
+    hasher: &mut blake3::Hasher,
+) -> Result<()> {
     anyhow::ensure!(
-        entries.len() <= 4096,
-        "CodeQL database has too many top-level entries"
+        depth <= MAX_DATABASE_DEPTH,
+        "CodeQL database nesting is too deep"
     );
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        hasher.update(entry.file_name().to_string_lossy().as_bytes());
-        let metadata = entry.metadata()?;
-        hasher.update(&metadata.len().to_le_bytes());
-        if let Ok(modified) = metadata.modified()?.duration_since(std::time::UNIX_EPOCH) {
-            hasher.update(&modified.as_nanos().to_le_bytes());
+    for name in directory.entry_names(remaining_entry_capacity(budget))? {
+        hash_database_entry(directory, &name, depth, budget, hasher)?;
+    }
+    hasher.update(b"e");
+    Ok(())
+}
+
+fn hash_database_entry(
+    directory: &SecureDirectory,
+    name: &OsStr,
+    depth: usize,
+    budget: &mut CopyBudget,
+    hasher: &mut blake3::Hasher,
+) -> Result<()> {
+    reserve_entry(budget)?;
+    let entry = directory.open_entry(name)?;
+    match entry {
+        SecureEntry::Directory(child) => {
+            hash_entry_header(hasher, b'd', name, 0);
+            hash_directory_contents(&child, depth + 1, budget, hasher)
+        }
+        SecureEntry::File(mut file, metadata) => {
+            hash_regular_file(&mut file, &metadata, name, budget, hasher)
         }
     }
-    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn hash_regular_file(
+    file: &mut fs::File,
+    metadata: &fs::Metadata,
+    name: &OsStr,
+    budget: &mut CopyBudget,
+    hasher: &mut blake3::Hasher,
+) -> Result<()> {
+    reserve_file_bytes(budget, metadata.len())?;
+    hash_entry_header(hasher, b'f', name, metadata.len());
+    stream_exact_file(file, metadata.len(), |bytes| {
+        hasher.update(bytes);
+        Ok(())
+    })?;
+    verify_source_unchanged(file, metadata, Path::new(name))
+}
+
+fn hash_entry_header(hasher: &mut blake3::Hasher, kind: u8, name: &OsStr, size: u64) {
+    let name = encoded_name(name);
+    hasher.update(&[kind]);
+    hasher.update(&(name.len() as u64).to_le_bytes());
+    hasher.update(&name);
+    hasher.update(&size.to_le_bytes());
+}
+
+#[cfg(unix)]
+fn encoded_name(name: &OsStr) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    name.as_bytes().to_vec()
+}
+
+#[cfg(windows)]
+fn encoded_name(name: &OsStr) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt;
+    name.encode_wide()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn encoded_name(name: &OsStr) -> Vec<u8> {
+    name.to_string_lossy().into_owned().into_bytes()
 }
 
 fn validate_backup_path(workspace: &Path, backup: &Path) -> Result<()> {
@@ -332,6 +463,101 @@ mod tests {
         assert_eq!(
             fs::read_to_string(destination.join("codeql-database.yml")).unwrap(),
             "primaryLanguage: javascript\n"
+        );
+    }
+
+    #[test]
+    fn destination_identity_detects_nested_same_size_rewrite() {
+        let workspace = tempfile::tempdir().unwrap();
+        let isolated = tempfile::tempdir().unwrap();
+        let destination = workspace.path().join(".kuzushi/codeql-db");
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        fs::create_dir(&destination).unwrap();
+        make_valid_database(&destination);
+        make_valid_database(isolated.path());
+        let nested = destination.join("db-cpp/cache/chunk.bin");
+        fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        fs::write(&nested, b"AAAA").unwrap();
+        let expected = inspect_destination(&destination).unwrap();
+
+        fs::write(&nested, b"BBBB").unwrap();
+        let actual = inspect_destination(&destination).unwrap();
+
+        assert_ne!(actual, expected);
+        let error = promote_database(workspace.path(), isolated.path(), &destination, expected)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("destination changed"), "{error}");
+        assert_eq!(fs::read(&nested).unwrap(), b"BBBB");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_rejects_file_swapped_to_symlink_after_enumeration() {
+        use std::os::unix::fs::symlink;
+
+        let source = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let victim = source.path().join("chunk.bin");
+        fs::write(&victim, b"approved").unwrap();
+        let opened = SecureDirectory::open(source.path()).unwrap();
+        assert!(opened
+            .entry_names(MAX_DATABASE_ENTRIES as usize)
+            .unwrap()
+            .iter()
+            .any(|name| name == "chunk.bin"));
+        fs::remove_file(&victim).unwrap();
+        symlink(outside.path(), &victim).unwrap();
+
+        let error = copy_database_entry(
+            &opened,
+            OsStr::new("chunk.bin"),
+            destination.path(),
+            0,
+            &mut CopyBudget::default(),
+        )
+        .unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains("symlinked database"),
+            "{error:#}"
+        );
+        assert!(!destination.path().join("chunk.bin").exists());
+    }
+
+    #[test]
+    fn database_identity_includes_provenance_bytes() {
+        let database = tempfile::tempdir().unwrap();
+        make_valid_database(database.path());
+        let before = database_identity(database.path()).unwrap();
+        let provenance = database
+            .path()
+            .join(super::super::provenance::CODEQL_PROVENANCE_FILE);
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&provenance).unwrap()).unwrap();
+        value["generation"] = serde_json::Value::String(uuid::Uuid::new_v4().to_string());
+        fs::write(&provenance, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+
+        let after = database_identity(database.path()).unwrap();
+
+        assert_ne!(after, before);
+    }
+
+    #[test]
+    fn database_identity_frames_directory_boundaries() {
+        let nested = tempfile::tempdir().unwrap();
+        fs::create_dir(nested.path().join("a")).unwrap();
+        fs::write(nested.path().join("a/b"), b"b").unwrap();
+        fs::write(nested.path().join("a/c"), b"c").unwrap();
+        let flattened = tempfile::tempdir().unwrap();
+        fs::create_dir(flattened.path().join("a")).unwrap();
+        fs::write(flattened.path().join("a/b"), b"b").unwrap();
+        fs::write(flattened.path().join("c"), b"c").unwrap();
+
+        assert_ne!(
+            database_identity(nested.path()).unwrap(),
+            database_identity(flattened.path()).unwrap()
         );
     }
 
