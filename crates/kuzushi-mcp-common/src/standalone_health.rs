@@ -7,12 +7,13 @@ use serde::Serialize;
 struct StandaloneHealth<'a> {
     server: &'a str,
     version: &'a str,
-    ready: bool,
-    mode: &'static str,
+    process_healthy: bool,
+    protocol: &'static str,
+    backend_readiness: &'static str,
 }
 
-/// Handle the release-smoke `--health` contract before a server constructs
-/// tool registries or reads target capabilities.
+/// Report process/protocol liveness without claiming that optional external
+/// tools or target-specific capabilities are available.
 pub fn exit_after_standalone_health_if_requested(info: &ServerInfo) -> Result<()> {
     if !std::env::args_os().any(|argument| argument == "--health") {
         return Ok(());
@@ -20,8 +21,9 @@ pub fn exit_after_standalone_health_if_requested(info: &ServerInfo) -> Result<()
     let health = StandaloneHealth {
         server: &info.name,
         version: &info.version,
-        ready: true,
-        mode: "stdio-server",
+        process_healthy: true,
+        protocol: "stdio",
+        backend_readiness: "not-probed",
     };
     println!("{}", serde_json::to_string_pretty(&health)?);
     std::process::exit(0)
@@ -32,19 +34,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn basic_health_is_truthful_server_startup_metadata() {
+    fn basic_health_does_not_claim_unprobed_backend_readiness() {
         let health = StandaloneHealth {
             server: "kuzushi-mcp-test",
             version: "1.2.3",
-            ready: true,
-            mode: "stdio-server",
+            process_healthy: true,
+            protocol: "stdio",
+            backend_readiness: "not-probed",
         };
 
         let value = serde_json::to_value(health).unwrap();
 
         assert_eq!(value["server"], "kuzushi-mcp-test");
         assert_eq!(value["version"], "1.2.3");
-        assert_eq!(value["ready"], true);
-        assert_eq!(value["mode"], "stdio-server");
+        assert_eq!(value["processHealthy"], true);
+        assert_eq!(value["protocol"], "stdio");
+        assert_eq!(value["backendReadiness"], "not-probed");
+        assert_eq!(value.get("ready"), None);
     }
 }

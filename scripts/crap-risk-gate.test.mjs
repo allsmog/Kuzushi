@@ -32,6 +32,29 @@ test("explicit CI base covers every commit in a multi-commit change", () => {
   }
 });
 
+test("zero-SHA event base covers a complete multi-commit new ref", () => {
+  const repository = mkdtempSync(path.join(os.tmpdir(), "kuzushi-crap-zero-base-"));
+  try {
+    initializeRepository(repository);
+    writeBranchyProductionChange(repository);
+    commit(repository, "add risky code");
+    writeFileSync(path.join(repository, "README.md"), "tip-only docs change\n");
+    commit(repository, "docs only tip");
+
+    const result = spawnSync(process.execPath, [gate], {
+      cwd: repository,
+      encoding: "utf8",
+      env: { ...process.env, KUZUSHI_CRAP_RISK_BASE_REF: "0".repeat(40) },
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /src\/risky\.rs/);
+    assert.match(result.stderr, /complexity/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
 function initializeRepository(repository) {
   git(repository, ["init", "-q"]);
   git(repository, ["config", "user.name", "Kuzushi Test"]);

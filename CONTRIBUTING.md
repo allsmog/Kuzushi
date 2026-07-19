@@ -15,9 +15,12 @@ pnpm verify:quick    # types, tests, formatting, architecture, docs, and policy 
 ```
 
 Before a release or when reproducing CI end to end, run `pnpm verify:ci`.
-It adds the full Rust workspace, native/package assembly, and e2e smoke and
-prints a machine-readable step receipt. CI keeps the same gates parallel for
-latency; this command is the canonical local parity entrypoint.
+It adds coverage, codegen drift, Clippy, cargo-deny, the full Rust workspace,
+native/package assembly, and e2e smoke, and reserves stdout for one
+machine-readable receipt. CI keeps those gates parallel for latency. The
+dedicated Node 22 compatibility lane, Linux bubblewrap/AppArmor setup, and
+artifact transfer are matrix/infrastructure checks and remain CI-only; the
+receipt lists those exceptions explicitly.
 
 Requires Rust 1.96.1 (including rustfmt and Clippy) and Node 22+. The repo has
 `rust-toolchain.toml`, `.nvmrc`, and `.tool-versions` so `rustup`, `nvm use`,

@@ -32,8 +32,8 @@ pnpm verify:pack
 node scripts/bump-release-version.mjs 0.24.0-alpha.9
 pnpm check:release
 
-# 3. Commit and tag
-git add package.json CHANGELOG.md
+# 3. Commit every source updated by the bump, plus the changelog, and tag
+git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md
 git commit -m "chore: bump version to $(node -p 'require("./package.json").version')"
 git tag "v$(node -p 'require("./package.json").version')"
 

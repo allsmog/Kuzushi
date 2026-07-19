@@ -94,13 +94,20 @@ function changedFilesFromGit() {
 
 function diffBase() {
   const requested = process.env.KUZUSHI_CRAP_RISK_BASE_REF;
-  const selected = requested && !/^0+$/.test(requested) ? requested : "HEAD^";
+  const selected = /^0+$/.test(requested ?? "") ? emptyTreeBase() : (requested ?? "HEAD^");
   requireResolvableBase(selected);
   return selected;
 }
 
+function emptyTreeBase() {
+  const emptyTree = execGit(["hash-object", "-t", "tree", "--stdin"], root, "").trim();
+  if (emptyTree) return emptyTree;
+  console.error("CRAP-risk gate cannot resolve Git's empty tree for a zero-SHA event base.");
+  process.exit(1);
+}
+
 function requireResolvableBase(base) {
-  if (gitRefResolves(base)) return;
+  if (gitObjectResolves(base)) return;
   console.error(
     `CRAP-risk gate cannot resolve diff base "${base}" — the gate would silently check 0 files. ` +
       "Fetch more history (checkout with fetch-depth: 2 or 0) or set KUZUSHI_CRAP_RISK_BASE_REF.",
@@ -108,8 +115,12 @@ function requireResolvableBase(base) {
   process.exit(1);
 }
 
-function gitRefResolves(ref) {
-  return git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).trim().length > 0;
+function gitObjectResolves(ref) {
+  return git(["cat-file", "-e", ref]).trim().length === 0 && gitObjectType(ref).length > 0;
+}
+
+function gitObjectType(ref) {
+  return git(["cat-file", "-t", ref]).trim();
 }
 
 function functionBlocks(file, source) {
@@ -330,9 +341,9 @@ function git(args) {
   return execGit(args, root);
 }
 
-function execGit(args, cwd) {
+function execGit(args, cwd, input) {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8" });
+    return execFileSync("git", args, { cwd, encoding: "utf8", input });
   } catch {
     return "";
   }

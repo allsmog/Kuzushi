@@ -35,8 +35,10 @@ for (const workflow of [
 }
 checkNativeRuntimeContract();
 checkDynamicHostVersion();
+checkWorkspaceLockVersions();
 checkNativeReleaseSmoke();
 checkReleaseAssemblyGate();
+checkReleaseInstructions();
 
 if (process.env.GITHUB_REF_TYPE === "tag") {
   const expectedTag = `v${manifest.version}`;
@@ -97,6 +99,32 @@ function checkDynamicHostVersion() {
     failures.push(
       `dynamic module host version ${JSON.stringify(baked)} must equal package.json version ${JSON.stringify(manifest.version)}`,
     );
+  }
+}
+
+function checkWorkspaceLockVersions() {
+  const lock = readText("Cargo.lock");
+  const members = [...cargo.matchAll(/^\s*"crates\/([^"]+)",?$/gm)].map((match) => match[1]);
+  const lockedVersions = new Map(
+    [...lock.matchAll(/\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"/g)].map((match) => [
+      match[1],
+      match[2],
+    ]),
+  );
+  const mismatches = members.filter((member) => lockedVersions.get(member) !== manifest.version);
+  failures.push(
+    ...mismatches.map((member) =>
+      "Cargo.lock workspace package ".concat(member, " must have version ", manifest.version),
+    ),
+  );
+}
+
+function checkReleaseInstructions() {
+  const instructions = readText("RELEASING.md");
+  const staged =
+    "git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md";
+  if (!instructions.includes(staged)) {
+    failures.push("RELEASING.md must stage every release-version source and CHANGELOG.md");
   }
 }
 
