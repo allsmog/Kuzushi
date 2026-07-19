@@ -214,11 +214,11 @@ fn hash_path(hasher: &mut blake3::Hasher, path: &Path) {
     hasher.update(path.to_string_lossy().as_bytes());
 }
 
-fn operator_home_for_target(target: &Path) -> Result<PathBuf> {
+fn operator_home_for_target(_target: &Path) -> Result<PathBuf> {
     #[cfg(test)]
     {
         return Ok(
-            test_operator_home(target).unwrap_or_else(|| register_test_operator_home(target))
+            test_operator_home(_target).unwrap_or_else(|| register_test_operator_home(_target))
         );
     }
     #[cfg(not(test))]
