@@ -1,4 +1,4 @@
-use super::promotion::codeql_database_has_shape;
+use super::promotion::{codeql_database_has_shape, DatabaseIdentity};
 use crate::remediation::patch::RepositorySourceBinding;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -20,10 +20,43 @@ pub(crate) struct CodeqlDatabaseProvenance {
     pub(crate) generation: String,
 }
 
-#[derive(Clone, Debug)]
 pub(crate) struct ValidatedManagedCodeqlDatabase {
-    pub(crate) path: PathBuf,
+    path: PathBuf,
     pub(crate) provenance: CodeqlDatabaseProvenance,
+    expected_identity: DatabaseIdentity,
+    _destination_lock: crate::file_lock::ExclusiveFileLock,
+}
+
+impl std::fmt::Debug for ValidatedManagedCodeqlDatabase {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ValidatedManagedCodeqlDatabase")
+            .field("path", &self.path)
+            .field("provenance", &self.provenance)
+            .field("expected_identity", &self.expected_identity)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ValidatedManagedCodeqlDatabase {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn run_verified<T>(&self, operation: impl FnOnce(&Path) -> Result<T>) -> Result<T> {
+        let result = operation(&self.path);
+        self.verify_unchanged()?;
+        result
+    }
+
+    fn verify_unchanged(&self) -> Result<()> {
+        let actual = super::promotion::database_identity(&self.path)?;
+        anyhow::ensure!(
+            actual == self.expected_identity,
+            "managed CodeQL database changed while in use; discard its output and run `codeql:create-db` again"
+        );
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -73,6 +106,7 @@ pub(crate) fn resolve_managed_codeql_database(
         reject_legacy_database(target)?;
         return Ok(None);
     }
+    let destination_lock = super::acquire_managed_database_lock(target, &path)?;
     anyhow::ensure!(
         codeql_database_has_shape(&path),
         "managed CodeQL database at {} is incomplete or unsafe; run `codeql:create-db` again",
@@ -85,31 +119,36 @@ pub(crate) fn resolve_managed_codeql_database(
         )
     })?;
     validate_current_source(target, &provenance)?;
-    verify_codeql_promotion_receipt(target, &path, &provenance)?;
-    Ok(Some(ValidatedManagedCodeqlDatabase { path, provenance }))
+    let expected_identity = verify_codeql_promotion_receipt(target, &path, &provenance)?;
+    Ok(Some(ValidatedManagedCodeqlDatabase {
+        path,
+        provenance,
+        expected_identity,
+        _destination_lock: destination_lock,
+    }))
 }
 
 pub(super) fn write_codeql_promotion_receipt(
     target: &Path,
-    database: &Path,
     provenance: &CodeqlDatabaseProvenance,
+    database_identity: &DatabaseIdentity,
 ) -> Result<()> {
     let operator_home = operator_home_for_target(target)?;
-    write_codeql_promotion_receipt_at(&operator_home, target, database, provenance)
+    write_codeql_promotion_receipt_at(&operator_home, target, provenance, database_identity)
 }
 
 fn write_codeql_promotion_receipt_at(
     operator_home: &Path,
     target: &Path,
-    database: &Path,
     provenance: &CodeqlDatabaseProvenance,
+    database_identity: &DatabaseIdentity,
 ) -> Result<()> {
     let target_id = target_id(target)?;
     let path = prepare_receipt_path(operator_home, target, &target_id)?;
     let receipt = CodeqlPromotionReceipt {
         schema_version: CODEQL_RECEIPT_SCHEMA_VERSION,
         target_id,
-        database_identity: super::promotion::database_identity(database)?,
+        database_identity: database_identity.as_str().to_string(),
         provenance: provenance.clone(),
     };
     let bytes = serde_json::to_vec_pretty(&receipt)?;
@@ -121,7 +160,7 @@ fn verify_codeql_promotion_receipt(
     target: &Path,
     database: &Path,
     provenance: &CodeqlDatabaseProvenance,
-) -> Result<()> {
+) -> Result<DatabaseIdentity> {
     let operator_home = operator_home_for_target(target)?;
     let expected_target_id = target_id(target)?;
     let path = receipt_path(&operator_home, target, &expected_target_id)?;
@@ -138,7 +177,8 @@ fn verify_codeql_promotion_receipt(
     })?;
     let receipt: CodeqlPromotionReceipt = serde_json::from_str(&raw)
         .context("operator CodeQL promotion receipt is malformed; run `codeql:create-db` again")?;
-    validate_promotion_receipt(database, provenance, &expected_target_id, &receipt)
+    validate_promotion_receipt(database, provenance, &expected_target_id, &receipt)?;
+    Ok(DatabaseIdentity::from_receipt(receipt.database_identity))
 }
 
 fn validate_promotion_receipt(
@@ -152,7 +192,7 @@ fn validate_promotion_receipt(
         receipt.schema_version == CODEQL_RECEIPT_SCHEMA_VERSION
             && receipt.target_id == expected_target_id
             && receipt.provenance == *provenance
-            && receipt.database_identity == actual_identity,
+            && receipt.database_identity == actual_identity.as_str(),
         "managed CodeQL database does not match its operator promotion receipt; run `codeql:create-db` again"
     );
     Ok(())
@@ -170,9 +210,9 @@ fn receipt_path(operator_home: &Path, target: &Path, target_id: &str) -> Result<
     let operator_home = std::fs::canonicalize(operator_home)
         .context("could not resolve operator home for CodeQL receipt")?;
     let target = std::fs::canonicalize(target).context("could not resolve CodeQL target")?;
-    let operator_state = crate::workspace::workspace_state_root(&operator_home);
+    let receipt_store = operator_home.join(receipt_relative_dir());
     anyhow::ensure!(
-        !operator_state.starts_with(&target),
+        !receipt_store.starts_with(&target) && !target.starts_with(&receipt_store),
         "CodeQL target overlaps the operator-owned receipt store"
     );
     crate::workspace::validated_workspace_descendant(
@@ -290,14 +330,23 @@ fn path_exists_no_follow(path: &Path) -> Result<bool> {
 }
 
 fn reject_legacy_database(target: &Path) -> Result<()> {
-    let legacy = crate::workspace::legacy_codeql_db_path(target);
-    if path_exists_no_follow(&legacy)? {
-        anyhow::bail!(
-            "legacy CodeQL database at {} has no source provenance; rebuild it with `codeql:create-db`",
-            legacy.display()
-        );
+    for legacy in legacy_database_paths(target) {
+        if path_exists_no_follow(&legacy)? {
+            anyhow::bail!(
+                "legacy CodeQL database at {} has no source provenance; rebuild it with `codeql:create-db`",
+                legacy.display()
+            );
+        }
     }
     Ok(())
+}
+
+fn legacy_database_paths(target: &Path) -> [PathBuf; 2] {
+    [
+        crate::workspace::workspace_state_root(target)
+            .join(crate::workspace::WORKSPACE_CODEQL_DB_DIR),
+        crate::workspace::legacy_codeql_db_path(target),
+    ]
 }
 
 #[cfg(test)]
@@ -314,7 +363,8 @@ pub(crate) fn write_test_codeql_database_provenance(
     )
     .unwrap();
     let provenance = write_codeql_database_provenance(database, &binding, language).unwrap();
-    write_codeql_promotion_receipt_at(&operator_home, target, database, &provenance).unwrap();
+    let identity = super::promotion::database_identity(database).unwrap();
+    write_codeql_promotion_receipt_at(&operator_home, target, &provenance, &identity).unwrap();
 }
 
 #[cfg(test)]
@@ -366,8 +416,9 @@ mod tests {
         let current = resolve_managed_codeql_database(repository.path())
             .unwrap()
             .unwrap();
-        assert_eq!(current.path, database);
+        assert_eq!(current.path(), database);
         assert_eq!(current.provenance.language, "javascript");
+        drop(current);
 
         std::fs::write(repository.path().join("source.js"), "const value = 2;\n").unwrap();
         commit_all(repository.path(), "next");
@@ -423,6 +474,102 @@ mod tests {
 
         assert!(error.contains("does not match"), "{error}");
         assert!(error.contains("codeql:create-db"), "{error}");
+    }
+
+    #[test]
+    fn receipt_writer_does_not_bless_a_live_database_mutation() {
+        let repository = initialized_repository();
+        let database = make_database(repository.path(), "javascript");
+        let operator_home = register_test_operator_home(repository.path());
+        let binding = crate::remediation::patch::clean_repository_source_binding(
+            repository.path(),
+            crate::remediation::patch::unattended_patch_control(),
+        )
+        .unwrap();
+        let provenance =
+            write_codeql_database_provenance(&database, &binding, "javascript").unwrap();
+        let promoted_identity = super::super::promotion::database_identity(&database).unwrap();
+        std::fs::write(database.join("db-javascript/forged.bin"), b"forged").unwrap();
+
+        write_codeql_promotion_receipt_at(
+            &operator_home,
+            repository.path(),
+            &provenance,
+            &promoted_identity,
+        )
+        .unwrap();
+
+        let error = resolve_managed_codeql_database(repository.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn managed_database_lease_rejects_mutation_during_use() {
+        let repository = initialized_repository();
+        let database = make_database(repository.path(), "javascript");
+        let chunk = database.join("db-javascript/chunk.bin");
+        std::fs::write(&chunk, b"AAAA").unwrap();
+        write_test_codeql_database_provenance(&database, repository.path(), "javascript");
+        let managed = resolve_managed_codeql_database(repository.path())
+            .unwrap()
+            .unwrap();
+
+        let error = managed
+            .run_verified(|_| {
+                std::fs::write(&chunk, b"BBBB")?;
+                Ok(())
+            })
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("changed while in use"), "{error}");
+    }
+
+    #[test]
+    fn managed_database_lease_holds_the_publication_lock() {
+        let repository = initialized_repository();
+        let database = make_database(repository.path(), "javascript");
+        write_test_codeql_database_provenance(&database, repository.path(), "javascript");
+        let managed = resolve_managed_codeql_database(repository.path())
+            .unwrap()
+            .unwrap();
+        let relative = database.strip_prefix(repository.path()).unwrap();
+        let lock_path = super::super::destination_lock_path(repository.path(), relative).unwrap();
+
+        assert!(crate::file_lock::ExclusiveFileLock::try_acquire(&lock_path)
+            .unwrap()
+            .is_none());
+        drop(managed);
+        assert!(crate::file_lock::ExclusiveFileLock::try_acquire(&lock_path)
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn receipt_store_must_not_be_inside_the_target() {
+        let operator_home = tempfile::tempdir().unwrap();
+
+        let error = receipt_path(operator_home.path(), operator_home.path(), "target")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("overlaps"), "{error}");
+    }
+
+    #[test]
+    fn target_must_not_be_inside_the_receipt_store() {
+        let operator_home = tempfile::tempdir().unwrap();
+        let receipt_store = operator_home.path().join(receipt_relative_dir());
+        let target = receipt_store.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+
+        let error = receipt_path(operator_home.path(), &target, "target")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("overlaps"), "{error}");
     }
 
     #[test]

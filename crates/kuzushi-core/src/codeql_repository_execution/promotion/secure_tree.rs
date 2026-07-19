@@ -7,6 +7,8 @@ pub(super) struct SecureDirectory {
     handle: fs::File,
     path: PathBuf,
     #[cfg(windows)]
+    final_path: PathBuf,
+    #[cfg(windows)]
     _retained_ancestors: Vec<fs::File>,
 }
 
@@ -244,19 +246,21 @@ fn open_root_directory(path: &Path) -> io::Result<SecureDirectory> {
         }
     }
     let handle = retained.pop().ok_or_else(|| invalid_root(&absolute))?;
+    let final_path = crate::file_lock::windows_final_path(&handle)?;
     Ok(SecureDirectory {
         handle,
         path: absolute,
+        final_path,
         _retained_ancestors: retained,
     })
 }
 
 #[cfg(windows)]
 fn directory_entry_names(directory: &SecureDirectory, limit: usize) -> io::Result<Vec<OsString>> {
-    // The open handle denies delete-sharing, so this path cannot be replaced
-    // while ReadDir resolves it. Ancestor handles remain live in caller frames.
-    let _pinned_directory = &directory.handle;
-    collect_entry_names(fs::read_dir(&directory.path)?, limit)
+    verify_visible_windows_directory(directory)?;
+    let names = collect_entry_names(fs::read_dir(&directory.path)?, limit)?;
+    verify_visible_windows_directory(directory)?;
+    Ok(names)
 }
 
 #[cfg(windows)]
@@ -270,10 +274,13 @@ fn open_child_entry(directory: &SecureDirectory, name: &OsStr) -> io::Result<Sec
     if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(symlink_entry(&path));
     }
+    let final_path = crate::file_lock::windows_final_path(&file)?;
+    ensure_windows_child_contained(directory, &final_path)?;
     if metadata.is_dir() {
         return Ok(SecureEntry::Directory(SecureDirectory {
             handle: file,
             path,
+            final_path,
             _retained_ancestors: Vec::new(),
         }));
     }
@@ -281,6 +288,45 @@ fn open_child_entry(directory: &SecureDirectory, name: &OsStr) -> io::Result<Sec
         return Ok(SecureEntry::File(file, metadata));
     }
     Err(non_regular_entry(&path))
+}
+
+#[cfg(windows)]
+fn verify_visible_windows_directory(directory: &SecureDirectory) -> io::Result<()> {
+    let visible = open_windows_directory(&directory.path)?;
+    let same_identity = crate::file_lock::windows_file_identity(&visible)?
+        == crate::file_lock::windows_file_identity(&directory.handle)?;
+    let same_path = crate::file_lock::windows_final_path(&visible)? == directory.final_path;
+    if same_identity && same_path {
+        return Ok(());
+    }
+    Err(windows_path_changed(&directory.path))
+}
+
+#[cfg(windows)]
+fn ensure_windows_child_contained(
+    directory: &SecureDirectory,
+    child_final_path: &Path,
+) -> io::Result<()> {
+    if windows_child_is_contained(&directory.final_path, child_final_path) {
+        return Ok(());
+    }
+    Err(windows_path_changed(&directory.path))
+}
+
+#[cfg(windows)]
+fn windows_child_is_contained(directory: &Path, child: &Path) -> bool {
+    child.parent() == Some(directory)
+}
+
+#[cfg(windows)]
+fn windows_path_changed(path: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!(
+            "database path changed during secure traversal: {}",
+            path.display()
+        ),
+    )
 }
 
 #[cfg(windows)]
@@ -416,4 +462,27 @@ fn entry_limit_error() -> io::Error {
         io::ErrorKind::InvalidData,
         "CodeQL database exceeds the file-count limit",
     )
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn final_handle_path_must_be_a_direct_child_of_the_pinned_directory() {
+        let pinned = Path::new(r"\\?\C:\target\database");
+
+        assert!(windows_child_is_contained(
+            pinned,
+            Path::new(r"\\?\C:\target\database\chunk.bin")
+        ));
+        assert!(!windows_child_is_contained(
+            pinned,
+            Path::new(r"\\?\C:\outside\chunk.bin")
+        ));
+        assert!(!windows_child_is_contained(
+            pinned,
+            Path::new(r"\\?\C:\target\database\nested\chunk.bin")
+        ));
+    }
 }

@@ -143,7 +143,7 @@ fn first_standard_codeql_launcher() -> Option<PathBuf> {
 /// Standard locations kuzushi expects for an existing CodeQL DB.
 pub(crate) fn codeql_db_path(repo_root: &Path) -> Result<Option<PathBuf>> {
     crate::codeql_repository_execution::resolve_managed_codeql_database(repo_root)
-        .map(|database| database.map(|database| database.path))
+        .map(|database| database.map(|database| database.path().to_path_buf()))
 }
 
 /// One source-to-sink path discovered by a CodeQL query, distilled from
@@ -188,18 +188,20 @@ pub(crate) fn run_codeql_flows(plan: &TaintIrisNextPlan) -> Result<Option<Vec<Co
         return Ok(None);
     };
     let queries = selected_codeql_queries(plan);
-    let sarif_file =
-        tempfile::NamedTempFile::new().context("could not create codeql sarif tempfile")?;
+    let analysis_dir = tempfile::tempdir().context("could not create codeql analysis directory")?;
+    let sarif_path = analysis_dir.path().join("results.sarif");
     let timeout_secs = (plan.caps.codeql_analyze_timeout_ms as u64).div_ceil(1_000);
-    let output = run_codeql_analysis(
-        &launcher,
-        &database.path,
-        sarif_file.path(),
-        &queries,
-        timeout_secs,
-    )?;
+    let output = database.run_verified(|database_path| {
+        run_codeql_analysis(
+            &launcher,
+            database_path,
+            &sarif_path,
+            &queries,
+            timeout_secs,
+        )
+    })?;
     ensure_codeql_analysis_succeeded(&output)?;
-    let sarif = crate::bounded_file::read_utf8_text(sarif_file.path(), 64 * 1024 * 1024)
+    let sarif = crate::bounded_file::read_utf8_text(&sarif_path, 64 * 1024 * 1024)
         .context("could not read codeql SARIF output")?;
     Ok(Some(parse_sarif_flows(&sarif)))
 }
@@ -223,11 +225,17 @@ fn run_codeql_analysis(
     queries: &[String],
     timeout_secs: u64,
 ) -> Result<std::process::Output> {
+    let log_dir = sarif_path
+        .parent()
+        .context("CodeQL SARIF output has no parent directory")?;
     let mut command = Command::new(launcher);
     command
         .args(["database", "analyze", "--format=sarif-latest", "--output"])
         .arg(sarif_path)
         .args(["--ram=4096", "--threads=4"])
+        .args(
+            crate::codeql_repository_execution::managed_codeql_analysis_safety_args(log_dir),
+        )
         .arg(db_path)
         .args(queries)
         .stdin(std::process::Stdio::null())

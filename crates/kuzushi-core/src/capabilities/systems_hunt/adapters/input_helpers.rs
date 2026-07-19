@@ -100,7 +100,7 @@ pub(crate) fn write_artifact(
 
 pub(crate) fn resolve_codeql_db_path(target: &Path) -> Result<Option<PathBuf>> {
     crate::codeql_repository_execution::resolve_managed_codeql_database(target)
-        .map(|database| database.map(|database| database.path))
+        .map(|database| database.map(|database| database.path().to_path_buf()))
 }
 
 pub(crate) fn path_relative_to(root: &Path, path: &Path) -> String {

@@ -64,7 +64,9 @@ impl CodeqlScanner {
     ) -> Result<ScanEngineOutput> {
         let database = self.ensure_database(target, binary, cancel)?;
         let suite = resolve_codeql_suite(self.suite.as_deref(), &database.language)?;
-        let sarif = self.run_codeql_analysis(binary, &database.db_path, &suite, cancel)?;
+        let sarif = database.run_verified(|db_path| {
+            self.run_codeql_analysis(binary, db_path, &suite, cancel)
+        })?;
         let findings = normalize_codeql_sarif(&sarif, repo_name)?;
         Ok(ScanEngineOutput {
             findings,

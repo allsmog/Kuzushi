@@ -14,7 +14,20 @@ const MAX_DATABASE_DEPTH: usize = 128;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum DestinationState {
     Missing,
-    ValidDatabase(String),
+    ValidDatabase(DatabaseIdentity),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct DatabaseIdentity(String);
+
+impl DatabaseIdentity {
+    pub(super) fn from_receipt(value: String) -> Self {
+        Self(value)
+    }
+
+    pub(super) fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 pub(super) fn inspect_destination(path: &Path) -> Result<DestinationState> {
@@ -71,14 +84,15 @@ pub(super) fn promote_database(
     isolated_db: &Path,
     destination: &Path,
     expected_state: DestinationState,
-) -> Result<()> {
+) -> Result<DatabaseIdentity> {
     validate_isolated_database(isolated_db)?;
     let staged = stage_database_copy(isolated_db, destination)?;
     anyhow::ensure!(
         inspect_destination(destination)? == expected_state,
         "CodeQL destination changed during isolated execution; retry"
     );
-    install_staged_database(workspace, destination, staged, &expected_state)
+    install_staged_database(workspace, destination, staged.directory, &expected_state)?;
+    Ok(staged.identity)
 }
 
 fn validate_isolated_database(isolated_db: &Path) -> Result<()> {
@@ -89,7 +103,12 @@ fn validate_isolated_database(isolated_db: &Path) -> Result<()> {
     Ok(())
 }
 
-fn stage_database_copy(source: &Path, destination: &Path) -> Result<tempfile::TempDir> {
+struct StagedDatabase {
+    directory: tempfile::TempDir,
+    identity: DatabaseIdentity,
+}
+
+fn stage_database_copy(source: &Path, destination: &Path) -> Result<StagedDatabase> {
     let parent = destination
         .parent()
         .context("CodeQL output has no parent")?;
@@ -102,7 +121,11 @@ fn stage_database_copy(source: &Path, destination: &Path) -> Result<tempfile::Te
         codeql_database_is_valid(staged.path()),
         "staged CodeQL database failed validation"
     );
-    Ok(staged)
+    let identity = database_identity(staged.path())?;
+    Ok(StagedDatabase {
+        directory: staged,
+        identity,
+    })
 }
 
 #[derive(Default)]
@@ -286,14 +309,14 @@ fn restore_changed_database(destination: &Path, backup: &Path) -> Result<()> {
     anyhow::bail!("CodeQL destination changed during isolated execution; retry")
 }
 
-pub(super) fn database_identity(path: &Path) -> Result<String> {
+pub(super) fn database_identity(path: &Path) -> Result<DatabaseIdentity> {
     let root = SecureDirectory::open(path)
         .with_context(|| format!("opening CodeQL database {}", path.display()))?;
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"kuzushi-codeql-database-content-v1\0");
     let mut budget = CopyBudget::default();
     hash_directory_contents(&root, 0, &mut budget, &mut hasher)?;
-    Ok(hasher.finalize().to_hex().to_string())
+    Ok(DatabaseIdentity(hasher.finalize().to_hex().to_string()))
 }
 
 fn hash_directory_contents(
@@ -489,6 +512,28 @@ mod tests {
             .to_string();
         assert!(error.contains("destination changed"), "{error}");
         assert_eq!(fs::read(&nested).unwrap(), b"BBBB");
+    }
+
+    #[test]
+    fn promotion_returns_the_identity_of_the_staged_tree() {
+        let workspace = tempfile::tempdir().unwrap();
+        let isolated = tempfile::tempdir().unwrap();
+        let destination = workspace.path().join(".kuzushi/codeql-db");
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        make_valid_database(isolated.path());
+        fs::write(isolated.path().join("db-cpp/chunk.bin"), b"AAAA").unwrap();
+
+        let promoted = promote_database(
+            workspace.path(),
+            isolated.path(),
+            &destination,
+            DestinationState::Missing,
+        )
+        .unwrap();
+
+        assert_eq!(promoted, database_identity(&destination).unwrap());
+        fs::write(destination.join("db-cpp/chunk.bin"), b"BBBB").unwrap();
+        assert_ne!(promoted, database_identity(&destination).unwrap());
     }
 
     #[cfg(unix)]

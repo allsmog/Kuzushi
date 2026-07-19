@@ -19,9 +19,11 @@ impl CodeqlScanner {
                 )
             })?;
         let language = managed_database_language(self.language.as_deref(), &database)?;
+        let db_path = database.path().to_path_buf();
         Ok(CodeqlDatabase {
-            db_path: database.path,
+            db_path,
             language,
+            managed: Some(database),
         })
     }
 
@@ -42,6 +44,7 @@ impl CodeqlScanner {
         Ok(CodeqlDatabase {
             language: self.configured_codeql_language(target, binary, cancel, &db_path)?,
             db_path,
+            managed: None,
         })
     }
 

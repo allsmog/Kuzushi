@@ -25,6 +25,15 @@ pub(crate) use provenance::{resolve_managed_codeql_database, ValidatedManagedCod
 pub(crate) const DEFAULT_CODEQL_REPOSITORY_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 pub(crate) const MAX_CODEQL_REPOSITORY_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 
+pub(crate) fn managed_codeql_analysis_safety_args(log_dir: &Path) -> [String; 4] {
+    [
+        "--rerun".to_string(),
+        "--max-disk-cache=0".to_string(),
+        "--expect-discarded-cache".to_string(),
+        format!("--logdir={}", log_dir.display()),
+    ]
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum CodeqlBuildStrategy<'a> {
     BuildMode(&'a str),
@@ -121,7 +130,7 @@ impl<'a> CodeqlRepositoryExecution<'a> {
             &self.request.binding,
             language,
         )?;
-        promote_database(
+        let database_identity = promote_database(
             self.request.source_root,
             isolated_db,
             self.request.destination,
@@ -129,8 +138,8 @@ impl<'a> CodeqlRepositoryExecution<'a> {
         )?;
         provenance::write_codeql_promotion_receipt(
             self.request.source_root,
-            self.request.destination,
             &provenance,
+            &database_identity,
         )
     }
 
@@ -220,9 +229,28 @@ fn destination_lock_path(source_root: &Path, database_relative: &Path) -> Result
     crate::workspace::prepare_workspace_output_path(source_root, &relative)
 }
 
+fn acquire_managed_database_lock(
+    source_root: &Path,
+    destination: &Path,
+) -> Result<crate::file_lock::ExclusiveFileLock> {
+    let relative = validated_database_relative(source_root, destination)?;
+    let lock_path = destination_lock_path(source_root, &relative)?;
+    crate::file_lock::ExclusiveFileLock::acquire(&lock_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_analysis_args_disable_database_side_caches_and_logs() {
+        let args = managed_codeql_analysis_safety_args(Path::new("/tmp/codeql-logs"));
+
+        assert!(args.iter().any(|arg| arg == "--rerun"));
+        assert!(args.iter().any(|arg| arg == "--max-disk-cache=0"));
+        assert!(args.iter().any(|arg| arg == "--expect-discarded-cache"));
+        assert!(args.iter().any(|arg| arg == "--logdir=/tmp/codeql-logs"));
+    }
 
     #[test]
     fn prepared_execution_owns_the_cross_process_destination_lock() {
