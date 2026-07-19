@@ -28,7 +28,11 @@ pub struct RunProjectionRead {
 
 pub fn read_run_items(target: impl AsRef<Path>, run_id: &str) -> Result<Option<RunItemRead>> {
     let run_id = RunId::parse(run_id)?;
-    let path = crate::run_artifacts::run_dir(target, run_id.as_str()).join("items.jsonl");
+    let path = crate::run_artifacts::checked_run_artifact_path(
+        target,
+        run_id.as_str(),
+        "items.jsonl",
+    )?;
     let Some(reader) = open_stream(&path)? else {
         return Ok(None);
     };
@@ -38,7 +42,8 @@ pub fn read_run_items(target: impl AsRef<Path>, run_id: &str) -> Result<Option<R
 pub fn load_run_projection(target: impl AsRef<Path>, run_id: &str) -> Result<RunProjectionRead> {
     let target = target.as_ref();
     let run_id = RunId::parse(run_id)?;
-    let path = crate::run_artifacts::run_dir(target, run_id.as_str()).join("items.jsonl");
+    let path =
+        crate::run_artifacts::checked_run_artifact_path(target, run_id.as_str(), "items.jsonl")?;
     let Some(reader) = open_stream(&path)? else {
         return legacy_projection(run_id.as_str());
     };

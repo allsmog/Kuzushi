@@ -13,8 +13,11 @@
 //!    or `KUZUSHI_CODEQL_CACHE_DIR` if set). Persists across MCP server
 //!    restarts. First call to each CWE folder on a given language is
 //!    still slow because that's when the pack is compiled.
-//! 2. A bounded in-process result memo keyed on database revision,
-//!    selector revision, and result limit. The
+//! 2. A bounded in-process result memo keyed on database-tree revision,
+//!    dependency-free local selector revision, CodeQL executable revision,
+//!    and result limit. Pack selectors and imported local queries bypass the
+//!    memo because their complete dependency graph cannot be established
+//!    without executing CodeQL's resolver. The
 //!    agent often re-queries the same CWE folder when iterating on
 //!    findings during a single hunt; the second call returns instantly.
 //!    Keyed on the canonical absolute DB path so a typo or symlink swap
@@ -43,6 +46,8 @@ const MAX_LOCAL_QUERY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SARIF_BYTES: usize = 64 * 1024 * 1024;
 const MAX_MEMO_ENTRIES: usize = 64;
 const MAX_MEMO_BYTES: usize = 16 * 1024 * 1024;
+const MAX_DATABASE_REVISION_ENTRIES: usize = 250_000;
+const MAX_DATABASE_REVISION_BYTES: usize = 64 * 1024 * 1024;
 
 pub(crate) fn build_registry() -> Result<ToolRegistry> {
     Ok(build_registry_with_capability(
@@ -172,7 +177,9 @@ struct MemoKey {
     db: PathBuf,
     db_revision: String,
     selector: String,
-    selector_revision: Option<String>,
+    selector_revision: String,
+    codeql: PathBuf,
+    codeql_revision: String,
     limit: usize,
 }
 
@@ -250,11 +257,14 @@ fn flow_memo() -> &'static Mutex<FlowMemo> {
     MEMO.get_or_init(|| Mutex::new(FlowMemo::bounded(MAX_MEMO_ENTRIES, MAX_MEMO_BYTES)))
 }
 
-fn memo_key(db: &Path, selector: &str, limit: usize) -> Result<MemoKey> {
-    let db = std::fs::canonicalize(db).context("could not canonicalize CodeQL database")?;
-    Ok(MemoKey {
-        db_revision: database_revision(&db)?,
-        selector_revision: local_query_revision(selector)?,
+fn memo_key(db: &Path, selector: &str, limit: usize, codeql: &Path) -> Option<MemoKey> {
+    let db = std::fs::canonicalize(db).ok()?;
+    let codeql = std::fs::canonicalize(codeql).ok()?;
+    Some(MemoKey {
+        db_revision: database_revision(&db).ok()?,
+        selector_revision: local_query_revision(selector).ok()??,
+        codeql_revision: codeql_revision(&codeql).ok()?,
+        codeql,
         db,
         selector: selector.to_string(),
         limit,
@@ -273,11 +283,132 @@ fn store_memo(key: MemoKey, flows: &[Value]) {
 }
 
 fn database_revision(db: &Path) -> Result<String> {
-    let metadata = ReadRootCapability::new([db.to_path_buf()])?
-        .read_utf8(&db.join("codeql-database.yml"), MAX_DATABASE_METADATA_BYTES)?;
-    Ok(kuzushi_mcp_common::cache::sha256_hex_bytes(
-        metadata.as_bytes(),
-    ))
+    let mut manifest = Vec::new();
+    let root_metadata = std::fs::symlink_metadata(db)?;
+    append_database_revision_entry(db, db, &root_metadata, &mut manifest)?;
+    let mut pending = vec![db.to_path_buf()];
+    let mut entries = 0_usize;
+    while let Some(directory) = pending.pop() {
+        let mut children = std::fs::read_dir(&directory)?.collect::<std::io::Result<Vec<_>>>()?;
+        children.sort_by_key(std::fs::DirEntry::file_name);
+        let mut directories = Vec::new();
+        for child in children {
+            entries = entries.saturating_add(1);
+            anyhow::ensure!(
+                entries <= MAX_DATABASE_REVISION_ENTRIES,
+                "CodeQL database revision exceeds the entry limit"
+            );
+            let path = child.path();
+            let metadata = std::fs::symlink_metadata(&path)?;
+            anyhow::ensure!(
+                !metadata.file_type().is_symlink(),
+                "CodeQL database revision contains a symlink"
+            );
+            append_database_revision_entry(db, &path, &metadata, &mut manifest)?;
+            if metadata.is_dir() {
+                directories.push(path);
+            }
+        }
+        pending.extend(directories.into_iter().rev());
+    }
+    Ok(kuzushi_mcp_common::cache::sha256_hex_bytes(&manifest))
+}
+
+fn append_database_revision_entry(
+    root: &Path,
+    path: &Path,
+    metadata: &std::fs::Metadata,
+    manifest: &mut Vec<u8>,
+) -> Result<()> {
+    anyhow::ensure!(
+        metadata.is_file() || metadata.is_dir(),
+        "CodeQL database revision contains a non-file entry"
+    );
+    let relative = path.strip_prefix(root)?;
+    append_revision_path(manifest, relative);
+    manifest.push(file_type_marker(metadata));
+    manifest.extend_from_slice(&metadata.len().to_le_bytes());
+    append_platform_metadata(manifest, metadata)?;
+    anyhow::ensure!(
+        manifest.len() <= MAX_DATABASE_REVISION_BYTES,
+        "CodeQL database revision exceeds the manifest byte limit"
+    );
+    Ok(())
+}
+
+fn file_type_marker(metadata: &std::fs::Metadata) -> u8 {
+    if metadata.is_file() {
+        b'f'
+    } else if metadata.is_dir() {
+        b'd'
+    } else {
+        b'o'
+    }
+}
+
+#[cfg(unix)]
+fn append_revision_path(manifest: &mut Vec<u8>, path: &Path) {
+    use std::os::unix::ffi::OsStrExt;
+    let bytes = path.as_os_str().as_bytes();
+    manifest.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    manifest.extend_from_slice(bytes);
+}
+
+#[cfg(windows)]
+fn append_revision_path(manifest: &mut Vec<u8>, path: &Path) {
+    use std::os::windows::ffi::OsStrExt;
+    let words = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    manifest.extend_from_slice(&(words.len() as u64).to_le_bytes());
+    for word in words {
+        manifest.extend_from_slice(&word.to_le_bytes());
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn append_revision_path(manifest: &mut Vec<u8>, path: &Path) {
+    let path = path.to_string_lossy();
+    manifest.extend_from_slice(&(path.len() as u64).to_le_bytes());
+    manifest.extend_from_slice(path.as_bytes());
+}
+
+#[cfg(unix)]
+fn append_platform_metadata(manifest: &mut Vec<u8>, metadata: &std::fs::Metadata) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    for value in [
+        metadata.dev(),
+        metadata.ino(),
+        u64::from(metadata.mode()),
+        metadata.mtime() as u64,
+        metadata.mtime_nsec() as u64,
+        metadata.ctime() as u64,
+        metadata.ctime_nsec() as u64,
+    ] {
+        manifest.extend_from_slice(&value.to_le_bytes());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn append_platform_metadata(manifest: &mut Vec<u8>, metadata: &std::fs::Metadata) -> Result<()> {
+    use std::os::windows::fs::MetadataExt;
+    for value in [
+        metadata.creation_time(),
+        metadata.last_access_time(),
+        metadata.last_write_time(),
+        metadata.file_size(),
+        u64::from(metadata.file_attributes()),
+    ] {
+        manifest.extend_from_slice(&value.to_le_bytes());
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn append_platform_metadata(manifest: &mut Vec<u8>, metadata: &std::fs::Metadata) -> Result<()> {
+    let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?;
+    manifest.extend_from_slice(&modified.as_secs().to_le_bytes());
+    manifest.extend_from_slice(&u64::from(modified.subsec_nanos()).to_le_bytes());
+    Ok(())
 }
 
 fn local_query_revision(selector: &str) -> Result<Option<String>> {
@@ -288,9 +419,23 @@ fn local_query_revision(selector: &str) -> Result<Option<String>> {
     let parent = path.parent().context("local CodeQL query has no parent")?;
     let query =
         ReadRootCapability::new([parent.to_path_buf()])?.read_utf8(path, MAX_LOCAL_QUERY_BYTES)?;
+    if local_query_has_imports(&query) {
+        return Ok(None);
+    }
     Ok(Some(kuzushi_mcp_common::cache::sha256_hex_bytes(
         query.as_bytes(),
     )))
+}
+
+fn local_query_has_imports(query: &str) -> bool {
+    query
+        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .any(|token| token == "import")
+}
+
+fn codeql_revision(codeql: &Path) -> Result<String> {
+    anyhow::ensure!(codeql.is_file(), "CodeQL executable is not a regular file");
+    kuzushi_mcp_common::cache::sha256_file_hex(codeql)
 }
 
 fn serialized_flow_bytes(flows: &[Value]) -> Option<usize> {
@@ -313,11 +458,13 @@ pub(crate) fn codeql_cache_dir() -> Option<PathBuf> {
 }
 
 async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result<Vec<Value>> {
-    let key = memo_key(db, selector, limit)?;
-    if let Some(cached) = lookup_memo(&key) {
+    let configured = locate_codeql_binary()?.context("could not find the codeql binary")?;
+    let codeql = std::fs::canonicalize(&configured)
+        .with_context(|| format!("could not canonicalize {}", configured.display()))?;
+    let key = memo_key(db, selector, limit, &codeql);
+    if let Some(cached) = verified_memo_hit(db, selector, limit, &codeql, key.as_ref()) {
         return Ok(cached);
     }
-    let codeql = locate_codeql_binary()?.context("could not find the codeql binary")?;
     let sarif = tempfile::NamedTempFile::new()?;
     let mut command = Command::new(&codeql);
     command
@@ -345,21 +492,35 @@ async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result
     }
     let raw = read_generated_sarif(sarif.path())?;
     let flows = parse_sarif(&raw, limit);
-    store_current_result(db, selector, limit, key, &flows)?;
+    store_current_result(db, selector, limit, &codeql, key, &flows);
     Ok(flows)
+}
+
+fn verified_memo_hit(
+    db: &Path,
+    selector: &str,
+    limit: usize,
+    codeql: &Path,
+    key: Option<&MemoKey>,
+) -> Option<Vec<Value>> {
+    let cached = key.and_then(lookup_memo)?;
+    (memo_key(db, selector, limit, codeql).as_ref() == key).then_some(cached)
 }
 
 fn store_current_result(
     db: &Path,
     selector: &str,
     limit: usize,
-    key: MemoKey,
+    codeql: &Path,
+    key: Option<MemoKey>,
     flows: &[Value],
-) -> Result<()> {
-    if memo_key(db, selector, limit)? == key {
+) {
+    let Some(key) = key else {
+        return;
+    };
+    if memo_key(db, selector, limit, codeql).as_ref() == Some(&key) {
         store_memo(key, flows);
     }
-    Ok(())
 }
 
 fn read_generated_sarif(path: &Path) -> Result<String> {
@@ -714,8 +875,33 @@ fn result_limit(args: &Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
+
+    #[cfg(unix)]
+    const FAKE_CODEQL_SCRIPT: &str = r#"#!/usr/bin/env bash
+set -euo pipefail
+counter="$(dirname "$0")/codeql.invocations"
+count=0
+if [ -f "$counter" ]; then
+  count="$(cat "$counter")"
+fi
+echo "$((count + 1))" > "$counter"
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    out="$1"
+  fi
+  shift || true
+done
+if [ -n "$out" ]; then
+  cat > "$out" <<'JSON'
+{"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleId":"cpp/sql-injection","message":{"text":"sql injection"},"codeFlows":[{"threadFlows":[{"locations":[{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/api.c"},"region":{"startLine":7,"snippet":{"text":"input = arg;"}}}}},{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/db.c"},"region":{"startLine":11,"snippet":{"text":"query(input);"}}}}}]}]}]}]}]}
+JSON
+fi
+"#;
 
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -732,26 +918,7 @@ mod tests {
     #[cfg(unix)]
     fn fake_codeql(temp: &tempfile::TempDir) -> PathBuf {
         let path = temp.path().join("codeql");
-        std::fs::write(
-            &path,
-            r#"#!/usr/bin/env bash
-set -euo pipefail
-out=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output" ]; then
-    shift
-    out="$1"
-  fi
-  shift || true
-done
-if [ -n "$out" ]; then
-  cat > "$out" <<'JSON'
-{"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleId":"cpp/sql-injection","message":{"text":"sql injection"},"codeFlows":[{"threadFlows":[{"locations":[{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/api.c"},"region":{"startLine":7,"snippet":{"text":"input = arg;"}}}}},{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/db.c"},"region":{"startLine":11,"snippet":{"text":"query(input);"}}}}}]}]}]}]}]}
-JSON
-fi
-"#,
-        )
-        .unwrap();
+        std::fs::write(&path, FAKE_CODEQL_SCRIPT).unwrap();
         {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = std::fs::metadata(&path).unwrap().permissions();
@@ -759,6 +926,15 @@ fi
             std::fs::set_permissions(&path, perms).unwrap();
         }
         path
+    }
+
+    #[cfg(unix)]
+    fn invocation_count(codeql: &Path) -> usize {
+        std::fs::read_to_string(codeql.with_file_name("codeql.invocations"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
     }
 
     fn codeql_db(temp: &tempfile::TempDir) -> PathBuf {
@@ -829,26 +1005,73 @@ fi
     fn memo_key_changes_with_database_and_local_query_revisions() {
         let temp = tempdir().unwrap();
         let db = codeql_db(&temp);
+        let codeql = fake_codeql(&temp);
         let query = temp.path().join("queries/local.ql");
         std::fs::create_dir_all(query.parent().unwrap()).unwrap();
         std::fs::write(&query, "select 1").unwrap();
         let selector = query.display().to_string();
 
-        let first = memo_key(&db, &selector, 10).unwrap();
+        let first = memo_key(&db, &selector, 10, &codeql).unwrap();
         std::fs::write(
             db.join("codeql-database.yml"),
             "primaryLanguage: cpp\nrevision: two\n",
         )
         .unwrap();
-        let changed_db = memo_key(&db, &selector, 10).unwrap();
+        let changed_db = memo_key(&db, &selector, 10, &codeql).unwrap();
         assert_ne!(first.db_revision, changed_db.db_revision);
 
         std::fs::write(&query, "select 2").unwrap();
-        let changed_query = memo_key(&db, &selector, 10).unwrap();
+        let changed_query = memo_key(&db, &selector, 10, &codeql).unwrap();
         assert_ne!(
             changed_db.selector_revision,
             changed_query.selector_revision
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn memo_key_tracks_internal_database_and_codeql_binary_revisions() {
+        let temp = tempdir().unwrap();
+        let db = codeql_db(&temp);
+        let internal = db.join("db-cpp/internal.bin");
+        std::fs::write(&internal, b"one").unwrap();
+        let codeql = fake_codeql(&temp);
+        let query = temp.path().join("local.ql");
+        std::fs::write(&query, "select 1").unwrap();
+        let selector = query.display().to_string();
+        let first = memo_key(&db, &selector, 10, &codeql).unwrap();
+
+        std::fs::write(&internal, b"revision two").unwrap();
+        let changed_db = memo_key(&db, &selector, 10, &codeql).unwrap();
+        assert_ne!(first.db_revision, changed_db.db_revision);
+
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&codeql)
+            .unwrap()
+            .write_all(b"\n# executable revision two\n")
+            .unwrap();
+        let changed_binary = memo_key(&db, &selector, 10, &codeql).unwrap();
+        assert_ne!(changed_db.codeql_revision, changed_binary.codeql_revision);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn memo_bypasses_pack_and_imported_local_query_selectors() {
+        let temp = tempdir().unwrap();
+        let db = codeql_db(&temp);
+        let codeql = fake_codeql(&temp);
+        assert!(memo_key(&db, "codeql/cpp-queries:Security/CWE/CWE-089", 10, &codeql,).is_none());
+
+        let query = temp.path().join("queries/local.ql");
+        std::fs::create_dir_all(query.parent().unwrap()).unwrap();
+        std::fs::write(&query, "import helper\nselect 1").unwrap();
+        std::fs::write(
+            query.parent().unwrap().join("helper.qll"),
+            "predicate helper() { any() }",
+        )
+        .unwrap();
+        assert!(memo_key(&db, &query.display().to_string(), 10, &codeql).is_none());
     }
 
     #[test]
@@ -879,14 +1102,54 @@ fi
             db: PathBuf::from(format!("/{name}")),
             db_revision: "revision".to_string(),
             selector: "pack:query".to_string(),
-            selector_revision: None,
+            selector_revision: "selector-revision".to_string(),
+            codeql: PathBuf::from("/codeql"),
+            codeql_revision: "codeql-revision".to_string(),
             limit: 10,
         }
     }
 
     #[tokio::test]
     #[cfg(unix)]
-    async fn query_handler_invokes_codeql_and_memoizes_sarif_flows() {
+    async fn unresolved_selector_dependencies_are_executed_on_every_call() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        let fake = fake_codeql(&temp);
+        let db = codeql_db(&temp);
+        let query = temp.path().join("queries/local.ql");
+        let helper = temp.path().join("queries/helper.qll");
+        std::fs::create_dir_all(query.parent().unwrap()).unwrap();
+        std::fs::write(&query, "import helper\nselect 1").unwrap();
+        std::fs::write(&helper, "predicate helper() { any() }").unwrap();
+        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+
+        run_codeql_and_parse(&db, "codeql/cpp-queries:Security/CWE/CWE-089", 10)
+            .await
+            .unwrap();
+        run_codeql_and_parse(&db, "codeql/cpp-queries:Security/CWE/CWE-089", 10)
+            .await
+            .unwrap();
+        run_codeql_and_parse(&db, &query.display().to_string(), 10)
+            .await
+            .unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&helper)
+            .unwrap()
+            .write_all(b"\n// dependency revision two")
+            .unwrap();
+        run_codeql_and_parse(&db, &query.display().to_string(), 10)
+            .await
+            .unwrap();
+
+        restore_env("KUZUSHI_CODEQL_BIN", previous);
+        assert_eq!(invocation_count(&fake), 4);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn query_handler_invokes_codeql_and_parses_sarif_flows() {
         let _guard = env_lock().lock().unwrap();
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);

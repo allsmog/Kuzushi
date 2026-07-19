@@ -187,12 +187,15 @@ impl WorkbenchCache {
         leaf: String,
         state: kuzushi_core::RunArtifactTextRead,
     ) {
+        let key = (target, run_id, leaf);
+        let bytes = run_artifact_text_bytes(&state);
         insert_bounded(
             &mut self.run_artifact_texts,
-            (target, run_id, leaf),
-            RunArtifactTextCache { state },
+            key.clone(),
+            RunArtifactTextCache { state, bytes },
             MAX_LARGE_RUN_CACHE_ENTRIES,
         );
+        self.trim_large_run_caches(&LargeRunCacheKey::Artifact(key));
     }
 
     fn store_run_trace(
@@ -204,12 +207,15 @@ impl WorkbenchCache {
         let state = read
             .map(RunTraceCacheState::Ready)
             .unwrap_or(RunTraceCacheState::Invalid);
+        let key = (target, run_id);
+        let bytes = run_trace_bytes(&state);
         insert_bounded(
             &mut self.run_traces,
-            (target, run_id),
-            RunTraceCache { state },
+            key.clone(),
+            RunTraceCache { state, bytes },
             MAX_RUN_CACHE_ENTRIES,
         );
+        self.trim_large_run_caches(&LargeRunCacheKey::Trace(key));
     }
 
     pub(super) fn store_run_projection(
@@ -218,12 +224,15 @@ impl WorkbenchCache {
         run_id: String,
         state: Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>,
     ) {
+        let key = (target, run_id);
+        let bytes = run_projection_bytes(&state);
         insert_bounded(
             &mut self.run_projections,
-            (target, run_id),
-            RunProjectionCache { state },
+            key.clone(),
+            RunProjectionCache { state, bytes },
             MAX_LARGE_RUN_CACHE_ENTRIES,
         );
+        self.trim_large_run_caches(&LargeRunCacheKey::Projection(key));
     }
 
     fn store_scan_stage_receipt(
@@ -384,7 +393,12 @@ impl WorkbenchCache {
                 ViewHydrationKey::HealthChecks { credential_env },
                 ViewHydrationValue::HealthChecks(state),
             ) => {
-                self.health_checks.insert(credential_env, state);
+                insert_bounded(
+                    &mut self.health_checks,
+                    credential_env,
+                    state,
+                    MAX_STATUS_CACHE_ENTRIES,
+                );
             }
             (ViewHydrationKey::MapArtifacts, ViewHydrationValue::MapArtifacts(built)) => {
                 self.map_artifacts.store(target, built);

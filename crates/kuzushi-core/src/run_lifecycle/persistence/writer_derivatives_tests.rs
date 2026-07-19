@@ -3,7 +3,7 @@ use crate::run_lifecycle::{
     CommittedItemSubscriber, CommittedRangeSubscriber, DiagnosticLevel, RunItemId, RunItemRecord,
     RunItemSource, RunItemV1, SafeText,
 };
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::mpsc::SyncSender;
 use std::sync::{mpsc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -37,6 +37,66 @@ fn blocked_derivative_does_not_delay_later_canonical_delivery() {
         2
     );
     harness.finish();
+}
+
+#[test]
+fn derivative_retry_projects_every_sequence_once_after_post_read_fault() {
+    let target = tempfile::tempdir().unwrap();
+    let run_id = crate::run_artifacts::new_run_id("derivative-cursor-rollback");
+    persist_two_items(target.path(), &run_id);
+    let path = crate::run_artifacts::run_dir(target.path(), &run_id).join("items.jsonl");
+    let displaced = path.with_extension("original");
+    let cursor = replacement_fault_cursor(target.path(), &run_id, &path, &displaced);
+    let projected = Arc::new(Mutex::new(Vec::new()));
+    let mut pump = DerivativePump {
+        target: target.path().to_path_buf(),
+        run_id,
+        latest_seq: Arc::new(AtomicU64::new(2)),
+        subscriber: None,
+        fault_subscriber: None,
+        projector: recording_projector(&projected),
+        cursor,
+        pending: None,
+    };
+
+    assert_eq!(pump.attempt(0), 0);
+    assert!(projected.lock().unwrap().is_empty());
+    std::fs::remove_file(&path).unwrap();
+    std::fs::rename(&displaced, &path).unwrap();
+
+    assert_eq!(pump.attempt(0), 2);
+    assert_eq!(*projected.lock().unwrap(), [1, 2]);
+}
+
+fn replacement_fault_cursor(
+    target: &Path,
+    run_id: &str,
+    path: &Path,
+    displaced: &Path,
+) -> DeliveryCursor {
+    let swapped = Arc::new(AtomicBool::new(false));
+    let hook_swapped = Arc::clone(&swapped);
+    let hook_path = path.to_path_buf();
+    let hook_displaced = displaced.to_path_buf();
+    let mut cursor = DeliveryCursor::open(target, run_id, 0).unwrap();
+    cursor.set_post_read_hook(Arc::new(move || {
+        if !hook_swapped.swap(true, Ordering::SeqCst) {
+            std::fs::rename(&hook_path, &hook_displaced).unwrap();
+            std::fs::copy(&hook_displaced, &hook_path).unwrap();
+        }
+    }));
+    cursor
+}
+
+fn recording_projector(projected: &Arc<Mutex<Vec<u64>>>) -> DerivativeProjector {
+    let output = Arc::clone(projected);
+    Arc::new(move |_, _, items, _| {
+        output
+            .lock()
+            .unwrap()
+            .extend(items.iter().map(|item| item.seq));
+        Vec::new()
+    })
 }
 
 struct BlockedPumpHarness {

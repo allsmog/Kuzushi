@@ -1,8 +1,9 @@
 use super::*;
 use crate::run_lifecycle::{
-    read_run_items, DiagnosticLevel, OperationFingerprint, ProjectionHealth, RunCallId, RunItemId,
-    RunItemRecord, RunItemSource, RunItemV1, SafeText,
+    load_run_projection, read_run_items, DiagnosticLevel, OperationFingerprint, ProjectionHealth,
+    RunCallId, RunItemId, RunItemRecord, RunItemSource, RunItemV1, SafeText,
 };
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -128,6 +129,68 @@ fn delivery_cursor_faults_on_truncation_and_replacement() {
     let fault = replaced.read_through(replacement_second.seq).unwrap_err();
     assert_eq!(fault.stage, RunItemDeliveryFailureStage::ReadStream);
     assert!(fault.detail.as_str().contains("replaced"));
+}
+
+#[test]
+fn delivery_cursor_rolls_back_after_post_read_verification_failure() {
+    let target = tempfile::tempdir().unwrap();
+    let run_id = crate::run_artifacts::new_run_id("transactional-cursor");
+    persist_diagnostics(target.path(), &run_id, ["first", "second"]);
+    let path = crate::run_artifacts::run_dir(target.path(), &run_id).join("items.jsonl");
+    let displaced = path.with_extension("original");
+    let swapped = Arc::new(AtomicBool::new(false));
+    let hook_swapped = Arc::clone(&swapped);
+    let hook_path = path.clone();
+    let hook_displaced = displaced.clone();
+    let mut cursor = DeliveryCursor::open(target.path(), &run_id, 0).unwrap();
+    cursor.set_post_read_hook(Arc::new(move || {
+        if !hook_swapped.swap(true, Ordering::SeqCst) {
+            std::fs::rename(&hook_path, &hook_displaced).unwrap();
+            std::fs::copy(&hook_displaced, &hook_path).unwrap();
+        }
+    }));
+
+    let fault = cursor.read_through(2).unwrap_err();
+    assert!(fault.detail.as_str().contains("replaced"));
+    assert_eq!(cursor.applied_seq(), 0);
+    assert_eq!(cursor.records_read(), 0);
+
+    std::fs::remove_file(&path).unwrap();
+    std::fs::rename(&displaced, &path).unwrap();
+    let items = cursor.read_through(2).unwrap();
+    assert_eq!(items.iter().map(|item| item.seq).collect::<Vec<_>>(), [1, 2]);
+}
+
+#[cfg(unix)]
+#[test]
+fn lifecycle_readers_reject_symlinked_run_parents() {
+    use std::os::unix::fs::symlink;
+
+    for symlink_run_directory in [false, true] {
+        let target = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let run_id = crate::run_artifacts::new_run_id("symlinked-parent");
+        let runs = crate::run_artifacts::runs_root(target.path());
+        std::fs::create_dir_all(runs.parent().unwrap()).unwrap();
+        if symlink_run_directory {
+            std::fs::create_dir(&runs).unwrap();
+            symlink(outside.path(), runs.join(&run_id)).unwrap();
+        } else {
+            symlink(outside.path(), &runs).unwrap();
+        }
+
+        assert!(read_run_items(target.path(), &run_id).is_err());
+        assert!(load_run_projection(target.path(), &run_id).is_err());
+        assert!(DeliveryCursor::open(target.path(), &run_id, 0).is_err());
+    }
+}
+
+fn persist_diagnostics<const N: usize>(target: &Path, run_id: &str, messages: [&str; N]) {
+    let writer = super::super::RunItemWriter::open(target, run_id, None).unwrap();
+    for message in messages {
+        writer.emit_and_flush(diagnostic(message)).unwrap();
+    }
+    writer.shutdown().unwrap();
 }
 
 #[test]

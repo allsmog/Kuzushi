@@ -100,6 +100,7 @@ pub(crate) enum RunTraceCacheState {
 #[derive(Debug)]
 pub(super) struct RunProjectionCache {
     pub(super) state: Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>,
+    pub(super) bytes: usize,
 }
 
 #[derive(Debug)]
@@ -208,9 +209,11 @@ pub(super) struct DirectoryListingCache {
 #[derive(Debug)]
 pub(super) struct RunTraceCache {
     pub(super) state: RunTraceCacheState,
+    pub(super) bytes: usize,
 }
 
 #[derive(Debug)]
 pub(super) struct RunArtifactTextCache {
     pub(super) state: kuzushi_core::RunArtifactTextRead,
+    pub(super) bytes: usize,
 }

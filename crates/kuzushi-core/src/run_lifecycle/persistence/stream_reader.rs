@@ -32,11 +32,11 @@ pub(super) struct StreamRecord {
     pub(super) bytes: Vec<u8>,
 }
 
-#[derive(Debug)]
-struct RecordCheckpoint {
-    start: u64,
-    end: u64,
-    digest: [u8; 32],
+#[derive(Clone)]
+pub(super) struct StreamCursorCheckpoint {
+    bytes_read: u64,
+    items_read: usize,
+    prefix_digest: Sha256,
 }
 
 pub(super) struct RunItemStreamReader {
@@ -46,7 +46,7 @@ pub(super) struct RunItemStreamReader {
     limits: StreamLimits,
     bytes_read: u64,
     items_read: usize,
-    checkpoint: Option<RecordCheckpoint>,
+    prefix_digest: Sha256,
 }
 
 impl RunItemStreamReader {
@@ -60,28 +60,39 @@ impl RunItemStreamReader {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
+        Self::from_open_file_with_limits(path, file, limits).map(Some)
+    }
+
+    pub(super) fn from_open_file(path: &Path, file: File) -> io::Result<Self> {
+        Self::from_open_file_with_limits(path, file, StreamLimits::default())
+    }
+
+    fn from_open_file_with_limits(
+        path: &Path,
+        file: File,
+        limits: StreamLimits,
+    ) -> io::Result<Self> {
         reject_oversized_stream(path, &file.metadata()?, limits.bytes)?;
         let identity = FileIdentity::from_file(&file)?;
-        Ok(Some(Self {
+        Ok(Self {
             path: path.to_path_buf(),
             reader: BufReader::new(file),
             identity,
             limits,
             bytes_read: 0,
             items_read: 0,
-            checkpoint: None,
-        }))
+            prefix_digest: Sha256::new(),
+        })
     }
 
     pub(super) fn next_record(&mut self) -> io::Result<Option<StreamRecord>> {
         if self.items_read >= self.limits.items {
             return self.reject_additional_item();
         }
-        let start = self.bytes_read;
         let Some(raw) = read_raw_record(&mut self.reader, self.limits.record_bytes)? else {
             return Ok(None);
         };
-        self.record_consumed(start, &raw)?;
+        self.record_consumed(&raw)?;
         Ok(Some(StreamRecord {
             line_number: self.items_read,
             bytes: record_body(raw),
@@ -94,14 +105,28 @@ impl RunItemStreamReader {
         reject_oversized_stream(&self.path, &metadata, self.limits.bytes)?;
         reject_replaced_file(&self.identity, &current)?;
         reject_truncated_file(self.bytes_read, metadata.len())?;
-        if let Some(checkpoint) = self.checkpoint.as_ref() {
-            verify_checkpoint(&mut current, checkpoint)?;
-        }
+        verify_consumed_prefix(&mut current, self.bytes_read, &self.prefix_digest)?;
         Ok(())
     }
 
     pub(super) fn bytes_read(&self) -> u64 {
         self.bytes_read
+    }
+
+    pub(super) fn checkpoint(&self) -> StreamCursorCheckpoint {
+        StreamCursorCheckpoint {
+            bytes_read: self.bytes_read,
+            items_read: self.items_read,
+            prefix_digest: self.prefix_digest.clone(),
+        }
+    }
+
+    pub(super) fn restore(&mut self, checkpoint: StreamCursorCheckpoint) -> io::Result<()> {
+        self.reader.seek(SeekFrom::Start(checkpoint.bytes_read))?;
+        self.bytes_read = checkpoint.bytes_read;
+        self.items_read = checkpoint.items_read;
+        self.prefix_digest = checkpoint.prefix_digest;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -119,7 +144,7 @@ impl RunItemStreamReader {
         )))
     }
 
-    fn record_consumed(&mut self, start: u64, raw: &[u8]) -> io::Result<()> {
+    fn record_consumed(&mut self, raw: &[u8]) -> io::Result<()> {
         let consumed = u64::try_from(raw.len()).map_err(|_| invalid_data("record is too large"))?;
         self.bytes_read = self
             .bytes_read
@@ -132,11 +157,7 @@ impl RunItemStreamReader {
             )));
         }
         self.items_read += 1;
-        self.checkpoint = Some(RecordCheckpoint {
-            start,
-            end: self.bytes_read,
-            digest: Sha256::digest(raw).into(),
-        });
+        self.prefix_digest.update(raw);
         Ok(())
     }
 }
@@ -186,16 +207,30 @@ fn record_body(mut raw: Vec<u8>) -> Vec<u8> {
     raw
 }
 
-fn verify_checkpoint(file: &mut File, checkpoint: &RecordCheckpoint) -> io::Result<()> {
-    let length = checkpoint.end.saturating_sub(checkpoint.start);
-    let length = usize::try_from(length).map_err(|_| invalid_data("checkpoint is too large"))?;
-    let mut bytes = vec![0; length];
-    file.seek(SeekFrom::Start(checkpoint.start))?;
-    file.read_exact(&mut bytes)?;
-    if <[u8; 32]>::from(Sha256::digest(bytes)) != checkpoint.digest {
+fn verify_consumed_prefix(
+    file: &mut File,
+    bytes_read: u64,
+    expected: &Sha256,
+) -> io::Result<()> {
+    file.seek(SeekFrom::Start(0))?;
+    let actual = digest_prefix(file, bytes_read)?;
+    if actual != <[u8; 32]>::from(expected.clone().finalize()) {
         return Err(invalid_data("run-item stream committed prefix changed"));
     }
     Ok(())
+}
+
+fn digest_prefix(file: &mut File, mut remaining: u64) -> io::Result<[u8; 32]> {
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    while remaining > 0 {
+        let length = usize::try_from(remaining.min(buffer.len() as u64))
+            .map_err(|_| invalid_data("committed prefix is too large"))?;
+        file.read_exact(&mut buffer[..length])?;
+        digest.update(&buffer[..length]);
+        remaining -= length as u64;
+    }
+    Ok(digest.finalize().into())
 }
 
 fn reject_oversized_stream(path: &Path, metadata: &Metadata, max_bytes: u64) -> io::Result<()> {
@@ -315,5 +350,36 @@ mod tests {
             .set_len(0)
             .unwrap();
         assert!(reader.verify_path_unchanged().is_err());
+    }
+
+    #[test]
+    fn reader_verifies_the_entire_consumed_prefix() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("items.jsonl");
+        std::fs::write(&path, b"first\nsecond\n").unwrap();
+        let mut reader = RunItemStreamReader::open(&path).unwrap().unwrap();
+        reader.next_record().unwrap().unwrap();
+        reader.next_record().unwrap().unwrap();
+
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.write_all(b"other").unwrap();
+
+        let error = reader.verify_path_unchanged().unwrap_err();
+        assert!(error.to_string().contains("committed prefix changed"));
+    }
+
+    #[test]
+    fn checkpoint_restore_replays_consumed_records() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("items.jsonl");
+        std::fs::write(&path, b"first\nsecond\n").unwrap();
+        let mut reader = RunItemStreamReader::open(&path).unwrap().unwrap();
+        let checkpoint = reader.checkpoint();
+        assert_eq!(reader.next_record().unwrap().unwrap().bytes, b"first");
+
+        reader.restore(checkpoint).unwrap();
+
+        assert_eq!(reader.next_record().unwrap().unwrap().bytes, b"first");
+        assert_eq!(reader.records_read(), 1);
     }
 }

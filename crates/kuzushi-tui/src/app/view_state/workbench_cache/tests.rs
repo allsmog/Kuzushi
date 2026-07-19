@@ -126,6 +126,67 @@ fn run_projection_cache_is_bounded_and_keeps_the_new_entry() {
 }
 
 #[test]
+fn large_run_caches_share_a_byte_budget() {
+    let target = Path::new("/target");
+    let artifact_key = (
+        target.to_path_buf(),
+        "run-a".to_string(),
+        "result.json".to_string(),
+    );
+    let projection_key = (target.to_path_buf(), "run-b".to_string());
+    let mut cache = WorkbenchCache::default();
+    cache.run_artifact_texts.insert(
+        artifact_key.clone(),
+        RunArtifactTextCache {
+            state: kuzushi_core::RunArtifactRead::Missing {
+                path: PathBuf::from("result.json"),
+            },
+            bytes: 6,
+        },
+    );
+    cache.run_projections.insert(
+        projection_key.clone(),
+        RunProjectionCache {
+            state: Err("cached".to_string()),
+            bytes: 6,
+        },
+    );
+
+    cache.trim_large_run_caches_to(&LargeRunCacheKey::Projection(projection_key.clone()), 10);
+
+    assert!(cache.large_run_cache_bytes() <= 10);
+    assert!(!cache.run_artifact_texts.contains_key(&artifact_key));
+    assert!(cache.run_projections.contains_key(&projection_key));
+}
+
+#[test]
+fn health_check_cache_is_bounded() {
+    let target = PathBuf::from("/target");
+    let mut cache = WorkbenchCache::default();
+    for index in 0..=MAX_STATUS_CACHE_ENTRIES {
+        let credential_env = format!("env-{index:03}");
+        cache.apply_view_hydration(ViewHydrationResult {
+            target: target.clone(),
+            key: ViewHydrationKey::HealthChecks {
+                credential_env: credential_env.clone(),
+            },
+            value: ViewHydrationValue::HealthChecks(ViewHealthChecks {
+                semgrep_error: None,
+                codeql_error: None,
+                joern_path: None,
+                credential_set: false,
+                configured_joern_cpg: None,
+            }),
+        });
+    }
+
+    assert_eq!(cache.health_checks.len(), MAX_STATUS_CACHE_ENTRIES);
+    assert!(cache
+        .health_checks
+        .contains_key(&format!("env-{MAX_STATUS_CACHE_ENTRIES:03}")));
+}
+
+#[test]
 fn items_change_and_workspace_invalidation_evict_run_projection() {
     let target = tempfile::tempdir().unwrap();
     let mut cache = WorkbenchCache::default();
@@ -151,6 +212,90 @@ fn items_change_and_workspace_invalidation_evict_run_projection() {
     assert!(cache
         .cached_run_projection(target.path(), "run-a")
         .is_not_requested());
+}
+
+#[test]
+fn run_root_and_run_directory_changes_evict_all_derived_run_caches() {
+    let target = tempfile::tempdir().unwrap();
+    let other_target = tempfile::tempdir().unwrap();
+    let mut cache = WorkbenchCache::default();
+    seed_run_caches(&mut cache, target.path(), "run-a");
+    seed_run_caches(&mut cache, target.path(), "run-b");
+    seed_run_caches(&mut cache, other_target.path(), "run-a");
+    let run_directory = kuzushi_core::run_dir(target.path(), "run-a");
+    let relative = run_directory
+        .strip_prefix(target.path())
+        .unwrap()
+        .to_path_buf();
+
+    cache.invalidate_state_artifact_paths(target.path(), &[relative]);
+
+    assert_run_cache_absent(&cache, target.path(), "run-a");
+    assert_run_cache_present(&cache, target.path(), "run-b");
+    assert_run_cache_present(&cache, other_target.path(), "run-a");
+
+    let runs_root = kuzushi_core::runs_root(target.path());
+    let relative = runs_root.strip_prefix(target.path()).unwrap().to_path_buf();
+    cache.invalidate_state_artifact_paths(target.path(), &[relative]);
+
+    assert_run_cache_absent(&cache, target.path(), "run-b");
+    assert_run_cache_present(&cache, other_target.path(), "run-a");
+}
+
+fn seed_run_caches(cache: &mut WorkbenchCache, target: &Path, run_id: &str) {
+    let key = (target.to_path_buf(), run_id.to_string());
+    cache.run_traces.insert(
+        key.clone(),
+        RunTraceCache {
+            state: RunTraceCacheState::Invalid,
+            bytes: 1,
+        },
+    );
+    cache.run_projections.insert(
+        key.clone(),
+        RunProjectionCache {
+            state: Err("cached".to_string()),
+            bytes: 6,
+        },
+    );
+    cache.run_artifact_texts.insert(
+        (
+            target.to_path_buf(),
+            run_id.to_string(),
+            "result.json".to_string(),
+        ),
+        RunArtifactTextCache {
+            state: kuzushi_core::RunArtifactRead::Missing {
+                path: PathBuf::from("result.json"),
+            },
+            bytes: 1,
+        },
+    );
+    cache
+        .scan_stage_receipts
+        .insert(key, ScanStageReceiptState::Missing);
+}
+
+fn assert_run_cache_absent(cache: &WorkbenchCache, target: &Path, run_id: &str) {
+    let key = (target.to_path_buf(), run_id.to_string());
+    assert!(!cache.run_traces.contains_key(&key));
+    assert!(!cache.run_projections.contains_key(&key));
+    assert!(!cache
+        .run_artifact_texts
+        .keys()
+        .any(|(cached_target, cached_run, _)| cached_target == target && cached_run == run_id));
+    assert!(!cache.scan_stage_receipts.contains_key(&key));
+}
+
+fn assert_run_cache_present(cache: &WorkbenchCache, target: &Path, run_id: &str) {
+    let key = (target.to_path_buf(), run_id.to_string());
+    assert!(cache.run_traces.contains_key(&key));
+    assert!(cache.run_projections.contains_key(&key));
+    assert!(cache
+        .run_artifact_texts
+        .keys()
+        .any(|(cached_target, cached_run, _)| cached_target == target && cached_run == run_id));
+    assert!(cache.scan_stage_receipts.contains_key(&key));
 }
 
 #[test]

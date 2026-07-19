@@ -41,6 +41,8 @@ pub(super) struct DeliveryPumps {
 pub(super) struct DeliveryCursor {
     stream: RunItemStreamReader,
     projection: RunProjection,
+    #[cfg(test)]
+    post_read_hook: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl WriterState {
@@ -179,14 +181,23 @@ fn deliver_through(
 impl DeliveryCursor {
     pub(super) fn open(target: &Path, run_id: &str, applied_seq: u64) -> Result<Self> {
         let run_id = RunId::parse(run_id)?;
-        let path = crate::run_artifacts::run_dir(target, run_id.as_str()).join("items.jsonl");
+        let path = crate::run_artifacts::checked_run_artifact_path(
+            target,
+            run_id.as_str(),
+            "items.jsonl",
+        )?;
         let stream = RunItemStreamReader::open(&path)?
             .with_context(|| format!("durable stream is missing: {}", path.display()))?;
         let projection = RunProjection {
             run_id: Some(run_id),
             ..RunProjection::default()
         };
-        let mut cursor = Self { stream, projection };
+        let mut cursor = Self {
+            stream,
+            projection,
+            #[cfg(test)]
+            post_read_hook: None,
+        };
         cursor.consume_committed_prefix(applied_seq)?;
         cursor.stream.verify_path_unchanged()?;
         Ok(cursor)
@@ -201,8 +212,34 @@ impl DeliveryCursor {
         through_seq: u64,
     ) -> std::result::Result<Vec<RunItemEnvelopeV1>, RunItemDeliveryFault> {
         let applied_seq = self.applied_seq();
+        let stream_checkpoint = self.stream.checkpoint();
+        let projection_checkpoint = self.projection.clone();
+        let result = self.read_verified_batch(applied_seq, through_seq);
+        if result.is_ok() {
+            return result;
+        }
+        self.projection = projection_checkpoint;
+        self.stream.restore(stream_checkpoint).map_err(|error| {
+            read_stream_fault(
+                applied_seq,
+                through_seq,
+                format!("delivery cursor rollback failed: {error}"),
+            )
+        })?;
+        result
+    }
+
+    fn read_verified_batch(
+        &mut self,
+        applied_seq: u64,
+        through_seq: u64,
+    ) -> std::result::Result<Vec<RunItemEnvelopeV1>, RunItemDeliveryFault> {
         self.verify_stream(applied_seq, through_seq)?;
         let items = self.read_batch(applied_seq, through_seq)?;
+        #[cfg(test)]
+        if let Some(hook) = self.post_read_hook.as_ref() {
+            hook();
+        }
         self.verify_stream(applied_seq, through_seq)?;
         Ok(items)
     }
@@ -210,6 +247,11 @@ impl DeliveryCursor {
     #[cfg(test)]
     fn records_read(&self) -> usize {
         self.stream.records_read()
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_post_read_hook(&mut self, hook: Arc<dyn Fn() + Send + Sync>) {
+        self.post_read_hook = Some(hook);
     }
 
     fn consume_committed_prefix(&mut self, through_seq: u64) -> Result<()> {
