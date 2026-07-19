@@ -27,6 +27,7 @@ import {
   usageFromMessages,
 } from "./langgraph-bridge/model.mjs";
 import { parseOauthLoginArgs, runOauthLogin } from "./langgraph-bridge/oauth-login.mjs";
+import { writeBridgeResponseAndExit } from "./langgraph-bridge/process-exit.mjs";
 import { bridgeToolsForNextStep, validateBridgeRequest } from "./langgraph-bridge/schema.mjs";
 
 async function readStdin() {
@@ -250,10 +251,13 @@ async function main() {
     return;
   }
   const request = validateBridgeRequest(JSON.parse(await readStdin()));
-  process.stdout.write(JSON.stringify(await dispatch(request)));
+  await writeBridgeResponseAndExit(await dispatch(request), 0);
 }
 
-main().catch((error) => {
-  process.stdout.write(JSON.stringify(bridgeErrorResponse(error)));
-  process.exitCode = 1;
+main().catch(async (error) => {
+  try {
+    await writeBridgeResponseAndExit(bridgeErrorResponse(error), 1);
+  } catch {
+    process.exit(1);
+  }
 });

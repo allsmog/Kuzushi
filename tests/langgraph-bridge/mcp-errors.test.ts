@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isMcpToolTimeoutError,
@@ -6,6 +8,8 @@ import {
   normalizeMcpToolError,
   withMcpClientCleanup,
 } from "../../scripts/langgraph-bridge/mcp.mjs";
+
+const execFileAsync = promisify(execFile);
 
 describe("MCP connection error formatting", () => {
   afterEach(() => vi.useRealTimers());
@@ -92,5 +96,25 @@ describe("MCP connection error formatting", () => {
     await vi.advanceTimersByTimeAsync(25);
 
     await expect(result).resolves.toBe(receipt);
+  });
+
+  it("flushes the receipt and exits despite a live transport handle", async () => {
+    const helper = new URL("../../scripts/langgraph-bridge/process-exit.mjs", import.meta.url);
+    const receipt = { ok: true, stopReason: "mcp_tool_timeout", cost_usd: 0.02 };
+    const childScript = [
+      `import { writeBridgeResponseAndExit } from ${JSON.stringify(helper.href)};`,
+      "setInterval(() => {}, 60_000);",
+      `await writeBridgeResponseAndExit(${JSON.stringify(receipt)}, 0);`,
+    ].join("\n");
+
+    const result = await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "--eval", childScript],
+      {
+        timeout: 2_000,
+      },
+    );
+
+    expect(JSON.parse(result.stdout)).toEqual(receipt);
   });
 });
