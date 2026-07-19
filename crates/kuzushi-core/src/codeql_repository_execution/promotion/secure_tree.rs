@@ -240,7 +240,8 @@ fn open_root_directory(path: &Path) -> io::Result<SecureDirectory> {
         match component {
             Component::Prefix(_) | Component::CurDir => {}
             Component::RootDir | Component::Normal(_) => {
-                retained.push(open_windows_directory(&current)?)
+                let directory = open_windows_directory(&current)?;
+                retain_windows_root_component(&mut retained, directory, &current)?;
             }
             Component::ParentDir => return Err(invalid_root(&absolute)),
         }
@@ -327,6 +328,41 @@ fn windows_path_changed(path: &Path) -> io::Error {
             path.display()
         ),
     )
+}
+
+#[cfg(windows)]
+fn retain_windows_root_component(
+    retained: &mut Vec<fs::File>,
+    directory: fs::File,
+    requested: &Path,
+) -> io::Result<()> {
+    let Some(parent) = retained.last() else {
+        // A drive root or UNC share root bootstraps the retained handle chain.
+        retained.push(directory);
+        return Ok(());
+    };
+    ensure_windows_direct_child(parent, &directory, requested)?;
+    retained.push(directory);
+    Ok(())
+}
+
+#[cfg(windows)]
+fn ensure_windows_direct_child(
+    parent: &fs::File,
+    child: &fs::File,
+    requested: &Path,
+) -> io::Result<()> {
+    let child_path = crate::file_lock::windows_final_path(child)?;
+    let parent_path = child_path
+        .parent()
+        .ok_or_else(|| windows_path_changed(requested))?;
+    let resolved_parent = open_windows_directory(parent_path)?;
+    let expected = crate::file_lock::windows_file_identity(parent)?;
+    let actual = crate::file_lock::windows_file_identity(&resolved_parent)?;
+    if actual == expected {
+        return Ok(());
+    }
+    Err(windows_path_changed(requested))
 }
 
 #[cfg(windows)]
@@ -467,6 +503,45 @@ fn entry_limit_error() -> io::Error {
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
+
+    #[test]
+    fn drive_and_unc_roots_bootstrap_without_a_parent_handle() {
+        let temp = tempfile::tempdir().unwrap();
+        for requested in [Path::new(r"C:\"), Path::new(r"\\server\share\")] {
+            let root = open_windows_directory(temp.path()).unwrap();
+            let mut retained = Vec::new();
+
+            retain_windows_root_component(&mut retained, root, requested).unwrap();
+
+            assert_eq!(retained.len(), 1);
+        }
+    }
+
+    #[test]
+    fn intermediate_junction_rebase_cannot_escape_the_retained_root_chain() {
+        let temp = tempfile::tempdir().unwrap();
+        let expected_parent = temp.path().join("repository").join(".kuzushi");
+        let expected_child = expected_parent.join("codeql-db");
+        let outside_child = temp.path().join("outside").join("codeql-db");
+        fs::create_dir_all(&expected_child).unwrap();
+        fs::create_dir_all(&outside_child).unwrap();
+
+        let mut valid_chain = vec![open_windows_directory(&expected_parent).unwrap()];
+        let expected = open_windows_directory(&expected_child).unwrap();
+        retain_windows_root_component(&mut valid_chain, expected, &expected_child).unwrap();
+        assert_eq!(valid_chain.len(), 2);
+
+        let mut retained = vec![open_windows_directory(&expected_parent).unwrap()];
+        let escaped = open_windows_directory(&outside_child).unwrap();
+
+        // This outside handle models a full-path open resolved through an
+        // intermediate junction after the expected parent was retained.
+        let error =
+            retain_windows_root_component(&mut retained, escaped, &expected_child).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(retained.len(), 1);
+    }
 
     #[test]
     fn final_handle_path_must_be_a_direct_child_of_the_pinned_directory() {
