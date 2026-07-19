@@ -521,9 +521,17 @@ const workspaceStateRequiredHelpersByFile = {
       needle: "workspace_codeql_db_path(",
       message: "taint-iris-next CodeQL build must use workspace_codeql_db_path",
     },
+    {
+      needle: "CodeqlRepositoryExecution::prepare(",
+      message: "taint-iris-next CodeQL build must use trusted repository execution",
+    },
+    {
+      needle: "repository_source_binding(input)",
+      message: "taint-iris-next CodeQL build must require repository source binding",
+    },
   ],
   "crates/kuzushi-core/src/capabilities/taint_iris_next/application/codeql_dataflow.rs":
-    codeqlDbResolverHelperRequirements("taint-iris-next CodeQL dataflow"),
+    managedCodeqlDbResolverRequirements("taint-iris-next CodeQL dataflow"),
   "crates/kuzushi-core/src/evidence/static_evidence/evidence_store.rs": [
     {
       needle: "workspace_static_evidence_db_path(",
@@ -556,15 +564,11 @@ const workspaceStateRequiredHelpersByFile = {
   ],
 };
 
-function codeqlDbResolverHelperRequirements(label) {
+function managedCodeqlDbResolverRequirements(label) {
   return [
     {
-      needle: "workspace_codeql_db_path(",
-      message: `${label} must use workspace_codeql_db_path`,
-    },
-    {
-      needle: "legacy_codeql_db_path(",
-      message: `${label} must use legacy_codeql_db_path`,
+      needle: "resolve_managed_codeql_database(",
+      message: `${label} must resolve a provenance-authenticated managed database`,
     },
   ];
 }
@@ -1034,7 +1038,6 @@ export function checkTaintIrisNextArtifactPathHelpers(root) {
     "TAINT_IRIS_NEXT_JOERN_CPG_FILE",
     "TAINT_IRIS_NEXT_DISCOVERED_SIGNALS_FILE",
     "TAINT_IRIS_NEXT_TARGET_CATALOG_FILE",
-    "TAINT_IRIS_NEXT_CODEQL_BUILD_SCRIPT_FILE",
   ]);
   return [
     ...taintIrisNextArtifactPathConstantFailures(constants),
@@ -1080,9 +1083,6 @@ function taintIrisNextArtifactPathConstantFailures(constants) {
     constants.TAINT_IRIS_NEXT_TARGET_CATALOG_FILE === "taint-iris-next-catalog.json"
       ? null
       : "taint-iris-next artifact path must name TAINT_IRIS_NEXT_TARGET_CATALOG_FILE as taint-iris-next-catalog.json",
-    constants.TAINT_IRIS_NEXT_CODEQL_BUILD_SCRIPT_FILE === "codeql-build.sh"
-      ? null
-      : "taint-iris-next artifact path must name TAINT_IRIS_NEXT_CODEQL_BUILD_SCRIPT_FILE as codeql-build.sh",
   ];
 }
 
@@ -1097,9 +1097,6 @@ function taintIrisNextArtifactPathFunctionFailures(helper) {
     helper.includes("taint_iris_next_target_catalog_artifact_path(target: &Path) -> PathBuf")
       ? null
       : "taint-iris-next artifact path helper must expose target catalog path",
-    helper.includes("taint_iris_next_codeql_build_script_path(target: &Path) -> PathBuf")
-      ? null
-      : "taint-iris-next artifact path helper must expose CodeQL build script path",
     helper.includes("workspace_state_root(target).join(TAINT_IRIS_NEXT_JOERN_CPG_FILE)")
       ? null
       : "taint-iris-next joern CPG path must derive from workspace_state_root",
@@ -1109,9 +1106,6 @@ function taintIrisNextArtifactPathFunctionFailures(helper) {
     helper.includes("workspace_state_root(target).join(TAINT_IRIS_NEXT_TARGET_CATALOG_FILE)")
       ? null
       : "taint-iris-next target catalog path must derive from workspace_state_root",
-    helper.includes("workspace_state_root(target).join(TAINT_IRIS_NEXT_CODEQL_BUILD_SCRIPT_FILE)")
-      ? null
-      : "taint-iris-next CodeQL build script path must derive from workspace_state_root",
   ];
 }
 
@@ -1120,7 +1114,6 @@ function taintIrisNextArtifactPathConsumerFailures(root) {
     "crates/kuzushi-core/src/capabilities/taint_iris_next/application/joern_dataflow.rs",
     "crates/kuzushi-core/src/capabilities/taint_iris_next/application/source_sink_discovery.rs",
     "crates/kuzushi-core/src/capabilities/taint_iris_next/application/dynamic_catalog.rs",
-    "crates/kuzushi-core/src/capabilities/taint_iris_next/application/codeql_build.rs",
   ];
   return consumers.flatMap((file) => taintIrisNextArtifactPathConsumerFailure(root, file));
 }
@@ -1145,7 +1138,6 @@ function taintIrisNextArtifactPathConsumerUsesHelper(source) {
     "taint_iris_next_joern_cpg_path(",
     "taint_iris_next_discovered_signals_path(",
     "taint_iris_next_target_catalog_artifact_path(",
-    "taint_iris_next_codeql_build_script_path(",
   ].some((needle) => source.includes(needle));
 }
 
@@ -1157,8 +1149,6 @@ function taintIrisNextArtifactPathConsumerHardcodesPath(source) {
     'join(".kuzushi/discovered-signals.json")',
     'join(".kuzushi").join("taint-iris-next-catalog.json")',
     'join(".kuzushi/taint-iris-next-catalog.json")',
-    'join(".kuzushi").join("codeql-build.sh")',
-    'join(".kuzushi/codeql-build.sh")',
   ].some((needle) => source.includes(needle));
 }
 

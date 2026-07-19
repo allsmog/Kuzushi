@@ -91,7 +91,7 @@ fn stage_database_copy(source: &Path, destination: &Path) -> Result<tempfile::Te
     let staged = tempfile::Builder::new()
         .prefix(".codeql-db-stage-")
         .tempdir_in(parent)
-        .context("could not stage the validated CodeQL database")?;
+        .context("could not stage the trusted CodeQL database")?;
     copy_database_tree(source, staged.path())?;
     anyhow::ensure!(
         codeql_database_is_valid(staged.path()),
@@ -183,7 +183,7 @@ fn install_staged_database(
     state: &DestinationState,
 ) -> Result<()> {
     if *state == DestinationState::Missing {
-        fs::rename(staged.path(), destination).context("publishing validated CodeQL database")?;
+        fs::rename(staged.path(), destination).context("publishing trusted CodeQL database")?;
         return sync_database_parent(destination);
     }
     replace_existing_database(workspace, destination, staged.path(), state)
@@ -261,7 +261,7 @@ fn restore_previous_database(
     fs::rename(backup, destination).with_context(|| {
         format!("publishing the new CodeQL database failed ({publish_error}); restoring the previous database also failed")
     })?;
-    Err(publish_error).context("publishing validated CodeQL database")
+    Err(publish_error).context("publishing trusted CodeQL database")
 }
 
 fn sync_database_parent(destination: &Path) -> Result<()> {
