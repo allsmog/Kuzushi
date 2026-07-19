@@ -1,5 +1,7 @@
 use crate::scan::ScanCancellation;
-use super::bounded_regular_files::{collect_regular_files, RegularFileWalkOptions};
+use super::bounded_regular_files::{
+    collect_regular_files, FileLimitBehavior, RegularFileWalkOptions,
+};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -81,12 +83,23 @@ mod bounded_fs {
 
     const MAX_SBOM_INPUT_BYTES: usize = 64 * 1024 * 1024;
 
-    pub(super) fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
-        crate::bounded_file::read_utf8_text(path.as_ref(), MAX_SBOM_INPUT_BYTES)
+    pub(super) fn read_to_string(
+        target: &Path,
+        path: impl AsRef<Path>,
+    ) -> io::Result<String> {
+        crate::bounded_file::read_utf8_text_within(
+            target,
+            path.as_ref(),
+            MAX_SBOM_INPUT_BYTES,
+        )
     }
 
-    pub(super) fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-        crate::bounded_file::read_regular_bytes(path.as_ref(), MAX_SBOM_INPUT_BYTES)
+    pub(super) fn read(target: &Path, path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+        crate::bounded_file::read_regular_bytes_within(
+            target,
+            path.as_ref(),
+            MAX_SBOM_INPUT_BYTES,
+        )
     }
 }
 
@@ -129,10 +142,14 @@ pub struct SbomLockfile {
 
 pub fn scan_sbom(target: &Path, cancellation: &ScanCancellation) -> Result<SbomScanReport> {
     target::ensure_directory(target)?;
-    let files = collect_regular_files(target, cancellation, sbom_walk_options())?;
+    let files = collect_regular_files(target, cancellation, sbom_walk_options())?.files;
+    ensure_scan_active(cancellation)?;
     let manifests = collect_manifests(&files);
+    ensure_scan_active(cancellation)?;
     let lockfiles = collect_lockfiles(target, &files)?;
+    ensure_scan_active(cancellation)?;
     let dependencies = collect_dependency_edges(target, &files)?;
+    ensure_scan_active(cancellation)?;
     let mut components = manifests
         .iter()
         .map(|path| manifest::manifest_components(target, path))
@@ -140,6 +157,7 @@ pub fn scan_sbom(target: &Path, cancellation: &ScanCancellation) -> Result<SbomS
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
+    ensure_scan_active(cancellation)?;
     components.extend(collect_lockfile_components(target, &files)?);
     components.sort_by_key(report::component_sort_key);
     components.dedup();
@@ -153,12 +171,19 @@ pub fn scan_sbom(target: &Path, cancellation: &ScanCancellation) -> Result<SbomS
     })
 }
 
+fn ensure_scan_active(cancellation: &ScanCancellation) -> Result<()> {
+    cancellation.wait_if_paused();
+    anyhow::ensure!(!cancellation.is_cancelled(), "sbom-scan scan cancelled");
+    Ok(())
+}
+
 fn sbom_walk_options() -> RegularFileWalkOptions {
     RegularFileWalkOptions {
         operation: "sbom-scan",
         max_entries: 100_000,
         max_files: 50_000,
         max_depth: 64,
+        file_limit: FileLimitBehavior::Error,
         ignored_dir: target::ignored_dir,
     }
 }

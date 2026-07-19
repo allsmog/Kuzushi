@@ -28,7 +28,7 @@ pub(super) fn sbt_components(target: &Path, path: &Path, text: &str) -> Vec<Sbom
 
 pub(super) fn sbt_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let scala_binary = scala_binary_version(&text);
     let source = relative_display(target, path);
     Ok(text

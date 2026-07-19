@@ -29,21 +29,21 @@ pub(super) fn helm_chart_components(
 
 pub(super) fn helm_chart_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = crate::yaml::parse_value(&text).context("sbom-scan: parse Chart.yaml")?;
     Ok(dependency_edges(target, path, &value))
 }
 
 pub(super) fn helm_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = crate::yaml::parse_value(&text).context("sbom-scan: parse Chart.lock")?;
     Ok(dependency_edges(target, path, &value))
 }
 
 pub(super) fn helm_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = crate::yaml::parse_value(&text).context("sbom-scan: parse Chart.lock")?;
     Ok(chart_dependencies(&value)
         .filter_map(|dependency| chart_lock_component(target, path, dependency))

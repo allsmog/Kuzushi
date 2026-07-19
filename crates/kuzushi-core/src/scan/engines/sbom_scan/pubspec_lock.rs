@@ -14,7 +14,7 @@ pub(super) fn is_pubspec_lock(path: &Path) -> bool {
 
 pub(super) fn pubspec_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pubspec.lock")?;
     let source = relative_display(target, path);
     Ok(mapping_child(&value, "packages")
@@ -31,7 +31,7 @@ pub(super) fn pubspec_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomD
 
 pub(super) fn pubspec_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pubspec.lock")?;
     let source = relative_display(target, path);
     Ok(mapping_child(&value, "packages")

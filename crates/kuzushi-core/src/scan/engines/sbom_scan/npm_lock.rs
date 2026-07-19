@@ -8,7 +8,7 @@ pub(super) use super::dependency_graph::is_package_lock;
 
 pub(super) fn package_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse package lock")?;
     let source = relative_display(target, path);
     let mut components = package_lock_v2_components(target, path, &value, &source);

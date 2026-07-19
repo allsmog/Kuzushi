@@ -15,7 +15,7 @@ pub(super) fn is_pyproject_toml(path: &Path) -> bool {
 
 pub(super) fn pyproject_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse pyproject.toml")?;
     let source = relative_display(target, path);
     Ok(python_dependency_names(&value)

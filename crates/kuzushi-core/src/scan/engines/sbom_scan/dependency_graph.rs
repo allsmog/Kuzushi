@@ -50,7 +50,7 @@ pub(super) fn is_pnpm_lock(path: &Path) -> bool {
 
 pub(super) fn package_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse package lock")?;
     let source = relative_display(target, path);
     let mut edges = package_lock_v2_edges(&value, &source);
@@ -78,7 +78,7 @@ fn package_lock_v1_edges(value: &Value, source: &str) -> Vec<SbomDependencyEdge>
 
 pub(super) fn cargo_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse Cargo.lock")?;
     let source = relative_display(target, path);
     Ok(value
@@ -119,7 +119,7 @@ fn cargo_dependency_name(raw: &str) -> Option<String> {
 
 pub(super) fn go_sum_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(text
         .lines()

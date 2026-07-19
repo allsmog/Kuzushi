@@ -30,7 +30,7 @@ pub(super) fn is_pubspec_yaml(path: &Path) -> bool {
 
 pub(super) fn pubspec_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = crate::yaml::parse_value(&text).context("sbom-scan: parse pubspec.yaml")?;
     let source = relative_display(target, path);
     let mut edges = dependency_edges(&value, "dependencies", &source);

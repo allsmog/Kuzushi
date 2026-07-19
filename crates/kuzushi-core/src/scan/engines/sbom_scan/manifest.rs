@@ -77,7 +77,7 @@ pub(super) fn is_dependency_manifest(path: &Path) -> bool {
 
 pub(super) fn manifest_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let name = path.file_name().and_then(|name| name.to_str());
     if let Some(components) = named_manifest_components(target, path, &text, name)? {
         return Ok(components);

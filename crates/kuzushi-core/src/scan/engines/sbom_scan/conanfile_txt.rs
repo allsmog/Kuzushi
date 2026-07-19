@@ -27,7 +27,7 @@ pub(super) fn conanfile_components(target: &Path, path: &Path, text: &str) -> Ve
 
 pub(super) fn conanfile_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(requirements(&text)
         .into_iter()

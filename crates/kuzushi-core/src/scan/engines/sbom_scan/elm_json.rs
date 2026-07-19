@@ -20,7 +20,7 @@ pub(super) fn elm_components(target: &Path, path: &Path, text: &str) -> Result<V
 
 pub(super) fn elm_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse elm.json")?;
     let source = relative_display(target, path);
     Ok(elm_direct_dependency_names(&value)

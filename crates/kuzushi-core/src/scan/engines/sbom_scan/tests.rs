@@ -2,6 +2,37 @@ use super::*;
 use serde_json::json;
 use std::fs;
 
+#[cfg(unix)]
+#[test]
+fn parser_rejects_manifest_when_parent_is_replaced_after_inventory() {
+    let target = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let nested = target.path().join("nested");
+    fs::create_dir(&nested).unwrap();
+    fs::write(
+        nested.join("package.json"),
+        r#"{"dependencies":{"safe":"1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        outside.path().join("package.json"),
+        r#"{"dependencies":{"outside":"9.9.9"}}"#,
+    )
+    .unwrap();
+    let inventory = collect_regular_files(
+        target.path(),
+        &ScanCancellation::default(),
+        sbom_walk_options(),
+    )
+    .unwrap();
+    fs::rename(&nested, target.path().join("original-nested")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), &nested).unwrap();
+
+    let error = manifest::manifest_components(target.path(), &inventory.files[0]).unwrap_err();
+
+    assert!(format!("{error:#}").contains("escapes workspace"));
+}
+
 #[test]
 fn sbom_scan_extracts_package_cargo_and_python_dependencies() {
     let temp = tempfile::tempdir().unwrap();

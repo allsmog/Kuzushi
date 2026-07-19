@@ -9,7 +9,20 @@ pub(crate) struct RegularFileWalkOptions {
     pub max_entries: usize,
     pub max_files: usize,
     pub max_depth: usize,
+    pub file_limit: FileLimitBehavior,
     pub ignored_dir: fn(&Path) -> bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum FileLimitBehavior {
+    Error,
+    Stop,
+}
+
+#[derive(Debug)]
+pub(crate) struct RegularFileInventory {
+    pub files: Vec<PathBuf>,
+    pub truncated: bool,
 }
 
 #[derive(Default)]
@@ -22,11 +35,11 @@ pub(crate) fn collect_regular_files(
     root: &Path,
     cancellation: &ScanCancellation,
     options: RegularFileWalkOptions,
-) -> Result<Vec<PathBuf>> {
+) -> Result<RegularFileInventory> {
     let mut files = Vec::new();
     let mut budget = WalkBudget::default();
-    walk_dir(root, 0, cancellation, options, &mut budget, &mut files)?;
-    Ok(files)
+    let truncated = walk_dir(root, 0, cancellation, options, &mut budget, &mut files)?;
+    Ok(RegularFileInventory { files, truncated })
 }
 
 fn walk_dir(
@@ -36,25 +49,31 @@ fn walk_dir(
     options: RegularFileWalkOptions,
     budget: &mut WalkBudget,
     files: &mut Vec<PathBuf>,
-) -> Result<()> {
+) -> Result<bool> {
     check_cancellation(cancellation, options.operation)?;
-    let entries = read_sorted_entries(dir, options, budget)?;
+    let entries = read_sorted_entries(dir, cancellation, options, budget)?;
     for entry in entries {
-        visit_entry(entry, depth, cancellation, options, budget, files)?;
+        if visit_entry(entry, depth, cancellation, options, budget, files)? {
+            return Ok(true);
+        }
     }
-    Ok(())
+    Ok(false)
 }
 
 fn read_sorted_entries(
     dir: &Path,
+    cancellation: &ScanCancellation,
     options: RegularFileWalkOptions,
     budget: &WalkBudget,
 ) -> Result<Vec<fs::DirEntry>> {
     let remaining = options.max_entries.saturating_sub(budget.entries);
-    let mut entries = fs::read_dir(dir)
-        .with_context(|| format!("{}: read {}", options.operation, dir.display()))?
-        .take(remaining.saturating_add(1))
-        .collect::<std::io::Result<Vec<_>>>()?;
+    let read_dir = fs::read_dir(dir)
+        .with_context(|| format!("{}: read {}", options.operation, dir.display()))?;
+    let mut entries = collect_entries(
+        read_dir.take(remaining.saturating_add(1)),
+        cancellation,
+        options.operation,
+    )?;
     anyhow::ensure!(
         entries.len() <= remaining,
         "{} exceeded the {}-entry traversal limit at {}",
@@ -66,6 +85,20 @@ fn read_sorted_entries(
     Ok(entries)
 }
 
+fn collect_entries<T>(
+    entries: impl Iterator<Item = std::io::Result<T>>,
+    cancellation: &ScanCancellation,
+    operation: &str,
+) -> Result<Vec<T>> {
+    let mut collected = Vec::new();
+    for entry in entries {
+        cancellation.wait_if_paused();
+        check_cancellation(cancellation, operation)?;
+        collected.push(entry?);
+    }
+    Ok(collected)
+}
+
 fn visit_entry(
     entry: fs::DirEntry,
     depth: usize,
@@ -73,7 +106,7 @@ fn visit_entry(
     options: RegularFileWalkOptions,
     budget: &mut WalkBudget,
     files: &mut Vec<PathBuf>,
-) -> Result<()> {
+) -> Result<bool> {
     cancellation.wait_if_paused();
     check_cancellation(cancellation, options.operation)?;
     record_entry(budget, options, &entry.path())?;
@@ -82,9 +115,9 @@ fn visit_entry(
         return record_file(entry.path(), budget, options, files);
     }
     if file_type.is_dir() && !(options.ignored_dir)(&entry.path()) {
-        descend(entry.path(), depth, cancellation, options, budget, files)?;
+        return descend(entry.path(), depth, cancellation, options, budget, files);
     }
-    Ok(())
+    Ok(false)
 }
 
 fn record_entry(
@@ -108,17 +141,21 @@ fn record_file(
     budget: &mut WalkBudget,
     options: RegularFileWalkOptions,
     files: &mut Vec<PathBuf>,
-) -> Result<()> {
+) -> Result<bool> {
+    if budget.files >= options.max_files {
+        return match options.file_limit {
+            FileLimitBehavior::Error => anyhow::bail!(
+                "{} exceeded the {}-file traversal limit at {}",
+                options.operation,
+                options.max_files,
+                path.display()
+            ),
+            FileLimitBehavior::Stop => Ok(true),
+        };
+    }
     budget.files = budget.files.saturating_add(1);
-    anyhow::ensure!(
-        budget.files <= options.max_files,
-        "{} exceeded the {}-file traversal limit at {}",
-        options.operation,
-        options.max_files,
-        path.display()
-    );
     files.push(path);
-    Ok(())
+    Ok(false)
 }
 
 fn descend(
@@ -128,7 +165,7 @@ fn descend(
     options: RegularFileWalkOptions,
     budget: &mut WalkBudget,
     files: &mut Vec<PathBuf>,
-) -> Result<()> {
+) -> Result<bool> {
     let next_depth = depth.saturating_add(1);
     anyhow::ensure!(
         next_depth <= options.max_depth,
@@ -162,6 +199,7 @@ mod tests {
             max_entries: 10,
             max_files: 10,
             max_depth: 2,
+            file_limit: FileLimitBehavior::Error,
             ignored_dir: |_| false,
         }
     }
@@ -172,13 +210,14 @@ mod tests {
         fs::write(temp.path().join("z.txt"), "z").unwrap();
         fs::write(temp.path().join("a.txt"), "a").unwrap();
 
-        let files = collect_regular_files(temp.path(), &ScanCancellation::default(), options())
-            .unwrap();
+        let inventory =
+            collect_regular_files(temp.path(), &ScanCancellation::default(), options()).unwrap();
 
         assert_eq!(
-            files,
+            inventory.files,
             vec![temp.path().join("a.txt"), temp.path().join("z.txt")]
         );
+        assert!(!inventory.truncated);
     }
 
     #[test]
@@ -230,13 +269,51 @@ mod tests {
         fs::write(outside.path().join("secret"), "secret").unwrap();
         std::os::unix::fs::symlink(outside.path(), target.path().join("linked")).unwrap();
 
-        let files = collect_regular_files(
+        let inventory = collect_regular_files(
             target.path(),
             &ScanCancellation::default(),
             options(),
         )
         .unwrap();
 
-        assert!(files.is_empty());
+        assert!(inventory.files.is_empty());
+    }
+
+    #[test]
+    fn stop_limit_returns_first_files_and_discloses_truncation() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("c"), "c").unwrap();
+        fs::write(temp.path().join("a"), "a").unwrap();
+        fs::write(temp.path().join("b"), "b").unwrap();
+        let mut limited = options();
+        limited.max_files = 2;
+        limited.file_limit = FileLimitBehavior::Stop;
+
+        let inventory =
+            collect_regular_files(temp.path(), &ScanCancellation::default(), limited).unwrap();
+
+        assert_eq!(
+            inventory.files,
+            vec![temp.path().join("a"), temp.path().join("b")]
+        );
+        assert!(inventory.truncated);
+    }
+
+    #[test]
+    fn cancellation_is_checked_while_entries_are_consumed() {
+        let cancellation = ScanCancellation::default();
+        let requester = cancellation.clone();
+        let mut yielded = 0;
+        let entries = std::iter::from_fn(move || {
+            yielded += 1;
+            if yielded == 3 {
+                requester.cancel();
+            }
+            Some(Ok(yielded))
+        });
+
+        let error = collect_entries(entries, &cancellation, "enumeration-test").unwrap_err();
+
+        assert!(error.to_string().contains("scan cancelled"));
     }
 }

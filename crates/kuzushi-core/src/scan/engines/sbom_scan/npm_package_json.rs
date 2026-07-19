@@ -31,7 +31,7 @@ pub(super) fn is_package_json(path: &Path) -> bool {
 
 pub(super) fn package_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse package.json")?;
     let source = relative_display(target, path);
     Ok(NPM_DEPENDENCY_SCOPES

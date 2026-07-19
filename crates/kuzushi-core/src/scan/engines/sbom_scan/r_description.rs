@@ -25,7 +25,7 @@ pub(super) fn r_description_components(
 
 pub(super) fn r_description_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(parsed_fields(&text)
         .into_iter()

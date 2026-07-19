@@ -33,7 +33,7 @@ pub(super) fn mix_components(target: &Path, path: &Path, text: &str) -> Vec<Sbom
 
 pub(super) fn mix_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(text
         .lines()
@@ -44,7 +44,7 @@ pub(super) fn mix_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependency
 
 pub(super) fn mix_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(text
         .lines()
@@ -55,7 +55,7 @@ pub(super) fn mix_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDepen
 
 pub(super) fn mix_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(text
         .lines()

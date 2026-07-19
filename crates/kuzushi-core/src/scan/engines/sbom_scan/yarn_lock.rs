@@ -13,14 +13,14 @@ pub(super) fn is_yarn_lock(path: &Path) -> bool {
 
 pub(super) fn yarn_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(YarnLockParser::new(&source).parse(&text))
 }
 
 pub(super) fn yarn_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(YarnComponentParser::new(target, path, &source).parse(&text))
 }
