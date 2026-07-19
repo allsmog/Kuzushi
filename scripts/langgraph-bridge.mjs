@@ -8,6 +8,7 @@ import {
   isMcpToolTimeoutError,
   mcpToolsForRequest,
   normalizeMcpToolError,
+  withMcpClientCleanup,
 } from "./langgraph-bridge/mcp.mjs";
 import {
   appendStructuredOutputContract,
@@ -38,7 +39,7 @@ async function readStdin() {
 async function runQueryGraph(request) {
   const mcp = await mcpToolsForRequest(request);
   const modelMessages = [];
-  try {
+  return withMcpClientCleanup(async () => {
     const system = querySystemPromptForRequest(request);
     const graph = queryGraphForRequest(request, mcp.tools, system, modelMessages);
     try {
@@ -54,9 +55,7 @@ async function runQueryGraph(request) {
       debugDumpBridgeCall("query", request, mcp.tools, system, message);
       return interruptedQueryResult(modelMessages, "mcp_tool_timeout");
     }
-  } finally {
-    await mcp.close();
-  }
+  }, mcp.close);
 }
 
 function queryGraphForRequest(request, tools, system, modelMessages) {

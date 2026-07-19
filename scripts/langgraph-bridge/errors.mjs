@@ -52,9 +52,18 @@ export function bridgeErrorResponse(error) {
 function classifyBridgeError(error) {
   const status = statusFromError(error);
   const trustedClass = error instanceof BridgePublicError ? error.errorClass : undefined;
+  if (trustedClass === "mcp_timeout" || explicitMcpTimeoutClass(error)) {
+    return { errorClass: "mcp_timeout" };
+  }
   if (trustedClass) return { errorClass: trustedClass, status };
   if (status !== undefined) return { errorClass: errorClassForStatus(status), status };
   return { errorClass: errorClassFromShape(error) };
+}
+
+function explicitMcpTimeoutClass(error) {
+  const name = boundedLower(error?.name);
+  const code = boundedLower(error?.code ?? error?.cause?.code);
+  return mcpTimeoutClass(name, code);
 }
 
 function statusFromError(error) {

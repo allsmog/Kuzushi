@@ -323,6 +323,9 @@ fn bridge_response_error(response: BridgeResponse, final_attempt: bool) -> Resul
 }
 
 fn transient_bridge_response(response: &BridgeResponse) -> bool {
+    if response.error_class.as_deref() == Some("mcp_timeout") {
+        return false;
+    }
     matches!(response.status, Some(408 | 425 | 429 | 500..=599))
         || matches!(
             response.error_class.as_deref(),

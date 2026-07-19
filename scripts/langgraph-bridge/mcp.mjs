@@ -22,6 +22,22 @@ export function isMcpToolTimeoutError(error) {
   return errorChain(error).some(timeoutErrorSignal);
 }
 
+export async function withMcpClientCleanup(operation, close) {
+  try {
+    return await operation();
+  } finally {
+    await ignoreMcpCloseFailure(close);
+  }
+}
+
+async function ignoreMcpCloseFailure(close) {
+  try {
+    await close();
+  } catch {
+    // The primary result owns the spend receipt; cleanup cannot replace it.
+  }
+}
+
 export async function mcpToolsForRequest(request) {
   if (!agentMcpsEnabled(request)) return { tools: [], close: async () => {} };
   const mcpServers = mcpServerConfig(request);

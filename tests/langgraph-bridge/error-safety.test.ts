@@ -45,4 +45,18 @@ describe("bridge-visible error serialization", () => {
       errorClass: "mcp_timeout",
     });
   });
+
+  it("keeps an explicit MCP timeout ahead of HTTP 408", () => {
+    const error = Object.assign(new Error("MCP tool request timed out"), {
+      name: "McpToolTimeoutError",
+      code: "KUZUSHI_MCP_TOOL_TIMEOUT",
+      status: 408,
+    });
+
+    expect(bridgeErrorResponse(error)).toEqual({
+      ok: false,
+      error: "MCP tool request timed out.",
+      errorClass: "mcp_timeout",
+    });
+  });
 });

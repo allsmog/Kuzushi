@@ -4,6 +4,7 @@ import {
   mcpConnectionFailureMessage,
   mcpToolTimeoutForRequest,
   normalizeMcpToolError,
+  withMcpClientCleanup,
 } from "../../scripts/langgraph-bridge/mcp.mjs";
 
 describe("MCP connection error formatting", () => {
@@ -54,5 +55,26 @@ describe("MCP connection error formatting", () => {
 
     expect(normalizeMcpToolError(failure)).toBe(failure);
     expect(isMcpToolTimeoutError(failure)).toBe(false);
+  });
+
+  it("keeps a computed timeout spend receipt when MCP cleanup rejects", async () => {
+    const receipt = {
+      ok: true,
+      stopReason: "mcp_tool_timeout",
+      cost_usd: 0.02,
+      model_calls: 1,
+    };
+    let closeCalls = 0;
+
+    const result = await withMcpClientCleanup(
+      async () => receipt,
+      async () => {
+        closeCalls += 1;
+        throw new Error("MCP cleanup timed out");
+      },
+    );
+
+    expect(result).toBe(receipt);
+    expect(closeCalls).toBe(1);
   });
 });

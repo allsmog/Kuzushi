@@ -253,18 +253,38 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
 
     #[test]
     fn query_bridge_does_not_retry_mcp_timeout_failures() {
+        assert_mcp_timeout_response_is_not_retried(
+            r#"{"ok":false,"error":"MCP tool request timed out.","errorClass":"mcp_timeout"}"#,
+        );
+    }
+
+    #[test]
+    fn query_bridge_does_not_retry_mcp_timeout_with_http_408() {
+        assert_mcp_timeout_response_is_not_retried(
+            r#"{"ok":false,"error":"MCP tool request timed out.","errorClass":"mcp_timeout","status":408}"#,
+        );
+    }
+
+    #[test]
+    fn query_bridge_does_not_retry_mcp_timeout_with_gateway_timeout_text() {
+        assert_mcp_timeout_response_is_not_retried(
+            r#"{"ok":false,"error":"gateway timeout","errorClass":"mcp_timeout"}"#,
+        );
+    }
+
+    fn assert_mcp_timeout_response_is_not_retried(response: &str) {
         let tmp = tempfile::tempdir().unwrap();
         let attempts = tmp.path().join("attempts");
         let bridge_script = tmp.path().join("bridge.sh");
         let script = format!(
             r#"#!/bin/sh
 count=0
-if test -f {attempts}; then count=$(cat {attempts}); fi
+if test -f "{attempts}"; then count=$(cat "{attempts}"); fi
 count=$((count + 1))
-printf '%s' "$count" > {attempts}
-printf '%s' '{{"ok":false,"error":"MCP tool request timed out.","errorClass":"mcp_timeout"}}'
+printf '%s' "$count" > "{attempts}"
+printf '%s' '{response}'
 "#,
-            attempts = attempts.display()
+            attempts = attempts.display(),
         );
         std::fs::write(&bridge_script, script).unwrap();
         #[cfg(unix)]
