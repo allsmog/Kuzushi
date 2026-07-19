@@ -412,7 +412,7 @@ fn open_windows_ancestor_chain(
     canonical_root: &Path,
     relative: &Path,
 ) -> io::Result<(fs::File, Vec<fs::File>, PathBuf)> {
-    let root = open_windows_directory_no_follow(canonical_root)?;
+    let root = open_windows_absolute_directory_no_follow(canonical_root)?;
     let mut ancestors = Vec::new();
     let mut candidate = canonical_root.to_path_buf();
     let mut components = relative
@@ -426,6 +426,34 @@ fn open_windows_ancestor_chain(
         }
     }
     Ok((root, ancestors, candidate))
+}
+
+#[cfg(windows)]
+fn open_windows_absolute_directory_no_follow(path: &Path) -> io::Result<fs::File> {
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is not an absolute directory", path.display()),
+        ));
+    }
+    let mut current = PathBuf::new();
+    let mut retained = Vec::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        match component {
+            std::path::Component::RootDir | std::path::Component::Normal(_) => {
+                retained.push(open_windows_directory_no_follow(&current)?);
+            }
+            std::path::Component::Prefix(_) | std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => return Err(workspace_escape_error(path, path)),
+        }
+    }
+    retained.pop().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} has no directory components", path.display()),
+        )
+    })
 }
 
 #[cfg(windows)]
