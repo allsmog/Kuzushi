@@ -2,12 +2,12 @@
 //!
 //! Wraps `codeql database analyze` with focused selectors so an agent
 //! can ask narrow per-CWE questions instead of running the full
-//! 179-query security-and-quality suite. Each tool spawns codeql, waits
-//! for SARIF output, parses the thread-flow paths, and returns a small
-//! JSON summary the agent can reason about.
+//! 179-query security-and-quality suite. Analysis cache misses spawn CodeQL,
+//! wait for SARIF output, parse the thread-flow paths, and return a small JSON
+//! summary the agent can reason about. `db_info` and eligible memo hits do not
+//! spawn CodeQL.
 //!
-//! Latency strategy: we keep two layers of caching to amortise the
-//! ~60s-per-CWE pack-compile cost on cold runs.
+//! Latency strategy: we use two independent mechanisms to reduce CodeQL work.
 //!
 //! 1. CodeQL's own on-disk pack cache (`--common-caches=$HOME/.codeql`,
 //!    or `KUZUSHI_CODEQL_CACHE_DIR` if set). Persists across MCP server
@@ -20,16 +20,17 @@
 //!    memo because their complete dependency graph cannot be established
 //!    without executing CodeQL's resolver. Database identity uses the same
 //!    bounded content tree as the promotion receipt; databases outside those
-//!    bounds fail closed before CodeQL executes. The
-//!    agent often re-queries the same CWE folder when iterating on
-//!    findings during a single hunt; the second call returns instantly.
+//!    bounds fail closed before CodeQL executes. A memo hit skips CodeQL
+//!    execution only after the complete database tree has been authenticated,
+//!    so its latency remains proportional to database size.
 //!    Keyed on the canonical absolute DB path so a typo or symlink swap
 //!    doesn't poison the cache.
 //!
 //! Optional: if `KUZUSHI_CODEQL_PREWARM` is set, on MCP server startup
 //! we spawn a background task that compiles the common CWE folders
 //! (CWE-022, CWE-078, CWE-079, CWE-089, CWE-120, CWE-190, CWE-416, CWE-918)
-//! for the C/C++ pack so the first agent call is also a cache hit.
+//! for the C/C++ pack so the first agent call avoids a cold pack compile.
+//! Database content authentication still runs.
 //! See `prewarm.rs`.
 
 use anyhow::{Context, Result};
@@ -71,7 +72,7 @@ fn build_registry_with_capability(read_capability: ReadRootCapability) -> ToolRe
 fn flows_for_cwe_descriptor() -> Tool {
     Tool {
         name: "codeql:flows_for_cwe".to_string(),
-        description: "Run CodeQL's CWE-specific query folder against a built database and return source-to-sink reaching flows. Each result has a rule, message, and a list of {file,line,code} steps from source to sink. Slow per call (the DB reloads); use it to verify or refute a specific candidate, not to enumerate every flow.".to_string(),
+        description: "Run CodeQL's CWE-specific query folder against a built database and return source-to-sink reaching flows. Each result has a rule, message, and a list of {file,line,code} steps from source to sink. CWE pack selectors bypass the result memo. Every call performs full database content authentication, so authentication latency is proportional to database size; use this tool to verify or refute a specific candidate, not to enumerate every flow.".to_string(),
         input_schema: json!({
             "type": "object",
             "required": ["db", "cwe"],
@@ -102,7 +103,7 @@ fn db_info_descriptor() -> Tool {
 fn query_descriptor() -> Tool {
     Tool {
         name: "codeql:query".to_string(),
-        description: "Run an arbitrary CodeQL query selector (e.g. `codeql/cpp-queries:Security/CWE/CWE-089/SqlTainted.ql`) against the DB and return SARIF results parsed into the same {file,line,code} shape as flows_for_cwe.".to_string(),
+        description: "Run an arbitrary CodeQL query selector (e.g. `codeql/cpp-queries:Security/CWE/CWE-089/SqlTainted.ql`) against the DB and return SARIF results parsed into the same {file,line,code} shape as flows_for_cwe. An eligible dependency-free local query may use the in-process result memo; a memo hit skips CodeQL execution but still performs full database content authentication, so authentication latency remains proportional to database size. Pack selectors and imported local queries bypass the result memo.".to_string(),
         input_schema: json!({
             "type": "object",
             "required": ["db", "query"],
@@ -286,6 +287,9 @@ fn analysis_identity(db: &Path, codeql: &Path) -> Result<AnalysisIdentity> {
     })
 }
 
+// Recompute this identity for every request, including memo lookups. The MCP
+// attachment is a mutable filesystem path plus an expected digest, not an
+// immutable server-lifetime snapshot, so metadata cannot authenticate content.
 fn authenticated_database_identity(db: &Path) -> Result<String> {
     let actual = crate::database_identity::database_identity(db)?;
     let artifact = std::env::var_os(CODEQL_ARTIFACT_ENV);
@@ -960,6 +964,20 @@ fi
     }
 
     #[test]
+    fn descriptors_disclose_memo_scope_and_authentication_cost() {
+        let flows = flows_for_cwe_descriptor().description;
+        assert!(flows.contains("CWE pack selectors bypass the result memo"));
+        assert!(flows.contains("full database content authentication"));
+        assert!(flows.contains("proportional to database size"));
+
+        let query = query_descriptor().description;
+        assert!(query.contains("memo hit skips CodeQL execution"));
+        assert!(query.contains("full database content authentication"));
+        assert!(query.contains("proportional to database size"));
+        assert!(query.contains("imported local queries bypass the result memo"));
+    }
+
+    #[test]
     fn parse_sarif_extracts_thread_flow_path() {
         let sarif = r#"{
             "runs": [{
@@ -1264,6 +1282,34 @@ fi
 
         restore_env("KUZUSHI_CODEQL_BIN", previous);
         assert_eq!(invocation_count(&fake), 1);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn memo_lookup_reauthenticates_same_metadata_database_content() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        let fake = fake_codeql(&temp);
+        let db = codeql_db(&temp);
+        let internal = db.join("db-cpp/internal.bin");
+        std::fs::write(&internal, b"one").unwrap();
+        let query = temp.path().join("local.ql");
+        std::fs::write(&query, "select 1").unwrap();
+        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+
+        run_codeql_and_parse(&db, &query.display().to_string(), 10)
+            .await
+            .unwrap();
+        let stable_metadata = std::fs::metadata(&internal).unwrap();
+        std::fs::write(&internal, b"two").unwrap();
+        restore_file_times(&internal, &stable_metadata);
+        run_codeql_and_parse(&db, &query.display().to_string(), 10)
+            .await
+            .unwrap();
+
+        restore_env("KUZUSHI_CODEQL_BIN", previous);
+        assert_eq!(invocation_count(&fake), 2);
     }
 
     #[tokio::test]

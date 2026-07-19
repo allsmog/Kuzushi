@@ -37,6 +37,15 @@ Caps keep the run bounded: `maxCatalogEntries`, `maxCandidatesPerCwe`, `maxEvide
 
 The module requires usable context or a file inventory. An empty threat model is a warning, not a blocker; `/threats regen dfd` improves ranking and triage but should not prevent structural-first hunts from producing candidates.
 
+## CodeQL MCP latency and authentication
+
+The CodeQL MCP result memo reduces CodeQL execution; it does not weaken database authentication.
+
+- An eligible dependency-free local query can reuse an in-process result. A memo hit skips CodeQL execution, but the server first performs full content authentication of the database tree. Memo-hit authentication time therefore remains proportional to database size.
+- CWE pack selectors and local queries with imports bypass the result memo because the server cannot authenticate their complete dependency graph without CodeQL's resolver. CodeQL's on-disk pack cache and optional prewarm can still avoid repeated compilation work.
+- When CodeQL executes, Kuzushi authenticates the complete database before the process starts and again before accepting or memoizing its output. A change during analysis fails closed.
+- Kuzushi does not currently give the MCP server an immutable, cross-platform server-lifetime filesystem snapshot. It gives the server a database path and an operator-authenticated expected identity, and the path can still be changed by an uncoordinated writer. The secure fallback is therefore a full content hash on every request, including memo lookups; metadata-only or process-lifetime identity caches are not safe substitutes.
+
 ## CWE Reference
 
 `taint-iris-next` owns a typed CWE catalog in `src/modules/taint-iris-next/cwe-reference.ts`. The deterministic prepass filters and ranks this catalog using detected languages, frameworks, data stores, entrypoints, and threat-model `relatedCwe` fields. The agent-facing prompt receives the bounded "CWE Candidate Catalog" section from this reference file and must cite catalog signals when selecting CWEs.

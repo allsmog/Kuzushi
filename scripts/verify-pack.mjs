@@ -74,7 +74,7 @@ const expectedPackageScripts = {
   setup: "bash scripts/bootstrap.sh",
   doctor: "bash scripts/doctor.sh",
   "check:docs":
-    "node scripts/check-release-contract.mjs && node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
+    "node scripts/check-release-contract.mjs && node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-codeql-mcp-latency-contract.mjs && node scripts/check-retired-ts-runtime.mjs",
   "check:release": "node scripts/check-release-contract.mjs",
   "release:bump": "node scripts/bump-release-version.mjs",
   "verify:quick": "node scripts/verify-repository.mjs quick",
