@@ -11,6 +11,7 @@ const contracts = [
       "full content authentication of the database tree",
       "proportional to database size",
       "Pack selectors and imported local queries bypass the result memo",
+      "analysis and prewarm execute only that cached snapshot",
     ],
   },
   {
@@ -21,6 +22,7 @@ const contracts = [
       "full content authentication of the database tree",
       "proportional to database size",
       "Pack selectors and imported local queries bypass the result memo",
+      "analysis and prewarm execute only that cached snapshot",
     ],
   },
   {
@@ -31,6 +33,7 @@ const contracts = [
       "proportional to database size",
       "immutable, cross-platform server-lifetime filesystem snapshot",
       "full content hash on every request, including memo lookups",
+      "Analysis and prewarm execute only that cached snapshot",
     ],
   },
   {
@@ -40,6 +43,7 @@ const contracts = [
       "proportional to database size",
       "Recompute this identity for every request, including memo lookups",
       "not an immutable server-lifetime snapshot",
+      "Analysis and prewarm execute only that snapshot",
     ],
   },
 ];

@@ -25,6 +25,10 @@
 //!    so its latency remains proportional to database size.
 //!    Keyed on the canonical absolute DB path so a typo or symlink swap
 //!    doesn't poison the cache.
+//! On the first execution for a CodeQL bundle revision, the complete bundle is
+//! copied into an authenticated operator-owned snapshot. Analysis and prewarm
+//! execute only that snapshot; later calls reuse it while the source bundle's
+//! full identity remains part of per-request authentication.
 //!
 //! Optional: if `KUZUSHI_CODEQL_PREWARM` is set, on MCP server startup
 //! we spawn a background task that compiles the common CWE folders
@@ -36,15 +40,14 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_mcp_common::{
-    bounded_bundle_identity, resolve_codeql_bundle_root, BundleIdentityConfig, ReadRootCapability,
-    Tool, ToolHandler, ToolRegistry,
+    bounded_bundle_identity, copy_bounded_bundle, resolve_codeql_bundle_root, BundleIdentityConfig,
+    ReadRootCapability, Tool, ToolHandler, ToolRegistry,
 };
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 const DEFAULT_RESULT_LIMIT: usize = 50;
 const MAX_RESULT_LIMIT: usize = 500;
@@ -412,6 +415,79 @@ fn codeql_revision(codeql: &Path) -> Result<String> {
     bounded_bundle_identity(&bundle, CODEQL_BUNDLE_CONFIG)
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct CodeqlSnapshotKey {
+    launcher: PathBuf,
+    revision: String,
+}
+
+#[derive(Clone)]
+struct CodeqlExecutionSnapshot {
+    launcher: PathBuf,
+    _directory: Arc<tempfile::TempDir>,
+}
+
+struct CachedCodeqlSnapshot {
+    key: CodeqlSnapshotKey,
+    execution: CodeqlExecutionSnapshot,
+}
+
+fn codeql_snapshot_cache() -> &'static Mutex<Option<CachedCodeqlSnapshot>> {
+    static CACHE: OnceLock<Mutex<Option<CachedCodeqlSnapshot>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn authenticated_codeql_snapshot(
+    launcher: &Path,
+    expected_revision: &str,
+) -> Result<CodeqlExecutionSnapshot> {
+    let key = CodeqlSnapshotKey {
+        launcher: launcher.to_path_buf(),
+        revision: expected_revision.to_string(),
+    };
+    let mut cache = codeql_snapshot_cache()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("CodeQL execution snapshot cache is unavailable"))?;
+    if let Some(cached) = cache.as_ref().filter(|cached| cached.key == key) {
+        return Ok(cached.execution.clone());
+    }
+    let execution = create_codeql_execution_snapshot(launcher, expected_revision)?;
+    *cache = Some(CachedCodeqlSnapshot {
+        key,
+        execution: execution.clone(),
+    });
+    Ok(execution)
+}
+
+fn create_codeql_execution_snapshot(
+    launcher: &Path,
+    expected_revision: &str,
+) -> Result<CodeqlExecutionSnapshot> {
+    let bundle = resolve_codeql_bundle_root(launcher)?;
+    let relative_launcher = launcher
+        .strip_prefix(&bundle)
+        .context("CodeQL launcher is outside its authenticated bundle")?;
+    let directory = Arc::new(tempfile::tempdir()?);
+    let actual = copy_bounded_bundle(&bundle, directory.path(), CODEQL_BUNDLE_CONFIG)?;
+    anyhow::ensure!(
+        actual == expected_revision,
+        "CodeQL executable bundle changed after authentication; retry the operation"
+    );
+    let launcher = directory.path().join(relative_launcher);
+    anyhow::ensure!(launcher.is_file(), "CodeQL snapshot launcher is missing");
+    Ok(CodeqlExecutionSnapshot {
+        launcher,
+        _directory: directory,
+    })
+}
+
+fn snapshot_current_codeql(launcher: &Path) -> Result<CodeqlExecutionSnapshot> {
+    let launcher = std::fs::canonicalize(launcher)
+        .with_context(|| format!("could not canonicalize {}", launcher.display()))?;
+    let revision = codeql_revision(&launcher)?;
+    authenticated_codeql_snapshot(&launcher, &revision)
+}
+
 fn serialized_flow_bytes(flows: &[Value]) -> Option<usize> {
     serde_json::to_vec(flows).ok().map(|encoded| encoded.len())
 }
@@ -441,11 +517,13 @@ async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result
     if let Some(cached) = key.as_ref().and_then(lookup_memo) {
         return Ok(cached);
     }
+    let execution = authenticated_codeql_snapshot(&identity.codeql, &identity.codeql_revision)
+        .context("could not prepare authenticated CodeQL execution snapshot")?;
     let sarif = tempfile::NamedTempFile::new()?;
     let log_dir = tempfile::tempdir()?;
     let cache_dir = codeql_cache_dir();
     let mut command = codeql_analyze_command(
-        &codeql,
+        &execution.launcher,
         db,
         selector,
         sarif.path(),
@@ -633,7 +711,7 @@ fn sarif_step(location: &Value) -> Option<Value> {
 /// task; failures are logged to stderr and ignored — pre-warm is an
 /// optimisation, not a correctness gate.
 pub(crate) async fn spawn_prewarm() {
-    let Some(codeql) = codeql_binary_for_prewarm() else {
+    let Some(codeql) = codeql_snapshot_for_prewarm() else {
         return;
     };
     let selectors = prewarm_selectors();
@@ -642,15 +720,17 @@ pub(crate) async fn spawn_prewarm() {
         selectors.len()
     );
     for selector in selectors {
-        log_prewarm_outcome(&selector, run_prewarm_compile(&codeql, &selector));
+        log_prewarm_outcome(&selector, run_prewarm_compile(&codeql.launcher, &selector));
         tokio::task::yield_now().await;
     }
     eprintln!("[kuzushi-mcp-codeql] prewarm: complete");
 }
 
-fn codeql_binary_for_prewarm() -> Option<PathBuf> {
+fn codeql_snapshot_for_prewarm() -> Option<CodeqlExecutionSnapshot> {
     match locate_codeql_binary() {
-        Ok(Some(codeql)) => Some(codeql),
+        Ok(Some(codeql)) => snapshot_current_codeql(&codeql)
+            .map_err(|error| eprintln!("[kuzushi-mcp-codeql] prewarm skipped: {error}"))
+            .ok(),
         Ok(None) => {
             eprintln!("[kuzushi-mcp-codeql] prewarm skipped: codeql binary not found");
             None
@@ -888,9 +968,10 @@ mod tests {
     use tempfile::tempdir;
 
     #[cfg(unix)]
+    const FAKE_CODEQL_COUNTER_ENV: &str = "KUZUSHI_TEST_CODEQL_COUNTER";
     const FAKE_CODEQL_SCRIPT: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
-counter="$(dirname "$(dirname "$(dirname "$0")")")/codeql.invocations"
+counter="${KUZUSHI_TEST_CODEQL_COUNTER:-$(dirname "$(dirname "$(dirname "$0")")")/codeql.invocations}"
 count=0
 if [ -f "$counter" ]; then
   count="$(cat "$counter")"
@@ -940,10 +1021,7 @@ fi
 
     #[cfg(unix)]
     fn invocation_count(codeql: &Path) -> usize {
-        let counter = codeql_bundle(codeql)
-            .parent()
-            .unwrap()
-            .join("codeql.invocations");
+        let counter = fake_codeql_counter(codeql);
         std::fs::read_to_string(counter)
             .unwrap()
             .trim()
@@ -954,6 +1032,38 @@ fi
     #[cfg(unix)]
     fn codeql_bundle(codeql: &Path) -> &Path {
         codeql.parent().unwrap().parent().unwrap()
+    }
+
+    #[cfg(unix)]
+    fn fake_codeql_counter(codeql: &Path) -> PathBuf {
+        codeql_bundle(codeql)
+            .parent()
+            .unwrap()
+            .join("codeql.invocations")
+    }
+
+    #[cfg(unix)]
+    struct FakeCodeqlEnvironment {
+        previous_binary: Option<std::ffi::OsString>,
+        previous_counter: Option<std::ffi::OsString>,
+    }
+
+    #[cfg(unix)]
+    fn install_fake_codeql(codeql: &Path) -> FakeCodeqlEnvironment {
+        let previous_binary = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        let previous_counter = std::env::var_os(FAKE_CODEQL_COUNTER_ENV);
+        std::env::set_var("KUZUSHI_CODEQL_BIN", codeql);
+        std::env::set_var(FAKE_CODEQL_COUNTER_ENV, fake_codeql_counter(codeql));
+        FakeCodeqlEnvironment {
+            previous_binary,
+            previous_counter,
+        }
+    }
+
+    #[cfg(unix)]
+    fn restore_fake_codeql(environment: FakeCodeqlEnvironment) {
+        restore_env("KUZUSHI_CODEQL_BIN", environment.previous_binary);
+        restore_env(FAKE_CODEQL_COUNTER_ENV, environment.previous_counter);
     }
 
     fn codeql_db(temp: &tempfile::TempDir) -> PathBuf {
@@ -1179,6 +1289,33 @@ fi
     }
 
     #[test]
+    #[cfg(unix)]
+    fn execution_snapshot_retains_authenticated_launcher_and_runtime_bytes() {
+        let temp = tempdir().unwrap();
+        let db = codeql_db(&temp);
+        let codeql = fake_codeql(&temp);
+        let runtime = codeql_bundle(&codeql).join("lib/runtime.bin");
+        std::fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+        std::fs::write(&runtime, b"trusted runtime").unwrap();
+        let identity = analysis_identity(&db, &codeql).unwrap();
+
+        let execution =
+            authenticated_codeql_snapshot(&identity.codeql, &identity.codeql_revision).unwrap();
+        std::fs::write(&codeql, b"malicious launcher").unwrap();
+        std::fs::write(&runtime, b"malicious runtime").unwrap();
+
+        let snapshot_bundle = resolve_codeql_bundle_root(&execution.launcher).unwrap();
+        assert_eq!(
+            std::fs::read(&execution.launcher).unwrap(),
+            FAKE_CODEQL_SCRIPT.as_bytes()
+        );
+        assert_eq!(
+            std::fs::read(snapshot_bundle.join("lib/runtime.bin")).unwrap(),
+            b"trusted runtime"
+        );
+    }
+
+    #[test]
     fn planned_database_identity_is_mandatory_and_content_bound() {
         let temp = tempdir().unwrap();
         let db = codeql_db(&temp);
@@ -1301,8 +1438,7 @@ fi
         std::fs::create_dir_all(query.parent().unwrap()).unwrap();
         std::fs::write(&query, "import helper\nselect 1").unwrap();
         std::fs::write(&helper, "predicate helper() { any() }").unwrap();
-        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
-        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+        let environment = install_fake_codeql(&fake);
 
         run_codeql_and_parse(&db, "codeql/cpp-queries:Security/CWE/CWE-089", 10)
             .await
@@ -1323,7 +1459,7 @@ fi
             .await
             .unwrap();
 
-        restore_env("KUZUSHI_CODEQL_BIN", previous);
+        restore_fake_codeql(environment);
         assert_eq!(invocation_count(&fake), 4);
     }
 
@@ -1336,8 +1472,7 @@ fi
         let db = codeql_db(&temp);
         let query = temp.path().join("local.ql");
         std::fs::write(&query, "select 1").unwrap();
-        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
-        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+        let environment = install_fake_codeql(&fake);
 
         for _ in 0..2 {
             run_codeql_and_parse(&db, &query.display().to_string(), 10)
@@ -1345,7 +1480,7 @@ fi
                 .unwrap();
         }
 
-        restore_env("KUZUSHI_CODEQL_BIN", previous);
+        restore_fake_codeql(environment);
         assert_eq!(invocation_count(&fake), 1);
     }
 
@@ -1360,8 +1495,7 @@ fi
         std::fs::write(&internal, b"one").unwrap();
         let query = temp.path().join("local.ql");
         std::fs::write(&query, "select 1").unwrap();
-        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
-        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+        let environment = install_fake_codeql(&fake);
 
         run_codeql_and_parse(&db, &query.display().to_string(), 10)
             .await
@@ -1373,7 +1507,7 @@ fi
             .await
             .unwrap();
 
-        restore_env("KUZUSHI_CODEQL_BIN", previous);
+        restore_fake_codeql(environment);
         assert_eq!(invocation_count(&fake), 2);
     }
 
@@ -1384,8 +1518,7 @@ fi
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);
         let db = codeql_db(&temp);
-        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
-        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+        let environment = install_fake_codeql(&fake);
 
         let response = QueryHandler(capability(&temp))
             .call(json!({
@@ -1396,7 +1529,7 @@ fi
             .await
             .unwrap();
 
-        restore_env("KUZUSHI_CODEQL_BIN", previous);
+        restore_fake_codeql(environment);
 
         assert_eq!(response["flow_count"], json!(1));
         assert_eq!(response["flows"][0]["source"]["line"], json!(7));
@@ -1410,15 +1543,14 @@ fi
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);
         let db = codeql_db(&temp);
-        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
-        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+        let environment = install_fake_codeql(&fake);
 
         let response = FlowsForCweHandler(capability(&temp))
             .call(json!({"db": db.display().to_string(), "cwe": "89", "limit": 5}))
             .await
             .unwrap();
 
-        restore_env("KUZUSHI_CODEQL_BIN", previous);
+        restore_fake_codeql(environment);
 
         assert_eq!(
             response["selector"],

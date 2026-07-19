@@ -86,9 +86,12 @@ attaches as agent tools when a module asks for it:
   `codeql database analyze`, but every request still performs full content
   authentication of the database tree, so memo-hit latency remains
   proportional to database size. Pack selectors and imported local queries
-  bypass the result memo. Set `KUZUSHI_CODEQL_PREWARM=1` to pre-compile common
-  CWE packs at MCP-server startup; set `KUZUSHI_CODEQL_CACHE_DIR=<path>` to
-  share the on-disk pack cache across kuzushi runs.
+  bypass the result memo. On the first execution for a CodeQL bundle revision,
+  the server copies the complete authenticated bundle into an operator-owned
+  snapshot; analysis and prewarm execute only that cached snapshot. Set
+  `KUZUSHI_CODEQL_PREWARM=1` to pre-compile common CWE packs at MCP-server
+  startup; set `KUZUSHI_CODEQL_CACHE_DIR=<path>` to share the on-disk pack cache
+  across kuzushi runs.
 
 The bridge wires these in when the request carries
 `toolPolicy.mcps === true` (set by `taint-iris-next:hunt` automatically
