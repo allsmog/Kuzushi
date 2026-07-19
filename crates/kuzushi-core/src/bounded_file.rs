@@ -381,7 +381,12 @@ fn open_no_follow(path: &Path) -> io::Result<fs::File> {
         FILE_ATTRIBUTE_NORMAL, FILE_FLAG_OPEN_REPARSE_POINT,
     };
 
-    let file = open_windows_handle(path, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT)?;
+    use windows_sys::Win32::Foundation::GENERIC_READ;
+    let file = open_windows_handle(
+        path,
+        GENERIC_READ,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+    )?;
     reject_windows_reparse_attributes(path, file.metadata()?.file_attributes())?;
     Ok(file)
 }
@@ -395,6 +400,7 @@ fn open_windows_directory_no_follow(path: &Path) -> io::Result<fs::File> {
 
     let file = open_windows_handle(
         path,
+        0,
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
     )?;
     reject_windows_reparse_attributes(path, file.metadata()?.file_attributes())?;
@@ -498,10 +504,10 @@ fn reject_non_regular_open_file(file: fs::File) -> io::Result<fs::File> {
 }
 
 #[cfg(windows)]
-fn open_windows_handle(path: &Path, flags: u32) -> io::Result<fs::File> {
+fn open_windows_handle(path: &Path, desired_access: u32, flags: u32) -> io::Result<fs::File> {
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::io::FromRawHandle;
-    use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
@@ -517,7 +523,7 @@ fn open_windows_handle(path: &Path, flags: u32) -> io::Result<fs::File> {
     let handle = unsafe {
         CreateFileW(
             wide_path.as_ptr(),
-            GENERIC_READ,
+            desired_access,
             share,
             std::ptr::null(),
             OPEN_EXISTING,
