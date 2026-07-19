@@ -28,11 +28,12 @@ Feature: Conditional MCP attachment plan
     When I type command "logs"
     Then the log contains "MCP plan: treesitter, context"
 
-  Scenario: Pre-seeded CPG and CodeQL DB attach the joern + codeql MCPs
+  Scenario: Legacy marker-only CodeQL DB fails closed
     Given the artifact ".kuzushi/cpg.bin" is seeded with "CPGSTUB"
     And the artifact ".kuzushi/codeql-db/codeql-database.yml" is seeded with "primaryLanguage: rust"
     When I launch the shell
     Then the status segment shows "workbench"
     When I type command "logs"
-    Then the log contains "joern"
-    And the log contains "codeql"
+    Then the log contains "MCP plan error: legacy CodeQL database"
+    And I do not see "joern,"
+    And I do not see "codeql,"
