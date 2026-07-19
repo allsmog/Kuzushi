@@ -5,6 +5,7 @@ const PUBLIC_FAILURES = Object.freeze({
   authentication: "Provider authentication failed.",
   bridge_internal: "Bridge operation failed; raw error details were suppressed.",
   cancelled: "Bridge operation was cancelled.",
+  mcp_timeout: "MCP tool request timed out.",
   provider_rejected: "Provider rejected the request.",
   provider_response_invalid: "Provider returned an invalid response.",
   provider_unavailable: "Provider is temporarily unavailable.",
@@ -68,10 +69,16 @@ function errorClassFromShape(error) {
   const message = boundedLower(error?.message);
   return (
     cancellationClass(name, message) ??
+    mcpTimeoutClass(name, code) ??
     timeoutClass(code, message) ??
     transportClass(name, code, message) ??
     "bridge_internal"
   );
+}
+
+function mcpTimeoutClass(name, code) {
+  const marked = name === "mcptooltimeouterror" || code === "kuzushi_mcp_tool_timeout";
+  return marked ? "mcp_timeout" : undefined;
 }
 
 function cancellationClass(name, message) {

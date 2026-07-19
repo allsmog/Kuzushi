@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  isMcpToolTimeoutError,
   mcpConnectionFailureMessage,
   mcpToolTimeoutForRequest,
+  normalizeMcpToolError,
 } from "../../scripts/langgraph-bridge/mcp.mjs";
 
 describe("MCP connection error formatting", () => {
@@ -30,11 +32,27 @@ describe("MCP connection error formatting", () => {
 
   it("uses the request-scoped MCP timeout with a bounded default", () => {
     expect(mcpToolTimeoutForRequest({})).toBe(60_000);
-    expect(
-      mcpToolTimeoutForRequest({ runtimeOptions: { mcpToolTimeoutMs: 12_345 } }),
-    ).toBe(12_345);
-    expect(() =>
-      mcpToolTimeoutForRequest({ runtimeOptions: { mcpToolTimeoutMs: 0 } }),
-    ).toThrow(/positive safe integer/);
+    expect(mcpToolTimeoutForRequest({ runtimeOptions: { mcpToolTimeoutMs: 12_345 } })).toBe(12_345);
+    expect(() => mcpToolTimeoutForRequest({ runtimeOptions: { mcpToolTimeoutMs: 0 } })).toThrow(
+      /positive safe integer/,
+    );
+  });
+
+  it("marks MCP timeouts without retaining their raw message as public text", () => {
+    const sentinel = "provider-secret-sentinel";
+    const normalized = normalizeMcpToolError(
+      new Error(`MCP error -32001: Request timed out: ${sentinel}`),
+    );
+
+    expect(isMcpToolTimeoutError(normalized)).toBe(true);
+    expect(normalized.message).toBe("MCP tool request timed out");
+    expect(normalized.message).not.toContain(sentinel);
+  });
+
+  it("does not relabel unrelated MCP failures as timeouts", () => {
+    const failure = new Error("MCP tool returned invalid output");
+
+    expect(normalizeMcpToolError(failure)).toBe(failure);
+    expect(isMcpToolTimeoutError(failure)).toBe(false);
   });
 });

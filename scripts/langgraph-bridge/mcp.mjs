@@ -3,6 +3,25 @@ import { sep } from "node:path";
 import process from "node:process";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
+const MCP_TOOL_TIMEOUT_CODE = "KUZUSHI_MCP_TOOL_TIMEOUT";
+
+export class McpToolTimeoutError extends Error {
+  constructor(cause) {
+    super("MCP tool request timed out", { cause });
+    this.name = "McpToolTimeoutError";
+    this.code = MCP_TOOL_TIMEOUT_CODE;
+  }
+}
+
+export function normalizeMcpToolError(error) {
+  if (error instanceof McpToolTimeoutError) return error;
+  return isMcpToolTimeoutError(error) ? new McpToolTimeoutError(error) : error;
+}
+
+export function isMcpToolTimeoutError(error) {
+  return errorChain(error).some(timeoutErrorSignal);
+}
+
 export async function mcpToolsForRequest(request) {
   if (!agentMcpsEnabled(request)) return { tools: [], close: async () => {} };
   const mcpServers = mcpServerConfig(request);
@@ -16,6 +35,32 @@ export async function mcpToolsForRequest(request) {
   });
   const tools = await client.getTools();
   return { tools, close: async () => client.close?.() };
+}
+
+function errorChain(error) {
+  const chain = [];
+  let current = error;
+  while (current && chain.length < 4) {
+    chain.push(current);
+    current = current?.cause;
+  }
+  return chain;
+}
+
+function timeoutErrorSignal(error) {
+  const name = normalizedErrorField(error?.name);
+  const code = normalizedErrorField(error?.code);
+  const message = normalizedErrorField(error?.message);
+  return (
+    name === "mcptooltimeouterror" ||
+    code === MCP_TOOL_TIMEOUT_CODE.toLowerCase() ||
+    code.includes("timeout") ||
+    message.includes("timed out")
+  );
+}
+
+function normalizedErrorField(value) {
+  return typeof value === "string" ? value.slice(0, 512).toLowerCase() : "";
 }
 
 export function mcpToolTimeoutForRequest(request) {

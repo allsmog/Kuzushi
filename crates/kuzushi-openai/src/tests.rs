@@ -211,6 +211,96 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
     }
 
     #[test]
+    fn query_bridge_preserves_mcp_timeout_spend_receipt() {
+        let config = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "printf '%s' '{\"ok\":true,\"text\":\"\",\"truncated\":true,\"stopReason\":\"mcp_tool_timeout\",\"cost_usd\":0.02,\"cost_usd_exact\":true,\"cost_reported_calls\":1,\"input_tokens\":12,\"output_tokens\":3,\"input_reported_calls\":1,\"output_reported_calls\":1,\"model_calls\":1}'".to_string(),
+            ]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
+            anthropic_oauth: None,
+        };
+        let runtime = LangGraphRuntime::from_runtime_config(&config, ".").unwrap();
+
+        let observed = runtime
+            .query_observed_blocking(AgentQueryRequest::new(
+                "openai:gpt-5.5",
+                ".",
+                "sys",
+                "prompt",
+            ))
+            .unwrap();
+
+        assert!(observed.value.truncated);
+        assert_eq!(
+            observed.value.stop_reason.as_deref(),
+            Some("mcp_tool_timeout")
+        );
+        assert_eq!(
+            observed.value.checked_cost_report().unwrap().exact_usd(),
+            Some(0.02)
+        );
+        assert_eq!(observed.usage.observed_counts(), (Some(12), Some(3)));
+        assert!(observed.usage.is_complete());
+    }
+
+    #[test]
+    fn query_bridge_does_not_retry_mcp_timeout_failures() {
+        let tmp = tempfile::tempdir().unwrap();
+        let attempts = tmp.path().join("attempts");
+        let bridge_script = tmp.path().join("bridge.sh");
+        let script = format!(
+            r#"#!/bin/sh
+count=0
+if test -f {attempts}; then count=$(cat {attempts}); fi
+count=$((count + 1))
+printf '%s' "$count" > {attempts}
+printf '%s' '{{"ok":false,"error":"MCP tool request timed out.","errorClass":"mcp_timeout"}}'
+"#,
+            attempts = attempts.display()
+        );
+        std::fs::write(&bridge_script, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bridge_script, std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        }
+        let config = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec![bridge_script.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
+            anthropic_oauth: None,
+        };
+        let runtime = LangGraphRuntime::from_runtime_config(&config, ".").unwrap();
+
+        let error = runtime
+            .query_blocking(AgentQueryRequest::new(
+                "openai:gpt-5.5",
+                ".",
+                "sys",
+                "prompt",
+            ))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("MCP tool request timed out"), "{error}");
+        assert_eq!(std::fs::read_to_string(attempts).unwrap(), "1");
+    }
+
+    #[test]
     fn query_bridge_cancellation_kills_running_child() {
         let tmp = tempfile::tempdir().unwrap();
         let started = tmp.path().join("started");

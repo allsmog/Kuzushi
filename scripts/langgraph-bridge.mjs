@@ -4,10 +4,16 @@ import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 import { debugDumpBridgeCall } from "./langgraph-bridge/diagnostics.mjs";
 import { bridgeErrorResponse } from "./langgraph-bridge/errors.mjs";
-import { mcpToolsForRequest } from "./langgraph-bridge/mcp.mjs";
+import {
+  isMcpToolTimeoutError,
+  mcpToolsForRequest,
+  normalizeMcpToolError,
+} from "./langgraph-bridge/mcp.mjs";
 import {
   appendStructuredOutputContract,
+  bridgeUsageFields,
   DEFAULT_MAX_MODEL_TURNS,
+  interruptedQueryResult,
   isAiMessage,
   maybeParseJson,
   messageText,
@@ -31,25 +37,33 @@ async function readStdin() {
 
 async function runQueryGraph(request) {
   const mcp = await mcpToolsForRequest(request);
+  const modelMessages = [];
   try {
     const system = querySystemPromptForRequest(request);
-    const graph = queryGraphForRequest(request, mcp.tools, system);
-    const result = await graph.invoke({
-      messages: [new HumanMessage(request.prompt ?? "")],
-    }, { recursionLimit: DEFAULT_MAX_MODEL_TURNS * 2 + 2 });
-    const message = result.messages.at(-1);
-    debugDumpBridgeCall("query", request, mcp.tools, system, message);
-    return queryResultFromMessages(result.messages, request);
+    const graph = queryGraphForRequest(request, mcp.tools, system, modelMessages);
+    try {
+      const result = await graph.invoke({
+        messages: [new HumanMessage(request.prompt ?? "")],
+      }, { recursionLimit: DEFAULT_MAX_MODEL_TURNS * 2 + 2 });
+      const message = result.messages.at(-1);
+      debugDumpBridgeCall("query", request, mcp.tools, system, message);
+      return queryResultFromMessages(result.messages, request);
+    } catch (error) {
+      if (!isMcpToolTimeoutError(error)) throw error;
+      const message = modelMessages.at(-1);
+      debugDumpBridgeCall("query", request, mcp.tools, system, message);
+      return interruptedQueryResult(modelMessages, "mcp_tool_timeout");
+    }
   } finally {
     await mcp.close();
   }
 }
 
-function queryGraphForRequest(request, tools, system) {
+function queryGraphForRequest(request, tools, system, modelMessages) {
   const model = modelForRequest(request);
   const boundModel = tools.length ? model.bindTools(tools) : model;
   return new StateGraph(MessagesAnnotation)
-    .addNode("model", callModelNode(boundModel, request, system))
+    .addNode("model", callModelNode(boundModel, request, system, modelMessages))
     .addNode("tools", runToolsNode(tools))
     .addEdge(START, "model")
     .addConditionalEdges("model", shouldContinueForRequest(request))
@@ -64,10 +78,15 @@ function querySystemPromptForRequest(request) {
   );
 }
 
-function callModelNode(model, request, system) {
-  return async (state) => ({
-    messages: [await model.invoke([systemMessageForRequest(request, system), ...state.messages])],
-  });
+function callModelNode(model, request, system, modelMessages) {
+  return async (state) => {
+    const message = await model.invoke([
+      systemMessageForRequest(request, system),
+      ...state.messages,
+    ]);
+    modelMessages.push(message);
+    return { messages: [message] };
+  };
 }
 
 function runToolsNode(tools) {
@@ -88,8 +107,12 @@ async function runOneTool(call, tool) {
   if (!tool) {
     return new ToolMessage({ tool_call_id: call.id ?? call.name, content: `Unknown tool ${call.name}` });
   }
-  const output = await tool.invoke(call.args ?? {});
-  return toolMessageForOutput(call, output);
+  try {
+    const output = await tool.invoke(call.args ?? {});
+    return toolMessageForOutput(call, output);
+  } catch (error) {
+    throw normalizeMcpToolError(error);
+  }
 }
 
 function shouldContinueForRequest(request) {
@@ -109,7 +132,7 @@ function queryResultFromMessages(messages, request) {
     ok: true,
     text,
     structured: maybeParseJson(text),
-    ...queryUsageFields(usage),
+    ...bridgeUsageFields(usage),
     truncated: isTruncatedStopReason(stopReason),
     stopReason,
   };
@@ -124,28 +147,13 @@ function queryStopReason(messages, request) {
   return decision === "continue" ? undefined : decision;
 }
 
-function queryUsageFields(usage) {
-  const hasInput = usage.inputReportedCalls > 0;
-  const hasOutput = usage.outputReportedCalls > 0;
-  const hasCost = usage.costReportedCalls > 0;
-  return {
-    input_tokens: hasInput ? usage.inputTokens : undefined,
-    output_tokens: hasOutput ? usage.outputTokens : undefined,
-    cost_usd: hasCost ? usage.costUsd : undefined,
-    input_reported_calls: usage.inputReportedCalls,
-    output_reported_calls: usage.outputReportedCalls,
-    cost_reported_calls: usage.costReportedCalls,
-    model_calls: usage.modelCalls,
-    cost_usd_exact: usage.modelCalls > 0 && usage.costReportedCalls === usage.modelCalls,
-  };
-}
-
 function isTruncatedStopReason(reason) {
   return [
     "length",
     "max_tokens",
     "max_tokens_reached",
     "model_turn_limit",
+    "mcp_tool_timeout",
     "observed_spend_incomplete",
     "observed_spend_exhausted",
   ].includes(String(reason ?? ""));

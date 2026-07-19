@@ -258,6 +258,31 @@ authorization: Default::default(),
     }
 
     #[test]
+    fn run_rejects_non_positive_budget_before_querying() {
+        let tmp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
+        let runtime = MockRuntime::new(AgentQueryResponse::default());
+
+        for value in [0.0, -0.25] {
+            let error = execute_x_ray_tool(
+                "x-ray:run",
+                json!({"maxBudgetUsd": value}),
+                &context(&config, &workspace),
+                Some(&runtime),
+            )
+            .unwrap_err()
+            .to_string();
+
+            assert!(error.contains("finite positive number"), "{error}");
+        }
+        assert!(runtime.queries().is_empty());
+    }
+
+    #[test]
     fn read_reports_missing_required_artifacts() {
         let tmp = tempdir().unwrap();
         fs::create_dir(tmp.path().join("x-ray")).unwrap();

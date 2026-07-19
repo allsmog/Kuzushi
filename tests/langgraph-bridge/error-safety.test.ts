@@ -32,4 +32,17 @@ describe("bridge-visible error serialization", () => {
     });
     expect(JSON.stringify(response)).not.toContain(sentinel);
   });
+
+  it("classifies MCP timeouts separately from retryable provider timeouts", () => {
+    const error = Object.assign(new Error("MCP tool request timed out"), {
+      name: "McpToolTimeoutError",
+      code: "KUZUSHI_MCP_TOOL_TIMEOUT",
+    });
+
+    expect(bridgeErrorResponse(error)).toEqual({
+      ok: false,
+      error: "MCP tool request timed out.",
+      errorClass: "mcp_timeout",
+    });
+  });
 });

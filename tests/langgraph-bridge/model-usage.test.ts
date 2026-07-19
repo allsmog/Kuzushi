@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 // @ts-expect-error -- plain .mjs bridge module without type declarations
 import {
+  interruptedQueryResult,
   modelContinuationDecision,
   usageFromMessage,
   usageFromMessages,
@@ -57,6 +58,28 @@ describe("LangGraph bridge usage cost", () => {
     });
   });
 
+  it("returns an MCP-timeout receipt for completed model turns", () => {
+    const result = interruptedQueryResult(
+      [ai({ input_tokens: 10, output_tokens: 2, cost_usd: 0.01 }), ai({ input_tokens: 4 })],
+      "mcp_tool_timeout",
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      text: "",
+      input_tokens: 14,
+      output_tokens: 2,
+      cost_usd: 0.01,
+      input_reported_calls: 2,
+      output_reported_calls: 1,
+      cost_reported_calls: 1,
+      model_calls: 2,
+      cost_usd_exact: false,
+      truncated: true,
+      stopReason: "mcp_tool_timeout",
+    });
+  });
+
   it("stops follow-up turns when observed spend is incomplete or exhausted", () => {
     const incomplete = [ai({ cost_usd: 0.01 }), ai({})];
     const exhausted = [ai({ cost_usd: 0.02 }), ai({ cost_usd: 0.03 })];
@@ -70,8 +93,8 @@ describe("LangGraph bridge usage cost", () => {
     expect(() =>
       usageFromMessages([ai({ input_tokens: Number.MAX_SAFE_INTEGER }), ai({ input_tokens: 1 })]),
     ).toThrow(/aggregate overflowed/);
-    expect(() => usageFromMessages([ai({ cost_usd: Number.MAX_VALUE }), ai({ cost_usd: Number.MAX_VALUE })])).toThrow(
-      /cost aggregate overflowed/,
-    );
+    expect(() =>
+      usageFromMessages([ai({ cost_usd: Number.MAX_VALUE }), ai({ cost_usd: Number.MAX_VALUE })]),
+    ).toThrow(/cost aggregate overflowed/);
   });
 });

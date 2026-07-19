@@ -5,6 +5,7 @@ import path from "node:path";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
+import { BridgePublicError } from "./errors.mjs";
 import { oauthModelForRequest } from "./oauth-models.mjs";
 
 export const DEFAULT_MAX_MODEL_TURNS = 12;
@@ -42,17 +43,21 @@ export function modelForRequest(request) {
 }
 
 function oauthModelForProvider(request, provider, modelName) {
-  const defaultEnv = provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
-  if (apiKeyCredential(request, defaultEnv)) return undefined;
-  const token = oauthAccessToken(request, provider);
-  if (!token) return undefined;
-  return oauthModelSupported(provider)
-    ? oauthModelForRequest(provider, modelName, token, request)
-    : undefined;
+  if (provider === "openai-codex") return requiredOauthModel(request, provider, modelName);
+  if (provider !== "anthropic") return undefined;
+  if (apiKeyCredential(request, "ANTHROPIC_API_KEY")) return undefined;
+  return optionalOauthModel(request, provider, modelName);
 }
 
-function oauthModelSupported(provider) {
-  return provider === "openai-codex" || provider === "anthropic";
+function requiredOauthModel(request, provider, modelName) {
+  const model = optionalOauthModel(request, provider, modelName);
+  if (!model) throw new BridgePublicError("authentication");
+  return model;
+}
+
+function optionalOauthModel(request, provider, modelName) {
+  const token = oauthAccessToken(request, provider);
+  return token ? oauthModelForRequest(provider, modelName, token, request) : undefined;
 }
 
 export function credentialForRequest(request, provider, defaultEnv) {
@@ -64,7 +69,7 @@ function apiKeyCredential(request, defaultEnv) {
 }
 
 export function oauthAccessToken(request, provider) {
-  const entry = freshOauthCredentialBag(request)[oauthCredentialProvider(provider)];
+  const entry = freshOauthCredentialBag(request, provider)[oauthCredentialProvider(provider)];
   return nonEmpty(entry?.access) ?? allowedOauthEnvToken(request, provider);
 }
 
@@ -80,10 +85,12 @@ export function oauthCredentialBag(credentialsPath = oauthCredentialsPath()) {
   }
 }
 
-function freshOauthCredentialBag(request) {
+function freshOauthCredentialBag(request, provider) {
   const credentialsPath = requestOauthCredentialsPath(request);
   const bag = credentialsPath ? oauthCredentialBag(credentialsPath) : {};
-  return refreshExpiredAnthropicCredential(bag, credentialsPath);
+  return provider === "anthropic"
+    ? refreshExpiredAnthropicCredential(bag, credentialsPath)
+    : bag;
 }
 
 function refreshExpiredAnthropicCredential(bag, credentialsPath) {
@@ -286,6 +293,32 @@ export function usageFromMessage(message) {
 
 export function usageFromMessages(messages) {
   return (messages ?? []).filter(isAiMessage).reduce(addMessageUsage, emptyUsage());
+}
+
+export function bridgeUsageFields(usage) {
+  const hasInput = usage.inputReportedCalls > 0;
+  const hasOutput = usage.outputReportedCalls > 0;
+  const hasCost = usage.costReportedCalls > 0;
+  return {
+    input_tokens: hasInput ? usage.inputTokens : undefined,
+    output_tokens: hasOutput ? usage.outputTokens : undefined,
+    cost_usd: hasCost ? usage.costUsd : undefined,
+    input_reported_calls: usage.inputReportedCalls,
+    output_reported_calls: usage.outputReportedCalls,
+    cost_reported_calls: usage.costReportedCalls,
+    model_calls: usage.modelCalls,
+    cost_usd_exact: usage.modelCalls > 0 && usage.costReportedCalls === usage.modelCalls,
+  };
+}
+
+export function interruptedQueryResult(messages, stopReason) {
+  return {
+    ok: true,
+    text: "",
+    ...bridgeUsageFields(usageFromMessages(messages)),
+    truncated: true,
+    stopReason,
+  };
 }
 
 export function modelContinuationDecision(

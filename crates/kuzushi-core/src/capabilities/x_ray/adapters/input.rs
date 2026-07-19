@@ -13,7 +13,7 @@ pub(crate) fn parse_run_input(
     )?;
     let system_prompt = resolve_system_prompt(input, &target)?;
     let effort = optional_string(input, "effort")?;
-    let max_budget_usd = max_budget_usd(input);
+    let max_budget_usd = max_budget_usd(input)?;
     let kb_context = ctx.artifact_knowledge_context(
         &target,
         "x-ray architecture entry points invariants attack surface threat model context",
@@ -47,12 +47,21 @@ fn resolve_system_prompt(input: &Value, target: &Path) -> Result<String> {
     Ok(prompt)
 }
 
-fn max_budget_usd(input: &Value) -> Option<f64> {
-    input
+fn max_budget_usd(input: &Value) -> Result<Option<f64>> {
+    let Some(value) = input
         .get("maxBudgetUsd")
         .or_else(|| input.get("max_budget_usd"))
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite() && *value >= 0.0)
+    else {
+        return Ok(None);
+    };
+    let value = value
+        .as_f64()
+        .context("x-ray:run maxBudgetUsd must be a finite positive number")?;
+    anyhow::ensure!(
+        value.is_finite() && value > 0.0,
+        "x-ray:run maxBudgetUsd must be a finite positive number"
+    );
+    Ok(Some(value))
 }
 
 pub(crate) fn resolve_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {

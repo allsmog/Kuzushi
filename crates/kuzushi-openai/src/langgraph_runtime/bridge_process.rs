@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
@@ -101,6 +101,7 @@ fn public_failure_message(class: &str, status: Option<u16>) -> String {
     let base = match class {
         "authentication" => "Provider authentication failed",
         "cancelled" => "Bridge operation was cancelled",
+        "mcp_timeout" => "MCP tool request timed out",
         "provider_rejected" => "Provider rejected the request",
         "provider_response_invalid" => "Provider returned an invalid response",
         "provider_unavailable" => "Provider is temporarily unavailable",
@@ -121,6 +122,7 @@ fn allowed_error_class(class: &str) -> Option<&str> {
         "authentication"
             | "bridge_internal"
             | "cancelled"
+            | "mcp_timeout"
             | "provider_rejected"
             | "provider_response_invalid"
             | "provider_unavailable"
@@ -201,6 +203,64 @@ where
 const DEFAULT_BRIDGE_TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_BRIDGE_STDOUT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_BRIDGE_STDERR_BYTES: usize = 1024 * 1024;
+const MAX_BRIDGE_DIAGNOSTIC_LINE_BYTES: usize = 4096;
+const MAX_BRIDGE_DIAGNOSTIC_LINES: usize = 64;
+const BRIDGE_DIAGNOSTIC_PREFIX: &str = "[kuzushi-bridge] ";
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BridgeDiagnosticMetadata {
+    ts: u64,
+    kind: BridgeDiagnosticKind,
+    model_provider: BridgeDiagnosticProvider,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking_level: Option<BridgeDiagnosticThinkingLevel>,
+    tool_count: u64,
+    prompt_len: u64,
+    message_count: u64,
+    system_prompt_len: u64,
+    response_len: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop_class: Option<BridgeDiagnosticStopClass>,
+    response_tool_count: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum BridgeDiagnosticKind {
+    Query,
+    NextStep,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+enum BridgeDiagnosticProvider {
+    #[serde(rename = "anthropic")]
+    Anthropic,
+    #[serde(rename = "openai")]
+    OpenAi,
+    #[serde(rename = "openai-codex")]
+    OpenAiCodex,
+    #[serde(rename = "other")]
+    Other,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum BridgeDiagnosticThinkingLevel {
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum BridgeDiagnosticStopClass {
+    Length,
+    Tool,
+    Complete,
+    Filtered,
+    Other,
+}
 
 fn bridge_timeout() -> Duration {
     std::env::var("KUZUSHI_BRIDGE_TIMEOUT_MS")
@@ -444,10 +504,38 @@ fn bridge_process_group_id(_child: &Child) -> Option<u32> {
 }
 
 fn parse_bridge_output<R: DeserializeOwned>(output: Output, label: &str) -> Result<R> {
+    forward_bridge_diagnostics(&output.stderr);
     if output.status.success() {
         return parse_successful_bridge_output(&output.stdout, label);
     }
     parse_failed_bridge_output(output, label)
+}
+
+fn forward_bridge_diagnostics(captured_stderr: &[u8]) {
+    let stderr = std::io::stderr();
+    let mut destination = stderr.lock();
+    write_bridge_diagnostics(captured_stderr, &mut destination);
+}
+
+pub(super) fn write_bridge_diagnostics(captured_stderr: &[u8], destination: &mut dyn Write) {
+    let metadata = captured_stderr
+        .split(|byte| *byte == b'\n')
+        .filter_map(parse_bridge_diagnostic_line)
+        .take(MAX_BRIDGE_DIAGNOSTIC_LINES);
+    for metadata in metadata {
+        if let Ok(serialized) = serde_json::to_string(&metadata) {
+            let _ = writeln!(destination, "{BRIDGE_DIAGNOSTIC_PREFIX}{serialized}");
+        }
+    }
+}
+
+fn parse_bridge_diagnostic_line(line: &[u8]) -> Option<BridgeDiagnosticMetadata> {
+    if line.len() > MAX_BRIDGE_DIAGNOSTIC_LINE_BYTES {
+        return None;
+    }
+    let line = std::str::from_utf8(line).ok()?;
+    let payload = line.strip_prefix(BRIDGE_DIAGNOSTIC_PREFIX)?;
+    serde_json::from_str(payload).ok()
 }
 
 fn parse_successful_bridge_output<R: DeserializeOwned>(stdout: &[u8], label: &str) -> Result<R> {
