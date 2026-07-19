@@ -1,7 +1,7 @@
 use super::bounded_fs as fs;
 use super::edge_readers::dependency_edges_for_path;
-use super::target::ignored_dir;
 use super::*;
+use anyhow::Context;
 use serde_json::Value;
 
 const NPM_LOCK_DEPENDENCY_FIELDS: &[&str] = &[
@@ -13,35 +13,15 @@ const NPM_LOCK_DEPENDENCY_FIELDS: &[&str] = &[
 
 pub(super) fn collect_dependency_edges(
     target: &Path,
-    cancellation: &ScanCancellation,
+    files: &[PathBuf],
 ) -> Result<Vec<SbomDependencyEdge>> {
     let mut edges = Vec::new();
-    collect_package_lock_edges(target, target, &mut edges, cancellation)?;
+    for path in files {
+        edges.extend(dependency_edges_for_path(target, path)?);
+    }
     edges.sort_by_key(edge_sort_key);
     edges.dedup();
     Ok(edges)
-}
-
-fn collect_package_lock_edges(
-    target: &Path,
-    dir: &Path,
-    edges: &mut Vec<SbomDependencyEdge>,
-    cancellation: &ScanCancellation,
-) -> Result<()> {
-    if cancellation.is_cancelled() {
-        anyhow::bail!("sbom-scan scan cancelled");
-    }
-    for entry in fs::read_dir(dir).with_context(|| format!("sbom-scan: read {}", dir.display()))? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let path = entry.path();
-        if file_type.is_dir() && !ignored_dir(&path) {
-            collect_package_lock_edges(target, &path, edges, cancellation)?;
-        } else if file_type.is_file() {
-            edges.extend(dependency_edges_for_path(target, &path)?);
-        }
-    }
-    Ok(())
 }
 
 pub(super) fn is_package_lock(path: &Path) -> bool {

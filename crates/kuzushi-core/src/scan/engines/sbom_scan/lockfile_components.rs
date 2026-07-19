@@ -1,4 +1,3 @@
-use super::bounded_fs as fs;
 use super::bun_lock::{bun_lock_components, is_bun_lock};
 use super::cargo_lock::{cargo_lock_components, is_cargo_lock};
 use super::cartfile_resolved::{cartfile_resolved_components, is_cartfile_resolved};
@@ -18,12 +17,11 @@ use super::poetry_lock::{is_poetry_lock, poetry_lock_components};
 use super::pubspec_lock::{is_pubspec_lock, pubspec_lock_components};
 use super::renv_lock::{is_renv_lock, renv_lock_components};
 use super::swift_resolved::{is_swift_resolved, swift_resolved_components};
-use super::target::ignored_dir;
 use super::uv_lock::{is_uv_lock, uv_lock_components};
 use super::yarn_lock::{is_yarn_lock, yarn_lock_components};
-use super::{SbomComponent, ScanCancellation};
-use anyhow::{Context, Result};
-use std::path::Path;
+use super::SbomComponent;
+use anyhow::Result;
+use std::path::{Path, PathBuf};
 
 type LockfileDetector = fn(&Path) -> bool;
 type LockfileComponentReader = fn(&Path, &Path) -> Result<Vec<SbomComponent>>;
@@ -54,33 +52,12 @@ const LOCKFILE_COMPONENT_READERS: &[(LockfileDetector, LockfileComponentReader)]
 
 pub(super) fn collect_lockfile_components(
     target: &Path,
-    cancellation: &ScanCancellation,
+    files: &[PathBuf],
 ) -> Result<Vec<SbomComponent>> {
-    let mut components = Vec::new();
-    collect_lockfile_components_in(target, target, &mut components, cancellation)?;
-    Ok(components)
-}
-
-fn collect_lockfile_components_in(
-    target: &Path,
-    dir: &Path,
-    components: &mut Vec<SbomComponent>,
-    cancellation: &ScanCancellation,
-) -> Result<()> {
-    if cancellation.is_cancelled() {
-        anyhow::bail!("sbom-scan scan cancelled");
-    }
-    for entry in fs::read_dir(dir).with_context(|| format!("sbom-scan: read {}", dir.display()))? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let path = entry.path();
-        if file_type.is_dir() && !ignored_dir(&path) {
-            collect_lockfile_components_in(target, &path, components, cancellation)?;
-        } else if file_type.is_file() {
-            components.extend(lockfile_components_for_path(target, &path)?);
-        }
-    }
-    Ok(())
+    files.iter().try_fold(Vec::new(), |mut components, path| {
+        components.extend(lockfile_components_for_path(target, path)?);
+        Ok(components)
+    })
 }
 
 fn lockfile_components_for_path(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {

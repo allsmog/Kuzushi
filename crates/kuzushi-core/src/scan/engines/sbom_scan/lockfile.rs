@@ -1,37 +1,16 @@
 use super::bounded_fs as fs;
-use super::target::ignored_dir;
 use super::*;
+use anyhow::Context;
 
 pub(super) fn collect_lockfiles(
     target: &Path,
-    cancellation: &ScanCancellation,
+    files: &[PathBuf],
 ) -> Result<Vec<SbomLockfile>> {
-    let mut lockfiles = Vec::new();
-    collect_lockfiles_in(target, target, &mut lockfiles, cancellation)?;
-    lockfiles.sort_by_key(|lockfile| lockfile.path.clone());
-    Ok(lockfiles)
-}
-
-fn collect_lockfiles_in(
-    target: &Path,
-    dir: &Path,
-    lockfiles: &mut Vec<SbomLockfile>,
-    cancellation: &ScanCancellation,
-) -> Result<()> {
-    if cancellation.is_cancelled() {
-        anyhow::bail!("sbom-scan scan cancelled");
-    }
-    for entry in fs::read_dir(dir).with_context(|| format!("sbom-scan: read {}", dir.display()))? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let path = entry.path();
-        if file_type.is_dir() && !ignored_dir(&path) {
-            collect_lockfiles_in(target, &path, lockfiles, cancellation)?;
-        } else if file_type.is_file() && is_lockfile(&path) {
-            lockfiles.push(lockfile_digest(target, &path)?);
-        }
-    }
-    Ok(())
+    files
+        .iter()
+        .filter(|path| is_lockfile(path))
+        .map(|path| lockfile_digest(target, path))
+        .collect()
 }
 
 fn is_lockfile(path: &Path) -> bool {
