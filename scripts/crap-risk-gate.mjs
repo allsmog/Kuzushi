@@ -6,6 +6,7 @@ import { testCoversProductionFile } from "./crap-risk-test-mapping.mjs";
 
 const root = execGit(["rev-parse", "--show-toplevel"], process.cwd()).trim() || process.cwd();
 const threshold = Number(process.env.KUZUSHI_CRAP_RISK_THRESHOLD ?? "7");
+const base = diffBase();
 const allChanged = changedFiles();
 const changedTests = changedTestFiles(allChanged);
 const changed = changedCodeFiles(allChanged);
@@ -88,9 +89,14 @@ function changedFilesFromGit() {
     ...gitLines(["ls-files", "--others", "--exclude-standard"]),
   ];
   if (files.length > 0) return files;
-  const base = process.env.KUZUSHI_CRAP_RISK_BASE_REF ?? "HEAD^";
-  requireResolvableBase(base);
   return gitLines(["diff", "--name-only", "--diff-filter=ACMR", base, "HEAD"]);
+}
+
+function diffBase() {
+  const requested = process.env.KUZUSHI_CRAP_RISK_BASE_REF;
+  const selected = requested && !/^0+$/.test(requested) ? requested : "HEAD^";
+  requireResolvableBase(selected);
+  return selected;
 }
 
 function requireResolvableBase(base) {
@@ -277,7 +283,18 @@ function isUntrackedFile(file) {
 }
 
 function isAddedFile(file) {
-  return gitLines(["diff", "--name-only", "--diff-filter=A", "HEAD", "--", file]).includes(file);
+  const workingTreeAdd = gitLines([
+    "diff",
+    "--name-only",
+    "--diff-filter=A",
+    "HEAD",
+    "--",
+    file,
+  ]).includes(file);
+  return (
+    workingTreeAdd ||
+    gitLines(["diff", "--name-only", "--diff-filter=A", base, "HEAD", "--", file]).includes(file)
+  );
 }
 
 function overlapsRanges(block, ranges) {
@@ -288,10 +305,7 @@ function overlapsRanges(block, ranges) {
 function changedLineRanges(file) {
   let diff = git(["diff", "--unified=0", "HEAD", "--", file]);
   if (!diff.trim() && !explicitFileListUsed() && !isUntrackedFile(file)) {
-    const base = process.env.KUZUSHI_CRAP_RISK_BASE_REF ?? "HEAD^";
-    if (gitRefResolves(base)) {
-      diff = git(["diff", "--unified=0", base, "HEAD", "--", file]);
-    }
+    diff = git(["diff", "--unified=0", base, "HEAD", "--", file]);
   }
   return diff.split(/\r?\n/).map(parseAddedRange).filter(Boolean);
 }

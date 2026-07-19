@@ -880,6 +880,8 @@ const ciRequirements = [
   "node scripts/build-native-runtime.mjs",
   "moonrepo/setup-rust@v1",
   "native-linux-x64",
+  "KUZUSHI_CRAP_RISK_BASE_REF",
+  "fetch-depth: 0",
 ];
 
 const releaseRequirements = [
@@ -890,6 +892,7 @@ const releaseRequirements = [
   "merge-multiple: true",
   "Stage native binaries for every built platform",
   "pnpm verify:pack",
+  "KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY",
   "npm publish --access public --provenance --ignore-scripts",
   "npm publish --access public --ignore-scripts",
   "npm pack --ignore-scripts",
@@ -898,12 +901,14 @@ const releaseRequirements = [
 ];
 
 const publishScriptRequirements = [
-  "typecheck + tests + clean JS/native build + package verification must pass",
+  "Build and inspect a platform-local npm package without publishing it",
+  "Local publishing is disabled",
+  "Release assembly is authoritative",
   "pnpm run build:clean",
   "pnpm run build:native",
   "pnpm run verify:pack",
   "npm pack --dry-run --ignore-scripts",
-  "PUBLISH_ARGS=(publish --access public --ignore-scripts)",
+  "no registry mutation was attempted",
 ];
 
 const stageNativeRequirements = [
@@ -1082,7 +1087,9 @@ const packagingRequirements = [
   "package scripts.${name} must be ${command}",
   "publishWrapperContentFailures",
   "scripts/publish-npm.sh must mention ${token}",
-  "typecheck + tests + clean JS/native build + package verification must pass",
+  "Build and inspect a platform-local npm package without publishing it",
+  "Local publishing is disabled",
+  "Release assembly is authoritative",
   "git diff --quiet",
   "git diff --cached --quiet",
   "git rev-parse --abbrev-ref HEAD",
@@ -1090,8 +1097,6 @@ const packagingRequirements = [
   'git rev-list -n 1 "$TAG"',
   "git rev-parse HEAD",
   'git ls-remote --tags origin "refs/tags/${TAG}"',
-  "npm whoami",
-  'npm view "${PUB_NAME}@${VERSION}" version',
   "pnpm exec tsc --noEmit",
   "pnpm exec vitest run",
   "SKIP_TESTS:-0",
@@ -1099,15 +1104,8 @@ const packagingRequirements = [
   "pnpm run build:native",
   "pnpm run verify:pack",
   "npm pack --dry-run --ignore-scripts",
-  "PUBLISH_ARGS=(publish --access public --ignore-scripts)",
-  "NPM_PROVENANCE:-",
-  "PUBLISH_ARGS+=(--provenance)",
-  "OTP:-",
-  'PUBLISH_ARGS+=(--otp="$OTP")',
-  "read -r reply",
-  'npm "${PUBLISH_ARGS[@]}"',
-  "Dry-run complete (would run: npm ${PUBLISH_ARGS[*]})",
-  "Pass --publish to actually publish",
+  "no registry mutation was attempted",
+  "multi-platform GitHub workflow",
   "expectedPackageMetadata",
   "packageMetadataFailures",
   "packageVersionFailures",

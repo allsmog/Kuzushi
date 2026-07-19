@@ -11,7 +11,7 @@ part of every release commit.
 - Push access to `github.com/allsmog/Kuzushi`
 - `NPM_TOKEN` secret set in GitHub repo settings (for automated CI releases)
 
-## Manual Release (from your machine)
+## Prepare a release (from your machine)
 
 ```sh
 # 1. Make sure release gates pass locally
@@ -27,11 +27,9 @@ pnpm build:clean
 pnpm build:native
 pnpm verify:pack
 
-# 2. Bump the same version in package.json and workspace Cargo.toml.
-#    Then let Cargo refresh local workspace entries in Cargo.lock.
-npm version prerelease --preid alpha --no-git-tag-version
-# Edit [workspace.package].version in Cargo.toml to that exact value.
-cargo metadata --no-deps --format-version 1 >/dev/null
+# 2. Consistently bump package.json, Cargo.toml, Cargo.lock workspace entries,
+#    and the dynamic-module host protocol version.
+node scripts/bump-release-version.mjs 0.24.0-alpha.9
 pnpm check:release
 
 # 3. Commit and tag
@@ -42,6 +40,11 @@ git tag "v$(node -p 'require("./package.json").version')"
 # 4. Push commit + tag (triggers GitHub Release workflow and npm publish)
 git push origin main --tags
 ```
+
+Do not publish from the local package build. `pnpm publish:npm:go` fails
+closed by design because `pnpm build:native` stages only the current host.
+The tag-triggered workflow is the sole publishing path and requires both
+`linux-x64` and `darwin-arm64` payloads before `npm publish` can run.
 
 ## Automated Release (via CI)
 

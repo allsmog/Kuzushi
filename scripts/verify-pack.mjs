@@ -24,6 +24,8 @@ const packageDevDependencies = recordOrEmpty(manifest.devDependencies);
 const packageOptionalDependencies = recordOrEmpty(manifest.optionalDependencies);
 const packageExports = recordOrEmpty(manifest.exports);
 const omitNative = process.env.KUZUSHI_VERIFY_PACK_OMIT_NATIVE === "1";
+const verifyReleaseAssembly = process.env.KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY === "1";
+const requiredReleaseNativeDirs = ["native/linux-x64", "native/darwin-arm64"];
 const includes = entries.filter((entry) => !entry.startsWith("!")).filter(isIncludedEntry);
 const excludes = entries.filter((entry) => entry.startsWith("!")).map((entry) => entry.slice(1));
 const requiredPackageFiles = [
@@ -74,6 +76,9 @@ const expectedPackageScripts = {
   "check:docs":
     "node scripts/check-release-contract.mjs && node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
   "check:release": "node scripts/check-release-contract.mjs",
+  "release:bump": "node scripts/bump-release-version.mjs",
+  "verify:quick": "node scripts/verify-repository.mjs quick",
+  "verify:ci": "node scripts/verify-repository.mjs ci",
   "check:retired-ts-runtime": "node scripts/check-retired-ts-runtime.mjs",
   "export:source": "bash scripts/export-clean-source.sh",
   "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
@@ -93,13 +98,13 @@ const expectedPackageScripts = {
   "typecheck:all": "node scripts/typecheck-all.mjs",
   "typecheck:benchmarks": "tsc -p benchmarks/tsconfig.json --noEmit",
   "typecheck:perf": "tsc -p perf/tsconfig.json --noEmit",
-  test: "vitest run && node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs scripts/setup-contract.test.mjs",
+  test: "vitest run && node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs scripts/setup-contract.test.mjs scripts/bump-release-version.test.mjs scripts/verify-repository.test.mjs",
   "test:rust": "cargo test --workspace",
   "test:e2e": "bash tests/e2e/run-smoke.sh",
   "test:coverage":
-    "vitest run --coverage && node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs scripts/setup-contract.test.mjs",
+    "vitest run --coverage && node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs scripts/setup-contract.test.mjs scripts/bump-release-version.test.mjs scripts/verify-repository.test.mjs",
   "quality:crap-risk":
-    "node --test scripts/crap-risk-test-mapping.test.mjs && node scripts/crap-risk-gate.mjs",
+    "node --test scripts/crap-risk-test-mapping.test.mjs scripts/crap-risk-gate.test.mjs && node scripts/crap-risk-gate.mjs",
   "quality:identity": "node scripts/check-public-identity.mjs",
   "quality:architecture":
     "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-env-discipline.mjs && node scripts/check-dispatch-boundary-contract.mjs && node scripts/check-run-lifecycle-boundary.mjs && node scripts/check-workspace-state-writes.mjs && node scripts/check-validated-wording.mjs",
@@ -705,13 +710,26 @@ function nativeBinaryFailures(files) {
   if (omitNative) return [];
   const dirs = nativePlatformDirs(files);
   if (dirs.length === 0) {
-    return ["missing shipped native directory native/<platform>-<arch>"];
+    return [
+      "missing shipped native directory native/<platform>-<arch>",
+      ...missingReleaseNativeDirs(dirs),
+    ];
   }
-  return dirs.flatMap((dir) => [
-    ...missingNativeBinaries(files, dir),
-    ...extraNativePayloadFailures(files, dir),
-    ...nativeExecutableFailures(dir),
-  ]);
+  return [
+    ...missingReleaseNativeDirs(dirs),
+    ...dirs.flatMap((dir) => [
+      ...missingNativeBinaries(files, dir),
+      ...extraNativePayloadFailures(files, dir),
+      ...nativeExecutableFailures(dir),
+    ]),
+  ];
+}
+
+function missingReleaseNativeDirs(dirs) {
+  if (!verifyReleaseAssembly) return [];
+  return requiredReleaseNativeDirs
+    .filter((dir) => !dirs.includes(dir))
+    .map((dir) => `release assembly is missing required native directory ${dir}`);
 }
 
 function nativePlatformDirs(files) {
@@ -857,7 +875,9 @@ function publishWrapperContentFailures() {
   const content = readPackageContractText("scripts/publish-npm.sh");
   const source = content.source;
   const required = [
-    "typecheck + tests + clean JS/native build + package verification must pass",
+    "Build and inspect a platform-local npm package without publishing it",
+    "Local publishing is disabled",
+    "Release assembly is authoritative",
     "git diff --quiet",
     "git diff --cached --quiet",
     "git rev-parse --abbrev-ref HEAD",
@@ -865,8 +885,6 @@ function publishWrapperContentFailures() {
     'git rev-list -n 1 "$TAG"',
     "git rev-parse HEAD",
     'git ls-remote --tags origin "refs/tags/${TAG}"',
-    "npm whoami",
-    'npm view "${PUB_NAME}@${VERSION}" version',
     "pnpm exec tsc --noEmit",
     "pnpm exec vitest run",
     "SKIP_TESTS:-0",
@@ -874,15 +892,8 @@ function publishWrapperContentFailures() {
     "pnpm run build:native",
     "pnpm run verify:pack",
     "npm pack --dry-run --ignore-scripts",
-    "PUBLISH_ARGS=(publish --access public --ignore-scripts)",
-    "NPM_PROVENANCE:-",
-    "PUBLISH_ARGS+=(--provenance)",
-    "OTP:-",
-    'PUBLISH_ARGS+=(--otp="$OTP")',
-    "read -r reply",
-    'npm "${PUBLISH_ARGS[@]}"',
-    "Dry-run complete (would run: npm ${PUBLISH_ARGS[*]})",
-    "Pass --publish to actually publish",
+    "no registry mutation was attempted",
+    "multi-platform GitHub workflow",
   ];
   return [
     ...content.failures,
