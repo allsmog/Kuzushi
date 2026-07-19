@@ -12,8 +12,13 @@ const checks = [
   },
   {
     file: "crates/kuzushi-core/src/modules/codeql_db_module.rs",
-    required: ["codeqlBin", 'optional_string_input(input, &["codeqlBin", "codeql_bin"])'],
+    required: ["prepared_codeql_launcher"],
     forbidden: ["KUZUSHI_CODEQL_BIN"],
+  },
+  {
+    file: "crates/kuzushi-core/src/codeql_repository_execution/launcher.rs",
+    required: ['"codeqlBin"', "CODEQL_LAUNCHER_INPUT_KEY", "bind_codeql_launcher"],
+    forbidden: [],
   },
   {
     file: "crates/kuzushi-openai/src/langgraph_runtime/runtime_impl.rs",
