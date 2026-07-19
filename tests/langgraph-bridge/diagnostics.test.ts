@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error -- plain .mjs bridge module without type declarations
 import { debugDumpBridgeCall } from "../../scripts/langgraph-bridge/diagnostics.mjs";
 
@@ -18,6 +18,7 @@ const priorFullPrompt = process.env.KUZUSHI_BRIDGE_DEBUG_FULL_PROMPT;
 const roots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   restoreEnv("KUZUSHI_BRIDGE_DEBUG_DUMP", priorDump);
   restoreEnv("KUZUSHI_BRIDGE_DEBUG_FULL_PROMPT", priorFullPrompt);
   while (roots.length) rmSync(roots.pop()!, { recursive: true, force: true });
@@ -53,6 +54,33 @@ describe("bridge diagnostics", () => {
     expect(bodies.map((body) => JSON.parse(body).promptLen)).toEqual([36, 36]);
     expect(fileMode(dump)).toBe(0o600);
     expect(fileMode(promptFile)).toBe(0o600);
+  });
+
+  it("honors request-scoped metadata-only verbose and log options", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "kuzushi-bridge-runtime-diagnostics-"));
+    roots.push(root);
+    const log = path.join(root, "bridge.jsonl");
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const sentinel = "request-scoped-secret-sentinel";
+
+    debugDumpBridgeCall(
+      "query",
+      {
+        model: "openai:configured",
+        prompt: sentinel,
+        runtimeOptions: { bridgeVerbose: true, bridgeLogPath: log },
+      },
+      [{ name: sentinel }],
+      sentinel,
+      { content: sentinel },
+    );
+
+    const persisted = readFileSync(log, "utf8");
+    const emitted = String(stderr.mock.calls[0]?.[0]);
+    expect(persisted).not.toContain(sentinel);
+    expect(emitted).not.toContain(sentinel);
+    expect(JSON.parse(persisted).modelProvider).toBe("openai");
+    expect(fileMode(log)).toBe(0o600);
   });
 });
 

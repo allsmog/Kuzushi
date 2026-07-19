@@ -27,8 +27,16 @@ const STOP_CLASSES = new Map([
 
 export function debugDumpBridgeCall(kind, request, tools, systemPrompt, response) {
   const metadata = bridgeDiagnosticMetadata(kind, request, tools, systemPrompt, response);
+  const options = request?.runtimeOptions ?? request?.runtime_options ?? {};
+  appendDiagnostic(options.bridgeLogPath ?? options.bridge_log_path, metadata);
+  writeVerboseDiagnostic(options.bridgeVerbose ?? options.bridge_verbose, metadata);
   appendDiagnostic(process.env.KUZUSHI_BRIDGE_DEBUG_DUMP, metadata);
   writePromptDiagnostic(process.env.KUZUSHI_BRIDGE_DEBUG_FULL_PROMPT, kind, metadata);
+}
+
+function writeVerboseDiagnostic(enabled, metadata) {
+  if (enabled !== true) return;
+  process.stderr.write(`[kuzushi-bridge] ${JSON.stringify(metadata)}\n`);
 }
 
 export function bridgeDiagnosticMetadata(kind, request, tools, systemPrompt, response) {

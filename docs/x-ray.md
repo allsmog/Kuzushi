@@ -39,7 +39,7 @@ Options on `x-ray:run`:
 | `target` | path | Repository to analyze (defaults to the session target). |
 | `model` | string | Per-run model override; otherwise the session model is used. |
 | `effort` | string | Runtime reasoning effort hint (advanced). |
-| `maxBudgetUsd` | float | Maximum runtime budget for the request (advanced; alias `max_budget_usd`). |
+| `maxBudgetUsd` | float | Observed-spend stop checked after model turns; the crossing turn may exceed it, and incomplete cost receipts stop follow-up turns or repair (advanced; alias `max_budget_usd`). |
 
 ## Output
 

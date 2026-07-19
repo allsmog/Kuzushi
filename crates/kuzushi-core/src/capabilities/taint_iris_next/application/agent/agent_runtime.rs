@@ -23,27 +23,41 @@ pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent(
             error,
             cost,
             raw_text,
+            retry_count,
         }) => {
             return Ok(invalid_taint_iris_next_agent_result(
-                plan, evidence, error, 1, cost, raw_text,
+                plan,
+                evidence,
+                error,
+                retry_count,
+                cost,
+                raw_text,
             ))
         }
     };
     normalized_taint_iris_next_agent_result(plan, evidence, raw, retry_count, cost)
 }
 
+#[derive(Debug)]
 pub(in crate::capabilities::taint_iris_next) struct QueryAgentError {
     pub(in crate::capabilities::taint_iris_next) error: anyhow::Error,
     pub(in crate::capabilities::taint_iris_next) cost: RuntimeCostReport,
     pub(in crate::capabilities::taint_iris_next) raw_text: Option<String>,
+    pub(in crate::capabilities::taint_iris_next) retry_count: usize,
 }
 
 impl QueryAgentError {
-    fn new(error: anyhow::Error, cost: RuntimeCostReport, raw_text: Option<String>) -> Self {
+    fn new(
+        error: anyhow::Error,
+        cost: RuntimeCostReport,
+        raw_text: Option<String>,
+        retry_count: usize,
+    ) -> Self {
         Self {
             error,
             cost,
             raw_text,
+            retry_count,
         }
     }
 }
@@ -64,8 +78,9 @@ pub(in crate::capabilities::taint_iris_next) fn query_taint_iris_next_agent(
         agent_prompt.to_string(),
         agent_tool_policy.clone(),
         runtime_options.clone(),
+        plan.max_budget_usd,
     )
-    .map_err(|error| QueryAgentError::new(error, RuntimeCostReport::INCOMPLETE_ZERO, None))?;
+    .map_err(|error| QueryAgentError::new(error, RuntimeCostReport::INCOMPLETE_ZERO, None, 0))?;
     parse_or_repair_taint_agent(
         plan,
         evidence,
@@ -86,7 +101,7 @@ fn parse_or_repair_taint_agent(
     options: Option<AgentRuntimeOptions>,
     response: AgentQueryResponse,
 ) -> std::result::Result<(Value, usize, RuntimeCostReport), QueryAgentError> {
-    let first_cost = checked_taint_agent_cost(&response, RuntimeCostReport::INCOMPLETE_ZERO)?;
+    let first_cost = checked_taint_agent_cost(&response, RuntimeCostReport::INCOMPLETE_ZERO, 0)?;
     let first_text = response.text.clone();
     match parse_taint_iris_next_agent_response(response) {
         Ok(raw) => Ok((raw, 0, first_cost)),
@@ -107,6 +122,8 @@ fn repair_taint_agent(
     first_cost: RuntimeCostReport,
     first_text: String,
 ) -> std::result::Result<(Value, usize, RuntimeCostReport), QueryAgentError> {
+    let remaining_spend =
+        remaining_observed_spend(plan.max_budget_usd, first_cost, &first_text)?;
     let repair = run_taint_iris_next_agent_prompt(
         plan,
         runtime,
@@ -114,9 +131,12 @@ fn repair_taint_agent(
         build_taint_iris_next_repair_prompt(plan, evidence),
         policy,
         options,
+        remaining_spend,
     )
-    .map_err(|error| QueryAgentError::new(error, first_cost.mark_incomplete(), Some(first_text)))?;
-    let repair_cost = checked_taint_agent_cost(&repair, first_cost.mark_incomplete())?;
+    .map_err(|error| {
+        QueryAgentError::new(error, first_cost.mark_incomplete(), Some(first_text), 1)
+    })?;
+    let repair_cost = checked_taint_agent_cost(&repair, first_cost.mark_incomplete(), 1)?;
     let total = first_cost
         .checked_add(repair_cost, "taint-iris-next initial plus repair cost")
         .map_err(|error| {
@@ -124,6 +144,7 @@ fn repair_taint_agent(
                 error,
                 first_cost.mark_incomplete(),
                 Some(repair.text.clone()),
+                1,
             )
         })?;
     parse_taint_agent_repair(repair, total)
@@ -132,10 +153,48 @@ fn repair_taint_agent(
 fn checked_taint_agent_cost(
     response: &AgentQueryResponse,
     fallback: RuntimeCostReport,
+    retry_count: usize,
 ) -> std::result::Result<RuntimeCostReport, QueryAgentError> {
     response
         .checked_cost_report()
-        .map_err(|error| QueryAgentError::new(error, fallback, Some(response.text.clone())))
+        .map_err(|error| {
+            QueryAgentError::new(error, fallback, Some(response.text.clone()), retry_count)
+        })
+}
+
+fn remaining_observed_spend(
+    stop_usd: Option<f64>,
+    spent: RuntimeCostReport,
+    raw_text: &str,
+) -> std::result::Result<Option<f64>, QueryAgentError> {
+    let Some(stop_usd) = stop_usd else {
+        return Ok(None);
+    };
+    if !spent.is_complete() {
+        return Err(spend_stop_error(
+            "observed spend receipt is incomplete",
+            spent,
+            raw_text,
+        ));
+    }
+    let remaining = stop_usd - spent.observed_usd();
+    if remaining <= 0.0 {
+        return Err(spend_stop_error(
+            "observed spend stop is exhausted",
+            spent,
+            raw_text,
+        ));
+    }
+    Ok(Some(remaining))
+}
+
+fn spend_stop_error(reason: &str, cost: RuntimeCostReport, raw_text: &str) -> QueryAgentError {
+    QueryAgentError::new(
+        anyhow::anyhow!("repair skipped: {reason}"),
+        cost,
+        Some(raw_text.to_string()),
+        0,
+    )
 }
 
 fn parse_taint_agent_repair(
@@ -145,7 +204,7 @@ fn parse_taint_agent_repair(
     let raw_text = response.text.clone();
     parse_taint_iris_next_agent_response(response)
         .map(|raw| (raw, 1, cost))
-        .map_err(|error| QueryAgentError::new(error, cost, Some(raw_text)))
+        .map_err(|error| QueryAgentError::new(error, cost, Some(raw_text), 1))
 }
 
 pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent_prompt(
@@ -155,6 +214,7 @@ pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent_prompt
     prompt: String,
     agent_tool_policy: AgentToolPolicy,
     runtime_options: Option<AgentRuntimeOptions>,
+    observed_spend_stop_usd: Option<f64>,
 ) -> Result<AgentQueryResponse> {
     let mut request = AgentQueryRequest::new(
         model.to_string(),
@@ -163,10 +223,21 @@ pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent_prompt
         prompt,
     )
     .with_tool_policy(agent_tool_policy);
+    let runtime_options =
+        runtime_options_with_spend_stop(runtime_options, observed_spend_stop_usd);
     if let Some(runtime_options) = runtime_options {
         request = request.with_runtime_options(runtime_options);
     }
     crate::runtime::query_blocking_checked(runtime, request)
+}
+
+fn runtime_options_with_spend_stop(
+    runtime_options: Option<AgentRuntimeOptions>,
+    observed_spend_stop_usd: Option<f64>,
+) -> Option<AgentRuntimeOptions> {
+    let mut options = runtime_options.unwrap_or_default();
+    options.observed_spend_stop_usd = observed_spend_stop_usd;
+    (!options.is_empty()).then_some(options)
 }
 
 pub(in crate::capabilities::taint_iris_next) fn invalid_taint_iris_next_agent_result(
@@ -255,4 +326,39 @@ fn truncate_for_excerpt(text: &str) -> String {
         &trimmed[..end],
         trimmed.len() - end
     )
+}
+
+#[cfg(test)]
+mod observed_spend_tests {
+    use super::*;
+
+    #[test]
+    fn incomplete_or_exhausted_spend_refuses_repair() {
+        let incomplete = RuntimeCostReport::INCOMPLETE_ZERO;
+        let exhausted = RuntimeCostReport::known(
+            RuntimeCost::from_usd(0.25, "test observed spend").unwrap(),
+        );
+
+        assert!(remaining_observed_spend(Some(1.0), incomplete, "raw")
+            .unwrap_err()
+            .error
+            .to_string()
+            .contains("incomplete"));
+        assert!(remaining_observed_spend(Some(0.25), exhausted, "raw")
+            .unwrap_err()
+            .error
+            .to_string()
+            .contains("exhausted"));
+    }
+
+    #[test]
+    fn exact_spend_passes_only_the_remaining_stop_to_repair() {
+        let spent = RuntimeCostReport::known(
+            RuntimeCost::from_usd(0.10, "test observed spend").unwrap(),
+        );
+
+        let remaining = remaining_observed_spend(Some(0.25), spent, "raw").unwrap();
+
+        assert!((remaining.unwrap() - 0.15).abs() < f64::EPSILON);
+    }
 }

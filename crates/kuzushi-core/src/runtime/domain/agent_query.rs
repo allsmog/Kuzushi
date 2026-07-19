@@ -86,7 +86,7 @@ impl AgentQueryRequest {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRuntimeOptions {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -97,6 +97,10 @@ pub struct AgentRuntimeOptions {
     pub bridge_verbose: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge_log_path: Option<String>,
+    /// Retrospective stop checked after each model receipt. This cannot
+    /// prevent the turn that crosses the threshold from spending money.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_spend_stop_usd: Option<f64>,
 }
 
 impl AgentRuntimeOptions {
@@ -105,6 +109,7 @@ impl AgentRuntimeOptions {
             && self.mcp_tool_timeout_ms.is_none()
             && self.bridge_verbose.is_none()
             && self.bridge_log_path.is_none()
+            && self.observed_spend_stop_usd.is_none()
     }
 }
 

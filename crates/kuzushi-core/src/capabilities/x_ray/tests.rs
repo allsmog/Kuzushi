@@ -152,7 +152,7 @@ authorization: Default::default(),
 
         let output = execute_x_ray_tool(
             "x-ray:run",
-            json!({"X_RAY_PROMPT": "custom x-ray system"}),
+            json!({"X_RAY_PROMPT": "custom x-ray system", "maxBudgetUsd": 0.25}),
             &context(&config, &workspace),
             Some(&runtime),
         )
@@ -172,6 +172,16 @@ authorization: Default::default(),
         assert!(runtime.queries()[0]
             .prompt
             .contains("missing local artifact KB"));
+        assert!(runtime.queries()[0]
+            .prompt
+            .contains("Observed-spend stop requested by operator"));
+        assert_eq!(
+            runtime.queries()[0]
+                .runtime_options
+                .as_ref()
+                .and_then(|options| options.observed_spend_stop_usd),
+            Some(0.25)
+        );
     }
 
     #[test]

@@ -214,7 +214,7 @@ fn x_ray_options() -> Vec<OptionSpec> {
         opt(
             "maxBudgetUsd",
             OptionType::Float,
-            "Maximum runtime budget for the X-Ray request.",
+            "Observed-spend stop for model follow-up turns; the crossing turn can exceed it and incomplete cost receipts stop retries.",
         )
         .aliases(&["max_budget_usd"])
         .advanced(),

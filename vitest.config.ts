@@ -15,6 +15,8 @@ export default defineConfig({
       "tests/langgraph-bridge/mcp-errors.test.ts",
       "tests/langgraph-bridge/mcp-plan.test.ts",
       "tests/langgraph-bridge/schema.test.ts",
+      "tests/langgraph-bridge/model-credentials.test.ts",
+      "tests/langgraph-bridge/model-usage.test.ts",
       "tests/langgraph-bridge/oauth-models.test.ts",
       "tests/langgraph-bridge/error-safety.test.ts",
       "tests/langgraph-bridge/diagnostics.test.ts",

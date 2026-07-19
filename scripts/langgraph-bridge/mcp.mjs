@@ -9,12 +9,23 @@ export async function mcpToolsForRequest(request) {
   if (Object.keys(mcpServers).length === 0) return { tools: [], close: async () => {} };
   const client = new MultiServerMCPClient({
     mcpServers,
+    defaultToolTimeout: mcpToolTimeoutForRequest(request),
     onConnectionError: (server, error) => {
       throw new Error(mcpConnectionFailureMessage(server, error, mcpServers));
     },
   });
   const tools = await client.getTools();
   return { tools, close: async () => client.close?.() };
+}
+
+export function mcpToolTimeoutForRequest(request) {
+  const options = request?.runtimeOptions ?? request?.runtime_options ?? {};
+  const raw = options.mcpToolTimeoutMs ?? options.mcp_tool_timeout_ms ?? 60_000;
+  const timeout = Number(raw);
+  if (!Number.isSafeInteger(timeout) || timeout < 1) {
+    throw new Error("MCP tool timeout must be a positive safe integer in milliseconds");
+  }
+  return timeout;
 }
 
 export function mcpConnectionFailureMessage(server, error, serverConfig = {}) {

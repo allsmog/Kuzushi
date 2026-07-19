@@ -117,15 +117,52 @@ pub(crate) fn query_required_structured_json_with_cost<T>(
     let request = request.with_structured_output(contract.runtime_contract());
     let response = crate::runtime::query_blocking_checked(runtime, request.clone())
         .map_err(unknown_provider_failure)?;
+    let repair_spend_stop = remaining_repair_spend_stop(&request, &response);
     parse_or_repair_required_structured_json_with_cost(
         response,
         contract,
         validate,
         |repair_prompt, output| {
+            let remaining = repair_spend_stop?;
             let repair_request = repair_request_from(&request, repair_prompt, output);
+            let repair_request = with_repair_spend_stop(repair_request, remaining);
             crate::runtime::query_blocking_checked(runtime, repair_request)
         },
     )
+}
+
+fn remaining_repair_spend_stop(
+    request: &AgentQueryRequest,
+    response: &AgentQueryResponse,
+) -> Result<Option<f64>> {
+    let stop = request
+        .runtime_options
+        .as_ref()
+        .and_then(|options| options.observed_spend_stop_usd);
+    let Some(stop) = stop else {
+        return Ok(None);
+    };
+    let spent = response.checked_cost_report()?;
+    anyhow::ensure!(
+        spent.is_complete(),
+        "structured-output repair refused: observed spend receipt is incomplete"
+    );
+    let remaining = stop - spent.observed_usd();
+    anyhow::ensure!(
+        remaining > 0.0,
+        "structured-output repair refused: observed spend stop is exhausted"
+    );
+    Ok(Some(remaining))
+}
+
+fn with_repair_spend_stop(
+    mut request: AgentQueryRequest,
+    remaining: Option<f64>,
+) -> AgentQueryRequest {
+    if let Some(options) = request.runtime_options.as_mut() {
+        options.observed_spend_stop_usd = remaining;
+    }
+    request
 }
 
 pub(crate) fn repair_request_from(
@@ -267,6 +304,50 @@ fn checked_response_cost(
     response
         .checked_cost_report()
         .map_err(|error| unresolved_provider_failure(error, observed_cost))
+}
+
+#[cfg(test)]
+mod observed_spend_stop_tests {
+    use super::*;
+
+    fn request(stop_usd: f64) -> AgentQueryRequest {
+        AgentQueryRequest::new("openai:test", ".", "system", "prompt").with_runtime_options(
+            crate::runtime::AgentRuntimeOptions {
+                observed_spend_stop_usd: Some(stop_usd),
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn structured_repair_requires_exact_remaining_spend() {
+        let incomplete = AgentQueryResponse {
+            cost_usd: 0.10,
+            cost_usd_reported: false,
+            ..Default::default()
+        };
+        let exhausted = AgentQueryResponse {
+            cost_usd: 0.25,
+            cost_usd_reported: true,
+            ..Default::default()
+        };
+
+        assert!(remaining_repair_spend_stop(&request(1.0), &incomplete).is_err());
+        assert!(remaining_repair_spend_stop(&request(0.25), &exhausted).is_err());
+    }
+
+    #[test]
+    fn structured_repair_receives_only_the_exact_remaining_stop() {
+        let response = AgentQueryResponse {
+            cost_usd: 0.10,
+            cost_usd_reported: true,
+            ..Default::default()
+        };
+
+        let remaining = remaining_repair_spend_stop(&request(0.25), &response).unwrap();
+
+        assert!((remaining.unwrap() - 0.15).abs() < f64::EPSILON);
+    }
 }
 
 fn unknown_provider_failure(error: anyhow::Error) -> anyhow::Error {

@@ -50,8 +50,12 @@ pub(crate) fn x_ray_artifact_schema() -> Value {
 pub(crate) fn build_x_ray_prompt(input: &XRayRunInput) -> String {
     let budget_line = input
         .max_budget_usd
-        .map(|value| format!("Budget cap requested by operator: ${value:.4}."))
-        .unwrap_or_else(|| "No explicit budget cap was supplied.".to_string());
+        .map(|value| {
+            format!(
+                "Observed-spend stop requested by operator: ${value:.4}; the crossing model turn can exceed it."
+            )
+        })
+        .unwrap_or_else(|| "No observed-spend stop was supplied.".to_string());
     let effort_line = input
         .effort
         .as_deref()

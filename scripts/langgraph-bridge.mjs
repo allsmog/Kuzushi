@@ -7,14 +7,17 @@ import { bridgeErrorResponse } from "./langgraph-bridge/errors.mjs";
 import { mcpToolsForRequest } from "./langgraph-bridge/mcp.mjs";
 import {
   appendStructuredOutputContract,
+  DEFAULT_MAX_MODEL_TURNS,
   isAiMessage,
   maybeParseJson,
   messageText,
+  modelContinuationDecision,
   modelForRequest,
   parseModelSpec,
   systemMessageForRequest,
   toolMessageForOutput,
   usageFromMessage,
+  usageFromMessages,
 } from "./langgraph-bridge/model.mjs";
 import { parseOauthLoginArgs, runOauthLogin } from "./langgraph-bridge/oauth-login.mjs";
 import { bridgeToolsForNextStep, validateBridgeRequest } from "./langgraph-bridge/schema.mjs";
@@ -33,10 +36,10 @@ async function runQueryGraph(request) {
     const graph = queryGraphForRequest(request, mcp.tools, system);
     const result = await graph.invoke({
       messages: [new HumanMessage(request.prompt ?? "")],
-    });
+    }, { recursionLimit: DEFAULT_MAX_MODEL_TURNS * 2 + 2 });
     const message = result.messages.at(-1);
     debugDumpBridgeCall("query", request, mcp.tools, system, message);
-    return queryResultFromMessage(message);
+    return queryResultFromMessages(result.messages, request);
   } finally {
     await mcp.close();
   }
@@ -49,7 +52,7 @@ function queryGraphForRequest(request, tools, system) {
     .addNode("model", callModelNode(boundModel, request, system))
     .addNode("tools", runToolsNode(tools))
     .addEdge(START, "model")
-    .addConditionalEdges("model", shouldContinue)
+    .addConditionalEdges("model", shouldContinueForRequest(request))
     .addEdge("tools", "model")
     .compile();
 }
@@ -89,29 +92,63 @@ async function runOneTool(call, tool) {
   return toolMessageForOutput(call, output);
 }
 
-function shouldContinue(state) {
-  const last = state.messages.at(-1);
-  return isAiMessage(last) && last.tool_calls?.length ? "tools" : END;
+function shouldContinueForRequest(request) {
+  return (state) => {
+    const last = state.messages.at(-1);
+    if (!isAiMessage(last) || !last.tool_calls?.length) return END;
+    return queryStopReason(state.messages, request) ? END : "tools";
+  };
 }
 
-function queryResultFromMessage(message) {
+function queryResultFromMessages(messages, request) {
+  const message = messages.at(-1);
   const text = messageText(message);
-  const usage = usageFromMessage(message);
-  const stopReason = message?.response_metadata?.finish_reason;
+  const usage = usageFromMessages(messages);
+  const stopReason = queryStopReason(messages, request) ?? message?.response_metadata?.finish_reason;
   return {
     ok: true,
     text,
     structured: maybeParseJson(text),
-    cost_usd: usage.costUsd,
-    input_tokens: usage.inputTokens,
-    output_tokens: usage.outputTokens,
+    ...queryUsageFields(usage),
     truncated: isTruncatedStopReason(stopReason),
     stopReason,
   };
 }
 
+function queryStopReason(messages, request) {
+  const last = messages.at(-1);
+  if (!isAiMessage(last) || !last.tool_calls?.length) return undefined;
+  const options = request.runtimeOptions ?? request.runtime_options ?? {};
+  const stop = options.observedSpendStopUsd ?? options.observed_spend_stop_usd;
+  const decision = modelContinuationDecision(messages, stop);
+  return decision === "continue" ? undefined : decision;
+}
+
+function queryUsageFields(usage) {
+  const hasInput = usage.inputReportedCalls > 0;
+  const hasOutput = usage.outputReportedCalls > 0;
+  const hasCost = usage.costReportedCalls > 0;
+  return {
+    input_tokens: hasInput ? usage.inputTokens : undefined,
+    output_tokens: hasOutput ? usage.outputTokens : undefined,
+    cost_usd: hasCost ? usage.costUsd : undefined,
+    input_reported_calls: usage.inputReportedCalls,
+    output_reported_calls: usage.outputReportedCalls,
+    cost_reported_calls: usage.costReportedCalls,
+    model_calls: usage.modelCalls,
+    cost_usd_exact: usage.modelCalls > 0 && usage.costReportedCalls === usage.modelCalls,
+  };
+}
+
 function isTruncatedStopReason(reason) {
-  return ["length", "max_tokens", "max_tokens_reached"].includes(String(reason ?? ""));
+  return [
+    "length",
+    "max_tokens",
+    "max_tokens_reached",
+    "model_turn_limit",
+    "observed_spend_incomplete",
+    "observed_spend_exhausted",
+  ].includes(String(reason ?? ""));
 }
 
 function messagesForNextStep(request) {

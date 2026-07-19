@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mcpConnectionFailureMessage } from "../../scripts/langgraph-bridge/mcp.mjs";
+import {
+  mcpConnectionFailureMessage,
+  mcpToolTimeoutForRequest,
+} from "../../scripts/langgraph-bridge/mcp.mjs";
 
 describe("MCP connection error formatting", () => {
   it("normalizes the single-object callback shape", () => {
@@ -23,5 +26,15 @@ describe("MCP connection error formatting", () => {
 
     expect(message).toContain("server treesitter");
     expect(message).toContain("handshake failed");
+  });
+
+  it("uses the request-scoped MCP timeout with a bounded default", () => {
+    expect(mcpToolTimeoutForRequest({})).toBe(60_000);
+    expect(
+      mcpToolTimeoutForRequest({ runtimeOptions: { mcpToolTimeoutMs: 12_345 } }),
+    ).toBe(12_345);
+    expect(() =>
+      mcpToolTimeoutForRequest({ runtimeOptions: { mcpToolTimeoutMs: 0 } }),
+    ).toThrow(/positive safe integer/);
   });
 });

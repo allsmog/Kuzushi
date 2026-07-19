@@ -18,6 +18,8 @@ pub(crate) struct NextStepBridgeRequest {
     pub(crate) max_tokens: u32,
     pub(crate) api_key_env: String,
     pub(crate) api_key: Option<String>,
+    pub(crate) oauth_credentials_path: String,
+    pub(crate) oauth_allow_env_token: bool,
     pub(crate) base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) runtime_options: Option<AgentRuntimeOptions>,
@@ -82,6 +84,8 @@ pub(crate) struct BridgeRequest {
     pub(crate) structured_output: Option<AgentStructuredOutput>,
     pub(crate) api_key_env: String,
     pub(crate) api_key: Option<String>,
+    pub(crate) oauth_credentials_path: String,
+    pub(crate) oauth_allow_env_token: bool,
     pub(crate) base_url: Option<String>,
     pub(crate) thinking_level: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -118,4 +122,14 @@ pub(crate) struct BridgeResponse {
     pub(crate) input_tokens: Option<u64>,
     #[serde(default, alias = "output_tokens")]
     pub(crate) output_tokens: Option<u64>,
+    #[serde(default, alias = "input_reported_calls")]
+    pub(crate) input_reported_calls: Option<u64>,
+    #[serde(default, alias = "output_reported_calls")]
+    pub(crate) output_reported_calls: Option<u64>,
+    #[serde(default, alias = "cost_reported_calls")]
+    pub(crate) cost_reported_calls: Option<u64>,
+    #[serde(default, alias = "model_calls")]
+    pub(crate) model_calls: Option<u64>,
+    #[serde(default, alias = "cost_usd_exact")]
+    pub(crate) cost_usd_exact: Option<bool>,
 }

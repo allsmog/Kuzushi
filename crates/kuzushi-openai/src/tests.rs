@@ -171,6 +171,46 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
     }
 
     #[test]
+    fn query_bridge_preserves_multi_turn_usage_provenance() {
+        let config = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "printf '%s' '{\"ok\":true,\"text\":\"done\",\"cost_usd\":0.01,\"cost_usd_exact\":false,\"cost_reported_calls\":1,\"input_tokens\":20,\"output_tokens\":4,\"input_reported_calls\":2,\"output_reported_calls\":1,\"model_calls\":2}'".to_string(),
+            ]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
+            anthropic_oauth: None,
+        };
+        let runtime = LangGraphRuntime::from_runtime_config(&config, ".").unwrap();
+
+        let observed = runtime
+            .query_observed_blocking(AgentQueryRequest::new(
+                "openai:gpt-5.5",
+                ".",
+                "sys",
+                "prompt",
+            ))
+            .unwrap();
+
+        assert_eq!(observed.usage.observed_counts(), (Some(20), Some(4)));
+        assert_eq!(observed.usage.input_reported_calls, 2);
+        assert_eq!(observed.usage.output_reported_calls, 1);
+        assert_eq!(observed.usage.total_calls, 2);
+        assert!(!observed.usage.is_complete());
+        assert_eq!(observed.value.cost_usd, 0.01);
+        assert!(!observed.value.cost_usd_reported);
+        let cost = observed.value.checked_cost_report().unwrap();
+        assert_eq!(cost.observed_usd(), 0.01);
+        assert!(!cost.is_complete());
+    }
+
+    #[test]
     fn query_bridge_cancellation_kills_running_child() {
         let tmp = tempfile::tempdir().unwrap();
         let started = tmp.path().join("started");
@@ -829,7 +869,10 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
-            anthropic_oauth: None,
+            anthropic_oauth: Some(kuzushi_core::AnthropicOauthConfig {
+                credentials_path: Some(tmp.path().join("operator-oauth.json")),
+                allow_env_token: true,
+            }),
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
         let mut mcp_environment = BTreeMap::new();
@@ -846,6 +889,7 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
                         mcp_tool_timeout_ms: Some(180_000),
                         bridge_verbose: Some(true),
                         bridge_log_path: Some("bridge.log".to_string()),
+                        observed_spend_stop_usd: None,
                     }),
             )
             .unwrap();
@@ -853,6 +897,11 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
         let payload: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(payload_path).unwrap()).unwrap();
         assert_eq!(payload["thinkingLevel"], serde_json::json!("high"));
+        assert_eq!(
+            payload["oauthCredentialsPath"],
+            serde_json::json!(tmp.path().join("operator-oauth.json").display().to_string())
+        );
+        assert_eq!(payload["oauthAllowEnvToken"], serde_json::json!(true));
         assert_eq!(
             payload["runtimeOptions"]["mcpEnvironment"]["KUZUSHI_JOERN_CPG"],
             serde_json::json!(".kuzushi/cpg.bin")

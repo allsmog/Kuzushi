@@ -116,6 +116,8 @@ fn next_step_bridge_request(
         max_tokens: 4096,
         api_key_env: credential.env,
         api_key: credential.value,
+        oauth_credentials_path: runtime.oauth_credentials_path.display().to_string(),
+        oauth_allow_env_token: runtime.oauth_allow_env_token,
         base_url: runtime.base_url.clone(),
         runtime_options: request.runtime_options.clone(),
         temperature: request.temperature,
