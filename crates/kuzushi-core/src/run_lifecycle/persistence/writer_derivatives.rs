@@ -1,5 +1,5 @@
 use super::{
-    writer_delivery::{delivery_batch, report_delivery_fault},
+    writer_delivery::{report_delivery_fault, DeliveryCursor},
     CommittedRange, DerivativeRangeSubscriber, RunItemDeliveryFaultSubscriber,
 };
 use crate::run_lifecycle::{
@@ -26,6 +26,13 @@ struct DerivativePump {
     subscriber: Option<DerivativeRangeSubscriber>,
     fault_subscriber: Option<RunItemDeliveryFaultSubscriber>,
     projector: DerivativeProjector,
+    cursor: DeliveryCursor,
+    pending: Option<PendingDerivativeBatch>,
+}
+
+struct PendingDerivativeBatch {
+    through_seq: u64,
+    items: Vec<RunItemEnvelopeV1>,
 }
 
 pub(super) fn start_derivative_delivery_pump(
@@ -57,6 +64,7 @@ pub(super) fn start_derivative_delivery_pump_with(
     projector: DerivativeProjector,
 ) -> Result<(SyncSender<()>, JoinHandle<()>)> {
     let (wake, receiver) = mpsc::sync_channel(1);
+    let cursor = DeliveryCursor::open(&target, &run_id, 0)?;
     let pump = DerivativePump {
         target,
         run_id: run_id.clone(),
@@ -64,10 +72,15 @@ pub(super) fn start_derivative_delivery_pump_with(
         subscriber,
         fault_subscriber,
         projector,
+        cursor,
+        pending: None,
     };
     let thread = std::thread::Builder::new()
         .name(format!("run-items-derivatives-{run_id}"))
-        .spawn(move || pump.run(&receiver))
+        .spawn(move || {
+            let mut pump = pump;
+            pump.run(&receiver)
+        })
         .context("spawn run-item derivative delivery worker")?;
     if initial_durable_seq > 0 {
         let _ = wake.try_send(());
@@ -76,7 +89,7 @@ pub(super) fn start_derivative_delivery_pump_with(
 }
 
 impl DerivativePump {
-    fn run(&self, receiver: &Receiver<()>) {
+    fn run(&mut self, receiver: &Receiver<()>) {
         let mut applied_seq = 0;
         while receiver.recv().is_ok() {
             applied_seq = self.attempt(applied_seq);
@@ -84,60 +97,70 @@ impl DerivativePump {
         let _ = self.attempt(applied_seq);
     }
 
-    fn attempt(&self, applied_seq: u64) -> u64 {
-        match deliver_derivatives_through(
-            &self.target,
-            &self.run_id,
-            applied_seq,
-            &self.latest_seq,
-            self.subscriber.as_ref(),
-            self.fault_subscriber.as_ref(),
-            &self.projector,
-        ) {
-            Ok(next) => next,
-            Err(fault) => {
-                report_delivery_fault(self.fault_subscriber.as_ref(), fault);
-                applied_seq
+    fn attempt(&mut self, mut applied_seq: u64) -> u64 {
+        loop {
+            match self.deliver_next(applied_seq) {
+                Ok(Some(next)) => applied_seq = next,
+                Ok(None) => return applied_seq,
+                Err(fault) => {
+                    report_delivery_fault(self.fault_subscriber.as_ref(), fault);
+                    return applied_seq;
+                }
             }
         }
     }
-}
 
-fn deliver_derivatives_through(
-    target: &Path,
-    run_id: &str,
-    applied_seq: u64,
-    latest_seq: &AtomicU64,
-    subscriber: Option<&DerivativeRangeSubscriber>,
-    fault_subscriber: Option<&RunItemDeliveryFaultSubscriber>,
-    projector: &DerivativeProjector,
-) -> std::result::Result<u64, RunItemDeliveryFault> {
-    let through_seq = latest_seq.load(Ordering::Acquire);
-    if through_seq <= applied_seq {
-        return Ok(applied_seq);
+    fn deliver_next(
+        &mut self,
+        applied_seq: u64,
+    ) -> std::result::Result<Option<u64>, RunItemDeliveryFault> {
+        let through_seq = self.latest_seq.load(Ordering::Acquire);
+        if through_seq <= applied_seq && self.pending.is_none() {
+            return Ok(None);
+        }
+        self.prepare_pending(applied_seq, through_seq)?;
+        let pending = self.pending.as_ref().expect("pending batch is prepared");
+        let faults = (self.projector)(&self.target, &self.run_id, &pending.items, applied_seq);
+        reject_derivative_faults(faults, self.fault_subscriber.as_ref())?;
+        notify_derivative_subscriber(applied_seq, pending.through_seq, self.subscriber.as_ref())?;
+        let applied = pending.through_seq;
+        self.pending = None;
+        Ok(Some(applied))
     }
-    let items = derivative_batch(target, run_id, applied_seq, through_seq)?;
-    let faults = projector(target, run_id, &items, applied_seq);
-    reject_derivative_faults(faults, fault_subscriber)?;
-    notify_derivative_subscriber(applied_seq, through_seq, subscriber)?;
-    Ok(through_seq)
+
+    fn prepare_pending(
+        &mut self,
+        applied_seq: u64,
+        through_seq: u64,
+    ) -> std::result::Result<(), RunItemDeliveryFault> {
+        if let Some(pending) = self.pending.as_mut() {
+            if through_seq > pending.through_seq {
+                let mut items = self.cursor.read_through(through_seq).map_err(|fault| {
+                    derivative_read_fault(fault, applied_seq, through_seq)
+                })?;
+                pending.items.append(&mut items);
+                pending.through_seq = through_seq;
+            }
+            return Ok(());
+        }
+        let items = self.cursor.read_through(through_seq).map_err(|fault| {
+            derivative_read_fault(fault, applied_seq, through_seq)
+        })?;
+        self.pending = Some(PendingDerivativeBatch { through_seq, items });
+        Ok(())
+    }
 }
 
-fn derivative_batch(
-    target: &Path,
-    run_id: &str,
+fn derivative_read_fault(
+    fault: RunItemDeliveryFault,
     applied_seq: u64,
     through_seq: u64,
-) -> std::result::Result<Vec<RunItemEnvelopeV1>, RunItemDeliveryFault> {
-    delivery_batch(target, run_id, applied_seq, through_seq).map_err(|fault| {
-        let stage = match fault.stage {
-            RunItemDeliveryFailureStage::EmptyBatch => {
-                RunItemDeliveryFailureStage::DerivativeEmptyBatch
-            }
-            _ => RunItemDeliveryFailureStage::DerivativeReadStream,
-        };
-        RunItemDeliveryFault::new(stage, applied_seq, through_seq, fault.detail.as_str())
-    })
+) -> RunItemDeliveryFault {
+    let stage = match fault.stage {
+        RunItemDeliveryFailureStage::EmptyBatch => RunItemDeliveryFailureStage::DerivativeEmptyBatch,
+        _ => RunItemDeliveryFailureStage::DerivativeReadStream,
+    };
+    RunItemDeliveryFault::new(stage, applied_seq, through_seq, fault.detail.as_str())
 }
 
 fn reject_derivative_faults(

@@ -187,8 +187,12 @@ impl WorkbenchCache {
         leaf: String,
         state: kuzushi_core::RunArtifactTextRead,
     ) {
-        self.run_artifact_texts
-            .insert((target, run_id, leaf), RunArtifactTextCache { state });
+        insert_bounded(
+            &mut self.run_artifact_texts,
+            (target, run_id, leaf),
+            RunArtifactTextCache { state },
+            MAX_LARGE_RUN_CACHE_ENTRIES,
+        );
     }
 
     fn store_run_trace(
@@ -200,18 +204,26 @@ impl WorkbenchCache {
         let state = read
             .map(RunTraceCacheState::Ready)
             .unwrap_or(RunTraceCacheState::Invalid);
-        self.run_traces
-            .insert((target, run_id), RunTraceCache { state });
+        insert_bounded(
+            &mut self.run_traces,
+            (target, run_id),
+            RunTraceCache { state },
+            MAX_RUN_CACHE_ENTRIES,
+        );
     }
 
-    fn store_run_projection(
+    pub(super) fn store_run_projection(
         &mut self,
         target: PathBuf,
         run_id: String,
         state: Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>,
     ) {
-        self.run_projections
-            .insert((target, run_id), RunProjectionCache { state });
+        insert_bounded(
+            &mut self.run_projections,
+            (target, run_id),
+            RunProjectionCache { state },
+            MAX_LARGE_RUN_CACHE_ENTRIES,
+        );
     }
 
     fn store_scan_stage_receipt(
@@ -220,7 +232,12 @@ impl WorkbenchCache {
         run_id: String,
         state: ScanStageReceiptState,
     ) {
-        self.scan_stage_receipts.insert((target, run_id), state);
+        insert_bounded(
+            &mut self.scan_stage_receipts,
+            (target, run_id),
+            state,
+            MAX_RUN_CACHE_ENTRIES,
+        );
     }
 
     fn apply_project_hydration(
@@ -310,17 +327,16 @@ impl WorkbenchCache {
                 self.harness_file = Some(HarnessFileCache { target, contents });
             }
             (ViewHydrationKey::JsonFile { path }, ViewHydrationValue::JsonFile(state)) => {
-                self.json_files.insert(path, JsonFileCache { state });
+                self.store_json_file(path, state);
             }
             (ViewHydrationKey::PathState { path }, ViewHydrationValue::PathState(state)) => {
-                self.path_states.insert(path, PathStateCache { state });
+                self.store_path_state(path, state);
             }
             (
                 ViewHydrationKey::DirectoryListing { path },
                 ViewHydrationValue::DirectoryListing(state),
             ) => {
-                self.directory_listings
-                    .insert(path, DirectoryListingCache { state });
+                self.store_directory_listing(path, state);
             }
             (
                 ViewHydrationKey::PromptOverrideHash { path },
@@ -328,6 +344,33 @@ impl WorkbenchCache {
             ) => self.prompt_overrides.store(path, state),
             _ => {}
         }
+    }
+
+    fn store_json_file(&mut self, path: PathBuf, state: JsonFileState) {
+        insert_bounded(
+            &mut self.json_files,
+            path,
+            JsonFileCache { state },
+            MAX_PATH_CACHE_ENTRIES,
+        );
+    }
+
+    fn store_path_state(&mut self, path: PathBuf, state: PathState) {
+        insert_bounded(
+            &mut self.path_states,
+            path,
+            PathStateCache { state },
+            MAX_PATH_CACHE_ENTRIES,
+        );
+    }
+
+    fn store_directory_listing(&mut self, path: PathBuf, state: DirectoryListingState) {
+        insert_bounded(
+            &mut self.directory_listings,
+            path,
+            DirectoryListingCache { state },
+            MAX_PATH_CACHE_ENTRIES,
+        );
     }
 
     fn apply_status_hydration(

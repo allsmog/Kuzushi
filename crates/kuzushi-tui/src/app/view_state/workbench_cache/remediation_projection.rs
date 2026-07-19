@@ -11,7 +11,12 @@ impl FindingPatchTruthCache {
     }
 
     pub(super) fn store(&mut self, key: FindingPatchTruthCacheKey, state: FindingPatchTruthState) {
-        self.entries.insert(key, state);
+        insert_bounded(
+            &mut self.entries,
+            key,
+            state,
+            MAX_FINDING_TRUTH_CACHE_ENTRIES,
+        );
     }
 
     pub(super) fn invalidate(&mut self, fingerprint: Option<&str>) {

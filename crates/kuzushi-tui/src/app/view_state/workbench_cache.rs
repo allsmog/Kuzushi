@@ -25,6 +25,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use view_model_fragments::ViewModelFragmentCache;
 
+const MAX_PATH_CACHE_ENTRIES: usize = 128;
+const MAX_RUN_CACHE_ENTRIES: usize = 32;
+const MAX_LARGE_RUN_CACHE_ENTRIES: usize = 8;
+const MAX_FINDING_TRUTH_CACHE_ENTRIES: usize = 256;
+
 mod cache_entries;
 mod completion_values;
 mod finding_alias_cache;
@@ -360,6 +365,7 @@ impl WorkbenchCache {
         self.file_completion_values = None;
         self.bump_completion_generation();
         self.run_traces.clear();
+        self.run_projections.clear();
         self.run_artifact_texts.clear();
         self.scan_stage_receipts.clear();
         self.finding_patch_truth.invalidate(None);
@@ -464,6 +470,13 @@ impl WorkbenchCache {
             &path,
             broad,
         );
+        invalidate_cached_run_projection(
+            &mut self.run_projections,
+            roots.target,
+            &roots.runs,
+            path,
+            broad,
+        );
         invalidate_cached_scan_stage_receipt(
             &mut self.scan_stage_receipts,
             roots.target,
@@ -555,11 +568,13 @@ impl WorkbenchCache {
             return cache.state.clone();
         }
         let state = read_json_file(path);
-        self.json_files.insert(
+        insert_bounded(
+            &mut self.json_files,
             path.to_path_buf(),
             JsonFileCache {
                 state: state.clone(),
             },
+            MAX_PATH_CACHE_ENTRIES,
         );
         state
     }
@@ -576,11 +591,13 @@ impl WorkbenchCache {
             return cache.state.clone();
         }
         let state = kuzushi_core::read_run_artifact_text(target, run_id, leaf);
-        self.run_artifact_texts.insert(
+        insert_bounded(
+            &mut self.run_artifact_texts,
             key,
             RunArtifactTextCache {
                 state: state.clone(),
             },
+            MAX_LARGE_RUN_CACHE_ENTRIES,
         );
         state
     }
@@ -756,6 +773,25 @@ fn invalidate_cached_run_artifact_text(
     artifacts.remove(&(target.to_path_buf(), run_id.to_string(), leaf.to_string()));
 }
 
+fn invalidate_cached_run_projection(
+    projections: &mut BTreeMap<(PathBuf, String), RunProjectionCache>,
+    target: &Path,
+    runs_root: &Path,
+    path: &Path,
+    broad: bool,
+) {
+    if broad {
+        projections.retain(|(cached_target, _), _| cached_target != target);
+        return;
+    }
+    let Some((run_id, leaf)) = run_artifact_identity(runs_root, path) else {
+        return;
+    };
+    if leaf == "items.jsonl" {
+        projections.remove(&(target.to_path_buf(), run_id.to_string()));
+    }
+}
+
 fn invalidate_cached_scan_stage_receipt(
     receipts: &mut BTreeMap<(PathBuf, String), ScanStageReceiptState>,
     target: &Path,
@@ -783,6 +819,16 @@ fn run_artifact_identity<'a>(runs_root: &Path, path: &'a Path) -> Option<(&'a st
     let run_id = components.next()?.as_os_str().to_str()?;
     let leaf = components.next()?.as_os_str().to_str()?;
     (components.next().is_none()).then_some((run_id, leaf))
+}
+
+fn insert_bounded<K: Ord, V>(entries: &mut BTreeMap<K, V>, key: K, value: V, max_entries: usize) {
+    debug_assert!(max_entries > 0);
+    if !entries.contains_key(&key) {
+        while entries.len() >= max_entries {
+            entries.pop_first();
+        }
+    }
+    entries.insert(key, value);
 }
 
 #[derive(Debug)]

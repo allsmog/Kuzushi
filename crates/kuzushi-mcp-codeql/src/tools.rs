@@ -13,7 +13,8 @@
 //!    or `KUZUSHI_CODEQL_CACHE_DIR` if set). Persists across MCP server
 //!    restarts. First call to each CWE folder on a given language is
 //!    still slow because that's when the pack is compiled.
-//! 2. An in-process result memo keyed on `(db, selector, limit)`. The
+//! 2. A bounded in-process result memo keyed on database revision,
+//!    selector revision, and result limit. The
 //!    agent often re-queries the same CWE folder when iterating on
 //!    findings during a single hunt; the second call returns instantly.
 //!    Keyed on the canonical absolute DB path so a typo or symlink swap
@@ -29,7 +30,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_mcp_common::{ReadRootCapability, Tool, ToolHandler, ToolRegistry};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
@@ -38,7 +39,10 @@ use std::sync::OnceLock;
 const DEFAULT_RESULT_LIMIT: usize = 50;
 const MAX_RESULT_LIMIT: usize = 500;
 const MAX_DATABASE_METADATA_BYTES: usize = 1024 * 1024;
+const MAX_LOCAL_QUERY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SARIF_BYTES: usize = 64 * 1024 * 1024;
+const MAX_MEMO_ENTRIES: usize = 64;
+const MAX_MEMO_BYTES: usize = 16 * 1024 * 1024;
 
 pub(crate) fn build_registry() -> Result<ToolRegistry> {
     Ok(build_registry_with_capability(
@@ -163,29 +167,134 @@ impl ToolHandler for QueryHandler {
     }
 }
 
-/// (db_canonical, selector, limit) → memoised flow set, populated on the
-/// first call of each combo and reused for the rest of the MCP server's
-/// lifetime. The memo is bounded by the agent's appetite for distinct
-/// queries (~10 per hunt in practice), so we don't bother with eviction.
-fn flow_memo() -> &'static Mutex<HashMap<(PathBuf, String, usize), Vec<Value>>> {
-    static MEMO: OnceLock<Mutex<HashMap<(PathBuf, String, usize), Vec<Value>>>> = OnceLock::new();
-    MEMO.get_or_init(|| Mutex::new(HashMap::new()))
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct MemoKey {
+    db: PathBuf,
+    db_revision: String,
+    selector: String,
+    selector_revision: Option<String>,
+    limit: usize,
 }
 
-fn memo_key(db: &Path, selector: &str, limit: usize) -> (PathBuf, String, usize) {
-    let canonical = std::fs::canonicalize(db).unwrap_or_else(|_| db.to_path_buf());
-    (canonical, selector.to_string(), limit)
+struct MemoEntry {
+    flows: Vec<Value>,
+    bytes: usize,
 }
 
-fn lookup_memo(db: &Path, selector: &str, limit: usize) -> Option<Vec<Value>> {
-    let memo = flow_memo().lock().ok()?;
-    memo.get(&memo_key(db, selector, limit)).cloned()
+struct FlowMemo {
+    entries: HashMap<MemoKey, MemoEntry>,
+    order: VecDeque<MemoKey>,
+    bytes: usize,
+    max_entries: usize,
+    max_bytes: usize,
 }
 
-fn store_memo(db: &Path, selector: &str, limit: usize, flows: &[Value]) {
-    if let Ok(mut memo) = flow_memo().lock() {
-        memo.insert(memo_key(db, selector, limit), flows.to_vec());
+impl FlowMemo {
+    fn bounded(max_entries: usize, max_bytes: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            bytes: 0,
+            max_entries,
+            max_bytes,
+        }
     }
+
+    fn get(&self, key: &MemoKey) -> Option<Vec<Value>> {
+        self.entries.get(key).map(|entry| entry.flows.clone())
+    }
+
+    fn insert(&mut self, key: MemoKey, flows: &[Value]) {
+        let Some(bytes) = serialized_flow_bytes(flows) else {
+            return;
+        };
+        if bytes > self.max_bytes || self.max_entries == 0 {
+            return;
+        }
+        self.remove(&key);
+        while self.entries.len() >= self.max_entries || self.bytes + bytes > self.max_bytes {
+            self.evict_oldest();
+        }
+        self.bytes += bytes;
+        self.order.push_back(key.clone());
+        self.entries.insert(
+            key,
+            MemoEntry {
+                flows: flows.to_vec(),
+                bytes,
+            },
+        );
+    }
+
+    fn remove(&mut self, key: &MemoKey) {
+        let Some(entry) = self.entries.remove(key) else {
+            return;
+        };
+        self.bytes = self.bytes.saturating_sub(entry.bytes);
+        self.order.retain(|candidate| candidate != key);
+    }
+
+    fn evict_oldest(&mut self) {
+        while let Some(key) = self.order.pop_front() {
+            let Some(entry) = self.entries.remove(&key) else {
+                continue;
+            };
+            self.bytes = self.bytes.saturating_sub(entry.bytes);
+            return;
+        }
+    }
+}
+
+fn flow_memo() -> &'static Mutex<FlowMemo> {
+    static MEMO: OnceLock<Mutex<FlowMemo>> = OnceLock::new();
+    MEMO.get_or_init(|| Mutex::new(FlowMemo::bounded(MAX_MEMO_ENTRIES, MAX_MEMO_BYTES)))
+}
+
+fn memo_key(db: &Path, selector: &str, limit: usize) -> Result<MemoKey> {
+    let db = std::fs::canonicalize(db).context("could not canonicalize CodeQL database")?;
+    Ok(MemoKey {
+        db_revision: database_revision(&db)?,
+        selector_revision: local_query_revision(selector)?,
+        db,
+        selector: selector.to_string(),
+        limit,
+    })
+}
+
+fn lookup_memo(key: &MemoKey) -> Option<Vec<Value>> {
+    let memo = flow_memo().lock().ok()?;
+    memo.get(key)
+}
+
+fn store_memo(key: MemoKey, flows: &[Value]) {
+    if let Ok(mut memo) = flow_memo().lock() {
+        memo.insert(key, flows);
+    }
+}
+
+fn database_revision(db: &Path) -> Result<String> {
+    let metadata = ReadRootCapability::new([db.to_path_buf()])?
+        .read_utf8(&db.join("codeql-database.yml"), MAX_DATABASE_METADATA_BYTES)?;
+    Ok(kuzushi_mcp_common::cache::sha256_hex_bytes(
+        metadata.as_bytes(),
+    ))
+}
+
+fn local_query_revision(selector: &str) -> Result<Option<String>> {
+    if is_pack_selector(selector) {
+        return Ok(None);
+    }
+    let path = Path::new(selector);
+    let parent = path.parent().context("local CodeQL query has no parent")?;
+    let query =
+        ReadRootCapability::new([parent.to_path_buf()])?.read_utf8(path, MAX_LOCAL_QUERY_BYTES)?;
+    Ok(Some(kuzushi_mcp_common::cache::sha256_hex_bytes(
+        query.as_bytes(),
+    )))
+}
+
+fn serialized_flow_bytes(flows: &[Value]) -> Option<usize> {
+    serde_json::to_vec(flows).ok().map(|encoded| encoded.len())
 }
 
 /// Resolve the CodeQL pack cache directory. CodeQL defaults to
@@ -204,7 +313,8 @@ pub(crate) fn codeql_cache_dir() -> Option<PathBuf> {
 }
 
 async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result<Vec<Value>> {
-    if let Some(cached) = lookup_memo(db, selector, limit) {
+    let key = memo_key(db, selector, limit)?;
+    if let Some(cached) = lookup_memo(&key) {
         return Ok(cached);
     }
     let codeql = locate_codeql_binary()?.context("could not find the codeql binary")?;
@@ -235,8 +345,21 @@ async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result
     }
     let raw = read_generated_sarif(sarif.path())?;
     let flows = parse_sarif(&raw, limit);
-    store_memo(db, selector, limit, &flows);
+    store_current_result(db, selector, limit, key, &flows)?;
     Ok(flows)
+}
+
+fn store_current_result(
+    db: &Path,
+    selector: &str,
+    limit: usize,
+    key: MemoKey,
+    flows: &[Value],
+) -> Result<()> {
+    if memo_key(db, selector, limit)? == key {
+        store_memo(key, flows);
+    }
+    Ok(())
 }
 
 fn read_generated_sarif(path: &Path) -> Result<String> {
@@ -700,6 +823,65 @@ fi
             Some("codeql/python-queries")
         );
         assert!(query_pack_for_language("rust").is_none());
+    }
+
+    #[test]
+    fn memo_key_changes_with_database_and_local_query_revisions() {
+        let temp = tempdir().unwrap();
+        let db = codeql_db(&temp);
+        let query = temp.path().join("queries/local.ql");
+        std::fs::create_dir_all(query.parent().unwrap()).unwrap();
+        std::fs::write(&query, "select 1").unwrap();
+        let selector = query.display().to_string();
+
+        let first = memo_key(&db, &selector, 10).unwrap();
+        std::fs::write(
+            db.join("codeql-database.yml"),
+            "primaryLanguage: cpp\nrevision: two\n",
+        )
+        .unwrap();
+        let changed_db = memo_key(&db, &selector, 10).unwrap();
+        assert_ne!(first.db_revision, changed_db.db_revision);
+
+        std::fs::write(&query, "select 2").unwrap();
+        let changed_query = memo_key(&db, &selector, 10).unwrap();
+        assert_ne!(
+            changed_db.selector_revision,
+            changed_query.selector_revision
+        );
+    }
+
+    #[test]
+    fn memo_enforces_entry_and_serialized_byte_limits() {
+        let flows = vec![json!({"flow": "small"})];
+        let bytes = serialized_flow_bytes(&flows).unwrap();
+        let first = test_memo_key("first");
+        let second = test_memo_key("second");
+        let third = test_memo_key("third");
+        let mut memo = FlowMemo::bounded(2, bytes * 2);
+        memo.insert(first.clone(), &flows);
+        memo.insert(second.clone(), &flows);
+        memo.insert(third.clone(), &flows);
+
+        assert!(memo.get(&first).is_none());
+        assert!(memo.get(&second).is_some());
+        assert!(memo.get(&third).is_some());
+        assert_eq!(memo.entries.len(), 2);
+        assert!(memo.bytes <= bytes * 2);
+
+        let mut too_small = FlowMemo::bounded(2, bytes.saturating_sub(1));
+        too_small.insert(first, &flows);
+        assert!(too_small.entries.is_empty());
+    }
+
+    fn test_memo_key(name: &str) -> MemoKey {
+        MemoKey {
+            db: PathBuf::from(format!("/{name}")),
+            db_revision: "revision".to_string(),
+            selector: "pack:query".to_string(),
+            selector_revision: None,
+            limit: 10,
+        }
     }
 
     #[tokio::test]

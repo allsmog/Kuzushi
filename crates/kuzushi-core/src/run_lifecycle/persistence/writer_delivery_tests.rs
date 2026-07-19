@@ -1,7 +1,7 @@
 use super::*;
 use crate::run_lifecycle::{
-    DiagnosticLevel, OperationFingerprint, RunCallId, RunItemId, RunItemRecord, RunItemSource,
-    RunItemV1, SafeText,
+    read_run_items, DiagnosticLevel, OperationFingerprint, ProjectionHealth, RunCallId, RunItemId,
+    RunItemRecord, RunItemSource, RunItemV1, SafeText,
 };
 use std::sync::mpsc;
 use std::time::Duration;
@@ -75,6 +75,59 @@ fn missing_and_empty_streams_are_structured_delivery_faults() {
     assert_eq!(empty.stage, RunItemDeliveryFailureStage::EmptyBatch);
     assert_eq!(empty.applied_seq, 0);
     assert_eq!(empty.durable_seq, 1);
+}
+
+#[test]
+fn delivery_cursor_reads_each_committed_record_once_across_batches() {
+    let target = tempfile::tempdir().unwrap();
+    let run_id = crate::run_artifacts::new_run_id("incremental-cursor");
+    let writer = super::super::RunItemWriter::open(target.path(), &run_id, None).unwrap();
+    let first = writer.emit_and_flush(diagnostic("first")).unwrap();
+    let second = writer.emit_and_flush(diagnostic("second")).unwrap();
+    let third = writer.emit_and_flush(diagnostic("third")).unwrap();
+    writer.shutdown().unwrap();
+
+    let mut cursor = DeliveryCursor::open(target.path(), &run_id, 0).unwrap();
+    assert_eq!(cursor.read_through(first.seq).unwrap()[0].seq, first.seq);
+    assert_eq!(cursor.read_through(second.seq).unwrap()[0].seq, second.seq);
+    assert_eq!(cursor.read_through(third.seq).unwrap()[0].seq, third.seq);
+    assert_eq!(cursor.records_read(), 3);
+}
+
+#[test]
+fn delivery_cursor_faults_on_truncation_and_replacement() {
+    let target = tempfile::tempdir().unwrap();
+    let run_id = crate::run_artifacts::new_run_id("mutated-cursor");
+    let writer = super::super::RunItemWriter::open(target.path(), &run_id, None).unwrap();
+    let first = writer.emit_and_flush(diagnostic("first")).unwrap();
+    let second = writer.emit_and_flush(diagnostic("second")).unwrap();
+    writer.shutdown().unwrap();
+    let path = crate::run_artifacts::run_dir(target.path(), &run_id).join("items.jsonl");
+
+    let mut truncated = DeliveryCursor::open(target.path(), &run_id, 0).unwrap();
+    truncated.read_through(first.seq).unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(0)
+        .unwrap();
+    let fault = truncated.read_through(second.seq).unwrap_err();
+    assert_eq!(fault.stage, RunItemDeliveryFailureStage::ReadStream);
+
+    std::fs::remove_file(&path).unwrap();
+    let writer = super::super::RunItemWriter::open(target.path(), &run_id, None).unwrap();
+    let replacement_first = writer.emit_and_flush(diagnostic("replacement first")).unwrap();
+    let replacement_second = writer.emit_and_flush(diagnostic("replacement second")).unwrap();
+    writer.shutdown().unwrap();
+    let mut replaced = DeliveryCursor::open(target.path(), &run_id, 0).unwrap();
+    replaced.read_through(replacement_first.seq).unwrap();
+    let replacement = path.with_extension("replacement");
+    std::fs::copy(&path, &replacement).unwrap();
+    std::fs::rename(&replacement, &path).unwrap();
+    let fault = replaced.read_through(replacement_second.seq).unwrap_err();
+    assert_eq!(fault.stage, RunItemDeliveryFailureStage::ReadStream);
+    assert!(fault.detail.as_str().contains("replaced"));
 }
 
 #[test]

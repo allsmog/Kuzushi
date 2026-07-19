@@ -1383,6 +1383,49 @@ fn reader_stops_at_the_last_valid_prefix_for_corruption_and_truncation() {
     ));
 }
 
+#[cfg(unix)]
+#[test]
+fn typed_stream_reader_and_recovery_reject_a_symlinked_items_file() {
+    use std::os::unix::fs::symlink;
+
+    let target = tempfile::tempdir().unwrap();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    let run_id = crate::run_artifacts::new_run_id("symlinked-items");
+    let path = crate::run_artifacts::run_dir(target.path(), &run_id).join("items.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    symlink(outside.path(), &path).unwrap();
+
+    let read_error = read_run_items(target.path(), &run_id).unwrap_err();
+    let recovery_error = RunItemWriter::open(target.path(), &run_id, None)
+        .err()
+        .expect("symlinked stream must fail recovery");
+    assert!(read_error.to_string().contains("symlink"));
+    assert!(format!("{recovery_error:#}").contains("symlink"));
+}
+
+#[test]
+fn typed_stream_reader_and_recovery_reject_oversized_streams_and_records() {
+    let target = tempfile::tempdir().unwrap();
+    let run_id = crate::run_artifacts::new_run_id("oversized-items");
+    let path = crate::run_artifacts::run_dir(target.path(), &run_id).join("items.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::File::create(&path)
+        .unwrap()
+        .set_len(MAX_RUN_ITEM_STREAM_BYTES + 1)
+        .unwrap();
+    assert!(read_run_items(target.path(), &run_id).is_err());
+    assert!(RunItemWriter::open(target.path(), &run_id, None).is_err());
+
+    std::fs::write(
+        &path,
+        vec![b'x'; MAX_SERIALIZED_RUN_ITEM_BYTES.saturating_add(1)],
+    )
+    .unwrap();
+    let read = read_run_items(target.path(), &run_id).unwrap().unwrap();
+    assert!(matches!(read.health, ProjectionHealth::Degraded { .. }));
+    assert!(RunItemWriter::open(target.path(), &run_id, None).is_err());
+}
+
 #[test]
 fn persistence_policy_bounds_previews_and_never_serializes_sensitive_inputs() {
     let prompt_secret = "Authorization: Bearer sk-prompt-sentinel";

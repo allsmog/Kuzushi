@@ -1,8 +1,8 @@
+use super::super::stream_reader::{parse_record, RunItemStreamReader};
 use super::WriterState;
 use crate::run_lifecycle::{RunId, RunItemEnvelopeV1};
 use anyhow::{Context, Result};
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 pub(super) fn open_writer_state(target: &Path, run_id: &str) -> Result<WriterState> {
@@ -37,27 +37,22 @@ fn record_stream_artifact(target: &Path, run_id: &str) -> Result<()> {
 }
 
 fn recover_tail(path: &Path) -> Result<(u64, Option<String>, u64)> {
-    let Some(file) = open_existing(path)? else {
+    let Some(mut reader) = RunItemStreamReader::open(path)
+        .with_context(|| format!("open {}", path.display()))?
+    else {
         return Ok((1, None, 0));
     };
-    let bytes = file.metadata()?.len();
     let mut next_seq = 1;
     let mut previous_hash = None;
-    for line in BufReader::new(file).lines() {
-        let envelope: RunItemEnvelopeV1 = serde_json::from_str(&line?)?;
+    while let Some(record) = reader.next_record()? {
+        let envelope = parse_record(record).map_err(anyhow::Error::msg)?;
         validate_recovered_envelope(&envelope, next_seq, &previous_hash)?;
         next_seq += 1;
         previous_hash = Some(envelope.event_hash);
     }
+    reader.verify_path_unchanged()?;
+    let bytes = reader.bytes_read();
     Ok((next_seq, previous_hash, bytes))
-}
-
-fn open_existing(path: &Path) -> Result<Option<File>> {
-    match File::open(path) {
-        Ok(file) => Ok(Some(file)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error).with_context(|| format!("open {}", path.display())),
-    }
 }
 
 fn validate_recovered_envelope(

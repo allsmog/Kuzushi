@@ -16,7 +16,12 @@ impl PromptOverrideCache {
     }
 
     pub(super) fn store(&mut self, path: PathBuf, state: Result<Option<String>, String>) {
-        self.entries.insert(path, PromptOverrideEntry { state });
+        super::insert_bounded(
+            &mut self.entries,
+            path,
+            PromptOverrideEntry { state },
+            super::MAX_PATH_CACHE_ENTRIES,
+        );
     }
 
     #[cfg(test)]

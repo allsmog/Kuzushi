@@ -107,6 +107,66 @@ fn latest_run_pointer_refreshes_after_run_persistence_invalidation() {
 }
 
 #[test]
+fn run_projection_cache_is_bounded_and_keeps_the_new_entry() {
+    let target = Path::new("/target");
+    let mut cache = WorkbenchCache::default();
+    for index in 0..=MAX_LARGE_RUN_CACHE_ENTRIES {
+        cache.store_run_projection(
+            target.to_path_buf(),
+            format!("run-{index:03}"),
+            Err(format!("projection-{index}")),
+        );
+    }
+
+    assert_eq!(cache.run_projections.len(), MAX_LARGE_RUN_CACHE_ENTRIES);
+    assert!(matches!(
+        cache.cached_run_projection(target, &format!("run-{MAX_LARGE_RUN_CACHE_ENTRIES:03}")),
+        ViewDataState::Ready(Err(_))
+    ));
+}
+
+#[test]
+fn items_change_and_workspace_invalidation_evict_run_projection() {
+    let target = tempfile::tempdir().unwrap();
+    let mut cache = WorkbenchCache::default();
+    cache.store_run_projection(
+        target.path().to_path_buf(),
+        "run-a".to_string(),
+        Err("cached".to_string()),
+    );
+    let items = kuzushi_core::run_dir(target.path(), "run-a").join("items.jsonl");
+    let relative = items.strip_prefix(target.path()).unwrap().to_path_buf();
+
+    cache.invalidate_state_artifact_paths(target.path(), &[relative]);
+    assert!(cache
+        .cached_run_projection(target.path(), "run-a")
+        .is_not_requested());
+
+    cache.store_run_projection(
+        target.path().to_path_buf(),
+        "run-a".to_string(),
+        Err("cached again".to_string()),
+    );
+    cache.invalidate_workspace_files();
+    assert!(cache
+        .cached_run_projection(target.path(), "run-a")
+        .is_not_requested());
+}
+
+#[test]
+fn bounded_map_never_discards_the_entry_being_inserted() {
+    let mut entries = BTreeMap::new();
+    for value in 0..=MAX_PATH_CACHE_ENTRIES {
+        insert_bounded(&mut entries, value, value, MAX_PATH_CACHE_ENTRIES);
+    }
+    assert_eq!(entries.len(), MAX_PATH_CACHE_ENTRIES);
+    assert_eq!(
+        entries.get(&MAX_PATH_CACHE_ENTRIES),
+        Some(&MAX_PATH_CACHE_ENTRIES)
+    );
+}
+
+#[test]
 fn project_scope_tree_does_not_discover_on_cache_miss() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("libs/parser/.git")).unwrap();
