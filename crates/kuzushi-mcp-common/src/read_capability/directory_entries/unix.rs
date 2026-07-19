@@ -216,6 +216,10 @@ pub(super) fn open_child(directory: &File, record: &EntryRecord) -> Result<File>
 
     let EntryIdentity::Unix { file_type, .. } = &record.identity;
     anyhow::ensure!(
+        *file_type != libc::S_IFLNK as u32,
+        "MCP directory entry is a symbolic link"
+    );
+    anyhow::ensure!(
         matches!(
             *file_type,
             value if value == libc::S_IFREG as u32 || value == libc::S_IFDIR as u32

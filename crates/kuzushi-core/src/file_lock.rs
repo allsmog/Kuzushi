@@ -13,6 +13,12 @@ pub(crate) struct ExclusiveFileLock {
     _file: File,
 }
 
+impl Drop for ExclusiveFileLock {
+    fn drop(&mut self) {
+        let _ = self._file.unlock();
+    }
+}
+
 impl ExclusiveFileLock {
     pub(crate) fn acquire(path: &Path) -> Result<Self> {
         let file = prepared_lock_file(path)?;

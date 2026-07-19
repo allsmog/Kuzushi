@@ -232,7 +232,7 @@ fn bundle_identity_rejects_special_files() {
         .unwrap_err()
         .to_string();
 
-    assert!(error.contains("non-regular entry"), "{error}");
+    assert!(error.contains("not a regular file or directory"), "{error}");
 }
 
 #[test]
