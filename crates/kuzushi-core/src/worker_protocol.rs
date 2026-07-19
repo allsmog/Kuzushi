@@ -7067,14 +7067,7 @@ mod tests {
         let target = tempfile::tempdir().unwrap();
         let workspace = crate::workspace::WorkspaceTarget::new(target.path()).unwrap();
         let config = crate::config::V2Config::default();
-        let context = crate::modules::ToolExecutionContext {
-            config: &config,
-            workspace: Some(&workspace),
-            findings_store: None,
-            trace: None,
-            cancellation: None,
-            authorization: crate::modules::ExecutionAuthorization::default(),
-        };
+        let context = worker_policy_context(&config, &workspace);
         let module = worker_policy_module(target.path());
         let invocation_id = InvocationId("inv-worker-policy".to_string());
         let run_id = RunId("run-worker-policy".to_string());
@@ -7096,7 +7089,93 @@ mod tests {
         assert_worker_denial_audit(target.path(), &run_id, requests);
     }
 
+    #[tokio::test]
+    async fn broker_facades_share_the_workspace_control_path_decision() {
+        let target = tempfile::tempdir().unwrap();
+        let grant = workspace_read_grant();
+        let reference_error = reference_control_path_error(grant.clone()).await;
+        let live_error = live_control_path_error(target.path(), grant);
+
+        assert_eq!(reference_error, KwpError::denied("fs.control_path"));
+        assert_eq!(live_error, reference_error);
+    }
+
+    async fn reference_control_path_error(grant: Grant) -> KwpError {
+        let authority = invocation_for("policy-parity", grant);
+        broker(Arc::new(Effects::default()))
+            .fs_read(
+                &authority,
+                FsScope::Workspace,
+                ".kuzushi/v3/config.toml",
+            )
+            .await
+            .unwrap_err()
+    }
+
+    fn live_control_path_error(target: &Path, grant: Grant) -> KwpError {
+        let workspace = crate::workspace::WorkspaceTarget::new(target).unwrap();
+        let config = crate::config::V2Config::default();
+        let context = worker_policy_context(&config, &workspace);
+        let module = worker_policy_module_with_grant(target, grant);
+        let invocation_id = InvocationId("inv-policy-parity".to_string());
+        let run_id = RunId("run-policy-parity".to_string());
+        let cost_ledger = worker_cost_ledger(&module, &context, &run_id).unwrap();
+        let mut session = new_worker_host_session(
+            &module,
+            "worker-policy:run",
+            &context,
+            None,
+            invocation_id.clone(),
+            run_id,
+            None,
+            cost_ledger,
+        );
+        session.initializing = false;
+        session
+            .handle_worker_request(
+                METHOD_FS_READ.to_string(),
+                worker_request_params(
+                    &invocation_id,
+                    json!({
+                        "scope": "workspace",
+                        "path": ".kuzushi/v3/config.toml"
+                    }),
+                ),
+            )
+            .unwrap_err()
+    }
+
+    fn workspace_read_grant() -> Grant {
+        Grant {
+            fs: vec![FsScopeGrant {
+                scope: FsScope::Workspace,
+                mode: FsMode::Ro,
+                max_bytes: None,
+                max_files: None,
+            }],
+            ..Grant::default()
+        }
+    }
+
+    fn worker_policy_context<'a>(
+        config: &'a crate::config::V2Config,
+        workspace: &'a crate::workspace::WorkspaceTarget,
+    ) -> crate::modules::ToolExecutionContext<'a> {
+        crate::modules::ToolExecutionContext {
+            config,
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: crate::modules::ExecutionAuthorization::default(),
+        }
+    }
+
     fn worker_policy_module(target: &Path) -> VerifiedModule {
+        worker_policy_module_with_grant(target, Grant::default())
+    }
+
+    fn worker_policy_module_with_grant(target: &Path, grant: Grant) -> VerifiedModule {
         VerifiedModule {
             module_id: ModuleId("worker-policy".to_string()),
             digest: Digest("sha256:worker-policy".to_string()),
@@ -7104,7 +7183,7 @@ mod tests {
             module_root: target.to_path_buf(),
             entry: "worker.mjs".to_string(),
             tier: ExecutorTier::Node,
-            grant: Arc::new(Grant::default()),
+            grant: Arc::new(grant),
         }
     }
 

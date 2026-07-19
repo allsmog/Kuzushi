@@ -1011,6 +1011,7 @@ JSON
     fn fake_codeql_binary(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
+        prepare_managed_codeql_database(dir);
         let binary = dir.join("codeql-fixture.sh");
         fs::write(
             &binary,
@@ -1021,11 +1022,6 @@ if [ "$1" = "resolve" ] && [ "$2" = "languages" ]; then
 fi
 if [ "$1" = "database" ] && [ "$2" = "resolve" ]; then
   printf '["javascript"]'
-  exit 0
-fi
-if [ "$1" = "database" ] && [ "$2" = "create" ]; then
-  mkdir -p "$3"
-  printf 'name: test\n' > "$3/codeql-database.yml"
   exit 0
 fi
 if [ "$1" = "database" ] && [ "$2" = "analyze" ]; then
@@ -1078,6 +1074,16 @@ exit 2
         permissions.set_mode(0o755);
         fs::set_permissions(&binary, permissions).unwrap();
         binary
+    }
+
+    fn prepare_managed_codeql_database(root: &Path) {
+        let db = crate::workspace::workspace_codeql_db_path(root);
+        fs::create_dir_all(&db).unwrap();
+        fs::write(
+            db.join("codeql-database.yml"),
+            "primaryLanguage: javascript\n",
+        )
+        .unwrap();
     }
 
     #[cfg(unix)]
@@ -1274,6 +1280,7 @@ exit 2
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join("package.json"), "{}\n").unwrap();
         fs::write(tmp.path().join("server.js"), "db.query(req.query.q)\n").unwrap();
+        prepare_managed_codeql_database(tmp.path());
         let binary = tmp.path().join("codeql-env-fixture.sh");
         fs::write(
             &binary,
@@ -1281,11 +1288,6 @@ exit 2
 if [ "${AWS_SECRET_ACCESS_KEY+x}" = "x" ] || [ "${GITHUB_TOKEN+x}" = "x" ] || [ "${DATABASE_URL+x}" = "x" ]; then
   echo "credential env leaked to codeql" >&2
   exit 44
-fi
-if [ "$1" = "database" ] && [ "$2" = "create" ]; then
-  mkdir -p "$3"
-  printf 'name: test\n' > "$3/codeql-database.yml"
-  exit 0
 fi
 if [ "$1" = "database" ] && [ "$2" = "analyze" ]; then
   out=""

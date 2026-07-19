@@ -69,7 +69,11 @@ fn codeql_options() -> Vec<OptionSpec> {
             .workspace_read()
             .advanced(),
         codeql_language_option(),
-        opt("buildMode", OptionType::Enum, "CodeQL build mode override.")
+        opt(
+            "buildMode",
+            OptionType::Enum,
+            "Deprecated compatibility input. Scans consume an existing database; pass the build mode to codeql:create-db when creating it.",
+        )
             .aliases(&["build_mode"])
             .choices(&["default", "autobuild", "none"])
             .advanced(),
@@ -79,7 +83,7 @@ fn codeql_options() -> Vec<OptionSpec> {
         opt(
             "timeoutMs",
             OptionType::Int,
-            "Per-command CodeQL create/analyze deadline in milliseconds. A deadline kills and reaps the complete CodeQL process tree.",
+            "Per-command CodeQL resolve/analyze deadline in milliseconds. A deadline kills and reaps the complete CodeQL process tree.",
         )
         .aliases(&["timeout_ms"])
         .default(json!(

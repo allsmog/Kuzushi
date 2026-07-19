@@ -199,7 +199,7 @@ fn taint_iris_next_tools() -> Vec<ToolDescriptor> {
             WorkspaceRequirement::Required,
             FindingStoreRequirement::Optional,
         )),
-        taint_iris_next_codeql_db_tool().with_policy(workspace_policy(
+        taint_iris_next_codeql_db_tool().with_policy(repository_execute_policy(
             ToolPhase::Scan,
             RuntimeRequirement::Always,
             FindingStoreRequirement::Optional,
@@ -292,6 +292,17 @@ fn taint_iris_next_codeql_db_tool() -> ToolDescriptor {
                 "TAINT_IRIS_NEXT_CODEQL_BUILD_PROMPT",
                 "CodeQL build planning",
             ),
+            opt(
+                "timeoutMs",
+                OptionType::Int,
+                "Isolated CodeQL database-build deadline in milliseconds.",
+            )
+            .aliases(&["timeout_ms"])
+            .default(json!(
+                crate::codeql_repository_execution::DEFAULT_CODEQL_REPOSITORY_TIMEOUT_MS
+            ))
+            .advanced(),
+            repository_source_commit_binding_option(),
         ],
     )
     .with_prompt(editable_prompt(

@@ -59,6 +59,22 @@ mod tests {
         records
     }
 
+    #[test]
+    fn codeql_database_build_tools_require_repository_execution_approval() {
+        let registry = ModuleRegistry::with_v2_builtins();
+
+        for name in ["codeql:create-db", "taint-iris-next:codeql-db"] {
+            let descriptor = registry.resolve_tool(name).unwrap();
+            assert_eq!(descriptor.effect, ToolEffect::RepositoryExecute, "{name}");
+            assert_eq!(descriptor.approval, ApprovalPolicy::Explicit, "{name}");
+            assert_eq!(
+                descriptor.workspace_requirement,
+                WorkspaceRequirement::Required,
+                "{name}"
+            );
+        }
+    }
+
     struct MockRuntime {
         requests: Mutex<Vec<TriageRequest>>,
         queries: Mutex<Vec<AgentQueryRequest>>,
@@ -637,15 +653,17 @@ JSON
     fn fake_codeql_binary(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
+        let db = crate::workspace::workspace_codeql_db_path(dir);
+        fs::create_dir_all(&db).unwrap();
+        fs::write(
+            db.join("codeql-database.yml"),
+            "primaryLanguage: javascript\n",
+        )
+        .unwrap();
         let binary = dir.join("codeql-fixture.sh");
         fs::write(
             &binary,
             r#"#!/bin/sh
-if [ "$1" = "database" ] && [ "$2" = "create" ]; then
-  mkdir -p "$3"
-  printf 'name: test\n' > "$3/codeql-database.yml"
-  exit 0
-fi
 if [ "$1" = "database" ] && [ "$2" = "analyze" ]; then
   out=""
   for arg in "$@"; do

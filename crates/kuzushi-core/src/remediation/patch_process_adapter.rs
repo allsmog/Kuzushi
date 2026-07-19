@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::ffi::OsString;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -115,6 +116,20 @@ impl<'a> PatchProcessControl<'a> {
         self.output(&mut command, label)
     }
 
+    pub(crate) fn run_program(
+        self,
+        cwd: &Path,
+        program: &Path,
+        args: &[OsString],
+        label: &str,
+    ) -> Result<Output> {
+        self.ensure_active()?;
+        let mut command = validation_program_command(cwd, program, args)?;
+        command.current_dir(cwd).stdin(Stdio::null());
+        configure_validation_environment(&mut command, cwd)?;
+        self.output(&mut command, label)
+    }
+
     fn output(self, command: &mut Command, label: &str) -> Result<Output> {
         crate::bounded_subprocess::output_with_control(
             command,
@@ -152,6 +167,25 @@ fn validation_shell_command(_cwd: &Path, script: &str) -> Result<Command> {
         return Ok(linux_validation_command(_cwd, script));
     }
     anyhow::bail!("patch validation refused: no isolating sandbox is available on this host")
+}
+
+fn validation_program_command(
+    _cwd: &Path,
+    program: &Path,
+    args: &[OsString],
+) -> Result<Command> {
+    #[cfg(target_os = "macos")]
+    if Path::new("/usr/bin/sandbox-exec").is_file() {
+        let mut command = Command::new("/usr/bin/sandbox-exec");
+        command.args(["-p", &macos_validation_profile(_cwd)]);
+        command.arg(program).args(args);
+        return Ok(command);
+    }
+    #[cfg(target_os = "linux")]
+    if kuzushi_sandbox::which("bwrap").is_some() {
+        return linux_validation_program_command(_cwd, program, args);
+    }
+    anyhow::bail!("repository execution refused: no isolating sandbox is available on this host")
 }
 
 #[cfg(target_os = "macos")]
@@ -195,6 +229,25 @@ fn sandbox_literal(path: &Path) -> String {
 
 #[cfg(target_os = "linux")]
 fn linux_validation_command(cwd: &Path, script: &str) -> Command {
+    let mut command = linux_validation_base_command(cwd);
+    command.args(["--", "/bin/sh", "-c", script]);
+    command
+}
+
+#[cfg(target_os = "linux")]
+fn linux_validation_program_command(
+    cwd: &Path,
+    program: &Path,
+    args: &[OsString],
+) -> Result<Command> {
+    let mut command = linux_validation_base_command(cwd);
+    let program = linux_sandbox_program_path(cwd, program)?;
+    command.arg("--").arg(program).args(args);
+    Ok(command)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_validation_base_command(cwd: &Path) -> Command {
     let mut command = Command::new("bwrap");
     command.args([
         "--die-with-parent",
@@ -218,8 +271,17 @@ fn linux_validation_command(cwd: &Path, script: &str) -> Command {
         .arg(cwd)
         .args(["/work", "--chdir", "/work"]);
     append_linux_child_environment(&mut command);
-    command.args(["--", "/bin/sh", "-c", script]);
     command
+}
+
+#[cfg(target_os = "linux")]
+fn linux_sandbox_program_path(cwd: &Path, program: &Path) -> Result<PathBuf> {
+    let cwd = std::fs::canonicalize(cwd)?;
+    let program = std::fs::canonicalize(program)?;
+    match program.strip_prefix(&cwd) {
+        Ok(relative) => Ok(Path::new("/work").join(relative)),
+        Err(_) => Ok(program),
+    }
 }
 
 #[cfg(target_os = "linux")]

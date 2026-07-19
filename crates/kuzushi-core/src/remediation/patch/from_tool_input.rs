@@ -31,17 +31,19 @@ impl PatchFindingInput {
 }
 
 pub(crate) fn patch_source_commit(input: &Value) -> Result<String> {
+    repository_source_commit(input).context("patch:finding source binding is invalid")
+}
+
+pub(crate) fn repository_source_commit(input: &Value) -> Result<String> {
     let value = input
         .get(PATCH_SOURCE_COMMIT_INPUT_KEY)
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .context(
-            "patch:finding is missing its bound source commit; prepare the operation through the module registry",
-        )?;
+        .context("repository execution is missing its bound source commit; prepare the operation through the module registry")?;
     anyhow::ensure!(
         matches!(value.len(), 40 | 64) && value.chars().all(|ch| ch.is_ascii_hexdigit()),
-        "patch:finding bound source commit must be a full Git object ID"
+        "repository execution bound source commit must be a full Git object ID"
     );
     Ok(value.to_ascii_lowercase())
 }

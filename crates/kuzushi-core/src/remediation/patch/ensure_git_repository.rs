@@ -41,13 +41,16 @@ pub(crate) fn ensure_git_repository(
     Ok(())
 }
 
-pub(crate) fn bind_patch_source_snapshot(repo_root: &Path, input: &mut Value) -> Result<()> {
+pub(crate) fn bind_repository_source_snapshot(
+    repo_root: &Path,
+    input: &mut Value,
+) -> Result<()> {
     let expected = input
         .get(PATCH_SOURCE_COMMIT_INPUT_KEY)
-        .map(|_| patch_source_commit(input))
+        .map(|_| repository_source_commit(input))
         .transpose()?;
     crate::workspace::initialize_workspace_state(repo_root)?;
-    let actual = clean_patch_source_commit(repo_root, unattended_patch_control())?;
+    let actual = clean_repository_source_commit(repo_root, unattended_patch_control())?;
     ensure_expected_source_commit(expected.as_deref(), &actual)?;
     input
         .as_object_mut()
@@ -64,27 +67,38 @@ pub(crate) fn verify_patch_source_snapshot(
     expected: &str,
     control: PatchCommandControl<'_>,
 ) -> Result<()> {
-    let actual = clean_patch_source_commit(repo_root, control)?;
+    verify_repository_source_snapshot(repo_root, expected, control)
+}
+
+pub(crate) fn verify_repository_source_snapshot(
+    repo_root: &Path,
+    expected: &str,
+    control: PatchCommandControl<'_>,
+) -> Result<()> {
+    let actual = clean_repository_source_commit(repo_root, control)?;
     ensure_expected_source_commit(Some(expected), &actual)
 }
 
 fn ensure_expected_source_commit(expected: Option<&str>, actual: &str) -> Result<()> {
     if expected.is_some_and(|expected| expected != actual) {
         anyhow::bail!(
-            "patch:finding source commit changed after preparation; prepare and authorize the operation again"
+            "repository source commit changed after preparation; prepare and authorize the operation again"
         );
     }
     Ok(())
 }
 
-fn clean_patch_source_commit(repo_root: &Path, control: PatchCommandControl<'_>) -> Result<String> {
+fn clean_repository_source_commit(
+    repo_root: &Path,
+    control: PatchCommandControl<'_>,
+) -> Result<String> {
     ensure_git_repository(repo_root, control)?;
     let before = resolve_head_commit(repo_root, control)?;
     ensure_clean_patch_source(repo_root, control)?;
     let after = resolve_head_commit(repo_root, control)?;
     anyhow::ensure!(
         before == after,
-        "patch:finding source commit changed while binding the operation; retry preparation"
+        "repository source commit changed while binding the operation; retry preparation"
     );
     Ok(after)
 }
@@ -146,7 +160,7 @@ fn ensure_clean_patch_source(repo_root: &Path, control: PatchCommandControl<'_>)
     );
     anyhow::ensure!(
         output.stdout.is_empty(),
-        "patch:finding requires a clean Git source snapshot; commit or stash tracked/staged changes and remove untracked source files, then retry"
+        "repository execution requires a clean Git source snapshot; commit or stash tracked/staged changes and remove untracked source files, then retry"
     );
     Ok(())
 }
@@ -505,7 +519,7 @@ mod tests {
 
     fn bind_source(repo: &Path) -> Result<Value> {
         let mut input = json!({"fingerprint": "finding-1"});
-        bind_patch_source_snapshot(repo, &mut input)?;
+        bind_repository_source_snapshot(repo, &mut input)?;
         Ok(input)
     }
 

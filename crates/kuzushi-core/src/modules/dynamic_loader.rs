@@ -1564,6 +1564,42 @@ mod dynamic_loader_tests {
     }
 
     #[test]
+    fn approved_worker_executes_its_snapshot_after_the_source_changes() {
+        let source = tempfile::tempdir().unwrap();
+        let entry = source.path().join("worker.mjs");
+        fs::write(&entry, "export const version = 1;\n").unwrap();
+        let specifier = entry.display().to_string();
+        let resolved = resolve_file_worker_bundle(&specifier).unwrap();
+        let approval = LockfileEntry {
+            module_id: crate::worker_protocol::ModuleId("snapshot-test".to_string()),
+            digest: resolved.digest.clone(),
+            version: "1.0.0".to_string(),
+            descriptor_hash: "sha256:test-descriptor".to_string(),
+            grant: Grant::default(),
+            signature_chain: Vec::new(),
+            revoked: false,
+        };
+        let (_snapshot, staged) = snapshot_worker_bundle(&resolved).unwrap();
+        let verified = verified_module_from_snapshot(&resolved, staged, &approval);
+
+        fs::write(&entry, "export const version = 2;\n").unwrap();
+
+        let changed = ensure_verified_bundle_is_current(&specifier, &verified)
+            .unwrap_err()
+            .to_string();
+        assert!(changed.contains("changed after approval"), "{changed}");
+        ensure_verified_snapshot_is_current(&verified).unwrap();
+        assert_eq!(
+            PathBuf::from(worker_import_path(&specifier, &verified)),
+            verified.module_root.join(&verified.entry)
+        );
+        assert_ne!(
+            PathBuf::from(worker_import_path(&specifier, &verified)),
+            entry
+        );
+    }
+
+    #[test]
     fn dynamic_host_candidates_cover_native_package_layout() {
         let package = tempfile::tempdir().unwrap();
         let native_dir = package.path().join("native").join("darwin-arm64");

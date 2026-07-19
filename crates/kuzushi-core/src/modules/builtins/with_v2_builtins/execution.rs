@@ -501,14 +501,17 @@ fn bind_repository_execution_input(
     if name == "patch:reverify" {
         return crate::remediation::patch::bind_patch_reverify_input(input, ctx);
     }
-    if !operation_delegates_patch_validation(name, &input) {
+    let patch_validation = operation_delegates_patch_validation(name, &input);
+    if !patch_validation && !operation_builds_codeql_database(name) {
         return Ok(input);
     }
     let workspace = ctx.workspace.context(
-        "repository patch execution requires an active workspace before binding its source and commands",
+        "repository execution requires an active workspace before binding its source",
     )?;
-    crate::remediation::patch::bind_patch_validation_plan(workspace.root(), &mut input)?;
-    crate::remediation::patch::bind_patch_source_snapshot(workspace.root(), &mut input)?;
+    if patch_validation {
+        crate::remediation::patch::bind_patch_validation_plan(workspace.root(), &mut input)?;
+    }
+    crate::remediation::patch::bind_repository_source_snapshot(workspace.root(), &mut input)?;
     Ok(input)
 }
 
@@ -517,18 +520,23 @@ fn verify_repository_execution_input(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<()> {
-    if !operation_delegates_patch_validation(name, input) {
+    if !operation_delegates_patch_validation(name, input) && !operation_builds_codeql_database(name)
+    {
         return Ok(());
     }
     let workspace = ctx
         .workspace
-        .context("repository patch execution requires an active workspace")?;
-    let source_commit = crate::remediation::patch::patch_source_commit(input)?;
-    crate::remediation::patch::verify_patch_source_snapshot(
+        .context("repository execution requires an active workspace")?;
+    let source_commit = crate::remediation::patch::repository_source_commit(input)?;
+    crate::remediation::patch::verify_repository_source_snapshot(
         workspace.root(),
         &source_commit,
         crate::remediation::patch::unattended_patch_control(),
     )
+}
+
+fn operation_builds_codeql_database(name: &str) -> bool {
+    matches!(name, "codeql:create-db" | "taint-iris-next:codeql-db")
 }
 
 fn operation_delegates_patch_validation(name: &str, input: &Value) -> bool {

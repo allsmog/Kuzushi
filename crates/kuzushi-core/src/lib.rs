@@ -25,6 +25,7 @@ pub(crate) mod artifact_contract;
 pub(crate) mod bounded_file;
 pub(crate) mod bounded_subprocess;
 pub(crate) mod codeql_build_mode;
+pub(crate) mod codeql_repository_execution;
 pub(crate) mod file_lock;
 pub(crate) mod fs_atomic;
 pub(crate) mod module_result;
