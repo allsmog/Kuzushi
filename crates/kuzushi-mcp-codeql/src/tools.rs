@@ -16,9 +16,9 @@
 //! 2. A bounded in-process result memo keyed on content-authenticated
 //!    database-tree revision,
 //!    dependency-free local selector revision, CodeQL executable revision,
-//!    and result limit. Pack selectors and imported local queries bypass the
-//!    memo because their complete dependency graph cannot be established
-//!    without executing CodeQL's resolver. Database identity uses the same
+//!    and result limit. Pack selectors bypass the memo. Imported local queries
+//!    are rejected because their complete dependency graph cannot be
+//!    authenticated without executing CodeQL's resolver. Database identity uses the same
 //!    bounded content tree as the promotion receipt; databases outside those
 //!    bounds fail closed before CodeQL executes. A memo hit skips CodeQL
 //!    execution only after the complete database tree has been authenticated,
@@ -26,9 +26,12 @@
 //!    Keyed on the canonical absolute DB path so a typo or symlink swap
 //!    doesn't poison the cache.
 //! On the first execution for a CodeQL bundle revision, the complete bundle is
-//! copied into an authenticated operator-owned snapshot. Analysis and prewarm
-//! execute only that snapshot; later calls reuse it while the source bundle's
-//! full identity remains part of per-request authentication.
+//! copied into an authenticated operator-owned snapshot. The authenticated
+//! database is copied into a separate receipt-bound snapshot. Analysis and
+//! prewarm execute only sandboxed snapshot paths; later calls reuse the
+//! one-entry bundle/database caches while full source identities remain part
+//! of per-request authentication. Abandoned server-session roots are reclaimed
+//! under a cross-process owner lock at startup.
 //!
 //! Optional: if `KUZUSHI_CODEQL_PREWARM` is set, on MCP server startup
 //! we spawn a background task that compiles the common CWE folders
@@ -40,14 +43,17 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_mcp_common::{
-    bounded_bundle_identity, copy_bounded_bundle, resolve_codeql_bundle_root, BundleIdentityConfig,
-    ReadRootCapability, Tool, ToolHandler, ToolRegistry,
+    bounded_bundle_identity, resolve_codeql_bundle_root, BundleIdentityConfig, ReadRootCapability,
+    Tool, ToolHandler, ToolRegistry,
 };
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
+
+mod snapshot_store;
+use snapshot_store::{CodeqlExecutionSnapshot, CodeqlSnapshotStore, DatabaseExecutionSnapshot};
 
 const DEFAULT_RESULT_LIMIT: usize = 50;
 const MAX_RESULT_LIMIT: usize = 500;
@@ -69,20 +75,42 @@ const CODEQL_BUNDLE_CONFIG: BundleIdentityConfig = BundleIdentityConfig::new(
 const CODEQL_ARTIFACT_ENV: &str = "KUZUSHI_MCP_CODEQL_ARTIFACT";
 const CODEQL_ARTIFACT_IDENTITY_ENV: &str = "KUZUSHI_MCP_CODEQL_ARTIFACT_IDENTITY";
 
-pub(crate) fn build_registry() -> Result<ToolRegistry> {
-    Ok(build_registry_with_capability(
-        ReadRootCapability::from_environment()?,
-    ))
+pub(crate) struct CodeqlRuntime {
+    snapshots: CodeqlSnapshotStore,
 }
 
-fn build_registry_with_capability(read_capability: ReadRootCapability) -> ToolRegistry {
+impl CodeqlRuntime {
+    fn new() -> Result<Arc<Self>> {
+        Ok(Arc::new(Self {
+            snapshots: CodeqlSnapshotStore::new()?,
+        }))
+    }
+
+    pub(crate) fn cancel(&self) {
+        self.snapshots.cancel_all();
+    }
+}
+
+pub(crate) fn build_runtime_and_registry() -> Result<(Arc<CodeqlRuntime>, ToolRegistry)> {
+    let runtime = CodeqlRuntime::new()?;
+    let registry = build_registry_with_capability(
+        ReadRootCapability::from_environment()?,
+        Arc::clone(&runtime),
+    );
+    Ok((runtime, registry))
+}
+
+fn build_registry_with_capability(
+    read_capability: ReadRootCapability,
+    runtime: Arc<CodeqlRuntime>,
+) -> ToolRegistry {
     ToolRegistry::new()
         .register(
             flows_for_cwe_descriptor(),
-            FlowsForCweHandler(read_capability.clone()),
+            FlowsForCweHandler(read_capability.clone(), Arc::clone(&runtime)),
         )
         .register(db_info_descriptor(), DbInfoHandler(read_capability.clone()))
-        .register(query_descriptor(), QueryHandler(read_capability))
+        .register(query_descriptor(), QueryHandler(read_capability, runtime))
 }
 
 fn flows_for_cwe_descriptor() -> Tool {
@@ -119,7 +147,7 @@ fn db_info_descriptor() -> Tool {
 fn query_descriptor() -> Tool {
     Tool {
         name: "codeql:query".to_string(),
-        description: "Run an arbitrary CodeQL query selector (e.g. `codeql/cpp-queries:Security/CWE/CWE-089/SqlTainted.ql`) against the DB and return SARIF results parsed into the same {file,line,code} shape as flows_for_cwe. An eligible dependency-free local query may use the in-process result memo; a memo hit skips CodeQL execution but still performs full database content authentication, so authentication latency remains proportional to database size. Pack selectors and imported local queries bypass the result memo.".to_string(),
+        description: "Run an arbitrary CodeQL query selector (e.g. `codeql/cpp-queries:Security/CWE/CWE-089/SqlTainted.ql`) against the DB and return SARIF results parsed into the same {file,line,code} shape as flows_for_cwe. An eligible dependency-free local query may use the in-process result memo; a memo hit skips CodeQL execution but still performs full database content authentication, so authentication latency remains proportional to database size. Pack selectors bypass the result memo. Local queries with imports are rejected because their dependency closure cannot be authenticated.".to_string(),
         input_schema: json!({
             "type": "object",
             "required": ["db", "query"],
@@ -132,9 +160,9 @@ fn query_descriptor() -> Tool {
     }
 }
 
-struct FlowsForCweHandler(ReadRootCapability);
+struct FlowsForCweHandler(ReadRootCapability, Arc<CodeqlRuntime>);
 struct DbInfoHandler(ReadRootCapability);
-struct QueryHandler(ReadRootCapability);
+struct QueryHandler(ReadRootCapability, Arc<CodeqlRuntime>);
 
 #[async_trait]
 impl ToolHandler for FlowsForCweHandler {
@@ -151,7 +179,8 @@ impl ToolHandler for FlowsForCweHandler {
         let folder = cwe_folder(&cwe).context("invalid CWE identifier")?;
         let selector = format!("{pack}:Security/CWE/{folder}");
 
-        let flows = run_codeql_and_parse(&db, &selector, limit).await?;
+        let flows =
+            run_codeql_and_parse_with_runtime(&self.1, &self.0, &db, &selector, limit).await?;
         Ok(json!({
             "db": db.display().to_string(),
             "cwe": cwe,
@@ -183,7 +212,7 @@ impl ToolHandler for QueryHandler {
         let db = authorized_database(&self.0, &args)?;
         let query = authorized_query_selector(&self.0, &args)?;
         let limit = result_limit(&args);
-        let flows = run_codeql_and_parse(&db, &query, limit).await?;
+        let flows = run_codeql_and_parse_with_runtime(&self.1, &self.0, &db, &query, limit).await?;
         Ok(json!({
             "db": db.display().to_string(),
             "query": query,
@@ -415,79 +444,6 @@ fn codeql_revision(codeql: &Path) -> Result<String> {
     bounded_bundle_identity(&bundle, CODEQL_BUNDLE_CONFIG)
 }
 
-#[derive(Clone, PartialEq, Eq)]
-struct CodeqlSnapshotKey {
-    launcher: PathBuf,
-    revision: String,
-}
-
-#[derive(Clone)]
-struct CodeqlExecutionSnapshot {
-    launcher: PathBuf,
-    _directory: Arc<tempfile::TempDir>,
-}
-
-struct CachedCodeqlSnapshot {
-    key: CodeqlSnapshotKey,
-    execution: CodeqlExecutionSnapshot,
-}
-
-fn codeql_snapshot_cache() -> &'static Mutex<Option<CachedCodeqlSnapshot>> {
-    static CACHE: OnceLock<Mutex<Option<CachedCodeqlSnapshot>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(None))
-}
-
-fn authenticated_codeql_snapshot(
-    launcher: &Path,
-    expected_revision: &str,
-) -> Result<CodeqlExecutionSnapshot> {
-    let key = CodeqlSnapshotKey {
-        launcher: launcher.to_path_buf(),
-        revision: expected_revision.to_string(),
-    };
-    let mut cache = codeql_snapshot_cache()
-        .lock()
-        .map_err(|_| anyhow::anyhow!("CodeQL execution snapshot cache is unavailable"))?;
-    if let Some(cached) = cache.as_ref().filter(|cached| cached.key == key) {
-        return Ok(cached.execution.clone());
-    }
-    let execution = create_codeql_execution_snapshot(launcher, expected_revision)?;
-    *cache = Some(CachedCodeqlSnapshot {
-        key,
-        execution: execution.clone(),
-    });
-    Ok(execution)
-}
-
-fn create_codeql_execution_snapshot(
-    launcher: &Path,
-    expected_revision: &str,
-) -> Result<CodeqlExecutionSnapshot> {
-    let bundle = resolve_codeql_bundle_root(launcher)?;
-    let relative_launcher = launcher
-        .strip_prefix(&bundle)
-        .context("CodeQL launcher is outside its authenticated bundle")?;
-    let directory = Arc::new(tempfile::tempdir()?);
-    let actual = copy_bounded_bundle(&bundle, directory.path(), CODEQL_BUNDLE_CONFIG)?;
-    anyhow::ensure!(
-        actual == expected_revision,
-        "CodeQL executable bundle changed after authentication; retry the operation"
-    );
-    let launcher = directory.path().join(relative_launcher);
-    anyhow::ensure!(launcher.is_file(), "CodeQL snapshot launcher is missing");
-    Ok(CodeqlExecutionSnapshot {
-        launcher,
-        _directory: directory,
-    })
-}
-
-fn snapshot_current_codeql(launcher: &Path) -> Result<CodeqlExecutionSnapshot> {
-    let launcher = std::fs::canonicalize(launcher)
-        .with_context(|| format!("could not canonicalize {}", launcher.display()))?;
-    let revision = codeql_revision(&launcher)?;
-    authenticated_codeql_snapshot(&launcher, &revision)
-}
-
 fn serialized_flow_bytes(flows: &[Value]) -> Option<usize> {
     serde_json::to_vec(flows).ok().map(|encoded| encoded.len())
 }
@@ -507,7 +463,51 @@ pub(crate) fn codeql_cache_dir() -> Option<PathBuf> {
     None
 }
 
-async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result<Vec<Value>> {
+async fn run_codeql_and_parse_with_runtime(
+    runtime: &CodeqlRuntime,
+    read_capability: &ReadRootCapability,
+    db: &Path,
+    selector: &str,
+    limit: usize,
+) -> Result<Vec<Value>> {
+    let plan = prepare_analysis(runtime, read_capability, db, selector, limit).await?;
+    let prepared = match plan {
+        AnalysisPlan::Cached(flows) => return Ok(flows),
+        AnalysisPlan::Execute(prepared) => prepared,
+    };
+    let flows = execute_prepared_analysis(&prepared, limit).await?;
+    authenticate_and_store_current_result(
+        db,
+        selector,
+        limit,
+        &prepared.codeql,
+        prepared.identity,
+        prepared.key,
+        &flows,
+    )?;
+    Ok(flows)
+}
+
+enum AnalysisPlan {
+    Cached(Vec<Value>),
+    Execute(PreparedAnalysis),
+}
+
+struct PreparedAnalysis {
+    codeql: PathBuf,
+    identity: AnalysisIdentity,
+    key: Option<MemoKey>,
+    execution: CodeqlExecutionSnapshot,
+    inputs: ExecutionInputs,
+}
+
+async fn prepare_analysis(
+    runtime: &CodeqlRuntime,
+    read_capability: &ReadRootCapability,
+    db: &Path,
+    selector: &str,
+    limit: usize,
+) -> Result<AnalysisPlan> {
     let configured = locate_codeql_binary()?.context("could not find the codeql binary")?;
     let codeql = std::fs::canonicalize(&configured)
         .with_context(|| format!("could not canonicalize {}", configured.display()))?;
@@ -515,60 +515,241 @@ async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result
         .context("could not authenticate CodeQL database and executable before analysis")?;
     let key = memo_key_from_identity(&identity, selector, limit);
     if let Some(cached) = key.as_ref().and_then(lookup_memo) {
-        return Ok(cached);
+        return Ok(AnalysisPlan::Cached(cached));
     }
-    let execution = authenticated_codeql_snapshot(&identity.codeql, &identity.codeql_revision)
+    let execution = runtime
+        .snapshots
+        .authenticated(&identity.codeql, &identity.codeql_revision)
+        .await
         .context("could not prepare authenticated CodeQL execution snapshot")?;
-    let sarif = tempfile::NamedTempFile::new()?;
-    let log_dir = tempfile::tempdir()?;
-    let cache_dir = codeql_cache_dir();
-    let mut command = codeql_analyze_command(
-        &execution.launcher,
+    let inputs = snapshot_execution_inputs(
+        &runtime.snapshots,
+        read_capability,
         db,
         selector,
-        sarif.path(),
-        log_dir.path(),
-        cache_dir.as_deref(),
+        &identity.db_revision,
+        key.as_ref().map(|key| key.selector_revision.as_str()),
+    )
+    .await?;
+    Ok(AnalysisPlan::Execute(PreparedAnalysis {
+        codeql,
+        identity,
+        key,
+        execution,
+        inputs,
+    }))
+}
+
+async fn execute_prepared_analysis(
+    prepared: &PreparedAnalysis,
+    limit: usize,
+) -> Result<Vec<Value>> {
+    let run = prepared.inputs.db.temporary_directory("run-")?;
+    let cache = effective_codeql_cache_dir()?;
+    let sarif = run.path().join("result.sarif");
+    let logs = run.path().join("logs");
+    std::fs::create_dir(&logs)?;
+    let args = codeql_analyze_args(
+        &prepared.inputs.db.directory,
+        &prepared.inputs.selector,
+        &sarif,
+        &logs,
+        Some(&cache),
     );
-    command
+    let access = analysis_sandbox_access(&prepared.execution, &prepared.inputs, &run, &cache)?;
+    let mut sandboxed = kuzushi_mcp_common::read_only_sandbox::restricted_command(
+        &prepared.execution.launcher,
+        args,
+        access,
+    )
+    .await
+    .context("CodeQL analysis requires an available read-only sandbox")?;
+    silence_sandboxed_command(&mut sandboxed)?;
+    let (mut child, _scratch) = sandboxed.spawn("CodeQL analysis")?;
+    let status = wait_for_analysis(&mut child, &prepared.execution, &prepared.inputs.db).await?;
+    anyhow::ensure!(
+        status.success(),
+        "codeql database analyze exited with {status}"
+    );
+    Ok(parse_sarif(&read_generated_sarif(&sarif)?, limit))
+}
+
+fn silence_sandboxed_command(
+    sandboxed: &mut kuzushi_mcp_common::read_only_sandbox::SandboxedCommand,
+) -> Result<()> {
+    sandboxed
+        .command_mut()?
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
-    let status = command
-        .status()
-        .with_context(|| format!("could not invoke {}", codeql.display()))?;
-    if !status.success() {
-        anyhow::bail!("codeql database analyze exited with {status}");
-    }
-    let raw = read_generated_sarif(sarif.path())?;
-    let flows = parse_sarif(&raw, limit);
-    authenticate_and_store_current_result(db, selector, limit, &codeql, identity, key, &flows)?;
-    Ok(flows)
+    Ok(())
 }
 
-fn codeql_analyze_command(
-    codeql: &Path,
+async fn wait_for_analysis(
+    child: &mut tokio::process::Child,
+    execution: &CodeqlExecutionSnapshot,
+    database: &DatabaseExecutionSnapshot,
+) -> Result<std::process::ExitStatus> {
+    let status = tokio::select! {
+        result = child.wait() => result?,
+        () = execution.cancelled() => {
+            kuzushi_mcp_common::read_only_sandbox::terminate_child_group(child).await;
+            anyhow::bail!("CodeQL execution snapshot became stale during analysis");
+        }
+        () = database.cancelled() => {
+            kuzushi_mcp_common::read_only_sandbox::terminate_child_group(child).await;
+            anyhow::bail!("CodeQL database snapshot became stale during analysis");
+        }
+    };
+    Ok(status)
+}
+
+#[cfg(test)]
+async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result<Vec<Value>> {
+    let runtime = CodeqlRuntime::new()?;
+    let capability = ReadRootCapability::new([db.parent().unwrap_or(db).to_path_buf()])?;
+    run_codeql_and_parse_with_runtime(&runtime, &capability, db, selector, limit).await
+}
+
+fn codeql_analyze_args(
     db: &Path,
     selector: &str,
     sarif: &Path,
     log_dir: &Path,
     cache_dir: Option<&Path>,
-) -> Command {
-    let mut command = Command::new(codeql);
-    command.args(["database", "analyze", "--format=sarif-latest", "--rerun"]);
-    command
-        .arg("--max-disk-cache=0")
-        .arg("--expect-discarded-cache")
-        .arg(format!("--logdir={}", log_dir.display()))
-        .arg("--output")
-        .arg(sarif)
-        .arg("--ram=4096")
-        .arg("--threads=4");
+) -> Vec<OsString> {
+    let mut args = vec![
+        "database".into(),
+        "analyze".into(),
+        "--format=sarif-latest".into(),
+        "--rerun".into(),
+        "--max-disk-cache=0".into(),
+        "--expect-discarded-cache".into(),
+        format!("--logdir={}", log_dir.display()).into(),
+        "--output".into(),
+        sarif.as_os_str().to_owned(),
+        "--ram=4096".into(),
+        "--threads=4".into(),
+    ];
     if let Some(cache) = cache_dir {
-        command.arg(format!("--common-caches={}", cache.display()));
+        args.push(format!("--common-caches={}", cache.display()).into());
     }
-    command.arg(db).arg(selector);
-    command
+    args.push(db.as_os_str().to_owned());
+    args.push(selector.into());
+    args
+}
+
+struct ExecutionInputs {
+    db: DatabaseExecutionSnapshot,
+    query: Option<tempfile::TempDir>,
+    selector: String,
+}
+
+async fn snapshot_execution_inputs(
+    snapshots: &CodeqlSnapshotStore,
+    read_capability: &ReadRootCapability,
+    db: &Path,
+    selector: &str,
+    expected_db_revision: &str,
+    expected_selector_revision: Option<&str>,
+) -> Result<ExecutionInputs> {
+    let database = snapshots.database(db, expected_db_revision).await?;
+    let read_capability = read_capability.clone();
+    let selector = selector.to_string();
+    let expected_selector_revision = expected_selector_revision.map(str::to_string);
+    let query_directory = Path::new(&selector)
+        .is_absolute()
+        .then(|| database.temporary_directory("query-"))
+        .transpose()?;
+    let (query, selector) = tokio::task::spawn_blocking(move || {
+        snapshot_local_query(
+            &read_capability,
+            selector,
+            expected_selector_revision,
+            query_directory,
+        )
+    })
+    .await
+    .context("CodeQL input snapshot worker stopped")??;
+    Ok(ExecutionInputs {
+        db: database,
+        query,
+        selector,
+    })
+}
+
+fn snapshot_local_query(
+    read_capability: &ReadRootCapability,
+    selector: String,
+    expected_revision: Option<String>,
+    query: Option<tempfile::TempDir>,
+) -> Result<(Option<tempfile::TempDir>, String)> {
+    let query_path = Path::new(&selector);
+    if !query_path.is_absolute() {
+        return Ok((None, selector));
+    }
+    let file = query_path
+        .file_name()
+        .context("local query has no file name")?;
+    let expected = expected_revision
+        .context("local query has unresolved imports and cannot be snapshotted safely")?;
+    let bytes = read_capability
+        .open_strict(query_path, MAX_LOCAL_QUERY_BYTES)?
+        .read_bytes()?;
+    let actual = kuzushi_mcp_common::cache::sha256_hex_bytes(&bytes);
+    anyhow::ensure!(
+        actual == expected,
+        "local CodeQL query changed while creating its execution snapshot"
+    );
+    let query = query.context("local query snapshot directory is unavailable")?;
+    std::fs::write(query.path().join(file), bytes)?;
+    let selector = query.path().join(file).display().to_string();
+    Ok((Some(query), selector))
+}
+
+fn effective_codeql_cache_dir() -> Result<PathBuf> {
+    let cache = codeql_cache_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join(".codeql")))
+        .context("could not resolve the CodeQL common cache directory")?;
+    std::fs::create_dir_all(&cache)?;
+    std::fs::canonicalize(&cache)
+        .with_context(|| format!("could not resolve CodeQL cache {}", cache.display()))
+}
+
+fn analysis_sandbox_access(
+    execution: &CodeqlExecutionSnapshot,
+    inputs: &ExecutionInputs,
+    run: &tempfile::TempDir,
+    cache: &Path,
+) -> Result<kuzushi_mcp_common::read_only_sandbox::RestrictedSandboxAccess> {
+    let tool = authorize_directory(&execution.bundle_root)?;
+    let database = authorize_directory(&inputs.db.directory)?;
+    let read_only = inputs
+        .query
+        .as_ref()
+        .map(|query| authorize_directory(query.path()))
+        .transpose()?
+        .into_iter()
+        .collect();
+    Ok(
+        kuzushi_mcp_common::read_only_sandbox::RestrictedSandboxAccess {
+            working_directory: database,
+            tool_root: tool,
+            read_only,
+            read_write: vec![
+                authorize_directory(run.path())?,
+                authorize_directory(cache)?,
+            ],
+            environment: vec![(
+                "CODEQL_DIST".into(),
+                execution.bundle_root.as_os_str().to_owned(),
+            )],
+        },
+    )
+}
+
+fn authorize_directory(path: &Path) -> Result<kuzushi_mcp_common::AuthorizedDirectory> {
+    ReadRootCapability::new([path.to_path_buf()])?.authorize_directory(path)
 }
 
 fn authenticate_and_store_current_result(
@@ -710,8 +891,8 @@ fn sarif_step(location: &Value) -> Option<Value> {
 /// instead of paying a 60s+ cold compile. Runs as a detached background
 /// task; failures are logged to stderr and ignored — pre-warm is an
 /// optimisation, not a correctness gate.
-pub(crate) async fn spawn_prewarm() {
-    let Some(codeql) = codeql_snapshot_for_prewarm() else {
+pub(crate) async fn spawn_prewarm(runtime: &CodeqlRuntime) {
+    let Some(codeql) = codeql_snapshot_for_prewarm(runtime).await else {
         return;
     };
     let selectors = prewarm_selectors();
@@ -720,15 +901,22 @@ pub(crate) async fn spawn_prewarm() {
         selectors.len()
     );
     for selector in selectors {
-        log_prewarm_outcome(&selector, run_prewarm_compile(&codeql.launcher, &selector));
+        if codeql.is_cancelled() {
+            eprintln!("[kuzushi-mcp-codeql] prewarm: snapshot replaced; stopping stale work");
+            return;
+        }
+        log_prewarm_outcome(&selector, run_prewarm_compile(&codeql, &selector).await);
         tokio::task::yield_now().await;
     }
     eprintln!("[kuzushi-mcp-codeql] prewarm: complete");
 }
 
-fn codeql_snapshot_for_prewarm() -> Option<CodeqlExecutionSnapshot> {
+async fn codeql_snapshot_for_prewarm(runtime: &CodeqlRuntime) -> Option<CodeqlExecutionSnapshot> {
     match locate_codeql_binary() {
-        Ok(Some(codeql)) => snapshot_current_codeql(&codeql)
+        Ok(Some(codeql)) => runtime
+            .snapshots
+            .current(&codeql)
+            .await
             .map_err(|error| eprintln!("[kuzushi-mcp-codeql] prewarm skipped: {error}"))
             .ok(),
         Ok(None) => {
@@ -763,20 +951,46 @@ fn prewarm_selectors() -> Vec<String> {
         .collect()
 }
 
-fn run_prewarm_compile(codeql: &Path, selector: &str) -> std::io::Result<std::process::ExitStatus> {
-    let mut command = Command::new(codeql);
-    command.arg("query").arg("compile").arg(selector);
-    if let Some(cache) = codeql_cache_dir() {
-        command.arg(format!("--common-caches={}", cache.display()));
+async fn run_prewarm_compile(
+    execution: &CodeqlExecutionSnapshot,
+    selector: &str,
+) -> Result<std::process::ExitStatus> {
+    let cache = effective_codeql_cache_dir()?;
+    let args = vec![
+        OsString::from("query"),
+        OsString::from("compile"),
+        selector.into(),
+        format!("--common-caches={}", cache.display()).into(),
+    ];
+    let access = kuzushi_mcp_common::read_only_sandbox::RestrictedSandboxAccess {
+        working_directory: authorize_directory(&execution.bundle_root)?,
+        tool_root: authorize_directory(&execution.bundle_root)?,
+        read_only: Vec::new(),
+        read_write: vec![authorize_directory(&cache)?],
+        environment: vec![(
+            "CODEQL_DIST".into(),
+            execution.bundle_root.as_os_str().to_owned(),
+        )],
+    };
+    let mut sandboxed = kuzushi_mcp_common::read_only_sandbox::restricted_command(
+        &execution.launcher,
+        args,
+        access,
+    )
+    .await
+    .context("CodeQL prewarm requires an available read-only sandbox")?;
+    silence_sandboxed_command(&mut sandboxed)?;
+    let (mut child, _scratch) = sandboxed.spawn("CodeQL prewarm")?;
+    tokio::select! {
+        result = child.wait() => Ok(result?),
+        () = execution.cancelled() => {
+            kuzushi_mcp_common::read_only_sandbox::terminate_child_group(&mut child).await;
+            anyhow::bail!("CodeQL prewarm snapshot became stale")
+        }
     }
-    command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
 }
 
-fn log_prewarm_outcome(selector: &str, outcome: std::io::Result<std::process::ExitStatus>) {
+fn log_prewarm_outcome(selector: &str, outcome: Result<std::process::ExitStatus>) {
     match outcome {
         Ok(status) if status.success() => {
             eprintln!("[kuzushi-mcp-codeql] prewarm ok: {selector}");
@@ -922,6 +1136,13 @@ fn authorized_query_selector(read_capability: &ReadRootCapability, args: &Value)
         "local CodeQL query must be an existing .ql file: {}",
         query.display()
     );
+    let source = read_capability
+        .open_strict(&query, MAX_LOCAL_QUERY_BYTES)?
+        .read_utf8()?;
+    anyhow::ensure!(
+        !local_query_has_imports(&source),
+        "local CodeQL queries with imports are not supported because their dependency closure cannot be authenticated"
+    );
     Ok(query.display().to_string())
 }
 
@@ -963,28 +1184,30 @@ fn result_limit(args: &Value) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::io::Write;
     use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 
-    #[cfg(unix)]
-    const FAKE_CODEQL_COUNTER_ENV: &str = "KUZUSHI_TEST_CODEQL_COUNTER";
     const FAKE_CODEQL_SCRIPT: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
-counter="${KUZUSHI_TEST_CODEQL_COUNTER:-$(dirname "$(dirname "$(dirname "$0")")")/codeql.invocations}"
+out=""
+cache=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    out="$1"
+  elif [ "${1#--common-caches=}" != "$1" ]; then
+    cache="${1#--common-caches=}"
+  fi
+  shift || true
+done
+counter="${cache:-/tmp}/codeql.invocations"
 count=0
 if [ -f "$counter" ]; then
   count="$(cat "$counter")"
 fi
 echo "$((count + 1))" > "$counter"
-out=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output" ]; then
-    shift
-    out="$1"
-  fi
-  shift || true
-done
 if [ -n "$out" ]; then
   cat > "$out" <<'JSON'
 {"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleId":"cpp/sql-injection","message":{"text":"sql injection"},"codeFlows":[{"threadFlows":[{"locations":[{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/api.c"},"region":{"startLine":7,"snippet":{"text":"input = arg;"}}}}},{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/db.c"},"region":{"startLine":11,"snippet":{"text":"query(input);"}}}}}]}]}]}]}]}
@@ -995,6 +1218,12 @@ fi
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn restore_env(name: &str, previous: Option<std::ffi::OsString>) {
@@ -1039,31 +1268,34 @@ fi
         codeql_bundle(codeql)
             .parent()
             .unwrap()
-            .join("codeql.invocations")
+            .join("test-cache/codeql.invocations")
     }
 
     #[cfg(unix)]
     struct FakeCodeqlEnvironment {
         previous_binary: Option<std::ffi::OsString>,
-        previous_counter: Option<std::ffi::OsString>,
+        previous_cache: Option<std::ffi::OsString>,
     }
 
     #[cfg(unix)]
     fn install_fake_codeql(codeql: &Path) -> FakeCodeqlEnvironment {
         let previous_binary = std::env::var_os("KUZUSHI_CODEQL_BIN");
-        let previous_counter = std::env::var_os(FAKE_CODEQL_COUNTER_ENV);
+        let previous_cache = std::env::var_os("KUZUSHI_CODEQL_CACHE_DIR");
+        let counter = fake_codeql_counter(codeql);
+        let cache = counter.parent().unwrap();
+        std::fs::create_dir_all(cache).unwrap();
         std::env::set_var("KUZUSHI_CODEQL_BIN", codeql);
-        std::env::set_var(FAKE_CODEQL_COUNTER_ENV, fake_codeql_counter(codeql));
+        std::env::set_var("KUZUSHI_CODEQL_CACHE_DIR", cache);
         FakeCodeqlEnvironment {
             previous_binary,
-            previous_counter,
+            previous_cache,
         }
     }
 
     #[cfg(unix)]
     fn restore_fake_codeql(environment: FakeCodeqlEnvironment) {
         restore_env("KUZUSHI_CODEQL_BIN", environment.previous_binary);
-        restore_env(FAKE_CODEQL_COUNTER_ENV, environment.previous_counter);
+        restore_env("KUZUSHI_CODEQL_CACHE_DIR", environment.previous_cache);
     }
 
     fn codeql_db(temp: &tempfile::TempDir) -> PathBuf {
@@ -1109,7 +1341,7 @@ fi
         assert!(query.contains("memo hit skips CodeQL execution"));
         assert!(query.contains("full database content authentication"));
         assert!(query.contains("proportional to database size"));
-        assert!(query.contains("imported local queries bypass the result memo"));
+        assert!(query.contains("Local queries with imports are rejected"));
     }
 
     #[test]
@@ -1157,6 +1389,7 @@ fi
         assert!(query_pack_for_language("rust").is_none());
     }
 
+    #[cfg(unix)]
     #[test]
     fn memo_key_changes_with_database_and_local_query_revisions() {
         let temp = tempdir().unwrap();
@@ -1288,9 +1521,9 @@ fi
         );
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(unix)]
-    fn execution_snapshot_retains_authenticated_launcher_and_runtime_bytes() {
+    async fn execution_snapshot_retains_authenticated_launcher_and_runtime_bytes() {
         let temp = tempdir().unwrap();
         let db = codeql_db(&temp);
         let codeql = fake_codeql(&temp);
@@ -1299,8 +1532,11 @@ fi
         std::fs::write(&runtime, b"trusted runtime").unwrap();
         let identity = analysis_identity(&db, &codeql).unwrap();
 
-        let execution =
-            authenticated_codeql_snapshot(&identity.codeql, &identity.codeql_revision).unwrap();
+        let store = CodeqlSnapshotStore::new().unwrap();
+        let execution = store
+            .authenticated(&identity.codeql, &identity.codeql_revision)
+            .await
+            .unwrap();
         std::fs::write(&codeql, b"malicious launcher").unwrap();
         std::fs::write(&runtime, b"malicious runtime").unwrap();
 
@@ -1356,10 +1592,8 @@ fi
         let db = temp.path().join("database");
         let sarif = temp.path().join("result.sarif");
         let logs = temp.path().join("analysis-logs");
-        let command =
-            codeql_analyze_command(Path::new("codeql"), &db, "pack:query", &sarif, &logs, None);
-        let args = command
-            .get_args()
+        let args = codeql_analyze_args(&db, "pack:query", &sarif, &logs, None)
+            .iter()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
 
@@ -1426,47 +1660,28 @@ fi
         }
     }
 
-    #[tokio::test]
-    #[cfg(unix)]
-    async fn unresolved_selector_dependencies_are_executed_on_every_call() {
-        let _guard = env_lock().lock().unwrap();
+    #[test]
+    fn imported_local_queries_are_rejected_before_execution() {
         let temp = tempdir().unwrap();
-        let fake = fake_codeql(&temp);
-        let db = codeql_db(&temp);
         let query = temp.path().join("queries/local.ql");
-        let helper = temp.path().join("queries/helper.qll");
         std::fs::create_dir_all(query.parent().unwrap()).unwrap();
         std::fs::write(&query, "import helper\nselect 1").unwrap();
-        std::fs::write(&helper, "predicate helper() { any() }").unwrap();
-        let environment = install_fake_codeql(&fake);
+        let error = authorized_query_selector(
+            &capability(&temp),
+            &json!({"query": query.display().to_string()}),
+        )
+        .unwrap_err();
 
-        run_codeql_and_parse(&db, "codeql/cpp-queries:Security/CWE/CWE-089", 10)
-            .await
-            .unwrap();
-        run_codeql_and_parse(&db, "codeql/cpp-queries:Security/CWE/CWE-089", 10)
-            .await
-            .unwrap();
-        run_codeql_and_parse(&db, &query.display().to_string(), 10)
-            .await
-            .unwrap();
-        std::fs::OpenOptions::new()
-            .append(true)
-            .open(&helper)
-            .unwrap()
-            .write_all(b"\n// dependency revision two")
-            .unwrap();
-        run_codeql_and_parse(&db, &query.display().to_string(), 10)
-            .await
-            .unwrap();
-
-        restore_fake_codeql(environment);
-        assert_eq!(invocation_count(&fake), 4);
+        assert!(error.to_string().contains("dependency closure"));
     }
 
     #[tokio::test]
     #[cfg(unix)]
     async fn authenticated_local_query_returns_from_memo_on_second_call() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = lock_env();
+        if !kuzushi_mcp_common::read_only_sandbox::sandbox_available().await {
+            return;
+        }
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);
         let db = codeql_db(&temp);
@@ -1487,7 +1702,10 @@ fi
     #[tokio::test]
     #[cfg(unix)]
     async fn memo_lookup_reauthenticates_same_metadata_database_content() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = lock_env();
+        if !kuzushi_mcp_common::read_only_sandbox::sandbox_available().await {
+            return;
+        }
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);
         let db = codeql_db(&temp);
@@ -1514,13 +1732,16 @@ fi
     #[tokio::test]
     #[cfg(unix)]
     async fn query_handler_invokes_codeql_and_parses_sarif_flows() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = lock_env();
+        if !kuzushi_mcp_common::read_only_sandbox::sandbox_available().await {
+            return;
+        }
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);
         let db = codeql_db(&temp);
         let environment = install_fake_codeql(&fake);
 
-        let response = QueryHandler(capability(&temp))
+        let response = QueryHandler(capability(&temp), CodeqlRuntime::new().unwrap())
             .call(json!({
                 "db": db.display().to_string(),
                 "query": "codeql/cpp-queries:Security/CWE/CWE-089",
@@ -1539,13 +1760,16 @@ fi
     #[tokio::test]
     #[cfg(unix)]
     async fn flows_for_cwe_handler_infers_language_and_selector() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = lock_env();
+        if !kuzushi_mcp_common::read_only_sandbox::sandbox_available().await {
+            return;
+        }
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);
         let db = codeql_db(&temp);
         let environment = install_fake_codeql(&fake);
 
-        let response = FlowsForCweHandler(capability(&temp))
+        let response = FlowsForCweHandler(capability(&temp), CodeqlRuntime::new().unwrap())
             .call(json!({"db": db.display().to_string(), "cwe": "89", "limit": 5}))
             .await
             .unwrap();
@@ -1689,13 +1913,16 @@ fi
     #[tokio::test]
     #[cfg(unix)]
     async fn prewarm_uses_configured_codeql_binary_without_requiring_a_db() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = lock_env();
+        if !kuzushi_mcp_common::read_only_sandbox::sandbox_available().await {
+            return;
+        }
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);
         let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
         std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
 
-        spawn_prewarm().await;
+        spawn_prewarm(&CodeqlRuntime::new().unwrap()).await;
 
         restore_env("KUZUSHI_CODEQL_BIN", previous);
     }
@@ -1703,7 +1930,7 @@ fi
     #[test]
     #[cfg(unix)]
     fn locate_codeql_binary_uses_valid_override() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = lock_env();
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);
         let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
@@ -1718,7 +1945,7 @@ fi
     #[test]
     #[cfg(unix)]
     fn locate_codeql_binary_rejects_invalid_override_without_path_fallback() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = lock_env();
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);
         let previous_bin = std::env::var_os("KUZUSHI_CODEQL_BIN");
@@ -1736,7 +1963,7 @@ fi
     #[test]
     #[cfg(unix)]
     fn locate_codeql_binary_falls_back_to_path_when_override_unset() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = lock_env();
         let temp = tempdir().unwrap();
         let fake = fake_codeql(&temp);
         let previous_bin = std::env::var_os("KUZUSHI_CODEQL_BIN");

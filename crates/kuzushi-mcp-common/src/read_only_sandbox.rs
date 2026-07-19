@@ -6,6 +6,7 @@ mod tests;
 
 use anyhow::{Context, Result};
 use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
@@ -22,19 +23,19 @@ pub enum ReadOnlySandboxBackend {
 
 pub struct SandboxedCommand {
     pub(super) command: Command,
-    pub(super) input: crate::AuthorizedDirectory,
+    pub(super) protected: Vec<crate::AuthorizedDirectory>,
     pub(super) scratch: TempDir,
     pub(super) _retained_handles: Vec<File>,
 }
 
 impl SandboxedCommand {
     pub fn command_mut(&mut self) -> Result<&mut Command> {
-        self.input.verify_unchanged()?;
+        verify_directories(&self.protected)?;
         Ok(&mut self.command)
     }
 
     pub fn spawn(mut self, label: &str) -> Result<(Child, TempDir)> {
-        self.input.verify_unchanged()?;
+        verify_directories(&self.protected)?;
         configure_long_lived_group(&mut self.command);
         let child = self
             .command
@@ -44,8 +45,35 @@ impl SandboxedCommand {
     }
 }
 
+/// Explicit filesystem authority for a sandboxed tool invocation.
+///
+/// All read-only and read-write roots retain no-follow directory handles until
+/// after the child is spawned. The executable bundle is deliberately separate
+/// from the working input because tools such as CodeQL load siblings of their
+/// launcher at runtime.
+pub struct RestrictedSandboxAccess {
+    pub working_directory: crate::AuthorizedDirectory,
+    pub tool_root: crate::AuthorizedDirectory,
+    pub read_only: Vec<crate::AuthorizedDirectory>,
+    pub read_write: Vec<crate::AuthorizedDirectory>,
+    /// A bounded, deny-by-default set of adapter-approved child variables.
+    pub environment: Vec<(OsString, OsString)>,
+}
+
 pub async fn sandbox_available() -> bool {
     verified_backend().await.is_ok()
+}
+
+pub async fn terminate_child_group(child: &mut Child) {
+    #[cfg(unix)]
+    if let Some(pid) = child.id() {
+        // SAFETY: sandbox children are placed in a dedicated process group
+        // whose id is the launcher pid before spawn returns.
+        unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL) };
+    }
+    #[cfg(not(unix))]
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
 
 pub async fn read_only_command<I, S>(
@@ -59,6 +87,25 @@ where
 {
     let backend = verified_backend().await?;
     backend::build_command(backend, program, args, input)
+}
+
+pub async fn restricted_command<I, S>(
+    program: &Path,
+    args: I,
+    access: RestrictedSandboxAccess,
+) -> Result<SandboxedCommand>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let backend = verified_backend().await?;
+    backend::build_restricted_command(backend, program, args, access)
+}
+
+fn verify_directories(directories: &[crate::AuthorizedDirectory]) -> Result<()> {
+    directories
+        .iter()
+        .try_for_each(crate::AuthorizedDirectory::verify_unchanged)
 }
 
 pub fn resolve_regular_executable(program: &OsStr) -> Result<PathBuf> {

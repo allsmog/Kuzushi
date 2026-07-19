@@ -42,10 +42,11 @@ The module requires usable context or a file inventory. An empty threat model is
 The CodeQL MCP result memo reduces CodeQL execution; it does not weaken database authentication.
 
 - An eligible dependency-free local query can reuse an in-process result. A memo hit skips CodeQL execution, but the server first performs full content authentication of the database tree. Memo-hit authentication time therefore remains proportional to database size.
-- CWE pack selectors and local queries with imports bypass the result memo because the server cannot authenticate their complete dependency graph without CodeQL's resolver. CodeQL's on-disk pack cache and optional prewarm can still avoid repeated compilation work.
+- CWE pack selectors bypass the result memo. Local queries with imports are rejected because the server cannot authenticate their complete dependency graph without CodeQL's resolver. CodeQL's on-disk pack cache and optional prewarm can still avoid repeated compilation work for pack selectors.
 - When CodeQL executes, Kuzushi authenticates the complete database before the process starts and again before accepting or memoizing its output. A change during analysis fails closed.
-- On the first execution for a CodeQL bundle revision, Kuzushi copies the complete authenticated launcher bundle into an operator-owned snapshot. Analysis and prewarm execute only that cached snapshot, so later changes to the original launcher or adjacent runtime files cannot change the bytes being executed.
-- Kuzushi does not currently give the MCP server an immutable, cross-platform server-lifetime filesystem snapshot. It gives the server a database path and an operator-authenticated expected identity, and the path can still be changed by an uncoordinated writer. The secure fallback is therefore a full content hash on every request, including memo lookups; metadata-only or process-lifetime identity caches are not safe substitutes.
+- On the first execution for a CodeQL bundle or database revision, Kuzushi copies the complete authenticated tree into an operator-owned, receipt-bound server-session snapshot. A one-entry cache per tree type bounds retained disk; replacing either revision cancels work using the stale snapshot.
+- Analysis and prewarm run inside the shared read-only MCP sandbox. The launcher bundle, database, and dependency-free local query snapshot are read-only to the child; only its per-run scratch/output and explicit common-cache roots are writable. `CODEQL_DIST` is pinned to the launcher snapshot and `CODEQL_JAVA_HOME` is not inherited. If the OS sandbox is unavailable, execution fails closed.
+- Session roots are explicitly owned by the MCP runtime and removed at normal shutdown. A cross-process owner lock lets the next server safely reclaim abandoned roots after a crash. Full source authentication still runs on every request, including memo lookups, before a cached snapshot can be reused.
 
 ## CWE Reference
 

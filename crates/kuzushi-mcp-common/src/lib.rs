@@ -11,7 +11,10 @@ pub mod server;
 pub mod standalone_health;
 pub mod tool;
 
-pub use bundle_identity::{bounded_bundle_identity, copy_bounded_bundle, BundleIdentityConfig};
+pub use bundle_identity::{
+    bounded_bundle_identity, copy_bounded_bundle, copy_bounded_bundle_with_durability,
+    BundleIdentityConfig, CopyDurability,
+};
 pub use cache::{index_root, manifest_path, repo_hash, RepoFingerprint};
 pub use codeql_bundle_root::resolve_codeql_bundle_root;
 pub use doctor::{which, BinaryProbe};
