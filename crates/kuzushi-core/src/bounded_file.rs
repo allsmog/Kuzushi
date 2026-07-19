@@ -163,14 +163,23 @@ fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
     let leaf = components
         .next_back()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file path is empty"))?;
-    let mut directory = open_directory_no_follow(&canonical_root)?;
+    let mut directory = open_absolute_directory_no_follow(&canonical_root)?;
     for component in components {
         directory = open_directory_at(&directory, component)?;
     }
     open_regular_at(&directory, leaf)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
+    let canonical_root = fs::canonicalize(root)?;
+    let root_handle = open_windows_directory_no_follow(&canonical_root)?;
+    let file = open_regular_file(&canonical_path_within(root, path)?)?;
+    verify_windows_handle_containment(&root_handle, &file, &canonical_root, path)?;
+    Ok(file)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
     open_regular_file(&canonical_path_within(root, path)?)
 }
@@ -211,7 +220,7 @@ fn normal_component(component: std::path::Component<'_>) -> Option<&std::ffi::Os
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn workspace_escape_error(root: &Path, path: &Path) -> io::Error {
     io::Error::new(
         io::ErrorKind::PermissionDenied,
@@ -229,6 +238,21 @@ fn open_directory_no_follow(path: &Path) -> io::Result<fs::File> {
         io::ErrorKind::InvalidInput,
         format!("{} is not a directory", path.display()),
     ))
+}
+
+#[cfg(unix)]
+fn open_absolute_directory_no_follow(path: &Path) -> io::Result<fs::File> {
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is not an absolute directory", path.display()),
+        ));
+    }
+    let mut directory = open_directory_no_follow(Path::new("/"))?;
+    for component in path.components().filter_map(normal_component) {
+        directory = open_directory_at(&directory, component)?;
+    }
+    Ok(directory)
 }
 
 #[cfg(unix)]
@@ -317,13 +341,44 @@ fn open_no_follow(path: &Path) -> io::Result<fs::File> {
 
 #[cfg(windows)]
 fn open_no_follow(path: &Path) -> io::Result<fs::File> {
-    use std::os::windows::ffi::OsStrExt;
     use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_NORMAL, FILE_FLAG_OPEN_REPARSE_POINT,
+    };
+
+    let file = open_windows_handle(path, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT)?;
+    reject_windows_reparse_attributes(path, file.metadata()?.file_attributes())?;
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn open_windows_directory_no_follow(path: &Path) -> io::Result<fs::File> {
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    };
+
+    let file = open_windows_handle(
+        path,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+    )?;
+    reject_windows_reparse_attributes(path, file.metadata()?.file_attributes())?;
+    if file.metadata()?.is_dir() {
+        return Ok(file);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("{} is not a directory", path.display()),
+    ))
+}
+
+#[cfg(windows)]
+fn open_windows_handle(path: &Path, flags: u32) -> io::Result<fs::File> {
+    use std::os::windows::ffi::OsStrExt;
     use std::os::windows::io::FromRawHandle;
     use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        CreateFileW, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
 
     let wide_path = path
@@ -331,7 +386,6 @@ fn open_no_follow(path: &Path) -> io::Result<fs::File> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
-    let flags = FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT;
     let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     let handle = unsafe {
         CreateFileW(
@@ -347,9 +401,28 @@ fn open_no_follow(path: &Path) -> io::Result<fs::File> {
     if handle == INVALID_HANDLE_VALUE {
         return Err(io::Error::last_os_error());
     }
-    let file = unsafe { fs::File::from_raw_handle(handle) };
-    reject_windows_reparse_attributes(path, file.metadata()?.file_attributes())?;
-    Ok(file)
+    Ok(unsafe { fs::File::from_raw_handle(handle) })
+}
+
+#[cfg(windows)]
+fn verify_windows_handle_containment(
+    root: &fs::File,
+    file: &fs::File,
+    expected_root: &Path,
+    requested: &Path,
+) -> io::Result<()> {
+    let root_path = crate::file_lock::windows_final_path(root)?;
+    let file_path = crate::file_lock::windows_final_path(file)?;
+    if windows_paths_equal(&root_path, expected_root) && file_path.starts_with(&root_path) {
+        return Ok(());
+    }
+    Err(workspace_escape_error(&root_path, requested))
+}
+
+#[cfg(windows)]
+fn windows_paths_equal(left: &Path, right: &Path) -> bool {
+    left.to_string_lossy()
+        .eq_ignore_ascii_case(&right.to_string_lossy())
 }
 
 #[cfg(windows)]
@@ -508,6 +581,25 @@ mod tests {
 
         assert_eq!(bytes, b"approved bytes");
         assert!(read_utf8_text_within(&workspace, Path::new("nested/prompt.md"), 1024).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn absolute_root_walk_rejects_an_ancestor_replaced_after_resolution() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().join("selected-parent");
+        let workspace = parent.join("workspace");
+        let outside_parent = temp.path().join("outside-parent");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(outside_parent.join("workspace")).unwrap();
+        let resolved_workspace = fs::canonicalize(&workspace).unwrap();
+        fs::rename(&parent, temp.path().join("original-parent")).unwrap();
+        symlink(&outside_parent, &parent).unwrap();
+
+        let error = open_absolute_directory_no_follow(&resolved_workspace).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     }
 
     #[cfg(unix)]

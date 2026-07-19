@@ -144,7 +144,7 @@ pub(crate) fn windows_file_identity(file: &File) -> std::io::Result<WindowsFileI
 }
 
 #[cfg(windows)]
-fn windows_final_path(file: &File) -> std::io::Result<std::path::PathBuf> {
+pub(crate) fn windows_final_path(file: &File) -> std::io::Result<std::path::PathBuf> {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
     use std::os::windows::io::AsRawHandle;
