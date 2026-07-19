@@ -43,8 +43,8 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_mcp_common::{
-    bounded_bundle_identity, resolve_codeql_bundle_root, BundleIdentityConfig, ReadRootCapability,
-    Tool, ToolHandler, ToolRegistry,
+    bounded_bundle_identity, resolve_codeql_bundle_root, which, BundleIdentityConfig,
+    ReadRootCapability, Tool, ToolHandler, ToolRegistry,
 };
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
@@ -315,7 +315,7 @@ fn flow_memo() -> &'static Mutex<FlowMemo> {
     MEMO.get_or_init(|| Mutex::new(FlowMemo::bounded(MAX_MEMO_ENTRIES, MAX_MEMO_BYTES)))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn memo_key(db: &Path, selector: &str, limit: usize, codeql: &Path) -> Option<MemoKey> {
     let identity = analysis_identity(db, codeql).ok()?;
     memo_key_from_identity(&identity, selector, limit)
@@ -604,7 +604,7 @@ async fn wait_for_analysis(
     Ok(status)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result<Vec<Value>> {
     let runtime = CodeqlRuntime::new()?;
     let capability = ReadRootCapability::new([db.parent().unwrap_or(db).to_path_buf()])?;
@@ -1008,7 +1008,7 @@ fn locate_codeql_binary() -> Result<Option<PathBuf>> {
     if let Some(configured) = configured_codeql_binary()? {
         return Ok(Some(configured));
     }
-    Ok(find_executable_on_path("codeql").or_else(standard_codeql_binary))
+    Ok(which("codeql").or_else(standard_codeql_binary))
 }
 
 fn configured_codeql_binary() -> Result<Option<PathBuf>> {
@@ -1034,17 +1034,6 @@ fn standard_codeql_binary() -> Option<PathBuf> {
     ]
     .into_iter()
     .find(|candidate| candidate.is_file())
-}
-
-fn find_executable_on_path(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&paths) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
 }
 
 fn requested_or_database_language(
@@ -1189,6 +1178,7 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 
+    #[cfg(unix)]
     const FAKE_CODEQL_SCRIPT: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
 out=""
@@ -1220,6 +1210,7 @@ fi
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    #[cfg(unix)]
     fn lock_env() -> std::sync::MutexGuard<'static, ()> {
         env_lock()
             .lock()
@@ -1309,6 +1300,7 @@ fi
         ReadRootCapability::new([temp.path().to_path_buf()]).unwrap()
     }
 
+    #[cfg(unix)]
     fn restore_file_times(path: &Path, metadata: &std::fs::Metadata) {
         let mut times = std::fs::FileTimes::new().set_modified(metadata.modified().unwrap());
         if let Ok(accessed) = metadata.accessed() {
@@ -1976,5 +1968,30 @@ fi
         restore_env("KUZUSHI_CODEQL_BIN", previous_bin);
         restore_env("PATH", previous_path);
         assert_eq!(resolved, fake);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn locate_codeql_binary_finds_codeql_exe_via_pathext() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        std::fs::write(temp.path().join("codeql"), "extensionless decoy").unwrap();
+        let codeql = temp.path().join("codeql.exe");
+        std::fs::write(&codeql, "test CodeQL executable").unwrap();
+        let previous_bin = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        let previous_path = std::env::var_os("PATH");
+        let previous_pathext = std::env::var_os("PATHEXT");
+        std::env::remove_var("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("PATH", temp.path());
+        std::env::set_var("PATHEXT", ".Com;.EXE;.Cmd");
+
+        let resolved = locate_codeql_binary().unwrap().unwrap();
+
+        restore_env("KUZUSHI_CODEQL_BIN", previous_bin);
+        restore_env("PATH", previous_path);
+        restore_env("PATHEXT", previous_pathext);
+        assert!(resolved
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("codeql.exe")));
     }
 }

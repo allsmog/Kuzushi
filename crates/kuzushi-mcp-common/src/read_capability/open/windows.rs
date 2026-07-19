@@ -76,6 +76,37 @@ pub(super) fn file_change_time(file: &File) -> Result<i64> {
     Ok(info.ChangeTime)
 }
 
+pub(super) fn ensure_open_by_file_id_supported(directory: &File) -> Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::GetVolumeInformationByHandleW;
+    use windows_sys::Win32::System::SystemServices::FILE_SUPPORTS_OPEN_BY_FILE_ID;
+
+    let mut flags = 0_u32;
+    // SAFETY: the retained directory handle is live, the flags pointer is
+    // writable, and all omitted output buffers are represented by nulls.
+    let succeeded = unsafe {
+        GetVolumeInformationByHandleW(
+            directory.as_raw_handle(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut flags,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if succeeded == 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("could not inspect retained MCP directory volume capabilities");
+    }
+    anyhow::ensure!(
+        flags & FILE_SUPPORTS_OPEN_BY_FILE_ID != 0,
+        "retained MCP tree traversal requires FILE_SUPPORTS_OPEN_BY_FILE_ID; \
+         SMB and FAT/exFAT volumes are unsupported"
+    );
+    Ok(())
+}
+
 fn open_path(path: &Path, access: u32, flags: u32) -> Result<File> {
     let path = nul_terminated_path(path)?;
     // SAFETY: `path` is NUL-terminated, the security/template pointers are

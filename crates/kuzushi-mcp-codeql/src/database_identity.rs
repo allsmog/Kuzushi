@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
-use kuzushi_mcp_common::{AuthorizedDirectory, ReadRootCapability};
+use kuzushi_mcp_common::{
+    AuthorizedChild, AuthorizedDirectory, AuthorizedDirectoryEntry, AuthorizedDirectoryRevisions,
+    AuthorizedFile, ReadRootCapability,
+};
 use std::ffi::OsStr;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(crate) const MAX_DATABASE_IDENTITY_ENTRIES: u64 = 500_000;
 pub(crate) const MAX_DATABASE_IDENTITY_BYTES: u64 = 64_u64 * 1024 * 1024 * 1024;
@@ -12,21 +15,8 @@ pub(crate) fn database_identity(path: &Path) -> Result<String> {
     let path = std::fs::canonicalize(path)?;
     let capability = ReadRootCapability::new([path.clone()])?;
     let database = capability.authorize_directory(&path)?;
-    preflight_database(&capability, &database, &path)?;
-    let mut budget = IdentityBudget::default();
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"kuzushi-codeql-database-content-v1\0");
-    hash_directory(
-        &capability,
-        &database,
-        &path,
-        None,
-        0,
-        &mut budget,
-        &mut hasher,
-    )?;
-    database.verify_unchanged()?;
-    Ok(hasher.finalize().to_hex().to_string())
+    preflight_database(&database)?;
+    hash_database(&database, None)
 }
 
 /// Copy a database while deriving the same receipt used by `database_identity`.
@@ -40,191 +30,172 @@ pub(crate) fn copy_database(path: &Path, destination: &Path) -> Result<String> {
     let path = std::fs::canonicalize(path)?;
     let capability = ReadRootCapability::new([path.clone()])?;
     let database = capability.authorize_directory(&path)?;
+    hash_database(&database, Some(destination))
+}
+
+fn hash_database(database: &AuthorizedDirectory, destination: Option<&Path>) -> Result<String> {
     let mut budget = IdentityBudget::default();
+    let mut revisions = AuthorizedDirectoryRevisions::new(database, entry_limit()?)?;
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"kuzushi-codeql-database-content-v1\0");
     hash_directory(
-        &capability,
-        &database,
-        &path,
-        Some(destination),
+        database,
+        Path::new(""),
+        destination,
         0,
         &mut budget,
+        &mut revisions,
         &mut hasher,
     )?;
-    database.verify_unchanged()?;
+    revisions.verify_all_unchanged()?;
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-fn preflight_database(
-    capability: &ReadRootCapability,
-    database: &AuthorizedDirectory,
-    path: &Path,
-) -> Result<()> {
+fn preflight_database(database: &AuthorizedDirectory) -> Result<()> {
     let mut budget = IdentityBudget::default();
-    preflight_directory(capability, database, path, 0, &mut budget)?;
-    database.verify_unchanged()
+    preflight_directory(database, 0, &mut budget)?;
+    database.verify_revision_unchanged()
 }
 
 fn preflight_directory(
-    capability: &ReadRootCapability,
-    database: &AuthorizedDirectory,
-    path: &Path,
+    directory: &AuthorizedDirectory,
     depth: usize,
     budget: &mut IdentityBudget,
 ) -> Result<()> {
     ensure_depth(depth)?;
-    let directory = capability.authorize_directory(path)?;
-    for entry in bounded_children(&directory, budget.remaining_entries())? {
-        preflight_entry(capability, database, entry.path(), depth, budget)?;
+    for entry in bounded_children(directory, budget.remaining_entries())? {
+        preflight_entry(directory, &entry, depth, budget)?;
     }
-    directory.verify_unchanged()
+    directory.verify_revision_unchanged()
 }
 
 fn preflight_entry(
-    capability: &ReadRootCapability,
-    database: &AuthorizedDirectory,
-    path: PathBuf,
+    directory: &AuthorizedDirectory,
+    entry: &AuthorizedDirectoryEntry,
     depth: usize,
     budget: &mut IdentityBudget,
 ) -> Result<()> {
     budget.reserve_entry()?;
-    let metadata = checked_entry_metadata(&path)?;
-    if metadata.is_dir() {
-        return preflight_directory(capability, database, &path, depth + 1, budget);
+    match directory.open_child(entry)? {
+        AuthorizedChild::Directory(child) => preflight_directory(&child, depth + 1, budget),
+        AuthorizedChild::File(file) => budget.reserve_bytes(file.byte_len()),
     }
-    let _ = path.strip_prefix(database.path())?;
-    budget.reserve_bytes(metadata.len())
 }
 
 fn hash_directory(
-    capability: &ReadRootCapability,
-    database: &AuthorizedDirectory,
-    path: &Path,
+    directory: &AuthorizedDirectory,
+    relative: &Path,
     destination: Option<&Path>,
     depth: usize,
     budget: &mut IdentityBudget,
+    revisions: &mut AuthorizedDirectoryRevisions,
     hasher: &mut blake3::Hasher,
 ) -> Result<()> {
     ensure_depth(depth)?;
-    let directory = capability.authorize_directory(path)?;
-    for entry in bounded_children(&directory, budget.remaining_entries())? {
+    let entries = bounded_children(directory, budget.remaining_entries())?;
+    revisions.retain(directory, &entries)?;
+    for entry in entries {
         hash_entry(
-            capability,
-            database,
-            entry.path(),
+            directory,
+            relative,
+            &entry,
             destination,
             depth,
             budget,
+            revisions,
             hasher,
         )?;
     }
     hasher.update(b"e");
-    directory.verify_unchanged()
-}
-
-fn hash_entry(
-    capability: &ReadRootCapability,
-    database: &AuthorizedDirectory,
-    path: PathBuf,
-    destination: Option<&Path>,
-    depth: usize,
-    budget: &mut IdentityBudget,
-    hasher: &mut blake3::Hasher,
-) -> Result<()> {
-    budget.reserve_entry()?;
-    let metadata = checked_entry_metadata(&path)?;
-    let name = path
-        .file_name()
-        .context("CodeQL database entry has no name")?;
-    if metadata.is_dir() {
-        return hash_child_directory(
-            capability,
-            database,
-            &path,
-            name,
-            destination,
-            depth,
-            budget,
-            hasher,
-        );
-    }
-    hash_file(
-        database,
-        &path,
-        name,
-        &metadata,
-        destination,
-        budget,
-        hasher,
-    )
+    directory.verify_revision_unchanged()
 }
 
 #[allow(clippy::too_many_arguments)]
-fn hash_child_directory(
-    capability: &ReadRootCapability,
-    database: &AuthorizedDirectory,
-    path: &Path,
-    name: &OsStr,
+fn hash_entry(
+    directory: &AuthorizedDirectory,
+    parent: &Path,
+    entry: &AuthorizedDirectoryEntry,
     destination: Option<&Path>,
     depth: usize,
     budget: &mut IdentityBudget,
+    revisions: &mut AuthorizedDirectoryRevisions,
     hasher: &mut blake3::Hasher,
 ) -> Result<()> {
-    hash_entry_header(hasher, b'd', name, 0);
-    let child_destination = destination
-        .map(|root| {
-            path.strip_prefix(database.path())
-                .map(|relative| root.join(relative))
-        })
-        .transpose()?;
-    if let Some(child) = child_destination.as_ref() {
-        std::fs::create_dir(child)?;
+    budget.reserve_entry()?;
+    let relative = parent.join(entry.name());
+    match directory.open_child(entry)? {
+        AuthorizedChild::Directory(child) => {
+            hash_entry_header(hasher, b'd', entry.name(), 0);
+            prepare_output_directory(destination, &relative)?;
+            hash_directory(
+                &child,
+                &relative,
+                destination,
+                depth + 1,
+                budget,
+                revisions,
+                hasher,
+            )
+        }
+        AuthorizedChild::File(file) => {
+            hash_file(file, &relative, entry.name(), destination, budget, hasher)
+        }
     }
-    hash_directory(
-        capability,
-        database,
-        path,
-        destination,
-        depth + 1,
-        budget,
-        hasher,
-    )
+}
+
+fn prepare_output_directory(destination: Option<&Path>, relative: &Path) -> Result<()> {
+    let Some(destination) = destination else {
+        return Ok(());
+    };
+    std::fs::create_dir(destination.join(relative))?;
+    Ok(())
 }
 
 fn hash_file(
-    database: &AuthorizedDirectory,
-    path: &Path,
+    file: AuthorizedFile,
+    relative: &Path,
     name: &OsStr,
-    metadata: &std::fs::Metadata,
     destination: Option<&Path>,
     budget: &mut IdentityBudget,
     hasher: &mut blake3::Hasher,
 ) -> Result<()> {
-    budget.reserve_bytes(metadata.len())?;
-    hash_entry_header(hasher, b'f', name, metadata.len());
-    let relative = path.strip_prefix(database.path())?;
-    let max_bytes = usize::try_from(metadata.len()).context("CodeQL database file is too large")?;
-    let mut output = destination
-        .map(|root| {
+    let max_bytes =
+        usize::try_from(file.byte_len()).context("CodeQL database file is too large")?;
+    let permissions = file.permissions();
+    let file = file.into_bounded(max_bytes)?;
+    let bytes = file.identity().len;
+    budget.reserve_bytes(bytes)?;
+    hash_entry_header(hasher, b'f', name, bytes);
+    copy_and_hash_file(file, destination, relative, permissions, hasher)
+}
+
+fn copy_and_hash_file(
+    file: kuzushi_mcp_common::BoundedReadFile,
+    destination: Option<&Path>,
+    relative: &Path,
+    permissions: std::fs::Permissions,
+    hasher: &mut blake3::Hasher,
+) -> Result<()> {
+    let output_path = destination.map(|root| root.join(relative));
+    let mut output = output_path
+        .as_ref()
+        .map(|path| {
             std::fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .open(root.join(relative))
+                .open(path)
         })
         .transpose()?;
-    database
-        .open_file(relative, max_bytes)?
-        .for_each_chunk(|bytes| {
-            hasher.update(bytes);
-            if let Some(output) = output.as_mut() {
-                output.write_all(bytes)?;
-            }
-            Ok(())
-        })?;
-    if let Some(output) = output {
+    file.for_each_chunk(|chunk| {
+        hasher.update(chunk);
+        if let Some(output) = output.as_mut() {
+            output.write_all(chunk)?;
+        }
+        Ok(())
+    })?;
+    if let Some((output, path)) = output.zip(output_path) {
         drop(output);
-        std::fs::set_permissions(destination.unwrap().join(relative), metadata.permissions())?;
+        std::fs::set_permissions(path, permissions)?;
     }
     Ok(())
 }
@@ -232,32 +203,10 @@ fn hash_file(
 fn bounded_children(
     directory: &AuthorizedDirectory,
     remaining_entries: usize,
-) -> Result<Vec<std::fs::DirEntry>> {
-    let read_limit = remaining_entries
-        .checked_add(1)
-        .context("CodeQL database entry read limit overflow")?;
-    let mut children = std::fs::read_dir(directory.path())?
-        .take(read_limit)
-        .collect::<std::io::Result<Vec<_>>>()?;
-    anyhow::ensure!(
-        children.len() <= remaining_entries,
-        "CodeQL database exceeds the file-count limit"
-    );
-    children.sort_by_key(std::fs::DirEntry::file_name);
-    Ok(children)
-}
-
-fn checked_entry_metadata(path: &Path) -> Result<std::fs::Metadata> {
-    let metadata = std::fs::symlink_metadata(path)?;
-    anyhow::ensure!(
-        !metadata.file_type().is_symlink(),
-        "CodeQL database contains a symbolic link"
-    );
-    anyhow::ensure!(
-        metadata.is_dir() || metadata.is_file(),
-        "CodeQL database contains a non-regular entry"
-    );
-    Ok(metadata)
+) -> Result<Vec<AuthorizedDirectoryEntry>> {
+    directory
+        .entries(remaining_entries)
+        .with_context(|| "CodeQL database exceeds the file-count limit or could not be enumerated")
 }
 
 fn ensure_depth(depth: usize) -> Result<()> {
@@ -266,6 +215,11 @@ fn ensure_depth(depth: usize) -> Result<()> {
         "CodeQL database nesting is too deep"
     );
     Ok(())
+}
+
+fn entry_limit() -> Result<usize> {
+    usize::try_from(MAX_DATABASE_IDENTITY_ENTRIES)
+        .context("CodeQL database entry limit exceeds this platform")
 }
 
 fn hash_entry_header(hasher: &mut blake3::Hasher, kind: u8, name: &OsStr, size: u64) {
@@ -327,70 +281,4 @@ impl IdentityBudget {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn identity_changes_for_same_size_content() {
-        let temp = tempfile::tempdir().unwrap();
-        let file = temp.path().join("entry");
-        std::fs::write(&file, "one").unwrap();
-        let first = database_identity(temp.path()).unwrap();
-
-        std::fs::write(&file, "two").unwrap();
-        let second = database_identity(temp.path()).unwrap();
-
-        assert_ne!(first, second);
-    }
-
-    #[test]
-    fn preflight_rejects_total_content_above_the_promotion_bound() {
-        let temp = tempfile::tempdir().unwrap();
-        for name in ["first", "second"] {
-            std::fs::File::create(temp.path().join(name))
-                .unwrap()
-                .set_len(MAX_DATABASE_IDENTITY_BYTES / 2 + 1)
-                .unwrap();
-        }
-
-        let error = database_identity(temp.path()).unwrap_err().to_string();
-
-        assert!(error.contains("promotion byte limit"), "{error}");
-    }
-
-    #[test]
-    fn enumeration_reads_only_remaining_capacity_plus_one() {
-        let temp = tempfile::tempdir().unwrap();
-        for name in ["one", "two", "three"] {
-            std::fs::write(temp.path().join(name), name).unwrap();
-        }
-        let capability = ReadRootCapability::new([temp.path().to_path_buf()]).unwrap();
-        let directory = capability.authorize_directory(temp.path()).unwrap();
-
-        let error = bounded_children(&directory, 2).unwrap_err().to_string();
-
-        assert!(error.contains("file-count limit"), "{error}");
-    }
-
-    #[test]
-    fn copied_database_receipt_matches_the_preauthenticated_identity() {
-        let source = tempfile::tempdir().unwrap();
-        std::fs::create_dir(source.path().join("db-cpp")).unwrap();
-        std::fs::write(
-            source.path().join("codeql-database.yml"),
-            "primaryLanguage: cpp\n",
-        )
-        .unwrap();
-        std::fs::write(source.path().join("db-cpp/data"), b"authenticated bytes").unwrap();
-        let destination = tempfile::tempdir().unwrap();
-        let expected = database_identity(source.path()).unwrap();
-
-        let copied = copy_database(source.path(), destination.path()).unwrap();
-
-        assert_eq!(copied, expected);
-        assert_eq!(
-            std::fs::read(destination.path().join("db-cpp/data")).unwrap(),
-            b"authenticated bytes"
-        );
-    }
-}
+mod tests;

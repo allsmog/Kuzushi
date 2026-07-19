@@ -97,6 +97,154 @@ fn strict_directory_children_reject_absolute_and_parent_paths() {
     assert!(directory.open_file(Path::new("../main.c"), 64).is_err());
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn retained_directory_enumeration_ignores_a_visible_leaf_swap() {
+    assert_retained_names_during_swap(Path::new("scope"), Path::new("scope"));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn retained_directory_enumeration_ignores_an_ancestor_swap() {
+    assert_retained_names_during_swap(Path::new("scope/parent"), Path::new("scope"));
+}
+
+#[cfg(any(unix, windows))]
+fn assert_retained_names_during_swap(authorized: &Path, swapped: &Path) {
+    let outer = tempfile::tempdir().unwrap();
+    let authorized = outer.path().join(authorized);
+    let swapped = outer.path().join(swapped);
+    let retained = outer.path().join("retained-scope");
+    std::fs::create_dir_all(&authorized).unwrap();
+    std::fs::write(authorized.join("trusted"), "trusted").unwrap();
+    let capability = ReadRootCapability::new([outer.path().to_path_buf()]).unwrap();
+    let directory = capability.authorize_directory(&authorized).unwrap();
+
+    std::fs::rename(&swapped, &retained).unwrap();
+    std::fs::create_dir_all(&authorized).unwrap();
+    std::fs::write(authorized.join("decoy"), "decoy").unwrap();
+    let first = directory.entry_names(4).unwrap();
+    let second = directory.entry_names(4).unwrap();
+    std::fs::remove_dir_all(&swapped).unwrap();
+    std::fs::rename(&retained, &swapped).unwrap();
+
+    assert_eq!(first, [std::ffi::OsString::from("trusted")]);
+    assert_eq!(second, first, "enumeration must restart on each call");
+    directory.verify_unchanged().unwrap();
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn retained_directory_enumeration_enforces_its_entry_bound() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("one"), "one").unwrap();
+    std::fs::write(root.path().join("two"), "two").unwrap();
+    let capability = ReadRootCapability::new([root.path().to_path_buf()]).unwrap();
+    let directory = capability.authorize_directory(root.path()).unwrap();
+
+    let error = directory.entry_names(1).unwrap_err().to_string();
+
+    assert!(error.contains("1-entry limit"), "{error}");
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn enumerated_child_token_never_opens_a_path_replacement() {
+    let root = tempfile::tempdir().unwrap();
+    let trusted = root.path().join("artifact");
+    let retained = root.path().join("retained-artifact");
+    std::fs::write(&trusted, "trusted").unwrap();
+    let capability = ReadRootCapability::new([root.path().to_path_buf()]).unwrap();
+    let directory = capability.authorize_directory(root.path()).unwrap();
+    let entry = directory.entries(4).unwrap().into_iter().next().unwrap();
+
+    std::fs::rename(&trusted, &retained).unwrap();
+    std::fs::write(&trusted, "replacement").unwrap();
+    match directory.open_child(&entry) {
+        Ok(AuthorizedChild::File(file)) => {
+            let bytes = file.into_bounded(64).unwrap().read_utf8().unwrap();
+            assert_eq!(bytes, "trusted", "the retained file ID must win");
+        }
+        Ok(AuthorizedChild::Directory(_)) => panic!("file token opened a directory"),
+        Err(error) => assert!(
+            format!("{error:#}").contains("directory entry"),
+            "unexpected error: {error:#}"
+        ),
+    }
+    std::fs::remove_file(&trusted).unwrap();
+    std::fs::rename(&retained, &trusted).unwrap();
+
+    assert!(directory.verify_revision_unchanged().is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_directory_tokens_open_a_nested_mount_root() {
+    use std::os::unix::fs::MetadataExt;
+
+    let root_device = std::fs::metadata("/").unwrap().dev();
+    let dev_device = std::fs::metadata("/dev").unwrap().dev();
+    if root_device == dev_device {
+        eprintln!("skipping nested-mount regression: /dev shares the / device");
+        return;
+    }
+    let capability = ReadRootCapability::new([PathBuf::from("/")]).unwrap();
+    let root = capability.authorize_directory(Path::new("/")).unwrap();
+    let dev = root
+        .entries(4096)
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.name() == std::ffi::OsStr::new("dev"))
+        .expect("the Unix root should contain /dev");
+
+    let AuthorizedChild::Directory(dev) = root.open_child(&dev).unwrap() else {
+        panic!("/dev token did not open a directory");
+    };
+
+    assert_eq!(dev.path(), Path::new("/dev"));
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_directory_tokens_reject_special_files_before_opening() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let fifo = root.path().join("pipe");
+    let fifo_name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    // SAFETY: the path is NUL-terminated and names a new entry in a live
+    // temporary directory.
+    assert_eq!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) }, 0);
+    let capability = ReadRootCapability::new([root.path().to_path_buf()]).unwrap();
+    let directory = capability.authorize_directory(root.path()).unwrap();
+    let entry = directory.entries(1).unwrap().into_iter().next().unwrap();
+
+    let error = directory.open_child(&entry).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("not a regular file or directory"),
+        "{error:#}"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_directory_enumeration_continues_across_multiple_batches() {
+    let root = tempfile::tempdir().unwrap();
+    for index in 0..600 {
+        let name = format!("{index:04}-{}", "x".repeat(180));
+        std::fs::write(root.path().join(name), "entry").unwrap();
+    }
+    let capability = ReadRootCapability::new([root.path().to_path_buf()]).unwrap();
+    let directory = capability.authorize_directory(root.path()).unwrap();
+
+    let entries = directory.entries(600).unwrap();
+
+    assert_eq!(entries.len(), 600);
+}
+
 #[cfg(unix)]
 #[test]
 fn strict_open_rejects_symlinks_even_when_the_target_is_inside_the_root() {

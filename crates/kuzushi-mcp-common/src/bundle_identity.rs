@@ -1,6 +1,9 @@
-use crate::{AuthorizedDirectory, ReadRootCapability};
+use crate::{
+    AuthorizedChild, AuthorizedDirectory, AuthorizedDirectoryEntry, AuthorizedDirectoryRevisions,
+    AuthorizedFile, ReadRootCapability,
+};
 use anyhow::{Context, Result};
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
@@ -94,19 +97,20 @@ fn walk_bundle(
     let capability = ReadRootCapability::new([root.clone()])?;
     let directory = capability.authorize_directory(&root)?;
     let mut budget = BundleBudget::default();
+    let mut revisions = AuthorizedDirectoryRevisions::new(&directory, entry_limit(config)?)?;
     let mut hasher = blake3::Hasher::new();
     hasher.update(config.domain);
     hash_directory(
-        &capability,
         &directory,
         Path::new(""),
         destination,
         0,
         &mut budget,
+        &mut revisions,
         &mut hasher,
         config,
     )?;
-    directory.verify_unchanged()?;
+    revisions.verify_all_unchanged()?;
     Ok(hasher.finalize().to_hex().to_string())
 }
 
@@ -118,34 +122,35 @@ struct BundleBudget {
 
 #[allow(clippy::too_many_arguments)]
 fn hash_directory(
-    capability: &ReadRootCapability,
-    root: &AuthorizedDirectory,
+    directory: &AuthorizedDirectory,
     relative: &Path,
     destination: Option<(&Path, CopyDurability)>,
     depth: usize,
     budget: &mut BundleBudget,
+    revisions: &mut AuthorizedDirectoryRevisions,
     hasher: &mut blake3::Hasher,
     config: BundleIdentityConfig,
 ) -> Result<()> {
     ensure_depth(depth, config)?;
-    let directory = capability.authorize_directory(&root.path().join(relative))?;
+    let entries = bounded_entries(directory, budget, config)?;
+    revisions.retain(directory, &entries)?;
     let before = DirectoryRevision::read(directory.path(), config.label)?;
     hasher.update(b"d");
-    for name in bounded_entry_names(directory.path(), budget, config)? {
+    for entry in entries {
         hash_entry(
-            capability,
-            root,
+            directory,
             relative,
-            &name,
+            &entry,
             destination,
             depth,
             budget,
+            revisions,
             hasher,
             config,
         )?;
     }
     hasher.update(b"e");
-    verify_directory_stable(&directory, &before, config.label)
+    verify_directory_stable(directory, &before, config.label)
 }
 
 fn ensure_depth(depth: usize, config: BundleIdentityConfig) -> Result<()> {
@@ -158,61 +163,49 @@ fn ensure_depth(depth: usize, config: BundleIdentityConfig) -> Result<()> {
     Ok(())
 }
 
+fn entry_limit(config: BundleIdentityConfig) -> Result<usize> {
+    usize::try_from(config.max_entries).context("bundle entry limit exceeds this platform")
+}
+
 #[allow(clippy::too_many_arguments)]
 fn hash_entry(
-    capability: &ReadRootCapability,
-    root: &AuthorizedDirectory,
+    directory: &AuthorizedDirectory,
     parent: &Path,
-    name: &OsStr,
+    entry: &AuthorizedDirectoryEntry,
     destination: Option<(&Path, CopyDurability)>,
     depth: usize,
     budget: &mut BundleBudget,
+    revisions: &mut AuthorizedDirectoryRevisions,
     hasher: &mut blake3::Hasher,
     config: BundleIdentityConfig,
 ) -> Result<()> {
     budget.reserve_entry(config)?;
-    let relative = parent.join(name);
-    let path = root.path().join(&relative);
-    let metadata = checked_entry_metadata(&path, config.label)?;
-    if metadata.is_dir() {
-        frame_entry(hasher, b'd', name);
-        prepare_output_directory(destination, &relative)?;
-        return hash_directory(
-            capability,
-            root,
+    let relative = parent.join(entry.name());
+    match directory.open_child(entry)? {
+        AuthorizedChild::Directory(child) => {
+            frame_entry(hasher, b'd', entry.name());
+            prepare_output_directory(destination, &relative)?;
+            hash_directory(
+                &child,
+                &relative,
+                destination,
+                depth + 1,
+                budget,
+                revisions,
+                hasher,
+                config,
+            )
+        }
+        AuthorizedChild::File(file) => hash_file(
+            file,
             &relative,
+            entry.name(),
             destination,
-            depth + 1,
             budget,
             hasher,
             config,
-        );
+        ),
     }
-    hash_file(
-        root,
-        &relative,
-        name,
-        &metadata,
-        destination,
-        budget,
-        hasher,
-        config,
-    )
-}
-
-fn checked_entry_metadata(path: &Path, label: &str) -> Result<fs::Metadata> {
-    let metadata = fs::symlink_metadata(path)?;
-    anyhow::ensure!(
-        !metadata.file_type().is_symlink(),
-        "{label} contains a symbolic link: {}",
-        path.display()
-    );
-    anyhow::ensure!(
-        metadata.is_dir() || metadata.is_file(),
-        "{label} contains a non-regular entry: {}",
-        path.display()
-    );
-    Ok(metadata)
 }
 
 fn prepare_output_directory(
@@ -228,10 +221,9 @@ fn prepare_output_directory(
 
 #[allow(clippy::too_many_arguments)]
 fn hash_file(
-    root: &AuthorizedDirectory,
+    file: AuthorizedFile,
     relative: &Path,
     name: &OsStr,
-    metadata: &fs::Metadata,
     destination: Option<(&Path, CopyDurability)>,
     budget: &mut BundleBudget,
     hasher: &mut blake3::Hasher,
@@ -239,10 +231,11 @@ fn hash_file(
 ) -> Result<()> {
     let remaining = config.max_bytes.saturating_sub(budget.bytes);
     let max_bytes = usize::try_from(remaining).context("bundle limit exceeds this platform")?;
-    let file = root.open_file(relative, max_bytes)?;
+    let permissions = file.permissions();
+    let file = file.into_bounded(max_bytes)?;
     let bytes = file.identity().len;
     budget.reserve_bytes(bytes, config)?;
-    let digest = copy_or_discard(file, destination, relative, metadata)?;
+    let digest = copy_or_discard(file, destination, relative, permissions)?;
     frame_entry(hasher, b'f', name);
     hasher.update(&bytes.to_le_bytes());
     hasher.update(&(digest.len() as u64).to_le_bytes());
@@ -254,7 +247,7 @@ fn copy_or_discard(
     source: crate::BoundedReadFile,
     destination: Option<(&Path, CopyDurability)>,
     relative: &Path,
-    metadata: &fs::Metadata,
+    permissions: fs::Permissions,
 ) -> Result<String> {
     let Some((destination, durability)) = destination else {
         return source.copy_to_with_sha256_hex(&mut std::io::sink());
@@ -269,28 +262,24 @@ fn copy_or_discard(
         output.sync_all()?;
     }
     drop(output);
-    fs::set_permissions(path, metadata.permissions())?;
+    fs::set_permissions(path, permissions)?;
     Ok(digest)
 }
 
-fn bounded_entry_names(
-    path: &Path,
+fn bounded_entries(
+    directory: &AuthorizedDirectory,
     budget: &BundleBudget,
     config: BundleIdentityConfig,
-) -> Result<Vec<OsString>> {
-    let remaining = config.max_entries.saturating_sub(budget.entries) as usize;
-    let mut names = fs::read_dir(path)?
-        .take(remaining.saturating_add(1))
-        .map(|entry| entry.map(|entry| entry.file_name()))
-        .collect::<std::io::Result<Vec<_>>>()?;
-    anyhow::ensure!(
-        names.len() <= remaining,
-        "{} exceeds the {}-entry limit",
-        config.label,
-        config.max_entries
-    );
-    names.sort();
-    Ok(names)
+) -> Result<Vec<AuthorizedDirectoryEntry>> {
+    let remaining = config.max_entries.saturating_sub(budget.entries);
+    let remaining =
+        usize::try_from(remaining).context("bundle entry limit exceeds this platform")?;
+    directory.entries(remaining).with_context(|| {
+        format!(
+            "{} exceeds the {}-entry limit or could not be enumerated",
+            config.label, config.max_entries
+        )
+    })
 }
 
 fn frame_entry(hasher: &mut blake3::Hasher, kind: u8, name: &OsStr) {
@@ -341,5 +330,143 @@ fn verify_directory_stable(
         "{label} changed while its identity was computed: {}",
         directory.path().display()
     );
-    directory.verify_unchanged()
+    directory.verify_revision_unchanged()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_CONFIG: BundleIdentityConfig =
+        BundleIdentityConfig::new(b"kuzushi-test-bundle-v1\0", "test bundle", 32, 1024, 8);
+
+    #[test]
+    fn copy_preserves_nested_tree_identity_and_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::create_dir(&destination).unwrap();
+        fs::write(source.join("root.txt"), "root").unwrap();
+        fs::write(source.join("nested/child.bin"), [0_u8, 1, 2]).unwrap();
+
+        let expected = bounded_bundle_identity(&source, TEST_CONFIG).unwrap();
+        let copied = copy_bounded_bundle(&source, &destination, TEST_CONFIG).unwrap();
+
+        assert_eq!(copied, expected);
+        assert_eq!(
+            bounded_bundle_identity(&destination, TEST_CONFIG).unwrap(),
+            expected
+        );
+        assert_eq!(fs::read(destination.join("root.txt")).unwrap(), b"root");
+        assert_eq!(
+            fs::read(destination.join("nested/child.bin")).unwrap(),
+            [0_u8, 1, 2]
+        );
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn bundle_walker_never_accepts_a_swapped_nested_subset() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let child = source.join("child");
+        let retained = temp.path().join("retained-child");
+        fs::create_dir_all(&child).unwrap();
+        fs::write(child.join("trusted-a"), "trusted-a").unwrap();
+        fs::write(child.join("trusted-b"), "trusted-b").unwrap();
+        let capability = ReadRootCapability::new([temp.path().to_path_buf()]).unwrap();
+        let directory = capability.authorize_directory(&source).unwrap();
+        let entry = bounded_entries(&directory, &BundleBudget::default(), TEST_CONFIG)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let expected = hash_test_entry(&directory, &entry).unwrap();
+
+        fs::rename(&child, &retained).unwrap();
+        fs::create_dir(&child).unwrap();
+        fs::write(child.join("decoy"), "decoy").unwrap();
+        let swapped = hash_test_entry(&directory, &entry);
+        fs::remove_dir_all(&child).unwrap();
+        fs::rename(&retained, &child).unwrap();
+
+        match swapped {
+            Ok(actual) => assert_eq!(actual, expected, "the retained child must be hashed"),
+            Err(error) => {
+                let message = format!("{error:#}");
+                assert!(
+                    message.contains("directory entry") || message.contains("directory revision"),
+                    "unexpected error: {error:#}"
+                );
+            }
+        }
+        assert!(directory.verify_revision_unchanged().is_err());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn bundle_revision_receipts_reject_a_restored_same_directory_subset() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let child_path = source.join("child");
+        let omitted = child_path.join("trusted-b");
+        let retained = temp.path().join("retained-b");
+        fs::create_dir_all(&child_path).unwrap();
+        fs::write(child_path.join("trusted-a"), "trusted-a").unwrap();
+        fs::write(&omitted, "trusted-b").unwrap();
+        let capability = ReadRootCapability::new([temp.path().to_path_buf()]).unwrap();
+        let root = capability.authorize_directory(&source).unwrap();
+        let child_entry = root.entries(4).unwrap().into_iter().next().unwrap();
+
+        fs::rename(&omitted, &retained).unwrap();
+        let AuthorizedChild::Directory(child) = root.open_child(&child_entry).unwrap() else {
+            panic!("child token did not open a directory");
+        };
+        let mut budget = BundleBudget::default();
+        let mut revisions =
+            AuthorizedDirectoryRevisions::new(&child, entry_limit(TEST_CONFIG).unwrap()).unwrap();
+        let mut hasher = blake3::Hasher::new();
+        hash_directory(
+            &child,
+            Path::new("child"),
+            None,
+            1,
+            &mut budget,
+            &mut revisions,
+            &mut hasher,
+            TEST_CONFIG,
+        )
+        .unwrap();
+        fs::rename(&retained, &omitted).unwrap();
+
+        let error = revisions.verify_all_unchanged().unwrap_err();
+        assert!(
+            format!("{error:#}").contains("directory revision"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    fn hash_test_entry(
+        directory: &AuthorizedDirectory,
+        entry: &AuthorizedDirectoryEntry,
+    ) -> Result<String> {
+        let mut budget = BundleBudget::default();
+        let mut revisions =
+            AuthorizedDirectoryRevisions::new(directory, entry_limit(TEST_CONFIG)?)?;
+        let mut hasher = blake3::Hasher::new();
+        hash_entry(
+            directory,
+            Path::new(""),
+            entry,
+            None,
+            0,
+            &mut budget,
+            &mut revisions,
+            &mut hasher,
+            TEST_CONFIG,
+        )?;
+        revisions.verify_all_unchanged()?;
+        Ok(hasher.finalize().to_hex().to_string())
+    }
 }

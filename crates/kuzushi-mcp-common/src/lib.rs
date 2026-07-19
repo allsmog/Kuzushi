@@ -23,7 +23,8 @@ pub use jsonrpc::{
     ERROR_INVALID_REQUEST, ERROR_METHOD_NOT_FOUND, ERROR_PARSE,
 };
 pub use read_capability::{
-    AuthorizedDirectory, BoundedReadFile, ReadFileIdentity, ReadRootCapability, MCP_READ_ROOTS_ENV,
+    AuthorizedChild, AuthorizedDirectory, AuthorizedDirectoryEntry, AuthorizedDirectoryRevisions,
+    AuthorizedFile, BoundedReadFile, ReadFileIdentity, ReadRootCapability, MCP_READ_ROOTS_ENV,
 };
 pub use schema::{
     EdgeKind, FileSpan, Method, Path as PathResult, Position, Range, Symbol, SymbolKind,
