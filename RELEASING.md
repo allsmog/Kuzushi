@@ -247,6 +247,13 @@ destination into `<target>/.kuzushi/`; destinations elsewhere are rejected
 instead of allowing scanner subprocesses to overwrite operator or project
 files.
 
+Managed CodeQL databases now require a content-bound promotion receipt in the
+operator-owned global state store. Existing target-only databases, including
+legacy `.kuzushi/codeql-db` and `.codeql/db` layouts, are intentionally not
+trusted after upgrade. Rebuild them with `codeql:create-db`; Kuzushi will then
+bind the database contents, source commit, nested target scope, and language to
+the operator receipt before any consumer can use the database.
+
 The empirical Rust API `verify_finding` now requires an explicit
 `workspace_root` argument. Custom callers must pass the same trusted target
 root that owns the finding store. Rust/C finding paths are resolved below that
