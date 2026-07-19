@@ -13,11 +13,13 @@
 //!    or `KUZUSHI_CODEQL_CACHE_DIR` if set). Persists across MCP server
 //!    restarts. First call to each CWE folder on a given language is
 //!    still slow because that's when the pack is compiled.
-//! 2. A bounded in-process result memo keyed on database-tree revision,
+//! 2. A bounded in-process result memo keyed on content-authenticated
+//!    database-tree revision,
 //!    dependency-free local selector revision, CodeQL executable revision,
 //!    and result limit. Pack selectors and imported local queries bypass the
 //!    memo because their complete dependency graph cannot be established
-//!    without executing CodeQL's resolver. The
+//!    without executing CodeQL's resolver. Databases that exceed the bounded
+//!    identity traversal also bypass it. The
 //!    agent often re-queries the same CWE folder when iterating on
 //!    findings during a single hunt; the second call returns instantly.
 //!    Keyed on the canonical absolute DB path so a typo or symlink swap
@@ -31,7 +33,9 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use kuzushi_mcp_common::{ReadRootCapability, Tool, ToolHandler, ToolRegistry};
+use kuzushi_mcp_common::{
+    AuthorizedDirectory, ReadRootCapability, Tool, ToolHandler, ToolRegistry,
+};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -47,7 +51,8 @@ const MAX_SARIF_BYTES: usize = 64 * 1024 * 1024;
 const MAX_MEMO_ENTRIES: usize = 64;
 const MAX_MEMO_BYTES: usize = 16 * 1024 * 1024;
 const MAX_DATABASE_REVISION_ENTRIES: usize = 250_000;
-const MAX_DATABASE_REVISION_BYTES: usize = 64 * 1024 * 1024;
+const MAX_DATABASE_REVISION_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
+const MAX_DATABASE_REVISION_CONTENT_BYTES: usize = 64 * 1024 * 1024;
 
 pub(crate) fn build_registry() -> Result<ToolRegistry> {
     Ok(build_registry_with_capability(
@@ -283,67 +288,130 @@ fn store_memo(key: MemoKey, flows: &[Value]) {
 }
 
 fn database_revision(db: &Path) -> Result<String> {
-    let mut manifest = Vec::new();
-    let root_metadata = std::fs::symlink_metadata(db)?;
-    append_database_revision_entry(db, db, &root_metadata, &mut manifest)?;
-    let mut pending = vec![db.to_path_buf()];
-    let mut entries = 0_usize;
+    let db = std::fs::canonicalize(db)?;
+    let capability = ReadRootCapability::new([db.to_path_buf()])?;
+    let database = capability.authorize_directory(&db)?;
+    let mut revision = DatabaseRevisionBuilder::default();
+    revision.record_directory(Path::new(""))?;
+    let mut pending = vec![db];
     while let Some(directory) = pending.pop() {
-        let mut children = std::fs::read_dir(&directory)?.collect::<std::io::Result<Vec<_>>>()?;
-        children.sort_by_key(std::fs::DirEntry::file_name);
-        let mut directories = Vec::new();
-        for child in children {
-            entries = entries.saturating_add(1);
-            anyhow::ensure!(
-                entries <= MAX_DATABASE_REVISION_ENTRIES,
-                "CodeQL database revision exceeds the entry limit"
-            );
-            let path = child.path();
-            let metadata = std::fs::symlink_metadata(&path)?;
-            anyhow::ensure!(
-                !metadata.file_type().is_symlink(),
-                "CodeQL database revision contains a symlink"
-            );
-            append_database_revision_entry(db, &path, &metadata, &mut manifest)?;
-            if metadata.is_dir() {
-                directories.push(path);
-            }
-        }
+        let directories =
+            record_database_directory(&capability, &database, &directory, &mut revision)?;
         pending.extend(directories.into_iter().rev());
     }
-    Ok(kuzushi_mcp_common::cache::sha256_hex_bytes(&manifest))
+    database.verify_unchanged()?;
+    revision.finish()
 }
 
-fn append_database_revision_entry(
-    root: &Path,
-    path: &Path,
-    metadata: &std::fs::Metadata,
-    manifest: &mut Vec<u8>,
-) -> Result<()> {
+fn record_database_directory(
+    capability: &ReadRootCapability,
+    database: &AuthorizedDirectory,
+    directory_path: &Path,
+    revision: &mut DatabaseRevisionBuilder,
+) -> Result<Vec<PathBuf>> {
+    let directory = capability.authorize_directory(directory_path)?;
+    let mut children = std::fs::read_dir(directory.path())?.collect::<std::io::Result<Vec<_>>>()?;
+    children.sort_by_key(std::fs::DirEntry::file_name);
+    let mut directories = Vec::new();
+    for child in children {
+        if let Some(path) = record_database_entry(database, child.path(), revision)? {
+            directories.push(path);
+        }
+    }
+    directory.verify_unchanged()?;
+    Ok(directories)
+}
+
+fn record_database_entry(
+    database: &AuthorizedDirectory,
+    path: PathBuf,
+    revision: &mut DatabaseRevisionBuilder,
+) -> Result<Option<PathBuf>> {
+    revision.claim_entry()?;
+    let metadata = std::fs::symlink_metadata(&path)?;
     anyhow::ensure!(
-        metadata.is_file() || metadata.is_dir(),
+        !metadata.file_type().is_symlink(),
+        "CodeQL database revision contains a symlink"
+    );
+    let relative = path.strip_prefix(database.path())?;
+    if metadata.is_dir() {
+        revision.record_directory(relative)?;
+        return Ok(Some(path));
+    }
+    anyhow::ensure!(
+        metadata.is_file(),
         "CodeQL database revision contains a non-file entry"
     );
-    let relative = path.strip_prefix(root)?;
-    append_revision_path(manifest, relative);
-    manifest.push(file_type_marker(metadata));
-    manifest.extend_from_slice(&metadata.len().to_le_bytes());
-    append_platform_metadata(manifest, metadata)?;
-    anyhow::ensure!(
-        manifest.len() <= MAX_DATABASE_REVISION_BYTES,
-        "CodeQL database revision exceeds the manifest byte limit"
-    );
-    Ok(())
+    revision.record_file(database, relative)?;
+    Ok(None)
 }
 
-fn file_type_marker(metadata: &std::fs::Metadata) -> u8 {
-    if metadata.is_file() {
-        b'f'
-    } else if metadata.is_dir() {
-        b'd'
-    } else {
-        b'o'
+#[derive(Default)]
+struct DatabaseRevisionBuilder {
+    manifest: Vec<u8>,
+    entries: usize,
+    content_bytes: usize,
+}
+
+impl DatabaseRevisionBuilder {
+    fn claim_entry(&mut self) -> Result<()> {
+        self.entries = self
+            .entries
+            .checked_add(1)
+            .context("database entry count overflow")?;
+        anyhow::ensure!(
+            self.entries <= MAX_DATABASE_REVISION_ENTRIES,
+            "CodeQL database revision exceeds the entry limit"
+        );
+        Ok(())
     }
+
+    fn record_directory(&mut self, relative: &Path) -> Result<()> {
+        self.record_header(relative, b'd')
+    }
+
+    fn record_file(&mut self, database: &AuthorizedDirectory, relative: &Path) -> Result<()> {
+        let remaining = MAX_DATABASE_REVISION_CONTENT_BYTES.saturating_sub(self.content_bytes);
+        let (bytes, digest) = database_file_revision(database, relative, remaining)?;
+        self.content_bytes = self
+            .content_bytes
+            .checked_add(bytes)
+            .context("database content byte count overflow")?;
+        self.record_header(relative, b'f')?;
+        self.manifest
+            .extend_from_slice(&(bytes as u64).to_le_bytes());
+        self.manifest.extend_from_slice(digest.as_bytes());
+        self.ensure_manifest_budget()
+    }
+
+    fn record_header(&mut self, relative: &Path, kind: u8) -> Result<()> {
+        append_revision_path(&mut self.manifest, relative);
+        self.manifest.push(kind);
+        self.ensure_manifest_budget()
+    }
+
+    fn ensure_manifest_budget(&self) -> Result<()> {
+        anyhow::ensure!(
+            self.manifest.len() <= MAX_DATABASE_REVISION_MANIFEST_BYTES,
+            "CodeQL database revision exceeds the manifest byte limit"
+        );
+        Ok(())
+    }
+
+    fn finish(self) -> Result<String> {
+        Ok(kuzushi_mcp_common::cache::sha256_hex_bytes(&self.manifest))
+    }
+}
+
+fn database_file_revision(
+    database: &AuthorizedDirectory,
+    relative: &Path,
+    max_bytes: usize,
+) -> Result<(usize, String)> {
+    let file = database.open_file(relative, max_bytes)?;
+    let bytes = usize::try_from(file.identity().len).context("database file is too large")?;
+    let digest = file.copy_to_with_sha256_hex(&mut std::io::sink())?;
+    Ok((bytes, digest))
 }
 
 #[cfg(unix)]
@@ -369,46 +437,6 @@ fn append_revision_path(manifest: &mut Vec<u8>, path: &Path) {
     let path = path.to_string_lossy();
     manifest.extend_from_slice(&(path.len() as u64).to_le_bytes());
     manifest.extend_from_slice(path.as_bytes());
-}
-
-#[cfg(unix)]
-fn append_platform_metadata(manifest: &mut Vec<u8>, metadata: &std::fs::Metadata) -> Result<()> {
-    use std::os::unix::fs::MetadataExt;
-    for value in [
-        metadata.dev(),
-        metadata.ino(),
-        u64::from(metadata.mode()),
-        metadata.mtime() as u64,
-        metadata.mtime_nsec() as u64,
-        metadata.ctime() as u64,
-        metadata.ctime_nsec() as u64,
-    ] {
-        manifest.extend_from_slice(&value.to_le_bytes());
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn append_platform_metadata(manifest: &mut Vec<u8>, metadata: &std::fs::Metadata) -> Result<()> {
-    use std::os::windows::fs::MetadataExt;
-    for value in [
-        metadata.creation_time(),
-        metadata.last_access_time(),
-        metadata.last_write_time(),
-        metadata.file_size(),
-        u64::from(metadata.file_attributes()),
-    ] {
-        manifest.extend_from_slice(&value.to_le_bytes());
-    }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-fn append_platform_metadata(manifest: &mut Vec<u8>, metadata: &std::fs::Metadata) -> Result<()> {
-    let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?;
-    manifest.extend_from_slice(&modified.as_secs().to_le_bytes());
-    manifest.extend_from_slice(&u64::from(modified.subsec_nanos()).to_le_bytes());
-    Ok(())
 }
 
 fn local_query_revision(selector: &str) -> Result<Option<String>> {
@@ -948,6 +976,19 @@ fi
         ReadRootCapability::new([temp.path().to_path_buf()]).unwrap()
     }
 
+    fn restore_file_times(path: &Path, metadata: &std::fs::Metadata) {
+        let mut times = std::fs::FileTimes::new().set_modified(metadata.modified().unwrap());
+        if let Ok(accessed) = metadata.accessed() {
+            times = times.set_accessed(accessed);
+        }
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(times)
+            .unwrap();
+    }
+
     #[test]
     fn cwe_folder_pads_three_digits() {
         assert_eq!(cwe_folder("CWE-89"), Some("CWE-089".to_string()));
@@ -1030,7 +1071,7 @@ fi
 
     #[test]
     #[cfg(unix)]
-    fn memo_key_tracks_internal_database_and_codeql_binary_revisions() {
+    fn memo_key_tracks_same_size_database_content_and_codeql_binary_revisions() {
         let temp = tempdir().unwrap();
         let db = codeql_db(&temp);
         let internal = db.join("db-cpp/internal.bin");
@@ -1040,8 +1081,16 @@ fi
         std::fs::write(&query, "select 1").unwrap();
         let selector = query.display().to_string();
         let first = memo_key(&db, &selector, 10, &codeql).unwrap();
+        let stable_metadata = std::fs::metadata(&internal).unwrap();
 
-        std::fs::write(&internal, b"revision two").unwrap();
+        std::fs::write(&internal, b"two").unwrap();
+        restore_file_times(&internal, &stable_metadata);
+        let changed_metadata = std::fs::metadata(&internal).unwrap();
+        assert_eq!(stable_metadata.len(), changed_metadata.len());
+        assert_eq!(
+            stable_metadata.modified().unwrap(),
+            changed_metadata.modified().unwrap()
+        );
         let changed_db = memo_key(&db, &selector, 10, &codeql).unwrap();
         assert_ne!(first.db_revision, changed_db.db_revision);
 
@@ -1053,6 +1102,24 @@ fi
             .unwrap();
         let changed_binary = memo_key(&db, &selector, 10, &codeql).unwrap();
         assert_ne!(changed_db.codeql_revision, changed_binary.codeql_revision);
+    }
+
+    #[test]
+    fn memo_bypasses_database_outside_the_content_revision_budget() {
+        let temp = tempdir().unwrap();
+        let db = codeql_db(&temp);
+        let oversized = db.join("db-cpp/oversized.bin");
+        std::fs::File::create(&oversized)
+            .unwrap()
+            .set_len(MAX_DATABASE_REVISION_CONTENT_BYTES as u64 + 1)
+            .unwrap();
+        let codeql = temp.path().join("codeql");
+        std::fs::write(&codeql, "binary").unwrap();
+        let query = temp.path().join("local.ql");
+        std::fs::write(&query, "select 1").unwrap();
+
+        assert!(database_revision(&db).is_err());
+        assert!(memo_key(&db, &query.display().to_string(), 10, &codeql).is_none());
     }
 
     #[test]
