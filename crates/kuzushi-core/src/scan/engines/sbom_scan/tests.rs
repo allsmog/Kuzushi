@@ -30,7 +30,9 @@ fn parser_rejects_manifest_when_parent_is_replaced_after_inventory() {
 
     let error = manifest::manifest_components(target.path(), &inventory.files[0]).unwrap_err();
 
-    assert!(format!("{error:#}").contains("escapes workspace"));
+    let detail = format!("{error:#}");
+    assert!(detail.contains("refusing to follow"), "{detail}");
+    assert!(!detail.contains("outside\":\"9.9.9"));
 }
 
 #[test]

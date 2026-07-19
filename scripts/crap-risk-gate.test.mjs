@@ -55,6 +55,26 @@ test("zero-SHA event base covers a complete multi-commit new ref", () => {
   }
 });
 
+test("non-commit diff bases fail closed", () => {
+  const repository = mkdtempSync(path.join(os.tmpdir(), "kuzushi-crap-object-base-"));
+  try {
+    initializeRepository(repository);
+    const blob = git(repository, ["rev-parse", "HEAD:README.md"]).trim();
+
+    const result = spawnSync(process.execPath, [gate], {
+      cwd: repository,
+      encoding: "utf8",
+      env: { ...process.env, KUZUSHI_CRAP_RISK_BASE_REF: blob },
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /cannot resolve diff base/);
+    assert.doesNotMatch(result.stdout, /passed for 0 changed code file/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
 function initializeRepository(repository) {
   git(repository, ["init", "-q"]);
   git(repository, ["config", "user.name", "Kuzushi Test"]);

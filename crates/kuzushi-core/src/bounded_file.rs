@@ -14,8 +14,14 @@ pub(crate) struct BoundedText {
 /// Binary-looking files return `Ok(None)`; text is decoded lossily to preserve
 /// the existing inventory behavior for imperfect source encodings.
 pub(crate) fn read_source_text_prefix(path: &Path, max_bytes: usize) -> io::Result<Option<String>> {
-    let sniff_limit = max_bytes.max(BINARY_SNIFF_BYTES);
-    let prefix = read_file_prefix(path, sniff_limit)?;
+    read_source_text_prefix_from_file(open_regular_file(path)?, max_bytes)
+}
+
+fn read_source_text_prefix_from_file(
+    file: fs::File,
+    max_bytes: usize,
+) -> io::Result<Option<String>> {
+    let prefix = read_open_file_prefix(file, max_bytes.max(BINARY_SNIFF_BYTES))?;
     if prefix
         .bytes
         .iter()
@@ -51,24 +57,24 @@ pub(crate) fn read_utf8_text(path: &Path, max_bytes: usize) -> io::Result<String
 
 /// Read an entire binary file only when it fits within `max_bytes`.
 pub(crate) fn read_regular_bytes(path: &Path, max_bytes: usize) -> io::Result<Vec<u8>> {
-    let file = open_regular_file(path)?;
+    read_open_regular_bytes(path, open_regular_file(path)?, max_bytes)
+}
+
+fn read_open_regular_bytes(path: &Path, file: fs::File, max_bytes: usize) -> io::Result<Vec<u8>> {
     reject_truncated(path, max_bytes, file.metadata()?.len() > max_bytes as u64)?;
     let prefix = read_open_file_prefix(file, max_bytes)?;
     reject_truncated(path, max_bytes, prefix.truncated)?;
     Ok(prefix.bytes)
 }
 
-/// Resolve `path` inside `root`, reject a symlink at the requested leaf, and
-/// then perform an exact bounded read. Canonical containment closes parent
-/// directory symlink escapes; `O_NOFOLLOW` on the canonical leaf closes a
-/// replacement race at open time.
+/// Open `path` beneath `root` without following symlinked path components, then
+/// perform an exact bounded read.
 pub(crate) fn read_utf8_text_within(
     root: &Path,
     path: &Path,
     max_bytes: usize,
 ) -> io::Result<String> {
-    let canonical = canonical_path_within(root, path)?;
-    read_utf8_text(&canonical, max_bytes)
+    decode_utf8_prefix(read_regular_bytes_within(root, path, max_bytes)?)
 }
 
 pub(crate) fn read_source_text_prefix_within(
@@ -76,8 +82,7 @@ pub(crate) fn read_source_text_prefix_within(
     path: &Path,
     max_bytes: usize,
 ) -> io::Result<Option<String>> {
-    let canonical = canonical_path_within(root, path)?;
-    read_source_text_prefix(&canonical, max_bytes)
+    read_source_text_prefix_from_file(open_regular_file_within(root, path)?, max_bytes)
 }
 
 pub(crate) fn read_regular_bytes_within(
@@ -85,8 +90,7 @@ pub(crate) fn read_regular_bytes_within(
     path: &Path,
     max_bytes: usize,
 ) -> io::Result<Vec<u8>> {
-    let canonical = canonical_path_within(root, path)?;
-    read_regular_bytes(&canonical, max_bytes)
+    read_open_regular_bytes(path, open_regular_file_within(root, path)?, max_bytes)
 }
 
 pub(crate) fn read_dir_within(root: &Path, path: &Path) -> io::Result<fs::ReadDir> {
@@ -149,6 +153,135 @@ fn canonical_path_within(root: &Path, path: &Path) -> io::Result<PathBuf> {
         ));
     }
     Ok(canonical)
+}
+
+#[cfg(unix)]
+fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
+    let canonical_root = fs::canonicalize(root)?;
+    let relative = relative_path_within(root, &canonical_root, path)?;
+    let mut components = relative.components().filter_map(normal_component);
+    let leaf = components
+        .next_back()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file path is empty"))?;
+    let mut directory = open_directory_no_follow(&canonical_root)?;
+    for component in components {
+        directory = open_directory_at(&directory, component)?;
+    }
+    open_regular_at(&directory, leaf)
+}
+
+#[cfg(not(unix))]
+fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
+    open_regular_file(&canonical_path_within(root, path)?)
+}
+
+#[cfg(unix)]
+fn relative_path_within(root: &Path, canonical_root: &Path, path: &Path) -> io::Result<PathBuf> {
+    let relative = if path.is_absolute() {
+        path.strip_prefix(root)
+            .or_else(|_| path.strip_prefix(canonical_root))
+            .map_err(|_| workspace_escape_error(root, path))?
+    } else {
+        path
+    };
+    validate_relative_path(root, path, relative)?;
+    Ok(relative.to_path_buf())
+}
+
+#[cfg(unix)]
+fn validate_relative_path(root: &Path, path: &Path, relative: &Path) -> io::Result<()> {
+    let valid = relative.components().all(|component| {
+        matches!(
+            component,
+            std::path::Component::Normal(_) | std::path::Component::CurDir
+        )
+    });
+    if valid {
+        return Ok(());
+    }
+    Err(workspace_escape_error(root, path))
+}
+
+#[cfg(unix)]
+fn normal_component(component: std::path::Component<'_>) -> Option<&std::ffi::OsStr> {
+    match component {
+        std::path::Component::Normal(value) => Some(value),
+        std::path::Component::CurDir => None,
+        _ => None,
+    }
+}
+
+#[cfg(unix)]
+fn workspace_escape_error(root: &Path, path: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!("{} escapes workspace {}", path.display(), root.display()),
+    )
+}
+
+#[cfg(unix)]
+fn open_directory_no_follow(path: &Path) -> io::Result<fs::File> {
+    let directory = open_no_follow(path)?;
+    if directory.metadata()?.is_dir() {
+        return Ok(directory);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("{} is not a directory", path.display()),
+    ))
+}
+
+#[cfg(unix)]
+fn open_directory_at(directory: &fs::File, name: &std::ffi::OsStr) -> io::Result<fs::File> {
+    open_at(
+        directory,
+        name,
+        libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_DIRECTORY,
+    )
+}
+
+#[cfg(unix)]
+fn open_regular_at(directory: &fs::File, name: &std::ffi::OsStr) -> io::Result<fs::File> {
+    let file = open_at(
+        directory,
+        name,
+        libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+    )?;
+    if file.metadata()?.is_file() {
+        return Ok(file);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "workspace path is not a regular file",
+    ))
+}
+
+#[cfg(unix)]
+fn open_at(directory: &fs::File, name: &std::ffi::OsStr, flags: i32) -> io::Result<fs::File> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::io::{AsRawFd, FromRawFd};
+
+    let name = std::ffi::CString::new(name.as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
+    let descriptor = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
+    if descriptor < 0 {
+        return Err(map_no_follow_error(io::Error::last_os_error()));
+    }
+    Ok(unsafe { fs::File::from_raw_fd(descriptor) })
+}
+
+#[cfg(unix)]
+fn map_no_follow_error(error: io::Error) -> io::Error {
+    if error
+        .raw_os_error()
+        .is_some_and(|code| code == libc::ELOOP || code == libc::ENOTDIR)
+    {
+        return io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "refusing to follow a symlinked workspace path component",
+        );
+    }
+    error
 }
 
 pub(crate) fn open_regular_file(path: &Path) -> io::Result<fs::File> {
@@ -350,6 +483,31 @@ mod tests {
 
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert!(!error.to_string().contains("outside secret"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_handle_read_survives_parent_replacement_without_escape() {
+        use std::ffi::OsStr;
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let nested = workspace.join("nested");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(nested.join("prompt.md"), "approved bytes").unwrap();
+        fs::write(outside.join("prompt.md"), "outside secret").unwrap();
+        let root_handle = open_directory_no_follow(&workspace).unwrap();
+        let nested_handle = open_directory_at(&root_handle, OsStr::new("nested")).unwrap();
+        fs::rename(&nested, workspace.join("original-nested")).unwrap();
+        symlink(&outside, &nested).unwrap();
+
+        let file = open_regular_at(&nested_handle, OsStr::new("prompt.md")).unwrap();
+        let bytes = read_open_regular_bytes(Path::new("prompt.md"), file, 1024).unwrap();
+
+        assert_eq!(bytes, b"approved bytes");
+        assert!(read_utf8_text_within(&workspace, Path::new("nested/prompt.md"), 1024).is_err());
     }
 
     #[cfg(unix)]
