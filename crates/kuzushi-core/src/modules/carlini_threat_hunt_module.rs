@@ -303,6 +303,7 @@ fn taint_iris_next_codeql_db_tool() -> ToolDescriptor {
             ))
             .advanced(),
             repository_source_commit_binding_option(),
+            repository_target_scope_binding_option(),
         ],
     )
     .with_prompt(editable_prompt(

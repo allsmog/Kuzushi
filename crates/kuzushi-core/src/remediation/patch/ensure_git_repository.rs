@@ -50,15 +50,19 @@ pub(crate) fn bind_repository_source_snapshot(
         .map(|_| repository_source_commit(input))
         .transpose()?;
     crate::workspace::initialize_workspace_state(repo_root)?;
-    let actual = clean_repository_source_commit(repo_root, unattended_patch_control())?;
-    ensure_expected_source_commit(expected.as_deref(), &actual)?;
-    input
+    let actual = clean_repository_source_binding(repo_root, unattended_patch_control())?;
+    ensure_expected_source_commit(expected.as_deref(), &actual.commit)?;
+    let object = input
         .as_object_mut()
-        .context("patch:finding input must be an object")?
-        .insert(
-            PATCH_SOURCE_COMMIT_INPUT_KEY.to_string(),
-            Value::String(actual),
-        );
+        .context("repository execution input must be an object")?;
+    object.insert(
+        PATCH_SOURCE_COMMIT_INPUT_KEY.to_string(),
+        Value::String(actual.commit),
+    );
+    object.insert(
+        REPOSITORY_TARGET_SCOPE_INPUT_KEY.to_string(),
+        Value::String(actual.target_scope),
+    );
     Ok(())
 }
 
@@ -75,8 +79,21 @@ pub(crate) fn verify_repository_source_snapshot(
     expected: &str,
     control: PatchCommandControl<'_>,
 ) -> Result<()> {
-    let actual = clean_repository_source_commit(repo_root, control)?;
-    ensure_expected_source_commit(Some(expected), &actual)
+    let actual = clean_repository_source_binding(repo_root, control)?;
+    ensure_expected_source_commit(Some(expected), &actual.commit)
+}
+
+pub(crate) fn verify_repository_source_binding(
+    repo_root: &Path,
+    expected: &RepositorySourceBinding,
+    control: PatchCommandControl<'_>,
+) -> Result<()> {
+    let actual = clean_repository_source_binding(repo_root, control)?;
+    anyhow::ensure!(
+        actual == *expected,
+        "repository source binding changed after preparation; prepare and authorize the operation again"
+    );
+    Ok(())
 }
 
 fn ensure_expected_source_commit(expected: Option<&str>, actual: &str) -> Result<()> {
@@ -88,19 +105,56 @@ fn ensure_expected_source_commit(expected: Option<&str>, actual: &str) -> Result
     Ok(())
 }
 
-fn clean_repository_source_commit(
+pub(crate) fn clean_repository_source_binding(
     repo_root: &Path,
     control: PatchCommandControl<'_>,
-) -> Result<String> {
+) -> Result<RepositorySourceBinding> {
     ensure_git_repository(repo_root, control)?;
+    let scope_before = resolve_repository_target_scope(repo_root, control)?;
     let before = resolve_head_commit(repo_root, control)?;
     ensure_clean_patch_source(repo_root, control)?;
     let after = resolve_head_commit(repo_root, control)?;
+    let scope_after = resolve_repository_target_scope(repo_root, control)?;
     anyhow::ensure!(
-        before == after,
-        "repository source commit changed while binding the operation; retry preparation"
+        before == after && scope_before == scope_after,
+        "repository source binding changed while binding the operation; retry preparation"
     );
-    Ok(after)
+    Ok(RepositorySourceBinding {
+        commit: after,
+        target_scope: scope_after,
+    })
+}
+
+fn resolve_repository_target_scope(
+    target_root: &Path,
+    control: PatchCommandControl<'_>,
+) -> Result<String> {
+    let output = control.run_git(
+        target_root,
+        &["rev-parse", "--show-toplevel"],
+        "git resolve repository root",
+    )?;
+    anyhow::ensure!(
+        output.status.success(),
+        "repository execution could not resolve the Git repository root: {}",
+        command_output_text(&output)
+    );
+    let repository_root = PathBuf::from(String::from_utf8(output.stdout)?.trim());
+    let repository_root = std::fs::canonicalize(&repository_root)?;
+    let target_root = std::fs::canonicalize(target_root)?;
+    let relative = target_root
+        .strip_prefix(&repository_root)
+        .context("repository target escaped its Git worktree")?;
+    let scope = if relative.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        relative
+            .to_str()
+            .context("repository target scope is not UTF-8")?
+            .replace(std::path::MAIN_SEPARATOR, "/")
+    };
+    validate_repository_target_scope(&scope)?;
+    Ok(scope)
 }
 
 pub(crate) fn resolve_head_commit(
@@ -226,6 +280,40 @@ pub(crate) fn with_disposable_worktree<T>(
     let operation = operation(guard.path());
     let cleanup = guard.cleanup(control);
     combine_worktree_operation(operation, cleanup)
+}
+
+pub(crate) fn with_disposable_repository_target<T>(
+    target_root: &Path,
+    binding: &RepositorySourceBinding,
+    control: PatchCommandControl<'_>,
+    operation: impl FnOnce(&Path) -> Result<T>,
+) -> Result<T> {
+    let current_scope = resolve_repository_target_scope(target_root, control)?;
+    anyhow::ensure!(
+        current_scope == binding.target_scope,
+        "repository target scope changed after preparation; prepare and authorize the operation again"
+    );
+    with_disposable_worktree(target_root, &binding.commit, control, |checkout| {
+        let isolated_target = isolated_repository_target(checkout, &binding.target_scope)?;
+        operation(&isolated_target)
+    })
+}
+
+fn isolated_repository_target(checkout: &Path, scope: &str) -> Result<PathBuf> {
+    validate_repository_target_scope(scope)?;
+    let target = if scope == "." {
+        checkout.to_path_buf()
+    } else {
+        checkout.join(scope)
+    };
+    let canonical_checkout = std::fs::canonicalize(checkout)?;
+    let canonical_target = std::fs::canonicalize(&target)
+        .with_context(|| format!("bound repository target is missing at {}", target.display()))?;
+    anyhow::ensure!(
+        canonical_target.starts_with(&canonical_checkout) && canonical_target.is_dir(),
+        "bound repository target escaped its disposable checkout"
+    );
+    Ok(canonical_target)
 }
 
 fn combine_worktree_operation<T>(operation: Result<T>, cleanup: Result<()>) -> Result<T> {
@@ -637,6 +725,41 @@ mod tests {
             input[PATCH_SOURCE_COMMIT_INPUT_KEY],
             Value::String(head_commit(repo.path()))
         );
+    }
+
+    #[test]
+    fn nested_target_binding_selects_only_the_bound_repository_scope() {
+        if git_is_unavailable() {
+            return;
+        }
+        let repo = tempfile::tempdir().unwrap();
+        run_git(repo.path(), &["init"]);
+        let target = repo.path().join("packages/service");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(repo.path().join("packages/sibling")).unwrap();
+        std::fs::write(target.join("service.rs"), "fn service() {}\n").unwrap();
+        std::fs::write(repo.path().join("packages/sibling/secret.rs"), "fn secret() {}\n").unwrap();
+        run_git(repo.path(), &["add", "packages"]);
+        run_git(repo.path(), &["commit", "-m", "nested target"]);
+
+        let input = bind_source(&target).unwrap();
+        let binding = repository_source_binding(&input).unwrap();
+        assert_eq!(binding.target_scope, "packages/service");
+
+        with_disposable_repository_target(
+            &target,
+            &binding,
+            unattended_patch_control(),
+            |isolated_target| {
+                assert!(isolated_target.join("service.rs").is_file());
+                assert_eq!(
+                    isolated_target.file_name().and_then(|name| name.to_str()),
+                    Some("service")
+                );
+                Ok(())
+            },
+        )
+        .unwrap();
     }
 
     #[cfg(unix)]

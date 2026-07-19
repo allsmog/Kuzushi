@@ -99,16 +99,10 @@ pub(crate) fn write_artifact(
 }
 
 pub(crate) fn resolve_codeql_db_path(target: &Path) -> Option<PathBuf> {
-    [Path::new(".kuzushi/codeql-db"), Path::new(".codeql/db")]
-        .into_iter()
-        .filter_map(|relative| {
-            crate::workspace::validated_workspace_descendant(target, relative).ok()
-        })
-        .find(|path| {
-            std::fs::symlink_metadata(path).is_ok_and(|metadata| {
-                metadata.file_type().is_dir() && !metadata.file_type().is_symlink()
-            })
-        })
+    crate::codeql_repository_execution::resolve_managed_codeql_database(target)
+        .ok()
+        .flatten()
+        .map(|database| database.path)
 }
 
 pub(crate) fn path_relative_to(root: &Path, path: &Path) -> String {

@@ -878,6 +878,11 @@ fn ensure_node_network_permission_boundary() -> Result<()> {
         .map_err(anyhow::Error::msg)
 }
 
+#[cfg(test)]
+pub(crate) fn kwp_node_execution_available() -> bool {
+    ensure_node_network_permission_boundary().is_ok()
+}
+
 fn check_node_network_permission_boundary() -> std::result::Result<(), String> {
     let help_output = Command::new("node")
         .arg("--help")
@@ -1564,7 +1569,7 @@ mod dynamic_loader_tests {
     }
 
     #[test]
-    fn approved_worker_executes_its_snapshot_after_the_source_changes() {
+    fn approved_worker_snapshot_path_remains_bound_after_source_changes() {
         let source = tempfile::tempdir().unwrap();
         let entry = source.path().join("worker.mjs");
         fs::write(&entry, "export const version = 1;\n").unwrap();

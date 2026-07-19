@@ -105,31 +105,44 @@ pub(crate) fn run_codeql_build_report(
     let model = require_taint_iris_next_model(input, ctx)?;
     let system_prompt = codeql_build_system_prompt(input)?;
     let launcher = require_codeql_launcher()?;
-    let (detected_languages, response) =
-        request_codeql_build_plan(runtime, model, &target, system_prompt)?;
-    let cost = response.checked_cost_report()?;
-    let plan = decode_codeql_build_plan(&response)?;
-    let language = resolved_codeql_language(&plan, &detected_languages);
-    let build_mode = resolved_codeql_build_mode(&plan, &language);
     let db_path = prepare_codeql_db_path(&target)?;
-    let source_commit = crate::remediation::patch::repository_source_commit(input)?;
+    let binding = crate::remediation::patch::repository_source_binding(input)?;
     let timeout = codeql_build_timeout(input)?;
-    let (build_command, output) = execute_codeql_build(
-        &launcher,
-        &target,
-        &db_path,
-        &language,
-        &build_mode,
-        &plan,
-        &source_commit,
-        ctx.cancellation,
-        timeout,
+    let execution = crate::codeql_repository_execution::CodeqlRepositoryExecution::prepare(
+        crate::codeql_repository_execution::CodeqlRepositoryRequest {
+            source_root: &target,
+            binding,
+            destination: &db_path,
+            launcher: &launcher,
+            cancellation: ctx.cancellation,
+            timeout,
+        },
     )?;
-    let ok = output.status.success() && db_built(&db_path);
-    let details = codeql_build_details(language, build_command, build_mode, &output);
-    Ok(codeql_build_report(
-        &target, &db_path, details, cost, ok,
-    ))
+    let built = execution.with_bound_target(|bound_target| {
+        plan_and_execute_codeql_build(
+            &execution,
+            bound_target,
+            runtime,
+            model,
+            system_prompt,
+        )
+    })?;
+    Ok(completed_codeql_build_report(&target, &db_path, built))
+}
+
+fn completed_codeql_build_report(
+    target: &Path,
+    db_path: &Path,
+    built: BoundCodeqlBuild,
+) -> CodeqlBuildReport {
+    let ok = built.output.status.success() && db_built(&db_path);
+    let details = codeql_build_details(
+        built.language,
+        built.build_command,
+        built.build_mode,
+        &built.output,
+    );
+    codeql_build_report(target, db_path, details, built.cost, ok)
 }
 
 fn codeql_build_system_prompt(input: &Value) -> Result<String> {
@@ -138,6 +151,38 @@ fn codeql_build_system_prompt(input: &Value) -> Result<String> {
         &["TAINT_IRIS_NEXT_CODEQL_BUILD_PROMPT"],
     )?
     .unwrap_or_else(|| TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT.to_string()))
+}
+
+struct BoundCodeqlBuild {
+    language: String,
+    build_command: String,
+    build_mode: String,
+    output: std::process::Output,
+    cost: RuntimeCostReport,
+}
+
+fn plan_and_execute_codeql_build(
+    execution: &crate::codeql_repository_execution::CodeqlRepositoryExecution<'_>,
+    bound_target: &Path,
+    runtime: &dyn AgentRuntime,
+    model: String,
+    system_prompt: String,
+) -> Result<BoundCodeqlBuild> {
+    let (detected_languages, response) =
+        request_codeql_build_plan(runtime, model, bound_target, system_prompt)?;
+    let cost = response.checked_cost_report()?;
+    let plan = decode_codeql_build_plan(&response)?;
+    let language = resolved_codeql_language(&plan, &detected_languages);
+    let build_mode = resolved_codeql_build_mode(&plan, &language);
+    let (build_command, output) =
+        execute_codeql_build(execution, bound_target, &language, &build_mode, &plan)?;
+    Ok(BoundCodeqlBuild {
+        language,
+        build_command,
+        build_mode,
+        output,
+        cost,
+    })
 }
 
 struct CodeqlBuildDetails {
@@ -204,29 +249,14 @@ fn request_codeql_build_plan(
 }
 
 fn execute_codeql_build(
-    launcher: &Path,
-    target: &Path,
-    db_path: &Path,
+    execution: &crate::codeql_repository_execution::CodeqlRepositoryExecution<'_>,
+    bound_target: &Path,
     language: &str,
     build_mode: &str,
     plan: &CodeqlBuildPlan,
-    source_commit: &str,
-    cancellation: Option<&crate::scan::ScanCancellation>,
-    timeout: Duration,
 ) -> Result<(String, std::process::Output)> {
     let (build_command, strategy) = isolated_codeql_strategy(plan, build_mode);
-    let output = crate::codeql_repository_execution::run_codeql_repository_build(
-        crate::codeql_repository_execution::CodeqlRepositoryBuild {
-            source_root: target,
-            source_commit,
-            destination: db_path,
-            launcher,
-            language,
-            strategy,
-            cancellation,
-            timeout,
-        },
-    )?;
+    let output = execution.build(bound_target, language, strategy)?;
     Ok((build_command, output))
 }
 
@@ -650,14 +680,22 @@ mod tests {
     }
 
     #[test]
-    fn db_built_only_when_yaml_and_db_subdir_present() {
+    fn db_built_requires_shape_and_trusted_provenance() {
         let temp = tempdir().unwrap();
-        let path = temp.path().join("codeql-db");
+        std::fs::write(temp.path().join("source.cpp"), "int main() {}\n").unwrap();
+        initialize_codeql_test_repository(temp.path());
+        let path = crate::workspace::workspace_codeql_db_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
         assert!(!db_built(&path));
         std::fs::write(path.join("codeql-database.yml"), "...").unwrap();
         assert!(!db_built(&path));
         std::fs::create_dir_all(path.join("db-cpp")).unwrap();
+        assert!(!db_built(&path));
+        crate::codeql_repository_execution::write_test_codeql_database_provenance(
+            &path,
+            temp.path(),
+            "cpp",
+        );
         assert!(db_built(&path));
     }
 
@@ -824,7 +862,7 @@ printf 'fake warning\n' >&2
     }
 
     fn assert_codeql_build_report(report: CodeqlBuildReport) {
-        assert!(report.ok);
+        assert!(report.ok, "{report:#?}");
         assert_eq!(report.status, "built");
         assert_eq!(report.language, "cpp");
         assert_eq!(report.build_mode, "manual");

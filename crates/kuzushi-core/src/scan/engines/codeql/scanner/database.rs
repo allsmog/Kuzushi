@@ -11,10 +11,18 @@ impl CodeqlScanner {
             return self.configured_codeql_database(target, binary, cancel, configured_db_path);
         }
 
-        let language = self.required_codeql_language(target, binary, cancel)?;
-        let db_path = managed_codeql_database_path(target)?;
-        ensure_managed_codeql_database_exists(&db_path)?;
-        Ok(CodeqlDatabase { db_path, language })
+        let database = crate::codeql_repository_execution::resolve_managed_codeql_database(target)?
+            .with_context(|| {
+                format!(
+                    "codeql: no valid managed database exists at {}. Run the separately authorized `codeql:create-db` tool first; scan tools never autobuild in the source checkout",
+                    crate::workspace::workspace_codeql_db_path(target).display()
+                )
+            })?;
+        let language = managed_database_language(self.language.as_deref(), &database)?;
+        Ok(CodeqlDatabase {
+            db_path: database.path,
+            language,
+        })
     }
 
     pub(crate) fn configured_codeql_database(
@@ -57,34 +65,20 @@ impl CodeqlScanner {
             })
     }
 
-    pub(crate) fn required_codeql_language(
-        &self,
-        target: &Path,
-        binary: &str,
-        cancel: &ScanCancellation,
-    ) -> Result<String> {
-        match self.language.clone() {
-            Some(language) => Ok(language),
-            None => detect_codeql_language(target, binary, cancel),
-        }
+}
+
+fn managed_database_language(
+    requested: Option<&str>,
+    database: &crate::codeql_repository_execution::ValidatedManagedCodeqlDatabase,
+) -> Result<String> {
+    let provenance_language = database.provenance.language.clone();
+    if let Some(requested) = requested {
+        anyhow::ensure!(
+            requested.eq_ignore_ascii_case(&provenance_language),
+            "codeql: configured language {requested:?} does not match managed database language {provenance_language:?}"
+        );
     }
-}
-
-fn managed_codeql_database_path(target: &Path) -> Result<PathBuf> {
-    let declared = crate::workspace::workspace_codeql_db_path(target);
-    let relative = declared
-        .strip_prefix(target)
-        .context("CodeQL database path escaped the workspace")?;
-    crate::workspace::prepare_workspace_output_path(target, relative)
-}
-
-fn ensure_managed_codeql_database_exists(db_path: &Path) -> Result<()> {
-    anyhow::ensure!(
-        is_codeql_database_dir(db_path),
-        "codeql: no valid managed database exists at {}. Run the separately authorized `codeql:create-db` tool first; scan tools never autobuild in the source checkout",
-        db_path.display()
-    );
-    Ok(())
+    Ok(provenance_language)
 }
 
 #[cfg(test)]
@@ -95,7 +89,7 @@ mod tests {
     #[test]
     fn missing_managed_database_fails_closed_without_invoking_codeql() {
         let temp = tempdir().unwrap();
-        let marker = temp.path().join("codeql-was-invoked");
+        let marker = temp.path().join(".kuzushi/codeql-was-invoked");
         let binary = write_recording_codeql(temp.path(), &marker);
         let scanner = CodeqlScanner {
             binary: Some(binary.display().to_string()),
@@ -120,10 +114,17 @@ mod tests {
     #[test]
     fn existing_managed_database_is_reused_without_invoking_codeql() {
         let temp = tempdir().unwrap();
+        initialize_repository(temp.path());
         let db = crate::workspace::workspace_codeql_db_path(temp.path());
         fs::create_dir_all(&db).unwrap();
         fs::write(db.join("codeql-database.yml"), "primaryLanguage: javascript\n").unwrap();
-        let marker = temp.path().join("codeql-was-invoked");
+        fs::create_dir(db.join("db-javascript")).unwrap();
+        crate::codeql_repository_execution::write_test_codeql_database_provenance(
+            &db,
+            temp.path(),
+            "javascript",
+        );
+        let marker = temp.path().join(".kuzushi/codeql-was-invoked");
         let binary = write_recording_codeql(temp.path(), &marker);
         let scanner = CodeqlScanner {
             language: Some("javascript".to_string()),
@@ -142,11 +143,30 @@ mod tests {
         assert!(!marker.exists());
     }
 
+    fn initialize_repository(root: &Path) {
+        run_git(root, &["init", "-q"]);
+        fs::write(root.join("tracked.js"), "const value = 1;\n").unwrap();
+        run_git(root, &["add", "tracked.js"]);
+        run_git(root, &["commit", "-qm", "initial"]);
+    }
+
+    fn run_git(root: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.email=test@example.invalid"])
+            .args(["-c", "user.name=Kuzushi Test"])
+            .args(args)
+            .current_dir(root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
     #[cfg(unix)]
     fn write_recording_codeql(root: &Path, marker: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
-        let binary = root.join("recording-codeql");
+        let binary = root.join(".kuzushi/recording-codeql");
+        fs::create_dir_all(binary.parent().unwrap()).unwrap();
         fs::write(
             &binary,
             format!("#!/bin/sh\nprintf invoked > '{}'\n", marker.display()),

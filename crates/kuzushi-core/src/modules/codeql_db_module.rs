@@ -15,17 +15,6 @@ struct CodeqlCreateOutcome {
     first_error: Option<String>,
 }
 
-#[derive(Clone, Copy)]
-struct CodeqlCreateCommand<'a> {
-    bin: &'a Path,
-    target: &'a Path,
-    output_path: &'a Path,
-    language: &'a str,
-    source_commit: &'a str,
-    cancellation: Option<&'a crate::scan::ScanCancellation>,
-    timeout: Duration,
-}
-
 pub(in crate::modules) fn codeql_db_module() -> BuiltinModule {
     builtin_module(
         "codeql-db",
@@ -76,6 +65,7 @@ fn codeql_create_db_options() -> Vec<OptionSpec> {
         .default(json!(DEFAULT_CODEQL_CREATE_TIMEOUT_MS))
         .advanced(),
         repository_source_commit_binding_option(),
+        repository_target_scope_binding_option(),
     ]
 }
 
@@ -119,26 +109,22 @@ fn execute_codeql_create(
     target: PathBuf,
     bin: PathBuf,
 ) -> Result<Value> {
-    let language = resolve_language(input, &target)?;
     let output_path = resolve_db_output_path(input, &target);
-    let build_modes = resolve_build_modes(input, &language)?;
-    let source_commit = crate::remediation::patch::repository_source_commit(input)?;
+    let binding = crate::remediation::patch::repository_source_binding(input)?;
     let timeout = codeql_create_timeout(input)?;
-    let start_label = format!(
-        "codeql:create-db start · language={language} target={}",
-        target.display()
-    );
-    emit_step(ctx, "tool", "create-db", start_label);
-    let (outcome, elapsed_ms) = timed_codeql_create(
-        &bin,
-        &target,
-        &output_path,
-        &language,
-        &build_modes,
-        &source_commit,
-        ctx.cancellation,
-        timeout,
+    let execution = crate::codeql_repository_execution::CodeqlRepositoryExecution::prepare(
+        crate::codeql_repository_execution::CodeqlRepositoryRequest {
+            source_root: &target,
+            binding,
+            destination: &output_path,
+            launcher: &bin,
+            cancellation: ctx.cancellation,
+            timeout,
+        },
     )?;
+    let started = Instant::now();
+    let (language, outcome) = execute_bound_codeql_create(&execution, input, ctx, &target)?;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
     emit_done_step(ctx, &output_path, elapsed_ms);
     let timestamp = now_ms()?;
     Ok(codeql_db_response(
@@ -152,28 +138,33 @@ fn execute_codeql_create(
     ))
 }
 
-fn timed_codeql_create(
-    bin: &Path,
+fn execute_bound_codeql_create(
+    execution: &crate::codeql_repository_execution::CodeqlRepositoryExecution<'_>,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
     target: &Path,
-    output_path: &Path,
-    language: &str,
-    build_modes: &[String],
-    source_commit: &str,
-    cancellation: Option<&crate::scan::ScanCancellation>,
-    timeout: Duration,
-) -> Result<(CodeqlCreateOutcome, u64)> {
-    let started = Instant::now();
-    let command = CodeqlCreateCommand {
-        bin,
-        target,
-        output_path,
-        language,
-        source_commit,
-        cancellation,
-        timeout,
-    };
-    let outcome = invoke_codeql_create_with_fallbacks(command, build_modes)?;
-    Ok((outcome, started.elapsed().as_millis() as u64))
+) -> Result<(String, CodeqlCreateOutcome)> {
+    execution.with_bound_target(|bound_target| {
+        let language = resolve_language(input, bound_target)?;
+        let build_modes = resolve_build_modes(input, &language)?;
+        emit_step(
+            ctx,
+            "tool",
+            "create-db",
+            format!(
+                "codeql:create-db start · language={language} target={}",
+                target.display()
+            ),
+        );
+        let outcome = invoke_codeql_create_with_fallbacks(
+            &execution,
+            bound_target,
+            &language,
+            &build_modes,
+            ctx.cancellation,
+        )?;
+        Ok((language, outcome))
+    })
 }
 
 fn codeql_create_timeout(input: &Value) -> Result<Duration> {
@@ -373,21 +364,28 @@ fn resolve_build_modes(input: &Value, language: &str) -> Result<Vec<String>> {
 }
 
 fn invoke_codeql_create_with_fallbacks(
-    command: CodeqlCreateCommand<'_>,
+    execution: &crate::codeql_repository_execution::CodeqlRepositoryExecution<'_>,
+    bound_target: &Path,
+    language: &str,
     build_modes: &[String],
+    cancellation: Option<&crate::scan::ScanCancellation>,
 ) -> Result<CodeqlCreateOutcome> {
     let mut last_output: Option<std::process::Output> = None;
     let mut first_error = None;
     for (index, build_mode) in build_modes.iter().enumerate() {
-        let output = run_codeql_create_attempt(command, build_mode)?;
+        let output = run_codeql_create_attempt(
+            execution,
+            bound_target,
+            language,
+            build_mode,
+            cancellation,
+        )?;
         if output.status.success() {
-            return completed_codeql_create_attempt(
-                command.target,
-                command.output_path,
+            return Ok(completed_codeql_create_attempt(
                 build_mode,
                 index,
                 first_error,
-            );
+            ));
         }
         if first_error.is_none() {
             first_error = Some(codeql_failure_summary(&output));
@@ -399,76 +397,40 @@ fn invoke_codeql_create_with_fallbacks(
 }
 
 fn completed_codeql_create_attempt(
-    target: &Path,
-    output_path: &Path,
     build_mode: &str,
     attempt_index: usize,
     first_error: Option<String>,
-) -> Result<CodeqlCreateOutcome> {
-    validate_codeql_create_output(target, output_path)?;
-    Ok(CodeqlCreateOutcome {
+) -> CodeqlCreateOutcome {
+    CodeqlCreateOutcome {
         build_mode: build_mode.to_string(),
         fallback: attempt_index > 0,
         first_error,
-    })
+    }
 }
 
 fn run_codeql_create_attempt(
-    command: CodeqlCreateCommand<'_>,
-    build_mode: &str,
-) -> Result<std::process::Output> {
-    if command
-        .cancellation
-        .is_some_and(crate::scan::ScanCancellation::is_cancelled)
-    {
-        anyhow::bail!("codeql:create-db was cancelled before starting an attempt");
-    }
-    invoke_codeql_create(
-        command.bin,
-        command.target,
-        command.output_path,
-        command.language,
-        build_mode,
-        command.source_commit,
-        command.cancellation,
-        command.timeout,
-    )
-}
-
-fn validate_codeql_create_output(_target: &Path, output_path: &Path) -> Result<()> {
-    if crate::codeql_repository_execution::codeql_database_is_valid(output_path) {
-        return Ok(());
-    }
-    anyhow::bail!(
-        "codeql reported success without a valid database at {}",
-        output_path.display()
-    )
-}
-
-fn invoke_codeql_create(
-    bin: &Path,
-    target: &Path,
-    output_path: &Path,
+    execution: &crate::codeql_repository_execution::CodeqlRepositoryExecution<'_>,
+    bound_target: &Path,
     language: &str,
     build_mode: &str,
-    source_commit: &str,
     cancellation: Option<&crate::scan::ScanCancellation>,
-    timeout: Duration,
 ) -> Result<std::process::Output> {
-    crate::codeql_repository_execution::run_codeql_repository_build(
-        crate::codeql_repository_execution::CodeqlRepositoryBuild {
-            source_root: target,
-            source_commit,
-            destination: output_path,
-            launcher: bin,
-            language,
-            strategy: crate::codeql_repository_execution::CodeqlBuildStrategy::BuildMode(
-                build_mode,
-            ),
-            cancellation,
-            timeout,
-        },
+    ensure_codeql_attempt_active(cancellation)?;
+    execution.build(
+        bound_target,
+        language,
+        crate::codeql_repository_execution::CodeqlBuildStrategy::BuildMode(build_mode),
     )
+}
+
+fn ensure_codeql_attempt_active(
+    cancellation: Option<&crate::scan::ScanCancellation>,
+) -> Result<()> {
+    anyhow::ensure!(
+        !cancellation.is_some_and(crate::scan::ScanCancellation::is_cancelled),
+        "codeql:create-db was cancelled before starting an attempt"
+    );
+    Ok(())
 }
 
 fn codeql_failure_error(output: &std::process::Output) -> anyhow::Error {
@@ -655,17 +617,7 @@ mod tests {
         fs::write(output.join("partial"), "stale").unwrap();
         let cancellation = crate::scan::ScanCancellation::default();
         cancellation.cancel();
-        let command = CodeqlCreateCommand {
-            bin: Path::new("unused-codeql"),
-            target: workspace.path(),
-            output_path: &output,
-            language: "javascript",
-            source_commit: "0000000000000000000000000000000000000000",
-            cancellation: Some(&cancellation),
-            timeout: Duration::from_secs(1),
-        };
-
-        let error = run_codeql_create_attempt(command, "none")
+        let error = ensure_codeql_attempt_active(Some(&cancellation))
             .unwrap_err()
             .to_string();
 

@@ -142,15 +142,10 @@ fn first_standard_codeql_launcher() -> Option<PathBuf> {
 
 /// Standard locations kuzushi expects for an existing CodeQL DB.
 pub(crate) fn codeql_db_path(repo_root: &Path) -> Option<PathBuf> {
-    for candidate in [
-        crate::workspace::workspace_codeql_db_path(repo_root),
-        crate::workspace::legacy_codeql_db_path(repo_root),
-    ] {
-        if candidate.exists() && candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-    None
+    crate::codeql_repository_execution::resolve_managed_codeql_database(repo_root)
+        .ok()
+        .flatten()
+        .map(|database| database.path)
 }
 
 /// One source-to-sink path discovered by a CodeQL query, distilled from
@@ -186,7 +181,9 @@ pub(crate) fn run_codeql_flows(plan: &TaintIrisNextPlan) -> Result<Option<Vec<Co
     if !codeql_available() {
         return Ok(None);
     }
-    let Some(db_path) = codeql_db_path(&plan.scan_root) else {
+    let Some(database) =
+        crate::codeql_repository_execution::resolve_managed_codeql_database(&plan.scan_root)?
+    else {
         return Ok(None);
     };
     let Some(launcher) = codeql_launcher_path() else {
@@ -198,7 +195,7 @@ pub(crate) fn run_codeql_flows(plan: &TaintIrisNextPlan) -> Result<Option<Vec<Co
     let timeout_secs = (plan.caps.codeql_analyze_timeout_ms as u64).div_ceil(1_000);
     let output = run_codeql_analysis(
         &launcher,
-        &db_path,
+        &database.path,
         sarif_file.path(),
         &queries,
         timeout_secs,
@@ -802,10 +799,16 @@ mod tests {
     fn run_codeql_flows_invokes_cli_and_parses_sarif() {
         let _guard = crate::test_env::codeql_bin_env_lock();
         let temp = tempdir().unwrap();
+        let fake_codeql = write_fake_codeql_flow_script(temp.path());
+        initialize_codeql_dataflow_repository(temp.path());
         let db = crate::workspace::workspace_codeql_db_path(temp.path());
         std::fs::create_dir_all(db.join("db-cpp")).unwrap();
         std::fs::write(db.join("codeql-database.yml"), "primaryLanguage: cpp\n").unwrap();
-        let fake_codeql = write_fake_codeql_flow_script(temp.path());
+        crate::codeql_repository_execution::write_test_codeql_database_provenance(
+            &db,
+            temp.path(),
+            "cpp",
+        );
 
         let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
         std::env::set_var("KUZUSHI_CODEQL_BIN", &fake_codeql);
@@ -823,6 +826,26 @@ mod tests {
         assert_eq!(flows[0].taint_class, "sql-injection");
         assert_eq!(flows[0].source_line, 3);
         assert_eq!(flows[0].sink_line, 9);
+    }
+
+    #[cfg(unix)]
+    fn initialize_codeql_dataflow_repository(root: &Path) {
+        run_codeql_dataflow_git(root, &["init", "-q"]);
+        std::fs::write(root.join("tracked.cpp"), "int main() { return 0; }\n").unwrap();
+        run_codeql_dataflow_git(root, &["add", "tracked.cpp", "codeql"]);
+        run_codeql_dataflow_git(root, &["commit", "-qm", "initial"]);
+    }
+
+    #[cfg(unix)]
+    fn run_codeql_dataflow_git(root: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.email=test@example.invalid"])
+            .args(["-c", "user.name=Kuzushi Test"])
+            .args(args)
+            .current_dir(root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
     }
 
     #[cfg(unix)]

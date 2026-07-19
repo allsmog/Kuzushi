@@ -1191,7 +1191,10 @@ export default {
     }
 
     #[test]
-    fn dynamic_js_execute_rejects_source_mutation_after_load() {
+    fn dynamic_js_worker_executes_approved_snapshot_then_rejects_source_mutation() {
+        if !crate::modules::dynamic_loader::kwp_node_execution_available() {
+            return;
+        }
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("mutable-module.mjs");
         let source = r#"
@@ -1209,9 +1212,18 @@ export default {
         let specifier = format!("file://{}", module_path.display());
         let lockfile = tmp.path().join("kuzushi.lock");
         let registry = approve_and_load_kwp_module(&specifier, Grant::default(), &lockfile);
-        fs::write(&module_path, source.replace("v1", "v2")).unwrap();
         let config = V2Config::default();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let output = registry
+            .execute_tool(
+                "dynmutable:run",
+                json!({}),
+                &kwp_context(&config, Some(&workspace), None, None),
+            )
+            .unwrap();
+        assert_eq!(output.pointer("/data/value"), Some(&json!("v1")));
+
+        fs::write(&module_path, source.replace("v1", "v2")).unwrap();
 
         let error = registry
             .execute_tool(

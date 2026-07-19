@@ -527,10 +527,10 @@ fn verify_repository_execution_input(
     let workspace = ctx
         .workspace
         .context("repository execution requires an active workspace")?;
-    let source_commit = crate::remediation::patch::repository_source_commit(input)?;
-    crate::remediation::patch::verify_repository_source_snapshot(
+    let source_binding = crate::remediation::patch::repository_source_binding(input)?;
+    crate::remediation::patch::verify_repository_source_binding(
         workspace.root(),
-        &source_commit,
+        &source_binding,
         crate::remediation::patch::unattended_patch_control(),
     )
 }

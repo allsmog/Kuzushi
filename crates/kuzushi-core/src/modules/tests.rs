@@ -653,13 +653,6 @@ JSON
     fn fake_codeql_binary(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
-        let db = crate::workspace::workspace_codeql_db_path(dir);
-        fs::create_dir_all(&db).unwrap();
-        fs::write(
-            db.join("codeql-database.yml"),
-            "primaryLanguage: javascript\n",
-        )
-        .unwrap();
         let binary = dir.join("codeql-fixture.sh");
         fs::write(
             &binary,
@@ -741,7 +734,40 @@ exit 2
         let mut permissions = fs::metadata(&binary).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&binary, permissions).unwrap();
+        initialize_codeql_scan_fixture(dir);
         binary
+    }
+
+    #[cfg(unix)]
+    fn initialize_codeql_scan_fixture(root: &Path) {
+        run_codeql_fixture_git(root, &["init", "-q"]);
+        run_codeql_fixture_git(root, &["add", "."]);
+        run_codeql_fixture_git(root, &["commit", "-qm", "CodeQL fixture"]);
+        crate::workspace::initialize_workspace_state(root).unwrap();
+        let database = crate::workspace::workspace_codeql_db_path(root);
+        fs::create_dir_all(database.join("db-javascript")).unwrap();
+        fs::write(
+            database.join("codeql-database.yml"),
+            "primaryLanguage: javascript\n",
+        )
+        .unwrap();
+        crate::codeql_repository_execution::write_test_codeql_database_provenance(
+            &database,
+            root,
+            "javascript",
+        );
+    }
+
+    #[cfg(unix)]
+    fn run_codeql_fixture_git(root: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(["-c", "user.email=test@example.invalid"])
+            .args(["-c", "user.name=Kuzushi Test"])
+            .args(args)
+            .current_dir(root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
     }
 
     #[cfg(unix)]

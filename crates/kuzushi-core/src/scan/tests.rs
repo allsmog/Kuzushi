@@ -1011,7 +1011,6 @@ JSON
     fn fake_codeql_binary(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
-        prepare_managed_codeql_database(dir);
         let binary = dir.join("codeql-fixture.sh");
         fs::write(
             &binary,
@@ -1073,17 +1072,40 @@ exit 2
         let mut permissions = fs::metadata(&binary).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&binary, permissions).unwrap();
+        prepare_managed_codeql_database(dir);
         binary
     }
 
     fn prepare_managed_codeql_database(root: &Path) {
+        if !root.join(".git").is_dir() {
+            run_codeql_fixture_git(root, &["init", "-q"]);
+        }
+        run_codeql_fixture_git(root, &["add", "."]);
+        run_codeql_fixture_git(root, &["commit", "-qm", "CodeQL fixture"]);
+        crate::workspace::initialize_workspace_state(root).unwrap();
         let db = crate::workspace::workspace_codeql_db_path(root);
-        fs::create_dir_all(&db).unwrap();
+        fs::create_dir_all(db.join("db-javascript")).unwrap();
         fs::write(
             db.join("codeql-database.yml"),
             "primaryLanguage: javascript\n",
         )
         .unwrap();
+        crate::codeql_repository_execution::write_test_codeql_database_provenance(
+            &db,
+            root,
+            "javascript",
+        );
+    }
+
+    fn run_codeql_fixture_git(root: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.email=test@example.invalid"])
+            .args(["-c", "user.name=Kuzushi Test"])
+            .args(args)
+            .current_dir(root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
     }
 
     #[cfg(unix)]
@@ -1280,7 +1302,6 @@ exit 2
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join("package.json"), "{}\n").unwrap();
         fs::write(tmp.path().join("server.js"), "db.query(req.query.q)\n").unwrap();
-        prepare_managed_codeql_database(tmp.path());
         let binary = tmp.path().join("codeql-env-fixture.sh");
         fs::write(
             &binary,
@@ -1307,6 +1328,7 @@ exit 2
         let mut permissions = fs::metadata(&binary).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&binary, permissions).unwrap();
+        prepare_managed_codeql_database(tmp.path());
 
         let scanner = CodeqlScanner {
             binary: Some(binary.display().to_string()),
