@@ -107,12 +107,21 @@ impl<'a> CodeqlRepositoryExecution<'a> {
             promotion::codeql_database_has_shape(isolated_db),
             "CodeQL reported success without a complete database in the isolated checkout"
         );
-        provenance::write_codeql_database_provenance(isolated_db, &self.request.binding, language)?;
+        let provenance = provenance::write_codeql_database_provenance(
+            isolated_db,
+            &self.request.binding,
+            language,
+        )?;
         promote_database(
             self.request.source_root,
             isolated_db,
             self.request.destination,
             self.destination_state.clone(),
+        )?;
+        provenance::write_codeql_promotion_receipt(
+            self.request.source_root,
+            self.request.destination,
+            &provenance,
         )
     }
 

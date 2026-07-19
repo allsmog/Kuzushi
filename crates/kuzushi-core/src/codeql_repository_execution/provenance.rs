@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 pub(super) const CODEQL_PROVENANCE_FILE: &str = ".kuzushi-provenance.json";
 const CODEQL_PROVENANCE_SCHEMA_VERSION: u32 = 1;
 const MAX_CODEQL_PROVENANCE_BYTES: usize = 64 * 1024;
+const CODEQL_RECEIPT_SCHEMA_VERSION: u32 = 1;
+const CODEQL_RECEIPTS_DIR: &str = "codeql-receipts";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -22,6 +24,15 @@ pub(crate) struct CodeqlDatabaseProvenance {
 pub(crate) struct ValidatedManagedCodeqlDatabase {
     pub(crate) path: PathBuf,
     pub(crate) provenance: CodeqlDatabaseProvenance,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CodeqlPromotionReceipt {
+    schema_version: u32,
+    target_id: String,
+    database_identity: String,
+    provenance: CodeqlDatabaseProvenance,
 }
 
 pub(super) fn write_codeql_database_provenance(
@@ -74,7 +85,144 @@ pub(crate) fn resolve_managed_codeql_database(
         )
     })?;
     validate_current_source(target, &provenance)?;
+    verify_codeql_promotion_receipt(target, &path, &provenance)?;
     Ok(Some(ValidatedManagedCodeqlDatabase { path, provenance }))
+}
+
+pub(super) fn write_codeql_promotion_receipt(
+    target: &Path,
+    database: &Path,
+    provenance: &CodeqlDatabaseProvenance,
+) -> Result<()> {
+    let operator_home = operator_home_for_target(target)?;
+    write_codeql_promotion_receipt_at(&operator_home, target, database, provenance)
+}
+
+fn write_codeql_promotion_receipt_at(
+    operator_home: &Path,
+    target: &Path,
+    database: &Path,
+    provenance: &CodeqlDatabaseProvenance,
+) -> Result<()> {
+    let target_id = target_id(target)?;
+    let path = prepare_receipt_path(operator_home, target, &target_id)?;
+    let receipt = CodeqlPromotionReceipt {
+        schema_version: CODEQL_RECEIPT_SCHEMA_VERSION,
+        target_id,
+        database_identity: super::promotion::database_identity(database)?,
+        provenance: provenance.clone(),
+    };
+    let bytes = serde_json::to_vec_pretty(&receipt)?;
+    crate::fs_atomic::write_atomic_bytes(&path, &bytes)
+        .context("could not write operator CodeQL promotion receipt")
+}
+
+fn verify_codeql_promotion_receipt(
+    target: &Path,
+    database: &Path,
+    provenance: &CodeqlDatabaseProvenance,
+) -> Result<()> {
+    let operator_home = operator_home_for_target(target)?;
+    let expected_target_id = target_id(target)?;
+    let path = receipt_path(&operator_home, target, &expected_target_id)?;
+    let raw = crate::bounded_file::read_utf8_text_within(
+        &operator_home,
+        &path,
+        MAX_CODEQL_PROVENANCE_BYTES,
+    )
+    .with_context(|| {
+        format!(
+            "managed CodeQL database has no operator promotion receipt at {}; run `codeql:create-db` again",
+            path.display()
+        )
+    })?;
+    let receipt: CodeqlPromotionReceipt = serde_json::from_str(&raw)
+        .context("operator CodeQL promotion receipt is malformed; run `codeql:create-db` again")?;
+    validate_promotion_receipt(database, provenance, &expected_target_id, &receipt)
+}
+
+fn validate_promotion_receipt(
+    database: &Path,
+    provenance: &CodeqlDatabaseProvenance,
+    expected_target_id: &str,
+    receipt: &CodeqlPromotionReceipt,
+) -> Result<()> {
+    let actual_identity = super::promotion::database_identity(database)?;
+    anyhow::ensure!(
+        receipt.schema_version == CODEQL_RECEIPT_SCHEMA_VERSION
+            && receipt.target_id == expected_target_id
+            && receipt.provenance == *provenance
+            && receipt.database_identity == actual_identity,
+        "managed CodeQL database does not match its operator promotion receipt; run `codeql:create-db` again"
+    );
+    Ok(())
+}
+
+fn prepare_receipt_path(operator_home: &Path, target: &Path, target_id: &str) -> Result<PathBuf> {
+    let path = receipt_path(operator_home, target, target_id)?;
+    crate::workspace::initialize_workspace_state(operator_home)?;
+    let directory = receipt_relative_dir();
+    crate::workspace::ensure_workspace_descendant_dir(operator_home, &directory)?;
+    Ok(path)
+}
+
+fn receipt_path(operator_home: &Path, target: &Path, target_id: &str) -> Result<PathBuf> {
+    let operator_home = std::fs::canonicalize(operator_home)
+        .context("could not resolve operator home for CodeQL receipt")?;
+    let target = std::fs::canonicalize(target).context("could not resolve CodeQL target")?;
+    let operator_state = crate::workspace::workspace_state_root(&operator_home);
+    anyhow::ensure!(
+        !operator_state.starts_with(&target),
+        "CodeQL target overlaps the operator-owned receipt store"
+    );
+    crate::workspace::validated_workspace_descendant(
+        &operator_home,
+        receipt_relative_dir().join(format!("{target_id}.json")),
+    )
+}
+
+fn receipt_relative_dir() -> PathBuf {
+    PathBuf::from(crate::workspace::KUZUSHI_STATE_DIR)
+        .join(crate::workspace::WORKSPACE_STATE_VERSION_DIR)
+        .join(CODEQL_RECEIPTS_DIR)
+}
+
+fn target_id(target: &Path) -> Result<String> {
+    let target = std::fs::canonicalize(target).context("could not resolve CodeQL target")?;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"kuzushi-codeql-target-v1\0");
+    hash_path(&mut hasher, &target);
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+#[cfg(unix)]
+fn hash_path(hasher: &mut blake3::Hasher, path: &Path) {
+    use std::os::unix::ffi::OsStrExt;
+    hasher.update(path.as_os_str().as_bytes());
+}
+
+#[cfg(windows)]
+fn hash_path(hasher: &mut blake3::Hasher, path: &Path) {
+    use std::os::windows::ffi::OsStrExt;
+    for unit in path.as_os_str().encode_wide() {
+        hasher.update(&unit.to_le_bytes());
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn hash_path(hasher: &mut blake3::Hasher, path: &Path) {
+    hasher.update(path.to_string_lossy().as_bytes());
+}
+
+fn operator_home_for_target(target: &Path) -> Result<PathBuf> {
+    #[cfg(test)]
+    {
+        return Ok(
+            test_operator_home(target).unwrap_or_else(|| register_test_operator_home(target))
+        );
+    }
+    #[cfg(not(test))]
+    dirs::home_dir().context("could not resolve operator home for CodeQL promotion receipt")
 }
 
 fn validate_current_source(target: &Path, provenance: &CodeqlDatabaseProvenance) -> Result<()> {
@@ -158,13 +306,51 @@ pub(crate) fn write_test_codeql_database_provenance(
     target: &Path,
     language: &str,
 ) {
+    let operator_home = register_test_operator_home(target);
     crate::workspace::initialize_workspace_state(target).unwrap();
     let binding = crate::remediation::patch::clean_repository_source_binding(
         target,
         crate::remediation::patch::unattended_patch_control(),
     )
     .unwrap();
-    write_codeql_database_provenance(database, &binding, language).unwrap();
+    let provenance = write_codeql_database_provenance(database, &binding, language).unwrap();
+    write_codeql_promotion_receipt_at(&operator_home, target, database, &provenance).unwrap();
+}
+
+#[cfg(test)]
+#[derive(Default)]
+struct TestOperatorHomes {
+    roots: Vec<tempfile::TempDir>,
+    by_target: std::collections::HashMap<PathBuf, PathBuf>,
+}
+
+#[cfg(test)]
+fn test_operator_homes() -> &'static std::sync::Mutex<TestOperatorHomes> {
+    static HOMES: std::sync::OnceLock<std::sync::Mutex<TestOperatorHomes>> =
+        std::sync::OnceLock::new();
+    HOMES.get_or_init(Default::default)
+}
+
+#[cfg(test)]
+fn register_test_operator_home(target: &Path) -> PathBuf {
+    let target = std::fs::canonicalize(target).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().to_path_buf();
+    let mut homes = test_operator_homes().lock().unwrap();
+    homes.by_target.insert(target, path.clone());
+    homes.roots.push(root);
+    path
+}
+
+#[cfg(test)]
+fn test_operator_home(target: &Path) -> Option<PathBuf> {
+    let target = std::fs::canonicalize(target).ok()?;
+    test_operator_homes()
+        .lock()
+        .ok()?
+        .by_target
+        .get(&target)
+        .cloned()
 }
 
 #[cfg(test)]
@@ -202,6 +388,41 @@ mod tests {
             .to_string();
 
         assert!(error.contains("trusted provenance"), "{error}");
+    }
+
+    #[test]
+    fn managed_database_rejects_self_asserted_target_provenance() {
+        let repository = initialized_repository();
+        let database = make_database(repository.path(), "javascript");
+        let operator_home = register_test_operator_home(repository.path());
+        let binding = crate::remediation::patch::clean_repository_source_binding(
+            repository.path(),
+            crate::remediation::patch::unattended_patch_control(),
+        )
+        .unwrap();
+        write_codeql_database_provenance(&database, &binding, "javascript").unwrap();
+
+        let error = resolve_managed_codeql_database(repository.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("operator promotion receipt"), "{error}");
+        assert!(!operator_home.join(receipt_relative_dir()).exists());
+    }
+
+    #[test]
+    fn managed_database_rejects_content_changed_after_operator_receipt() {
+        let repository = initialized_repository();
+        let database = make_database(repository.path(), "javascript");
+        write_test_codeql_database_provenance(&database, repository.path(), "javascript");
+        std::fs::write(database.join("db-javascript/forged.bin"), b"forged").unwrap();
+
+        let error = resolve_managed_codeql_database(repository.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("does not match"), "{error}");
+        assert!(error.contains("codeql:create-db"), "{error}");
     }
 
     #[test]

@@ -220,7 +220,7 @@ fn restore_changed_database(destination: &Path, backup: &Path) -> Result<()> {
     anyhow::bail!("CodeQL destination changed during isolated execution; retry")
 }
 
-fn database_identity(path: &Path) -> Result<String> {
+pub(super) fn database_identity(path: &Path) -> Result<String> {
     let mut hasher = blake3::Hasher::new();
     let marker = path.join("codeql-database.yml");
     let marker_bytes = crate::bounded_file::read_regular_bytes_within(path, &marker, 1024 * 1024)?;
