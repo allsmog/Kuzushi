@@ -104,7 +104,14 @@ pub(crate) fn run_codeql_build_report(
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
     let system_prompt = codeql_build_system_prompt(input)?;
-    let launcher = require_codeql_launcher()?;
+    let launcher = crate::codeql_repository_execution::prepared_codeql_launcher(input)?;
+    anyhow::ensure!(
+        !matches!(
+            launcher,
+            crate::codeql_repository_execution::PreparedCodeqlLauncher::Unavailable
+        ),
+        "taint-iris-next:codeql-db requires the codeql CLI on PATH (or set KUZUSHI_CODEQL_BIN)"
+    );
     let db_path = prepare_codeql_db_path(&target)?;
     let binding = crate::remediation::patch::repository_source_binding(input)?;
     let timeout = codeql_build_timeout(input)?;
@@ -113,19 +120,13 @@ pub(crate) fn run_codeql_build_report(
             source_root: &target,
             binding,
             destination: &db_path,
-            launcher: &launcher,
+            launcher,
             cancellation: ctx.cancellation,
             timeout,
         },
     )?;
     let built = execution.with_bound_target(|bound_target| {
-        plan_and_execute_codeql_build(
-            &execution,
-            bound_target,
-            runtime,
-            model,
-            system_prompt,
-        )
+        plan_and_execute_codeql_build(&execution, bound_target, runtime, model, system_prompt)
     })?;
     Ok(completed_codeql_build_report(&target, &db_path, built))
 }
@@ -146,11 +147,10 @@ fn completed_codeql_build_report(
 }
 
 fn codeql_build_system_prompt(input: &Value) -> Result<String> {
-    Ok(optional_taint_next_string(
-        input,
-        &["TAINT_IRIS_NEXT_CODEQL_BUILD_PROMPT"],
-    )?
-    .unwrap_or_else(|| TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT.to_string()))
+    Ok(
+        optional_taint_next_string(input, &["TAINT_IRIS_NEXT_CODEQL_BUILD_PROMPT"])?
+            .unwrap_or_else(|| TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT.to_string()),
+    )
 }
 
 struct BoundCodeqlBuild {
@@ -274,9 +274,8 @@ fn isolated_codeql_strategy<'a>(
         );
     }
     let command = codeql_build_command(plan);
-    let strategy = crate::codeql_repository_execution::CodeqlBuildStrategy::Manual(
-        plan.build_command.trim(),
-    );
+    let strategy =
+        crate::codeql_repository_execution::CodeqlBuildStrategy::Manual(plan.build_command.trim());
     (command, strategy)
 }
 
@@ -303,14 +302,6 @@ fn resolve_codeql_build_target(input: &Value, ctx: &ToolExecutionContext<'_>) ->
     Ok(target)
 }
 
-fn require_codeql_launcher() -> Result<PathBuf> {
-    codeql_launcher_path().ok_or_else(|| {
-        anyhow::anyhow!(
-            "taint-iris-next:codeql-db requires the codeql CLI on PATH (or set KUZUSHI_CODEQL_BIN)"
-        )
-    })
-}
-
 fn query_codeql_build_plan(
     runtime: &dyn AgentRuntime,
     model: String,
@@ -318,12 +309,10 @@ fn query_codeql_build_plan(
     system_prompt: String,
     prompt: String,
 ) -> Result<AgentQueryResponse> {
-    crate::runtime::query_blocking_checked(runtime, AgentQueryRequest::new(
-        model,
-        target.to_path_buf(),
-        system_prompt,
-        prompt,
-    ))
+    crate::runtime::query_blocking_checked(
+        runtime,
+        AgentQueryRequest::new(model, target.to_path_buf(), system_prompt, prompt),
+    )
 }
 
 fn decode_codeql_build_plan(response: &AgentQueryResponse) -> Result<CodeqlBuildPlan> {
@@ -763,15 +752,23 @@ mod tests {
         let mut input = json!({"target": temp.path().display().to_string()});
         crate::remediation::patch::bind_repository_source_snapshot(temp.path(), &mut input)
             .unwrap();
+        crate::codeql_repository_execution::bind_codeql_launcher(
+            "taint-iris-next:codeql-db",
+            temp.path(),
+            &mut input,
+        )
+        .unwrap();
 
         let report = run_codeql_build_report(&input, &ctx, Some(&BuildPlanRuntime)).unwrap();
 
         restore_codeql_bin(previous);
         assert_codeql_build_report(report);
         assert!(!temp.path().join("source-side-effect.txt").exists());
-        assert!(crate::codeql_repository_execution::codeql_database_is_valid(
-            &crate::workspace::workspace_codeql_db_path(temp.path())
-        ));
+        assert!(
+            crate::codeql_repository_execution::codeql_database_is_valid(
+                &crate::workspace::workspace_codeql_db_path(temp.path())
+            )
+        );
     }
 
     #[cfg(unix)]

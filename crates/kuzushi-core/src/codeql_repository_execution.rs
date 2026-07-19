@@ -9,9 +9,13 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::Duration;
 
+mod launcher;
 mod promotion;
 mod provenance;
 
+pub(crate) use launcher::{
+    bind_codeql_launcher, prepared_codeql_launcher, verify_codeql_launcher, PreparedCodeqlLauncher,
+};
 pub(crate) use promotion::codeql_database_is_valid;
 use promotion::{inspect_destination, promote_database, DestinationState};
 #[cfg(test)]
@@ -31,7 +35,7 @@ pub(crate) struct CodeqlRepositoryRequest<'a> {
     pub source_root: &'a Path,
     pub binding: RepositorySourceBinding,
     pub destination: &'a Path,
-    pub launcher: &'a Path,
+    pub launcher: PreparedCodeqlLauncher,
     pub cancellation: Option<&'a crate::scan::ScanCancellation>,
     pub timeout: Duration,
 }
@@ -84,15 +88,20 @@ impl<'a> CodeqlRepositoryExecution<'a> {
             checkout_target,
             &self.relative_database,
         )?;
-        let launcher = isolated_launcher(
-            self.request.source_root,
-            checkout_target,
-            self.request.launcher,
-        )?;
+        let launcher = self
+            .request
+            .launcher
+            .resolve_for_checkout(
+                self.request.source_root,
+                &self.request.binding,
+                checkout_target,
+            )?
+            .context("CodeQL launcher was unavailable when the operation was prepared")?;
         let args = codeql_arguments(&self.relative_database, language, strategy, checkout_target)?;
         let output = self.control().run_program(
             checkout_target,
-            &launcher,
+            launcher.path(),
+            launcher.read_scope(),
             &args,
             "isolated CodeQL database build",
         )?;
@@ -177,17 +186,6 @@ fn write_manual_build_script(checkout: &Path, command: &str) -> Result<PathBuf> 
     crate::workspace::write_workspace_state_file(checkout, relative, body.as_bytes())
 }
 
-fn isolated_launcher(source_root: &Path, checkout: &Path, launcher: &Path) -> Result<PathBuf> {
-    let source_root = fs::canonicalize(source_root)
-        .with_context(|| format!("could not resolve source root {}", source_root.display()))?;
-    let launcher = fs::canonicalize(launcher)
-        .with_context(|| format!("could not resolve CodeQL launcher {}", launcher.display()))?;
-    match launcher.strip_prefix(&source_root) {
-        Ok(relative) => Ok(checkout.join(relative)),
-        Err(_) => Ok(launcher),
-    }
-}
-
 fn validated_database_relative(source_root: &Path, destination: &Path) -> Result<PathBuf> {
     let canonical_source_root = fs::canonicalize(source_root)
         .with_context(|| format!("could not resolve source root {}", source_root.display()))?;
@@ -241,12 +239,11 @@ mod tests {
         )
         .unwrap();
         let destination = crate::workspace::workspace_codeql_db_path(repository.path());
-        let launcher = repository.path().join("codeql");
         let execution = CodeqlRepositoryExecution::prepare(CodeqlRepositoryRequest {
             source_root: repository.path(),
             binding,
             destination: &destination,
-            launcher: &launcher,
+            launcher: PreparedCodeqlLauncher::Unavailable,
             cancellation: None,
             timeout: Duration::from_secs(5),
         })

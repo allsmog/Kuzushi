@@ -830,7 +830,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn systems_context_does_not_accept_symlinked_codeql_database() {
+    fn systems_context_rejects_symlinked_codeql_database() {
         use std::os::unix::fs::symlink;
 
         let workspace = tempdir().unwrap();
@@ -838,7 +838,41 @@ mod tests {
         fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
         symlink(outside.path(), workspace.path().join(".kuzushi/codeql-db")).unwrap();
 
-        assert!(resolve_codeql_db_path(workspace.path()).is_none());
+        let error = resolve_codeql_db_path(workspace.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("symbolic link"), "{error}");
+    }
+
+    #[test]
+    fn systems_context_rejects_malformed_codeql_provenance() {
+        let workspace = tempdir().unwrap();
+        let database = crate::workspace::workspace_codeql_db_path(workspace.path());
+        fs::create_dir_all(database.join("db-cpp")).unwrap();
+        fs::write(
+            database.join("codeql-database.yml"),
+            "primaryLanguage: cpp\n",
+        )
+        .unwrap();
+        fs::write(database.join(".kuzushi-provenance.json"), "{not-json\n").unwrap();
+
+        let error = gather_systems_context(
+            workspace.path(),
+            &SystemsHuntInput::from_tool_input(&json!({})).unwrap(),
+        )
+        .unwrap_err();
+        let error = format!("{error:#}");
+
+        assert!(error.contains("invalid CodeQL provenance"), "{error}");
+        assert!(error.contains("run `codeql:create-db` again"), "{error}");
+    }
+
+    #[test]
+    fn systems_context_treats_only_missing_codeql_database_as_absent() {
+        let workspace = tempdir().unwrap();
+
+        assert_eq!(resolve_codeql_db_path(workspace.path()).unwrap(), None);
     }
 
     // ----- pick_role_for_invariants --------------------------------

@@ -141,11 +141,9 @@ fn first_standard_codeql_launcher() -> Option<PathBuf> {
 }
 
 /// Standard locations kuzushi expects for an existing CodeQL DB.
-pub(crate) fn codeql_db_path(repo_root: &Path) -> Option<PathBuf> {
+pub(crate) fn codeql_db_path(repo_root: &Path) -> Result<Option<PathBuf>> {
     crate::codeql_repository_execution::resolve_managed_codeql_database(repo_root)
-        .ok()
-        .flatten()
-        .map(|database| database.path)
+        .map(|database| database.map(|database| database.path))
 }
 
 /// One source-to-sink path discovered by a CodeQL query, distilled from

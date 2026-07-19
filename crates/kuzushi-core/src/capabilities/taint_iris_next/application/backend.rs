@@ -3,8 +3,8 @@ use super::*;
 pub(crate) fn choose_taint_iris_next_backend(
     requested: &str,
     repo_root: &Path,
-) -> TaintIrisNextBackendChoice {
-    let codeql_db = super::codeql_db_path(repo_root);
+) -> Result<TaintIrisNextBackendChoice> {
+    let codeql_db = super::codeql_db_path(repo_root)?;
     let availability = TaintIrisNextBackendAvailability {
         codeql_db_present: codeql_db.is_some(),
         codeql_runnable: codeql_db.is_some() && super::codeql_available(),
@@ -14,14 +14,14 @@ pub(crate) fn choose_taint_iris_next_backend(
     let availability = availability.with_joern_status();
     let mut warnings = Vec::new();
     let selected = select_taint_iris_next_backend(requested, &availability, &mut warnings);
-    TaintIrisNextBackendChoice {
+    Ok(TaintIrisNextBackendChoice {
         requested: requested.to_string(),
         selected: selected.to_string(),
         codeql_db_path: codeql_db.as_ref().map(|path| path.display().to_string()),
         corroborate_with_codeql: codeql_db.as_ref().map(|_| true),
         structural_tool: detect_structural_tool().to_string(),
         warnings,
-    }
+    })
 }
 
 struct TaintIrisNextBackendAvailability {

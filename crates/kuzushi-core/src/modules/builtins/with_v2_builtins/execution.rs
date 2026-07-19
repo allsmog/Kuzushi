@@ -505,14 +505,27 @@ fn bind_repository_execution_input(
     if !patch_validation && !operation_builds_codeql_database(name) {
         return Ok(input);
     }
-    let workspace = ctx.workspace.context(
-        "repository execution requires an active workspace before binding its source",
-    )?;
-    if patch_validation {
-        crate::remediation::patch::bind_patch_validation_plan(workspace.root(), &mut input)?;
-    }
-    crate::remediation::patch::bind_repository_source_snapshot(workspace.root(), &mut input)?;
+    let workspace = ctx
+        .workspace
+        .context("repository execution requires an active workspace before binding its source")?;
+    bind_repository_execution_contract(name, patch_validation, workspace.root(), &mut input)?;
     Ok(input)
+}
+
+fn bind_repository_execution_contract(
+    name: &str,
+    patch_validation: bool,
+    workspace_root: &std::path::Path,
+    input: &mut Value,
+) -> Result<()> {
+    if patch_validation {
+        crate::remediation::patch::bind_patch_validation_plan(workspace_root, input)?;
+    }
+    crate::remediation::patch::bind_repository_source_snapshot(workspace_root, input)?;
+    if operation_builds_codeql_database(name) {
+        crate::codeql_repository_execution::bind_codeql_launcher(name, workspace_root, input)?;
+    }
+    Ok(())
 }
 
 fn verify_repository_execution_input(
@@ -532,7 +545,11 @@ fn verify_repository_execution_input(
         workspace.root(),
         &source_binding,
         crate::remediation::patch::unattended_patch_control(),
-    )
+    )?;
+    if operation_builds_codeql_database(name) {
+        crate::codeql_repository_execution::verify_codeql_launcher(name, workspace.root(), input)?;
+    }
+    Ok(())
 }
 
 fn operation_builds_codeql_database(name: &str) -> bool {

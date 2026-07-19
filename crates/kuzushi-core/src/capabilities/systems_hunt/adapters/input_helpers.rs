@@ -98,11 +98,9 @@ pub(crate) fn write_artifact(
     crate::workspace::write_workspace_file(target, relative, body.as_bytes())
 }
 
-pub(crate) fn resolve_codeql_db_path(target: &Path) -> Option<PathBuf> {
+pub(crate) fn resolve_codeql_db_path(target: &Path) -> Result<Option<PathBuf>> {
     crate::codeql_repository_execution::resolve_managed_codeql_database(target)
-        .ok()
-        .flatten()
-        .map(|database| database.path)
+        .map(|database| database.map(|database| database.path))
 }
 
 pub(crate) fn path_relative_to(root: &Path, path: &Path) -> String {

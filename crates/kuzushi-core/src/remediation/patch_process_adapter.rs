@@ -5,6 +5,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ProgramReadScope {
+    Checkout,
+    IsolatedFile,
+    ExternalBundle(PathBuf),
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct PatchProcessControl<'a> {
     cancellation: Option<&'a crate::scan::ScanCancellation>,
@@ -120,11 +127,12 @@ impl<'a> PatchProcessControl<'a> {
         self,
         cwd: &Path,
         program: &Path,
+        read_scope: &ProgramReadScope,
         args: &[OsString],
         label: &str,
     ) -> Result<Output> {
         self.ensure_active()?;
-        let mut command = validation_program_command(cwd, program, args)?;
+        let mut command = validation_program_command(cwd, program, read_scope, args)?;
         command.current_dir(cwd).stdin(Stdio::null());
         configure_validation_environment(&mut command, cwd)?;
         self.output(&mut command, label)
@@ -155,7 +163,7 @@ fn validation_shell_command(_cwd: &Path, script: &str) -> Result<Command> {
         let mut command = Command::new("/usr/bin/sandbox-exec");
         command.args([
             "-p",
-            &macos_validation_profile(_cwd, &[]),
+            &macos_validation_profile(_cwd, &[], &[]),
             "/bin/sh",
             "-c",
             script,
@@ -172,31 +180,44 @@ fn validation_shell_command(_cwd: &Path, script: &str) -> Result<Command> {
 fn validation_program_command(
     _cwd: &Path,
     program: &Path,
+    read_scope: &ProgramReadScope,
     args: &[OsString],
 ) -> Result<Command> {
     #[cfg(target_os = "macos")]
     if Path::new("/usr/bin/sandbox-exec").is_file() {
         let program = std::fs::canonicalize(program)
             .with_context(|| format!("could not resolve executable {}", program.display()))?;
-        let read_paths = external_program_read_paths(_cwd, &program)?;
+        let grants = program_read_grants(_cwd, &program, read_scope)?;
         let mut command = Command::new("/usr/bin/sandbox-exec");
-        command.args(["-p", &macos_validation_profile(_cwd, &read_paths)]);
+        command.args([
+            "-p",
+            &macos_validation_profile(_cwd, &grants.trees, &grants.files),
+        ]);
         command.arg(&program).args(args);
         return Ok(command);
     }
     #[cfg(target_os = "linux")]
     if kuzushi_sandbox::which("bwrap").is_some() {
-        return linux_validation_program_command(_cwd, program, args);
+        return linux_validation_program_command(_cwd, program, read_scope, args);
     }
     anyhow::bail!("repository execution refused: no isolating sandbox is available on this host")
 }
 
 #[cfg(target_os = "macos")]
-fn macos_validation_profile(cwd: &Path, extra_read_paths: &[PathBuf]) -> String {
+fn macos_validation_profile(
+    cwd: &Path,
+    extra_read_trees: &[PathBuf],
+    extra_read_files: &[PathBuf],
+) -> String {
     let canonical_cwd = std::fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let mut profile = String::from("(version 1)(allow default)(deny network*)");
     append_macos_denied_reads(&mut profile, &canonical_cwd);
-    append_macos_allowed_reads(&mut profile, &canonical_cwd, extra_read_paths);
+    append_macos_allowed_reads(
+        &mut profile,
+        &canonical_cwd,
+        extra_read_trees,
+        extra_read_files,
+    );
     append_macos_write_policy(&mut profile, &canonical_cwd);
     profile
 }
@@ -219,14 +240,25 @@ fn append_macos_denied_reads(profile: &mut String, cwd: &Path) {
 }
 
 #[cfg(target_os = "macos")]
-fn append_macos_allowed_reads(profile: &mut String, cwd: &Path, extra: &[PathBuf]) {
+fn append_macos_allowed_reads(
+    profile: &mut String,
+    cwd: &Path,
+    extra_trees: &[PathBuf],
+    extra_files: &[PathBuf],
+) {
     for path in validation_read_paths(cwd)
         .into_iter()
-        .chain(extra.iter().cloned())
+        .chain(extra_trees.iter().cloned())
     {
         profile.push_str(&format!(
             "(allow file-read* (subpath \"{}\"))",
             sandbox_literal(&path)
+        ));
+    }
+    for path in extra_files {
+        profile.push_str(&format!(
+            "(allow file-read* (literal \"{}\"))",
+            sandbox_literal(path)
         ));
     }
 }
@@ -264,10 +296,11 @@ fn linux_validation_command(cwd: &Path, script: &str) -> Command {
 fn linux_validation_program_command(
     cwd: &Path,
     program: &Path,
+    read_scope: &ProgramReadScope,
     args: &[OsString],
 ) -> Result<Command> {
     let mut command = linux_validation_base_command(cwd);
-    let program = append_linux_program_mount(&mut command, cwd, program)?;
+    let program = append_linux_program_mount(&mut command, cwd, program, read_scope)?;
     command.arg("--").arg(program).args(args);
     Ok(command)
 }
@@ -305,33 +338,86 @@ fn append_linux_program_mount(
     command: &mut Command,
     cwd: &Path,
     program: &Path,
+    read_scope: &ProgramReadScope,
 ) -> Result<PathBuf> {
     let cwd = std::fs::canonicalize(cwd)?;
     let program = std::fs::canonicalize(program)?;
-    match program.strip_prefix(&cwd) {
-        Ok(relative) => Ok(Path::new("/work").join(relative)),
-        Err(_) => {
-            let parent = program.parent().context("executable has no parent directory")?;
-            let file_name = program.file_name().context("executable has no file name")?;
+    if let Ok(relative) = program.strip_prefix(&cwd) {
+        anyhow::ensure!(
+            matches!(read_scope, ProgramReadScope::Checkout),
+            "checkout-local executable has an invalid sandbox read scope"
+        );
+        return Ok(Path::new("/work").join(relative));
+    }
+    match read_scope {
+        ProgramReadScope::Checkout => {
+            anyhow::bail!("checkout-scoped executable escaped the validation checkout")
+        }
+        ProgramReadScope::IsolatedFile => {
             command
                 .args(["--dir", "/tooling/program", "--ro-bind"])
-                .arg(parent)
+                .arg(&program)
+                .arg("/tooling/program/launcher");
+            Ok(PathBuf::from("/tooling/program/launcher"))
+        }
+        ProgramReadScope::ExternalBundle(root) => {
+            let root = std::fs::canonicalize(root)?;
+            let relative = program
+                .strip_prefix(&root)
+                .context("external executable escaped its prepared bundle root")?;
+            command
+                .args(["--dir", "/tooling/program", "--ro-bind"])
+                .arg(&root)
                 .arg("/tooling/program");
-            Ok(Path::new("/tooling/program").join(file_name))
+            Ok(Path::new("/tooling/program").join(relative))
         }
     }
 }
 
 #[cfg(target_os = "macos")]
-fn external_program_read_paths(cwd: &Path, program: &Path) -> Result<Vec<PathBuf>> {
+#[derive(Debug, Eq, PartialEq)]
+struct ProgramReadGrants {
+    trees: Vec<PathBuf>,
+    files: Vec<PathBuf>,
+}
+
+#[cfg(target_os = "macos")]
+fn program_read_grants(
+    cwd: &Path,
+    program: &Path,
+    read_scope: &ProgramReadScope,
+) -> Result<ProgramReadGrants> {
     let cwd = std::fs::canonicalize(cwd)?;
     if program.starts_with(&cwd) {
-        return Ok(Vec::new());
+        anyhow::ensure!(
+            matches!(read_scope, ProgramReadScope::Checkout),
+            "checkout-local executable has an invalid sandbox read scope"
+        );
+        return Ok(ProgramReadGrants {
+            trees: Vec::new(),
+            files: Vec::new(),
+        });
     }
-    Ok(vec![program
-        .parent()
-        .context("executable has no parent directory")?
-        .to_path_buf()])
+    match read_scope {
+        ProgramReadScope::Checkout => {
+            anyhow::bail!("checkout-scoped executable escaped the validation checkout")
+        }
+        ProgramReadScope::IsolatedFile => Ok(ProgramReadGrants {
+            trees: Vec::new(),
+            files: vec![program.to_path_buf()],
+        }),
+        ProgramReadScope::ExternalBundle(root) => {
+            let root = std::fs::canonicalize(root)?;
+            anyhow::ensure!(
+                program.starts_with(&root),
+                "external executable escaped its prepared bundle root"
+            );
+            Ok(ProgramReadGrants {
+                trees: vec![root],
+                files: Vec::new(),
+            })
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -653,7 +739,7 @@ mod tests {
             output.status.success(),
             "{}\n{}",
             String::from_utf8_lossy(&output.stderr),
-            macos_validation_profile(&worktree, &[])
+            macos_validation_profile(&worktree, &[], &[])
         );
         assert!(!outside.exists());
         assert!(worktree.join("inside-write").is_file());
@@ -697,10 +783,20 @@ mod tests {
         std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let output = PatchProcessControl::unattended(Duration::from_secs(5))
-            .run_program(&worktree, &launcher, &[], "external launcher probe")
+            .run_program(
+                &worktree,
+                &launcher,
+                &ProgramReadScope::ExternalBundle(bundle.clone()),
+                &[],
+                "external launcher probe",
+            )
             .unwrap();
 
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(String::from_utf8_lossy(&output.stdout), "mounted\n");
     }
 
@@ -715,13 +811,46 @@ mod tests {
         let launcher = bundle.join("codeql");
         std::fs::write(&launcher, "launcher").unwrap();
         let launcher = std::fs::canonicalize(launcher).unwrap();
-        let read_paths = external_program_read_paths(&worktree, &launcher).unwrap();
+        let bundle = std::fs::canonicalize(&bundle).unwrap();
+        let grants = program_read_grants(
+            &worktree,
+            &launcher,
+            &ProgramReadScope::ExternalBundle(bundle.clone()),
+        )
+        .unwrap();
 
-        assert_eq!(read_paths, vec![std::fs::canonicalize(&bundle).unwrap()]);
-        let profile = macos_validation_profile(&worktree, &read_paths);
+        assert_eq!(grants.trees, vec![bundle.clone()]);
+        assert!(grants.files.is_empty());
+        let profile = macos_validation_profile(&worktree, &grants.trees, &grants.files);
         assert!(profile.contains(&format!(
             "(allow file-read* (subpath \"{}\"))",
-            sandbox_literal(&std::fs::canonicalize(&bundle).unwrap())
+            sandbox_literal(&bundle)
+        )));
+        assert!(!profile.contains(&format!(
+            "(allow file-read* (subpath \"{}\"))",
+            sandbox_literal(&std::fs::canonicalize(outer.path()).unwrap())
+        )));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn isolated_repository_launcher_grants_only_the_file() {
+        let outer = tempfile::tempdir().unwrap();
+        let worktree = outer.path().join("worktree");
+        let launcher = outer.path().join("codeql");
+        std::fs::create_dir(&worktree).unwrap();
+        std::fs::write(&launcher, "launcher").unwrap();
+        let launcher = std::fs::canonicalize(launcher).unwrap();
+
+        let grants =
+            program_read_grants(&worktree, &launcher, &ProgramReadScope::IsolatedFile).unwrap();
+        let profile = macos_validation_profile(&worktree, &grants.trees, &grants.files);
+
+        assert!(grants.trees.is_empty());
+        assert_eq!(grants.files, vec![launcher.clone()]);
+        assert!(profile.contains(&format!(
+            "(allow file-read* (literal \"{}\"))",
+            sandbox_literal(&launcher)
         )));
         assert!(!profile.contains(&format!(
             "(allow file-read* (subpath \"{}\"))",
@@ -740,7 +869,7 @@ mod tests {
         std::fs::create_dir_all(&sibling).unwrap();
         std::fs::write(checkout.join("root-secret"), "secret").unwrap();
 
-        let profile = macos_validation_profile(&target, &[]);
+        let profile = macos_validation_profile(&target, &[], &[]);
 
         assert!(profile.contains(&format!(
             "(deny file-read* (subpath \"{}\"))",

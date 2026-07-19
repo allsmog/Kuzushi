@@ -96,19 +96,26 @@ pub(in crate::modules) fn run_codeql_create_db(
 ) -> Result<Value> {
     ctx.ensure_active()?;
     let target = resolve_tool_target(input, ctx)?;
-    let bin = match locate_codeql_bin(input)? {
-        Some(path) => path,
-        None => return Ok(skipped_response(&target)),
+    let launcher = crate::codeql_repository_execution::prepared_codeql_launcher(input)?;
+    if matches!(
+        launcher,
+        crate::codeql_repository_execution::PreparedCodeqlLauncher::Unavailable
+    ) {
+        return Ok(skipped_response(&target));
     };
-    execute_codeql_create(input, ctx, target, bin)
+    execute_codeql_create(input, ctx, target, launcher)
 }
 
 fn execute_codeql_create(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     target: PathBuf,
-    bin: PathBuf,
+    launcher: crate::codeql_repository_execution::PreparedCodeqlLauncher,
 ) -> Result<Value> {
+    let bin = launcher
+        .display_path()
+        .context("prepared CodeQL launcher has no executable path")?
+        .to_path_buf();
     let output_path = resolve_db_output_path(input, &target);
     let binding = crate::remediation::patch::repository_source_binding(input)?;
     let timeout = codeql_create_timeout(input)?;
@@ -117,7 +124,7 @@ fn execute_codeql_create(
             source_root: &target,
             binding,
             destination: &output_path,
-            launcher: &bin,
+            launcher,
             cancellation: ctx.cancellation,
             timeout,
         },
@@ -183,31 +190,6 @@ fn emit_done_step(ctx: &ToolExecutionContext<'_>, output_path: &Path, elapsed_ms
         output_path.display()
     );
     emit_step(ctx, "done", "create-db", done_label);
-}
-
-fn locate_codeql_bin(input: &Value) -> Result<Option<PathBuf>> {
-    if let Some(value) = optional_string_input(input, &["codeqlBin", "codeql_bin"])? {
-        let path = PathBuf::from(value);
-        if path.is_file() {
-            return Ok(Some(path));
-        }
-        anyhow::bail!(
-            "codeqlBin points to a missing CodeQL binary: {}",
-            path.display()
-        );
-    }
-    Ok(which_on_path("codeql"))
-}
-
-fn which_on_path(name: &str) -> Option<PathBuf> {
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
 }
 
 fn resolve_language(input: &Value, target: &Path) -> Result<String> {
@@ -373,13 +355,8 @@ fn invoke_codeql_create_with_fallbacks(
     let mut last_output: Option<std::process::Output> = None;
     let mut first_error = None;
     for (index, build_mode) in build_modes.iter().enumerate() {
-        let output = run_codeql_create_attempt(
-            execution,
-            bound_target,
-            language,
-            build_mode,
-            cancellation,
-        )?;
+        let output =
+            run_codeql_create_attempt(execution, bound_target, language, build_mode, cancellation)?;
         if output.status.success() {
             return Ok(completed_codeql_create_attempt(
                 build_mode,
@@ -534,16 +511,6 @@ mod tests {
             "timeoutMs": MAX_CODEQL_CREATE_TIMEOUT_MS + 1
         }))
         .is_err());
-    }
-
-    #[test]
-    fn invalid_codeql_bin_option_is_not_silent_fallback() {
-        let temp = tempdir().unwrap();
-        let input = json!({"codeqlBin": temp.path().join("missing-codeql")});
-
-        let error = locate_codeql_bin(&input).unwrap_err().to_string();
-
-        assert!(error.contains("codeqlBin points to a missing CodeQL binary"));
     }
 
     #[test]

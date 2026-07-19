@@ -5,79 +5,12 @@ pub(crate) fn gather_systems_context(
     options: &SystemsHuntInput,
 ) -> Result<SystemsContextOutput> {
     let inventory = collect_production_inventory(target, options)?;
-    let mut by_file: BTreeMap<String, SurfaceAccumulator> = BTreeMap::new();
-
-    for (file_path, body) in &inventory {
-        for (idx, line) in body.lines().enumerate() {
-            let line_number = (idx + 1) as u32;
-            let signals = classify_line(line);
-            if signals.is_empty() {
-                continue;
-            }
-            let key = file_path.clone();
-            let accumulator = by_file.entry(key.clone()).or_insert_with(|| {
-                SurfaceAccumulator::new(file_path.clone(), infer_kind(file_path, line), line_number)
-            });
-            accumulator.start_line = accumulator.start_line.min(line_number);
-            for (domain, reason, weight) in signals {
-                accumulator.score += weight;
-                accumulator.domains.insert(domain.to_string());
-                accumulator.reasons.insert(reason.to_string());
-                accumulator.evidence.push(SystemsSurfaceSignal {
-                    domain: domain.to_string(),
-                    line_number,
-                    line_content: trim_line(line),
-                    reason: reason.to_string(),
-                });
-            }
-            for field in attacker_fields(line) {
-                accumulator.attacker_controlled_fields.insert(field);
-            }
-            for hardening in hardening_signals(line) {
-                accumulator.hardening_signals.insert(hardening);
-            }
-        }
-    }
-
-    let mut surfaces = by_file
-        .into_values()
-        .map(SurfaceAccumulator::finish)
-        .collect::<Vec<_>>();
-    // Pre-sort: the index-augmentation step only queries the top-N
-    // surfaces (most expensive backend calls otherwise dominate cost
-    // on large repos), so sort first, augment, then re-sort.
-    surfaces.sort_by(|left, right| {
-        right
-            .score
-            .cmp(&left.score)
-            .then_with(|| left.file_path.cmp(&right.file_path))
-            .then_with(|| left.start_line.cmp(&right.start_line))
-    });
-
-    // Block-on the async index augmentation. Failures (no joern,
-    // network error, …) leave surfaces unchanged.
-    let augment_count = surfaces.len().min(options.max_surfaces.saturating_mul(2));
-    let to_augment = surfaces
-        .drain(..augment_count.min(surfaces.len()))
-        .collect();
-    let augmented = score_with_index_blocking(to_augment);
-    let mut surfaces: Vec<RankedSystemsSurface> = augmented.into_iter().chain(surfaces).collect();
-    // Re-sort after augmentation: index bumps may have re-ordered the
-    // top of the list.
-    surfaces.sort_by(|left, right| {
-        right
-            .score
-            .cmp(&left.score)
-            .then_with(|| left.file_path.cmp(&right.file_path))
-            .then_with(|| left.start_line.cmp(&right.start_line))
-    });
-    surfaces.truncate(options.max_surfaces);
-
+    let surfaces = ranked_system_surfaces(&inventory, options.max_surfaces);
     let surface_packs = surfaces
         .iter()
         .map(|surface| build_surface_pack(target, surface))
         .collect::<Result<Vec<_>>>()?;
-    let codeql_db_path = resolve_codeql_db_path(target);
+    let codeql_db_path = resolve_codeql_db_path(target)?;
     Ok(SystemsContextOutput {
         surfaces,
         surface_packs,
@@ -87,6 +20,92 @@ pub(crate) fn gather_systems_context(
             bash_probing_used: false,
         },
     })
+}
+
+fn ranked_system_surfaces(
+    inventory: &[(String, String)],
+    max_surfaces: usize,
+) -> Vec<RankedSystemsSurface> {
+    let mut surfaces = collect_system_surfaces(inventory);
+    sort_system_surfaces(&mut surfaces);
+    let augment_count = surfaces.len().min(max_surfaces.saturating_mul(2));
+    let to_augment = surfaces.drain(..augment_count).collect();
+    let mut surfaces = score_with_index_blocking(to_augment)
+        .into_iter()
+        .chain(surfaces)
+        .collect::<Vec<_>>();
+    sort_system_surfaces(&mut surfaces);
+    surfaces.truncate(max_surfaces);
+    surfaces
+}
+
+fn collect_system_surfaces(inventory: &[(String, String)]) -> Vec<RankedSystemsSurface> {
+    let mut by_file: BTreeMap<String, SurfaceAccumulator> = BTreeMap::new();
+    for (file_path, body) in inventory {
+        collect_file_surfaces(&mut by_file, file_path, body);
+    }
+    by_file
+        .into_values()
+        .map(SurfaceAccumulator::finish)
+        .collect()
+}
+
+fn collect_file_surfaces(
+    by_file: &mut BTreeMap<String, SurfaceAccumulator>,
+    file_path: &str,
+    body: &str,
+) {
+    for (idx, line) in body.lines().enumerate() {
+        let line_number = (idx + 1) as u32;
+        let signals = classify_line(line);
+        if signals.is_empty() {
+            continue;
+        }
+        let accumulator = by_file.entry(file_path.to_string()).or_insert_with(|| {
+            SurfaceAccumulator::new(
+                file_path.to_string(),
+                infer_kind(file_path, line),
+                line_number,
+            )
+        });
+        record_surface_signals(accumulator, line, line_number, signals);
+    }
+}
+
+fn record_surface_signals(
+    accumulator: &mut SurfaceAccumulator,
+    line: &str,
+    line_number: u32,
+    signals: Vec<(&'static str, &'static str, i64)>,
+) {
+    accumulator.start_line = accumulator.start_line.min(line_number);
+    for (domain, reason, weight) in signals {
+        accumulator.score += weight;
+        accumulator.domains.insert(domain.to_string());
+        accumulator.reasons.insert(reason.to_string());
+        accumulator.evidence.push(SystemsSurfaceSignal {
+            domain: domain.to_string(),
+            line_number,
+            line_content: trim_line(line),
+            reason: reason.to_string(),
+        });
+    }
+    accumulator
+        .attacker_controlled_fields
+        .extend(attacker_fields(line));
+    accumulator
+        .hardening_signals
+        .extend(hardening_signals(line));
+}
+
+fn sort_system_surfaces(surfaces: &mut [RankedSystemsSurface]) {
+    surfaces.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| left.file_path.cmp(&right.file_path))
+            .then_with(|| left.start_line.cmp(&right.start_line))
+    });
 }
 
 pub(crate) fn score_with_index_blocking(
