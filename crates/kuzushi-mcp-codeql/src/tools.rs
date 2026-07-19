@@ -35,7 +35,10 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use kuzushi_mcp_common::{ReadRootCapability, Tool, ToolHandler, ToolRegistry};
+use kuzushi_mcp_common::{
+    bounded_bundle_identity, resolve_codeql_bundle_root, BundleIdentityConfig, ReadRootCapability,
+    Tool, ToolHandler, ToolRegistry,
+};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -50,6 +53,16 @@ const MAX_LOCAL_QUERY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SARIF_BYTES: usize = 64 * 1024 * 1024;
 const MAX_MEMO_ENTRIES: usize = 64;
 const MAX_MEMO_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CODEQL_BUNDLE_ENTRIES: u64 = 500_000;
+const MAX_CODEQL_BUNDLE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+const MAX_CODEQL_BUNDLE_DEPTH: usize = 128;
+const CODEQL_BUNDLE_CONFIG: BundleIdentityConfig = BundleIdentityConfig::new(
+    b"kuzushi-codeql-external-bundle-v1\0",
+    "CodeQL executable bundle",
+    MAX_CODEQL_BUNDLE_ENTRIES,
+    MAX_CODEQL_BUNDLE_BYTES,
+    MAX_CODEQL_BUNDLE_DEPTH,
+);
 const CODEQL_ARTIFACT_ENV: &str = "KUZUSHI_MCP_CODEQL_ARTIFACT";
 const CODEQL_ARTIFACT_IDENTITY_ENV: &str = "KUZUSHI_MCP_CODEQL_ARTIFACT_IDENTITY";
 
@@ -395,7 +408,8 @@ fn local_query_has_imports(query: &str) -> bool {
 
 fn codeql_revision(codeql: &Path) -> Result<String> {
     anyhow::ensure!(codeql.is_file(), "CodeQL executable is not a regular file");
-    kuzushi_mcp_common::cache::sha256_file_hex(codeql)
+    let bundle = resolve_codeql_bundle_root(codeql)?;
+    bounded_bundle_identity(&bundle, CODEQL_BUNDLE_CONFIG)
 }
 
 fn serialized_flow_bytes(flows: &[Value]) -> Option<usize> {
@@ -876,7 +890,7 @@ mod tests {
     #[cfg(unix)]
     const FAKE_CODEQL_SCRIPT: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
-counter="$(dirname "$0")/codeql.invocations"
+counter="$(dirname "$(dirname "$(dirname "$0")")")/codeql.invocations"
 count=0
 if [ -f "$counter" ]; then
   count="$(cat "$counter")"
@@ -911,7 +925,9 @@ fi
 
     #[cfg(unix)]
     fn fake_codeql(temp: &tempfile::TempDir) -> PathBuf {
-        let path = temp.path().join("codeql");
+        let bundle = temp.path().join("codeql-bundle");
+        let path = bundle.join("bin/codeql");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, FAKE_CODEQL_SCRIPT).unwrap();
         {
             use std::os::unix::fs::PermissionsExt;
@@ -924,11 +940,20 @@ fi
 
     #[cfg(unix)]
     fn invocation_count(codeql: &Path) -> usize {
-        std::fs::read_to_string(codeql.with_file_name("codeql.invocations"))
+        let counter = codeql_bundle(codeql)
+            .parent()
+            .unwrap()
+            .join("codeql.invocations");
+        std::fs::read_to_string(counter)
             .unwrap()
             .trim()
             .parse()
             .unwrap()
+    }
+
+    #[cfg(unix)]
+    fn codeql_bundle(codeql: &Path) -> &Path {
+        codeql.parent().unwrap().parent().unwrap()
     }
 
     fn codeql_db(temp: &tempfile::TempDir) -> PathBuf {
@@ -1051,12 +1076,15 @@ fi
 
     #[test]
     #[cfg(unix)]
-    fn memo_key_tracks_same_size_database_content_and_codeql_binary_revisions() {
+    fn memo_key_tracks_database_and_full_codeql_bundle_revisions() {
         let temp = tempdir().unwrap();
         let db = codeql_db(&temp);
         let internal = db.join("db-cpp/internal.bin");
         std::fs::write(&internal, b"one").unwrap();
         let codeql = fake_codeql(&temp);
+        let runtime = codeql_bundle(&codeql).join("lib/runtime.bin");
+        std::fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+        std::fs::write(&runtime, b"one").unwrap();
         let query = temp.path().join("local.ql");
         std::fs::write(&query, "select 1").unwrap();
         let selector = query.display().to_string();
@@ -1074,6 +1102,10 @@ fi
         let changed_db = memo_key(&db, &selector, 10, &codeql).unwrap();
         assert_ne!(first.db_revision, changed_db.db_revision);
 
+        std::fs::write(&runtime, b"two").unwrap();
+        let changed_runtime = memo_key(&db, &selector, 10, &codeql).unwrap();
+        assert_ne!(changed_db.codeql_revision, changed_runtime.codeql_revision);
+
         std::fs::OpenOptions::new()
             .append(true)
             .open(&codeql)
@@ -1081,7 +1113,10 @@ fi
             .write_all(b"\n# executable revision two\n")
             .unwrap();
         let changed_binary = memo_key(&db, &selector, 10, &codeql).unwrap();
-        assert_ne!(changed_db.codeql_revision, changed_binary.codeql_revision);
+        assert_ne!(
+            changed_runtime.codeql_revision,
+            changed_binary.codeql_revision
+        );
     }
 
     #[test]
@@ -1095,6 +1130,36 @@ fi
         let identity = analysis_identity(&db, &codeql).unwrap();
         std::fs::write(&internal, "after").unwrap();
 
+        let error = authenticate_and_store_current_result(
+            &db,
+            "codeql/cpp-queries:Security/CWE/CWE-089",
+            10,
+            &codeql,
+            identity,
+            None,
+            &[],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("rejecting unauthenticated output"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn changed_adjacent_codeql_helper_rejects_analysis_output() {
+        let temp = tempdir().unwrap();
+        let db = codeql_db(&temp);
+        let codeql = fake_codeql(&temp);
+        let helper = codeql_bundle(&codeql).join("lib/runtime.bin");
+        std::fs::create_dir_all(helper.parent().unwrap()).unwrap();
+        std::fs::write(&helper, "trusted runtime").unwrap();
+        let identity = analysis_identity(&db, &codeql).unwrap();
+
+        std::fs::write(&helper, "mutated runtime").unwrap();
         let error = authenticate_and_store_current_result(
             &db,
             "codeql/cpp-queries:Security/CWE/CWE-089",

@@ -31,6 +31,7 @@ pub(crate) enum PreparedCodeqlLauncher {
 pub(crate) struct ResolvedCodeqlLauncher {
     path: PathBuf,
     read_scope: ProgramReadScope,
+    _authenticated_snapshot: Option<tempfile::TempDir>,
 }
 
 impl ResolvedCodeqlLauncher {
@@ -139,10 +140,7 @@ fn prepare_codeql_launcher(
             bundle_identity: None,
         });
     }
-    let bundle_root = path
-        .parent()
-        .context("CodeQL launcher has no bundle root")?
-        .to_path_buf();
+    let bundle_root = kuzushi_mcp_common::resolve_codeql_bundle_root(&path)?;
     validate_external_bundle_root(&bundle_root, &repository_root)?;
     let bundle_identity = external_bundle_identity(&bundle_root)?;
     Ok(PreparedCodeqlLauncher::Ready {
@@ -226,20 +224,39 @@ fn resolve_ready_launcher(
         "external CodeQL launcher has no prepared bundle identity; prepare the operation again",
     )?;
     validate_external_bundle_root(bundle_root, &repository_root)?;
-    let canonical = canonical_launcher(path)?;
+    resolve_external_launcher_snapshot(path, bundle_root, expected_digest, expected_bundle_identity)
+}
+
+fn resolve_external_launcher_snapshot(
+    path: &Path,
+    bundle_root: &Path,
+    expected_digest: &str,
+    expected_bundle_identity: &str,
+) -> Result<ResolvedCodeqlLauncher> {
+    let current_bundle_root = kuzushi_mcp_common::resolve_codeql_bundle_root(path)?;
     anyhow::ensure!(
-        canonical == path,
-        "CodeQL launcher changed after preparation"
+        current_bundle_root == bundle_root,
+        "CodeQL launcher bundle root changed after preparation"
     );
-    verify_launcher_identity(path, expected_digest)?;
-    verify_external_bundle_identity(bundle_root, expected_bundle_identity)?;
+    let launcher_relative = path
+        .strip_prefix(bundle_root)
+        .context("CodeQL launcher escaped its bundle")?;
+    let snapshot = tempfile::Builder::new()
+        .prefix("kuzushi-codeql-bundle-")
+        .tempdir()
+        .context("could not create authenticated CodeQL bundle snapshot")?;
+    snapshot_external_bundle(bundle_root, snapshot.path(), expected_bundle_identity)?;
+    let snapshot_root = fs::canonicalize(snapshot.path())?;
+    let path = canonical_launcher(&snapshot_root.join(launcher_relative))?;
     anyhow::ensure!(
-        path.starts_with(bundle_root),
-        "CodeQL launcher escaped its bundle"
+        path.starts_with(&snapshot_root),
+        "CodeQL launcher escaped its snapshot"
     );
+    verify_launcher_identity(&path, expected_digest)?;
     Ok(ResolvedCodeqlLauncher {
-        path: path.to_path_buf(),
-        read_scope: ProgramReadScope::ExternalBundle(bundle_root.to_path_buf()),
+        path,
+        read_scope: ProgramReadScope::ExternalBundle(snapshot_root),
+        _authenticated_snapshot: Some(snapshot),
     })
 }
 
@@ -263,5 +280,9 @@ fn resolve_repository_launcher(
     } else {
         ProgramReadScope::IsolatedFile
     };
-    Ok(ResolvedCodeqlLauncher { path, read_scope })
+    Ok(ResolvedCodeqlLauncher {
+        path,
+        read_scope,
+        _authenticated_snapshot: None,
+    })
 }

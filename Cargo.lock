@@ -1911,6 +1911,7 @@ version = "0.24.0-alpha.8"
 dependencies = [
  "anyhow",
  "async-trait",
+ "blake3",
  "dirs",
  "libc",
  "serde",

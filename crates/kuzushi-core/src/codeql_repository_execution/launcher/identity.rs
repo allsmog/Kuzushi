@@ -45,39 +45,7 @@ pub(super) fn validate_external_bundle_root(
         bundle_root.display(),
         repository_root.display()
     );
-    anyhow::ensure!(
-        !is_broad_sensitive_root(bundle_root),
-        "CodeQL external bundle root {} is too broad or sensitive; install CodeQL in a dedicated bundle directory",
-        bundle_root.display()
-    );
     Ok(())
-}
-
-fn is_broad_sensitive_root(path: &Path) -> bool {
-    if path.parent().is_none()
-        || dirs::home_dir().is_some_and(|home| path == home)
-        || path.file_name().is_some_and(|name| name == "bin")
-    {
-        return true;
-    }
-    [
-        "/Applications",
-        "/Library",
-        "/System",
-        "/Users",
-        "/etc",
-        "/home",
-        "/lib",
-        "/lib64",
-        "/opt",
-        "/private/tmp",
-        "/tmp",
-        "/usr",
-        "/usr/local",
-        "/var",
-    ]
-    .into_iter()
-    .any(|sensitive| path == Path::new(sensitive))
 }
 
 pub(super) fn repository_root(

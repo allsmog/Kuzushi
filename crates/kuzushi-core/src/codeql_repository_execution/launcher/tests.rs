@@ -22,15 +22,6 @@ fn external_bundle_may_not_contain_the_live_repository() {
 }
 
 #[test]
-fn broad_bundle_roots_are_rejected() {
-    let error = validate_external_bundle_root(Path::new("/usr/local/bin"), Path::new("/repo"))
-        .unwrap_err()
-        .to_string();
-
-    assert!(error.contains("too broad or sensitive"), "{error}");
-}
-
-#[test]
 fn repository_launcher_outside_nested_target_uses_bound_checkout_file() {
     let live = tempfile::tempdir().unwrap();
     let checkout = tempfile::tempdir().unwrap();
@@ -109,6 +100,33 @@ fn prepared_launcher_rejects_sibling_runtime_mutation() {
 }
 
 #[test]
+fn bin_launcher_authenticates_runtime_sibling_outside_bin() {
+    let repository = tempfile::tempdir().unwrap();
+    let bundle = tempfile::tempdir().unwrap();
+    let launcher = bundle.path().join("bin/codeql");
+    let runtime = bundle.path().join("lib/runtime.bin");
+    fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+    fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+    fs::write(&launcher, "launcher").unwrap();
+    fs::write(&runtime, "trusted runtime").unwrap();
+    let mut input = prepared_input(&launcher);
+    bind_codeql_launcher("codeql:create-db", repository.path(), &mut input).unwrap();
+    assert_eq!(
+        input
+            .pointer("/__kuzushiCodeqlLauncher/bundleRoot")
+            .and_then(serde_json::Value::as_str),
+        fs::canonicalize(bundle.path()).unwrap().to_str()
+    );
+
+    fs::write(&runtime, "mutated runtime").unwrap();
+    let error = verify_codeql_launcher("codeql:create-db", repository.path(), &input)
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("changed after preparation"), "{error}");
+}
+
+#[test]
 fn execution_rechecks_prepared_bundle_identity() {
     let repository = tempfile::tempdir().unwrap();
     let checkout = tempfile::tempdir().unwrap();
@@ -129,6 +147,42 @@ fn execution_rechecks_prepared_bundle_identity() {
         .to_string();
 
     assert!(error.contains("external bundle changed"), "{error}");
+}
+
+#[test]
+fn resolved_external_launcher_uses_authenticated_operator_snapshot() {
+    let repository = tempfile::tempdir().unwrap();
+    let checkout = tempfile::tempdir().unwrap();
+    let bundle = tempfile::tempdir().unwrap();
+    let launcher_path = bundle.path().join("codeql");
+    let runtime_path = bundle.path().join("runtime.bin");
+    fs::write(&launcher_path, "trusted launcher").unwrap();
+    fs::write(&runtime_path, "trusted runtime").unwrap();
+    let mut input = prepared_input(&launcher_path);
+    bind_codeql_launcher("codeql:create-db", repository.path(), &mut input).unwrap();
+
+    let resolved = prepared_codeql_launcher(&input)
+        .unwrap()
+        .resolve_for_checkout(repository.path(), &binding("."), checkout.path())
+        .unwrap()
+        .unwrap();
+    let snapshot_root = match resolved.read_scope() {
+        ProgramReadScope::ExternalBundle(root) => root.clone(),
+        scope => panic!("expected external snapshot, got {scope:?}"),
+    };
+
+    fs::write(&launcher_path, "mutated launcher").unwrap();
+    fs::write(&runtime_path, "mutated runtime").unwrap();
+
+    assert_ne!(resolved.path(), launcher_path);
+    assert_eq!(
+        fs::read_to_string(resolved.path()).unwrap(),
+        "trusted launcher"
+    );
+    assert_eq!(
+        fs::read_to_string(snapshot_root.join("runtime.bin")).unwrap(),
+        "trusted runtime"
+    );
 }
 
 #[test]
