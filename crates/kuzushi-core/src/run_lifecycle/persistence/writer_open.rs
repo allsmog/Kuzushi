@@ -2,7 +2,7 @@ use super::super::stream_reader::{parse_record, RunItemStreamReader};
 use super::WriterState;
 use crate::run_lifecycle::{RunId, RunItemEnvelopeV1};
 use anyhow::{Context, Result};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::path::Path;
 
 pub(super) fn open_writer_state(target: &Path, run_id: &str) -> Result<WriterState> {
@@ -15,9 +15,11 @@ pub(super) fn open_writer_state(target: &Path, run_id: &str) -> Result<WriterSta
         run_id.as_str(),
         "items.jsonl",
     )?;
-    let file = open_append_file(&path)?;
+    let file = crate::bounded_file::open_append_regular_file_within(target, &path)
+        .with_context(|| format!("open {}", path.display()))?;
     let recovery_file = file.try_clone().context("clone run-item stream handle")?;
-    let (next_seq, previous_hash, bytes_written) = recover_tail(&path, recovery_file)?;
+    let (next_seq, previous_hash, bytes_written) =
+        recover_tail(target, &path, recovery_file)?;
     let state = WriterState {
         run_id,
         file,
@@ -41,8 +43,8 @@ fn record_stream_artifact(target: &Path, run_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn recover_tail(path: &Path, file: File) -> Result<(u64, Option<String>, u64)> {
-    let mut reader = RunItemStreamReader::from_open_file(path, file)
+fn recover_tail(root: &Path, path: &Path, file: File) -> Result<(u64, Option<String>, u64)> {
+    let mut reader = RunItemStreamReader::from_open_file_within(root, path, file)
         .with_context(|| format!("open {}", path.display()))?;
     let mut next_seq = 1;
     let mut previous_hash = None;
@@ -74,70 +76,6 @@ fn validate_recovered_envelope(
     Ok(())
 }
 
-#[cfg(unix)]
-fn open_append_file(path: &Path) -> Result<File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .read(true)
-        .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
-        .open(path)
-        .with_context(|| format!("open {}", path.display()))?;
-    reject_non_regular_file(path, &file)?;
-    Ok(file)
-}
-
-#[cfg(windows)]
-fn open_append_file(path: &Path) -> Result<File> {
-    use std::os::windows::fs::OpenOptionsExt;
-    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .read(true)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-        .with_context(|| format!("open {}", path.display()))?;
-    reject_windows_reparse_file(path, &file)?;
-    reject_non_regular_file(path, &file)?;
-    Ok(file)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn open_append_file(path: &Path) -> Result<File> {
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .read(true)
-        .open(path)
-        .with_context(|| format!("open {}", path.display()))?;
-    reject_non_regular_file(path, &file)?;
-    Ok(file)
-}
-
-fn reject_non_regular_file(path: &Path, file: &File) -> Result<()> {
-    anyhow::ensure!(
-        file.metadata()?.is_file(),
-        "run-item stream is not a regular file: {}",
-        path.display()
-    );
-    Ok(())
-}
-
-#[cfg(windows)]
-fn reject_windows_reparse_file(path: &Path, file: &File) -> Result<()> {
-    use std::os::windows::fs::MetadataExt;
-    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-    anyhow::ensure!(
-        file.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT == 0,
-        "run-item stream is a reparse point: {}",
-        path.display()
-    );
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,9 +87,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("items.jsonl");
         let displaced = temp.path().join("original.jsonl");
-        let mut writer = open_append_file(&path).unwrap();
+        let mut writer = crate::bounded_file::open_append_regular_file_within(temp.path(), &path)
+            .unwrap();
         let recovery = writer.try_clone().unwrap();
-        assert_eq!(recover_tail(&path, recovery).unwrap(), (1, None, 0));
+        assert_eq!(
+            recover_tail(temp.path(), &path, recovery).unwrap(),
+            (1, None, 0)
+        );
 
         std::fs::rename(&path, &displaced).unwrap();
         std::fs::write(&path, b"replacement\n").unwrap();
@@ -160,5 +102,32 @@ mod tests {
 
         assert_eq!(std::fs::read(&path).unwrap(), b"replacement\n");
         assert_eq!(std::fs::read(&displaced).unwrap(), b"retained handle\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rooted_append_rejects_parent_replaced_after_path_validation() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join(".kuzushi/v3/runs/run-1");
+        let displaced = temp.path().join("displaced-run");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let checked = crate::run_artifacts::checked_run_artifact_path(
+            temp.path(),
+            "run-1",
+            "items.jsonl",
+        )
+        .unwrap();
+
+        std::fs::rename(&run_dir, &displaced).unwrap();
+        symlink(&outside, &run_dir).unwrap();
+
+        let error = crate::bounded_file::open_append_regular_file_within(temp.path(), &checked)
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(!outside.join("items.jsonl").exists());
     }
 }

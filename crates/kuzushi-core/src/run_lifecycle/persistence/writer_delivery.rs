@@ -186,7 +186,7 @@ impl DeliveryCursor {
             run_id.as_str(),
             "items.jsonl",
         )?;
-        let stream = RunItemStreamReader::open(&path)?
+        let stream = RunItemStreamReader::open_within(target, &path)?
             .with_context(|| format!("durable stream is missing: {}", path.display()))?;
         let projection = RunProjection {
             run_id: Some(run_id),

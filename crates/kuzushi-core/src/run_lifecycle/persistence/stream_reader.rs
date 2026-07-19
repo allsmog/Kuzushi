@@ -40,6 +40,7 @@ pub(super) struct StreamCursorCheckpoint {
 }
 
 pub(super) struct RunItemStreamReader {
+    root: Option<PathBuf>,
     path: PathBuf,
     reader: BufReader<File>,
     identity: FileIdentity,
@@ -50,24 +51,40 @@ pub(super) struct RunItemStreamReader {
 }
 
 impl RunItemStreamReader {
+    #[cfg(test)]
     pub(super) fn open(path: &Path) -> io::Result<Option<Self>> {
         Self::open_with_limits(path, StreamLimits::default())
     }
 
+    pub(super) fn open_within(root: &Path, path: &Path) -> io::Result<Option<Self>> {
+        let file = match crate::bounded_file::open_regular_file_within(root, path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        Self::from_open_file_with_limits(Some(root), path, file, StreamLimits::default()).map(Some)
+    }
+
+    #[cfg(test)]
     fn open_with_limits(path: &Path, limits: StreamLimits) -> io::Result<Option<Self>> {
         let file = match crate::bounded_file::open_regular_file(path) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
-        Self::from_open_file_with_limits(path, file, limits).map(Some)
+        Self::from_open_file_with_limits(None, path, file, limits).map(Some)
     }
 
-    pub(super) fn from_open_file(path: &Path, file: File) -> io::Result<Self> {
-        Self::from_open_file_with_limits(path, file, StreamLimits::default())
+    pub(super) fn from_open_file_within(
+        root: &Path,
+        path: &Path,
+        file: File,
+    ) -> io::Result<Self> {
+        Self::from_open_file_with_limits(Some(root), path, file, StreamLimits::default())
     }
 
     fn from_open_file_with_limits(
+        root: Option<&Path>,
         path: &Path,
         file: File,
         limits: StreamLimits,
@@ -75,6 +92,7 @@ impl RunItemStreamReader {
         reject_oversized_stream(path, &file.metadata()?, limits.bytes)?;
         let identity = FileIdentity::from_file(&file)?;
         Ok(Self {
+            root: root.map(Path::to_path_buf),
             path: path.to_path_buf(),
             reader: BufReader::new(file),
             identity,
@@ -100,13 +118,20 @@ impl RunItemStreamReader {
     }
 
     pub(super) fn verify_path_unchanged(&self) -> io::Result<()> {
-        let mut current = crate::bounded_file::open_regular_file(&self.path)?;
+        let mut current = self.reopen_current_path()?;
         let metadata = current.metadata()?;
         reject_oversized_stream(&self.path, &metadata, self.limits.bytes)?;
         reject_replaced_file(&self.identity, &current)?;
         reject_truncated_file(self.bytes_read, metadata.len())?;
         verify_consumed_prefix(&mut current, self.bytes_read, &self.prefix_digest)?;
         Ok(())
+    }
+
+    fn reopen_current_path(&self) -> io::Result<File> {
+        match self.root.as_deref() {
+            Some(root) => crate::bounded_file::open_regular_file_within(root, &self.path),
+            None => crate::bounded_file::open_regular_file(&self.path),
+        }
     }
 
     pub(super) fn bytes_read(&self) -> u64 {
@@ -302,6 +327,7 @@ impl FileIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::io::Write;
 
     #[test]
@@ -381,5 +407,35 @@ mod tests {
 
         assert_eq!(reader.next_record().unwrap().unwrap().bytes, b"first");
         assert_eq!(reader.records_read(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rooted_reader_rejects_parent_replaced_after_path_validation() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join(".kuzushi/v3/runs/run-1");
+        let displaced = temp.path().join("displaced-run");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&run_dir).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(run_dir.join("items.jsonl"), b"inside\n").unwrap();
+        fs::write(outside.join("items.jsonl"), b"outside\n").unwrap();
+        let checked = crate::run_artifacts::checked_run_artifact_path(
+            temp.path(),
+            "run-1",
+            "items.jsonl",
+        )
+        .unwrap();
+
+        fs::rename(&run_dir, &displaced).unwrap();
+        symlink(&outside, &run_dir).unwrap();
+
+        let error = match RunItemStreamReader::open_within(temp.path(), &checked) {
+            Err(error) => error,
+            Ok(_) => panic!("rooted reader followed a replaced parent"),
+        };
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
     }
 }

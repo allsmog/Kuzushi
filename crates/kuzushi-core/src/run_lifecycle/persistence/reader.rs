@@ -27,13 +27,14 @@ pub struct RunProjectionRead {
 }
 
 pub fn read_run_items(target: impl AsRef<Path>, run_id: &str) -> Result<Option<RunItemRead>> {
+    let target = target.as_ref();
     let run_id = RunId::parse(run_id)?;
     let path = crate::run_artifacts::checked_run_artifact_path(
         target,
         run_id.as_str(),
         "items.jsonl",
     )?;
-    let Some(reader) = open_stream(&path)? else {
+    let Some(reader) = open_stream(target, &path)? else {
         return Ok(None);
     };
     Ok(Some(read_lines(reader)))
@@ -44,7 +45,7 @@ pub fn load_run_projection(target: impl AsRef<Path>, run_id: &str) -> Result<Run
     let run_id = RunId::parse(run_id)?;
     let path =
         crate::run_artifacts::checked_run_artifact_path(target, run_id.as_str(), "items.jsonl")?;
-    let Some(reader) = open_stream(&path)? else {
+    let Some(reader) = open_stream(target, &path)? else {
         return legacy_projection(run_id.as_str());
     };
     let mut projection = RunProjection {
@@ -64,8 +65,9 @@ pub fn load_run_projection(target: impl AsRef<Path>, run_id: &str) -> Result<Run
     })
 }
 
-fn open_stream(path: &Path) -> Result<Option<RunItemStreamReader>> {
-    RunItemStreamReader::open(path).with_context(|| format!("open {}", path.display()))
+fn open_stream(root: &Path, path: &Path) -> Result<Option<RunItemStreamReader>> {
+    RunItemStreamReader::open_within(root, path)
+        .with_context(|| format!("open {}", path.display()))
 }
 
 fn reduce_lines(mut reader: RunItemStreamReader, projection: &mut RunProjection) {

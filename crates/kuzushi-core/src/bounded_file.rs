@@ -156,7 +156,7 @@ fn canonical_path_within(root: &Path, path: &Path) -> io::Result<PathBuf> {
 }
 
 #[cfg(unix)]
-fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
     let canonical_root = fs::canonicalize(root)?;
     let relative = relative_path_within(root, &canonical_root, path)?;
     let mut components = relative.components().filter_map(normal_component);
@@ -171,20 +171,22 @@ fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(windows)]
-fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
     let canonical_root = fs::canonicalize(root)?;
-    let root_handle = open_windows_directory_no_follow(&canonical_root)?;
-    let file = open_regular_file(&canonical_path_within(root, path)?)?;
+    let relative = relative_path_within(root, &canonical_root, path)?;
+    let (root_handle, _ancestors, candidate) =
+        open_windows_ancestor_chain(&canonical_root, &relative)?;
+    let file = open_regular_file(&candidate)?;
     verify_windows_handle_containment(&root_handle, &file, &canonical_root, path)?;
     Ok(file)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
     open_regular_file(&canonical_path_within(root, path)?)
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn relative_path_within(root: &Path, canonical_root: &Path, path: &Path) -> io::Result<PathBuf> {
     let relative = if path.is_absolute() {
         path.strip_prefix(root)
@@ -197,7 +199,7 @@ fn relative_path_within(root: &Path, canonical_root: &Path, path: &Path) -> io::
     Ok(relative.to_path_buf())
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn validate_relative_path(root: &Path, path: &Path, relative: &Path) -> io::Result<()> {
     let valid = relative.components().all(|component| {
         matches!(
@@ -211,7 +213,7 @@ fn validate_relative_path(root: &Path, path: &Path, relative: &Path) -> io::Resu
     Err(workspace_escape_error(root, path))
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn normal_component(component: std::path::Component<'_>) -> Option<&std::ffi::OsStr> {
     match component {
         std::path::Component::Normal(value) => Some(value),
@@ -278,6 +280,39 @@ fn open_regular_at(directory: &fs::File, name: &std::ffi::OsStr) -> io::Result<f
         io::ErrorKind::InvalidInput,
         "workspace path is not a regular file",
     ))
+}
+
+/// Open a regular file for read/append/create while retaining trusted handles
+/// to every ancestor until the leaf handle is established.
+#[cfg(unix)]
+pub(crate) fn open_append_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
+    let canonical_root = fs::canonicalize(root)?;
+    let relative = relative_path_within(root, &canonical_root, path)?;
+    let mut components = relative.components().filter_map(normal_component);
+    let leaf = components
+        .next_back()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "file path is empty"))?;
+    let mut directory = open_absolute_directory_no_follow(&canonical_root)?;
+    for component in components {
+        directory = open_directory_at(&directory, component)?;
+    }
+    open_append_regular_at(&directory, leaf)
+}
+
+#[cfg(unix)]
+fn open_append_regular_at(directory: &fs::File, name: &std::ffi::OsStr) -> io::Result<fs::File> {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::io::{AsRawFd, FromRawFd};
+
+    let name = std::ffi::CString::new(name.as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL byte"))?;
+    let flags = libc::O_RDWR | libc::O_APPEND | libc::O_CREAT | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+    let descriptor = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags, 0o600) };
+    if descriptor < 0 {
+        return Err(map_no_follow_error(io::Error::last_os_error()));
+    }
+    let file = unsafe { fs::File::from_raw_fd(descriptor) };
+    reject_non_regular_open_file(file)
 }
 
 #[cfg(unix)]
@@ -373,12 +408,74 @@ fn open_windows_directory_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(windows)]
+fn open_windows_ancestor_chain(
+    canonical_root: &Path,
+    relative: &Path,
+) -> io::Result<(fs::File, Vec<fs::File>, PathBuf)> {
+    let root = open_windows_directory_no_follow(canonical_root)?;
+    let mut ancestors = Vec::new();
+    let mut candidate = canonical_root.to_path_buf();
+    let mut components = relative
+        .components()
+        .filter_map(normal_component)
+        .peekable();
+    while let Some(component) = components.next() {
+        candidate.push(component);
+        if components.peek().is_some() {
+            ancestors.push(open_windows_directory_no_follow(&candidate)?);
+        }
+    }
+    Ok((root, ancestors, candidate))
+}
+
+#[cfg(windows)]
+pub(crate) fn open_append_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+
+    let canonical_root = fs::canonicalize(root)?;
+    let relative = relative_path_within(root, &canonical_root, path)?;
+    let (root_handle, _ancestors, candidate) =
+        open_windows_ancestor_chain(&canonical_root, &relative)?;
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(&candidate)?;
+    reject_windows_reparse_attributes(&candidate, file.metadata()?.file_attributes())?;
+    let file = reject_non_regular_open_file(file)?;
+    verify_windows_handle_containment(&root_handle, &file, &canonical_root, path)?;
+    Ok(file)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(crate) fn open_append_regular_file_within(root: &Path, path: &Path) -> io::Result<fs::File> {
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(canonical_path_within(root, path)?)?;
+    reject_non_regular_open_file(file)
+}
+
+fn reject_non_regular_open_file(file: fs::File) -> io::Result<fs::File> {
+    if file.metadata()?.is_file() {
+        return Ok(file);
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "workspace path is not a regular file",
+    ))
+}
+
+#[cfg(windows)]
 fn open_windows_handle(path: &Path, flags: u32) -> io::Result<fs::File> {
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::io::FromRawHandle;
     use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
 
     let wide_path = path
@@ -386,7 +483,9 @@ fn open_windows_handle(path: &Path, flags: u32) -> io::Result<fs::File> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
-    let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    // Excluding FILE_SHARE_DELETE pins each ancestor against replacement while
+    // its child handle is opened.
+    let share = FILE_SHARE_READ | FILE_SHARE_WRITE;
     let handle = unsafe {
         CreateFileW(
             wide_path.as_ptr(),
