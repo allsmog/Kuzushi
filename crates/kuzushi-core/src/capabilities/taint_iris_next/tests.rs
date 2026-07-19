@@ -300,7 +300,7 @@ mod tests {
         let kuzushi = root.join(".kuzushi");
         fs::create_dir_all(&kuzushi).unwrap();
         fs::write(kuzushi.join("cpg.bin"), b"CPG\0stub").unwrap();
-        let db = kuzushi.join("codeql-db");
+        let db = crate::workspace::workspace_codeql_db_path(root);
         fs::create_dir_all(db.join("db-javascript")).unwrap();
         fs::write(
             db.join("codeql-database.yml"),

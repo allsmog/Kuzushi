@@ -61,7 +61,7 @@ pub(crate) fn query_carlini_actor(
         inventory_block,
         actor_hunt,
         actor_fingerprint,
-    );
+    )?;
     let (response, accumulated_cost) = prepared.run(runtime, debug_artifacts, actor_fingerprint)?;
     if let Some(value) = extract_carlini_findings_response(&response) {
         return Ok(CarliniActorQuery {
@@ -88,7 +88,7 @@ fn prepare_carlini_actor_query(
     inventory_block: &str,
     actor_hunt: &ActorHunt,
     actor_fingerprint: &str,
-) -> PreparedCarliniActorQuery {
+) -> Result<PreparedCarliniActorQuery> {
     let prompt = build_actor_prompt(
         target,
         actor_hunt,
@@ -101,13 +101,13 @@ fn prepare_carlini_actor_query(
         "CarliniThreatFindings",
         findings_schema(),
     );
-    let request = carlini_actor_request(model, target, prompt.clone(), input)
+    let request = carlini_actor_request(model, target, prompt.clone(), input)?
         .with_structured_output(contract.runtime_contract());
-    PreparedCarliniActorQuery {
+    Ok(PreparedCarliniActorQuery {
         prompt,
         contract,
         request,
-    }
+    })
 }
 
 /// Run the initial actor query and, when the model truncated its output, one
@@ -243,20 +243,20 @@ fn carlini_actor_request(
     target: &Path,
     prompt: String,
     input: &Value,
-) -> AgentQueryRequest {
+) -> Result<AgentQueryRequest> {
     let request = AgentQueryRequest::new(
         model.to_string(),
         target.to_path_buf(),
         carlini_system_prompt(),
         prompt,
     )
-    .with_tool_policy(whitebox_static_policy_for_target(target))
+    .with_tool_policy(try_whitebox_static_policy_for_target(target)?)
     .with_thinking_level(agentic_hunter_thinking_level(input));
 
-    match max_output_tokens_from_input(input) {
+    Ok(match max_output_tokens_from_input(input) {
         Some(tokens) => request.with_max_output_tokens(tokens),
         None => request,
-    }
+    })
 }
 
 pub(in crate::capabilities::carlini_threat_hunt) fn max_output_tokens_from_input(

@@ -328,7 +328,7 @@ pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_tool_polic
     if !mcps_enabled {
         return Ok(policy);
     }
-    let policy = policy.with_mcps_for_target(target);
+    let policy = policy.try_with_mcps_for_target(target)?;
     ensure_required_mcps(&policy, target, &["joern", "codeql"])?;
     Ok(policy)
 }
@@ -366,7 +366,7 @@ fn missing_mcp_hint(name: &str, target: &Path) -> String {
             target.display()
         ),
         "codeql" => format!(
-            "- codeql (.kuzushi/codeql-db/)          missing -> run `codeql:create-db` on {}",
+            "- codeql (.kuzushi/v3/codeql-db/)       missing -> run `codeql:create-db` on {}",
             target.display()
         ),
         other => format!("- {other:>17} missing"),

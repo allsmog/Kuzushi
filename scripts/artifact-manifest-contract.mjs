@@ -418,6 +418,9 @@ function workspaceStatePathFunctionFailures(source) {
     source.includes("pub fn workspace_codeql_db_path(root: impl AsRef<Path>) -> PathBuf")
       ? null
       : "workspace state helper must expose workspace_codeql_db_path",
+    source.includes("pub fn legacy_workspace_codeql_db_path(root: impl AsRef<Path>) -> PathBuf")
+      ? null
+      : "workspace state helper must expose legacy_workspace_codeql_db_path",
     source.includes("pub fn legacy_codeql_db_path(root: impl AsRef<Path>) -> PathBuf")
       ? null
       : "workspace state helper must expose legacy_codeql_db_path",
@@ -426,9 +429,12 @@ function workspaceStatePathFunctionFailures(source) {
 
 function workspaceStatePathDerivationFailures(source) {
   return [
+    source.includes("workspace_state_dir(root).join(WORKSPACE_CODEQL_DB_DIR)")
+      ? null
+      : "workspace codeql helper must derive from workspace_state_dir",
     source.includes("workspace_state_root(root).join(WORKSPACE_CODEQL_DB_DIR)")
       ? null
-      : "workspace codeql helper must derive from workspace_state_root",
+      : "legacy workspace codeql helper must derive from workspace_state_root",
     source.includes("workspace_state_dir(root).join(WORKSPACE_STATIC_EVIDENCE_DB_FILE)")
       ? null
       : "workspace static evidence helper must derive from workspace_state_dir",
@@ -582,6 +588,7 @@ function workspaceStatePathConsumerHardcodesPath(source) {
     'join(".kuzushi").join("models.toml")',
     'join(".kuzushi").join("codeql-db")',
     'join(".kuzushi/codeql-db")',
+    'join(".kuzushi/v3/codeql-db")',
     'join(".kuzushi").join("bin")',
     'join(".kuzushi/bin")',
     'join(".kuzushi").join("v2").join("static-evidence.sqlite3")',

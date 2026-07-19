@@ -18,8 +18,9 @@
 //!    dependency-free local selector revision, CodeQL executable revision,
 //!    and result limit. Pack selectors and imported local queries bypass the
 //!    memo because their complete dependency graph cannot be established
-//!    without executing CodeQL's resolver. Databases that exceed the bounded
-//!    identity traversal also bypass it. The
+//!    without executing CodeQL's resolver. Database identity uses the same
+//!    bounded content tree as the promotion receipt; databases outside those
+//!    bounds fail closed before CodeQL executes. The
 //!    agent often re-queries the same CWE folder when iterating on
 //!    findings during a single hunt; the second call returns instantly.
 //!    Keyed on the canonical absolute DB path so a typo or symlink swap
@@ -33,9 +34,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use kuzushi_mcp_common::{
-    AuthorizedDirectory, ReadRootCapability, Tool, ToolHandler, ToolRegistry,
-};
+use kuzushi_mcp_common::{ReadRootCapability, Tool, ToolHandler, ToolRegistry};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -50,9 +49,8 @@ const MAX_LOCAL_QUERY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SARIF_BYTES: usize = 64 * 1024 * 1024;
 const MAX_MEMO_ENTRIES: usize = 64;
 const MAX_MEMO_BYTES: usize = 16 * 1024 * 1024;
-const MAX_DATABASE_REVISION_ENTRIES: usize = 250_000;
-const MAX_DATABASE_REVISION_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
-const MAX_DATABASE_REVISION_CONTENT_BYTES: usize = 64 * 1024 * 1024;
+const CODEQL_ARTIFACT_ENV: &str = "KUZUSHI_MCP_CODEQL_ARTIFACT";
+const CODEQL_ARTIFACT_IDENTITY_ENV: &str = "KUZUSHI_MCP_CODEQL_ARTIFACT_IDENTITY";
 
 pub(crate) fn build_registry() -> Result<ToolRegistry> {
     Ok(build_registry_with_capability(
@@ -151,6 +149,7 @@ impl ToolHandler for FlowsForCweHandler {
 impl ToolHandler for DbInfoHandler {
     async fn call(&self, args: Value) -> Result<Value> {
         let db = authorized_database(&self.0, &args)?;
+        validate_planned_database_if_present(&db)?;
         let metadata = database_metadata(&self.0, &db)?;
         Ok(json!({
             "db": db.display().to_string(),
@@ -186,6 +185,14 @@ struct MemoKey {
     codeql: PathBuf,
     codeql_revision: String,
     limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AnalysisIdentity {
+    db: PathBuf,
+    db_revision: String,
+    codeql: PathBuf,
+    codeql_revision: String,
 }
 
 struct MemoEntry {
@@ -262,15 +269,88 @@ fn flow_memo() -> &'static Mutex<FlowMemo> {
     MEMO.get_or_init(|| Mutex::new(FlowMemo::bounded(MAX_MEMO_ENTRIES, MAX_MEMO_BYTES)))
 }
 
+#[cfg(test)]
 fn memo_key(db: &Path, selector: &str, limit: usize, codeql: &Path) -> Option<MemoKey> {
-    let db = std::fs::canonicalize(db).ok()?;
-    let codeql = std::fs::canonicalize(codeql).ok()?;
-    Some(MemoKey {
-        db_revision: database_revision(&db).ok()?,
-        selector_revision: local_query_revision(selector).ok()??,
-        codeql_revision: codeql_revision(&codeql).ok()?,
+    let identity = analysis_identity(db, codeql).ok()?;
+    memo_key_from_identity(&identity, selector, limit)
+}
+
+fn analysis_identity(db: &Path, codeql: &Path) -> Result<AnalysisIdentity> {
+    let db = std::fs::canonicalize(db)?;
+    let codeql = std::fs::canonicalize(codeql)?;
+    Ok(AnalysisIdentity {
+        db_revision: authenticated_database_identity(&db)?,
+        codeql_revision: codeql_revision(&codeql)?,
         codeql,
         db,
+    })
+}
+
+fn authenticated_database_identity(db: &Path) -> Result<String> {
+    let actual = crate::database_identity::database_identity(db)?;
+    let artifact = std::env::var_os(CODEQL_ARTIFACT_ENV);
+    let expected = std::env::var_os(CODEQL_ARTIFACT_IDENTITY_ENV);
+    validate_planned_database_identity(db, &actual, artifact, expected)?;
+    Ok(actual)
+}
+
+fn validate_planned_database_if_present(db: &Path) -> Result<()> {
+    let artifact = std::env::var_os(CODEQL_ARTIFACT_ENV);
+    let expected = std::env::var_os(CODEQL_ARTIFACT_IDENTITY_ENV);
+    if artifact.is_none() && expected.is_none() {
+        return Ok(());
+    }
+    let actual = crate::database_identity::database_identity(db)?;
+    validate_planned_database_identity(db, &actual, artifact, expected)
+}
+
+fn validate_planned_database_identity(
+    db: &Path,
+    actual: &str,
+    artifact: Option<std::ffi::OsString>,
+    expected: Option<std::ffi::OsString>,
+) -> Result<()> {
+    let (artifact, expected) = match (artifact, expected) {
+        (None, None) => return Ok(()),
+        (Some(artifact), Some(expected)) => (artifact, expected),
+        _ => anyhow::bail!(
+            "planned CodeQL attachment is missing its authenticated artifact identity"
+        ),
+    };
+    let artifact = std::fs::canonicalize(PathBuf::from(artifact))?;
+    anyhow::ensure!(
+        artifact == std::fs::canonicalize(db)?,
+        "CodeQL request database does not match the planned managed attachment"
+    );
+    let expected = expected
+        .to_str()
+        .filter(|identity| valid_blake3_identity(identity))
+        .context("planned CodeQL attachment identity is malformed")?;
+    anyhow::ensure!(
+        actual == expected,
+        "managed CodeQL database does not match the planned attachment identity"
+    );
+    Ok(())
+}
+
+fn valid_blake3_identity(identity: &str) -> bool {
+    identity.len() == 64
+        && identity
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn memo_key_from_identity(
+    identity: &AnalysisIdentity,
+    selector: &str,
+    limit: usize,
+) -> Option<MemoKey> {
+    Some(MemoKey {
+        db_revision: identity.db_revision.clone(),
+        selector_revision: local_query_revision(selector).ok()??,
+        codeql_revision: identity.codeql_revision.clone(),
+        codeql: identity.codeql.clone(),
+        db: identity.db.clone(),
         selector: selector.to_string(),
         limit,
     })
@@ -285,158 +365,6 @@ fn store_memo(key: MemoKey, flows: &[Value]) {
     if let Ok(mut memo) = flow_memo().lock() {
         memo.insert(key, flows);
     }
-}
-
-fn database_revision(db: &Path) -> Result<String> {
-    let db = std::fs::canonicalize(db)?;
-    let capability = ReadRootCapability::new([db.to_path_buf()])?;
-    let database = capability.authorize_directory(&db)?;
-    let mut revision = DatabaseRevisionBuilder::default();
-    revision.record_directory(Path::new(""))?;
-    let mut pending = vec![db];
-    while let Some(directory) = pending.pop() {
-        let directories =
-            record_database_directory(&capability, &database, &directory, &mut revision)?;
-        pending.extend(directories.into_iter().rev());
-    }
-    database.verify_unchanged()?;
-    revision.finish()
-}
-
-fn record_database_directory(
-    capability: &ReadRootCapability,
-    database: &AuthorizedDirectory,
-    directory_path: &Path,
-    revision: &mut DatabaseRevisionBuilder,
-) -> Result<Vec<PathBuf>> {
-    let directory = capability.authorize_directory(directory_path)?;
-    let mut children = std::fs::read_dir(directory.path())?.collect::<std::io::Result<Vec<_>>>()?;
-    children.sort_by_key(std::fs::DirEntry::file_name);
-    let mut directories = Vec::new();
-    for child in children {
-        if let Some(path) = record_database_entry(database, child.path(), revision)? {
-            directories.push(path);
-        }
-    }
-    directory.verify_unchanged()?;
-    Ok(directories)
-}
-
-fn record_database_entry(
-    database: &AuthorizedDirectory,
-    path: PathBuf,
-    revision: &mut DatabaseRevisionBuilder,
-) -> Result<Option<PathBuf>> {
-    revision.claim_entry()?;
-    let metadata = std::fs::symlink_metadata(&path)?;
-    anyhow::ensure!(
-        !metadata.file_type().is_symlink(),
-        "CodeQL database revision contains a symlink"
-    );
-    let relative = path.strip_prefix(database.path())?;
-    if metadata.is_dir() {
-        revision.record_directory(relative)?;
-        return Ok(Some(path));
-    }
-    anyhow::ensure!(
-        metadata.is_file(),
-        "CodeQL database revision contains a non-file entry"
-    );
-    revision.record_file(database, relative)?;
-    Ok(None)
-}
-
-#[derive(Default)]
-struct DatabaseRevisionBuilder {
-    manifest: Vec<u8>,
-    entries: usize,
-    content_bytes: usize,
-}
-
-impl DatabaseRevisionBuilder {
-    fn claim_entry(&mut self) -> Result<()> {
-        self.entries = self
-            .entries
-            .checked_add(1)
-            .context("database entry count overflow")?;
-        anyhow::ensure!(
-            self.entries <= MAX_DATABASE_REVISION_ENTRIES,
-            "CodeQL database revision exceeds the entry limit"
-        );
-        Ok(())
-    }
-
-    fn record_directory(&mut self, relative: &Path) -> Result<()> {
-        self.record_header(relative, b'd')
-    }
-
-    fn record_file(&mut self, database: &AuthorizedDirectory, relative: &Path) -> Result<()> {
-        let remaining = MAX_DATABASE_REVISION_CONTENT_BYTES.saturating_sub(self.content_bytes);
-        let (bytes, digest) = database_file_revision(database, relative, remaining)?;
-        self.content_bytes = self
-            .content_bytes
-            .checked_add(bytes)
-            .context("database content byte count overflow")?;
-        self.record_header(relative, b'f')?;
-        self.manifest
-            .extend_from_slice(&(bytes as u64).to_le_bytes());
-        self.manifest.extend_from_slice(digest.as_bytes());
-        self.ensure_manifest_budget()
-    }
-
-    fn record_header(&mut self, relative: &Path, kind: u8) -> Result<()> {
-        append_revision_path(&mut self.manifest, relative);
-        self.manifest.push(kind);
-        self.ensure_manifest_budget()
-    }
-
-    fn ensure_manifest_budget(&self) -> Result<()> {
-        anyhow::ensure!(
-            self.manifest.len() <= MAX_DATABASE_REVISION_MANIFEST_BYTES,
-            "CodeQL database revision exceeds the manifest byte limit"
-        );
-        Ok(())
-    }
-
-    fn finish(self) -> Result<String> {
-        Ok(kuzushi_mcp_common::cache::sha256_hex_bytes(&self.manifest))
-    }
-}
-
-fn database_file_revision(
-    database: &AuthorizedDirectory,
-    relative: &Path,
-    max_bytes: usize,
-) -> Result<(usize, String)> {
-    let file = database.open_file(relative, max_bytes)?;
-    let bytes = usize::try_from(file.identity().len).context("database file is too large")?;
-    let digest = file.copy_to_with_sha256_hex(&mut std::io::sink())?;
-    Ok((bytes, digest))
-}
-
-#[cfg(unix)]
-fn append_revision_path(manifest: &mut Vec<u8>, path: &Path) {
-    use std::os::unix::ffi::OsStrExt;
-    let bytes = path.as_os_str().as_bytes();
-    manifest.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-    manifest.extend_from_slice(bytes);
-}
-
-#[cfg(windows)]
-fn append_revision_path(manifest: &mut Vec<u8>, path: &Path) {
-    use std::os::windows::ffi::OsStrExt;
-    let words = path.as_os_str().encode_wide().collect::<Vec<_>>();
-    manifest.extend_from_slice(&(words.len() as u64).to_le_bytes());
-    for word in words {
-        manifest.extend_from_slice(&word.to_le_bytes());
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn append_revision_path(manifest: &mut Vec<u8>, path: &Path) {
-    let path = path.to_string_lossy();
-    manifest.extend_from_slice(&(path.len() as u64).to_le_bytes());
-    manifest.extend_from_slice(path.as_bytes());
 }
 
 fn local_query_revision(selector: &str) -> Result<Option<String>> {
@@ -489,26 +417,24 @@ async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result
     let configured = locate_codeql_binary()?.context("could not find the codeql binary")?;
     let codeql = std::fs::canonicalize(&configured)
         .with_context(|| format!("could not canonicalize {}", configured.display()))?;
-    let key = memo_key(db, selector, limit, &codeql);
-    if let Some(cached) = verified_memo_hit(db, selector, limit, &codeql, key.as_ref()) {
+    let identity = analysis_identity(db, &codeql)
+        .context("could not authenticate CodeQL database and executable before analysis")?;
+    let key = memo_key_from_identity(&identity, selector, limit);
+    if let Some(cached) = key.as_ref().and_then(lookup_memo) {
         return Ok(cached);
     }
     let sarif = tempfile::NamedTempFile::new()?;
-    let mut command = Command::new(&codeql);
+    let log_dir = tempfile::tempdir()?;
+    let cache_dir = codeql_cache_dir();
+    let mut command = codeql_analyze_command(
+        &codeql,
+        db,
+        selector,
+        sarif.path(),
+        log_dir.path(),
+        cache_dir.as_deref(),
+    );
     command
-        .arg("database")
-        .arg("analyze")
-        .arg("--format=sarif-latest")
-        .arg("--output")
-        .arg(sarif.path())
-        .arg("--ram=4096")
-        .arg("--threads=4");
-    if let Some(cache) = codeql_cache_dir() {
-        command.arg(format!("--common-caches={}", cache.display()));
-    }
-    command
-        .arg(db)
-        .arg(selector)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -520,35 +446,71 @@ async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result
     }
     let raw = read_generated_sarif(sarif.path())?;
     let flows = parse_sarif(&raw, limit);
-    store_current_result(db, selector, limit, &codeql, key, &flows);
+    authenticate_and_store_current_result(db, selector, limit, &codeql, identity, key, &flows)?;
     Ok(flows)
 }
 
-fn verified_memo_hit(
+fn codeql_analyze_command(
+    codeql: &Path,
     db: &Path,
     selector: &str,
-    limit: usize,
-    codeql: &Path,
-    key: Option<&MemoKey>,
-) -> Option<Vec<Value>> {
-    let cached = key.and_then(lookup_memo)?;
-    (memo_key(db, selector, limit, codeql).as_ref() == key).then_some(cached)
+    sarif: &Path,
+    log_dir: &Path,
+    cache_dir: Option<&Path>,
+) -> Command {
+    let mut command = Command::new(codeql);
+    command.args(["database", "analyze", "--format=sarif-latest", "--rerun"]);
+    command
+        .arg("--max-disk-cache=0")
+        .arg("--expect-discarded-cache")
+        .arg(format!("--logdir={}", log_dir.display()))
+        .arg("--output")
+        .arg(sarif)
+        .arg("--ram=4096")
+        .arg("--threads=4");
+    if let Some(cache) = cache_dir {
+        command.arg(format!("--common-caches={}", cache.display()));
+    }
+    command.arg(db).arg(selector);
+    command
 }
 
-fn store_current_result(
+fn authenticate_and_store_current_result(
     db: &Path,
     selector: &str,
     limit: usize,
     codeql: &Path,
+    identity: AnalysisIdentity,
     key: Option<MemoKey>,
     flows: &[Value],
-) {
+) -> Result<()> {
+    let current = analysis_identity(db, codeql).context(
+        "CodeQL database or executable changed during analysis; rejecting unauthenticated output",
+    )?;
+    anyhow::ensure!(
+        current == identity,
+        "CodeQL database, query, or executable changed during analysis; rejecting unauthenticated output"
+    );
+    authenticate_and_store_memo(&current, selector, limit, key, flows)
+}
+
+fn authenticate_and_store_memo(
+    identity: &AnalysisIdentity,
+    selector: &str,
+    limit: usize,
+    key: Option<MemoKey>,
+    flows: &[Value],
+) -> Result<()> {
     let Some(key) = key else {
-        return;
+        return Ok(());
     };
-    if memo_key(db, selector, limit, codeql).as_ref() == Some(&key) {
-        store_memo(key, flows);
-    }
+    let current = memo_key_from_identity(identity, selector, limit);
+    anyhow::ensure!(
+        current.as_ref() == Some(&key),
+        "CodeQL database, query, or executable changed during analysis; rejecting unauthenticated output"
+    );
+    store_memo(key, flows);
+    Ok(())
 }
 
 fn read_generated_sarif(path: &Path) -> Result<String> {
@@ -1105,21 +1067,89 @@ fi
     }
 
     #[test]
-    fn memo_bypasses_database_outside_the_content_revision_budget() {
+    #[cfg(unix)]
+    fn changed_database_rejects_even_unmemoized_pack_output() {
         let temp = tempdir().unwrap();
         let db = codeql_db(&temp);
-        let oversized = db.join("db-cpp/oversized.bin");
-        std::fs::File::create(&oversized)
-            .unwrap()
-            .set_len(MAX_DATABASE_REVISION_CONTENT_BYTES as u64 + 1)
-            .unwrap();
-        let codeql = temp.path().join("codeql");
-        std::fs::write(&codeql, "binary").unwrap();
-        let query = temp.path().join("local.ql");
-        std::fs::write(&query, "select 1").unwrap();
+        let internal = db.join("db-cpp/internal.bin");
+        std::fs::write(&internal, "before").unwrap();
+        let codeql = fake_codeql(&temp);
+        let identity = analysis_identity(&db, &codeql).unwrap();
+        std::fs::write(&internal, "after").unwrap();
 
-        assert!(database_revision(&db).is_err());
-        assert!(memo_key(&db, &query.display().to_string(), 10, &codeql).is_none());
+        let error = authenticate_and_store_current_result(
+            &db,
+            "codeql/cpp-queries:Security/CWE/CWE-089",
+            10,
+            &codeql,
+            identity,
+            None,
+            &[],
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("rejecting unauthenticated output"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn planned_database_identity_is_mandatory_and_content_bound() {
+        let temp = tempdir().unwrap();
+        let db = codeql_db(&temp);
+        let actual = crate::database_identity::database_identity(&db).unwrap();
+
+        let missing = validate_planned_database_identity(
+            &db,
+            &actual,
+            Some(db.clone().into_os_string()),
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(missing.contains("missing its authenticated"), "{missing}");
+
+        let mismatch = validate_planned_database_identity(
+            &db,
+            &actual,
+            Some(db.clone().into_os_string()),
+            Some("0".repeat(64).into()),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(mismatch.contains("does not match"), "{mismatch}");
+
+        validate_planned_database_identity(
+            &db,
+            &actual,
+            Some(db.clone().into_os_string()),
+            Some(actual.clone().into()),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn analyze_command_keeps_logs_and_caches_out_of_the_database() {
+        let temp = tempdir().unwrap();
+        let db = temp.path().join("database");
+        let sarif = temp.path().join("result.sarif");
+        let logs = temp.path().join("analysis-logs");
+        let command =
+            codeql_analyze_command(Path::new("codeql"), &db, "pack:query", &sarif, &logs, None);
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        for required in ["--rerun", "--max-disk-cache=0", "--expect-discarded-cache"] {
+            assert!(args.iter().any(|arg| arg == required), "missing {required}");
+        }
+        assert!(args
+            .iter()
+            .any(|arg| arg == &format!("--logdir={}", logs.display())));
+        assert!(!logs.starts_with(&db));
     }
 
     #[test]
@@ -1212,6 +1242,28 @@ fi
 
         restore_env("KUZUSHI_CODEQL_BIN", previous);
         assert_eq!(invocation_count(&fake), 4);
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn authenticated_local_query_returns_from_memo_on_second_call() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        let fake = fake_codeql(&temp);
+        let db = codeql_db(&temp);
+        let query = temp.path().join("local.ql");
+        std::fs::write(&query, "select 1").unwrap();
+        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+
+        for _ in 0..2 {
+            run_codeql_and_parse(&db, &query.display().to_string(), 10)
+                .await
+                .unwrap();
+        }
+
+        restore_env("KUZUSHI_CODEQL_BIN", previous);
+        assert_eq!(invocation_count(&fake), 1);
     }
 
     #[tokio::test]

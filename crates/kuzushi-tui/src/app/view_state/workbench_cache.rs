@@ -772,7 +772,7 @@ fn is_project_scope_tree_path(path: &Path) -> bool {
 }
 
 fn is_map_artifact_path(path: &Path) -> bool {
-    path.starts_with(".kuzushi/codeql-db")
+    path.starts_with(".kuzushi/v3/codeql-db")
         || matches!(
             path.to_str(),
             Some(

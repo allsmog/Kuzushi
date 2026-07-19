@@ -1,6 +1,7 @@
 use anyhow::Result;
 use kuzushi_mcp_common::{exit_after_standalone_health_if_requested, serve_stdio, ServerInfo};
 
+mod database_identity;
 mod tools;
 
 const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -90,7 +90,7 @@ struct CodeqlBuildPlan {
 }
 
 /// Drive an LLM-picked build, wrap it in `codeql database create`, and
-/// produce a CodeQL DB at `<target>/.kuzushi/codeql-db` that the
+/// produce a CodeQL DB at `<target>/.kuzushi/v3/codeql-db` that the
 /// `codeql` backend can immediately consume. This removes the manual
 /// `./configure && make` step from the operator's path: the agent reads
 /// the codebase and decides what command extracts C/C++ facts (or
@@ -374,7 +374,8 @@ fn resolved_codeql_build_mode(plan: &CodeqlBuildPlan, language: &str) -> String 
 }
 
 fn prepare_codeql_db_path(target: &Path) -> Result<PathBuf> {
-    let relative = Path::new(".kuzushi/codeql-db");
+    let path = crate::workspace::workspace_codeql_db_path(target);
+    let relative = path.strip_prefix(target)?;
     crate::workspace::prepare_workspace_output_path(target, relative)
 }
 

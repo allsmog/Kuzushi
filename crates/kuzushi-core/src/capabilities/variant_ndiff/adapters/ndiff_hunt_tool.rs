@@ -141,7 +141,7 @@ fn query_ndiff_hunt_json(run: &NdiffHuntRun<'_>) -> Result<CostedStructuredJson<
         build_ndiff_hunt_prompt(&run.pattern, &run.advisory_id, run.include_vendored);
     query_required_structured_json_with_cost(
         run.runtime,
-        ndiff_hunt_request(run, prompt),
+        ndiff_hunt_request(run, prompt)?,
         StructuredJsonContract::new(
             "ndiff:hunt-variants",
             "NdiffVariantFindings",
@@ -151,15 +151,15 @@ fn query_ndiff_hunt_json(run: &NdiffHuntRun<'_>) -> Result<CostedStructuredJson<
     )
 }
 
-fn ndiff_hunt_request(run: &NdiffHuntRun<'_>, prompt: String) -> AgentQueryRequest {
-    AgentQueryRequest::new(
+fn ndiff_hunt_request(run: &NdiffHuntRun<'_>, prompt: String) -> Result<AgentQueryRequest> {
+    Ok(AgentQueryRequest::new(
         run.model.clone(),
         run.target.clone(),
         NDIFF_HUNT_SYSTEM_PROMPT.to_string(),
         prompt,
     )
-    .with_tool_policy(whitebox_static_policy_for_target(&run.target))
-    .with_thinking_level(run.thinking_level.clone())
+    .with_tool_policy(try_whitebox_static_policy_for_target(&run.target)?)
+    .with_thinking_level(run.thinking_level.clone()))
 }
 
 fn ndiff_hunt_response(

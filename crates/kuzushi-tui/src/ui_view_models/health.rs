@@ -336,6 +336,7 @@ fn joern_cpg_row(app: &ShellApp, checks: Option<&ViewHealthChecks>) -> HealthRow
 fn existing_codeql_db(app: &ShellApp, target: &Path) -> Option<PathBuf> {
     [
         kuzushi_core::workspace_codeql_db_path(target),
+        kuzushi_core::legacy_workspace_codeql_db_path(target),
         kuzushi_core::legacy_codeql_db_path(target),
     ]
     .into_iter()

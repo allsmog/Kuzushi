@@ -204,13 +204,19 @@ function plannedServer(attachment, cwd, request, readRoots) {
 }
 
 // Artifact-backed servers read their input path from
-// `KUZUSHI_MCP_<NAME>_ARTIFACT`; the joern server predates that
-// convention and reads `KUZUSHI_JOERN_CPG`.
+// `KUZUSHI_MCP_<NAME>_ARTIFACT`. When the attachment carries an authenticated
+// identity, the server receives it through the matching `_ARTIFACT_IDENTITY`
+// variable. The joern server predates the path convention and reads
+// `KUZUSHI_JOERN_CPG`.
 function artifactEnv(attachment, token, readRoots) {
   const path = attachment.artifactPath ?? attachment.artifact_path;
   if (typeof path !== "string" || path.length === 0) return {};
   const authorizedPath = authorizedArtifactPath(path, readRoots);
   const env = { [`KUZUSHI_MCP_${token}_ARTIFACT`]: authorizedPath };
+  const identity = attachment.artifactIdentity ?? attachment.artifact_identity;
+  if (typeof identity === "string" && identity.length > 0) {
+    env[`KUZUSHI_MCP_${token}_ARTIFACT_IDENTITY`] = identity;
+  }
   if (attachment.name === "joern") env.KUZUSHI_JOERN_CPG = authorizedPath;
   return env;
 }

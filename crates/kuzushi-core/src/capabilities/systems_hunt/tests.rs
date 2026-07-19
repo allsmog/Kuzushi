@@ -835,8 +835,9 @@ mod tests {
 
         let workspace = tempdir().unwrap();
         let outside = tempdir().unwrap();
-        fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
-        symlink(outside.path(), workspace.path().join(".kuzushi/codeql-db")).unwrap();
+        let database = crate::workspace::workspace_codeql_db_path(workspace.path());
+        fs::create_dir_all(database.parent().unwrap()).unwrap();
+        symlink(outside.path(), database).unwrap();
 
         let error = resolve_codeql_db_path(workspace.path())
             .unwrap_err()

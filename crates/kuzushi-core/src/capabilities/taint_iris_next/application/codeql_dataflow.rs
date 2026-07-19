@@ -171,7 +171,7 @@ pub(crate) struct CodeqlStep {
 }
 
 /// Run a CodeQL security-and-quality query suite against the DB at
-/// `<target>/.kuzushi/codeql-db` and return the resulting source-to-sink
+/// `<target>/.kuzushi/v3/codeql-db` and return the resulting source-to-sink
 /// flows. Returns `Ok(None)` when CodeQL is unavailable, the DB is
 /// missing, or the query suite isn't installed — callers fall back to
 /// joern or the heuristic linker without surfacing an error.

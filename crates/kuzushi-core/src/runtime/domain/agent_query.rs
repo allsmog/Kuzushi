@@ -195,6 +195,11 @@ pub struct McpAttachment {
     /// source tree directly.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub artifact_path: String,
+    /// Authenticated identity of the artifact at attachment-planning time.
+    /// Artifact-backed MCP servers may use this value to reject work when
+    /// the artifact changes between planning and execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_identity: Option<String>,
 }
 
 impl McpAttachment {
@@ -202,13 +207,20 @@ impl McpAttachment {
         Self {
             name: name.into(),
             artifact_path: artifact_path.into(),
+            artifact_identity: None,
         }
+    }
+
+    pub fn with_artifact_identity(mut self, identity: impl Into<String>) -> Self {
+        self.artifact_identity = Some(identity.into());
+        self
     }
 
     pub fn constant(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             artifact_path: String::new(),
+            artifact_identity: None,
         }
     }
 }

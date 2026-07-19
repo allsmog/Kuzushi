@@ -104,7 +104,7 @@ fn select_codeql_backend(
 
 fn codeql_unavailable_warning(availability: &TaintIrisNextBackendAvailability) -> &'static str {
     if !availability.codeql_db_present {
-        return "backend=codeql requested, but no existing CodeQL DB was found; build with `codeql database create --language=<lang> --source-root=<repo> <repo>/.kuzushi/codeql-db` then rerun. Using structural evidence.";
+        return "backend=codeql requested, but no existing CodeQL DB was found; run `codeql:create-db` to build <repo>/.kuzushi/v3/codeql-db, then rerun. Using structural evidence.";
     }
     "backend=codeql requested, but the codeql launcher was not found on PATH (set KUZUSHI_CODEQL_BIN or install the CodeQL CLI bundle). Using structural evidence."
 }

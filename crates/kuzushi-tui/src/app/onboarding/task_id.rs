@@ -200,7 +200,7 @@ impl PlanningTaskId {
             BuildStrideThreatModel => ".kuzushi/threat-model.json",
             BuildPastaThreatModel => ".kuzushi/threat-model-pasta.json",
             BuildCodePropertyGraph => ".kuzushi/cpg.bin",
-            BuildCodeQlDatabase => ".kuzushi/codeql-db",
+            BuildCodeQlDatabase => ".kuzushi/v3/codeql-db",
             ThreatIntelCves => ".kuzushi/threat-intel/candidates.json",
             _ => return None,
         };

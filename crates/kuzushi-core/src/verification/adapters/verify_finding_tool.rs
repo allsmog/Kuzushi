@@ -102,7 +102,7 @@ fn run_one_verify_pass(
 ) -> Result<CostedStructuredJson<Value>> {
     query_required_structured_json_with_cost(
         runtime,
-        verify_agent_query_request(model, workspace_root, prompt, input),
+        verify_agent_query_request(model, workspace_root, prompt, input)?,
         StructuredJsonContract::new(
             "verify:finding",
             "VerificationResult",
@@ -117,7 +117,7 @@ fn verify_agent_query_request(
     workspace_root: &Path,
     prompt: &str,
     input: &VerifyFindingInput,
-) -> AgentQueryRequest {
+) -> Result<AgentQueryRequest> {
     let mut request = AgentQueryRequest::new(
         model,
         workspace_root.to_path_buf(),
@@ -126,7 +126,7 @@ fn verify_agent_query_request(
     );
     if input.mcps {
         request = request.with_tool_policy(
-            crate::proof::whitebox_policy::whitebox_static_policy_for_target(workspace_root),
+            crate::proof::whitebox_policy::try_whitebox_static_policy_for_target(workspace_root)?,
         );
     }
     if let Some(timeout_ms) = input.mcp_tool_timeout_ms {
@@ -136,7 +136,7 @@ fn verify_agent_query_request(
         };
         request = request.with_runtime_options(runtime_options);
     }
-    request
+    Ok(request)
 }
 
 fn missing_finding_response(fingerprint: &str) -> Value {
@@ -399,7 +399,7 @@ mod tests {
             mcp_tool_timeout_ms: Some(12_345),
         };
 
-        let request = verify_agent_query_request("model", temp.path(), "prompt", &input);
+        let request = verify_agent_query_request("model", temp.path(), "prompt", &input).unwrap();
 
         assert_eq!(request.tool_policy.profile, "whitebox-static");
         assert!(request.tool_policy.mcps);
@@ -424,7 +424,8 @@ mod tests {
             mcp_tool_timeout_ms: None,
         };
 
-        let request = verify_agent_query_request("model", Path::new("."), "prompt", &input);
+        let request =
+            verify_agent_query_request("model", Path::new("."), "prompt", &input).unwrap();
 
         assert!(request.tool_policy.is_default());
         assert!(request.runtime_options.is_none());

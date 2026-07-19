@@ -20,7 +20,7 @@ pub(in crate::modules) fn codeql_db_module() -> BuiltinModule {
         "codeql-db",
         "CodeQL Database",
         ModuleKind::Intel,
-        "Create a CodeQL database (.kuzushi/codeql-db/) for downstream taint and \
+        "Create a CodeQL database (.kuzushi/v3/codeql-db/) for downstream taint and \
          security queries. Deterministic; wraps `codeql database create`.",
         tools_with_policy(
             repository_execute_policy(
@@ -31,7 +31,7 @@ pub(in crate::modules) fn codeql_db_module() -> BuiltinModule {
             vec![tool_with_options(
                 "codeql:create-db",
                 "Create a CodeQL database for the active target. Returns an explicit skipped result \
-                 when the codeql CLI is missing; otherwise writes .kuzushi/codeql-db/.",
+                 when the codeql CLI is missing; otherwise writes .kuzushi/v3/codeql-db/.",
                 codeql_create_db_options(),
             )],
         ),
@@ -73,7 +73,7 @@ fn codeql_output_path_option() -> OptionSpec {
     opt(
         "outputPath",
         OptionType::Path,
-        "Destination DB directory below <target>/.kuzushi. Defaults to <target>/.kuzushi/codeql-db; paths outside Kuzushi state are rejected.",
+        "Destination DB directory below <target>/.kuzushi. Defaults to <target>/.kuzushi/v3/codeql-db; paths outside Kuzushi state are rejected.",
     )
     .state_write()
     .advanced()
@@ -332,7 +332,7 @@ fn resolve_db_output_path(input: &Value, target: &Path) -> PathBuf {
     {
         return path;
     }
-    target.join(".kuzushi/codeql-db")
+    crate::workspace::workspace_codeql_db_path(target)
 }
 
 fn resolve_build_modes(input: &Value, language: &str) -> Result<Vec<String>> {
@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn cancellation_before_retry_preserves_existing_output() {
         let workspace = tempdir().unwrap();
-        let output = workspace.path().join(".kuzushi/codeql-db");
+        let output = crate::workspace::workspace_codeql_db_path(workspace.path());
         fs::create_dir_all(&output).unwrap();
         fs::write(output.join("partial"), "stale").unwrap();
         let cancellation = crate::scan::ScanCancellation::default();

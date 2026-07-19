@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context;
 
 impl AgentToolPolicy {
     pub fn new(
@@ -15,11 +16,11 @@ impl AgentToolPolicy {
     }
 
     /// Force-enable the legacy MCP boolean. Prefer
-    /// [`Self::with_mcps_for_target`] which probes artifacts on disk —
+    /// [`Self::try_with_mcps_for_target`] which probes artifacts on disk —
     /// the bare boolean attaches every MCP whether or not its backing
     /// artifact exists, which makes the operator chase confusing
     /// runtime errors when (for example) a CPG was never built.
-    #[deprecated(note = "Use `with_mcps_for_target` to gate attachment on artifact existence.")]
+    #[deprecated(note = "Use `try_with_mcps_for_target` to gate attachment on artifact validity.")]
     pub fn with_mcps(mut self, mcps: bool) -> Self {
         self.mcps = mcps;
         self
@@ -39,6 +40,22 @@ impl AgentToolPolicy {
     /// attachment plan. This is the canonical entry point for any tool
     /// that wants the MCP surface attached — it never attaches a
     /// server whose backing artifact is missing.
+    pub fn try_with_mcps_for_target(self, target: &std::path::Path) -> anyhow::Result<Self> {
+        let target = std::fs::canonicalize(target).with_context(|| {
+            format!(
+                "could not resolve MCP attachment target {}",
+                target.display()
+            )
+        })?;
+        let plan = crate::runtime::mcp_probe::try_mcp_attachment_plan_for_target(&target)?;
+        let mut policy = self.with_mcps_plan(plan);
+        policy.mcp_read_roots = vec![target];
+        Ok(policy)
+    }
+
+    /// Source-compatible, fail-closed wrapper for integrations that have not
+    /// migrated to the fallible attachment API. Invalid managed artifacts are
+    /// never attached; in-repo execution paths use `try_with_mcps_for_target`.
     pub fn with_mcps_for_target(self, target: &std::path::Path) -> Self {
         let Ok(target) = std::fs::canonicalize(target) else {
             return self.with_mcps_plan(Vec::new());
@@ -133,7 +150,7 @@ mod policy_tests {
     }
 
     #[test]
-    fn with_mcps_for_target_attaches_only_when_artifact_exists() {
+    fn try_with_mcps_for_target_attaches_only_when_artifact_exists() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
         std::fs::write(
@@ -141,7 +158,9 @@ mod policy_tests {
             "{\"target\":\"x\"}",
         )
         .unwrap();
-        let policy = AgentToolPolicy::default().with_mcps_for_target(tmp.path());
+        let policy = AgentToolPolicy::default()
+            .try_with_mcps_for_target(tmp.path())
+            .unwrap();
         assert!(policy.mcps);
         let names: Vec<&str> = policy
             .mcps_attached
@@ -170,7 +189,8 @@ mod policy_tests {
     fn mcps_attached_round_trips_through_serde() {
         let policy = AgentToolPolicy::default().with_mcps_plan(vec![
             McpAttachment::constant("treesitter"),
-            McpAttachment::new("context", "/work/.kuzushi/context-snapshot.json"),
+            McpAttachment::new("context", "/work/.kuzushi/context-snapshot.json")
+                .with_artifact_identity("sha256:context-snapshot"),
         ]);
         let json = serde_json::to_value(&policy).expect("serialise");
         assert_eq!(json["mcps"], serde_json::Value::Bool(true));
@@ -183,6 +203,11 @@ mod policy_tests {
             attachments[1]["artifactPath"],
             "/work/.kuzushi/context-snapshot.json"
         );
+        assert_eq!(
+            attachments[1]["artifactIdentity"],
+            "sha256:context-snapshot"
+        );
+        assert!(attachments[0].get("artifactIdentity").is_none());
         assert!(json.get("mcpReadRoots").is_none());
         let round_tripped: AgentToolPolicy = serde_json::from_value(json).expect("deserialise");
         assert_eq!(round_tripped, policy);
@@ -204,13 +229,28 @@ mod policy_tests {
     }
 
     #[test]
-    fn missing_target_does_not_grant_cwd_or_attach_servers() {
-        let policy = AgentToolPolicy::default()
-            .with_mcps_for_target(std::path::Path::new("/definitely/missing/kuzushi-target"));
+    fn old_attachment_payload_defaults_missing_identity() {
+        let attachment: McpAttachment = serde_json::from_value(serde_json::json!({
+            "name": "codeql",
+            "artifactPath": "/work/.kuzushi/v3/codeql-db"
+        }))
+        .expect("deserialize attachment without identity");
 
-        assert!(!policy.mcps);
-        assert!(policy.mcps_attached.is_empty());
-        assert!(policy.mcp_read_roots.is_empty());
+        assert_eq!(attachment.artifact_identity, None);
+        assert!(serde_json::to_value(attachment)
+            .expect("serialize attachment")
+            .get("artifactIdentity")
+            .is_none());
+    }
+
+    #[test]
+    fn missing_target_does_not_grant_cwd_or_attach_servers() {
+        let error = AgentToolPolicy::default()
+            .try_with_mcps_for_target(std::path::Path::new("/definitely/missing/kuzushi-target"))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("could not resolve MCP attachment target"));
     }
 }
 
@@ -273,9 +313,7 @@ impl<'de> Deserialize<'de> for AgentQueryResponse {
             text: wire.text,
             structured: wire.structured,
             cost_usd: wire.cost_usd,
-            cost_usd_reported: wire
-                .cost_usd_reported
-                .unwrap_or(wire.cost_usd > 0.0),
+            cost_usd_reported: wire.cost_usd_reported.unwrap_or(wire.cost_usd > 0.0),
             estimated_cost_usd: wire.estimated_cost_usd,
             input_tokens: wire.input_tokens,
             output_tokens: wire.output_tokens,
@@ -332,7 +370,10 @@ mod agent_query_response_cost_tests {
             serde_json::from_value(serde_json::json!({"cost_usd": 0.25})).unwrap();
 
         assert!(response.cost_usd_reported);
-        assert_eq!(response.checked_cost_report().unwrap().exact_usd(), Some(0.25));
+        assert_eq!(
+            response.checked_cost_report().unwrap().exact_usd(),
+            Some(0.25)
+        );
     }
 }
 

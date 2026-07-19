@@ -40,10 +40,11 @@ pub(crate) use domain::{
     ensure_workspace_descendant_dir, initialize_workspace_state, validated_workspace_descendant,
 };
 pub use domain::{
-    ensure_workspace_output_dir, legacy_codeql_db_path, prepare_workspace_output_path,
-    project_model_dir, project_model_scopes_path, read_optional_workspace_text,
-    read_workspace_text, remove_workspace_state_file, workspace_artifact_kb_db_path,
-    workspace_attachments_path, workspace_codeql_db_path, workspace_config_path,
+    ensure_workspace_output_dir, legacy_codeql_db_path, legacy_workspace_codeql_db_path,
+    prepare_workspace_output_path, project_model_dir, project_model_scopes_path,
+    read_optional_workspace_text, read_workspace_text, remove_workspace_state_file,
+    workspace_artifact_kb_db_path, workspace_attachments_path, workspace_codeql_db_path,
+    workspace_config_path,
     workspace_event_log_dir, workspace_findings_db_path, workspace_history_path,
     workspace_models_path, workspace_objects_dir, workspace_options_path, workspace_state_dir,
     workspace_state_root, workspace_static_evidence_db_path, workspace_suppressions_path,

@@ -97,7 +97,7 @@ fn query_variant_lift_signature(
     let _llm_scope = begin_variant_lift_scope(ctx);
     query_required_structured_json_with_cost(
         runtime,
-        variant_lift_request(model, workspace, prompt, thinking_level),
+        variant_lift_request(model, workspace, prompt, thinking_level)?,
         StructuredJsonContract::new("variant:lift-pattern", "VariantSignature", object_schema()),
         require_json_object,
     )
@@ -108,15 +108,15 @@ fn variant_lift_request(
     workspace: &WorkspaceTarget,
     prompt: String,
     thinking_level: String,
-) -> AgentQueryRequest {
-    AgentQueryRequest::new(
+) -> Result<AgentQueryRequest> {
+    Ok(AgentQueryRequest::new(
         model,
         workspace.root().to_path_buf(),
         VARIANT_SIGNATURE_SYSTEM_PROMPT.to_string(),
         prompt,
     )
-    .with_tool_policy(whitebox_static_policy_for_target(workspace.root()))
-    .with_thinking_level(thinking_level)
+    .with_tool_policy(try_whitebox_static_policy_for_target(workspace.root())?)
+    .with_thinking_level(thinking_level))
 }
 
 fn begin_variant_lift_scope(

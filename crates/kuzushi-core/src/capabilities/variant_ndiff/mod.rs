@@ -7,7 +7,7 @@ use crate::structured_output::{
 };
 use crate::whitebox_static::{
     agentic_hunter_thinking_level,
-    whitebox_static_policy_for_target,
+    try_whitebox_static_policy_for_target,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};

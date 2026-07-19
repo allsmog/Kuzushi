@@ -94,7 +94,7 @@ fn query_ndiff_fix_pattern(
     let _llm_scope = begin_ndiff_extract_scope(ctx);
     query_required_structured_json_with_cost(
         runtime,
-        ndiff_fix_pattern_request(model, target, prompt, thinking_level),
+        ndiff_fix_pattern_request(model, target, prompt, thinking_level)?,
         StructuredJsonContract::new(
             "ndiff:extract-fix-pattern",
             "NdiffFixPattern",
@@ -109,16 +109,16 @@ fn ndiff_fix_pattern_request(
     target: PathBuf,
     prompt: String,
     thinking_level: String,
-) -> AgentQueryRequest {
-    let policy = whitebox_static_policy_for_target(&target);
-    AgentQueryRequest::new(
+) -> Result<AgentQueryRequest> {
+    let policy = try_whitebox_static_policy_for_target(&target)?;
+    Ok(AgentQueryRequest::new(
         model,
         target,
         NDIFF_FIX_PATTERN_SYSTEM_PROMPT.to_string(),
         prompt,
     )
     .with_tool_policy(policy)
-    .with_thinking_level(thinking_level)
+    .with_thinking_level(thinking_level))
 }
 
 fn begin_ndiff_extract_scope(

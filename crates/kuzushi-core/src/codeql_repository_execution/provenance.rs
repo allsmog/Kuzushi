@@ -43,6 +43,10 @@ impl ValidatedManagedCodeqlDatabase {
         &self.path
     }
 
+    pub(crate) fn database_identity(&self) -> &str {
+        self.expected_identity.as_str()
+    }
+
     pub(crate) fn run_verified<T>(&self, operation: impl FnOnce(&Path) -> Result<T>) -> Result<T> {
         let result = operation(&self.path);
         self.verify_unchanged()?;
@@ -330,7 +334,10 @@ fn path_exists_no_follow(path: &Path) -> Result<bool> {
 }
 
 fn reject_legacy_database(target: &Path) -> Result<()> {
-    for legacy in legacy_database_paths(target) {
+    for legacy in [
+        crate::workspace::legacy_workspace_codeql_db_path(target),
+        crate::workspace::legacy_codeql_db_path(target),
+    ] {
         if path_exists_no_follow(&legacy)? {
             anyhow::bail!(
                 "legacy CodeQL database at {} has no source provenance; rebuild it with `codeql:create-db`",
@@ -339,14 +346,6 @@ fn reject_legacy_database(target: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn legacy_database_paths(target: &Path) -> [PathBuf; 2] {
-    [
-        crate::workspace::workspace_state_root(target)
-            .join(crate::workspace::WORKSPACE_CODEQL_DB_DIR),
-        crate::workspace::legacy_codeql_db_path(target),
-    ]
 }
 
 #[cfg(test)]

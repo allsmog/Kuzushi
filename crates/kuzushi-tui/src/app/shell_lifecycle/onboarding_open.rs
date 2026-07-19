@@ -29,7 +29,13 @@ impl ShellApp {
         let Some(target) = self.target() else {
             return;
         };
-        let plan = kuzushi_core::mcp_attachment_plan_for_target(target);
+        let plan = match kuzushi_core::try_mcp_attachment_plan_for_target(target) {
+            Ok(plan) => plan,
+            Err(error) => {
+                self.log("mcps", format!("MCP plan error: {error:#}"));
+                return;
+            }
+        };
         let summary = if plan.is_empty() {
             "MCP plan: (none) — build artifacts via /planning to attach servers".to_string()
         } else {

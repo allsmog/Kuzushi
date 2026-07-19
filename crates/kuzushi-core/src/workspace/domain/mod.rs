@@ -29,7 +29,7 @@ pub use workspace_state_io::{
     write_workspace_file, write_workspace_state_file,
 };
 pub use workspace_target::{
-    legacy_codeql_db_path,
+    legacy_codeql_db_path, legacy_workspace_codeql_db_path,
     workspace_artifact_kb_db_path, workspace_attachments_path, workspace_codeql_db_path,
     workspace_config_path, workspace_event_log_dir, workspace_findings_db_path,
     workspace_history_path, workspace_models_path, workspace_objects_dir, workspace_options_path,

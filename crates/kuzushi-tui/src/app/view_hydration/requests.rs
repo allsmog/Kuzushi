@@ -116,11 +116,12 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     let Some(target) = app.target() else {
         return;
     };
-    for relative in [".kuzushi/cpg.bin", ".kuzushi/codeql-db"] {
-        keys.push(ViewHydrationKey::PathState {
-            path: target.join(relative),
-        });
-    }
+    keys.push(ViewHydrationKey::PathState {
+        path: target.join(".kuzushi/cpg.bin"),
+    });
+    keys.push(ViewHydrationKey::PathState {
+        path: kuzushi_core::workspace_codeql_db_path(target),
+    });
 }
 
 fn append_finding_patch_truth_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
@@ -249,6 +250,7 @@ fn append_health_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     };
     let mut paths = vec![
         kuzushi_core::workspace_codeql_db_path(target),
+        kuzushi_core::legacy_workspace_codeql_db_path(target),
         kuzushi_core::legacy_codeql_db_path(target),
         target.join(".kuzushi/cpg.bin"),
     ];

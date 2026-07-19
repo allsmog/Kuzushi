@@ -91,6 +91,44 @@ describe("bridge MCP attachment plan", () => {
     ]);
   });
 
+  it("passes optional artifact identities only to their planned server", () => {
+    const config = mcpServerConfig(
+      requestWithPlan([
+        {
+          name: "codeql",
+          artifactPath: repoArtifact,
+          artifactIdentity: "sha256:authenticated-database",
+        },
+        { name: "context", artifactPath: repoArtifact },
+      ]),
+    ) as ServerConfig;
+
+    expect(config.codeql.env.KUZUSHI_MCP_CODEQL_ARTIFACT_IDENTITY).toBe(
+      "sha256:authenticated-database",
+    );
+    expect(config.context.env.KUZUSHI_MCP_CONTEXT_ARTIFACT_IDENTITY).toBeUndefined();
+  });
+
+  it("accepts snake_case artifact identities", () => {
+    const config = mcpServerConfig({
+      cwd: process.cwd(),
+      toolPolicy: {
+        profile: "default",
+        mcps: true,
+        mcps_attached: [
+          {
+            name: "codeql",
+            artifact_path: repoArtifact,
+            artifact_identity: "sha256:legacy-serializer",
+          },
+        ],
+        mcp_read_roots: [process.cwd()],
+      },
+    }) as ServerConfig;
+
+    expect(config.codeql.env.KUZUSHI_MCP_CODEQL_ARTIFACT_IDENTITY).toBe("sha256:legacy-serializer");
+  });
+
   it("falls back to the legacy trio when no plan is supplied", () => {
     const config = mcpServerConfig({
       cwd: process.cwd(),

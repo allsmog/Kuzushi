@@ -282,11 +282,12 @@ fn runtime_state_path(root: &Path, path: &Path) -> Option<PathBuf> {
     if is_sqlite_shared_memory(&relative) {
         return None;
     }
+    let codeql_database = crate::workspace::workspace_codeql_db_path("");
+    if relative.starts_with(&codeql_database) {
+        return Some(codeql_database);
+    }
     if relative.starts_with(".kuzushi/v3") {
         return Some(relative);
-    }
-    if relative == Path::new(".kuzushi/codeql-db") {
-        return Some(PathBuf::from(".kuzushi/codeql-db"));
     }
     is_legacy_workspace_artifact(&relative).then_some(relative)
 }
