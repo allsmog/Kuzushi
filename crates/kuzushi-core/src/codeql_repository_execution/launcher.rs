@@ -23,6 +23,8 @@ pub(crate) enum PreparedCodeqlLauncher {
         repository_relative: Option<PathBuf>,
         #[serde(rename = "contentDigest")]
         content_digest: String,
+        #[serde(rename = "bundleIdentity", skip_serializing_if = "Option::is_none")]
+        bundle_identity: Option<String>,
     },
 }
 
@@ -92,6 +94,7 @@ impl PreparedCodeqlLauncher {
                 bundle_root,
                 repository_relative,
                 content_digest,
+                bundle_identity,
             } => resolve_ready_launcher(
                 source_root,
                 source_binding,
@@ -100,6 +103,7 @@ impl PreparedCodeqlLauncher {
                 bundle_root.as_deref(),
                 repository_relative.as_deref(),
                 content_digest,
+                bundle_identity.as_deref(),
             )
             .map(Some),
         }
@@ -132,6 +136,7 @@ fn prepare_codeql_launcher(
             bundle_root: None,
             repository_relative: Some(repository_relative),
             content_digest,
+            bundle_identity: None,
         });
     }
     let bundle_root = path
@@ -139,11 +144,13 @@ fn prepare_codeql_launcher(
         .context("CodeQL launcher has no bundle root")?
         .to_path_buf();
     validate_external_bundle_root(&bundle_root, &repository_root)?;
+    let bundle_identity = external_bundle_identity(&bundle_root)?;
     Ok(PreparedCodeqlLauncher::Ready {
         path,
         bundle_root: Some(bundle_root),
         repository_relative: None,
         content_digest,
+        bundle_identity: Some(bundle_identity),
     })
 }
 
@@ -203,6 +210,7 @@ fn resolve_ready_launcher(
     bundle_root: Option<&Path>,
     repository_relative: Option<&Path>,
     expected_digest: &str,
+    expected_bundle_identity: Option<&str>,
 ) -> Result<ResolvedCodeqlLauncher> {
     if let Some(relative) = repository_relative {
         return resolve_repository_launcher(
@@ -214,8 +222,17 @@ fn resolve_ready_launcher(
     }
     let repository_root = repository_root(source_root, source_binding)?;
     let bundle_root = bundle_root.context("external CodeQL launcher has no bundle root")?;
+    let expected_bundle_identity = expected_bundle_identity.context(
+        "external CodeQL launcher has no prepared bundle identity; prepare the operation again",
+    )?;
     validate_external_bundle_root(bundle_root, &repository_root)?;
+    let canonical = canonical_launcher(path)?;
+    anyhow::ensure!(
+        canonical == path,
+        "CodeQL launcher changed after preparation"
+    );
     verify_launcher_identity(path, expected_digest)?;
+    verify_external_bundle_identity(bundle_root, expected_bundle_identity)?;
     anyhow::ensure!(
         path.starts_with(bundle_root),
         "CodeQL launcher escaped its bundle"

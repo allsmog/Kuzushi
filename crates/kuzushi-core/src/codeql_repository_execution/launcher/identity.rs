@@ -1,6 +1,10 @@
 use super::{fs, Context, Path, PathBuf, RepositorySourceBinding, Result};
 use std::io::Read;
 
+mod bundle;
+
+pub(super) use bundle::*;
+
 const MAX_LAUNCHER_BYTES: u64 = 512 * 1024 * 1024;
 
 pub(super) fn canonical_launcher(path: &Path) -> Result<PathBuf> {
