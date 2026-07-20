@@ -22,7 +22,19 @@ pub(crate) fn full_mode_config_from_input(
             .and_then(Value::as_u64)
             .map(|v| v as u32),
         auto_triage_deposit_usd: input.get("autoTriageDepositUsd").and_then(Value::as_f64),
+        run_budget_usd: full_mode_run_budget(input)?,
     })
+}
+
+fn full_mode_run_budget(input: &Value) -> Result<Option<f64>> {
+    let Some(budget) = input.get("budgetUsd").and_then(Value::as_f64) else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        budget.is_finite() && budget > 0.0,
+        "full-mode:hunt budgetUsd must be a positive number, got {budget}"
+    );
+    Ok(Some(budget))
 }
 
 pub(crate) fn full_mode_language(

@@ -1797,6 +1797,7 @@ dependencies = [
  "kuzushi-core",
  "kuzushi-openai",
  "kuzushi-tui",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

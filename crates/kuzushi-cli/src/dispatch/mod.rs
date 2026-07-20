@@ -59,6 +59,9 @@ async fn dispatch_scan_command(command: Command, default_target: Option<PathBuf>
         json,
         ci,
         budget,
+        shard,
+        shard_manifest,
+        paths,
         since,
         include_worktree,
         fail_on,
@@ -72,6 +75,11 @@ async fn dispatch_scan_command(command: Command, default_target: Option<PathBuf>
         fail_on: fail_on.map(crate::command::FailOnArg::as_severity),
         sarif,
     };
+    let scope = crate::application::scan::ScanScopeArgs {
+        shard,
+        shard_manifest,
+        paths,
+    };
     scan_command(
         target,
         mode,
@@ -80,6 +88,7 @@ async fn dispatch_scan_command(command: Command, default_target: Option<PathBuf>
         json,
         ci,
         budget,
+        scope,
         since,
         include_worktree,
         gate,
@@ -125,6 +134,9 @@ mod tests {
             json: false,
             ci: false,
             budget: None,
+            shard: None,
+            shard_manifest: None,
+            paths: Vec::new(),
             since: None,
             include_worktree: false,
             fail_on: None,
@@ -178,6 +190,7 @@ mod tests {
             input: "{}".to_string(),
             options: Vec::new(),
             autonomy: None,
+            run_id: None,
         };
 
         assert!(reject_dynamic_load_for_command(&shell, &dynamic_specifier()).is_ok());
@@ -271,6 +284,30 @@ fn shell_target_source(
     }
 }
 
+/// `kuzushi ci` owns its documented exit-code contract (0/1/2), so nonzero
+/// outcomes exit the process here instead of surfacing as anyhow errors
+/// (which the top level would map to a generic failure exit).
+fn dispatch_ci_command(
+    target: Option<PathBuf>,
+    fail_on: crate::command::FailOnArg,
+    update_baseline: bool,
+    summary: Option<PathBuf>,
+    default_target: Option<PathBuf>,
+) -> Result<()> {
+    let options = crate::application::ci::CiOptions {
+        fail_on: fail_on.as_severity(),
+        update_baseline,
+        summary_path: summary,
+    };
+    let result = crate::support::require_cli_target("ci", target, default_target)
+        .and_then(|target| crate::application::ci::ci_command(target, options));
+    let code = crate::application::ci::ci_process_exit(result);
+    if code != 0 {
+        std::process::exit(code);
+    }
+    Ok(())
+}
+
 async fn dispatch_non_scan_command(
     command: Command,
     default_target: Option<PathBuf>,
@@ -287,6 +324,12 @@ async fn dispatch_non_scan_command(
         | Command::Permissions { .. }
         | Command::Doctor { .. }
         | Command::PrComment(_) => reporting::dispatch_reporting_command(command, default_target),
+        Command::Ci {
+            target,
+            fail_on,
+            update_baseline,
+            summary,
+        } => dispatch_ci_command(target, fail_on, update_baseline, summary, default_target),
         Command::Sessions { command } => {
             crate::application::sessions::sessions_command(command, default_target)
         }
@@ -296,6 +339,9 @@ async fn dispatch_non_scan_command(
         | Command::Kwp { .. }
         | Command::Tools { .. } => catalog::dispatch_catalog_command(command, default_target),
         Command::Run { .. } => run_command::dispatch_run_command(command, default_target, load),
+        Command::Campaign { command } => {
+            crate::application::campaign_run::campaign_command(command, default_target).await
+        }
         Command::Mcp { command } => mcp_command(command).await,
         Command::Demo { json } => crate::application::demo::demo_command(json).await,
         Command::Shell { .. } | Command::Scan { .. } => unreachable!("handled before dispatch"),

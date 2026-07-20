@@ -58,6 +58,16 @@ fn codeql_create_db_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
         opt(
+            "importPath",
+            OptionType::Path,
+            "Reuse a prebuilt CodeQL database directory instead of running `codeql database \
+             create`: the directory is validated (codeql-database.yml) and copied to the \
+             canonical <target>/.kuzushi/codeql-db. The codeql CLI need not be installed. \
+             Use for large targets where the database is built out-of-band or shared.",
+        )
+        .external_read()
+        .aliases(&["import_path", "existingDb", "existing_db"]),
+        opt(
             "language",
             OptionType::String,
             "CodeQL language pack (e.g. javascript, python, cpp, java, rust). Defaults to auto-detection.",
@@ -101,11 +111,137 @@ pub(in crate::modules) fn run_codeql_create_db(
 ) -> Result<Value> {
     ctx.ensure_active()?;
     let target = resolve_tool_target(input, ctx)?;
+    if let Some(import_path) = resolve_db_import_path(input) {
+        return run_codeql_db_import(ctx, &target, &import_path, input);
+    }
     let bin = match locate_codeql_bin(input)? {
         Some(path) => path,
         None => return Ok(skipped_response(&target)),
     };
     execute_codeql_create(input, ctx, target, bin)
+}
+
+fn resolve_db_import_path(input: &Value) -> Option<PathBuf> {
+    input
+        .get("importPath")
+        .or_else(|| input.get("import_path"))
+        .or_else(|| input.get("existingDb"))
+        .or_else(|| input.get("existing_db"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+}
+
+/// Import a prebuilt CodeQL database: validate the source directory, then copy
+/// it to the canonical output path so downstream queries find it where they
+/// already look. No `codeql database create` involvement.
+fn run_codeql_db_import(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+    import_path: &Path,
+    input: &Value,
+) -> Result<Value> {
+    validate_db_import_source(import_path)?;
+    let output_path = resolve_db_output_path(input, target);
+    emit_step(
+        ctx,
+        "tool",
+        "create-db",
+        format!("codeql:create-db import from {}", import_path.display()),
+    );
+    let started = Instant::now();
+    prepare_db_directory(target, &output_path.path, can_remove_non_db_path(&output_path))?;
+    copy_directory_recursive(import_path, &output_path.path).with_context(|| {
+        format!(
+            "Could not copy prebuilt CodeQL DB {} to {}",
+            import_path.display(),
+            output_path.path.display()
+        )
+    })?;
+    anyhow::ensure!(
+        looks_like_codeql_database(&output_path.path),
+        "imported CodeQL DB copy at {} is missing codeql-database.yml",
+        output_path.path.display()
+    );
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    emit_done_step(ctx, &output_path.path, elapsed_ms);
+    Ok(codeql_db_import_response(
+        target,
+        &output_path.path,
+        import_path,
+        elapsed_ms,
+        now_ms()?,
+    ))
+}
+
+/// A usable import source is a directory carrying the codeql-database.yml
+/// marker that `codeql database create` writes.
+fn validate_db_import_source(import_path: &Path) -> Result<()> {
+    anyhow::ensure!(
+        import_path.is_dir(),
+        "prebuilt CodeQL DB not found at {} — check importPath",
+        import_path.display()
+    );
+    anyhow::ensure!(
+        looks_like_codeql_database(import_path),
+        "{} is not a CodeQL database (no codeql-database.yml)",
+        import_path.display()
+    );
+    Ok(())
+}
+
+/// Copy a directory tree of regular files. Symlinks are skipped rather than
+/// followed so a hostile prebuilt artifact cannot pull outside content into
+/// Kuzushi state; CodeQL databases contain none.
+fn copy_directory_recursive(source: &Path, destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination)
+        .with_context(|| format!("creating {}", destination.display()))?;
+    for entry in fs::read_dir(source).with_context(|| format!("reading {}", source.display()))? {
+        let entry = entry.with_context(|| format!("reading entry below {}", source.display()))?;
+        copy_directory_entry(&entry, destination)?;
+    }
+    Ok(())
+}
+
+fn copy_directory_entry(entry: &fs::DirEntry, destination: &Path) -> Result<()> {
+    let file_type = entry
+        .file_type()
+        .with_context(|| format!("inspecting {}", entry.path().display()))?;
+    let target = destination.join(entry.file_name());
+    if file_type.is_dir() {
+        return copy_directory_recursive(&entry.path(), &target);
+    }
+    if file_type.is_file() {
+        fs::copy(entry.path(), &target)
+            .with_context(|| format!("copying {}", entry.path().display()))?;
+    }
+    Ok(())
+}
+
+fn codeql_db_import_response(
+    target: &Path,
+    output_path: &Path,
+    import_path: &Path,
+    elapsed_ms: u64,
+    timestamp: u64,
+) -> Value {
+    let output = format!(
+        "codeql:create-db imported prebuilt database from {} to {} in {} ms",
+        import_path.display(),
+        output_path.display(),
+        elapsed_ms
+    );
+    crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
+            "target": target.display().to_string(),
+            "dbPath": output_path.display().to_string(),
+            "importedFrom": import_path.display().to_string(),
+            "elapsedMs": elapsed_ms,
+            "timestamp": timestamp,
+        }),
+    )
 }
 
 fn execute_codeql_create(
@@ -647,6 +783,60 @@ fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, label: impl
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn db_import_path_resolves_from_any_alias_and_ignores_blank() {
+        assert_eq!(
+            resolve_db_import_path(&json!({"importPath": "/x/db"})),
+            Some(PathBuf::from("/x/db"))
+        );
+        assert_eq!(
+            resolve_db_import_path(&json!({"existing_db": "/y/db"})),
+            Some(PathBuf::from("/y/db"))
+        );
+        assert_eq!(resolve_db_import_path(&json!({"importPath": " "})), None);
+        assert_eq!(resolve_db_import_path(&json!({})), None);
+    }
+
+    #[test]
+    fn db_import_source_requires_codeql_database_marker() {
+        let temp = tempdir().unwrap();
+        let missing = temp.path().join("absent");
+        assert!(validate_db_import_source(&missing).is_err());
+
+        let plain = temp.path().join("plain");
+        fs::create_dir_all(&plain).unwrap();
+        let error = validate_db_import_source(&plain).unwrap_err().to_string();
+        assert!(error.contains("codeql-database.yml"), "{error}");
+
+        fs::write(plain.join("codeql-database.yml"), "db").unwrap();
+        validate_db_import_source(&plain).unwrap();
+    }
+
+    #[test]
+    fn directory_copy_preserves_tree_and_skips_symlinks() {
+        let source = tempdir().unwrap();
+        fs::write(source.path().join("codeql-database.yml"), "db").unwrap();
+        fs::create_dir_all(source.path().join("db-cpp/sub")).unwrap();
+        fs::write(source.path().join("db-cpp/sub/data.bin"), "payload").unwrap();
+        #[cfg(unix)]
+        {
+            let outside = source.path().join("codeql-database.yml");
+            std::os::unix::fs::symlink(&outside, source.path().join("link.yml")).unwrap();
+        }
+        let destination = tempdir().unwrap();
+        let copy_root = destination.path().join("copy");
+
+        copy_directory_recursive(source.path(), &copy_root).unwrap();
+
+        assert!(copy_root.join("codeql-database.yml").is_file());
+        assert_eq!(
+            fs::read_to_string(copy_root.join("db-cpp/sub/data.bin")).unwrap(),
+            "payload"
+        );
+        #[cfg(unix)]
+        assert!(!copy_root.join("link.yml").exists());
+    }
 
     #[test]
     fn build_mode_resolution_rejects_unknown_values() {

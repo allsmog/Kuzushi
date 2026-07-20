@@ -103,6 +103,7 @@ impl ShellApp {
                 self.router.report_mut().set_origin(origin);
             }
         }
+        self.refresh_workspace_trend();
         self.set_shell_view(ShellView::Report);
         self.set_input_mode(InputMode::Navigate);
     }

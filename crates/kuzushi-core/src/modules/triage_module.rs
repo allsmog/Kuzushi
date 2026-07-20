@@ -42,6 +42,7 @@ fn triage_run_options() -> Vec<OptionSpec> {
         triage_cost_cap_option(),
         triage_prefilter_option(),
         triage_retriage_option(),
+        triage_votes_option(),
         triage_stage2_tier_option(),
         triage_strategy_option(),
         deep_triage_options(),
@@ -109,6 +110,15 @@ fn triage_retriage_option() -> OptionSpec {
     .aliases(&["force", "includeTriaged", "include_triaged"])
     .default(json!(false))
     .advanced()
+}
+
+fn triage_votes_option() -> OptionSpec {
+    opt(
+        "votes",
+        OptionType::Int,
+        "Independent triage passes per finding; a strict majority wins and disagreement downgrades to needs_review.",
+    )
+    .default(json!(1))
 }
 
 fn triage_stage2_tier_option() -> OptionSpec {

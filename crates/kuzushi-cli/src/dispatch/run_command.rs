@@ -14,7 +14,8 @@ pub(super) fn dispatch_run_command(
             input,
             options,
             autonomy,
-        } => run_tool_command(tool, input, options, autonomy, default_target, load),
+            run_id,
+        } => run_tool_command(tool, input, options, autonomy, default_target, load, run_id),
         _ => unreachable!("non-run command routed to run dispatcher"),
     }
 }

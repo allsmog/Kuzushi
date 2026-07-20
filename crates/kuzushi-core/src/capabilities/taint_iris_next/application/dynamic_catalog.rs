@@ -549,7 +549,7 @@ fn parse_target_catalog_payload(raw: &str) -> Result<Vec<TaintIrisNextRankedCata
     Ok(entries)
 }
 
-fn persist_target_catalog(
+pub(in crate::capabilities::taint_iris_next) fn persist_target_catalog(
     target: &Path,
     entries: &[TaintIrisNextRankedCatalogEntry],
 ) -> Result<PathBuf> {

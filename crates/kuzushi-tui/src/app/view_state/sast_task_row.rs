@@ -126,6 +126,16 @@ pub enum ShellView {
     RunDiff,
     Replay,
     Trace,
+    /// Campaign deck — visual plan/launch surface over
+    /// `.kuzushi/v3/campaigns/`: folds each plan with its dispatcher queue,
+    /// supports per-job include/exclude and seasoned-prompt editing, and
+    /// Launch spawns `kuzushi campaign run` as a detached subprocess so the
+    /// shell never runs a campaign in-process.
+    Campaign,
+    /// Coverage matrix deck — read-only shards × threat-sources grid folded
+    /// from every campaign plan/queue plus per-shard finding counts. Answers
+    /// "where have we looked, what did we find, where is risk uncovered".
+    Coverage,
     Help,
     Quickstart,
     /// Full-screen scrollable transcript. M1 §1.1 — the embedded

@@ -5,8 +5,8 @@ mod pr_comment_args;
 mod subcommands;
 pub(crate) use pr_comment_args::PrCommentArgs;
 pub(crate) use subcommands::{
-    AuthCommand, ConfigCommand, FailOnArg, KwpCommand, McpBackend, McpCommand, RunsCommand,
-    ScanModeArg, SessionExportFormat, SessionsCommand,
+    AuthCommand, CampaignCommand, ConfigCommand, FailOnArg, KwpCommand, McpBackend, McpCommand,
+    RunsCommand, ScanModeArg, SessionExportFormat, SessionsCommand,
 };
 
 #[derive(Debug, Subcommand)]
@@ -41,6 +41,21 @@ pub(crate) enum Command {
         /// Scanner-only work and tools that do not report spend are unaffected.
         #[arg(long)]
         budget: Option<String>,
+        /// Scan only the named shard from the shard manifest — a reusable,
+        /// workspace-relative scope declared as `[shards.<name>] paths = [...]`
+        /// in `<target>/.kuzushi/shards.toml` (or `--shard-manifest <file>`).
+        /// Compiles into the canonical `sast:scan` `paths` option and records
+        /// the shard name in run provenance.
+        #[arg(long)]
+        shard: Option<String>,
+        /// Shard manifest file to resolve `--shard` against. Defaults to
+        /// `<target>/.kuzushi/shards.toml`.
+        #[arg(long, requires = "shard")]
+        shard_manifest: Option<PathBuf>,
+        /// Restrict the scan to these workspace-relative path roots (comma- or
+        /// repeat-separated) without a manifest. Mutually exclusive with `--shard`.
+        #[arg(long, value_delimiter = ',', conflicts_with = "shard")]
+        paths: Vec<String>,
         /// Diff-scope the scan to files changed since `<ref>`. Engines that
         /// support it (full-mode-multi today) narrow their walk; others are
         /// unaffected. Pass `--include-worktree` to include uncommitted edits.
@@ -123,6 +138,26 @@ pub(crate) enum Command {
         /// Emit the result as machine-readable JSON.
         #[arg(long)]
         json: bool,
+    },
+    /// Pipeline gate over persisted workspace state (no scan, no model
+    /// calls): prints a plain findings/campaign/trend summary, writes a
+    /// machine JSON summary, and exits 0 (clean), 1 (new confirmed findings
+    /// at or above `--fail-on` vs the committed `.kuzushi/ci-baseline.json`),
+    /// or 2 (error).
+    Ci {
+        #[arg(help = crate::support::TARGET_HELP)]
+        target: Option<PathBuf>,
+        /// Severity threshold for gating NEW confirmed findings.
+        #[arg(long, value_enum, default_value = "low")]
+        fail_on: FailOnArg,
+        /// Rewrite `.kuzushi/ci-baseline.json` from the currently confirmed
+        /// findings (accept current state) and exit 0. Commit the file.
+        #[arg(long)]
+        update_baseline: bool,
+        /// JSON summary output path. Relative paths resolve under the target
+        /// root; default `.kuzushi/v3/reports/ci-summary.json`.
+        #[arg(long)]
+        summary: Option<PathBuf>,
     },
     /// Inspect replayable run artifacts under `.kuzushi/v3/runs`.
     Runs {
@@ -236,6 +271,18 @@ pub(crate) enum Command {
         /// omitted = unconstrained.
         #[arg(long)]
         autonomy: Option<String>,
+        /// Caller-supplied run id (used by the campaign dispatcher). Must be
+        /// unused; artifacts land at `.kuzushi/v3/runs/<run-id>/` so the
+        /// caller finds them without racing directory scans.
+        #[arg(long = "run-id")]
+        run_id: Option<String>,
+    },
+    /// Campaign dispatcher: execute a planned job matrix as bounded
+    /// `kuzushi run` child processes with retries, quota-wall pauses, and a
+    /// budget cap.
+    Campaign {
+        #[command(subcommand)]
+        command: CampaignCommand,
     },
     /// Run a local MCP server (joern, clang, or gtags) over stdio.
     Mcp {

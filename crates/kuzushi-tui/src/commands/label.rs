@@ -63,6 +63,10 @@ pub enum ShellCommand {
     /// Cancel a running job (or dequeue a pending steer item) by run id.
     /// `jobs -k <id>`.
     CancelJob(String),
+    /// Open the Campaign deck (all campaigns, or jump straight to one).
+    /// `campaign [id]`.
+    ShowCampaigns(Option<String>),
+    ShowCoverage,
     /// Queue a command to dispatch after the current run finishes. `queue
     /// <tool|verb>`.
     QueueCommand(String),

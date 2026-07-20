@@ -37,18 +37,20 @@ struct ScanCommandSetup {
     config: kuzushi_core::V2Config,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_scan_command(
     target: &PathBuf,
     mode: Option<ScanModeArg>,
     tasks: &[String],
     triage: Option<bool>,
     budget: Option<&str>,
+    scope: &super::scan::ScanScopeArgs,
     since: Option<&str>,
     include_worktree: bool,
     json: bool,
     ci: bool,
 ) -> Result<PreparedScanCommand> {
-    let bootstrap = ScanCommandBootstrap::new(target, mode, tasks, triage)?;
+    let bootstrap = ScanCommandBootstrap::new(target, mode, tasks, triage, scope)?;
     prepare_scan_command_from_bootstrap(bootstrap, budget, since, include_worktree, json, ci, true)
 }
 
@@ -88,8 +90,17 @@ impl ScanCommandBootstrap {
         mode: Option<ScanModeArg>,
         tasks: &[String],
         triage: Option<bool>,
+        scope: &super::scan::ScanScopeArgs,
     ) -> Result<Self> {
-        Self::from_input(target, scan_tool_input(mode, tasks, triage))
+        let mut requested_input = scan_tool_input(mode, tasks, triage);
+        super::scan_shards::apply_scan_paths_scope(
+            &mut requested_input,
+            target,
+            scope.shard.as_deref(),
+            scope.shard_manifest.as_deref(),
+            &scope.paths,
+        )?;
+        Self::from_input(target, requested_input)
     }
 
     fn from_input(target: &PathBuf, requested_input: serde_json::Value) -> Result<Self> {

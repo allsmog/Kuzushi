@@ -80,6 +80,13 @@ fn forward_legacy_taint_prompt(object: &mut serde_json::Map<String, Value>) {
     }
 }
 
+pub(in crate::modules) fn run_taint_iris_next_import_sinks_tool(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    Ok(run_taint_iris_next_sink_import_report(input, ctx)?.to_tool_json())
+}
+
 pub(in crate::modules) fn run_taint_iris_next_catalog_tool(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,

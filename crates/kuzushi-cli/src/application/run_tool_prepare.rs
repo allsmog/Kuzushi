@@ -51,8 +51,10 @@ pub(crate) fn prepare_cli_tool_run(
     autonomy: Option<String>,
     target: Option<PathBuf>,
     load: Vec<String>,
+    explicit_run_id: Option<String>,
 ) -> Result<PreparedCliToolRun> {
-    let bootstrap = CliToolRunBootstrap::new(tool, target, &input, &options, &load)?;
+    let bootstrap =
+        CliToolRunBootstrap::new(tool, target, &input, &options, &load, explicit_run_id)?;
     let mut config = bootstrap.load_config_or_record_failure(&input)?;
     config.autonomy = bootstrap.resolve_autonomy_or_record_failure(&config, autonomy, &input)?;
     let setup = bootstrap.with_config(config, load, &input)?;
@@ -62,6 +64,30 @@ pub(crate) fn prepare_cli_tool_run(
     let store = setup.finding_store(&input)?;
     setup.start(input.value())?;
     Ok(setup.into_prepared(input, store))
+}
+
+/// A caller-supplied run id must be filesystem-safe and unused, so the
+/// caller (the campaign dispatcher) can rely on `.kuzushi/v3/runs/<id>/`
+/// being exclusively this run's artifacts. A collision is a prepare-stage
+/// error (batch exit 2): retrying the same id is pointless by design.
+fn validated_explicit_run_id(explicit: String, target: Option<&Path>) -> Result<String> {
+    let id = explicit.trim().to_string();
+    anyhow::ensure!(
+        !id.is_empty()
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+        "--run-id may only contain ASCII alphanumerics, '-', and '_', got {explicit:?}"
+    );
+    if let Some(target) = target {
+        let run_dir = kuzushi_core::run_dir(target, &id);
+        anyhow::ensure!(
+            !run_dir.exists(),
+            "--run-id {id:?} already has artifacts at {}",
+            run_dir.display()
+        );
+    }
+    Ok(id)
 }
 
 /// Resolve the `--autonomy` flag into the run's posture. Absent = the config
@@ -125,9 +151,13 @@ impl CliToolRunBootstrap {
         raw_input: &str,
         options: &[String],
         load: &[String],
+        explicit_run_id: Option<String>,
     ) -> Result<Self> {
         let registry = ModuleRegistry::with_v2_builtins();
-        let run_id = new_run_id("run");
+        let run_id = match explicit_run_id {
+            Some(explicit) => validated_explicit_run_id(explicit, target.as_deref())?,
+            None => new_run_id("run"),
+        };
         require_dynamic_invocation_workspace(&registry, &tool, target.as_deref(), load)?;
         let workspace = run_tool_workspace_for_invocation(
             &registry,
@@ -431,12 +461,24 @@ fn record_cli_preparation_rejection(
         error,
     )?;
     let (observation, completion) = rejection.into_parts();
-    try_record_tool_run_failed_settled(
+    let recorded = try_record_tool_run_failed_settled(
         ToolRunRecord::new(target, run_id, "run", tool),
         error,
         &observation,
         completion,
-    )
+    );
+    // A minted-then-rejected run must still publish its terminal sentinel,
+    // or an unattended poller reads it as a crash instead of a bad job.
+    if let Err(sentinel) = super::run_exit::write_done_sentinel(
+        target,
+        run_id,
+        tool,
+        &serde_json::json!({ "status": "failed" }),
+        super::run_exit::EXIT_RUN_PREPARE_FAILED,
+    ) {
+        eprintln!("kuzushi: warning: done sentinel not written: {sentinel}");
+    }
+    recorded
 }
 
 fn error_with_persistence(error: anyhow::Error, persistence: Result<()>) -> anyhow::Error {
@@ -586,6 +628,7 @@ export default {
             None,
             None,
             Vec::new(),
+            None,
         )
         .unwrap();
         let canonical_target = target.path().canonicalize().unwrap();
@@ -610,6 +653,7 @@ export default {
             None,
             None,
             Vec::new(),
+            None,
         )
         .unwrap();
         let canonical_target = target.path().canonicalize().unwrap();
@@ -634,6 +678,7 @@ export default {
             None,
             None,
             Vec::new(),
+            None,
         )
         .unwrap();
 
@@ -665,6 +710,7 @@ export default {
             None,
             Some(target.to_path_buf()),
             Vec::new(),
+            None,
         )
         .err()
         .expect("unknown option should be rejected")
@@ -750,6 +796,7 @@ export default {
             None,
             None,
             Vec::new(),
+            None,
         )
         .err()
         .expect("conflicting invocation targets must fail")
@@ -775,6 +822,7 @@ export default {
             None,
             Some(workspace.path().to_path_buf()),
             Vec::new(),
+            None,
         )
         .unwrap();
 
@@ -802,6 +850,7 @@ export default {
             None,
             Some(target.path().to_path_buf()),
             Vec::new(),
+            None,
         )
         .unwrap();
 
@@ -834,6 +883,7 @@ export default {
             None,
             None,
             Vec::new(),
+            None,
         )
         .err()
         .expect("network target must not satisfy the workspace requirement")
@@ -855,6 +905,7 @@ export default {
             None,
             None,
             vec!["file:///tmp/dynamic-demo.mjs".to_string()],
+            None,
         )
         .err()
         .expect("dynamic tools must not bootstrap trust from process cwd")

@@ -303,7 +303,7 @@ fn prepare_workspace_findings_export(
     options: WorkspaceExportOptions,
 ) -> Result<PreparedWorkspaceFindingsExport> {
     let store = FindingStore::open(workspace.findings_db_path())?;
-    let all_findings = store.list_findings(FindingListFilter::MAX_LIMIT)?;
+    let all_findings = store.list_all_findings()?;
     let all_reviews = effective_review_contexts(&store, &all_findings)?;
     let total_count = all_findings.len();
     let positions = workspace_finding_export_positions(&all_findings);

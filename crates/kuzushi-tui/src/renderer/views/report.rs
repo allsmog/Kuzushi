@@ -22,6 +22,19 @@ fn report_header_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         "Choose one durable export. Success and failure stay here as receipts.",
         theme::muted(),
     )));
+    if let Some(trend) = &app.router.campaign().trend {
+        lines.push(Line::from(Span::styled(
+            trend.strip_label(),
+            theme::subtle(),
+        )));
+        if let Some(history) =
+            kuzushi_core::capabilities::campaign::trend_history::history_strip_label(
+                &app.router.campaign().trend_history,
+            )
+        {
+            lines.push(Line::from(Span::styled(history, theme::subtle())));
+        }
+    }
     lines.push(blank());
     lines
 }
@@ -128,5 +141,29 @@ fn append_report_receipt(
             Span::styled("error  ", theme::danger()),
             Span::styled(error.clone(), theme::primary()),
         ]));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn report_header_carries_the_workspace_trend_strip_when_folded() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.router.campaign_mut().trend =
+            Some(kuzushi_core::capabilities::campaign::trend::trend_metrics(
+                &[],
+                8.0,
+            ));
+        let text = report_lines(&app, Rect::new(0, 0, 120, 30))
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("TREND  FP rate — (no decisions)"), "{text}");
+        assert!(text.contains("$8.00 spent"), "{text}");
     }
 }

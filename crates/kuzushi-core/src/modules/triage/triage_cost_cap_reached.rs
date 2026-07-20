@@ -86,6 +86,25 @@ pub(in crate::modules) fn call_triage_runtime(
     })
 }
 
+/// One additional consensus vote. Deliberately bypasses the runtime cache in
+/// both directions: reading it would replay vote #1 verbatim (defeating vote
+/// independence), and writing it would let a later single-vote run pick up
+/// an arbitrary vote instead of the consensus.
+pub(in crate::modules) fn call_triage_runtime_uncached(
+    runtime: &dyn AgentRuntime,
+    config: &TriageExecutionConfig,
+    input: &TriageRunInput,
+    finding: &Finding,
+) -> Result<TriageOutcome> {
+    let request = TriageRequest {
+        model: config.stage2_model.clone(),
+        cwd: config.cwd.clone(),
+        finding: finding.clone(),
+        prompt_template: input.prompt_template.clone(),
+    };
+    crate::runtime::triage_finding_blocking_checked(runtime, request)
+}
+
 fn cached_triage_outcome(key: &TriageRuntimeCacheKey) -> Option<TriageOutcome> {
     let cache = TRIAGE_RUNTIME_CACHE.get_or_init(|| Mutex::new(TriageRuntimeCache::default()));
     let guard = cache.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -222,6 +241,7 @@ fn triage_response_data(
         "byDesign": stats.by_design,
         "missingFingerprints": missing_fingerprints,
         "concurrency": input.concurrency,
+        "votes": input.votes,
         "stage2Tier": triage_tier_label(input.stage2_tier),
         "costCapUsd": input.cost_cap_usd,
         "costCapHit": stats.cost_cap_hit,
@@ -286,6 +306,7 @@ pub(in crate::modules) fn triage_stages(
             "stage": "haiku",
             "model": config.stage2_model,
             "concurrency": input.concurrency,
+            "votes": input.votes,
             "triaged": stats.triaged(),
             "tp": stats.tp,
             "fp": stats.fp,

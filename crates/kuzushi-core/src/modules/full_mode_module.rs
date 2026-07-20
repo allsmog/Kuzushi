@@ -49,6 +49,13 @@ fn full_mode_hunt_options() -> Vec<OptionSpec> {
             "Plan + cost estimate only; do not invoke any model.",
         )
         .default(serde_json::json!(false)),
+        opt(
+            "budgetUsd",
+            OptionType::Float,
+            "Per-run USD ceiling: stop dispatching new chunks once observed \
+             cost reaches it, keep findings, report undispatched chunk IDs \
+             for a failedChunkIds retry.",
+        ),
         full_mode_scope_file_option(),
         full_mode_failed_chunk_ids_option(),
         full_mode_auto_triage_option(),

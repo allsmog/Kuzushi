@@ -78,6 +78,14 @@ pub struct FullModeConfig {
     /// 1.0; deep-audit refunds unused budget.
     #[serde(default)]
     pub auto_triage_deposit_usd: Option<f64>,
+    /// Optional per-run USD budget. When the accumulated observed chunk
+    /// cost reaches this ceiling the dispatcher stops gracefully: findings
+    /// from completed chunks are kept and every undispatched chunk is
+    /// reported in `failed_chunk_errors` so a `failedChunkIds` retry can
+    /// finish the plan. Distinct from workspace spend caps, which are
+    /// lifetime ledger ceilings rather than per-run ones.
+    #[serde(default)]
+    pub run_budget_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,6 +109,7 @@ impl Default for FullModeConfig {
             auto_triage: false,
             auto_triage_max_steps: None,
             auto_triage_deposit_usd: None,
+            run_budget_usd: None,
         }
     }
 }

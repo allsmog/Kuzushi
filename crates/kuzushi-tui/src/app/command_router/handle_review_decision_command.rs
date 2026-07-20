@@ -143,7 +143,7 @@ impl ShellApp {
         })
     }
 
-    fn current_finding_decision_effect(
+    pub(crate) fn current_finding_decision_effect(
         &self,
         alias: Option<String>,
         finding: Finding,
@@ -290,7 +290,7 @@ impl ShellApp {
         reason
     }
 
-    fn parse_review_decision_verdict_or_log(
+    pub(crate) fn parse_review_decision_verdict_or_log(
         &mut self,
         value: &str,
     ) -> Option<ReviewDecisionVerdict> {
@@ -335,10 +335,12 @@ impl ShellApp {
         verdict: ReviewDecisionVerdict,
         label: &str,
     ) {
+        self.router.workbench_mut().review_mut().session_decided += 1;
+        let decided = self.router.workbench().review().session_decided;
         self.set_success_notice(
             "review",
             format!(
-                "decision saved; will carry forward as decision #{decision_id} ({} for {label})",
+                "decision saved; will carry forward as decision #{decision_id} ({} for {label}) · {decided} decided this session",
                 verdict.as_str()
             ),
         );

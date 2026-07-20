@@ -495,6 +495,15 @@ is expected to behave identically and should be filed as a parity bug.
   launch. `b` restores that origin without cancellation; final chain/plan/steer
   completion restores it with one accumulated receipt. Manual Run Focus
   inspection and background-owned runs never auto-return or hijack focus.
+- **Campaign deck (`campaign [id]`, `ShellView::Campaign`) is shell-only
+  presentation over shared campaign artifacts.** It renders the same
+  `plan.json` + `queue.json` fold as `campaign:status` (one snapshot
+  implementation in `kuzushi-core::capabilities::campaign::snapshot`), adds
+  cursor-driven include/exclude, worker-count, and prompt-preview interaction,
+  and launches/kills a **detached** `kuzushi campaign run` dispatcher in its
+  own process group (never in-process). Dispatched jobs are ordinary runs, so
+  they appear in `jobs`/`runs` unchanged; headless parity is `campaign:status`
+  plus `kuzushi campaign run`.
 - **Contextual utilities are shell-only presentation.** Help, Controls, and
   Capabilities are modal; Jobs, Replay, Trace, and visualization pages are
   scrollable full-frame decks. They share one non-nesting origin: replacing one

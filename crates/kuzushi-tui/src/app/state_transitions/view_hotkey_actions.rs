@@ -76,7 +76,22 @@ impl ShellApp {
             }
             ViewHotkeyAction::WorkbenchSuppress => return Some(self.draft_workbench_suppression()),
             ViewHotkeyAction::WorkbenchOrderChain => return Some(self.draft_workbench_chain()),
+            ViewHotkeyAction::WorkbenchChainFold => {
+                return Some(self.draft_workbench_chain_fold())
+            }
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
+            ViewHotkeyAction::WorkbenchBacklogToggle => self.toggle_review_backlog_preset(),
+            ViewHotkeyAction::WorkbenchBacklogDecide(verdict) => {
+                return Some(self.apply_backlog_one_key_decision(verdict))
+            }
+            ViewHotkeyAction::WorkbenchBacklogSeverityCycle => {
+                self.cycle_backlog_severity_filter()
+            }
+            ViewHotkeyAction::WorkbenchBacklogToolCycle => self.cycle_backlog_tool_filter(),
+            ViewHotkeyAction::WorkbenchBacklogBulkDefer => {
+                return Some(self.apply_backlog_bulk_defer())
+            }
+            ViewHotkeyAction::WorkbenchBacklogUndo => return Some(self.apply_backlog_undo()),
             ViewHotkeyAction::Back if self.focus_workbench_findings_before_back() => {}
             _ => return None,
         }
@@ -340,6 +355,19 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
+    /// Deterministic ledger-only counterpart to `draft_workbench_chain`:
+    /// folds already-confirmed findings into chain candidates without a
+    /// model call, so it is safe to run on every triage pass.
+    fn draft_workbench_chain_fold(&mut self) -> InputUpdate {
+        self.set_input("run findings:chains {}".to_string());
+        self.set_input_mode(InputMode::Prompt);
+        self.log(
+            "chain",
+            "draft loaded — press Enter to fold confirmed findings into chain candidates (no model)",
+        );
+        InputUpdate::handled()
+    }
+
     pub(super) fn reduce_hotkey_command(&mut self, command: ShellCommand) -> InputUpdate {
         let update = self.reduce_command_message(command);
         if update.handled {
@@ -347,6 +375,244 @@ impl ShellApp {
         } else {
             InputUpdate::ignored()
         }
+    }
+
+    fn toggle_review_backlog_preset(&mut self) {
+        let review = self.router.workbench_mut().review_mut();
+        review.backlog = !review.backlog;
+        let enabled = review.backlog;
+        let decided = review.session_decided;
+        self.router.findings_mut().jump(true, 0);
+        if enabled {
+            self.log(
+                "review",
+                format!(
+                    "backlog preset ON — untriaged only, severity-first; c confirm · f reject-FP · d defer · w needs-review · B off ({decided} decided this session)"
+                ),
+            );
+        } else {
+            self.log(
+                "review",
+                "backlog preset OFF — confidence-first order and full queue restored",
+            );
+        }
+    }
+
+    /// One-key backlog decision on the cursored finding. Routes through the
+    /// exact `decision <verdict> <reason>` reducer so watermark checks,
+    /// suppression redirects, and the pinned-finding disclosure rule all
+    /// apply unchanged.
+    fn apply_backlog_one_key_decision(&mut self, verdict: &'static str) -> InputUpdate {
+        if !self.router.workbench().review().backlog {
+            return InputUpdate::handled();
+        }
+        self.remember_backlog_batch_for_cursored_finding();
+        self.router.workbench_mut().review_mut().backlog_confirm_bulk = false;
+        let reason = format!("backlog one-key {verdict} by operator");
+        let effects = self.reduce_review_decision_command(
+            &crate::commands::ReviewDecisionCommand::Record {
+                verdict: verdict.to_string(),
+                reason,
+            },
+        );
+        InputUpdate {
+            handled: true,
+            effects,
+        }
+    }
+
+    const BACKLOG_SEVERITIES: [&'static str; 4] = ["critical", "high", "medium", "low"];
+
+    fn cycle_backlog_severity_filter(&mut self) {
+        if !self.router.workbench().review().backlog {
+            return;
+        }
+        let review = self.router.workbench_mut().review_mut();
+        review.backlog_confirm_bulk = false;
+        review.backlog_severity = match review.backlog_severity {
+            None => Some(Self::BACKLOG_SEVERITIES[0]),
+            Some(current) => Self::BACKLOG_SEVERITIES
+                .iter()
+                .position(|s| *s == current)
+                .and_then(|index| Self::BACKLOG_SEVERITIES.get(index + 1))
+                .copied(),
+        };
+        let label = review
+            .backlog_severity
+            .map(|s| format!("sev:{s}"))
+            .unwrap_or_else(|| "all severities".to_string());
+        self.router.findings_mut().jump(true, 0);
+        self.log("review", format!("backlog filter — {label}"));
+    }
+
+    fn cycle_backlog_tool_filter(&mut self) {
+        if !self.router.workbench().review().backlog {
+            return;
+        }
+        let tools: Vec<String> = self
+            .findings()
+            .iter()
+            .map(|finding| finding.tool.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let review = self.router.workbench_mut().review_mut();
+        review.backlog_confirm_bulk = false;
+        review.backlog_tool = match review.backlog_tool.take() {
+            None => tools.first().cloned(),
+            Some(current) => tools
+                .iter()
+                .position(|tool| *tool == current)
+                .and_then(|index| tools.get(index + 1))
+                .cloned(),
+        };
+        let label = review
+            .backlog_tool
+            .as_deref()
+            .map(|tool| format!("tool:{tool}"))
+            .unwrap_or_else(|| "all tools".to_string());
+        self.router.findings_mut().jump(true, 0);
+        self.log("review", format!("backlog filter — {label}"));
+    }
+
+    /// Bulk defer of the current filtered backlog set. First `X` arms a
+    /// confirmation (shown in the header), the second executes; any other
+    /// backlog action disarms — decisions are never bulk-recorded without
+    /// an explicit confirm.
+    fn apply_backlog_bulk_defer(&mut self) -> InputUpdate {
+        if !self.router.workbench().review().backlog {
+            return InputUpdate::handled();
+        }
+        let batch = self.visible_backlog_findings();
+        if batch.is_empty() {
+            self.log("review", "backlog defer-all — nothing visible to defer");
+            return InputUpdate::handled();
+        }
+        if !self.router.workbench().review().backlog_confirm_bulk {
+            self.router.workbench_mut().review_mut().backlog_confirm_bulk = true;
+            self.log(
+                "review",
+                format!(
+                    "backlog defer-all — press X again to defer {} visible finding(s), any other action cancels",
+                    batch.len()
+                ),
+            );
+            return InputUpdate::handled();
+        }
+        self.router.workbench_mut().review_mut().backlog_confirm_bulk = false;
+        let mut effects = Vec::new();
+        let mut undo_batch = Vec::new();
+        for (alias, finding) in batch {
+            undo_batch.push(crate::app::view_state::BacklogUndoEntry {
+                finding: finding.clone(),
+                alias: alias.clone(),
+                prior_verdict: self.latest_verdict_str(&finding),
+            });
+            let decision = kuzushi_core::findings::ReviewDecision {
+                verdict: kuzushi_core::findings::ReviewDecisionVerdict::Deferred,
+                author: kuzushi_core::findings::TriageAuthor::Human,
+                confidence: 1.0,
+                rationale: "backlog bulk defer by operator".to_string(),
+                dismiss_reason: None,
+                actor: None,
+            };
+            effects.push(self.current_finding_decision_effect(alias, finding, decision));
+        }
+        let count = undo_batch.len();
+        self.router.workbench_mut().review_mut().backlog_last_batch = undo_batch;
+        self.log(
+            "review",
+            format!("backlog defer-all — {count} finding(s) deferred (u undoes)"),
+        );
+        InputUpdate {
+            handled: true,
+            effects,
+        }
+    }
+
+    /// Single-level undo: append the inverse review record per finding in
+    /// the last backlog batch (the prior latest verdict, or needs_review
+    /// when the finding was undecided). History is never deleted — the
+    /// latest-decision-wins fold makes the append a reversal.
+    fn apply_backlog_undo(&mut self) -> InputUpdate {
+        if !self.router.workbench().review().backlog {
+            return InputUpdate::handled();
+        }
+        self.router.workbench_mut().review_mut().backlog_confirm_bulk = false;
+        let batch =
+            std::mem::take(&mut self.router.workbench_mut().review_mut().backlog_last_batch);
+        if batch.is_empty() {
+            self.log("review", "backlog undo — no decision batch to reverse");
+            return InputUpdate::handled();
+        }
+        let mut effects = Vec::new();
+        let mut restored = 0usize;
+        for entry in batch {
+            let Some(verdict) = self.parse_review_decision_verdict_or_log(&entry.prior_verdict)
+            else {
+                continue;
+            };
+            let decision = kuzushi_core::findings::ReviewDecision {
+                verdict,
+                author: kuzushi_core::findings::TriageAuthor::Human,
+                confidence: 1.0,
+                rationale: "backlog undo — restore prior latest decision".to_string(),
+                dismiss_reason: None,
+                actor: None,
+            };
+            effects.push(self.current_finding_decision_effect(entry.alias, entry.finding, decision));
+            restored += 1;
+        }
+        self.log(
+            "review",
+            format!("backlog undo — {restored} inverse record(s) appended"),
+        );
+        InputUpdate {
+            handled: true,
+            effects,
+        }
+    }
+
+    /// The findings currently visible under the backlog projection
+    /// (untriaged + severity/tool filters), as owned rows.
+    fn visible_backlog_findings(&self) -> Vec<(Option<String>, Finding)> {
+        crate::ui_view_models::visible_sorted_finding_alias_indices(self)
+            .into_iter()
+            .filter_map(|(alias, index)| {
+                self.findings()
+                    .get(index)
+                    .cloned()
+                    .map(|finding| (Some(alias), finding))
+            })
+            .collect()
+    }
+
+    /// The finding's current latest review verdict, for the undo batch.
+    fn latest_verdict_str(&self, finding: &Finding) -> String {
+        let Some(finding_id) = finding.id else {
+            return "needs_review".to_string();
+        };
+        self.review_decisions()
+            .iter()
+            .filter(|record| record.finding_id == finding_id)
+            .max_by_key(|record| record.id)
+            .map(|record| record.decision.verdict.as_str().to_string())
+            .unwrap_or_else(|| "needs_review".to_string())
+    }
+
+    /// One-key decisions target the cursored finding; remember its prior
+    /// verdict as a one-entry undo batch before the decision lands.
+    fn remember_backlog_batch_for_cursored_finding(&mut self) {
+        let Some(finding) = self.current_workbench_finding() else {
+            return;
+        };
+        let prior = self.latest_verdict_str(&finding);
+        self.router.workbench_mut().review_mut().backlog_last_batch =
+            vec![crate::app::view_state::BacklogUndoEntry {
+                alias: None,
+                prior_verdict: prior,
+                finding,
+            }];
     }
 
     fn open_workbench_coverage_clusters(&mut self) {
@@ -827,4 +1093,5 @@ const FOCUSED_HOTKEY_HANDLERS: &[FocusedHotkeyHandler] = &[
     ShellApp::apply_recommend_hotkey,
     ShellApp::apply_prompt_or_tune_hotkey,
     ShellApp::apply_actor_hotkey_update,
+    ShellApp::apply_campaign_hotkey,
 ];

@@ -1,5 +1,5 @@
 use super::view_keybinding_groups::{
-    activity_keybindings, actor_detail_keybindings, catalog_keybindings, home_keybindings,
+    activity_keybindings, actor_detail_keybindings, campaign_keybindings, catalog_keybindings, home_keybindings,
     prompts_editor_keybindings, recommend_keybindings, threat_keybindings, tune_keybindings,
     workbench_keybindings,
 };
@@ -39,6 +39,7 @@ impl ShellApp {
 
     fn view_specific_keybindings(&self, view: ShellView) -> Vec<ViewKeybinding> {
         match view {
+            ShellView::Campaign => campaign_keybindings(),
             ShellView::Catalog => catalog_keybindings(),
             ShellView::Home => home_keybindings(),
             ShellView::Workbench => workbench_keybindings(self),

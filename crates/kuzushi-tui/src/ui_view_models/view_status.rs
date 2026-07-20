@@ -50,6 +50,7 @@ fn threat_view_status(app: &ShellApp) -> Option<String> {
         ShellView::ActorDetail => Some(format!("actor:{}", app.router.actor_detail().index() + 1)),
         ShellView::Runs => Some("run-timeline".to_string()),
         ShellView::Jobs => Some("jobs".to_string()),
+        ShellView::Campaign => Some("campaign".to_string()),
         ShellView::RunDiff => Some("run-diff".to_string()),
         ShellView::Replay => Some("replay".to_string()),
         ShellView::Trace => Some("trace".to_string()),

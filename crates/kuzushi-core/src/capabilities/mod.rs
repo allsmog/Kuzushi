@@ -1,10 +1,14 @@
 pub mod agentic_sast;
+pub mod campaign;
 pub mod carlini_threat_hunt;
+pub mod chains;
 pub mod chrome_rce;
 pub mod classifier_gate;
 pub mod deep_auditor;
 pub mod full_mode_multi;
 pub mod module_recommender;
+pub mod pack_lint;
+pub mod shard_suggest;
 pub mod plugin_adapters;
 pub mod prompt_armor;
 pub mod recon;

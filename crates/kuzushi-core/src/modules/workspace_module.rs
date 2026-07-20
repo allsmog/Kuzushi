@@ -16,8 +16,34 @@ pub(crate) fn workspace_module() -> BuiltinModule {
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
             )),
+            workspace_import_findings_tool().with_policy(target_write_policy(
+                ToolPhase::Map,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Optional,
+            )),
         ],
         vec![],
+    )
+}
+
+fn workspace_import_findings_tool() -> ToolDescriptor {
+    tool_with_options(
+        "workspace:import-findings",
+        "Backfill the findings ledger from an external findings JSONL export \
+         (one row per finding: file/line/title plus optional severity, class, \
+         CWE, and verdict) so dedupe and triage see prior history.",
+        vec![
+            opt("path", OptionType::Path, "Path to the findings JSONL file.")
+                .external_read()
+                .required()
+                .aliases(&["findingsPath", "findings_path", "ledger", "corpus"]),
+            opt(
+                "tool",
+                OptionType::String,
+                "Tool label recorded on each imported finding.",
+            )
+            .default(json!("external-ledger")),
+        ],
     )
 }
 
@@ -182,6 +208,13 @@ fn sast_run_filter_options() -> Vec<OptionSpec> {
             "Optional workspace-relative path roots to scan.",
         )
         .aliases(&["includePaths", "include_paths"]),
+        opt(
+            "shard",
+            OptionType::String,
+            "Shard-manifest name that resolved this scan's `paths` scope \
+             (set by `kuzushi scan --shard`); recorded in run provenance.",
+        )
+        .advanced(),
     ]
 }
 
@@ -605,6 +638,13 @@ fn agentic_sast_chunk_execution_options() -> Vec<OptionSpec> {
             "failedChunkIds",
             OptionType::String,
             "Chunked strategy retry filter.",
+        )
+        .advanced(),
+        opt(
+            "budgetUsd",
+            OptionType::Float,
+            "Chunked strategy per-run USD ceiling; stops dispatching new \
+             chunks gracefully and keeps completed-chunk findings.",
         )
         .advanced(),
     ]

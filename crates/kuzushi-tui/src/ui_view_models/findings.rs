@@ -402,9 +402,62 @@ pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String
 
 pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
     let sorted = cached_sorted_finding_alias_indices(app);
-    let display_ordered = confidence_first_display_order(app, sorted);
+    // The backlog preset keeps the severity-major base order (skipping the
+    // confidence-first display reorder) so an operator can burn down the
+    // untriaged queue worst-severity-first. Explicit toggle only.
+    let display_ordered = if review_backlog_active(app) {
+        sorted
+    } else {
+        confidence_first_display_order(app, sorted)
+    };
     let component_filtered = component_filtered_finding_alias_indices(app, display_ordered);
-    active_filter_finding_alias_indices(app, component_filtered)
+    let filtered = active_filter_finding_alias_indices(app, component_filtered);
+    backlog_open_only_finding_alias_indices(app, filtered)
+}
+
+pub(crate) fn review_backlog_active(app: &ShellApp) -> bool {
+    app.router.workbench().review().backlog
+}
+
+/// Backlog preset visibility: drop findings whose review is already complete
+/// (same completeness rule as the review queue's `open` mode).
+fn backlog_open_only_finding_alias_indices(
+    app: &ShellApp,
+    visible: Vec<(String, usize)>,
+) -> Vec<(String, usize)> {
+    if !review_backlog_active(app) {
+        return visible;
+    }
+    let review = app.router.workbench().review();
+    let severity_filter = review.backlog_severity;
+    let tool_filter = review.backlog_tool.clone();
+    let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
+        app.findings(),
+        app.review_decisions(),
+    );
+    visible
+        .into_iter()
+        .filter(|(_, index)| {
+            app.findings().get(*index).is_some_and(|finding| {
+                let decision = review_index.effective_decision_for(finding);
+                !super::review_state::effective_review_decision_complete(
+                    finding,
+                    decision.as_ref(),
+                ) && backlog_filters_match(finding, severity_filter, tool_filter.as_deref())
+            })
+        })
+        .collect()
+}
+
+/// Backlog v2 filters: severity chip (`s`) and tool chip (`t`) narrow the
+/// untriaged queue; `None` means the axis is unfiltered.
+fn backlog_filters_match(
+    finding: &Finding,
+    severity: Option<&'static str>,
+    tool: Option<&str>,
+) -> bool {
+    severity.is_none_or(|wanted| finding.severity.as_str() == wanted)
+        && tool.is_none_or(|wanted| finding.tool == wanted)
 }
 
 /// Re-order the severity-major aliased pairs into confidence-first *display*
@@ -556,11 +609,27 @@ pub(crate) fn visible_findings_cache_key(app: &ShellApp) -> VisibleFindingsCache
 }
 
 fn active_findings_filter_cache_value(app: &ShellApp) -> Option<String> {
-    app.active_findings_filter()
+    let filter = app
+        .active_findings_filter()
         .as_deref()
         .map(str::trim)
         .filter(|filter| !filter.is_empty())
-        .map(ToString::to_string)
+        .map(ToString::to_string);
+    // The backlog preset changes visibility and ordering, so it must key the
+    // projection cache alongside the filter expression.
+    if review_backlog_active(app) {
+        // Severity/tool filters change visibility, so they must key the
+        // cache too — a chip toggle with unchanged revisions must not
+        // serve stale rows.
+        let review = app.router.workbench().review();
+        return Some(format!(
+            "[backlog sev:{} tool:{}]{}",
+            review.backlog_severity.unwrap_or("*"),
+            review.backlog_tool.as_deref().unwrap_or("*"),
+            filter.unwrap_or_default()
+        ));
+    }
+    filter
 }
 
 #[cfg(test)]

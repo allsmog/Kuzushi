@@ -178,7 +178,7 @@ pub(in crate::modules) fn triage_one_finding(
         return Ok(());
     }
 
-    let runtime_outcome = match call_triage_runtime(runtime, config, input, &finding) {
+    let runtime_outcome = match collect_triage_votes(runtime, config, input, &finding) {
         Ok(runtime_outcome) => runtime_outcome,
         Err(error) if is_cancelled_runtime_error(&error) => {
             return Err(error).context("triage:run cancelled");
@@ -190,6 +190,40 @@ pub(in crate::modules) fn triage_one_finding(
     };
     persist_triage_outcome(store, stats, finding, runtime_outcome)?;
     Ok(())
+}
+
+/// Vote #1 goes through the cache-aware path; extra votes are fresh,
+/// uncached calls folded into one consensus outcome. A finding whose extra
+/// votes all fail still resolves from the votes that succeeded, with the
+/// failure count on record; only losing every vote surfaces as an error.
+fn collect_triage_votes(
+    runtime: &dyn AgentRuntime,
+    config: &TriageExecutionConfig,
+    input: &TriageRunInput,
+    finding: &Finding,
+) -> Result<TriageRuntimeOutcome> {
+    let first = call_triage_runtime(runtime, config, input, finding)?;
+    if input.votes <= 1 {
+        return Ok(first);
+    }
+    let mut votes = vec![first.outcome];
+    let mut failed = 0usize;
+    for _ in 1..input.votes {
+        match call_triage_runtime_uncached(runtime, config, input, finding) {
+            Ok(outcome) => votes.push(outcome),
+            Err(error) if is_cancelled_runtime_error(&error) => return Err(error),
+            Err(_) => failed += 1,
+        }
+    }
+    let mut outcome = consensus_outcome(votes);
+    if failed > 0 {
+        outcome.cost_usd_exact = false;
+        outcome.rationale = format!("{} ({failed} vote call(s) failed)", outcome.rationale);
+    }
+    Ok(TriageRuntimeOutcome {
+        outcome,
+        cached: false,
+    })
 }
 
 fn is_cancelled_runtime_error(error: &anyhow::Error) -> bool {

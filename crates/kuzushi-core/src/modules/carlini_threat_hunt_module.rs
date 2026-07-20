@@ -192,6 +192,11 @@ fn taint_iris_next_tools() -> Vec<ToolDescriptor> {
             RuntimeRequirement::Always,
             FindingStoreRequirement::Required,
         )),
+        taint_iris_next_import_sinks_tool().with_policy(workspace_policy(
+            ToolPhase::Scan,
+            RuntimeRequirement::Never,
+            FindingStoreRequirement::Optional,
+        )),
         taint_iris_next_catalog_tool().with_policy(ToolPolicy::new(
             ToolPhase::Scan,
             RuntimeRequirement::Always,
@@ -257,6 +262,35 @@ fn taint_iris_next_finding_review_tool() -> ToolDescriptor {
         "TAINT_IRIS_NEXT_PROMPT",
         crate::capabilities::taint_iris_next::taint_iris_next_system_prompt(),
     ))
+}
+
+fn taint_iris_next_import_sinks_tool() -> ToolDescriptor {
+    tool_with_options(
+        "taint-iris-next:import-sinks",
+        "Deterministically import a JSONL sink inventory into the target-specific taint catalog (no agent runtime).",
+        vec![
+            target_option(),
+            opt(
+                "sinksPath",
+                OptionType::Path,
+                "JSONL sink inventory: one call-site row per line carrying `callee` (aliases `symbol`/`function`/`sink`) plus optional `tag`, `cwe`, and `language` fields.",
+            )
+            .external_read()
+            .aliases(&["sinks_path", "sinksJsonl", "sinks_jsonl", "inventory"]),
+            opt(
+                "merge",
+                OptionType::Bool,
+                "Merge imported entries into an existing target catalog instead of replacing it.",
+            )
+            .default(json!(true)),
+            opt(
+                "languages",
+                OptionType::StringList,
+                "Languages stamped on imported catalog entries (default: derived from row `language` fields, else `any`).",
+            )
+            .advanced(),
+        ],
+    )
 }
 
 fn taint_iris_next_catalog_tool() -> ToolDescriptor {

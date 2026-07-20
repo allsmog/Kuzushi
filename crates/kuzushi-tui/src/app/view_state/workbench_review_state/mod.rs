@@ -2,7 +2,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::widgets::ListState;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct WorkbenchReviewState {
     pub cursor: usize,
     pub mode: ReviewMode,
@@ -11,6 +11,33 @@ pub struct WorkbenchReviewState {
     pub read_watermark: u64,
     pub generation: u64,
     pub pending: Option<PendingDecision>,
+    /// Backlog preset: untriaged-only rows in severity-first order with
+    /// one-key decisions. Explicit operator toggle — the canonical
+    /// confidence-first shell sort stays the default.
+    pub backlog: bool,
+    /// Review decisions saved this shell session (any path, not just
+    /// one-key); surfaces as the backlog session counter.
+    pub session_decided: usize,
+    /// Backlog severity filter (`s` cycles critical→high→medium→low→off).
+    pub backlog_severity: Option<&'static str>,
+    /// Backlog tool filter (`t` cycles the tools present in the ledger).
+    pub backlog_tool: Option<String>,
+    /// Armed bulk-defer confirmation: `X` arms it, a second `X` executes,
+    /// any other backlog action disarms it. Never defers without a confirm.
+    pub backlog_confirm_bulk: bool,
+    /// Last backlog decision batch for single-level undo. Each entry
+    /// carries the finding AS DECIDED (a decision can push the row out of
+    /// the live projection, so undo must not depend on it) plus the prior
+    /// latest verdict. Undo appends the inverse records — history is never
+    /// deleted; the latest-decision-wins fold makes an append a reversal.
+    pub backlog_last_batch: Vec<BacklogUndoEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BacklogUndoEntry {
+    pub finding: kuzushi_core::Finding,
+    pub alias: Option<String>,
+    pub prior_verdict: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

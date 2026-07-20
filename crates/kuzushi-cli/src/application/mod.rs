@@ -1,5 +1,7 @@
 pub(crate) mod auth;
+pub(crate) mod campaign_run;
 pub(crate) mod catalog;
+pub(crate) mod ci;
 pub(crate) mod config;
 pub(crate) mod demo;
 pub(crate) mod export;
@@ -10,6 +12,7 @@ pub(crate) mod pr_comment;
 #[cfg(test)]
 mod pr_comment_tests;
 pub(crate) mod review_decisions;
+pub(crate) mod run_exit;
 pub(crate) mod run_tool;
 pub(crate) mod run_tool_prepare;
 pub(crate) mod runs;
@@ -18,5 +21,6 @@ pub(crate) mod runs_prune;
 pub(crate) mod scan;
 pub(crate) mod scan_gate;
 pub(crate) mod scan_prepare;
+pub(crate) mod scan_shards;
 pub(crate) mod sessions;
 pub(crate) mod suppressions;

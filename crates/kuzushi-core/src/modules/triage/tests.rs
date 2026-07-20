@@ -592,6 +592,141 @@ mod tests {
         }
     }
 
+
+    /// Returns a scripted verdict per call so consensus paths are exercised
+    /// deterministically (call 1 -> TP, call 2 -> FP, call 3 -> TP).
+    struct ScriptedVoteRuntime {
+        calls: std::sync::Mutex<usize>,
+    }
+
+    impl AgentRuntime for ScriptedVoteRuntime {
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            let verdict = if *calls == 2 {
+                TriageVerdict::FalsePositive
+            } else {
+                TriageVerdict::TruePositive
+            };
+            Ok(TriageOutcome {
+                verdict,
+                confidence: 0.8,
+                rationale: format!("vote {}", *calls),
+                cost_usd: 0.01,
+                cost_usd_exact: true,
+            })
+        }
+    }
+
+    #[test]
+    fn three_votes_take_a_majority_and_sum_costs() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let runtime = ScriptedVoteRuntime {
+            calls: std::sync::Mutex::new(0),
+        };
+        let input = TriageRunInput::from_tool_input(
+            &json!({"votes": 3}),
+            Path::new("/repo-votes-majority"),
+        )
+        .unwrap();
+        // Unique model+cwd keep this test out of other tests' runtime cache.
+        let config = TriageExecutionConfig::new(
+            PathBuf::from("/repo-votes-majority"),
+            "anthropic:votes-majority-model".to_string(),
+        );
+        store
+            .record_run_started("scan-votes-majority", Path::new("/repo-votes-majority"), "completed")
+            .unwrap();
+        store
+            .insert_finding(
+                "scan-votes-majority",
+                &finding_with(Severity::High, "semgrep", "votes-majority unique finding"),
+            )
+            .unwrap();
+        let findings = store.list_findings_for_scan_id("scan-votes-majority").unwrap();
+
+        let stats = run_triage_stage2(&store, &runtime, &input, &config, findings).unwrap();
+
+        assert_eq!(*runtime.calls.lock().unwrap(), 3);
+        assert_eq!(stats.tp, 1);
+        assert_eq!(stats.fp, 0);
+        let result = &stats.results[0];
+        assert!(result["rationale"]
+            .as_str()
+            .unwrap()
+            .starts_with("consensus 2/3 true_positive:"));
+        assert!((stats.cost_report().observed_usd() - 0.03).abs() < 1e-9);
+    }
+
+    /// Alternating verdicts across two votes -> no majority -> needs_review.
+    struct SplitVoteRuntime {
+        calls: std::sync::Mutex<usize>,
+    }
+
+    impl AgentRuntime for SplitVoteRuntime {
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            let verdict = if *calls % 2 == 0 {
+                TriageVerdict::FalsePositive
+            } else {
+                TriageVerdict::TruePositive
+            };
+            Ok(TriageOutcome {
+                verdict,
+                confidence: 0.9,
+                rationale: format!("vote {}", *calls),
+                cost_usd: 0.01,
+                cost_usd_exact: true,
+            })
+        }
+    }
+
+    #[test]
+    fn split_votes_downgrade_to_needs_review() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let runtime = SplitVoteRuntime {
+            calls: std::sync::Mutex::new(0),
+        };
+        let input = TriageRunInput::from_tool_input(
+            &json!({"votes": 2}),
+            Path::new("/repo-votes-split"),
+        )
+        .unwrap();
+        let config = TriageExecutionConfig::new(
+            PathBuf::from("/repo-votes-split"),
+            "anthropic:votes-split-model".to_string(),
+        );
+        store
+            .record_run_started("scan-votes-split", Path::new("/repo-votes-split"), "completed")
+            .unwrap();
+        store
+            .insert_finding(
+                "scan-votes-split",
+                &finding_with(Severity::High, "semgrep", "votes-split unique finding"),
+            )
+            .unwrap();
+        let findings = store.list_findings_for_scan_id("scan-votes-split").unwrap();
+
+        let stats = run_triage_stage2(&store, &runtime, &input, &config, findings).unwrap();
+
+        assert_eq!(*runtime.calls.lock().unwrap(), 2);
+        assert_eq!(stats.needs_review, 1);
+        assert!(stats.results[0]["rationale"]
+            .as_str()
+            .unwrap()
+            .contains("no consensus across 2 votes"));
+    }
+
+    #[test]
+    fn votes_outside_bounds_are_rejected() {
+        for bad in [0, 6] {
+            let err = TriageRunInput::from_tool_input(&json!({"votes": bad}), Path::new("."))
+                .unwrap_err();
+            assert!(err.to_string().contains("votes must be between 1 and 5"));
+        }
+    }
+
     fn runtime_outcome(outcome: TriageOutcome) -> TriageRuntimeOutcome {
         TriageRuntimeOutcome {
             outcome,

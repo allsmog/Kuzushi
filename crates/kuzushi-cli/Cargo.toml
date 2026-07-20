@@ -19,6 +19,7 @@ clap.workspace = true
 kuzushi-core = { path = "../kuzushi-core" }
 kuzushi-openai = { path = "../kuzushi-openai" }
 kuzushi-tui = { path = "../kuzushi-tui" }
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 toml.workspace = true

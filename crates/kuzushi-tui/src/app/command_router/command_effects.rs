@@ -43,6 +43,14 @@ impl ShellApp {
                 Some(Vec::new())
             }
             ShellCommand::CancelJob(run_id) => Some(self.reduce_cancel_job(run_id)),
+            ShellCommand::ShowCampaigns(campaign_id) => {
+                self.open_campaign_view(campaign_id.clone());
+                Some(Vec::new())
+            }
+            ShellCommand::ShowCoverage => {
+                self.open_coverage_view();
+                Some(Vec::new())
+            }
             ShellCommand::QueueCommand(raw) => Some(self.reduce_queue_command(raw)),
             ShellCommand::Background => {
                 self.background_handoff();

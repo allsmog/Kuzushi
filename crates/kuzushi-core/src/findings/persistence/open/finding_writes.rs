@@ -580,6 +580,11 @@ fn provenance_read_is_safely_omitted(error: &std::io::Error) -> bool {
             | std::io::ErrorKind::PermissionDenied
             | std::io::ErrorKind::InvalidData
             | std::io::ErrorKind::InvalidInput
+            // A name past the OS component limit (imported ledgers sometimes
+            // carry prose in their location field) can never be a readable
+            // source file; omit provenance like NotFound instead of failing
+            // the insert.
+            | std::io::ErrorKind::InvalidFilename
     )
 }
 

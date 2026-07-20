@@ -163,8 +163,9 @@ pub(crate) use finding_summary::{
 pub(crate) use findings::projected_visible_finding_pairs;
 pub(crate) use findings::{
     current_finding_for_detail, finding_detail_model_for_projection, findings_model,
-    selected_finding_detail_model, visible_finding_at_cursor, visible_finding_at_index,
-    visible_finding_position_for, visible_findings_len, visible_sorted_finding_alias_indices,
+    review_backlog_active, selected_finding_detail_model, visible_finding_at_cursor,
+    visible_finding_at_index, visible_finding_position_for, visible_findings_len,
+    visible_sorted_finding_alias_indices,
     CleanScanEmptyState, FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow,
     FindingListRow, FindingsEmptyState, FindingsModel, ProofTier, TriageSummaryModel,
 };

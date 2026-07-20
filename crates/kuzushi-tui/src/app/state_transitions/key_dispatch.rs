@@ -683,6 +683,7 @@ impl ShellApp {
                 | ShellView::Keymap
                 | ShellView::Help
                 | ShellView::Jobs
+                | ShellView::Campaign
                 | ShellView::Replay
                 | ShellView::Trace
                 | ShellView::Scene

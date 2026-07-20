@@ -43,6 +43,8 @@ pub struct RouterState {
     file_picker: FilePickerRouteState,
     activity: ActivityRouteState,
     workbench: WorkbenchRouteState,
+    campaign: super::CampaignRouteState,
+    coverage: super::CoverageRouteState,
     catalog: CatalogRouteState,
     findings: FindingsRouteState,
     help: HelpRouteState,
@@ -379,6 +381,22 @@ impl RouterState {
         &mut self.workbench
     }
 
+    pub(crate) fn campaign(&self) -> &super::CampaignRouteState {
+        &self.campaign
+    }
+
+    pub(crate) fn campaign_mut(&mut self) -> &mut super::CampaignRouteState {
+        &mut self.campaign
+    }
+
+    pub(crate) fn coverage(&self) -> &super::CoverageRouteState {
+        &self.coverage
+    }
+
+    pub(crate) fn coverage_mut(&mut self) -> &mut super::CoverageRouteState {
+        &mut self.coverage
+    }
+
     pub(crate) fn catalog(&self) -> &CatalogRouteState {
         &self.catalog
     }
@@ -710,7 +728,7 @@ pub struct ReportReceipt {
     pub(crate) timestamp: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WorkbenchRouteState {
     focus: crate::app::WorkbenchPane,
     zoom: crate::app::WorkbenchZoom,

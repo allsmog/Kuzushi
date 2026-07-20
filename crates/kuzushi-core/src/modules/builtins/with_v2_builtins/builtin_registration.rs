@@ -281,6 +281,7 @@ fn dispatch_result(result: ToolDispatchResult, name: &str) -> Result<Value> {
 
 fn register_workspace_catalog_modules(registry: &mut ModuleRegistry) {
     registry.register(workspace_module().with_executor(execute_context_workspace_tool));
+    registry.register(campaign_module().with_executor(execute_context_workspace_tool));
     registry.register(engagement_module().with_executor(execute_context_workspace_tool));
     registry.register(
         module_recommender_module()
@@ -364,6 +365,7 @@ fn register_finding_report_modules(registry: &mut ModuleRegistry) {
     registry.register(patch_module().with_executor(execute_finding_action_tool));
     registry.register(findings_module().with_executor(execute_context_workspace_tool));
     registry.register(suppress_module().with_executor(execute_context_workspace_tool));
+    registry.register(pack_module().with_executor(execute_context_workspace_tool));
     registry.register(report_module().with_executor(execute_context_workspace_tool));
 }
 

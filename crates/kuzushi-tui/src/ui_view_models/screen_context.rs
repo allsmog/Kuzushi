@@ -65,6 +65,8 @@ fn core_shell_view_label(app: &ShellApp, view: &ShellView) -> Option<&'static st
         ShellView::ActorDetail => Some("ActorDetail"),
         ShellView::Runs => Some("Runs"),
         ShellView::Jobs => Some("Jobs"),
+        ShellView::Campaign => Some("Campaign"),
+        ShellView::Coverage => Some("Coverage"),
         ShellView::RunDiff => Some("RunDiff"),
         ShellView::Replay => Some("Replay"),
         ShellView::Trace => Some("Trace"),

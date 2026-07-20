@@ -11,6 +11,16 @@ impl FindingStore {
         self.v3_findings_for_scan_id(scan_id)
     }
 
+    /// Full-ledger fetch. Presentation lists clamp to
+    /// `FindingListFilter::MAX_LIMIT`, but two consumers must see every
+    /// finding: exports (which stamp completeness into metadata) and alias
+    /// resolution (aliases are positional over the sorted whole ledger — a
+    /// clamped subset both loses aliases past the limit and can assign the
+    /// SAME alias to a different finding than the full set does).
+    pub fn list_all_findings(&self) -> Result<Vec<Finding>> {
+        self.v3_all_findings()
+    }
+
     pub fn list_findings_filtered(&self, filter: &FindingListFilter) -> Result<FindingListReport> {
         let all_findings = self.v3_all_findings()?;
         let (count, findings) = collect_filtered_findings(self, all_findings, filter)?;
@@ -106,4 +116,40 @@ fn finding_stable_key(finding: &Finding) -> String {
         .identity_id
         .clone()
         .unwrap_or_else(|| finding.fingerprint.clone())
+}
+
+#[cfg(test)]
+mod full_ledger_fetch_tests {
+    use crate::findings::{Finding, FindingStore};
+    use crate::Severity;
+
+    #[test]
+    fn list_all_findings_sees_past_the_presentation_clamp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(tmp.path().join("findings.db")).unwrap();
+        store
+            .with_run_lifecycle("run-clamp-test", tmp.path(), || {
+                for index in 0..501usize {
+                    let finding = Finding::new_tool(
+                        "clamp-test",
+                        "clamp/rule",
+                        &format!("src/f{index}.c"),
+                        1,
+                        None,
+                        Severity::Low,
+                        &format!("clamp row {index}"),
+                    );
+                    store.insert_finding("run-clamp-test", &finding)?;
+                }
+                Ok(((), 501usize))
+            })
+            .unwrap();
+
+        assert_eq!(store.list_findings(1000).unwrap().len(), 500);
+        let all = store.list_all_findings().unwrap();
+        assert_eq!(all.len(), 501);
+        // Alias indices must be assignable across the whole ledger.
+        let aliases = crate::findings::sorted_finding_aliases(&all);
+        assert_eq!(aliases.len(), 501);
+    }
 }

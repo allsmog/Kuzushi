@@ -1298,4 +1298,38 @@ authorization: Default::default(),
             "warnings should mention linked stories for offline review, got: {warnings_str}"
         );
     }
+
+    #[test]
+    fn static_catalog_carries_native_memory_safety_pack() {
+        // The cpp-memsafety pack: truncation, alloc-vs-copy write,
+        // unchecked-offset read. All restricted to native languages so
+        // web/JVM targets don't rank them, plus native exec sinks on
+        // the shared CWE-78 entry.
+        for (cwe, taint_class, sink) in [
+            ("CWE-197", "numeric-truncation", "static_cast<int"),
+            ("CWE-787", "out-of-bounds-write", "memcpy("),
+            ("CWE-125", "out-of-bounds-read", "reinterpret_cast<"),
+        ] {
+            let entry = TAINT_IRIS_NEXT_CATALOG
+                .iter()
+                .find(|entry| entry.cwe == cwe)
+                .unwrap_or_else(|| panic!("static catalog must carry {cwe}"));
+            assert_eq!(entry.taint_class, taint_class);
+            assert!(entry.sink_signals.contains(&sink), "{cwe} must list {sink}");
+            assert!(
+                entry.languages.contains(&"cpp") && !entry.languages.contains(&"any"),
+                "{cwe} must stay native-only"
+            );
+            assert!(
+                !entry.sanitizer_signals.is_empty(),
+                "{cwe} needs sanitizer signals for the review pass"
+            );
+        }
+        let exec = TAINT_IRIS_NEXT_CATALOG
+            .iter()
+            .find(|entry| entry.cwe == "CWE-78")
+            .expect("CWE-78 entry");
+        assert!(exec.sink_signals.contains(&"execv"));
+        assert!(exec.sink_signals.contains(&"system("));
+    }
 }

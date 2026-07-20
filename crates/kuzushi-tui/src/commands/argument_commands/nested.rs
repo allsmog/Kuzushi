@@ -26,6 +26,8 @@ pub(crate) fn parse_nested_shell_command(
         "project" => parse_project_command(args),
         "runs" => parse_runs_command(args),
         "jobs" => parse_jobs_command(args),
+        "campaign" | "campaigns" => parse_campaign_command(args),
+        "coverage" => ShellCommand::ShowCoverage,
         "queue" => parse_queue_command(args),
         "strategy" | "strategies" => parse_strategy_command(args),
         "decision" | "review" => parse_review_decision_command(args),
@@ -92,6 +94,14 @@ fn parse_jobs_command(args: &[&str]) -> ShellCommand {
         ["-k", id] | ["kill", id] | ["cancel", id] => ShellCommand::CancelJob((*id).to_string()),
         ["-k"] | ["kill"] | ["cancel"] => ShellCommand::Unknown("jobs -k <id>".to_string()),
         [other, ..] => ShellCommand::Unknown(format!("jobs {other}")),
+    }
+}
+
+fn parse_campaign_command(args: &[&str]) -> ShellCommand {
+    match args {
+        [] | ["list"] => ShellCommand::ShowCampaigns(None),
+        [id] => ShellCommand::ShowCampaigns(Some((*id).to_string())),
+        [other, ..] => ShellCommand::Unknown(format!("campaign {other}")),
     }
 }
 

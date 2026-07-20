@@ -29,9 +29,41 @@ pub(crate) fn findings_module() -> BuiltinModule {
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
             )),
+            tool_with_options(
+                "findings:chains",
+                "Deterministically fold confirmed findings into ranked \
+                 entry→pivot→impact chain candidates per code surface. \
+                 Advisory leads only; no model calls.",
+                findings_chains_options(),
+            )
+            .with_policy(workspace_policy(
+                ToolPhase::Review,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Required,
+            )),
         ],
         vec![],
     )
+}
+
+fn findings_chains_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "maxChains",
+            OptionType::Int,
+            "Maximum ranked chain candidates to return.",
+        )
+        .aliases(&["max_chains"])
+        .default(json!(16)),
+        opt(
+            "output",
+            OptionType::Path,
+            "Optional target-relative path for the chain report JSON \
+             (e.g. .kuzushi/v3/reports/chains.json).",
+        )
+        .state_write()
+        .advanced(),
+    ]
 }
 
 fn findings_dismiss_options() -> Vec<OptionSpec> {
