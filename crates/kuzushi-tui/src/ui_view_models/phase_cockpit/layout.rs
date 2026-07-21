@@ -34,6 +34,7 @@ pub(crate) enum PhaseSurfaceId {
     ScanScope,
     ReviewQueue,
     ReviewDetail,
+    ReviewNextPlan,
     ProveStatus,
     ProveEvidence,
     ProveLadder,
@@ -59,7 +60,7 @@ impl PhaseSurfaceId {
             Self::ScanEngines | Self::ScanReceipt | Self::ScanDelta | Self::ScanScope => {
                 WorkbenchPage::Scan
             }
-            Self::ReviewQueue | Self::ReviewDetail => WorkbenchPage::Review,
+            Self::ReviewQueue | Self::ReviewDetail | Self::ReviewNextPlan => WorkbenchPage::Review,
             Self::ProveStatus
             | Self::ProveEvidence
             | Self::ProveLadder
@@ -85,6 +86,7 @@ impl PhaseSurfaceId {
             Self::ScanScope => "Scope and Plan",
             Self::ReviewQueue => "Review Queue",
             Self::ReviewDetail => "Selected Finding",
+            Self::ReviewNextPlan => "Next Investigation Plan",
             Self::ProveStatus => "Proof Status",
             Self::ProveEvidence => "Evidence",
             Self::ProveLadder => "Proof Ladder",
@@ -216,10 +218,10 @@ fn screen_composition(
                 verification: PhaseSurfaceId::FixVerification,
             }
         }
-        PhaseCockpitBody::Review(_) if visible.len() >= 2 => Composition::ListDetail {
+        PhaseCockpitBody::Review(model) if visible.len() >= 2 => Composition::ListDetail {
             list: PhaseSurfaceId::ReviewQueue,
             detail: PhaseSurfaceId::ReviewDetail,
-            drawer: None,
+            drawer: review_next_plan_drawer(model),
         },
         PhaseCockpitBody::Map(model) => Composition::CanvasWithDrawer {
             canvas: PhaseSurfaceId::MapDfd,
@@ -233,6 +235,27 @@ fn screen_composition(
             }),
         },
         _ => columns(),
+    }
+}
+
+/// The Next-Investigation-Plan drawer appears only when the recommender has
+/// concrete follow-up passes to offer; a pending or failed fold shows nothing
+/// rather than an empty card. Three or more passes earn the expanded card.
+fn review_next_plan_drawer(
+    model: &super::ReviewPhaseModel,
+) -> Option<super::composition::DrawerSpec> {
+    match &model.next_plan {
+        super::NextScansState::Ready(rows) if !rows.is_empty() => {
+            Some(super::composition::DrawerSpec {
+                surface: PhaseSurfaceId::ReviewNextPlan,
+                size: if rows.len() >= 3 {
+                    super::composition::DrawerSize::Expanded
+                } else {
+                    super::composition::DrawerSize::Compact
+                },
+            })
+        }
+        _ => None,
     }
 }
 

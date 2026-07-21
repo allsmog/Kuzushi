@@ -20,6 +20,7 @@ pub(super) fn review_phase_model(app: &ShellApp) -> ReviewPhaseModel {
         review: review_queue_model(app, active_review_queue_mode(app)),
         finding,
         selection_disclosure: review_selection_disclosure(app, &findings),
+        next_plan: super::map::next_scans_state(app),
     }
 }
 

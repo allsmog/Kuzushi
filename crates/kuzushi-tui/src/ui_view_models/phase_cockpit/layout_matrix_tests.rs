@@ -250,3 +250,73 @@ fn assert_attention_release_restores_focus(phase: WorkflowPhase, attention: Atte
 fn cell_label(phase: WorkflowPhase, state: SemanticFixture, width: u16, height: u16) -> String {
     format!("phase={phase:?} state={state:?} size={width}x{height}")
 }
+
+/// The Next-Investigation-Plan drawer joins the Review composition only when
+/// the recommender has concrete passes, sizes itself by how many, and sheds
+/// first on short terminals.
+#[test]
+fn review_next_plan_drawer_appears_sizes_and_sheds_with_the_recommendations() {
+    let ready_row = |scope: &str| NextScanRow {
+        scope: scope.to_string(),
+        phase: "scan".to_string(),
+        reason: "changed".to_string(),
+        evidence: "files changed".to_string(),
+    };
+    let mut body = fixture_body(WorkflowPhase::Review, SemanticFixture::Dense);
+    let PhaseCockpitBody::Review(model) = &mut body else {
+        panic!("review fixture body");
+    };
+    model.next_plan = NextScansState::Ready(vec![ready_row("root")]);
+    let wide = Rect::new(0, 0, 160, 48);
+
+    let plan = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
+    assert!(plan
+        .surfaces
+        .iter()
+        .any(|surface| surface.id == PhaseSurfaceId::ReviewNextPlan));
+    assert_eq!(
+        plan.composition.role_of(PhaseSurfaceId::ReviewNextPlan),
+        SurfaceRole::Drawer
+    );
+
+    let short = phase_presentation_plan(
+        &body,
+        Rect::new(0, 0, 160, 9),
+        None,
+        None,
+        AttentionMode::Normal,
+    );
+    assert!(!short
+        .surfaces
+        .iter()
+        .any(|surface| surface.id == PhaseSurfaceId::ReviewNextPlan));
+
+    let PhaseCockpitBody::Review(model) = &mut body else {
+        panic!("review fixture body");
+    };
+    model.next_plan = NextScansState::Ready(vec![
+        ready_row("root"),
+        ready_row("web/app"),
+        ready_row("services/api"),
+    ]);
+    let expanded = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
+    let compact_rect = plan
+        .surface(PhaseSurfaceId::ReviewNextPlan)
+        .expect("compact drawer")
+        .rect;
+    let expanded_rect = expanded
+        .surface(PhaseSurfaceId::ReviewNextPlan)
+        .expect("expanded drawer")
+        .rect;
+    assert!(expanded_rect.height > compact_rect.height);
+
+    let PhaseCockpitBody::Review(model) = &mut body else {
+        panic!("review fixture body");
+    };
+    model.next_plan = NextScansState::Pending;
+    let pending = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
+    assert!(!pending
+        .surfaces
+        .iter()
+        .any(|surface| surface.id == PhaseSurfaceId::ReviewNextPlan));
+}

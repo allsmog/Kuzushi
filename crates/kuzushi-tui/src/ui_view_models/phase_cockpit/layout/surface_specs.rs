@@ -121,6 +121,13 @@ fn review_specs(model: &ReviewPhaseModel) -> Vec<PhaseSurfaceSpec> {
         model.finding.is_some(),
         scrollable(PhaseSurfaceId::ReviewDetail),
     );
+    let has_plan =
+        matches!(&model.next_plan, super::super::NextScansState::Ready(rows) if !rows.is_empty());
+    push_if(
+        &mut specs,
+        has_plan,
+        selectable(PhaseSurfaceId::ReviewNextPlan),
+    );
     specs
 }
 

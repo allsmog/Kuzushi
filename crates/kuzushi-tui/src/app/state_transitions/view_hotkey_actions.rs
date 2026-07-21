@@ -258,6 +258,7 @@ impl ShellApp {
                 self.open_workbench_finding_or_log();
             }
             PhaseSurfaceId::MapReadiness => self.draft_map_action_card_command(),
+            PhaseSurfaceId::ReviewNextPlan => self.draft_review_next_plan_command(),
             focus if focus == page.findings_surface() => self.open_workbench_finding_or_log(),
             PhaseSurfaceId::MapAttackSurface
             | PhaseSurfaceId::ScanEngines
@@ -295,6 +296,18 @@ impl ShellApp {
         self.set_input(command.to_string());
         self.set_input_mode(InputMode::Prompt);
         self.log("map", note);
+    }
+
+    /// Enter on the Next-Investigation-Plan drawer loads the journey planner
+    /// command into the prompt. The recommended follow-up passes run only
+    /// when the operator submits it.
+    fn draft_review_next_plan_command(&mut self) {
+        self.set_input("next".to_string());
+        self.set_input_mode(InputMode::Prompt);
+        self.log(
+            "review",
+            "recommended plan loaded — Enter to run the follow-up pass",
+        );
     }
 
     fn open_workbench_finding_or_log(&mut self) {
@@ -1086,7 +1099,8 @@ fn focused_workbench_visualization(
         | PhaseSurfaceId::ScanDelta
         | PhaseSurfaceId::ScanScope
         | PhaseSurfaceId::ReviewQueue
-        | PhaseSurfaceId::ReviewDetail => FocusedWorkbenchVisualization::Scene(VizPage::Heatmap),
+        | PhaseSurfaceId::ReviewDetail
+        | PhaseSurfaceId::ReviewNextPlan => FocusedWorkbenchVisualization::Scene(VizPage::Heatmap),
         PhaseSurfaceId::MapDfd | PhaseSurfaceId::FixRemediation | PhaseSurfaceId::FixDfd => {
             FocusedWorkbenchVisualization::Scene(VizPage::Dfd)
         }

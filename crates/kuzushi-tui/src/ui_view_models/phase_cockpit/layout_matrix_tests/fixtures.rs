@@ -128,6 +128,7 @@ fn review_fixture(state: SemanticFixture) -> ReviewPhaseModel {
         review: fixture_review_queue(richness > 0),
         finding: (richness >= 1).then(fixture_finding),
         selection_disclosure: None,
+        next_plan: crate::ui_view_models::NextScansState::Pending,
     }
 }
 

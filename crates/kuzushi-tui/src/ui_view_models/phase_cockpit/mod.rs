@@ -174,6 +174,9 @@ pub(crate) struct ReviewPhaseModel {
     pub(crate) review: ReviewQueueModel,
     pub(crate) finding: Option<FindingDetailModel>,
     pub(crate) selection_disclosure: Option<SelectionDisclosureModel>,
+    /// Recommender follow-up passes shown as the Next-Investigation-Plan
+    /// drawer; the operator authorizes each pass, nothing runs on its own.
+    pub(crate) next_plan: NextScansState,
 }
 
 #[derive(Debug, Clone, PartialEq)]

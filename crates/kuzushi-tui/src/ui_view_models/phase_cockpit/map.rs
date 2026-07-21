@@ -31,7 +31,7 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
 
 const NEXT_SCAN_ROW_LIMIT: usize = 4;
 
-fn next_scans_state(app: &ShellApp) -> NextScansState {
+pub(super) fn next_scans_state(app: &ShellApp) -> NextScansState {
     let cached = app
         .workbench_cache()
         .borrow()

@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::ReviewPhaseModel;
+use crate::ui_view_models::{NextScansState, ReviewPhaseModel};
 use ratatui::layout::{Constraint, Direction, Layout};
 
 const SIDE_BY_SIDE_MIN_WIDTH: u16 = 78;
@@ -37,6 +37,10 @@ pub(super) fn plain_lines(model: &ReviewPhaseModel, width: usize) -> Vec<Line<'s
         review_detail_lines(model, width),
         width,
     ));
+    let plan = next_plan_lines(&model.next_plan, width);
+    if !plan.is_empty() {
+        lines.extend(divider_lines("NEXT INVESTIGATION PLAN", plan, width));
+    }
     lines
 }
 
@@ -49,8 +53,67 @@ fn render_review_pane(
 ) {
     match surface {
         PhaseSurfaceId::ReviewDetail => render_review_detail(frame, area, model, state),
+        PhaseSurfaceId::ReviewNextPlan => render_next_plan_drawer(frame, area, model, state),
         _ => render_review_list(frame, area, model, state),
     }
+}
+
+/// The scan-complete recommendation moment: the recommender proposes
+/// follow-up passes with their evidence, and Enter merely drafts the command
+/// — Kuzushi recommends, the operator authorizes.
+fn render_next_plan_drawer(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ReviewPhaseModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "NEXT INVESTIGATION PLAN · Enter run plan · Tab skip",
+        next_plan_lines(&model.next_plan, area.width.saturating_sub(2) as usize),
+        PhaseSurfaceId::ReviewNextPlan,
+        state,
+    );
+}
+
+fn next_plan_lines(next_plan: &NextScansState, width: usize) -> Vec<Line<'static>> {
+    let NextScansState::Ready(rows) = next_plan else {
+        return Vec::new();
+    };
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![Line::styled(
+        fit(
+            &format!(
+                "Coverage and staleness evidence recommends {} follow-up pass(es):",
+                rows.len()
+            ),
+            width,
+        ),
+        theme::muted(),
+    )];
+    lines.extend(rows.iter().map(|row| {
+        Line::styled(
+            fit(
+                &format!(
+                    "▸ {} {} — {} · {}",
+                    row.phase, row.scope, row.reason, row.evidence
+                ),
+                width,
+            ),
+            theme::primary(),
+        )
+    }));
+    lines.push(Line::styled(
+        fit(
+            "Enter drafts `next` into the prompt — nothing runs until you submit it",
+            width,
+        ),
+        theme::subtle(),
+    ));
+    lines
 }
 
 fn render_review_list(
@@ -172,4 +235,41 @@ fn proof_ladder_lines(
         spans.push(Span::styled(format!("{mark} {rung}"), style));
     }
     vec![Line::from(spans)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui_view_models::NextScanRow;
+
+    fn text(lines: &[Line<'_>]) -> String {
+        lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn next_plan_lines_state_the_evidence_and_the_authorization_boundary() {
+        let ready = NextScansState::Ready(vec![NextScanRow {
+            scope: "root".to_string(),
+            phase: "scan".to_string(),
+            reason: "changed".to_string(),
+            evidence: "14 files changed since a1b2c3d4".to_string(),
+        }]);
+
+        let rendered = text(&next_plan_lines(&ready, 100));
+
+        assert!(rendered.contains("recommends 1 follow-up pass(es)"));
+        assert!(rendered.contains("▸ scan root — changed · 14 files changed since a1b2c3d4"));
+        assert!(rendered.contains("nothing runs until you submit"));
+    }
+
+    #[test]
+    fn pending_or_empty_recommendations_render_no_plan_card_content() {
+        assert!(next_plan_lines(&NextScansState::Pending, 80).is_empty());
+        assert!(next_plan_lines(&NextScansState::Ready(Vec::new()), 80).is_empty());
+        assert!(next_plan_lines(&NextScansState::Unavailable("boom".to_string()), 80).is_empty());
+    }
 }

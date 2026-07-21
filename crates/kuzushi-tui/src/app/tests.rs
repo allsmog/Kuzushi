@@ -20343,3 +20343,57 @@ fn default_phase_result_keys_work_outside_guided_flow() {
         notice.message
     );
 }
+
+#[test]
+fn enter_on_the_next_investigation_plan_drawer_drafts_the_journey_command() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let target = PathBuf::from("/tmp/next-plan-drawer-target");
+    app.set_target(Some(target.clone()));
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(crate::app::ViewHydrationResult {
+            target,
+            key: crate::app::ViewHydrationKey::ScanRecommendations,
+            value: crate::app::ViewHydrationValue::ScanRecommendations(
+                crate::app::ScanRecommendationsState::Ready(vec![
+                    kuzushi_core::capabilities::scan_recommender::ScanRecommendation {
+                        scope_id: "root".to_string(),
+                        phase: kuzushi_core::WorkflowPhase::Scan,
+                        reason: kuzushi_core::capabilities::scan_recommender::ReasonTag::Changed,
+                        score: 0.7,
+                        evidence: "14 files changed since a1b2c3d4".to_string(),
+                        suggested_mode: None,
+                    },
+                ]),
+            ),
+        });
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    *app.findings_mut() = (0..3)
+        .map(|i| make_finding(Severity::High, &format!("fp-{i:04}"), "x"))
+        .collect();
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewNextPlan);
+    let plan = workbench_phase_plan(&app);
+    assert!(
+        plan.surfaces
+            .iter()
+            .any(|surface| surface.id == PhaseSurfaceId::ReviewNextPlan),
+        "drawer missing from plan: {:?}",
+        plan.surfaces
+            .iter()
+            .map(|surface| surface.id)
+            .collect::<Vec<_>>()
+    );
+
+    app.set_input_mode(crate::InputMode::Navigate);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.input(), "next");
+}
