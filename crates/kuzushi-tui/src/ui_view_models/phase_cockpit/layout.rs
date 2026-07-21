@@ -43,6 +43,7 @@ pub(crate) enum PhaseSurfaceId {
     FixCandidate,
     FixAttackTree,
     FixDfd,
+    FixVerification,
 }
 
 impl PhaseSurfaceId {
@@ -64,9 +65,11 @@ impl PhaseSurfaceId {
             | Self::ProveLadder
             | Self::ProveReceipt
             | Self::ProveNextAction => WorkbenchPage::Prove,
-            Self::FixRemediation | Self::FixCandidate | Self::FixAttackTree | Self::FixDfd => {
-                WorkbenchPage::Fix
-            }
+            Self::FixRemediation
+            | Self::FixCandidate
+            | Self::FixAttackTree
+            | Self::FixDfd
+            | Self::FixVerification => WorkbenchPage::Fix,
         }
     }
 
@@ -91,6 +94,7 @@ impl PhaseSurfaceId {
             Self::FixCandidate => "Patch Candidate",
             Self::FixAttackTree => "Attack Tree",
             Self::FixDfd => "Data-flow Diagram",
+            Self::FixVerification => "Verification",
         }
     }
 }
@@ -201,6 +205,17 @@ fn screen_composition(
             body: PhaseSurfaceId::ProveStatus,
             action_menu: Some(PhaseSurfaceId::ProveNextAction),
         },
+        PhaseCockpitBody::Fix(model)
+            if model.finding.is_some()
+                || model.patch.is_some()
+                || model.remediation.stage != super::RemediationLifecycleStage::NotDrafted =>
+        {
+            Composition::Triptych {
+                plan: PhaseSurfaceId::FixRemediation,
+                diff: PhaseSurfaceId::FixCandidate,
+                verification: PhaseSurfaceId::FixVerification,
+            }
+        }
         PhaseCockpitBody::Review(_) if visible.len() >= 2 => Composition::ListDetail {
             list: PhaseSurfaceId::ReviewQueue,
             detail: PhaseSurfaceId::ReviewDetail,

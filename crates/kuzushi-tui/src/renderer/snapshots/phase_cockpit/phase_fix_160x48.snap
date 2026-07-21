@@ -8,46 +8,46 @@ KUZUSHI · Viewing Fix · pipeline live in Review · target ./phase-target · �
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  patch F-0001 patch displayed · v reverify applied patch · z chain / DFD · report open Report
-│▸ REMEDIATION                                                  │KUZUSHI · BREAKDOWN REPORT                     │ATTACK TREE
-│STATE  Staged for approval                                     │1 C · 2 H · 2 M · 1 L · 6 total · 0...         │ ╭───────────────────────────────────────────╮
-│▸ report                                                       │report sarif/all · preview only · no...        │ │ ☠ attacker goal — impact                  │
-│  choose format, completeness, and destination                 │◆ F-0001  CRITICAL  SQL injection reaches...   │ ╰───────────────────────────────────────────╯
-│F-0001 · pending reviewed diff                                 │                                               │                       │
-│rationale: bind the user value as a query parameter            │                                               │                       │ ◇ OR — any one chain
-│side effect: preserves the login response schema               │                                               │                       │
-│✓ login_rejects_sqli · payload is inert                        │                                               │                       ▼
-│guardrail: human approval required                             │                                               │ ╭───────────────────────────────────────────╮
-│                                                               │                                               │ │ Unauthenticated query manipulation · CRIT │
-│                                                               │                                               │ ╰───────────────────────────────────────────╯
-│                                                               │                                               │ ◆ AND                 │
-│                                                               │                                               │                       ▼
-│                                                               │                                               │ ╭───────────────────────────────────────────╮
-│                                                               │                                               │ │ supply crafted query parameter            │
-│                                                               │                                               │ ╰───────────────────────────────────────────╯
-│                                                               │                                               │
-│                                                               │                                               │ ╭───────────────────────────────────────────╮
-│                                                               │                                               │ │ alter database predicate                  │
-│                                                               │                                               │ ╰───────────────────────────────────────────╯
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
-│                                                               │                                               │
+│▸ REMEDIATION                              │KUZUSHI · BREAKDOWN REPORT                                           │VERIFICATION
+│STATE  Staged for approval                 │1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal · 6 open                │✓ patch drafted through the safe-patch gate
+│▸ report                                   │report sarif/all · preview only · no report written                  │○ applied · build and tests recorded
+│  choose format, completeness, and         │◆ F-0001  CRITICAL  SQL injection reaches query                      │○ proof fails after patch (reverify...
+│destination                                │                                                                     │defer with a reason code records a...
+│F-0001 · pending reviewed diff             │                                                                     │
+│rationale: bind the user value as a query  │                                                                     │
+│           parameter                       │                                                                     │
+│side effect: preserves the login response  │                                                                     │
+│             schema                        │                                                                     │
+│✓ login_rejects_sqli · payload is inert    │                                                                     │
+│guardrail: human approval required         │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
+│                                           │                                                                     │
 run route · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4 · ⠋ context:build · 42s · 1/2                                   6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt

@@ -239,6 +239,7 @@ fn phase_surface_zoom_label(surface: PhaseSurfaceId) -> &'static str {
         PhaseSurfaceId::FixCandidate => "FIX STATUS",
         PhaseSurfaceId::FixAttackTree => "ATTACK TREE",
         PhaseSurfaceId::FixRemediation => "REMEDIATION",
+        PhaseSurfaceId::FixVerification => "VERIFICATION",
     }
 }
 

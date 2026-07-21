@@ -47,6 +47,11 @@ pub(super) fn plain_lines(model: &FixPhaseModel, width: usize) -> Vec<Line<'stat
         remediation_lines(model, width),
         width,
     ));
+    lines.extend(divider_lines(
+        "VERIFICATION",
+        verification_lines(model, width),
+        width,
+    ));
     lines
 }
 
@@ -153,6 +158,7 @@ fn render_zoomed(
             PhaseSurfaceId::FixCandidate,
             state,
         ),
+        PhaseSurfaceId::FixVerification => render_verification_column(frame, area, model, state),
         _ => render_remediation(frame, area, model, state),
     }
 }
@@ -218,4 +224,71 @@ fn render_remediation(
         PhaseSurfaceId::FixRemediation,
         state,
     );
+}
+
+/// The patch verification ladder: safe-patch gate, build/tests, and the
+/// proof-must-fail re-validation, with reason-coded deferral surfaced as a
+/// durable peer outcome rather than a skipped state.
+fn render_verification_column(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &FixPhaseModel,
+    state: PhaseRenderState,
+) {
+    let width = area.width.saturating_sub(2) as usize;
+    render_lines_pane(
+        frame,
+        area,
+        "VERIFICATION",
+        verification_lines(model, width),
+        PhaseSurfaceId::FixVerification,
+        state,
+    );
+}
+
+fn verification_lines(model: &FixPhaseModel, width: usize) -> Vec<Line<'static>> {
+    use crate::ui_view_models::RemediationLifecycleStage as Stage;
+    let remediation = &model.remediation;
+    let staged = model.patch.is_some() || remediation.stage != Stage::NotDrafted;
+    let applied = matches!(
+        remediation.stage,
+        Stage::Applied
+            | Stage::ReverifyRunning
+            | Stage::Verified
+            | Stage::StillVulnerable
+            | Stage::NotRediscovered
+            | Stage::ChangedSinceApply
+    );
+    let reverified = remediation.stage == Stage::Verified;
+    let rung = |done: bool, label: &str| {
+        let mark = if done { "✓" } else { "○" };
+        let style = if done {
+            theme::success()
+        } else {
+            theme::muted()
+        };
+        Line::styled(fit(&format!("{mark} {label}"), width), style)
+    };
+    let mut lines = vec![
+        rung(staged, "patch drafted through the safe-patch gate"),
+        rung(applied, "applied · build and tests recorded"),
+        rung(
+            reverified,
+            "proof fails after patch (reverify verified absence)",
+        ),
+    ];
+    if let Some(command) = remediation.reverify_command.as_deref() {
+        lines.push(Line::styled(
+            fit(&format!("▸ {command}"), width),
+            theme::accent(),
+        ));
+    }
+    if let Some(detail) = remediation.detail.as_deref() {
+        lines.push(Line::styled(fit(detail, width), theme::muted()));
+    }
+    lines.push(Line::styled(
+        fit("defer with a reason code records a durable outcome", width),
+        theme::muted(),
+    ));
+    lines
 }

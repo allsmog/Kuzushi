@@ -8,22 +8,22 @@ KUZUSHI · Viewing Fix · pipeline live in Review · target ./phase-target · �
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  patch F-0001 patch displayed · v reverify applied patch · z chain / DFD
-│▸ REMEDIATION                     │KUZUSHI · BREAKDOWN REPORT
-│STATE  Staged for approval        │1 C · 2 H · 2 M · 1 L · 6 total · 0...
-│▸ report                          │report sarif/all · preview only · no...
-│  choose format, completeness, and│◆ F-0001  CRITICAL  SQL injection reache...
-│destination                       │
-│F-0001 · pending reviewed diff    │
-│rationale: bind the user value as │
-│           a query parameter      │
-│side effect: preserves the login  │
-│             response schema      │
-│✓ login_rejects_sqli ·...         │
-│guardrail: human approval         │
-│           required               │
-│                                  │
-│                                  │
-│                                  │
+│▸ REMEDIATION                │KUZUSHI · BREAKDOWN REPORT
+│STATE  Staged for approval   │1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal...
+│▸ report                     │report sarif/all · preview only · no report...
+│  choose format,             │◆ F-0001  CRITICAL  SQL injection reaches query
+│completeness, and destination│
+│F-0001 · pending reviewed    │
+│diff                         │
+│rationale: bind the user     │
+│           value as a query  │
+│           parameter         │
+│side effect: preserves the   │
+│             login response  │
+│             schema          │
+│✓ login_rejects_sqli ·...    │
+│guardrail: human approval    │
+│           required          │
 run route · Review 3/5 · ⛭ fix ·...         6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt

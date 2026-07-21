@@ -8,87 +8,87 @@ KUZUSHI · Viewing Fix · pipeline live in Review · target ./phase-target · �
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  patch F-0001 patch displayed · v reverify applied patch · z chain / DFD · report open Report
-│▸ REMEDIATION                            │KUZUSHI · BREAKDOWN REPORT
-│STATE  Staged for approval               │1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal · 6...
-│▸ report                                 │report sarif/all · preview only · no report written
-│  choose format, completeness, and       │◆ F-0001  CRITICAL  SQL injection reaches query
-│destination                              │
-│F-0001 · pending reviewed diff           │
-│rationale: bind the user value as a      │
-│           query parameter               │
-│side effect: preserves the login         │
-│             response schema             │
-│✓ login_rejects_sqli · payload is inert  │
-│guardrail: human approval required       │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
+│▸ REMEDIATION                      │KUZUSHI · BREAKDOWN REPORT
+│STATE  Staged for approval         │1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal · 6 open
+│▸ report                           │report sarif/all · preview only · no report written
+│  choose format, completeness, and │◆ F-0001  CRITICAL  SQL injection reaches query
+│destination                        │
+│F-0001 · pending reviewed diff     │
+│rationale: bind the user value as  │
+│           a query parameter       │
+│side effect: preserves the login   │
+│             response schema       │
+│✓ login_rejects_sqli · payload...  │
+│guardrail: human approval required │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
+│                                   │
 run route · Review 3/5 · ⛭ fix · workbench ·...             6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt

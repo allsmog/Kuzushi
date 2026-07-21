@@ -148,7 +148,7 @@ fn adaptive_sections(phase: kuzushi_core::WorkflowPhase, width: u16) -> &'static
         (WorkflowPhase::Prove, true, _) => &["STATUS / NEXT", "EVIDENCE", "PROOF LADDER"],
         (WorkflowPhase::Prove, false, true) => &["STATUS / NEXT", "EVIDENCE"],
         (WorkflowPhase::Prove, false, false) => &["STATUS / NEXT"],
-        (WorkflowPhase::Fix, true, _) => &["REMEDIATION", "BREAKDOWN REPORT", "ATTACK TREE"],
+        (WorkflowPhase::Fix, true, _) => &["REMEDIATION", "BREAKDOWN REPORT", "VERIFICATION"],
         (WorkflowPhase::Fix, false, true) => &["REMEDIATION", "BREAKDOWN REPORT"],
         (WorkflowPhase::Fix, false, false) => &["REMEDIATION"],
     }

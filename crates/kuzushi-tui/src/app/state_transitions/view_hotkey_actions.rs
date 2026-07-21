@@ -1097,7 +1097,9 @@ fn focused_workbench_visualization(
             FocusedWorkbenchVisualization::Scene(VizPage::AttackPath)
         }
         PhaseSurfaceId::ProveReceipt => FocusedWorkbenchVisualization::ProofReplay,
-        PhaseSurfaceId::FixCandidate | PhaseSurfaceId::FixAttackTree => {
+        PhaseSurfaceId::FixCandidate
+        | PhaseSurfaceId::FixVerification
+        | PhaseSurfaceId::FixAttackTree => {
             FocusedWorkbenchVisualization::Scene(VizPage::ExploitChain)
         }
     }

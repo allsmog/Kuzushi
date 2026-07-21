@@ -132,6 +132,24 @@ fn assert_matrix_cell(
         {
             vec![PhaseSurfaceId::ProveStatus, PhaseSurfaceId::ProveNextAction]
         }
+        // Fix adopted the plan/diff/verification triptych once anything is
+        // staged; the third column trades for the diff below 120 columns.
+        WorkflowPhase::Fix
+            if multi_surface
+                && specs
+                    .iter()
+                    .any(|spec| spec.id == PhaseSurfaceId::FixCandidate) =>
+        {
+            if area.width >= 120 {
+                vec![
+                    PhaseSurfaceId::FixRemediation,
+                    PhaseSurfaceId::FixCandidate,
+                    PhaseSurfaceId::FixVerification,
+                ]
+            } else {
+                vec![PhaseSurfaceId::FixRemediation, PhaseSurfaceId::FixCandidate]
+            }
+        }
         _ => surface_ids(&specs[..visible_count]),
     };
     assert_eq!(
