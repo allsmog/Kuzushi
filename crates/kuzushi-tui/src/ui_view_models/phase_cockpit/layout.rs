@@ -193,6 +193,11 @@ fn screen_composition(
         return columns();
     }
     match body {
+        PhaseCockpitBody::Review(_) if visible.len() >= 2 => Composition::ListDetail {
+            list: PhaseSurfaceId::ReviewQueue,
+            detail: PhaseSurfaceId::ReviewDetail,
+            drawer: None,
+        },
         PhaseCockpitBody::Map(model) => Composition::CanvasWithDrawer {
             canvas: PhaseSurfaceId::MapDfd,
             drawer: Some(super::composition::DrawerSpec {

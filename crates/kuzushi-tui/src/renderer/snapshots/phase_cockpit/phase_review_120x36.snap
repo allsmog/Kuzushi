@@ -8,34 +8,34 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  Enter open in Prove · findings show full queue · z open heatmap · scan again · report open Report
-│▸ FINDINGS · 6                                     │SELECTED FINDING · Enter prove · z heatmap
-│▸F-0001  C [●●●] s1 @? CFM open       SQL inje...  │SQL injection reaches query
-│  SQL injection reaches query                      │
-│  src/auth/login.rs:17                             │── STATUS ──
-│  ▸ next:patch · Enter open                        │severity: critical
-│ F-0002  H [●○○] s1 @? UNV open       Order...     │  confidence: CONFIRMED
-│ F-0003  H [●○○] s1 @? UNV open       Template...  │lifecycle status: runtime_verified
-│ F-0004  M [●○○] s1 @? UNV open       Upload...    │evidence state: evidence:1
-│ F-0005  M [●○○] s1 @? UNV open       Session...   │  proof summary: ✓ verified L4
-│ F-0006  L [●○○] s1 @? UNV open       Debug...     │
-│                                                   │── DECISION ──
-│                                                   │  current decision: needs_review
-│                                                   │  decision source: none
-│                                                   │  decision history: no decision history loaded
-│                                                   │
-│                                                   │── NEXT ──
-│                                                   │  patch: `patch F-0001`
-│                                                   │  runtime proof is recorded; generate remediation
-│                                                   │
-│                                                   │── SOURCE ──
-│                                                   │  src/auth/login.rs:17
-│                                                   │    14 │ }
-│                                                   │    15 │
-│                                                   │    16 │ pub fn login(attempt: &LoginAttempt) -> Response {
-│                                                   │  ▶ 17 │     let rows = query(&format!("SELECT * FROM users...
-│                                                   │    18 │     match rows.first() {
-│                                                   │    19 │         Some(user) => Response::session_for(user),
-│                                                   │    20 │         None => Response::unauthorized(),
+│▸ FINDINGS · 6                              │SELECTED FINDING · Enter prove · z heatmap
+│▸F-0001  C [●●●] s1 @? CFM open SQL inj...  │● candidate ─ ● corroborated ─ ● reproduced ─ ○ proven
+│  SQL injection reaches query               │SQL injection reaches query
+│  src/auth/login.rs:17                      │
+│  ▸ next:patch · Enter open                 │── STATUS ──
+│ F-0002  H [●○○] s1 @? UNV open Order...    │severity: critical
+│ F-0003  H [●○○] s1 @? UNV open Templat...  │  confidence: CONFIRMED
+│ F-0004  M [●○○] s1 @? UNV open Upload...   │lifecycle status: runtime_verified
+│ F-0005  M [●○○] s1 @? UNV open Session...  │evidence state: evidence:1
+│ F-0006  L [●○○] s1 @? UNV open Debug...    │  proof summary: ✓ verified L4
+│                                            │
+│                                            │── DECISION ──
+│                                            │  current decision: needs_review
+│                                            │  decision source: none
+│                                            │  decision history: no decision history loaded
+│                                            │
+│                                            │── NEXT ──
+│                                            │  patch: `patch F-0001`
+│                                            │  runtime proof is recorded; generate remediation
+│                                            │
+│                                            │── SOURCE ──
+│                                            │  src/auth/login.rs:17
+│                                            │    14 │ }
+│                                            │    15 │
+│                                            │    16 │ pub fn login(attempt: &LoginAttempt) -> Response {
+│                                            │  ▶ 17 │     let rows = query(&format!("SELECT * FROM users WHERE...
+│                                            │    18 │     match rows.first() {
+│                                            │    19 │         Some(user) => Response::session_for(user),
 run route · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4 · ⠋ context:build ·...  6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
