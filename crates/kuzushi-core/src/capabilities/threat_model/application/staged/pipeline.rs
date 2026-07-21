@@ -2,6 +2,7 @@ use super::super::*;
 use super::gap_fill::run_gap_fill;
 use super::research::{research_artifact_json, research_stats, run_research, ResearchDossier};
 use super::synthesis::staged_synthesis_prompt;
+use super::variant_scan::{run_variant_scan, variant_scan_stats, VariantScanOutcome};
 use crate::spend::{Operation, SpendLimiter, SpendTicket};
 
 const ESTIMATED_STAGE_DEPOSIT_USD: f64 = 1.0;
@@ -30,7 +31,8 @@ pub(crate) fn build_staged_threat_model(
     let mut generated = run_synthesis(runtime, ctx, flavor, verb, &input, &source_bundle, &dossier, spend.as_ref())?;
     let evidence_warnings = validate_synthesis_document(&mut generated.document, &dossier);
     let gap_fill = resolve_coverage(runtime, ctx, verb, &input, &dossier, &mut generated, spend.as_ref())?;
-    finalize_staged_document(&input, &dossier, &mut generated, &gap_fill, evidence_warnings)?;
+    let variants = run_optional_variant_scan(ctx, verb, &input, &mut generated)?;
+    finalize_staged_document(&input, &dossier, &mut generated, &gap_fill, variants, evidence_warnings)?;
     complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle)
 }
 
@@ -143,11 +145,39 @@ fn gap_fill_resolution(
     })
 }
 
+fn run_optional_variant_scan(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    input: &BuildInput,
+    generated: &mut GeneratedThreatModel,
+) -> Result<Option<VariantScanOutcome>> {
+    if !input.variant_scan {
+        return Ok(None);
+    }
+    let outcome = run_variant_scan(&input.target, &mut generated.document)?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                verb,
+                format!(
+                    "variant scan: {} threats with patterns · {} siblings · likelihood raised on {}",
+                    outcome.threats_with_patterns,
+                    outcome.total_siblings,
+                    outcome.likelihood_raised
+                ),
+            )
+            .emit();
+    }
+    Ok(Some(outcome))
+}
+
 fn finalize_staged_document(
     input: &BuildInput,
     dossier: &ResearchDossier,
     generated: &mut GeneratedThreatModel,
     gap_fill: &GapFillResolution,
+    variants: Option<VariantScanOutcome>,
     evidence_warnings: Vec<String>,
 ) -> Result<()> {
     assign_stable_ids(&mut generated.document);
@@ -155,6 +185,9 @@ fn finalize_staged_document(
     stamp_provenance(&mut generated.document, &input.target, "staged");
     if let Some(provenance) = generated.document["provenance"].as_object_mut() {
         provenance.insert("researchStats".to_string(), research_stats(dossier));
+        if let Some(variants) = &variants {
+            provenance.insert("variantScan".to_string(), variant_scan_stats(variants));
+        }
     }
     if !evidence_warnings.is_empty() {
         generated.document["evidenceWarnings"] = json!(evidence_warnings);

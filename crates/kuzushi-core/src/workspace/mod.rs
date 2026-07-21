@@ -61,7 +61,8 @@ pub use domain::{
     WORKSPACE_STATE_VERSION_DIR, WORKSPACE_STATIC_EVIDENCE_DB_FILE, WORKSPACE_SUPPRESSIONS_FILE,
 };
 pub use git_history_mining::{
-    mine_vuln_history, security_keywords_for_languages, GitHistoryMiningConfig, VulnCommit,
+    changed_files_since, mine_vuln_history, security_keywords_for_languages,
+    GitHistoryMiningConfig, VulnCommit,
 };
 pub use git_metadata::{
     resolve_target_git_commit, switch_target_revision, target_git_metadata, TargetRevisionSwitch,

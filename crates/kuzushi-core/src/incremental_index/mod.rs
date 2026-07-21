@@ -430,8 +430,15 @@ pub fn should_ignore_path(path: &Path) -> bool {
             matches!(
                 part,
                 ".git" | ".kuzushi" | "node_modules" | "target" | "dist"
-            )
+            ) || is_bazel_output_component(part)
         })
+}
+
+/// Bazel materializes convenience symlinks named `bazel-bin`, `bazel-out`,
+/// `bazel-testlogs`, and `bazel-<workspace>` at the repo root; all point into
+/// a build execroot that must never be indexed, watched, or completed.
+pub fn is_bazel_output_component(part: &str) -> bool {
+    part.starts_with("bazel-")
 }
 
 fn is_route_or_controller(path: &Path) -> bool {

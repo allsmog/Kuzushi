@@ -42,8 +42,12 @@ fn confirmed_finding_rows(ctx: &ToolExecutionContext<'_>) -> Result<Vec<Confirme
     let Some(store) = ctx.findings_store else {
         return Ok(Vec::new());
     };
+    // Confirmed = runtime-exploited; Likely = statically-supported
+    // (code-cited / source-sink / statically-confirmed). Both are legitimate
+    // evidence rows — the band travels with each row so the model can weight
+    // them differently.
     let filter = FindingListFilter {
-        confidence: vec![ProofConfidence::Confirmed],
+        confidence: vec![ProofConfidence::Confirmed, ProofConfidence::Likely],
         limit: MAX_CONFIRMED_FINDING_ROWS,
         ..Default::default()
     };
@@ -109,7 +113,7 @@ fn surface_line(surface: &AttackSurface) -> String {
 
 pub(crate) fn confirmed_findings_section(rows: &[ConfirmedFindingRow]) -> String {
     if rows.is_empty() {
-        return "Confirmed prior findings: none".to_string();
+        return "Corroborated prior findings: none".to_string();
     }
     let body = rows
         .iter()
@@ -117,7 +121,7 @@ pub(crate) fn confirmed_findings_section(rows: &[ConfirmedFindingRow]) -> String
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "Confirmed prior findings (evidence candidates; cite fingerprints in threat evidence — evidence raises likelihood, it is not the threat):\n{}",
+        "Corroborated prior findings (confirmed or statically-supported; cite fingerprints in threat evidence — evidence raises likelihood, it is not the threat):\n{}",
         untrusted_derived_source_block("confirmed-findings", &body)
     )
 }
@@ -177,7 +181,7 @@ mod tests {
         assert!(section.contains("evidence raises likelihood, it is not the threat"));
         assert_eq!(
             confirmed_findings_section(&[]),
-            "Confirmed prior findings: none"
+            "Corroborated prior findings: none"
         );
     }
 }

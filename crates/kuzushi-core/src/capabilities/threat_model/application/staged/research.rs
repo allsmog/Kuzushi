@@ -1,4 +1,5 @@
 use super::super::*;
+use super::advisories::{fetch_osv_advisories, AdvisoryRecord};
 use crate::workspace::{
     mine_vuln_history, security_keywords_for_languages, GitHistoryMiningConfig, VulnCommit,
 };
@@ -9,6 +10,7 @@ pub(crate) struct ResearchDossier {
     pub(crate) grounding: PromptGrounding,
     pub(crate) vuln_commits: Vec<VulnCommit>,
     pub(crate) history_mined: bool,
+    pub(crate) advisories: Vec<AdvisoryRecord>,
     pub(crate) evidence_index: BTreeSet<String>,
 }
 
@@ -20,11 +22,14 @@ pub(crate) fn run_research(
     let mined = mine_history(input, &grounding)?;
     let history_mined = mined.is_some();
     let vuln_commits = mined.unwrap_or_default();
-    let evidence_index = build_evidence_index(&grounding, &vuln_commits);
+    let advisories = fetch_osv_advisories(input)?;
+    let mut evidence_index = build_evidence_index(&grounding, &vuln_commits);
+    evidence_index.extend(advisories.iter().map(|record| record.id.clone()));
     Ok(ResearchDossier {
         grounding,
         vuln_commits,
         history_mined,
+        advisories,
         evidence_index,
     })
 }
@@ -100,6 +105,7 @@ pub(crate) fn research_stats(dossier: &ResearchDossier) -> Value {
         "confirmedFindings": dossier.grounding.confirmed_findings.len(),
         "vulnCommits": dossier.vuln_commits.len(),
         "historyMined": dossier.history_mined,
+        "advisories": dossier.advisories.len(),
         "diffExcerpts": dossier
             .vuln_commits
             .iter()
@@ -143,6 +149,15 @@ pub(crate) fn research_artifact_json(dossier: &ResearchDossier) -> Value {
                 "sha": commit.sha,
                 "subject": commit.subject,
                 "hasDiffExcerpt": commit.diff_excerpt.is_some(),
+            }))
+            .collect::<Vec<_>>(),
+        "advisories": dossier
+            .advisories
+            .iter()
+            .map(|record| json!({
+                "id": record.id,
+                "package": record.package,
+                "summary": record.summary,
             }))
             .collect::<Vec<_>>(),
     })

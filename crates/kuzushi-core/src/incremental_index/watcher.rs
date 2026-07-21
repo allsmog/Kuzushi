@@ -43,13 +43,16 @@ impl LiveWorkspaceWatcher {
     ) -> Result<Self> {
         let scope = workspace_watch_scope(root);
         let classifier_root = scope.root.clone();
-        let mut watcher = notify::recommended_watcher(move |event| {
-            let (changes, state_artifact_paths) =
-                classify_notify_result_with_state(&classifier_root, event);
-            if !changes.is_empty() || !state_artifact_paths.is_empty() {
-                sink(changes, state_artifact_paths);
-            }
-        })
+        let mut watcher = RecommendedWatcher::new(
+            move |event| {
+                let (changes, state_artifact_paths) =
+                    classify_notify_result_with_state(&classifier_root, event);
+                if !changes.is_empty() || !state_artifact_paths.is_empty() {
+                    sink(changes, state_artifact_paths);
+                }
+            },
+            watcher_config(),
+        )
         .context("could not start workspace watcher")?;
         watch_scope_roots(&mut watcher, &scope)?;
         Ok(Self {
@@ -61,6 +64,13 @@ impl LiveWorkspaceWatcher {
     pub fn scope(&self) -> &WatchScope {
         &self.scope
     }
+}
+
+/// Recursive watch config: never follow symlinks — bazel convenience
+/// symlinks (bazel-bin/…) point at an execroot with tens of thousands of
+/// directories that churn during builds.
+fn watcher_config() -> notify::Config {
+    notify::Config::default().with_follow_symlinks(false)
 }
 
 pub fn workspace_watch_scope(root: impl AsRef<Path>) -> WatchScope {
@@ -437,5 +447,39 @@ mod tests {
             state,
             vec![PathBuf::from(".kuzushi/v3/campaigns/camp/queue.json")]
         );
+    }
+
+    /// The recursive watch must never cross symlink boundaries: bazel's
+    /// convenience symlinks point at an execroot with tens of thousands of
+    /// churning directories.
+    #[test]
+    fn watcher_config_never_follows_symlinks() {
+        assert!(!watcher_config().follow_symlinks());
+    }
+
+    /// A bazel build churning under the repo's bazel-* convenience symlinks
+    /// must classify to zero changes and zero state events — otherwise every
+    /// build floods the shell with broad cache invalidations.
+    #[test]
+    fn bazel_build_burst_produces_no_watcher_work() {
+        let root = Path::new("/tmp/workspace");
+        let churn = [
+            "bazel-bin/src/cpp/libfoo.so",
+            "bazel-out/k8-opt/bin/tool",
+            "bazel-testlogs/suite/test.log",
+            "bazel-workspace/external/dep/BUILD",
+        ];
+        for _ in 0..200 {
+            for path in churn {
+                let event = Event {
+                    kind: EventKind::Modify(ModifyKind::Any),
+                    paths: vec![root.join(path)],
+                    attrs: Default::default(),
+                };
+                let (changes, state) = classify_notify_event_with_state(root, event);
+                assert!(changes.is_empty(), "{path} classified as a source change");
+                assert!(state.is_empty(), "{path} classified as a state event");
+            }
+        }
     }
 }

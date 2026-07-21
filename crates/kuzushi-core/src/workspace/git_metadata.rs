@@ -1,7 +1,14 @@
 use crate::run_artifacts::RunTargetGitMetadata;
 use anyhow::{bail, Context, Result};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
+use std::time::Duration;
+
+/// Read-only metadata git calls (status/rev-parse/branch) must never wedge
+/// the caller: `git status` alone is multiple seconds on a 400k-file repo.
+const GIT_METADATA_TIMEOUT: Duration = Duration::from_secs(10);
+/// Mutating calls (checkout --detach) legitimately take longer on huge trees.
+const GIT_MUTATION_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetRevisionSwitch {
@@ -81,7 +88,7 @@ fn status_line_is_kuzushi_state(line: &str) -> bool {
 fn git_stdout(target: &Path, args: &[&str]) -> Option<String> {
     let mut command = Command::new("git");
     command.arg("-C").arg(target).args(args);
-    let output = crate::bounded_subprocess::output(&mut command, "git").ok()?;
+    let output = bounded_git_output(&mut command, GIT_METADATA_TIMEOUT).ok()?;
     output
         .status
         .success()
@@ -92,7 +99,7 @@ fn git_stdout(target: &Path, args: &[&str]) -> Option<String> {
 fn run_git_checked(target: &Path, args: &[&str]) -> Result<()> {
     let mut command = Command::new("git");
     command.arg("-C").arg(target).args(args);
-    let output = crate::bounded_subprocess::output(&mut command, "git")
+    let output = bounded_git_output(&mut command, GIT_MUTATION_TIMEOUT)
         .with_context(|| format!("failed to run git {}", args.join(" ")))?;
     if output.status.success() {
         return Ok(());
@@ -106,6 +113,16 @@ fn run_git_checked(target: &Path, args: &[&str]) -> Result<()> {
         } else {
             format!(": {stderr}")
         }
+    )
+}
+
+fn bounded_git_output(command: &mut Command, timeout: Duration) -> Result<Output> {
+    crate::bounded_subprocess::output_with_limits_and_control(
+        command,
+        "git",
+        crate::bounded_subprocess::DEFAULT_STDOUT_LIMIT,
+        crate::bounded_subprocess::DEFAULT_STDERR_LIMIT,
+        timeout,
     )
 }
 
@@ -182,6 +199,21 @@ mod tests {
         let metadata = target_git_metadata(repo.path()).unwrap();
 
         assert!(!metadata.dirty);
+    }
+
+    #[test]
+    fn bounded_git_output_kills_a_wedged_subprocess() {
+        let started = std::time::Instant::now();
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 60"]);
+
+        let result = bounded_git_output(&mut command, Duration::from_millis(50));
+
+        assert!(result.is_err(), "wedged subprocess must not succeed");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "timeout must fire well before the subprocess would finish"
+        );
     }
 
     fn temp_git_repo() -> Option<tempfile::TempDir> {

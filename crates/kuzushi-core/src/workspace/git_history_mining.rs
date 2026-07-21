@@ -197,6 +197,35 @@ fn run_git(target: &Path, args: &[&str], timeout: Duration) -> Result<std::proce
     .context("git history mining subprocess failed")
 }
 
+/// Files changed between a recorded revision and HEAD — the refine-mode
+/// delta anchor. `Ok(None)` when the target is not a git repository or the
+/// stored revision no longer resolves (history rewritten); callers treat
+/// that as "delta unknown", never as an empty delta.
+pub fn changed_files_since(
+    target: &Path,
+    since_rev: &str,
+    max_files: usize,
+    timeout: Duration,
+) -> Result<Option<Vec<String>>> {
+    ensure_safe_git_rev(since_rev, "threat-model refine delta")?;
+    let range = format!("{since_rev}..HEAD");
+    let Ok(output) = run_git(target, &["diff", "--name-only", &range], timeout) else {
+        return Ok(None);
+    };
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(Some(
+        stdout
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .take(max_files)
+            .map(str::to_string)
+            .collect(),
+    ))
+}
+
 /// Curated commit-message keywords: a language-agnostic base plus
 /// stack-specific vulnerability vocabulary. Derived from language names only —
 /// never from repository content (prompt-injection boundary).

@@ -10459,7 +10459,7 @@ fn invalid_session_cost_fails_closed_without_rendering_infinity() {
     assert!(app.session().cost_accounting_error().is_some());
     assert_eq!(app.session().session_cost_usd(), 0.0);
     let model = crate::ui_view_models::cost_model(&app);
-    assert_eq!(model.spend_rows[0].cells[1], "cost invalid");
+    assert_eq!(model.spend_rows[0].cells[1], "cost accounting error");
     app.continue_past_budget();
     assert!(
         app.is_budget_halted(),
@@ -12073,6 +12073,59 @@ fn scope_ready_announcements(app: &ShellApp) -> usize {
         .iter()
         .filter(|line| line.body.contains("project scopes ready"))
         .count()
+}
+
+/// Constructing the shell must not run git synchronously: `git status` alone
+/// is multiple seconds on a monorepo-scale target and would block first
+/// paint. Git metadata belongs to the background view-hydration baseline.
+#[test]
+fn shell_construction_does_not_prewarm_git_metadata() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+
+    let app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    let state = app
+        .workbench_cache()
+        .borrow()
+        .cached_git_metadata(Some(workspace.root()));
+    assert!(
+        !matches!(state, ViewDataState::Ready(_)),
+        "constructor must leave git metadata to background hydration"
+    );
+}
+
+/// `.kuzushi/v3` state artifacts written by background runs are not workspace
+/// files: their arrival must not evict the git-metadata or file-completion
+/// caches, or every background write re-triggers a full picker walk plus a
+/// `git status` on the next frame.
+#[test]
+fn external_state_artifacts_keep_workspace_file_caches_warm() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.workbench_cache()
+        .borrow_mut()
+        .git_metadata(Some(workspace.root()));
+    let generations_before = app.workbench_cache().borrow().completion_generations();
+
+    app.apply_external_workspace_state_change(&[PathBuf::from(
+        ".kuzushi/v3/runs/run-1/done.json",
+    )]);
+
+    let cache = app.workbench_cache().borrow();
+    assert!(
+        matches!(
+            cache.cached_git_metadata(Some(workspace.root())),
+            ViewDataState::Ready(_)
+        ),
+        "state artifact churn must not evict git metadata"
+    );
+    assert_eq!(
+        cache.completion_generations().0,
+        generations_before.0,
+        "state artifact churn must not invalidate file completion values"
+    );
 }
 
 #[test]

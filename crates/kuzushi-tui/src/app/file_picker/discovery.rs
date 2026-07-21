@@ -276,7 +276,7 @@ fn ignored_picker_dir(path: &Path) -> bool {
     matches!(
         name,
         ".git" | ".kuzushi" | "node_modules" | "target" | "dist" | "build" | ".next" | "coverage"
-    )
+    ) || kuzushi_core::incremental_index::is_bazel_output_component(name)
 }
 
 #[cfg(test)]

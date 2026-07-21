@@ -23,6 +23,9 @@ fn build_agentic_threat_model(
     let input = parse_build_input(&input, ctx, flavor)?;
     let verb = threat_model_build_verb(flavor);
     emit_threat_model_start(ctx, verb, flavor, &input);
+    if input.is_refine() {
+        return refine_threat_model(runtime, ctx, flavor, verb, input);
+    }
     if input.is_staged() {
         return build_staged_threat_model(runtime, ctx, flavor, verb, input);
     }
@@ -154,6 +157,7 @@ fn has_nonempty_list(input: &Value, key: &str) -> bool {
 
 fn staged_pipeline_options_requested(input: &Value) -> bool {
     read_string(input, &["pipeline"]).is_some_and(|pipeline| pipeline.to_lowercase() != "single")
+        || read_string(input, &["mode"]).is_some_and(|mode| mode.to_lowercase() != "build")
         || input.get("budgetUsd").is_some()
         || input.get("budget_usd").is_some()
 }

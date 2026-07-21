@@ -109,8 +109,11 @@ fn first_affected_file(threat: &Value) -> Option<String> {
 }
 
 pub(crate) fn stable_threat_id(key: &str) -> String {
+    // prompt_content_sha256 returns a "sha256:<hex>" token; the id wants
+    // twelve hex chars, not the scheme prefix.
     let digest = crate::options::prompt_content_sha256(key);
-    format!("tm-{}", &digest[..digest.len().min(12)])
+    let hex = digest.strip_prefix("sha256:").unwrap_or(&digest);
+    format!("tm-{}", &hex[..hex.len().min(12)])
 }
 
 /// "Evidence raises likelihood; it is not the threat": ≥3 corroborated
@@ -184,6 +187,10 @@ mod tests {
         let first = document["threats"][0]["stableId"].as_str().unwrap().to_string();
         let second = document["threats"][1]["stableId"].as_str().unwrap().to_string();
         assert!(first.starts_with("tm-") && first.len() == 15);
+        assert!(
+            first[3..].chars().all(|c| c.is_ascii_hexdigit()),
+            "stableId must be tm-<12 hex>, got {first}"
+        );
         assert_eq!(first, second, "same cluster key must yield the same stableId");
     }
 

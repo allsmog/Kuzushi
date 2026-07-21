@@ -20,6 +20,10 @@ pub(crate) const VALID_CONTEXT_MODES: &[&str] = &["auto", "refresh", "require", 
 
 pub(crate) const VALID_PIPELINES: &[&str] = &["single", "staged"];
 
+pub(crate) const VALID_BUILD_MODES: &[&str] = &["build", "refine"];
+
+pub(crate) const VALID_ADVISORY_MODES: &[&str] = &["off", "osv"];
+
 pub(crate) const STRIDE_CATEGORIES: &[&str] = &[
     "spoofing",
     "tampering",
@@ -110,13 +114,22 @@ pub(crate) struct BuildInput {
     pub(crate) prompt_override: Option<String>,
     pub(crate) model: String,
     pub(crate) pipeline: String,
+    pub(crate) mode: String,
     pub(crate) budget_usd: Option<f64>,
     pub(crate) history_depth: usize,
+    pub(crate) variant_scan: bool,
+    pub(crate) advisories: String,
+    pub(crate) offline: bool,
+    pub(crate) advisory_fixtures: Option<Value>,
 }
 
 impl BuildInput {
     pub(crate) fn is_staged(&self) -> bool {
         self.pipeline == "staged"
+    }
+
+    pub(crate) fn is_refine(&self) -> bool {
+        self.mode == "refine"
     }
 }
 

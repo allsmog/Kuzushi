@@ -339,8 +339,8 @@ authorization: Default::default(),
             "deterministic attack-surface grounding must reach the prompt"
         );
         assert!(
-            requests[0].prompt.contains("Confirmed prior findings"),
-            "confirmed-findings grounding section must reach the prompt"
+            requests[0].prompt.contains("Corroborated prior findings"),
+            "corroborated-findings grounding section must reach the prompt"
         );
         assert!(
             result
@@ -12329,6 +12329,149 @@ authorization: Default::default(),
         assert!(
             format!("{error:#}").contains("staged-pipeline options require a configured model/runtime"),
             "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn staged_pipeline_advisory_fixtures_reach_the_prompt_and_evidence_index() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let mut document = sample_document();
+        document["threats"][0]["evidence"] =
+            json!([{"kind": "advisory", "ref": "GHSA-xxxx-1234", "summary": "cited fixture"}]);
+        let runtime = MockThreatRuntime::new(json!({"document": document}));
+        let ctx = staged_ctx(&config, &workspace);
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({
+                    "pipeline": "staged",
+                    "advisories": "osv",
+                    "offline": true,
+                    "advisoryFixtures": {
+                        "express": [{"id": "GHSA-xxxx-1234", "summary": "prototype pollution"}]
+                    },
+                    "preserveUserEdits": false
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let requests = runtime.requests();
+        assert!(requests[0].prompt.contains("dependency-advisories"));
+        assert!(requests[0].prompt.contains("GHSA-xxxx-1234"));
+        let document = result.pointer("/data/document").unwrap();
+        assert_eq!(
+            document["threats"][0]["evidence"][0]["ref"],
+            json!("GHSA-xxxx-1234"),
+            "advisory ids from fixtures are valid evidence refs"
+        );
+        assert_eq!(
+            document["provenance"]["researchStats"]["advisories"],
+            json!(1)
+        );
+    }
+
+    #[test]
+    fn refine_without_prior_persistent_model_is_a_hard_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::responses(Vec::new());
+        let ctx = staged_ctx(&config, &workspace);
+
+        let error = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"mode": "refine"}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("run a full build first"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn zero_delta_refine_makes_no_llm_calls_and_stamps_refine_provenance() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        save_persistent_threat_model(workspace.root(), &sample_document(), true).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::responses(Vec::new());
+        let ctx = staged_ctx(&config, &workspace);
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"mode": "refine", "preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert!(runtime.requests().is_empty(), "zero delta must cost $0");
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        let provenance = result.pointer("/data/document/provenance").unwrap();
+        assert_eq!(provenance["mode"], json!("refine"));
+        assert_eq!(provenance["pipeline"], json!("staged"));
+        assert_eq!(provenance["refineDelta"]["newFindings"], json!(0));
+        assert_eq!(
+            result.pointer("/data/persisted").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(result.pointer("/costUsd").and_then(Value::as_f64), Some(0.0));
+    }
+
+    #[test]
+    fn refine_preserves_a_user_edited_model_on_disk() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut edited = sample_document();
+        edited["userEdited"] = json!(true);
+        save_persistent_threat_model(workspace.root(), &edited, true).unwrap();
+        let persistent_path = persistent_threat_model_path(workspace.root());
+        let before = fs::read(&persistent_path).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::responses(Vec::new());
+        let ctx = staged_ctx(&config, &workspace);
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"mode": "refine"}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.pointer("/data/persisted").and_then(Value::as_bool),
+            Some(false),
+            "preserveUserEdits (default) must refuse to overwrite a user-edited model"
+        );
+        assert_eq!(
+            fs::read(&persistent_path).unwrap(),
+            before,
+            "user-edited model bytes must be untouched"
         );
     }
 

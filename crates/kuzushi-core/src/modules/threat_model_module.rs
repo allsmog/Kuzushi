@@ -94,6 +94,14 @@ fn threat_model_generation_options() -> Vec<OptionSpec> {
         .default(json!("single"))
         .advanced(),
         opt(
+            "mode",
+            OptionType::Enum,
+            "build = full model; refine = delta update from the persisted model (new findings + changed files).",
+        )
+        .choices(&["build", "refine"])
+        .default(json!("build"))
+        .advanced(),
+        opt(
             "budgetUsd",
             OptionType::Float,
             "Model-spend cap for the staged pipeline; gap-fill degrades gracefully at the cap.",
@@ -107,6 +115,36 @@ fn threat_model_generation_options() -> Vec<OptionSpec> {
         )
         .aliases(&["history_depth"])
         .default(json!(300))
+        .advanced(),
+        opt(
+            "variantScan",
+            OptionType::Bool,
+            "Deterministic sibling scan over threat variant patterns (staged pipeline).",
+        )
+        .aliases(&["variant_scan"])
+        .default(json!(true))
+        .advanced(),
+        opt(
+            "advisories",
+            OptionType::Enum,
+            "Advisory intake for staged research: off, or OSV queries for direct dependencies.",
+        )
+        .choices(&["off", "osv"])
+        .default(json!("off"))
+        .advanced(),
+        opt(
+            "offline",
+            OptionType::Bool,
+            "Never reach the network for advisories; use fixtures or skip.",
+        )
+        .default(json!(false))
+        .advanced(),
+        opt(
+            "advisoryFixtures",
+            OptionType::Json,
+            "Offline advisory fixture JSON: {\"<package>\": [{\"id\", \"summary\"}]}.",
+        )
+        .aliases(&["advisory_fixtures"])
         .advanced(),
         opt("slice", OptionType::Enum, "Threat-model slice to generate.")
             .choices(&["all", "dfd", "stride", "stories", "scope", "scenarios"])

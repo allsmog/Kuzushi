@@ -139,9 +139,9 @@ impl ShellApp {
                 );
             }
         }
-        app.workbench_cache()
-            .borrow_mut()
-            .git_metadata(target.map(WorkspaceTarget::root));
+        // Git metadata hydrates via the background view-hydration baseline;
+        // a synchronous prewarm here blocks first paint for seconds on
+        // monorepo-scale targets (`git status` alone).
         app.hydrate_persisted_scene_snapshots(target.map(|target| target.root()));
         app.refresh_program_scope();
     }

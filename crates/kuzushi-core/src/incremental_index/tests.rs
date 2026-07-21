@@ -89,6 +89,16 @@ fn plans_source_and_policy_changes_differently() {
 }
 
 #[test]
+fn bazel_output_trees_are_ignored_but_bazel_source_files_are_not() {
+    assert!(should_ignore_path(Path::new("bazel-bin/foo.o")));
+    assert!(should_ignore_path(Path::new("bazel-out/k8-opt/bin/lib.so")));
+    assert!(should_ignore_path(Path::new("bazel-monorepo/external/dep.h")));
+    assert!(should_ignore_path(Path::new("bazel-testlogs/suite/test.log")));
+    assert!(!should_ignore_path(Path::new("src/bazel.bzl")));
+    assert!(!should_ignore_path(Path::new("tools/bazelisk.rs")));
+}
+
+#[test]
 fn full_snapshot_excludes_git_and_kuzushi_owned_state() {
     if Command::new("git").arg("--version").output().is_err() {
         return;

@@ -207,14 +207,18 @@ impl TargetProfileScan {
         is_cancelled: &impl Fn() -> bool,
     ) -> Option<bool> {
         for entry in entries.flatten() {
-            if !self.visit_path(entry.path(), is_cancelled)? {
+            if !self.visit_entry(entry, is_cancelled)? {
                 return Some(false);
             }
         }
         Some(true)
     }
 
-    fn visit_path(&mut self, path: PathBuf, is_cancelled: &impl Fn() -> bool) -> Option<bool> {
+    fn visit_entry(
+        &mut self,
+        entry: std::fs::DirEntry,
+        is_cancelled: &impl Fn() -> bool,
+    ) -> Option<bool> {
         if is_cancelled() {
             return None;
         }
@@ -222,12 +226,21 @@ impl TargetProfileScan {
             return Some(false);
         }
         self.budget -= 1;
-        self.absorb_path(path);
+        self.absorb_entry(entry);
         Some(true)
     }
 
-    fn absorb_path(&mut self, path: PathBuf) {
-        if path.is_dir() {
+    fn absorb_entry(&mut self, entry: std::fs::DirEntry) {
+        let Ok(file_type) = entry.file_type() else {
+            return;
+        };
+        let path = entry.path();
+        if file_type.is_symlink() {
+            // Never cross symlink boundaries: bazel-bin & friends point at a
+            // huge execroot whose artifacts would misclassify a source tree.
+            return;
+        }
+        if file_type.is_dir() {
             if !is_skippable_dir(&path) {
                 self.stack.push(path);
             }
@@ -261,10 +274,12 @@ pub fn target_has_compile_commands(target: &Path) -> bool {
 }
 
 fn is_skippable_dir(path: &Path) -> bool {
-    matches!(
-        path.file_name().and_then(|name| name.to_str()),
-        Some(".git" | "node_modules" | ".kuzushi" | "target" | "vendor")
-    )
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            matches!(name, ".git" | "node_modules" | ".kuzushi" | "target" | "vendor")
+                || crate::incremental_index::is_bazel_output_component(name)
+        })
 }
 
 #[cfg(test)]
@@ -299,6 +314,28 @@ mod tests {
         std::fs::write(tmp.path().join("main.py"), "print(1)").unwrap();
         assert_eq!(classify_target_kind(tmp.path()), TargetKind::Source);
         assert!(!TargetKind::Source.is_reverse_engineering_target());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_native_artifacts_do_not_change_target_kind() {
+        let root = tempfile::tempdir().unwrap();
+        let execroot = tempfile::tempdir().unwrap();
+        std::fs::write(execroot.path().join("libfoo.so"), "\x7fELF").unwrap();
+        std::fs::write(root.path().join("main.py"), "print(1)").unwrap();
+        std::os::unix::fs::symlink(execroot.path(), root.path().join("bazel-bin")).unwrap();
+
+        assert_eq!(classify_target_kind(root.path()), TargetKind::Source);
+    }
+
+    #[test]
+    fn bazel_output_dirs_are_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("bazel-out")).unwrap();
+        std::fs::write(tmp.path().join("bazel-out/libfoo.so"), "\x7fELF").unwrap();
+        std::fs::write(tmp.path().join("main.py"), "print(1)").unwrap();
+
+        assert_eq!(classify_target_kind(tmp.path()), TargetKind::Source);
     }
 
     #[test]

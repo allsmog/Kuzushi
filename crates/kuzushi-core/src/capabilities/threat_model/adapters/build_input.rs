@@ -32,8 +32,16 @@ pub(crate) fn parse_build_input(
         ),
         model: build_model(input, ctx, flavor)?,
         pipeline: read_pipeline(input)?,
+        mode: read_build_mode(input)?,
         budget_usd: read_budget_usd(input)?,
         history_depth: read_usize(input, &["historyDepth", "history_depth"], 300, 0),
+        variant_scan: read_bool(input, &["variantScan", "variant_scan"], true),
+        advisories: read_advisories(input)?,
+        offline: read_bool(input, &["offline"], false),
+        advisory_fixtures: input
+            .get("advisoryFixtures")
+            .or_else(|| input.get("advisory_fixtures"))
+            .cloned(),
         target,
     })
 }
@@ -50,6 +58,34 @@ fn read_pipeline(input: &Value) -> Result<String> {
         );
     }
     Ok(pipeline)
+}
+
+fn read_build_mode(input: &Value) -> Result<String> {
+    let Some(mode) = read_string(input, &["mode"]) else {
+        return Ok("build".to_string());
+    };
+    let mode = mode.to_lowercase();
+    if !VALID_BUILD_MODES.contains(&mode.as_str()) {
+        anyhow::bail!(
+            "threat-model:build mode must be one of {}, got {mode:?}",
+            VALID_BUILD_MODES.join(", ")
+        );
+    }
+    Ok(mode)
+}
+
+fn read_advisories(input: &Value) -> Result<String> {
+    let Some(advisories) = read_string(input, &["advisories"]) else {
+        return Ok("off".to_string());
+    };
+    let advisories = advisories.to_lowercase();
+    if !VALID_ADVISORY_MODES.contains(&advisories.as_str()) {
+        anyhow::bail!(
+            "threat-model:build advisories must be one of {}, got {advisories:?}",
+            VALID_ADVISORY_MODES.join(", ")
+        );
+    }
+    Ok(advisories)
 }
 
 fn read_budget_usd(input: &Value) -> Result<Option<f64>> {
