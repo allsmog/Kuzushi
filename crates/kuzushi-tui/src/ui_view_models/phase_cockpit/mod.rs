@@ -15,6 +15,7 @@ use crate::{phase_attempt_outcome_from_label, phase_result_policy};
 use crate::{InputMode, PhaseResultCommand, ShellApp, ShellView};
 use kuzushi_core::WorkflowPhase;
 
+mod composition;
 mod confirm;
 mod layout;
 #[cfg(test)]
@@ -23,6 +24,7 @@ mod map;
 mod phase_bodies;
 mod scan;
 
+pub(crate) use composition::{Composition, DrawerSize, DrawerSpec};
 use confirm::prove_phase_model;
 pub(crate) use layout::{
     phase_presentation_plan, phase_surface_specs, AttentionMode, LayoutDensity,

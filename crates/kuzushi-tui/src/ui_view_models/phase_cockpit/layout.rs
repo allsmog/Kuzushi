@@ -1,3 +1,4 @@
+use super::composition::Composition;
 use super::PhaseCockpitBody;
 use crate::app::WorkbenchPage;
 use ratatui::layout::Rect;
@@ -127,6 +128,7 @@ pub(crate) struct PhasePresentationPlan {
     pub(crate) density: LayoutDensity,
     pub(crate) primary: PhaseSurfaceId,
     pub(crate) effective_focus: PhaseSurfaceId,
+    pub(crate) composition: Composition,
     pub(crate) available_surfaces: Vec<PhaseSurfaceSpec>,
     pub(crate) surfaces: Vec<PlannedPhaseSurface>,
 }
@@ -161,17 +163,23 @@ pub(crate) fn phase_presentation_plan(
     } else {
         area
     };
-    let rects = surface_rects(planned_area, visible.len());
-    let surfaces = visible
-        .iter()
-        .zip(rects)
-        .map(|(spec, rect)| planned_surface(**spec, rect))
+    let composition = Composition::Columns(visible.iter().map(|spec| spec.id).collect::<Vec<_>>());
+    let surfaces = composition
+        .solve(planned_area)
+        .into_iter()
+        .filter_map(|(id, rect)| {
+            visible
+                .iter()
+                .find(|spec| spec.id == id)
+                .map(|spec| planned_surface(**spec, rect))
+        })
         .collect::<Vec<_>>();
     let effective_focus = effective_focus(&surfaces, stored_focus, primary);
     PhasePresentationPlan {
         density,
         primary,
         effective_focus,
+        composition,
         available_surfaces: specs,
         surfaces,
     }
@@ -207,34 +215,6 @@ fn automatic_specs(
         return (LayoutDensity::MasterDetail, specs.iter().take(2).collect());
     }
     (LayoutDensity::Sparse, vec![&specs[0]])
-}
-
-fn surface_rects(area: Rect, count: usize) -> Vec<Rect> {
-    match count {
-        0 => Vec::new(),
-        1 => vec![area],
-        2 => split_columns(area, &[44, 56]),
-        _ => split_columns(area, &[40, 30, 30]),
-    }
-}
-
-fn split_columns(area: Rect, percentages: &[u16]) -> Vec<Rect> {
-    let mut x = area.x;
-    percentages
-        .iter()
-        .enumerate()
-        .map(|(index, percentage)| {
-            let last = index + 1 == percentages.len();
-            let width = if last {
-                area.right().saturating_sub(x)
-            } else {
-                area.width.saturating_mul(*percentage) / 100
-            };
-            let rect = Rect::new(x, area.y, width, area.height);
-            x = x.saturating_add(width);
-            rect
-        })
-        .collect()
 }
 
 fn effective_focus(

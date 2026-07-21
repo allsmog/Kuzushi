@@ -47,7 +47,7 @@ fn phase_presentation_plan_uses_visible_fallback_without_mutating_stored_focus()
 #[test]
 fn phase_presentation_plan_rectangles_are_bounded_and_non_overlapping() {
     let area = Rect::new(7, 5, 153, 31);
-    let rects = surface_rects(area, 3);
+    let rects = super::super::composition::split_columns(area, &[40, 30, 30]);
     assert_eq!(rects.len(), 3);
     for rect in &rects {
         assert!(rect.x >= area.x && rect.right() <= area.right());
