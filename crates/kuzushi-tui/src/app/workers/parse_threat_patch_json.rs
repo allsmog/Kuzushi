@@ -78,7 +78,11 @@ pub(crate) fn run_registry_scan_worker(
         cancel,
         trace_handle,
     )?;
-    let suppression_summary = invocation.prepare_workspace_state()?;
+    let preparation = invocation.prepare_workspace_state()?;
+    if let Some(warning) = &preparation.tree_identity_warning {
+        sink.send(ShellEvent::Scan(ScanEvent::Stage(warning.clone())));
+    }
+    let suppression_summary = preparation.suppressions;
     if !suppression_summary.is_noop() {
         sink.send(ShellEvent::Scan(ScanEvent::Stage(format!(
             "suppressions reconciled: {} added, {} expired, {} removed",
@@ -103,9 +107,7 @@ struct RegistryScanInvocation {
 }
 
 impl RegistryScanInvocation {
-    fn prepare_workspace_state(
-        &self,
-    ) -> Result<kuzushi_core::suppressions::SuppressionReconcileSummary> {
+    fn prepare_workspace_state(&self) -> Result<kuzushi_core::scan::ScanWorkspacePreparation> {
         kuzushi_core::scan::prepare_scan_workspace_state(&self.workspace, &self.store)
     }
 

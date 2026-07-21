@@ -163,9 +163,13 @@ impl ScanCommandSetup {
     }
 
     fn prepare_workspace_state(&self, store: &FindingStore) -> Result<()> {
-        let summary =
+        let preparation =
             kuzushi_core::scan::prepare_scan_workspace_state(&self.bootstrap.workspace, store)
                 .map_err(|error| self.recorded_error(error, &self.bootstrap.requested_input))?;
+        if let Some(warning) = &preparation.tree_identity_warning {
+            eprintln!("warning: {warning}");
+        }
+        let summary = &preparation.suppressions;
         if !summary.is_noop() {
             eprintln!(
                 "suppressions: {} added, {} reopened by expiry, {} reopened by rule removal",

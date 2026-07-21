@@ -37,7 +37,7 @@ pub(in crate::scan) use application::default_scan_engine_selection_for_test;
 pub use application::{
     default_scan_engines, normalize_semgrep_json, prepare_scan_workspace_state, run_scan_engines,
     run_scan_engines_with_options, run_scan_engines_with_options_and_cancellation,
-    run_semgrep_scan, scan_engines_for_tasks, ScanRun, ScanRunOptions,
+    run_semgrep_scan, scan_engines_for_tasks, ScanRun, ScanRunOptions, ScanWorkspacePreparation,
 };
 pub(crate) use application::{
     parse_semgrep_report, select_default_scan_engines, semgrep_error_summaries,

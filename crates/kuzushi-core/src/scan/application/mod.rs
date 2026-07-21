@@ -4,7 +4,7 @@ mod prepare_scan_workspace;
 mod run_scan_engines_with_options;
 mod run_semgrep_scan;
 
-pub use prepare_scan_workspace::prepare_scan_workspace_state;
+pub use prepare_scan_workspace::{prepare_scan_workspace_state, ScanWorkspacePreparation};
 pub use run_scan_engines_with_options::{
     normalize_semgrep_json, run_scan_engines_with_options,
     run_scan_engines_with_options_and_cancellation,
