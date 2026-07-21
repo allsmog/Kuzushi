@@ -93,20 +93,6 @@ writes `whitebox-diff-scope.json` in the run artifact directory. Findings are
 tagged `new`, `existing`, `fixed`, or `changed-context`. This mode does not
 need a remote git provider.
 
-## Demo Fixture
-
-The deterministic eval fixture under
-`evals/kuzushi-whitebox-static/fixtures/demo-repo/` is a zero-harness Express
-repository. The paired artifacts under `demo-artifacts/` exercise the full
-static-only path: repository inventory, Semgrep signal normalization, CodeQL
-SARIF code-flow normalization, static triage states, source citation
-validation, static prioritization, and SARIF report output.
-
-The fixture includes one statically confirmed source-to-sink SQL issue, one
-statically rejected parameterized-query false positive, one authorization case
-that needs runtime evidence, one sibling variant kept at `code_cited`, and one
-misleading scanner-noise signal kept at `signal_only`.
-
 ## Evidence Limits
 
 Whitebox-static cannot prove that an issue is reachable in a deployed runtime,

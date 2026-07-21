@@ -13,9 +13,4 @@ fi
 echo "Cloning OWASP BenchmarkJava (shallow)..."
 git clone --depth 1 https://github.com/OWASP-Benchmark/BenchmarkJava.git "$REPO_DIR"
 
-echo "Generating ground truth..."
-cd "$SCRIPT_DIR"
-npx tsx convert-ground-truth.ts
-
 echo "Done. Repo at: $REPO_DIR"
-echo "Ground truth at: $SCRIPT_DIR/ground-truth.json"

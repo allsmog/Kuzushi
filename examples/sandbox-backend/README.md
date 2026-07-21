@@ -3,15 +3,17 @@
 > Status: reference adapters only. Current `main` does not wire the source branch's remote `SandboxExecutor` into `kuzushi scan`; these examples preserve the protocol and deployment sketches for future remote-executor work.
 
 
-This directory contains two deployable reference implementations of the
+This directory contains a deployable reference implementation of the
 Kuzushi `SandboxExecutor` HTTP protocol (see `docs/sandbox-backend.md`):
 
 | Subdir       | Backend               | Deploy via          |
 |--------------|-----------------------|---------------------|
-| `vercel/`    | Vercel Sandbox microVMs | `vercel deploy`     |
 | `k8s/`       | Kubernetes Jobs       | `kubectl apply -f ` |
 
-Both expose the same four endpoints:
+A Vercel Sandbox adapter previously lived here as a TypeScript sketch; it was
+removed with the repository's TypeScript surface. `docs/sandbox-backend.md`
+still describes that backend shape as pseudocode. The adapter exposes four
+endpoints:
 
 * `POST /runs` — launch
 * `GET  /runs/<id>` — fetch final result
@@ -26,7 +28,7 @@ export KUZUSHI_SANDBOX_API_KEY=vck_...
 kuzushi scan --executor sandbox:https://sandbox.example.com/v1 ./repo
 ```
 
-See each subdir's `README.md` for backend-specific deployment notes.
+See the subdir's `README.md` for backend-specific deployment notes.
 
 ---
 
@@ -39,14 +41,12 @@ running backend. To smoke-test a real deployment:
 # 1. Start a tiny scanner image (adjust to your needs).
 docker pull returntocorp/semgrep:latest
 
-# 2. Deploy whichever adapter you picked.
-cd vercel && vercel deploy
-# (or)
+# 2. Deploy the adapter.
 cd k8s && kubectl apply -f .
 
 # 3. Run kuzushi against a tiny target.
 mkdir -p /tmp/probe && echo 'eval(input())' > /tmp/probe/x.py
-KUZUSHI_SANDBOX_API_KEY=$VERCEL_API_KEY \
+KUZUSHI_SANDBOX_API_KEY=$SANDBOX_API_KEY \
   kuzushi scan --executor sandbox:https://your-deploy.example.com/v1 /tmp/probe
 
 # 4. Inspect the round-trip cost.

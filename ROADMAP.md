@@ -149,12 +149,14 @@ code, tests, release workflows, and the npm registry remain the source of truth.
 **Goal: detection quality is a number anyone can check. This is the credibility bar in 2026.**
 *~6–12 weeks, then continuous. Infrastructure mostly exists — it has never produced a real number.*
 
-- [ ] **P3.1 Real benchmark runs.** `benchmarks/baseline.json` is literally
-  `{"datasets": {}}` and the CI benchmark job runs mock-LLM. Run the vendored
-  corpora (juice-shop, govwa, owasp-benchmark, cve-corpus) with real models;
-  populate the baseline; publish `benchmarks/SCOREBOARD.md` with the three
-  numbers practitioners demand: **detection rate, false-positive rate,
-  cost-per-finding**. Wire regression-check into CI against the real baseline.
+- [ ] **P3.1 Real benchmark runs.** The TypeScript scoring harness and its
+  empty baseline were removed with the TS surface; the scoring path is now the
+  Rust `kuzushi-eval` recall scorer plus `experiments/recall-eval/`. Run the
+  vendored corpora (juice-shop, govwa, owasp-benchmark, cve-corpus) with real
+  models; publish `benchmarks/SCOREBOARD.md` with the three numbers
+  practitioners demand: **detection rate, false-positive rate,
+  cost-per-finding**. Wire a detection-regression gate into CI against the
+  real baseline.
   *Exit: SCOREBOARD.md in the repo with real-LLM provenance; CI fails on detection regression.*
 - [ ] **P3.2 CWE-Bench-Java head-to-head.** 120 manually-validated real CVEs;
   the citable format is "X of 120 vs CodeQL's 27 / IRIS's 55." Kuzushi's
