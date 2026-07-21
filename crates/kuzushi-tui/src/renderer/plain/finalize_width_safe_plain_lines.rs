@@ -25,7 +25,17 @@ pub(crate) fn should_truncate_plain_line(line: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
-    if line.starts_with("route:") {
+    let route_prefixes = [
+        "shell route",
+        "module route",
+        "agent route",
+        "plan route",
+        "run route",
+    ];
+    if route_prefixes
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+    {
         return true;
     }
     if trimmed.chars().all(|ch| {

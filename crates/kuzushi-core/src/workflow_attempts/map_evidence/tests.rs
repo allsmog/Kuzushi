@@ -176,6 +176,35 @@ fn empty_run_refs_use_the_documented_legacy_fallback() {
     assert_eq!(collect_map_evidence(target.path(), &[]).files_indexed, 1);
 }
 
+#[test]
+fn message_names_the_empty_attempt_not_the_target_when_workspace_has_evidence() {
+    let target = tempfile::tempdir().unwrap();
+    write_json(
+        &crate::context::context_snapshot_path(target.path()),
+        &json!({"filesIndexed": 42}),
+    );
+
+    let message = insufficient_map_evidence_message(target.path());
+
+    assert!(message.contains("This attempt carried no map evidence"), "{message}");
+    assert!(message.contains("42 file(s) indexed"), "{message}");
+    assert!(
+        !message.contains("select another target"),
+        "a healthy workspace must never be blamed on the target: {message}"
+    );
+}
+
+#[test]
+fn message_steers_toward_building_evidence_when_workspace_is_empty_too() {
+    let target = tempfile::tempdir().unwrap();
+
+    let message = insufficient_map_evidence_message(target.path());
+
+    assert!(message.contains("no durable map artifacts yet"), "{message}");
+    assert!(message.contains("context build"), "{message}");
+    assert!(!message.contains("select another target"), "{message}");
+}
+
 fn write_run_result(target: &Path, run_id: &str, result: &Value) {
     write_json(&crate::run_dir(target, run_id).join("result.json"), result);
 }

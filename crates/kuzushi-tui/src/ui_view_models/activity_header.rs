@@ -89,7 +89,7 @@ pub(crate) fn activity_header_model_with_queue(
 
 fn activity_cost_label(session: &ActivitySession) -> String {
     match session.runtime_cost_report() {
-        Err(_) => "cost invalid".to_string(),
+        Err(_) => "cost accounting error".to_string(),
         Ok(cost) if cost.is_unavailable() => "cost unavailable".to_string(),
         Ok(cost) if cost.is_complete() => format!("cost ${:.4}", cost.observed_usd()),
         Ok(cost) => format!("cost >=${:.4} (incomplete)", cost.observed_usd()),
@@ -355,7 +355,7 @@ mod tests {
 
         let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
 
-        assert!(model.detailed_title.contains("cost invalid"));
+        assert!(model.detailed_title.contains("cost accounting error"));
     }
 
     #[test]
@@ -366,7 +366,7 @@ mod tests {
 
         let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
 
-        assert!(model.detailed_title.contains("cost invalid"));
+        assert!(model.detailed_title.contains("cost accounting error"));
         assert!(!model.detailed_title.contains("inf"));
     }
 

@@ -91,10 +91,13 @@ fn delivery_label(delivery: &RunDeliveryHealth) -> String {
 
 pub fn cost_label(cost: RuntimeCostReport) -> String {
     if cost.is_unavailable() {
-        return "cost unavailable".to_string();
+        return "cost not recorded".to_string();
     }
     if cost.is_complete() {
+        if cost.observed_usd() == 0.0 {
+            return "$0.00 (no model calls)".to_string();
+        }
         return format!("${:.4} exact", cost.observed_usd());
     }
-    format!(">=${:.4} incomplete", cost.observed_usd())
+    format!(">=${:.4} (metering incomplete)", cost.observed_usd())
 }

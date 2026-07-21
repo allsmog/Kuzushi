@@ -89,7 +89,7 @@ KUZUSHI · Viewing Fix · pipeline live in Review · target ./phase-target · �
 │                                         │
 │                                         │
 │                                         │
-route:run · Review 3/5 · ⛭ fix · workbench ·...             6 findings / 1 crit / 2 high / 2 med
+run route · Review 3/5 · ⛭ fix · workbench ·...             6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◆ FIX › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

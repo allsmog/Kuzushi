@@ -16,7 +16,7 @@ fn status_footer_model_reports_idle_shell_segments() {
 
     // Routing + view only: target/ctx/model are the top cockpit strip's job,
     // so each session fact is stated once per screen.
-    assert_eq!(model.left_segments, ["route:shell", "capabilities"]);
+    assert_eq!(model.left_segments, ["shell route", "capabilities"]);
     assert_eq!(model.right_segments, ["0 findings"]);
     assert!(!model.warning);
 }
@@ -73,7 +73,7 @@ fn malformed_context_snapshot_surfaces_in_the_cockpit_strip() {
     let strip = crate::ui_view_models::context_strip_model(&app);
     assert!(strip
         .compact_segments()
-        .contains(&"ctx:malformed".to_string()));
+        .contains(&"context malformed".to_string()));
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn status_footer_model_prefers_active_scan_status() {
     assert_eq!(
         model.left_segments,
         [
-            "route:run",
+            "run route",
             "capabilities",
             "openai:gpt-5.2",
             "running: semgrep"
@@ -230,7 +230,7 @@ fn status_footer_model_reflects_active_tool_model_override() {
     assert_eq!(
         model.left_segments,
         [
-            "route:run",
+            "run route",
             "capabilities",
             "openai:gpt-tool (tool)",
             "triage:run: active"

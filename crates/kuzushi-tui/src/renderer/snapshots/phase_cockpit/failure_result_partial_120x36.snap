@@ -4,7 +4,7 @@ contract: failure-path decision cards render honest outcome copy and recovery ac
 scenario: result_partial
 size: 120x36
 ---
-KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · ○ idle · ctx:not built · model unconfigured
+KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · ○ idle · context not built · model unconfigured
  Map ● · Scan ○ · Review ○ · Prove ○ · Fix ○
  ▸ NEXT build or explicitly skip the current-revision map
  run sast:scan {} scan now · next continue workspace phase · z open findings heatmap · jobs inspect run receipts
@@ -25,7 +25,7 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
 
 
 
-route:shell · 1 PARTIAL · workbench · Map 1/5 · ⛭ fix · workbench                                             0 findings
+shell route · 1 partial result · workbench · Map 1/5 · ⛭ fix · workbench                                      0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────────────────────────┐

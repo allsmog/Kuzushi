@@ -56,7 +56,7 @@ impl AttentionBroker {
         let subject = if self.len() == 1 {
             primary.kind.footer_subject().to_string()
         } else {
-            format!("{} ATTENTION", self.len())
+            format!("{} items need attention", self.len())
         };
         Some(format!("{subject} · {}", primary.route.hint()))
     }
@@ -75,11 +75,11 @@ impl AttentionKind {
 
     const fn footer_subject(self) -> &'static str {
         match self {
-            Self::Approval => "1 APPROVAL",
-            Self::OperatorQuestion => "1 INPUT",
-            Self::Credential => "1 CREDENTIAL",
-            Self::PartialResult => "1 PARTIAL",
-            Self::ResultDisposition => "1 RESULT",
+            Self::Approval => "1 approval needed",
+            Self::OperatorQuestion => "1 question waiting",
+            Self::Credential => "1 credential needed",
+            Self::PartialResult => "1 partial result",
+            Self::ResultDisposition => "1 result ready",
         }
     }
 }
@@ -206,7 +206,7 @@ mod tests {
         );
         assert_eq!(
             broker.footer_segment().as_deref(),
-            Some("2 ATTENTION · confirm")
+            Some("2 items need attention · confirm")
         );
     }
 

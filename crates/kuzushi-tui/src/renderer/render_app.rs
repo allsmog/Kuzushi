@@ -380,7 +380,7 @@ mod run_focus_prompt_tests {
         assert!(prompt.contains("jobs"), "{rows:?}");
         assert!(!prompt.contains("WAITING INPUT"), "{rows:?}");
         assert!(
-            rows.iter().any(|row| row.contains("1 INPUT")),
+            rows.iter().any(|row| row.contains("1 question waiting")),
             "background attention must remain visible: {rows:?}"
         );
     }

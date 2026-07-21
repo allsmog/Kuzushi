@@ -120,11 +120,40 @@ fn run_threat_model_document(result: &Value) -> Option<&Value> {
         })
 }
 
+/// The attempt-scoped verdict must not read as a target-scoped one. This
+/// message once said "select another target" while the workspace held
+/// perfectly good durable map artifacts — the attempt was empty, not the
+/// target. Consult the workspace before wording the advice.
 pub fn insufficient_map_evidence_message(target: &Path) -> String {
+    let workspace = collect_legacy_target_evidence(target);
+    if assess_map_evidence(&workspace).is_adequate() {
+        return format!(
+            "This attempt carried no map evidence, but `{}` already holds durable map artifacts ({}). Open the run to see why the attempt came back empty, or continue from the workspace state with `next`.",
+            target.display(),
+            workspace_evidence_summary(&workspace)
+        );
+    }
     format!(
-        "No analyzable evidence found under `{}`; select another target or import design evidence.",
+        "This attempt carried no map evidence, and `{}` has no durable map artifacts yet. Build the context snapshot (`context build`) or import design evidence, then map again.",
         target.display()
     )
+}
+
+fn workspace_evidence_summary(facts: &MapEvidenceFacts) -> String {
+    let mut parts = Vec::new();
+    if facts.files_indexed > 0 {
+        parts.push(format!("{} file(s) indexed", facts.files_indexed));
+    }
+    if facts.entry_points > 0 {
+        parts.push(format!("{} entry point(s)", facts.entry_points));
+    }
+    if facts.threats > 0 {
+        parts.push(format!("{} threat(s)", facts.threats));
+    }
+    if facts.flows > 0 {
+        parts.push(format!("{} data flow(s)", facts.flows));
+    }
+    parts.join(" \u{b7} ")
 }
 
 pub fn threat_model_has_concrete_content(document: &Value) -> bool {

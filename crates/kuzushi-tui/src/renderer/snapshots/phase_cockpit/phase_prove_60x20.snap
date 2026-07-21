@@ -19,7 +19,7 @@ KUZUSHI · Viewing Prove · pipeline live in Review · ● LIVE
 │
 │
 │
-route:run · workbench           6 findings · 1 C · 2 H · 2 M
+run route · workbench           6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt

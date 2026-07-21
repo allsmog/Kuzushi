@@ -6,7 +6,7 @@ fn routing_mode_defaults_to_shell() {
     let app = ShellApp::new(V2Config::default(), None);
 
     assert_eq!(routing_mode(&app), RoutingMode::Shell);
-    assert_eq!(routing_mode_segment(&app), "route:shell");
+    assert_eq!(routing_mode_segment(&app), "shell route");
 }
 
 #[test]

@@ -436,7 +436,12 @@ fn legacy_result_receipt_line(
 }
 
 fn durable_receipt_cost_label(cost: &str) -> String {
-    if cost.contains("incomplete") || cost.contains("unavailable") || cost.contains("invalid") {
+    // Old persisted receipts carry "unavailable"/"invalid"; new ones carry
+    // "not recorded"/"accounting error". Both generations get the prefix.
+    let qualified = ["incomplete", "unavailable", "invalid", "not recorded", "accounting"]
+        .iter()
+        .any(|marker| cost.contains(marker));
+    if qualified {
         return format!("Cost: {cost}");
     }
     cost.to_string()
@@ -1082,7 +1087,7 @@ mod tests {
         assert!(app
             .effective_phase_attempt_blocker(&completed)
             .unwrap()
-            .contains("No analyzable evidence"));
+            .contains("no map evidence"));
     }
 
     #[test]
@@ -1215,7 +1220,7 @@ mod tests {
         assert_eq!(presentation.recommended_next, expected_next);
         assert!(!presentation
             .recommended_next
-            .contains("No analyzable evidence"));
+            .contains("no map evidence"));
         assert_eq!(presentation.semantic_keys, expected_keys);
         assert_phase_card_matches(&fixture.app, WorkflowPhase::Map, &presentation);
     }

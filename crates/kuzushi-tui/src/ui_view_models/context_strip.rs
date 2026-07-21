@@ -73,11 +73,11 @@ impl ContextStripModel {
         // as an action ("not built") rather than an alarm ("missing") — scans
         // run fine without it; `context build` creates it.
         if self.context_state == "malformed" {
-            "ctx:malformed".to_string()
+            "context malformed".to_string()
         } else if self.context_present {
-            "ctx:✓ built".to_string()
+            "context ready".to_string()
         } else {
-            "ctx:not built".to_string()
+            "context not built".to_string()
         }
     }
 }

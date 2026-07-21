@@ -2391,7 +2391,7 @@ fn active_context_build_view_shows_live_feedback() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("route:run"));
+    assert!(rendered.contains("run route"));
     assert!(rendered.contains("context:build"));
     assert!(rendered.contains("indexing repository context"));
     assert!(rendered.contains("request abort"));
@@ -3091,7 +3091,7 @@ fn renders_agent_chat_mode_while_question_is_active() {
 
     assert!(rendered.contains("AGENT"));
     assert!(rendered.contains("running"));
-    assert!(rendered.contains("route:agent"));
+    assert!(rendered.contains("agent route"));
     assert!(rendered.contains("agent: active"));
     assert!(rendered.contains("scope: F-0001"));
     assert!(rendered.contains("kuzushi/agent>"));
@@ -3367,13 +3367,13 @@ fn renders_shell_module_plan_and_run_routing_modes() {
     let cases = [
         {
             let app = ShellApp::new(V2Config::default(), None);
-            (app, "route:shell", "kuzushi>")
+            (app, "shell route", "kuzushi>")
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
             app.set_focused_module(Some("sast".to_string()));
             app.set_shell_view(ShellView::Module);
-            (app, "route:module", "kuzushi/sast>")
+            (app, "module route", "kuzushi/sast>")
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
@@ -3383,7 +3383,7 @@ fn renders_shell_module_plan_and_run_routing_modes() {
                 changes: Vec::new(),
                 unsupported: Vec::new(),
             });
-            (app, "route:plan", "kuzushi/plan>")
+            (app, "plan route", "kuzushi/plan>")
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
@@ -3397,20 +3397,20 @@ fn renders_shell_module_plan_and_run_routing_modes() {
                 error: None,
             }));
             app.set_shell_view(ShellView::ModuleRun);
-            (app, "route:run", "kuzushi/run>")
+            (app, "run route", "kuzushi/run>")
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
             app.set_focused_module(Some("context".to_string()));
             app.set_shell_view(ShellView::ModuleRun);
-            (app, "route:module", "kuzushi/context>")
+            (app, "module route", "kuzushi/context>")
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
             app.set_focused_module(Some("context".to_string()));
             app.set_running_tool_for_test("context:build");
             app.set_shell_view(ShellView::ModuleRun);
-            (app, "route:run", "kuzushi/context/run>")
+            (app, "run route", "kuzushi/context/run>")
         },
     ];
 
@@ -3423,14 +3423,14 @@ fn renders_shell_module_plan_and_run_routing_modes() {
         assert!(rendered.contains(mode), "missing {mode} in {rendered}");
         assert!(rendered.contains("KUZUSHI"), "missing brand in {rendered}");
         assert!(
-            rendered.contains("route:"),
+            rendered.contains(" route"),
             "missing mode chip in {rendered}"
         );
         assert!(
             rendered.contains("target:"),
             "missing target chip in {rendered}"
         );
-        assert!(rendered.contains("ctx:"), "missing ctx chip in {rendered}");
+        assert!(rendered.contains("context"), "missing context chip in {rendered}");
         assert!(
             rendered.contains("model:"),
             "missing model chip in {rendered}"
@@ -4663,7 +4663,7 @@ fn idle_activity_is_coherent_and_actionable_at_minimum_size() {
     assert!(rendered.contains("no active run"), "{rendered}");
     assert!(rendered.contains("scan"), "{rendered}");
     assert!(rendered.contains("run <tool>"), "{rendered}");
-    assert!(rendered.contains("route:shell"), "{rendered}");
+    assert!(rendered.contains("shell route"), "{rendered}");
     assert!(!rendered.contains("logs appear here du"), "{rendered}");
 }
 

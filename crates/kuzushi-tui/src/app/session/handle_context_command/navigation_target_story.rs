@@ -152,9 +152,6 @@ impl ShellApp {
         refresh_auto_open_prefs_from_store(self);
         self.set_target(Some(root.clone()));
         self.schedule_target_profile_hydration(&root);
-        self.workbench_cache()
-            .borrow_mut()
-            .git_metadata(Some(&root));
         self.set_active_scope(None);
         if let Some(error) = option_store_error {
             self.log("options", error);

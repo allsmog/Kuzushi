@@ -29,7 +29,7 @@ fn empty_legacy_receipt() -> PhaseAttemptReceipt {
     PhaseAttemptReceipt {
         run_count: 0,
         elapsed_secs: 0,
-        cost: "cost unavailable".to_string(),
+        cost: "cost not recorded (legacy attempt)".to_string(),
         changed_findings: 0,
         changed_artifacts: Vec::new(),
         interaction_count: 0,

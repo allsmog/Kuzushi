@@ -74,15 +74,18 @@ pub(crate) fn format_runtime_cost(
     accounting_error: Option<&str>,
 ) -> String {
     if accounting_error.is_some() {
-        return "cost invalid".to_string();
+        return "cost accounting error".to_string();
     }
     if report.is_unavailable() {
-        return "cost unavailable".to_string();
+        return "cost not recorded".to_string();
     }
     let formatted = format_session_cost(report.observed_usd());
     if report.is_complete() {
+        if report.observed_usd() == 0.0 {
+            return format!("{formatted} (no model calls)");
+        }
         formatted
     } else {
-        format!(">={formatted} (incomplete)")
+        format!(">={formatted} (metering incomplete)")
     }
 }

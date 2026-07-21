@@ -43,11 +43,11 @@ pub(crate) fn routing_mode(app: &ShellApp) -> RoutingMode {
 
 pub(crate) fn routing_mode_segment(app: &ShellApp) -> String {
     match routing_mode(app) {
-        RoutingMode::Shell => "route:shell",
-        RoutingMode::Module => "route:module",
-        RoutingMode::Agent => "route:agent",
-        RoutingMode::Plan => "route:plan",
-        RoutingMode::Run => "route:run",
+        RoutingMode::Shell => "shell route",
+        RoutingMode::Module => "module route",
+        RoutingMode::Agent => "agent route",
+        RoutingMode::Plan => "plan route",
+        RoutingMode::Run => "run route",
     }
     .to_string()
 }

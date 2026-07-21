@@ -9,7 +9,7 @@ fn context_strip_model_reports_idle_shell_state() {
 
     let model = context_strip_model(&app);
 
-    assert_eq!(model.mode, "route:shell");
+    assert_eq!(model.mode, "shell route");
     assert_eq!(model.target, "none");
     assert!(!model.context_present);
     assert_eq!(model.context_state, "missing");
@@ -17,16 +17,16 @@ fn context_strip_model_reports_idle_shell_state() {
     assert_eq!(model.findings, "0 findings");
     assert_eq!(model.view, "capabilities");
     assert_eq!(model.phase, None);
-    assert_eq!(model.cost, Some("$0.00".to_string()));
+    assert_eq!(model.cost, Some("$0.00 (no model calls)".to_string()));
     assert_eq!(
         model.compact_segments(),
         [
-            "route:shell",
+            "shell route",
             "view:capabilities",
             "target:none",
             "model:unconfigured",
-            "ctx:not built",
-            "cost:$0.00"
+            "context not built",
+            "cost:$0.00 (no model calls)"
         ]
     );
 }
@@ -50,7 +50,7 @@ fn context_strip_model_formats_target_model_context_and_cost() {
     assert_eq!(model.cost, Some("$0.42".to_string()));
     assert!(model
         .compact_segments()
-        .contains(&"ctx:✓ built".to_string()));
+        .contains(&"context ready".to_string()));
 }
 
 #[test]
@@ -77,7 +77,7 @@ fn context_strip_model_reports_malformed_context_snapshot() {
     assert_eq!(model.context_state, "malformed");
     assert!(model
         .compact_segments()
-        .contains(&"ctx:malformed".to_string()));
+        .contains(&"context malformed".to_string()));
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn context_strip_model_reports_active_scan_stage() {
 
     let model = context_strip_model(&app);
 
-    assert_eq!(model.mode, "route:run");
+    assert_eq!(model.mode, "run route");
     assert_eq!(
         model.stage,
         Some(ContextStripSegment {

@@ -381,7 +381,7 @@ fn identity_atoms(header: &EngagementHeaderModel) -> Vec<IdentityAtom> {
     let (live_text, live_style) = live_atom(header.liveness);
     atoms.push(atom(live_text, live_style));
     if header.cost_invalid {
-        atoms.push(atom("cost invalid".to_string(), theme::danger()));
+        atoms.push(atom("cost accounting error".to_string(), theme::danger()));
     } else if !header.cost_complete {
         atoms.push(atom(
             format!("cost >=${:.2} incomplete", header.cost_usd),

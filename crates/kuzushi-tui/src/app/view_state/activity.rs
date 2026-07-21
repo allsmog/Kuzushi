@@ -430,14 +430,14 @@ impl ActivitySession {
             run_count: self.sequence_run_count,
             elapsed_secs: self.sequence_started_at.elapsed().as_secs(),
             cost: self.runtime_cost_report().map_or_else(
-                |_| "cost invalid".to_string(),
+                |_| "cost accounting error".to_string(),
                 |report| {
                     if report.is_unavailable() {
-                        "cost unavailable".to_string()
+                        "cost not recorded".to_string()
                     } else if report.is_complete() {
                         format!("${:.4}", report.observed_usd())
                     } else {
-                        format!(">=${:.4} incomplete", report.observed_usd())
+                        format!(">=${:.4} (metering incomplete)", report.observed_usd())
                     }
                 },
             ),
@@ -1567,7 +1567,7 @@ fn activity_detail_cost(cost: f64) -> Option<String> {
     match RuntimeCost::from_usd(cost, "Activity detail cost") {
         Ok(cost) if cost.usd() > 0.0 => Some(format!("${:.4}", cost.usd())),
         Ok(_) => None,
-        Err(_) => Some("cost invalid".to_string()),
+        Err(_) => Some("cost accounting error".to_string()),
     }
 }
 
@@ -1682,12 +1682,12 @@ fn typed_task_cost(projection: &kuzushi_core::run_lifecycle::RunProjection, task
 
 fn typed_cost_meta(cost: RuntimeCostReport) -> String {
     if cost.is_unavailable() {
-        return "cost unavailable".to_string();
+        return "cost not recorded".to_string();
     }
     if cost.is_complete() {
         return format!("${:.4}", cost.observed_usd());
     }
-    format!(">=${:.4} incomplete", cost.observed_usd())
+    format!(">=${:.4} (metering incomplete)", cost.observed_usd())
 }
 
 fn typed_task_state(status: kuzushi_core::run_lifecycle::RunItemStatus) -> DagTaskState {
