@@ -38,6 +38,7 @@ pub(crate) enum PhaseSurfaceId {
     ProveEvidence,
     ProveLadder,
     ProveReceipt,
+    ProveNextAction,
     FixRemediation,
     FixCandidate,
     FixAttackTree,
@@ -58,9 +59,11 @@ impl PhaseSurfaceId {
                 WorkbenchPage::Scan
             }
             Self::ReviewQueue | Self::ReviewDetail => WorkbenchPage::Review,
-            Self::ProveStatus | Self::ProveEvidence | Self::ProveLadder | Self::ProveReceipt => {
-                WorkbenchPage::Prove
-            }
+            Self::ProveStatus
+            | Self::ProveEvidence
+            | Self::ProveLadder
+            | Self::ProveReceipt
+            | Self::ProveNextAction => WorkbenchPage::Prove,
             Self::FixRemediation | Self::FixCandidate | Self::FixAttackTree | Self::FixDfd => {
                 WorkbenchPage::Fix
             }
@@ -83,6 +86,7 @@ impl PhaseSurfaceId {
             Self::ProveEvidence => "Evidence",
             Self::ProveLadder => "Proof Ladder",
             Self::ProveReceipt => "Verification Receipt",
+            Self::ProveNextAction => "Next Action",
             Self::FixRemediation => "Remediation",
             Self::FixCandidate => "Patch Candidate",
             Self::FixAttackTree => "Attack Tree",
@@ -193,6 +197,10 @@ fn screen_composition(
         return columns();
     }
     match body {
+        PhaseCockpitBody::Prove(model) if model.finding.is_some() => Composition::FocusDetail {
+            body: PhaseSurfaceId::ProveStatus,
+            action_menu: Some(PhaseSurfaceId::ProveNextAction),
+        },
         PhaseCockpitBody::Review(_) if visible.len() >= 2 => Composition::ListDetail {
             list: PhaseSurfaceId::ReviewQueue,
             detail: PhaseSurfaceId::ReviewDetail,

@@ -110,6 +110,15 @@ impl Composition {
                     SurfaceRole::Standard
                 }
             }
+            Self::FocusDetail { body, action_menu } => {
+                if *body == surface {
+                    SurfaceRole::Canvas
+                } else if *action_menu == Some(surface) {
+                    SurfaceRole::Drawer
+                } else {
+                    SurfaceRole::Standard
+                }
+            }
             _ => SurfaceRole::Standard,
         }
     }

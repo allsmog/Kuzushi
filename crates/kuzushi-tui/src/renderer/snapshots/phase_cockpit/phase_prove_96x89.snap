@@ -8,87 +8,87 @@ KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · 
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  v verify displayed · x suppress displayed · z attack path / replay · findings reveal queue
-│STATUS / NEXT                            │▸ EVIDENCE · z attack path
-│F-0001  CRITICAL  ✓ [●●●] · CONFIRMED... │evidence:1 · 1 source(s) · 1
-│SQL injection reaches query              │1. observed code evidence · source-sink · conf...
-│src/auth/login.rs:17                     │request_input -> database_query
-│STATUS runtime_verified · decision:ne... │attacker-controlled input reaches a security...
-│NEXT   patch F-0001                      │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
+│▸ STATUS / NEXT
+│F-0001  CRITICAL  ✓ [●●●] · CONFIRMED · 1 source(s)  runtime_verified
+│SQL injection reaches query
+│src/auth/login.rs:17
+│STATUS runtime_verified · decision:needs_review · evidence:1
+│NEXT   patch F-0001
+│
+│EVIDENCE · z attack path                               │PROOF LADDER
+│evidence:1 · 1 source(s) · 1                           │● 1 signal captured
+│1. observed code evidence · source-sink · conf 94...   │● 2 path-linked
+│request_input -> database_query                        │● 3 exploited
+│attacker-controlled input reaches a security boundary  │current [●●●] verified L4 · 1...
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │PROOF · REPLAY
+│                                                       │exploited  L4 · podman
+│                                                       │842ms · $0.0400
+│                                                       │▸ replay verify-phase-run  open trace
+│                                                       │▸ verify F-0001  recheck
+│                                                       │language: rust
+│                                                       │harness: .kuzushi/harness/sql-injec...
+│                                                       │evidence: boolean payload changed...
+│                                                       │✓ isolated database fixture
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│                                                       │
+│CHOOSE NEXT ACTION
+│ v  Run investigation     draft verify for F-0001 — resolve missing evidence, attempt...
+│ c  Generate attack chain model prerequisites, trust transitions, and impact over...
+│ 5  Draft patch           open Fix with this finding to stage a remediation
+│ x  Mark false positive   draft suppress — records a durable review decision with a reason
+│D defer proof · Esc return to findings
+│
+│
+│
+│
+│
+│
 run route · Review 3/5 · ⛭ fix · workbench ·...             6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt

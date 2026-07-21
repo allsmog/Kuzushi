@@ -24,11 +24,78 @@ pub(super) fn render(
         render_critical_compact(frame, area, model, finding, state);
         return;
     }
+    match state.role {
+        crate::ui_view_models::SurfaceRole::Canvas => {
+            return render_unzoomed(frame, area, model, finding, state);
+        }
+        crate::ui_view_models::SurfaceRole::Drawer => {
+            return render_next_action_menu(frame, area, finding, state);
+        }
+        crate::ui_view_models::SurfaceRole::Standard => {}
+    }
     if let Some(pane) = state.surface {
         render_zoomed(frame, area, model, state, pane);
         return;
     }
     render_unzoomed(frame, area, model, finding, state);
+}
+
+/// The Choose-Next-Action menu: every row is an existing Prove hotkey with
+/// its one-line consequence, so the operator authorizes the next move instead
+/// of the agent silently picking one.
+fn render_next_action_menu(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    finding: &FindingDetailModel,
+    state: PhaseRenderState,
+) {
+    let width = area.width.saturating_sub(2) as usize;
+    let reference = finding
+        .alias
+        .clone()
+        .unwrap_or_else(|| finding.identity_label.clone());
+    let rows: [(&str, &str, String); 4] = [
+        (
+            "v",
+            "Run investigation",
+            format!("draft verify for {reference} — resolve missing evidence, attempt safe reproduction"),
+        ),
+        (
+            "c",
+            "Generate attack chain",
+            "model prerequisites, trust transitions, and impact over verified findings".to_string(),
+        ),
+        (
+            "5",
+            "Draft patch",
+            "open Fix with this finding to stage a remediation".to_string(),
+        ),
+        (
+            "x",
+            "Mark false positive",
+            "draft suppress — records a durable review decision with a reason".to_string(),
+        ),
+    ];
+    let mut lines = Vec::new();
+    for (key, action, consequence) in rows {
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {key}  "), theme::accent()),
+            Span::styled(format!("{action:<22}"), theme::primary()),
+            Span::styled(fit(&consequence, width.saturating_sub(27)), theme::muted()),
+        ]));
+    }
+    lines.push(Line::styled(
+        fit("D defer proof · Esc return to findings", width),
+        theme::muted(),
+    ));
+    render_lines_pane(
+        frame,
+        area,
+        "CHOOSE NEXT ACTION",
+        lines,
+        PhaseSurfaceId::ProveNextAction,
+        state,
+    );
 }
 
 fn render_unzoomed(

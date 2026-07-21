@@ -14056,7 +14056,7 @@ fn prove_z_opens_its_persisted_replay() {
         .set_page(Some(WorkbenchPage::Prove));
     app.router
         .workbench_mut()
-        .set_focus(PhaseSurfaceId::ProveReceipt);
+        .show_zoomed_focus(PhaseSurfaceId::ProveReceipt);
     app.hydrate_active_view_blocking();
 
     press_key(

@@ -112,16 +112,27 @@ fn assert_matrix_cell(
         expected_primary(phase, state),
         "{cell}: primary"
     );
-    let expected_visible = if matches!(phase, WorkflowPhase::Map)
-        && matches!(
-            plan.density,
-            LayoutDensity::Dense | LayoutDensity::MasterDetail
-        ) {
+    let multi_surface = matches!(
+        plan.density,
+        LayoutDensity::Dense | LayoutDensity::MasterDetail
+    );
+    let expected_visible = match phase {
         // Map adopted the canvas+drawer composition: the data-flow canvas
         // dominates and the readiness action card rides the drawer.
-        vec![PhaseSurfaceId::MapDfd, PhaseSurfaceId::MapReadiness]
-    } else {
-        surface_ids(&specs[..visible_count])
+        WorkflowPhase::Map if multi_surface => {
+            vec![PhaseSurfaceId::MapDfd, PhaseSurfaceId::MapReadiness]
+        }
+        // Prove adopted the focus+action-menu composition when a finding is
+        // selected: one triage body plus the Choose-Next-Action menu.
+        WorkflowPhase::Prove
+            if multi_surface
+                && specs
+                    .iter()
+                    .any(|spec| spec.id == PhaseSurfaceId::ProveStatus) =>
+        {
+            vec![PhaseSurfaceId::ProveStatus, PhaseSurfaceId::ProveNextAction]
+        }
+        _ => surface_ids(&specs[..visible_count]),
     };
     assert_eq!(
         surface_ids(&plan.surfaces),

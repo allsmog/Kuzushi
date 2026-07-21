@@ -1092,7 +1092,10 @@ fn focused_workbench_visualization(
         }
         PhaseSurfaceId::ProveStatus
         | PhaseSurfaceId::ProveEvidence
-        | PhaseSurfaceId::ProveLadder => FocusedWorkbenchVisualization::Scene(VizPage::AttackPath),
+        | PhaseSurfaceId::ProveLadder
+        | PhaseSurfaceId::ProveNextAction => {
+            FocusedWorkbenchVisualization::Scene(VizPage::AttackPath)
+        }
         PhaseSurfaceId::ProveReceipt => FocusedWorkbenchVisualization::ProofReplay,
         PhaseSurfaceId::FixCandidate | PhaseSurfaceId::FixAttackTree => {
             FocusedWorkbenchVisualization::Scene(VizPage::ExploitChain)

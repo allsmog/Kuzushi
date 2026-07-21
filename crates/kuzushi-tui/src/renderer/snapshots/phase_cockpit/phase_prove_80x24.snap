@@ -8,22 +8,22 @@ KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · 
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  v verify displayed · x suppress displayed · z attack path / replay
-│STATUS / NEXT                     │▸ EVIDENCE · z attack path
-│F-0001  CRITICAL  ✓ [●●●] ·...    │evidence:1 · 1 source(s) · 1
-│SQL injection reaches query       │1. observed code evidence · source-sink...
-│src/auth/login.rs:17              │request_input -> database_query
-│STATUS runtime_verified ·...      │attacker-controlled input reaches a...
-│NEXT   patch F-0001               │
-│                                  │
-│                                  │
-│                                  │
-│                                  │
-│                                  │
-│                                  │
-│                                  │
-│                                  │
-│                                  │
-│                                  │
+│▸ STATUS / NEXT
+│F-0001  CRITICAL  ✓ [●●●] · CONFIRMED · 1 source(s)  runtime_verified
+│SQL injection reaches query
+│src/auth/login.rs:17
+│STATUS runtime_verified · decision:needs_review · evidence:1
+│NEXT   patch F-0001
+│
+│EVIDENCE · z attack path                     │PROOF LADDER
+│evidence:1 · 1 source(s) · 1                 │● 1 signal captured
+│1. observed code evidence · source-sink...   │PROOF · REPLAY
+│request_input -> database_query              │exploited  L4 · podman
+│CHOOSE NEXT ACTION
+│ v  Run investigation     draft verify for F-0001 — resolve missing...
+│ c  Generate attack chain model prerequisites, trust transitions, and...
+│ 5  Draft patch           open Fix with this finding to stage a remediation
+│ x  Mark false positive   draft suppress — records a durable review...
 run route · Review 3/5 · ⛭ fix ·...         6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
