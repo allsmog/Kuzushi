@@ -257,6 +257,7 @@ impl ShellApp {
                 // Confirm composition's primary Evidence surface.
                 self.open_workbench_finding_or_log();
             }
+            PhaseSurfaceId::MapReadiness => self.draft_map_action_card_command(),
             focus if focus == page.findings_surface() => self.open_workbench_finding_or_log(),
             PhaseSurfaceId::MapAttackSurface
             | PhaseSurfaceId::ScanEngines
@@ -264,6 +265,36 @@ impl ShellApp {
             | PhaseSurfaceId::FixAttackTree => self.open_workbench_focused_viz(),
             _ => {}
         }
+    }
+
+    /// Enter on the Map action drawer loads the card's threat-model action
+    /// into the prompt — bootstrap when no model exists, refine when stale,
+    /// otherwise the journey planner. Kuzushi recommends; the operator still
+    /// presses Enter to authorize the actual run.
+    fn draft_map_action_card_command(&mut self) {
+        let model = crate::ui_view_models::phase_cockpit_model_for_phase(
+            self,
+            kuzushi_core::WorkflowPhase::Map,
+        );
+        let crate::ui_view_models::PhaseCockpitBody::Map(map) = model.body else {
+            return;
+        };
+        let (command, note) = if map.dfd.empty_hint.is_some() || map.empty_hint.is_some() {
+            (
+                "run threat-model:build {}",
+                "threat-model draft loaded — Enter to generate (seeds scan recommendations)",
+            )
+        } else if map.context.state.eq_ignore_ascii_case("stale") {
+            (
+                "run threat-model:build {}",
+                "refine draft loaded — Enter to update the stale threat model",
+            )
+        } else {
+            ("next", "journey planner loaded — Enter to continue Map")
+        };
+        self.set_input(command.to_string());
+        self.set_input_mode(InputMode::Prompt);
+        self.log("map", note);
     }
 
     fn open_workbench_finding_or_log(&mut self) {

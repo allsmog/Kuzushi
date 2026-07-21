@@ -163,16 +163,11 @@ pub(crate) fn phase_presentation_plan(
     } else {
         area
     };
-    let composition = Composition::Columns(visible.iter().map(|spec| spec.id).collect::<Vec<_>>());
+    let composition = screen_composition(body, density, &visible);
     let surfaces = composition
         .solve(planned_area)
         .into_iter()
-        .filter_map(|(id, rect)| {
-            visible
-                .iter()
-                .find(|spec| spec.id == id)
-                .map(|spec| planned_surface(**spec, rect))
-        })
+        .map(|(id, rect)| planned_surface(spec_for(id, &specs), rect))
         .collect::<Vec<_>>();
     let effective_focus = effective_focus(&surfaces, stored_focus, primary);
     PhasePresentationPlan {
@@ -183,6 +178,60 @@ pub(crate) fn phase_presentation_plan(
         available_surfaces: specs,
         surfaces,
     }
+}
+
+/// Choose the screen-specific composition. Attention states, zoom, and
+/// small terminals keep the plain column layout of whatever is visible;
+/// pages that have adopted their investigation-IDE composition switch here.
+fn screen_composition(
+    body: &PhaseCockpitBody,
+    density: LayoutDensity,
+    visible: &[&PhaseSurfaceSpec],
+) -> Composition {
+    let columns = || Composition::Columns(visible.iter().map(|spec| spec.id).collect::<Vec<_>>());
+    if !matches!(density, LayoutDensity::Dense | LayoutDensity::MasterDetail) {
+        return columns();
+    }
+    match body {
+        PhaseCockpitBody::Map(model) => Composition::CanvasWithDrawer {
+            canvas: PhaseSurfaceId::MapDfd,
+            drawer: Some(super::composition::DrawerSpec {
+                surface: PhaseSurfaceId::MapReadiness,
+                size: if map_readiness_actionable(model) {
+                    super::composition::DrawerSize::Expanded
+                } else {
+                    super::composition::DrawerSize::Compact
+                },
+            }),
+        },
+        _ => columns(),
+    }
+}
+
+fn map_readiness_actionable(model: &super::MapPhaseModel) -> bool {
+    model.empty_hint.is_some()
+        || model.dfd.empty_hint.is_some()
+        || model.context.state.eq_ignore_ascii_case("stale")
+        || model
+            .context
+            .status
+            .to_ascii_lowercase()
+            .contains("blocked")
+}
+
+/// The spec backing a composition region. Regions the spec builder skipped
+/// (a canvas whose artifact is missing) synthesize a Missing placeholder so
+/// the region can still explain itself instead of vanishing.
+fn spec_for(id: PhaseSurfaceId, specs: &[PhaseSurfaceSpec]) -> PhaseSurfaceSpec {
+    specs
+        .iter()
+        .find(|spec| spec.id == id)
+        .copied()
+        .unwrap_or(PhaseSurfaceSpec {
+            id,
+            state: SurfaceState::Missing,
+            interaction: SurfaceInteraction::Static,
+        })
 }
 
 fn visible_specs<'a>(

@@ -8,34 +8,34 @@ KUZUSHI · Viewing Map · pipeline live in Review · target ./phase-target · �
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  next continue Map · context build build context · z open visualization · attach <path> seed materials
-│▸ PROJECT CONTEXT                              │ATTACK SURFACE · z terrain         │HOT MODULES · z heatmap
-│./phase-target · rev:unknown                     │2 high/critical, max 91, tiers...  │auth  12.0 · 1C 0H 1M 0L 0I
-│context:present · ⠋ context:build indexing...  │criticalAxum · POST /login · 91    │api   7.0 · 0C 1H 1M 0L 0I
-│○ scope tree    no persisted nested...         │high    Axum · GET /orders/:id...  │web   5.0 · 0C 1H 0M 0L 0I
-│◆ context feed  ./.kuzushi/context-snapsho...  │▸ z open terrain visualization     │src   1.0 · 0C 0H 0M 1L 0I
-│◆ inventory     indexed=3 total=3 files ·...   │                                   │NEXT SCANS
-│◆ threat model  current threat model...        │                                   │root · scan · never-scanned
-│◆ data flow     3 nodes · 2 flows · zones...   │                                   │
-│◆ review surface6 items · 0 triaged · 6...     │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
-│                                               │                                   │
+│REPOSITORY / DATA-FLOW MAP · z visualize
+│./phase-target · rev:unknown
+│ready · 3 nodes · 2 flows · 2 trust crossings
+│zones: external → application → data
+│Client ⇒ API · HTTPS request
+│API ⇒ Orders DB · SQL query
+│ ── ATTACK SURFACE ───────────────────────────────────────────────────────────────────────────────────────────────────
+│2 high/critical, max 91, tiers critical=1, high=1, frameworks Axum=2, top critical POST /login
+│criticalAxum · POST /login · 91
+│high    Axum · GET /orders/:id · 72
+│▸ z open terrain visualization
+│ ── HOT MODULES ──────────────────────────────────────────────────────────────────────────────────────────────────────
+│auth  12.0 · 1C 0H 1M 0L 0I
+│api   7.0 · 0C 1H 1M 0L 0I
+│web   5.0 · 0C 1H 0M 0L 0I
+│src   1.0 · 0C 0H 0M 1L 0I
+│
+│
+│
+│
+│
+│
+│▸ PROJECT CONTEXT · NEXT SCANS
+│context:present · ⠋ context:build indexing repository context
+│NEXT SCANS
+│root · scan · never-scanned  no baseline recorded for any phase
+│
+│
 run route · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4 · ⠋ context:build ·...  6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt

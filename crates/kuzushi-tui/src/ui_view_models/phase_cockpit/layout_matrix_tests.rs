@@ -112,9 +112,20 @@ fn assert_matrix_cell(
         expected_primary(phase, state),
         "{cell}: primary"
     );
+    let expected_visible = if matches!(phase, WorkflowPhase::Map)
+        && matches!(
+            plan.density,
+            LayoutDensity::Dense | LayoutDensity::MasterDetail
+        ) {
+        // Map adopted the canvas+drawer composition: the data-flow canvas
+        // dominates and the readiness action card rides the drawer.
+        vec![PhaseSurfaceId::MapDfd, PhaseSurfaceId::MapReadiness]
+    } else {
+        surface_ids(&specs[..visible_count])
+    };
     assert_eq!(
         surface_ids(&plan.surfaces),
-        surface_ids(&specs[..visible_count]),
+        expected_visible,
         "{cell}: visible surface order"
     );
     assert!(plan.surfaces.len() <= 3, "{cell}: more than three surfaces");
@@ -136,11 +147,17 @@ fn assert_focus_restoration_for_state(phase: WorkflowPhase, state: SemanticFixtu
         return;
     }
     let body = fixture_body(phase, state);
-    let specs = phase_surface_specs(&body);
-    let Some(secondary) = specs.get(1) else {
+    let probe = phase_presentation_plan(
+        &body,
+        Rect::new(0, 0, 160, 48),
+        None,
+        None,
+        AttentionMode::Normal,
+    );
+    let Some(secondary) = probe.surfaces.get(1).map(|surface| surface.id) else {
         return;
     };
-    let focus = secondary.id;
+    let focus = secondary;
     let compact = phase_presentation_plan(
         &body,
         Rect::new(0, 0, 40, 12),
@@ -157,12 +174,14 @@ fn assert_focus_restoration_for_state(phase: WorkflowPhase, state: SemanticFixtu
     );
     let cell = format!("phase={phase:?} state={state:?}");
 
+    if !compact.surfaces.iter().any(|surface| surface.id == focus) {
+        assert_eq!(
+            compact.effective_focus, compact.primary,
+            "{cell}: compact fallback"
+        );
+    }
     assert_eq!(
-        compact.effective_focus, compact.primary,
-        "{cell}: compact fallback"
-    );
-    assert_eq!(
-        wide.effective_focus, secondary.id,
+        wide.effective_focus, secondary,
         "{cell}: stored focus was not restored"
     );
     assert_eq!(wide.effective_focus, focus, "{cell}: restored slot");
@@ -179,12 +198,12 @@ fn phase_presentation_matrix_restores_focus_after_attention_releases() {
 
 fn assert_attention_release_restores_focus(phase: WorkflowPhase, attention: AttentionMode) {
     let body = fixture_body(phase, SemanticFixture::Dense);
-    let specs = phase_surface_specs(&body);
-    let Some(secondary) = specs.get(1) else {
+    let area = Rect::new(0, 0, 160, 48);
+    let probe = phase_presentation_plan(&body, area, None, None, AttentionMode::Normal);
+    let Some(secondary) = probe.surfaces.get(1).map(|surface| surface.id) else {
         return;
     };
-    let focus = Some(secondary.id);
-    let area = Rect::new(0, 0, 160, 48);
+    let focus = Some(secondary);
     let owned = phase_presentation_plan(&body, area, focus, None, attention);
     let released = phase_presentation_plan(&body, area, focus, None, AttentionMode::Normal);
     let cell = format!("phase={phase:?} attention={attention:?}");
@@ -194,7 +213,7 @@ fn assert_attention_release_restores_focus(phase: WorkflowPhase, attention: Atte
         "{cell}: attention owner"
     );
     assert_eq!(
-        released.effective_focus, secondary.id,
+        released.effective_focus, secondary,
         "{cell}: focus after attention release"
     );
 }

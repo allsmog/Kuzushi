@@ -14,8 +14,16 @@ KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not bui
 │context:missing · Next: context build
 │○ scope tree    no persisted nested scopes yet; run `next` to map project boundaries
 
-
-
+          ┌ MAP · RESULT READY ──────────────────────────────────────────────────────────────────────────────┐
+          │MAP returned partial evidence. Review it and choose a recovery action.                            │
+          │1 canonical run reference(s) · legacy receipt metadata unavailable                                │
+          │next: workflow attempt ledger is degraded; repair it before selecting results                     │
+          │›  1 ● Open run evidence  RECOMMENDED · Inspect the canonical run receipt and trace.              │
+          │2 ○ Run again                                                                                     │
+          │3 ○ Discard                                                                                       │
+          │1/3 · ↑/↓ move · Enter choose · Esc dismiss                                                       │
+          │                                                                                                  │
+          └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 
 
 
@@ -31,12 +39,4 @@ KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not bui
 shell route · 1 result ready · workbench · Map 1/5 · ⛭ fix · workbench                                        0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
-┌ MAP · RESULT READY ──────────────────────────────────────────────────────────────────────────────────────────────────┐
-│MAP returned partial evidence. Review it and choose a recovery action.                                                │
-│1 canonical run reference(s) · legacy receipt metadata unavailable                                                    │
-│next: workflow attempt ledger is degraded; repair it before selecting results                                         │
-│›  1 ● Open run evidence  RECOMMENDED · Inspect the canonical run receipt and trace.                                  │
-│2 ○ Run again                                                                                                         │
-│3 ○ Discard                                                                                                           │
-│1/3 · ↑/↓ move · Enter choose · Esc dismiss                                                                           │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+◇ MAP › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

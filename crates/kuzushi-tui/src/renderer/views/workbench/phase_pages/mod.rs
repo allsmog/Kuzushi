@@ -2,6 +2,7 @@ use super::*;
 use crate::app::WorkbenchPaneScroll;
 use crate::ui_view_models::{
     LayoutDensity, PhaseCockpitBody, PhaseCockpitModel, PhasePresentationPlan, PhaseSurfaceId,
+    SurfaceRole,
 };
 use ratatui::layout::Rect;
 use ratatui::prelude::{Frame, Line, Span};
@@ -22,6 +23,9 @@ pub(in crate::renderer::views) struct PhaseRenderState<'a> {
     /// When set, the page renderer paints exactly this surface into the given
     /// rect; when `None`, the page falls back to its own internal grid.
     pub(super) surface: Option<PhaseSurfaceId>,
+    /// The composition role of `surface` — canvas and drawer regions render
+    /// with screen-specific chrome instead of the classic pane block.
+    pub(super) role: SurfaceRole,
     pub(super) scroll: &'a WorkbenchPaneScroll,
     pub(super) density: LayoutDensity,
 }
@@ -32,6 +36,7 @@ impl<'a> PhaseRenderState<'a> {
         Self {
             focus: (plan.density != LayoutDensity::Guided).then_some(plan.effective_focus),
             surface: route.zoom().surface(),
+            role: SurfaceRole::Standard,
             scroll: route.scroll(),
             density: plan.density,
         }
@@ -58,6 +63,7 @@ pub(in crate::renderer::views) fn render_phase_cockpit_body(
     for surface in &plan.surfaces {
         let surface_state = PhaseRenderState {
             surface: Some(surface.id),
+            role: plan.composition.role_of(surface.id),
             ..state
         };
         match &model.body {

@@ -24,7 +24,7 @@ mod map;
 mod phase_bodies;
 mod scan;
 
-pub(crate) use composition::{Composition, DrawerSize, DrawerSpec};
+pub(crate) use composition::{Composition, DrawerSize, DrawerSpec, SurfaceRole};
 use confirm::prove_phase_model;
 pub(crate) use layout::{
     phase_presentation_plan, phase_surface_specs, AttentionMode, LayoutDensity,

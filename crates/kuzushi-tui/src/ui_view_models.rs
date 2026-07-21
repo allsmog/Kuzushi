@@ -228,7 +228,7 @@ pub(crate) use phase_cockpit::{
     PhasePresentationPlan, PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface,
     ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel, RemediationLifecycleStage,
     RemediationLoadState, ReviewPhaseModel, ScanAttemptModel, ScanEngineOutcomeModel,
-    ScanPhaseModel, SelectionDisclosureModel, SurfaceInteraction, SurfaceState,
+    ScanPhaseModel, SelectionDisclosureModel, SurfaceInteraction, SurfaceRole, SurfaceState,
 };
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use planning_overview::{

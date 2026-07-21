@@ -14,8 +14,19 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
 │
 │
 
-
-
+          ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
+          │SCAN returned partial evidence. Review it and choose a recovery action.                           │
+          │1 canonical run reference(s) · legacy receipt metadata unavailable                                │
+          │next: select this Scan, then open Review                                                          │
+          │›  1 ● Use scan  RECOMMENDED · Select this attempt without leaving the current phase page.        │
+          │2 ○ Use scan & continue to Review                                                                 │
+          │3 ○ Open run evidence                                                                             │
+          │4 ○ Refine                                                                                        │
+          │5 ○ Run again                                                                                     │
+          │6 ○ Discard                                                                                       │
+          │1/6 · ↑/↓ move · Enter choose · Esc dismiss                                                       │
+          │                                                                                                  │
+          └──────────────────────────────────────────────────────────────────────────────────────────────────┘
 
 
 
@@ -28,15 +39,4 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
 shell route · 1 partial result · workbench · Map 1/5 · ⛭ fix · workbench                                      0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
-┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────────────────────────┐
-│SCAN returned partial evidence. Review it and choose a recovery action.                                               │
-│1 canonical run reference(s) · legacy receipt metadata unavailable                                                    │
-│next: select this Scan, then open Review                                                                              │
-│›  1 ● Use scan  RECOMMENDED · Select this attempt without leaving the current phase page.                            │
-│2 ○ Use scan & continue to Review                                                                                     │
-│3 ○ Open run evidence                                                                                                 │
-│4 ○ Refine                                                                                                            │
-│5 ○ Run again                                                                                                         │
-│6 ○ Discard                                                                                                           │
-│1/6 · ↑/↓ move · Enter choose · Esc dismiss                                                                           │
-└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+▦ SCAN › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

@@ -15,6 +15,15 @@ pub(super) fn render(
     _header: &EngagementHeaderModel,
     state: PhaseRenderState,
 ) {
+    match state.role {
+        crate::ui_view_models::SurfaceRole::Canvas => {
+            return render_map_canvas(frame, area, model, state);
+        }
+        crate::ui_view_models::SurfaceRole::Drawer => {
+            return render_map_action_card(frame, area, model, state);
+        }
+        crate::ui_view_models::SurfaceRole::Standard => {}
+    }
     if let Some(pane) = state.surface {
         render_map_pane(frame, area, model, state, pane);
         return;
@@ -91,6 +100,116 @@ fn render_compact(
         state.focus.unwrap_or(PhaseSurfaceId::MapReadiness),
         state,
     );
+}
+
+/// The dominant Map workspace: the repository/data-flow picture with attack
+/// surface and hot-module annotations folded in, replacing the four-pane grid.
+fn render_map_canvas(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &MapPhaseModel,
+    state: PhaseRenderState,
+) {
+    let width = area.width.saturating_sub(2) as usize;
+    let mut lines = vec![Line::from(vec![
+        Span::styled(fit(&model.project.scope_label, width), theme::heading()),
+        Span::styled(
+            format!(" · {}", model.project.revision_label),
+            theme::muted(),
+        ),
+    ])];
+    lines.extend(dfd_readiness_lines(&model.dfd, width));
+    lines.push(divider("ATTACK SURFACE", area.width.saturating_sub(2)));
+    lines.extend(attack_surface_lines(model.attack_surface.as_ref(), width));
+    lines.push(divider("HOT MODULES", area.width.saturating_sub(2)));
+    lines.extend(hot_module_lines(&model.hot_modules.modules, width));
+    render_lines_pane(
+        frame,
+        area,
+        "REPOSITORY / DATA-FLOW MAP · z visualize",
+        lines,
+        PhaseSurfaceId::MapDfd,
+        state,
+    );
+}
+
+/// The contextual action drawer: missing artifacts become inline actions
+/// instead of status text. The threat model is refined when one exists and
+/// bootstrapped when none does; either way it seeds scan recommendations and
+/// trust-boundary scope.
+fn render_map_action_card(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &MapPhaseModel,
+    state: PhaseRenderState,
+) {
+    let width = area.width.saturating_sub(2) as usize;
+    let (title, lines) = map_action_card_lines(model, width);
+    render_lines_pane(
+        frame,
+        area,
+        title,
+        lines,
+        PhaseSurfaceId::MapReadiness,
+        state,
+    );
+}
+
+fn map_action_card_lines(
+    model: &MapPhaseModel,
+    width: usize,
+) -> (&'static str, Vec<Line<'static>>) {
+    if model.dfd.empty_hint.is_some() || model.empty_hint.is_some() {
+        let mut lines = vec![
+            Line::styled(fit("⚠ No threat model detected", width), theme::warn()),
+            Line::styled(
+                fit(
+                    "generating one seeds scan recommendations and trust-boundary scope",
+                    width,
+                ),
+                theme::muted(),
+            ),
+            Line::styled(
+                fit("  [x] repository context and data flows", width),
+                theme::primary(),
+            ),
+            Line::styled(
+                fit("  [ ] existing PASTA model · [ ] external intel", width),
+                theme::muted(),
+            ),
+            Line::from(vec![
+                Span::styled("▸ Enter generate threat model", theme::accent()),
+                Span::styled("   Tab focus map · not now", theme::muted()),
+            ]),
+        ];
+        if let Some(hint) = model.empty_hint.as_deref() {
+            lines.insert(1, Line::styled(fit(hint, width), theme::muted()));
+        }
+        return ("NEXT ACTION", lines);
+    }
+    if model.context.state.eq_ignore_ascii_case("stale") {
+        let lines = vec![
+            Line::styled(
+                fit("⚠ threat model stale — refine recommended", width),
+                theme::warn(),
+            ),
+            Line::styled(
+                fit(&context_status_line(model), width),
+                artifact_state_style(model.context.state),
+            ),
+            Line::from(vec![
+                Span::styled("▸ Enter refine threat model", theme::accent()),
+                Span::styled("   keeps threat ids stable", theme::muted()),
+            ]),
+        ];
+        return ("NEXT ACTION", lines);
+    }
+    let mut lines = vec![Line::styled(
+        fit(&context_status_line(model), width),
+        artifact_state_style(model.context.state),
+    )];
+    lines.extend(next_scan_lines(&model.next_scans, width));
+    ("PROJECT CONTEXT · NEXT SCANS", lines)
 }
 
 fn render_map_pane(

@@ -80,7 +80,40 @@ const LOG_STRIP_ROWS: u16 = 4;
 const ACTION_MENU_MAX_ROWS: u16 = 12;
 const CENTERED_FORM_MAX_COLUMNS: u16 = 100;
 
+/// How a composition region should present itself: a canvas dominates the
+/// workspace, a drawer is a contextual action card, a standard region keeps
+/// the classic pane chrome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SurfaceRole {
+    Standard,
+    Canvas,
+    Drawer,
+}
+
 impl Composition {
+    /// The presentation role `surface` plays in this composition.
+    pub(crate) fn role_of(&self, surface: PhaseSurfaceId) -> SurfaceRole {
+        match self {
+            Self::CanvasWithDrawer { canvas, drawer } => {
+                if *canvas == surface {
+                    SurfaceRole::Canvas
+                } else if drawer.map(|spec| spec.surface) == Some(surface) {
+                    SurfaceRole::Drawer
+                } else {
+                    SurfaceRole::Standard
+                }
+            }
+            Self::ListDetail { drawer, .. } => {
+                if drawer.map(|spec| spec.surface) == Some(surface) {
+                    SurfaceRole::Drawer
+                } else {
+                    SurfaceRole::Standard
+                }
+            }
+            _ => SurfaceRole::Standard,
+        }
+    }
+
     /// The surface a degraded (single-region) rendering keeps.
     pub(crate) fn primary(&self) -> Option<PhaseSurfaceId> {
         match self {
