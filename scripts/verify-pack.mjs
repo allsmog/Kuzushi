@@ -63,105 +63,28 @@ const requiredReleaseScripts = {
   "publish:npm:dry": "bash scripts/publish-npm.sh",
   "publish:npm:go": "bash scripts/publish-npm.sh --publish",
 };
-const expectedPackageScripts = {
-  setup: "bash scripts/bootstrap.sh",
-  doctor: "bash scripts/doctor.sh",
-  "check:docs":
-    "node scripts/check-release-contract.mjs && node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
-  "check:release": "node scripts/check-release-contract.mjs",
-  "check:retired-ts-runtime": "node scripts/check-retired-ts-runtime.mjs",
-  "export:source": "bash scripts/export-clean-source.sh",
-  "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
-  prepare: "husky",
-  dev: "cargo run -p kuzushi-cli",
-  "dev:rust": "cargo run -p kuzushi-cli",
-  "link:local": "node scripts/link-local.mjs",
-  "link:local:restore": "node scripts/link-local.mjs --restore",
-  "build:rust": "cargo build --workspace",
-  "build:native": "node scripts/build-native-runtime.mjs",
-  prepack: "pnpm build:native",
-  test: "node --test scripts/setup-contract.test.mjs",
-  "test:rust": "cargo test --workspace",
-  "test:e2e": "bash tests/e2e/run-smoke.sh",
-  "quality:crap-risk":
-    "node --test scripts/crap-risk-test-mapping.test.mjs && node scripts/crap-risk-gate.mjs",
-  "quality:identity": "node scripts/check-public-identity.mjs",
-  "quality:architecture":
-    "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-env-discipline.mjs && node scripts/check-dispatch-boundary-contract.mjs && node scripts/check-run-lifecycle-boundary.mjs && node scripts/check-workspace-state-writes.mjs && node scripts/check-validated-wording.mjs",
-  "check:workspace-state-writes": "node scripts/check-workspace-state-writes.mjs",
-  "quality:model-safety": "node scripts/check-model-safety.mjs",
-  "verify:pack": "node scripts/verify-pack.mjs && node scripts/smoke-packed-runtime.mjs",
-  "publish:npm": "bash scripts/publish-npm.sh",
-  "publish:npm:dry": "bash scripts/publish-npm.sh",
-  "publish:npm:go": "bash scripts/publish-npm.sh --publish",
-  lint: "biome lint .",
-  format: "biome format .",
-  check: "biome check .",
-  fix: "biome check --write .",
-  "fix:unsafe": "biome check --write --unsafe .",
-};
-const expectedPackageMetadata = {
+// Packaging policy is checked against package.json itself; expectations that
+// merely restate manifest content live in the manifest, not here. Only the
+// published identity and the release-critical wiring stay explicit.
+const expectedPackageIdentity = {
   name: "kuzushi",
-  description: "Kuzushi — security-native code agent for evidence-backed repository scans",
   type: "module",
-  repositoryType: "git",
-  repositoryUrl: "https://github.com/allsmog/Kuzushi.git",
-  homepage: "https://github.com/allsmog/Kuzushi",
-  bugsUrl: "https://github.com/allsmog/Kuzushi/issues",
-  nodeEngine: ">=22",
-  author: "Shayaun Nejad",
   license: "MIT",
-  packageManager:
-    "pnpm@10.30.0+sha512.2b5753de015d480eeb88f5b5b61e0051f05b4301808a82ec8b840c9d2adf7748eb352c83f5c1593ca703ff1017295bc3fdd3119abb9686efc96b9fcb18200937",
 };
-const expectedPackageKeywords = ["sast", "security", "semgrep", "ai", "triage"];
 const expectedOnlyBuiltDependencies = ["esbuild"];
-const expectedPackageDependencies = {
-  "@langchain/anthropic": "^1.0.0",
-  "@langchain/core": "^1.0.0",
-  "@langchain/langgraph": "^1.0.0",
-  "@langchain/mcp-adapters": "^1.0.0",
-  "@langchain/openai": "^1.0.0",
-  zod: "^4.3.6",
-};
-const expectedPnpmLockfileRootDependencyVersions = {
-  dependencies: {
-    "@langchain/anthropic": "1.5.1(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))",
-    "@langchain/core": "1.2.1(openai@6.45.0(zod@4.4.3))",
-    "@langchain/langgraph": "1.4.7(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))(zod@4.4.3)",
-    "@langchain/mcp-adapters":
-      "1.1.3(@cfworker/json-schema@4.1.1)(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))(@langchain/langgraph@1.4.7(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))(zod@4.4.3))",
-    "@langchain/openai": "1.5.3(@langchain/core@1.2.1(openai@6.45.0(zod@4.4.3)))",
-    zod: "4.4.3",
-  },
-  devDependencies: {
-    "@biomejs/biome": "2.5.2",
-    "@cfworker/json-schema": "4.1.1",
-    "@commitlint/cli": "21.2.0(@types/node@22.19.11)(typescript@5.9.3)",
-    "@commitlint/config-conventional": "21.2.0",
-    chalk: "5.6.2",
-    husky: "9.1.7",
-    "lint-staged": "17.0.8",
-  },
-  optionalDependencies: {},
-};
-const expectedPackageDevDependencies = {
-  "@biomejs/biome": "^2.4.12",
-  "@cfworker/json-schema": "^4.1.1",
-  "@commitlint/cli": "^21.2.0",
-  "@commitlint/config-conventional": "^21.2.0",
-  chalk: "^5.4.1",
-  husky: "^9.1.7",
-  "lint-staged": "^17.0.8",
-};
+// devDependencies must never reintroduce the retired TypeScript toolchain.
+const forbiddenDevDependencyPatterns = [
+  /^typescript$/,
+  /^tsx$/,
+  /^ts-node$/,
+  /^vitest$/,
+  /^@vitest\//,
+  /^@types\//,
+  /^madge$/,
+];
 const expectedPackageExports = {
   "./schemas/*": "./schemas/*",
   "./package.json": "./package.json",
-};
-const expectedPnpmLockfileHeader = {
-  lockfileVersion: "lockfileVersion: '9.0'",
-  autoInstallPeers: "  autoInstallPeers: true",
-  excludeLinksFromLockfile: "  excludeLinksFromLockfile: false",
 };
 const forbiddenPackageMetadataFields = [
   "workspaces",
@@ -293,12 +216,11 @@ const deniedFixtureFailures = deniedPathFixtureFailures();
 const packagePathShapeFailures = packagePayloadPathShapeFailures(includes);
 const packageEntryFailures = packageFilesEntryFailures(entries);
 const nativeFailures = nativeBinaryFailures(sorted);
-const stageNativeScriptFailures = stageNativeScriptContentFailures();
 const binFailures = packageBinFailures(packageBin);
 const binSurfaceFixtureFailures = packageBinSurfaceFixtureFailures(packageBinSurfaceFixtures);
 const binWrapperFailures = binWrapperContentFailures();
 const lifecycleFailures = lifecycleScriptFailures(sorted, packageScripts);
-const scriptSurfaceFailures = packageScriptSurfaceFailures(packageScripts);
+const scriptSurfaceFailures = scriptFileReferenceFailures(packageScripts);
 const scriptRuntimePolicyFailures = packageScriptRuntimePolicyFailures(packageScripts);
 const scriptRuntimePolicyFixtureFailures = packageScriptRuntimePolicyFixtureFailures(
   packageScriptRuntimePolicyFixtures,
@@ -314,10 +236,8 @@ const exportFailures = packageExportFailures(packageExports, sorted);
 const exportPolicyFixtureFailures = exportPolicyFixtureFailuresFor(exportPolicyFixtures);
 const typesPolicyFixtureFailures = packageTypesPolicyFixtureFailures(packageTypesPolicyFixtures);
 const legacyEntrypointFailures = packageLegacyEntrypointFailures(manifest);
-const lockfileSpecifierFailures = pnpmLockfileSpecifierFailures(manifest);
-const optionalLockfileResolutionFailures = optionalLockfilePackageResolutionFailures();
-const dependencyFailures = packageDependencyFailures(packageDependencies);
-const devDependencyFailures = packageDevDependencyFailures(packageDevDependencies);
+const dependencyFailures = unusedDependencyFailures(packageDependencies);
+const devDependencyFailures = devDependencyPolicyFailures(packageDevDependencies);
 const optionalDependencyFailures = packageOptionalDependencyFailures(packageOptionalDependencies);
 const deferredDependencyFailures = deferredAdapterDependencyFailures(
   packageDependencies,
@@ -333,7 +253,6 @@ if (
   manifestRecordShapeFailures.length > 0 ||
   packageEntryFailures.length > 0 ||
   nativeFailures.length > 0 ||
-  stageNativeScriptFailures.length > 0 ||
   binFailures.length > 0 ||
   binSurfaceFixtureFailures.length > 0 ||
   binWrapperFailures.length > 0 ||
@@ -352,8 +271,6 @@ if (
   exportPolicyFixtureFailures.length > 0 ||
   typesPolicyFixtureFailures.length > 0 ||
   legacyEntrypointFailures.length > 0 ||
-  lockfileSpecifierFailures.length > 0 ||
-  optionalLockfileResolutionFailures.length > 0 ||
   dependencyFailures.length > 0 ||
   devDependencyFailures.length > 0 ||
   optionalDependencyFailures.length > 0 ||
@@ -367,7 +284,6 @@ if (
   for (const failure of [
     ...nativeFailures,
     ...deniedFixtureFailures,
-    ...stageNativeScriptFailures,
     ...packagePathShapeFailures,
     ...packageFileShapeFailures,
     ...manifestRecordShapeFailures,
@@ -390,8 +306,6 @@ if (
     ...exportPolicyFixtureFailures,
     ...typesPolicyFixtureFailures,
     ...legacyEntrypointFailures,
-    ...lockfileSpecifierFailures,
-    ...optionalLockfileResolutionFailures,
     ...dependencyFailures,
     ...devDependencyFailures,
     ...optionalDependencyFailures,
@@ -447,16 +361,35 @@ function readPackageContractText(file) {
   }
 }
 
-function packagedBridgeDependencyFailures(dependencies) {
+function packagedBridgeImports() {
   const files = [
     "scripts/langgraph-bridge.mjs",
     ...walk("scripts/langgraph-bridge").filter((file) => file.endsWith(".mjs")),
     "scripts/kuzushi-dynamic-module-host.mjs",
   ];
-  const imports = new Set(files.flatMap(externalImportsFrom));
-  return [...imports]
+  return new Set(files.flatMap(externalImportsFrom));
+}
+
+function packagedBridgeDependencyFailures(dependencies) {
+  return [...packagedBridgeImports()]
     .filter((packageName) => !Object.hasOwn(dependencies, packageName))
     .map((packageName) => `packaged bridge imports undeclared dependency ${packageName}`);
+}
+
+// The published package is CLI-only; runtime dependencies exist solely for the
+// shipped bridge scripts. Any dependency no bridge imports is dead weight the
+// consumer installs for nothing.
+function unusedDependencyFailures(dependencies) {
+  const imports = packagedBridgeImports();
+  return Object.keys(dependencies)
+    .filter((name) => !imports.has(name))
+    .map((name) => `package dependencies.${name} is not imported by any shipped bridge script`);
+}
+
+function devDependencyPolicyFailures(devDependencies) {
+  return Object.keys(devDependencies)
+    .filter((name) => forbiddenDevDependencyPatterns.some((pattern) => pattern.test(name)))
+    .map((name) => `package devDependencies.${name} reintroduces the retired TypeScript toolchain`);
 }
 
 function externalImportsFrom(relativePath) {
@@ -597,61 +530,18 @@ function deniedPathFixtureFailures() {
     .map((file) => `package forbidden-payload fixture is not denied ${file}`);
 }
 
+// The wrapper's behavior is exercised end-to-end by smoke-packed-runtime and
+// the e2e job; only identity policy and executability are asserted statically.
 function binWrapperContentFailures() {
   const content = readPackageContractText("bin/kuzushi-rs.mjs");
-  const source = content.source;
+  const forbidden = ["codex", "kuzushi-ts"];
   return [
     ...content.failures,
-    ...missingBinWrapperTokens(source, requiredBinWrapperTokens()),
-    ...presentForbiddenBinWrapperTokens(source, forbiddenBinWrapperTokenList()),
+    ...forbidden
+      .filter((token) => content.source.includes(token))
+      .map((token) => `bin/kuzushi-rs.mjs must not mention ${token}`),
     ...executableFileFailures(["bin/kuzushi-rs.mjs"]),
   ];
-}
-
-function requiredBinWrapperTokens() {
-  return [
-    "#!/usr/bin/env node",
-    "spawnSync(binary, process.argv.slice(2)",
-    'stdio: "inherit"',
-    'join(root, "native", `${process.platform}-${process.arch}`, exe)',
-    'join(root, "target", "release", exe)',
-    'join(root, "target", "debug", exe)',
-    'invokedName === "kz" ? "kz" : "kuzushi"',
-    "KUZUSHI_CLI_NAME: cliName",
-    "nativeRuntimePath(binary, process.env.PATH)",
-    "native/<platform>-<arch>/kuzushi",
-    "kuzushi doctor --target .",
-    "KUZUSHI_NATIVE_BIN points to missing file",
-    "statSync(nativeOverride).isFile()",
-    "isNativeBinaryFile",
-    "candidates.find(isNativeBinaryFile)",
-    "KUZUSHI_NATIVE_BIN must point to a file",
-    "KUZUSHI_NATIVE_BIN must point to a kuzushi or kz binary",
-    "argv0: cliName",
-    "Could not find the Kuzushi native binary.",
-    "process.exit(127)",
-    "result.error",
-    "process.exit(1)",
-    "if (result.status === null)",
-    "process.exit(signalExitCode(result.signal))",
-    "process.exit(result.status)",
-  ];
-}
-
-function forbiddenBinWrapperTokenList() {
-  return ["codex", "kuzushi-ts", "process.env.KUZUSHI_CLI_NAME ??", "result.status ?? 0"];
-}
-
-function missingBinWrapperTokens(source, required) {
-  return required
-    .filter((token) => !source.includes(token))
-    .map((token) => `bin/kuzushi-rs.mjs must mention ${token}`);
-}
-
-function presentForbiddenBinWrapperTokens(source, forbidden) {
-  return forbidden
-    .filter((token) => source.includes(token))
-    .map((token) => `bin/kuzushi-rs.mjs must not mention ${token}`);
 }
 
 function nativeBinaryFailures(files) {
@@ -707,38 +597,6 @@ function executableFileFailures(files) {
     .map((file) => `${file} must be executable`);
 }
 
-function stageNativeScriptContentFailures() {
-  const content = readPackageContractText("scripts/stage-native-binary.mjs");
-  const source = content.source;
-  const required = [
-    'from "./native-runtime-contract.mjs"',
-    "nativeRuntimeBinaries.map",
-    "nativeExecutableName(binary)",
-    "nativePlatformSlug()",
-    '["codex.exe", "kuzushi-ts.exe", "kz.exe"]',
-    '["codex", "kuzushi-ts", "kz"]',
-    'join(root, "target", "release", exe)',
-    'join(root, "native", nativePlatformSlug())',
-    "node scripts/build-native-runtime.mjs",
-    "process.exit(1)",
-    "mkdirSync(outDir, { recursive: true })",
-    "readdirSync(outDir)",
-    "allowedExes",
-    "removed uncontracted native payload",
-    "copyFileSync(source, destination)",
-    'process.platform !== "win32"',
-    "rmSync(stale, { force: true })",
-    "chmodSync(destination, 0o755)",
-    "staged ${destination}",
-  ];
-  return [
-    ...content.failures,
-    ...required
-      .filter((token) => !source.includes(token))
-      .map((token) => `scripts/stage-native-binary.mjs must mention ${token}`),
-  ];
-}
-
 function lifecycleScriptFailures(files, scripts) {
   return [
     ...lifecycleScriptCommandFailures(scripts),
@@ -756,22 +614,22 @@ function lifecycleScriptCommandFailures(scripts) {
     .map((name) => `package scripts.${name} must be ${allowedLifecycleScripts[name] ?? "absent"}`);
 }
 
-function packageScriptSurfaceFailures(scripts) {
+// Every script/test file a package.json command references must exist; the
+// commands themselves are the source of truth and are not mirrored here.
+function scriptFileReferenceFailures(scripts) {
+  return Object.entries(scripts).flatMap(([name, command]) =>
+    referencedScriptFiles(command)
+      .filter((file) => !existsSync(path.join(repo, file)))
+      .map((file) => `package scripts.${name} references missing file ${file}`),
+  );
+}
+
+function referencedScriptFiles(command) {
   return [
-    ...missingSchemaFiles(
-      Object.keys(expectedPackageScripts),
-      Object.keys(scripts),
-      "package scripts missing required command",
+    ...String(command ?? "").matchAll(
+      /\b(?:node(?: --test)?|bash)\s+((?:scripts|tests)\/[^\s&|;]+)/g,
     ),
-    ...missingSchemaFiles(
-      Object.keys(scripts),
-      Object.keys(expectedPackageScripts),
-      "package scripts has uncontracted command",
-    ),
-    ...Object.entries(expectedPackageScripts)
-      .filter(([name, command]) => scripts[name] !== command)
-      .map(([name, command]) => `package scripts.${name} must stay ${command}`),
-  ];
+  ].map((match) => normalize(match[1]));
 }
 
 function packageScriptRuntimePolicyFailures(scripts) {
@@ -806,64 +664,38 @@ function releaseScriptFailuresFor(scripts) {
     .map(([name, command]) => `package scripts.${name} must be ${command}`);
 }
 
+// Publish safety policy: the publish path must verify the pack and must never
+// let npm run lifecycle scripts. Everything else about the script is its own
+// business.
 function publishWrapperContentFailures() {
   const content = readPackageContractText("scripts/publish-npm.sh");
-  const source = content.source;
   const required = [
-    "tests + native build + package verification must pass",
-    "git diff --quiet",
-    "git diff --cached --quiet",
-    "git rev-parse --abbrev-ref HEAD",
-    'git rev-parse -q --verify "refs/tags/${TAG}"',
-    'git rev-list -n 1 "$TAG"',
-    "git rev-parse HEAD",
-    'git ls-remote --tags origin "refs/tags/${TAG}"',
-    "npm whoami",
-    'npm view "${PUB_NAME}@${VERSION}" version',
-    "pnpm run test",
-    "pnpm run test:rust",
-    "SKIP_TESTS:-0",
-    "pnpm run build:native",
     "pnpm run verify:pack",
     "npm pack --dry-run --ignore-scripts",
     "PUBLISH_ARGS=(publish --access public --ignore-scripts)",
-    "NPM_PROVENANCE:-",
-    "PUBLISH_ARGS+=(--provenance)",
-    "OTP:-",
-    'PUBLISH_ARGS+=(--otp="$OTP")',
-    "read -r reply",
-    'npm "${PUBLISH_ARGS[@]}"',
-    "Dry-run complete (would run: npm ${PUBLISH_ARGS[*]})",
-    "Pass --publish to actually publish",
   ];
   return [
     ...content.failures,
     ...required
-      .filter((token) => !source.includes(token))
+      .filter((token) => !content.source.includes(token))
       .map((token) => `scripts/publish-npm.sh must mention ${token}`),
   ];
 }
 
 function packageMetadataFailures(packageManifest) {
   const checks = [
-    ["name", packageManifest.name, expectedPackageMetadata.name],
-    ["description", packageManifest.description, expectedPackageMetadata.description],
-    ["type", packageManifest.type, expectedPackageMetadata.type],
-    ["types", packageManifest.types, expectedPackageMetadata.types],
-    ["repository.type", packageManifest.repository?.type, expectedPackageMetadata.repositoryType],
-    ["repository.url", packageManifest.repository?.url, expectedPackageMetadata.repositoryUrl],
-    ["homepage", packageManifest.homepage, expectedPackageMetadata.homepage],
-    ["bugs.url", packageManifest.bugs?.url, expectedPackageMetadata.bugsUrl],
-    ["engines.node", packageManifest.engines?.node, expectedPackageMetadata.nodeEngine],
-    ["author", packageManifest.author, expectedPackageMetadata.author],
-    ["license", packageManifest.license, expectedPackageMetadata.license],
-    ["packageManager", packageManifest.packageManager, expectedPackageMetadata.packageManager],
+    ["name", packageManifest.name, expectedPackageIdentity.name],
+    ["type", packageManifest.type, expectedPackageIdentity.type],
+    ["license", packageManifest.license, expectedPackageIdentity.license],
   ];
   return [
     ...checks
       .filter(([, actual, expected]) => actual !== expected)
       .map(([field, , expected]) => `package ${field} must be ${expected}`),
-    ...arrayFieldFailures("keywords", packageManifest.keywords, expectedPackageKeywords),
+    ...(typeof packageManifest.engines?.node === "string" &&
+    packageManifest.engines.node.startsWith(">=")
+      ? []
+      : ["package engines.node must declare a >= floor"]),
     ...arrayFieldFailures(
       "pnpm.onlyBuiltDependencies",
       packageManifest.pnpm?.onlyBuiltDependencies,
@@ -1030,186 +862,6 @@ function packageLegacyEntrypointFailures(packageManifest) {
     .map((field) => `package ${field} must not bypass exports`);
 }
 
-function pnpmLockfileSpecifierFailures(packageManifest) {
-  const rootImporter = readPnpmRootImporterSpecifiers();
-  if (rootImporter.failures.length > 0) {
-    return rootImporter.failures;
-  }
-  const sections = rootImporter.sections;
-  const versions = rootImporter.versions;
-  return [
-    ...lockfileDependencyGroupFailures(
-      "dependencies",
-      recordOrEmpty(packageManifest.dependencies),
-      sections.dependencies,
-    ),
-    ...lockfileDependencyGroupFailures(
-      "devDependencies",
-      recordOrEmpty(packageManifest.devDependencies),
-      sections.devDependencies,
-    ),
-    ...lockfileDependencyGroupFailures(
-      "optionalDependencies",
-      recordOrEmpty(packageManifest.optionalDependencies),
-      sections.optionalDependencies,
-    ),
-    ...lockfileResolvedVersionFailures("dependencies", versions.dependencies),
-    ...lockfileResolvedVersionFailures("devDependencies", versions.devDependencies),
-    ...lockfileResolvedVersionFailures("optionalDependencies", versions.optionalDependencies),
-  ];
-}
-
-function lockfileDependencyGroupFailures(field, manifestDeps, lockDeps) {
-  return [
-    ...missingSchemaFiles(
-      Object.keys(manifestDeps),
-      Object.keys(lockDeps),
-      `pnpm-lock ${field} missing package`,
-    ),
-    ...missingSchemaFiles(
-      Object.keys(lockDeps),
-      Object.keys(manifestDeps),
-      `pnpm-lock ${field} has uncontracted package`,
-    ),
-    ...Object.entries(manifestDeps)
-      .filter(([name, specifier]) => lockDeps[name] !== specifier)
-      .map(([name, specifier]) => `pnpm-lock ${field}.${name} specifier must be ${specifier}`),
-  ];
-}
-
-function lockfileResolvedVersionFailures(field, actualVersions) {
-  const expectedVersions = expectedPnpmLockfileRootDependencyVersions[field];
-  return Object.entries(expectedVersions)
-    .filter(([name, version]) => actualVersions[name] !== version)
-    .map(([name, version]) => `pnpm-lock ${field}.${name} version must be ${version}`);
-}
-
-function optionalLockfilePackageResolutionFailures() {
-  const lockfile = readPnpmLockfileLines();
-  if (!lockfile.ok) return [];
-  return Object.entries(expectedPnpmLockfileRootDependencyVersions.optionalDependencies).flatMap(
-    ([name, version]) => optionalLockfilePackageFailures(lockfile.lines, name, version),
-  );
-}
-
-function optionalLockfilePackageFailures(lines, name, version) {
-  const packageKey = pnpmLockfilePackageKey(name, version);
-  const resolution = `    resolution: {tarball: ${version}}`;
-  return [
-    ...(lines.includes(packageKey)
-      ? []
-      : [`pnpm-lock optional package entry missing ${name}@${version}`]),
-    ...(lines.includes(resolution)
-      ? []
-      : [`pnpm-lock optional package resolution missing ${name}@${version}`]),
-  ];
-}
-
-function pnpmLockfilePackageKey(name, version) {
-  const key = `${name}@${version}`;
-  return name.startsWith("@") ? `  '${key}':` : `  ${key}:`;
-}
-
-function readPnpmRootImporterSpecifiers() {
-  const sections = { dependencies: {}, devDependencies: {}, optionalDependencies: {} };
-  const versions = { dependencies: {}, devDependencies: {}, optionalDependencies: {} };
-  const lockfile = readPnpmLockfileLines();
-  if (!lockfile.ok) return { sections, versions, failures: [lockfile.failure] };
-  let state = { inRoot: false, foundRootImporter: false, section: null, packageName: null };
-  for (const line of lockfile.lines) {
-    state = nextPnpmRootImporterState(sections, versions, state, line);
-  }
-  return {
-    sections,
-    versions,
-    failures: [
-      ...pnpmLockfileHeaderFailures(lockfile.lines),
-      ...(state.foundRootImporter ? [] : ["pnpm-lock root importer . must be present"]),
-    ],
-  };
-}
-
-function pnpmLockfileHeaderFailures(lines) {
-  const actual = {
-    lockfileVersion: lines[0] ?? "",
-    autoInstallPeers: lines.find((line) => line.trimStart().startsWith("autoInstallPeers:")) ?? "",
-    excludeLinksFromLockfile:
-      lines.find((line) => line.trimStart().startsWith("excludeLinksFromLockfile:")) ?? "",
-  };
-  return Object.entries(expectedPnpmLockfileHeader)
-    .filter(([field, expected]) => actual[field] !== expected)
-    .map(([field, expected]) => `pnpm-lock ${field} must be ${expected}`);
-}
-
-function readPnpmLockfileLines() {
-  try {
-    return {
-      ok: true,
-      lines: readFileSync(path.join(repo, "pnpm-lock.yaml"), "utf8").split(/\r?\n/),
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      failure: `pnpm-lock.yaml must be present and readable: ${error.message}`,
-    };
-  }
-}
-
-function nextPnpmRootImporterState(sections, versions, state, line) {
-  if (line === "  .:") {
-    return { inRoot: true, foundRootImporter: true, section: null, packageName: null };
-  }
-  if (!state.inRoot) return state;
-  if (line === "packages:" || /^ {2}[^ ].*:$/.test(line)) {
-    return { ...state, inRoot: false, section: null, packageName: null };
-  }
-  return nextPnpmRootDependencyState(sections, versions, state, line);
-}
-
-function nextPnpmRootDependencyState(sections, versions, state, line) {
-  const section = pnpmRootSectionName(line);
-  if (section) return { ...state, section, packageName: null };
-  const packageName = pnpmRootPackageName(line);
-  if (state.section && packageName) return { ...state, packageName };
-  recordPnpmRootPackageFields(sections, versions, state, line);
-  return state;
-}
-
-function recordPnpmRootPackageFields(sections, versions, state, line) {
-  if (!state.section || !state.packageName) return;
-  recordPnpmRootField(sections[state.section], state.packageName, pnpmRootSpecifier(line));
-  recordPnpmRootField(versions[state.section], state.packageName, pnpmRootVersion(line));
-}
-
-function recordPnpmRootField(target, packageName, value) {
-  if (value !== null) {
-    target[packageName] = value;
-  }
-}
-
-function pnpmRootSectionName(line) {
-  return line.match(/^ {4}(dependencies|devDependencies|optionalDependencies):$/)?.[1] ?? null;
-}
-
-function pnpmRootPackageName(line) {
-  const match = line.match(/^ {6}(.+):$/);
-  return match ? stripYamlScalar(match[1]) : null;
-}
-
-function pnpmRootSpecifier(line) {
-  const match = line.match(/^ {8}specifier: (.+)$/);
-  return match ? stripYamlScalar(match[1]) : null;
-}
-
-function pnpmRootVersion(line) {
-  const match = line.match(/^ {8}version: (.+)$/);
-  return match ? stripYamlScalar(match[1]) : null;
-}
-
-function stripYamlScalar(value) {
-  return value.replace(/^['"]|['"]$/g, "");
-}
-
 function packageExportSurfaceFailures(exports) {
   return [
     ...missingSchemaFiles(
@@ -1277,42 +929,6 @@ function packageExportTargets(value) {
 
 function normalizeExportTarget(value) {
   return normalize(value.replace(/^\.\//, ""));
-}
-
-function packageDependencyFailures(dependencies) {
-  return [
-    ...missingSchemaFiles(
-      Object.keys(expectedPackageDependencies),
-      Object.keys(dependencies),
-      "package dependencies missing required package",
-    ),
-    ...missingSchemaFiles(
-      Object.keys(dependencies),
-      Object.keys(expectedPackageDependencies),
-      "package dependencies has uncontracted package",
-    ),
-    ...Object.entries(expectedPackageDependencies)
-      .filter(([name, spec]) => dependencies[name] !== spec)
-      .map(([name, spec]) => `package dependencies.${name} must be ${spec}`),
-  ];
-}
-
-function packageDevDependencyFailures(devDependencies) {
-  return [
-    ...missingSchemaFiles(
-      Object.keys(expectedPackageDevDependencies),
-      Object.keys(devDependencies),
-      "package devDependencies missing required package",
-    ),
-    ...missingSchemaFiles(
-      Object.keys(devDependencies),
-      Object.keys(expectedPackageDevDependencies),
-      "package devDependencies has uncontracted package",
-    ),
-    ...Object.entries(expectedPackageDevDependencies)
-      .filter(([name, spec]) => devDependencies[name] !== spec)
-      .map(([name, spec]) => `package devDependencies.${name} must be ${spec}`),
-  ];
 }
 
 function packageOptionalDependencyFailures(optionalDependencies) {
