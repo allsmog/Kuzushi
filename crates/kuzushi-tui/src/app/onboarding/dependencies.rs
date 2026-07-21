@@ -17,6 +17,7 @@ pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
         BuildCodePropertyGraph => &[GatherRepoContext],
         BuildCodeQlDatabase => &[GatherRepoContext],
         ThreatIntelCves => &[GatherRepoContext],
+        MapFuzzAuthor => &[GatherRepoContext],
         ReverseEngineerBinary => &[GatherRepoContext],
         // 崩 KUZUSHI · hunt — some hunts need a Map-phase artifact first.
         ScanSecrets => &[GatherRepoContext],
@@ -26,6 +27,7 @@ pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
         HuntTaint => &[BuildCodePropertyGraph],
         HuntThreatModel => &[BuildStrideThreatModel],
         HuntSystems => &[GatherRepoContext],
+        ScanFuzz => &[GatherRepoContext],
         HuntUseAfterFree => &[GatherRepoContext],
         // 作 TSUKURI · confirm — triage then verify the findings.
         TriageFindings => &[GatherRepoContext],

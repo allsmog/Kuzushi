@@ -163,3 +163,69 @@ fn directory_hydration_rejects_symlinked_prompt_roots() {
         ViewHydrationValue::DirectoryListing(DirectoryListingState::Unreadable)
     ));
 }
+
+#[test]
+fn scanned_snippet_hydration_slices_the_observation_blob_window() {
+    let target = tempfile::tempdir().unwrap();
+    let source_path = target.path().join("src/app.rs");
+    std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &source_path,
+        "fn handler(term: &str) {\n    db.query(term);\n}\n",
+    )
+    .unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+    let run_id = "run-scanned-snippet";
+    store
+        .record_run_started(run_id, target.path(), "running")
+        .unwrap();
+    let finding = kuzushi_core::Finding::new_tool(
+        "semgrep",
+        "rules.cwe-89",
+        "src/app.rs",
+        2,
+        Some(2),
+        kuzushi_core::Severity::High,
+        "SQL injection reaches query builder, CWE-89",
+    );
+    store.insert_finding(run_id, &finding).unwrap();
+    let stored = store.list_findings_for_scan_id(run_id).unwrap();
+    let stable_fp = stored[0].identity_id.clone().unwrap();
+    drop(store);
+
+    let value = FsViewArtifactReader.read(
+        target.path(),
+        &ViewHydrationKey::ScannedSnippet {
+            stable_fp,
+            scan_id: Some(run_id.to_string()),
+            focus_line: 2,
+        },
+    );
+
+    let ViewHydrationValue::ScannedSnippet(ScannedSnippetState::Ready(window)) = value else {
+        panic!("scanned snippet hydration returned the wrong state: {value:?}");
+    };
+    assert_eq!(window.focus_line, 2);
+    assert_eq!(window.start_line, 1);
+    assert_eq!(window.lines[1], "    db.query(term);");
+}
+
+#[test]
+fn scanned_snippet_hydration_reports_missing_without_a_stored_blob() {
+    let target = tempfile::tempdir().unwrap();
+
+    let value = FsViewArtifactReader.read(
+        target.path(),
+        &ViewHydrationKey::ScannedSnippet {
+            stable_fp: "unknown-identity".to_string(),
+            scan_id: None,
+            focus_line: 5,
+        },
+    );
+
+    assert!(matches!(
+        value,
+        ViewHydrationValue::ScannedSnippet(ScannedSnippetState::Missing)
+    ));
+}

@@ -21,6 +21,7 @@ use kuzushi_core::{
 use map_artifacts_cache::MapArtifactsCache;
 use prompt_override_cache::PromptOverrideCache;
 use remediation_projection::FindingPatchTruthCache;
+use scanned_snippet::ScannedSnippetCache;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -34,6 +35,7 @@ mod hydration_state;
 mod map_artifacts_cache;
 mod prompt_override_cache;
 mod remediation_projection;
+mod scanned_snippet;
 #[cfg(test)]
 mod tests;
 mod view_model_fragments;
@@ -81,6 +83,7 @@ pub(crate) struct WorkbenchCache {
     health_checks: BTreeMap<String, ViewHealthChecks>,
     finding_aliases: FindingAliasCache,
     finding_patch_truth: FindingPatchTruthCache,
+    scanned_snippets: ScannedSnippetCache,
     view_models: ViewModelFragmentCache,
     hydrating_view_data: BTreeSet<(PathBuf, ViewHydrationKey)>,
 }
@@ -385,6 +388,7 @@ impl WorkbenchCache {
         self.run_artifact_texts.clear();
         drop_unsettled_scan_stage_receipts(&mut self.scan_stage_receipts);
         self.finding_patch_truth.invalidate(None);
+        self.scanned_snippets.invalidate();
         self.map_artifacts.invalidate();
         self.scan_recommendations = None;
         self.prompt_overrides.invalidate();
@@ -418,6 +422,7 @@ impl WorkbenchCache {
         if findings_changed {
             self.finding_completion_values = None;
             self.finding_patch_truth.invalidate(None);
+            self.scanned_snippets.invalidate();
         }
         self.bump_completion_generation_when(findings_changed | run_summaries_changed);
         self.strategy_queue = None;
@@ -506,6 +511,7 @@ impl WorkbenchCache {
             .retain(|cached, _| !cached.starts_with(state_root));
         self.map_artifacts.invalidate();
         self.finding_patch_truth.invalidate(None);
+        self.scanned_snippets.invalidate();
     }
 
     pub(crate) fn project_scope_tree(

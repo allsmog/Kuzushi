@@ -366,6 +366,12 @@ fn review_page_action_keybindings(backlog: bool) -> Vec<ViewKeybinding> {
         bind_char('D', "D", "cluster", ViewHotkeyAction::WorkbenchCluster),
         bind_char('C', "C", "chains", ViewHotkeyAction::WorkbenchChainFold),
         bind_char(
+            'i',
+            "i",
+            "invariant hunt",
+            ViewHotkeyAction::WorkbenchInvariantHunt,
+        ),
+        bind_char(
             'B',
             "B",
             if backlog { "backlog off" } else { "backlog" },

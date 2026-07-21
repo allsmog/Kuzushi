@@ -38,15 +38,9 @@ pub(crate) fn finding_patch_truth_for_target(
     fingerprint: &str,
     finding_scan_id: Option<&str>,
 ) -> Result<Option<FindingPatchTruth>> {
-    let workspace = WorkspaceTarget::new(target)?;
-    let path = workspace.findings_db_path();
-    match std::fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => anyhow::bail!("findings DB path is not a regular file: {}", path.display()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error.into()),
-    }
-    let store = FindingStore::open_read_only(path)?;
+    let Some(store) = open_existing_finding_store_read_only(target)? else {
+        return Ok(None);
+    };
     let latest_result = store.latest_patch_attempt_summary_for_finding(fingerprint)?;
     let lifecycle = store.latest_patch_lifecycle_for_finding(fingerprint)?;
     let lifecycle_matches_finding_generation = lifecycle
@@ -57,6 +51,72 @@ pub(crate) fn finding_patch_truth_for_target(
         lifecycle,
         lifecycle_matches_finding_generation,
     }))
+}
+
+fn open_existing_finding_store_read_only(target: &Path) -> Result<Option<FindingStore>> {
+    let workspace = WorkspaceTarget::new(target)?;
+    let path = workspace.findings_db_path();
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => anyhow::bail!("findings DB path is not a regular file: {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    }
+    Ok(Some(FindingStore::open_read_only(path)?))
+}
+
+/// Scanned-time source context for a finding, sliced from the observation
+/// blob that stored the whole cited file at insert time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ScannedSnippetWindow {
+    pub(crate) start_line: usize,
+    pub(crate) focus_line: usize,
+    pub(crate) lines: Vec<String>,
+}
+
+pub(crate) fn scanned_snippet_for_target(
+    target: &Path,
+    stable_fp: &str,
+    scan_id: Option<&str>,
+    focus_line: u32,
+) -> Result<Option<ScannedSnippetWindow>> {
+    let Some(store) = open_existing_finding_store_read_only(target)? else {
+        return Ok(None);
+    };
+    let Some(source) = store.latest_observation_source(stable_fp, scan_id)? else {
+        return Ok(None);
+    };
+    let Some(bytes) = store.read_observation_blob(&source.blob_hash)? else {
+        return Ok(None);
+    };
+    let focus_line = source
+        .display_line
+        .and_then(|line| usize::try_from(line).ok())
+        .filter(|line| *line > 0)
+        .unwrap_or(focus_line.max(1) as usize);
+    Ok(Some(scanned_snippet_window(&bytes, focus_line)))
+}
+
+fn scanned_snippet_window(bytes: &[u8], focus_line: usize) -> ScannedSnippetWindow {
+    let text = String::from_utf8_lossy(bytes);
+    let lines = text.lines().collect::<Vec<_>>();
+    let start_line = focus_line
+        .saturating_sub(crate::ui_view_models::SNIPPET_CONTEXT_BEFORE)
+        .max(1);
+    let end_line = focus_line
+        .saturating_add(crate::ui_view_models::SNIPPET_CONTEXT_AFTER)
+        .min(lines.len().max(1));
+    let window = lines
+        .iter()
+        .skip(start_line - 1)
+        .take(end_line.saturating_sub(start_line - 1))
+        .map(|line| line.to_string())
+        .collect();
+    ScannedSnippetWindow {
+        start_line,
+        focus_line,
+        lines: window,
+    }
 }
 
 impl ShellApp {

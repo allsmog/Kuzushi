@@ -66,8 +66,9 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         ReverseEngineerBinary => {
             target.kind.is_reverse_engineering_target() && target.has_reverse_engineering_artifact
         }
-        // Specialized / second-methodology builds are opt-in.
-        BuildPastaThreatModel | ThreatIntelCves => false,
+        // Specialized / second-methodology builds are opt-in. Harness
+        // authoring spends model dollars and needs an engine checkout.
+        BuildPastaThreatModel | ThreatIntelCves | MapFuzzAuthor => false,
         // Scan source surfaces; specialized systems hunts
         // are visible only when `task_applies_to_target` found matching code.
         ScanSecrets => true,
@@ -77,6 +78,8 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         ScanCodeql | ScanAgenticSast | HuntTaint => false,
         HuntThreatModel => true,
         HuntSystems => false,
+        // Fuzzing runs the external engine for many minutes — deliberate opt-in.
+        ScanFuzz => false,
         HuntUseAfterFree => target.has_c_family_source && target.has_compile_commands,
         // Review and Prove default to processing whatever the scan found.
         TriageFindings | VerifyFindings => true,
@@ -91,7 +94,9 @@ fn task_applies_to_target(task: PlanningTaskId, target: TargetProfile) -> bool {
     match task {
         BuildXRay | ReverseEngineerBinary => target.kind.is_reverse_engineering_target(),
         HuntSystems => target.has_systems_surface(),
-        HuntUseAfterFree => target.has_c_family_source,
+        // The engine compiles C/C++ libFuzzer harnesses; other estates have
+        // nothing for it to build or fuzz.
+        HuntUseAfterFree | ScanFuzz | MapFuzzAuthor => target.has_c_family_source,
         _ => true,
     }
 }

@@ -7867,7 +7867,11 @@ fn ask_requires_target_before_model_and_unknown_prose_stays_deterministic() {
 
     run_command(&mut app, parse_command("/ask What should I run first?"));
 
-    assert_eq!(app.shell_view(), ShellView::AgentChat);
+    assert_eq!(
+        app.shell_view(),
+        ShellView::Home,
+        "ask is a fallthrough; a refusal must not steal the current view"
+    );
     let agent = app.agent_chat().unwrap();
     assert_eq!(agent.question, "What should I run first?");
     assert!(!agent.running);
@@ -7875,6 +7879,11 @@ fn ask_requires_target_before_model_and_unknown_prose_stays_deterministic() {
         .error
         .as_deref()
         .is_some_and(|error| error.contains("explicit target")));
+    assert_eq!(
+        app.advisory().notice.as_ref().map(|notice| notice.severity),
+        Some(NoticeSeverity::Error),
+        "the refusal must surface as a notice on the retained view"
+    );
 }
 
 #[test]
@@ -8153,14 +8162,19 @@ fn ask_dispatches_agent_question_through_explicit_runtime() {
     let mut app = ShellApp::new(config, None);
     app.set_target(Some(tmp.path().to_path_buf()));
 
+    let origin_view = app.shell_view();
     run_command(&mut app, parse_command("?What should I run first?"));
 
-    assert_eq!(app.shell_view(), ShellView::AgentChat);
+    assert_eq!(
+        app.shell_view(),
+        origin_view,
+        "ask is a fallthrough; dispatch must keep the operator's view"
+    );
     let running_agent = app.agent_chat().unwrap();
     assert_eq!(running_agent.question, "What should I run first?");
     assert!(
         running_agent.running,
-        "ask should enter AgentChat running state immediately; {}",
+        "ask should enter the running chat state immediately; {}",
         app.agent_chat_diagnostics_for_test()
     );
     assert_eq!(running_agent.answer, None);
@@ -19303,6 +19317,73 @@ fn workbench_validate_drafts_without_replacing_a_live_scan_job() {
 
     app.jobs_mut().finish(JobKind::Run);
     scan_ticket.complete();
+}
+
+#[test]
+fn review_invariant_hunt_hotkey_drafts_a_focused_agentic_scan() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    *app.findings_mut() = vec![Finding::new_semgrep(
+        "demo.invariant",
+        "src/lib.rs",
+        7,
+        Some(3),
+        Severity::High,
+        "unchecked length reaches memcpy",
+    )];
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty()),
+    );
+
+    assert!(
+        app.input().starts_with("run agentic-sast:scan {"),
+        "{}",
+        app.input()
+    );
+    assert!(
+        app.input().contains("\"focus\":\"Invariant hunt seeded from demo.invariant at src/lib.rs:7."),
+        "{}",
+        app.input()
+    );
+    assert!(
+        app.input().contains("unchecked length reaches memcpy"),
+        "{}",
+        app.input()
+    );
+    assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "invariant" && line.body.contains("hunt draft loaded")
+    }));
+}
+
+#[test]
+fn review_invariant_hunt_hotkey_requires_a_selected_finding() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('i'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.input(), "");
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "invariant" && line.body.contains("no finding selected")
+    }));
 }
 
 #[test]

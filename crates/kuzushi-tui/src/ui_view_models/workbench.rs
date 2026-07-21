@@ -106,8 +106,8 @@ static SCAN_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 static REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint("Enter", "open in Prove"),
     hint("findings", "show full queue"),
+    hint("i", "invariant hunt"),
     hint("z", "open heatmap"),
-    hint("scan", "again"),
 ];
 
 static FIX_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [

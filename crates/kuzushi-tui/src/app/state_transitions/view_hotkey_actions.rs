@@ -75,6 +75,9 @@ impl ShellApp {
                 return Some(self.draft_workbench_patch_reverification())
             }
             ViewHotkeyAction::WorkbenchSuppress => return Some(self.draft_workbench_suppression()),
+            ViewHotkeyAction::WorkbenchInvariantHunt => {
+                return Some(self.draft_workbench_invariant_hunt())
+            }
             ViewHotkeyAction::WorkbenchOrderChain => return Some(self.draft_workbench_chain()),
             ViewHotkeyAction::WorkbenchChainFold => {
                 return Some(self.draft_workbench_chain_fold())
@@ -335,6 +338,28 @@ impl ShellApp {
         self.set_input(format!("suppress {reference} --reason "));
         self.set_input_mode(InputMode::Prompt);
         self.log("suppress", "draft loaded — enter a reason and submit");
+        InputUpdate::handled()
+    }
+
+    /// Seed a repo-wide invariant hunt from the selected finding: the
+    /// composer gets an editable `run agentic-sast:scan {"focus": …}` draft,
+    /// so Enter launches through the ordinary tool runner — prereq chain,
+    /// budget gates, and background events included.
+    fn draft_workbench_invariant_hunt(&mut self) -> InputUpdate {
+        let Some((_, finding)) = crate::ui_view_models::current_finding_for_detail(self) else {
+            self.log(
+                "invariant",
+                "no finding selected — open REVIEW and choose a finding first",
+            );
+            return InputUpdate::handled();
+        };
+        let input = serde_json::json!({ "focus": invariant_hunt_focus(&finding) }).to_string();
+        self.set_input(format!("run agentic-sast:scan {input}"));
+        self.set_input_mode(InputMode::Prompt);
+        self.log(
+            "invariant",
+            "hunt draft loaded — edit the focus hypothesis, then Enter launches a repo-wide agentic scan",
+        );
         InputUpdate::handled()
     }
 
@@ -968,6 +993,18 @@ impl ShellApp {
     }
 }
 
+/// The hunt-focus hypothesis seeded from a finding: names the reference
+/// violation and asks for repo-wide siblings, so it stays useful even when
+/// the operator submits it unedited.
+fn invariant_hunt_focus(finding: &kuzushi_core::Finding) -> String {
+    format!(
+        "Invariant hunt seeded from {} at {}:{}. Reference violation: {}. \
+         Hunt the whole repository for other code that violates the same \
+         invariant and report each site with file:line evidence.",
+        finding.rule_id, finding.file_path, finding.start_line, finding.title
+    )
+}
+
 fn current_phase_plan(app: &ShellApp) -> Option<crate::ui_view_models::PhasePresentationPlan> {
     let viewport = app.viewport();
     crate::renderer::workbench_phase_plan_for_app(
@@ -1017,6 +1054,33 @@ fn focused_workbench_visualization(
         PhaseSurfaceId::FixCandidate | PhaseSurfaceId::FixAttackTree => {
             FocusedWorkbenchVisualization::Scene(VizPage::ExploitChain)
         }
+    }
+}
+
+#[cfg(test)]
+mod invariant_hunt_focus_tests {
+    use super::*;
+
+    #[test]
+    fn seed_names_the_rule_location_and_reference_violation() {
+        let finding = kuzushi_core::Finding::new_tool(
+            "semgrep",
+            "rules.cwe-787",
+            "src/compress.c",
+            108,
+            None,
+            kuzushi_core::findings::Severity::High,
+            "dst_len truncation before SDDecompress",
+        );
+
+        let focus = invariant_hunt_focus(&finding);
+
+        assert!(
+            focus.starts_with("Invariant hunt seeded from rules.cwe-787 at src/compress.c:108."),
+            "{focus}"
+        );
+        assert!(focus.contains("dst_len truncation before SDDecompress"), "{focus}");
+        assert!(focus.contains("Hunt the whole repository"), "{focus}");
     }
 }
 

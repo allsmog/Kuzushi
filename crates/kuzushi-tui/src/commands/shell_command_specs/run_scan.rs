@@ -32,7 +32,13 @@ pub(crate) const RUN_SCAN_COMMANDS: &[ShellCommandSpec] = &[
         command: "ask <question>",
         aliases: &["/ask <question>", "?text"],
         category: ShellCommandCategory::RunScan,
-        description: "explicit agent question",
+        description: "explicit agent question (stays on the current view)",
+    },
+    ShellCommandSpec {
+        command: "chat",
+        aliases: &["/chat"],
+        category: ShellCommandCategory::RunScan,
+        description: "open the agent conversation history",
     },
     ShellCommandSpec {
         command: "queue <tool|verb>",

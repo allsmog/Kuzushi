@@ -48,7 +48,13 @@ impl ShellApp {
             },
         );
         self.log("answer", text.clone());
-        self.set_completed_activity("agent", "answer received");
+        // Ask is a fallthrough: the operator kept their view, so point the
+        // receipt at the surface holding the full conversation.
+        if self.shell_view() == ShellView::AgentChat {
+            self.set_completed_activity("agent", "answer received");
+        } else {
+            self.set_completed_activity("agent", "answer received. Next: chat");
+        }
         self.agent_success_record(&text, audit, state)
     }
 

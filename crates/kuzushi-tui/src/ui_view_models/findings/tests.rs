@@ -469,6 +469,8 @@ fn selected_finding_detail_includes_run_summary_provenance() {
     assert_eq!(detail.run_runtime, "runtime:codex");
     assert_eq!(detail.run_kuzushi_version, "kuzushi:0.24.0-test");
     assert_eq!(detail.revision_label, "rev:abcdef1*");
+    assert_eq!(detail.branch_label, "branch:main");
+    assert_eq!(detail.vuln_source_label, "sarif");
 }
 
 #[test]
@@ -718,6 +720,28 @@ fn finding_run_provenance_uses_run_summary_target_revision() {
 
     assert_eq!(provenance.run_label, "run:scan-r..3456");
     assert_eq!(provenance.revision_label, "rev:abcdef1*");
+    assert_eq!(provenance.branch_label, "branch:main");
+}
+
+#[test]
+fn finding_run_provenance_reports_unknown_branch_without_target_git() {
+    let mut finding = Finding::new_tool(
+        "demo",
+        "demo.rule",
+        "src/lib.rs",
+        7,
+        None,
+        Severity::Medium,
+        "finding scanned before target git capture",
+    );
+    finding.scan_id = Some("scan-no-git".to_string());
+    let summary = RunSummary::running("scan-no-git", "scan", Some("sast:scan".to_string()), ".");
+    let runs = BTreeMap::from([(summary.run_id.clone(), summary)]);
+
+    let provenance = finding_run_provenance(&finding, &runs);
+
+    assert_eq!(provenance.revision_label, "rev:unknown");
+    assert_eq!(provenance.branch_label, "branch:unknown");
 }
 
 #[test]
@@ -1075,4 +1099,112 @@ fn snippet_window_expands_tabs_for_stable_gutters() {
     let snippet = snippet_from_content("\tindented", 1);
 
     assert_eq!(snippet.lines, vec!["  indented"]);
+}
+
+fn scanned_fold_app() -> (tempfile::TempDir, ShellApp) {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let app = ShellApp::new(V2Config::default(), Some(&workspace));
+    (temp, app)
+}
+
+fn scanned_fold_finding() -> Finding {
+    Finding::new_tool(
+        "semgrep",
+        "demo.snippet",
+        "src/app.rs",
+        1,
+        None,
+        Severity::High,
+        "finding with a scanned copy",
+    )
+}
+
+fn store_scanned_window(app: &ShellApp, finding: &Finding, state: crate::ScannedSnippetState) {
+    app.workbench_cache().borrow_mut().store_scanned_snippet(
+        app.target().unwrap(),
+        &finding.fingerprint,
+        finding.scan_id.as_deref(),
+        finding.start_line,
+        state,
+    );
+}
+
+#[test]
+fn snippet_falls_back_to_the_scanned_copy_when_the_live_line_drifts() {
+    let (temp, app) = scanned_fold_app();
+    std::fs::create_dir_all(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/app.rs"), "let x = 2;\n").unwrap();
+    let finding = scanned_fold_finding();
+    store_scanned_window(
+        &app,
+        &finding,
+        crate::ScannedSnippetState::Ready(crate::ScannedSnippetWindow {
+            start_line: 1,
+            focus_line: 1,
+            lines: vec!["let x = 1;".to_string()],
+        }),
+    );
+
+    let snippet = source_snippet_model(&app, &finding).expect("snippet");
+
+    assert_eq!(snippet.lines, vec!["let x = 1;"]);
+    let note = snippet.note.expect("as-scanned note");
+    assert!(note.starts_with("as scanned @ unknown"), "{note}");
+}
+
+#[test]
+fn snippet_keeps_the_live_source_when_it_matches_the_scanned_copy() {
+    let (temp, app) = scanned_fold_app();
+    std::fs::create_dir_all(temp.path().join("src")).unwrap();
+    std::fs::write(temp.path().join("src/app.rs"), "let x = 2;\n").unwrap();
+    let finding = scanned_fold_finding();
+    store_scanned_window(
+        &app,
+        &finding,
+        crate::ScannedSnippetState::Ready(crate::ScannedSnippetWindow {
+            start_line: 1,
+            focus_line: 1,
+            lines: vec!["let  x  =  2;".to_string()],
+        }),
+    );
+
+    let snippet = source_snippet_model(&app, &finding).expect("snippet");
+
+    assert_eq!(snippet.lines, vec!["let x = 2;"]);
+    assert_eq!(snippet.note, None);
+}
+
+#[test]
+fn missing_live_source_renders_the_scanned_copy() {
+    let (_temp, app) = scanned_fold_app();
+    let finding = scanned_fold_finding();
+    store_scanned_window(
+        &app,
+        &finding,
+        crate::ScannedSnippetState::Ready(crate::ScannedSnippetWindow {
+            start_line: 1,
+            focus_line: 1,
+            lines: vec!["let x = 1;".to_string()],
+        }),
+    );
+
+    let snippet = source_snippet_model(&app, &finding).expect("snippet");
+
+    assert_eq!(snippet.lines, vec!["let x = 1;"]);
+    assert!(snippet.note.unwrap().starts_with("as scanned @"));
+}
+
+#[test]
+fn missing_live_source_without_a_scanned_copy_notes_the_absence() {
+    let (_temp, app) = scanned_fold_app();
+    let finding = scanned_fold_finding();
+    store_scanned_window(&app, &finding, crate::ScannedSnippetState::Missing);
+
+    let snippet = source_snippet_model(&app, &finding).expect("snippet");
+
+    assert!(snippet.lines.is_empty());
+    let note = snippet.note.expect("absence note");
+    assert!(note.contains("source unavailable"), "{note}");
+    assert!(note.contains("no scanned copy recorded"), "{note}");
 }

@@ -168,7 +168,7 @@ pub(crate) use findings::{
     visible_sorted_finding_alias_indices,
     CleanScanEmptyState, FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow,
     FindingListRow, FindingsEmptyState, FindingsModel, ProofTier, SourceSnippetModel,
-    TriageSummaryModel,
+    TriageSummaryModel, SNIPPET_CONTEXT_AFTER, SNIPPET_CONTEXT_BEFORE,
 };
 pub(crate) use health::{
     health_display_model, health_model, HealthDisplayModel, HealthModel, HealthRow, HealthTone,

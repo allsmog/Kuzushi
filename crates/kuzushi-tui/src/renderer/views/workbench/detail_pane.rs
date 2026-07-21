@@ -408,6 +408,8 @@ fn push_provenance_section(
         budget,
     );
     push_detail_kv(lines, "revision", &detail.revision_label, budget);
+    push_detail_kv(lines, "branch", &detail.branch_label, budget);
+    push_detail_kv(lines, "vuln source", &detail.vuln_source_label, budget);
     push_detail_kv(lines, "source signature", &detail.source_signature, budget);
     push_detail_kv(lines, "corroboration", &detail.corroboration, budget);
     push_detail_kv(lines, "identity", &detail.identity_label, budget);
@@ -548,6 +550,8 @@ mod tests {
             run_runtime: "runtime:codex".to_string(),
             run_kuzushi_version: "kuzushi:0.24.0-test".to_string(),
             revision_label: "rev:abc1234".to_string(),
+            branch_label: "branch:main".to_string(),
+            vuln_source_label: "analysis".to_string(),
             proof_label: "unverified".to_string(),
             proof_marker: "?",
             proof_tier: ProofTier::Suspected,
@@ -667,6 +671,8 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("revision: rev:abc1234"), "{text}");
+        assert!(text.contains("branch: branch:main"), "{text}");
+        assert!(text.contains("vuln source: analysis"), "{text}");
     }
 
     #[test]

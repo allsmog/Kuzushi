@@ -73,6 +73,7 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchDeferProof,
     WorkbenchReverifyPatch,
     WorkbenchSuppress,
+    WorkbenchInvariantHunt,
     WorkbenchOrderChain,
     WorkbenchChainFold,
     WorkbenchCluster,

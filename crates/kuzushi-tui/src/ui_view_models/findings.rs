@@ -7,8 +7,11 @@ use super::review_state::{
 };
 use super::workspace::findings_db_relative_path;
 use super::{context_snapshot_state, SeverityCounts, SeverityTone};
-use crate::{ShellApp, ViewDataState, VisibleFindingProjection, VisibleFindingsCacheKey};
-use kuzushi_core::findings::{FindingSource, ReviewDecision};
+use crate::{
+    ScannedSnippetWindow, ShellApp, ViewDataState, VisibleFindingProjection,
+    VisibleFindingsCacheKey,
+};
+use kuzushi_core::findings::{FindingSource, ReviewDecision, VulnSource};
 use kuzushi_core::{
     compare_findings_by_confidence, finding_next_action, finding_remediation_hint,
     finding_source_label, project_finding, runtime_validation_summary, static_proof_summary,
@@ -120,6 +123,8 @@ pub(crate) struct FindingDetailModel {
     pub(crate) run_runtime: String,
     pub(crate) run_kuzushi_version: String,
     pub(crate) revision_label: String,
+    pub(crate) branch_label: String,
+    pub(crate) vuln_source_label: String,
     pub(crate) proof_label: String,
     pub(crate) proof_meter: String,
     pub(crate) proof_marker: &'static str,
@@ -379,14 +384,16 @@ pub(crate) fn finding_detail_model_for_projection(
     detail
 }
 
-const SNIPPET_CONTEXT_BEFORE: usize = 3;
-const SNIPPET_CONTEXT_AFTER: usize = 4;
+pub(crate) const SNIPPET_CONTEXT_BEFORE: usize = 3;
+pub(crate) const SNIPPET_CONTEXT_AFTER: usize = 4;
 
 /// Read the finding's source context through the workbench cache. `None`
 /// means the finding carries no usable location (no file, line 0, or no
 /// way to resolve a relative path without a target); an unreadable file
 /// still yields a model whose `note` says why, so the operator learns the
-/// snippet is missing rather than wondering where it went.
+/// snippet is missing rather than wondering where it went. When the live
+/// file is missing or has drifted at the cited line, the scanned-time copy
+/// from the observation blob store renders instead, labeled as such.
 fn source_snippet_model(app: &ShellApp, finding: &Finding) -> Option<SourceSnippetModel> {
     let focus_line = finding.start_line as usize;
     if focus_line == 0 {
@@ -394,10 +401,116 @@ fn source_snippet_model(app: &ShellApp, finding: &Finding) -> Option<SourceSnipp
     }
     let path = finding_source_path(app, finding)?;
     let content = app.workbench_cache().borrow_mut().read_source_file(&path);
-    Some(match content {
+    let live = match content {
         Ok(content) => snippet_from_content(&content, focus_line),
         Err(error) => snippet_note(focus_line, format!("source unavailable · {error}")),
-    })
+    };
+    Some(resolve_snippet_with_scanned_copy(app, finding, live))
+}
+
+enum ScannedSnippetLookup {
+    Window(ScannedSnippetWindow),
+    Absent,
+    Unknown,
+}
+
+fn resolve_snippet_with_scanned_copy(
+    app: &ShellApp,
+    finding: &Finding,
+    live: SourceSnippetModel,
+) -> SourceSnippetModel {
+    let live_ok = live.note.is_none();
+    match cached_scanned_window(app, finding) {
+        ScannedSnippetLookup::Window(window) if !live_ok || snippet_is_stale(&live, &window) => {
+            scanned_snippet_fallback_model(app, finding, window)
+        }
+        ScannedSnippetLookup::Absent if !live_ok => append_snippet_note(live, "no scanned copy recorded"),
+        _ => live,
+    }
+}
+
+fn cached_scanned_window(app: &ShellApp, finding: &Finding) -> ScannedSnippetLookup {
+    let Some(target) = app.target() else {
+        return ScannedSnippetLookup::Unknown;
+    };
+    let stable_fp = finding
+        .identity_id
+        .as_deref()
+        .unwrap_or(finding.fingerprint.as_str());
+    let state = app.workbench_cache().borrow().cached_scanned_snippet(
+        target,
+        stable_fp,
+        finding.scan_id.as_deref(),
+        finding.start_line,
+    );
+    match state {
+        ViewDataState::Ready(crate::ScannedSnippetState::Ready(window)) => {
+            ScannedSnippetLookup::Window(window)
+        }
+        ViewDataState::Ready(crate::ScannedSnippetState::Missing) => ScannedSnippetLookup::Absent,
+        _ => ScannedSnippetLookup::Unknown,
+    }
+}
+
+/// Stale when the on-disk focus line no longer matches the scanned copy's
+/// focus line under whitespace normalization. An out-of-window comparison
+/// (either side missing its focus line) is not judged stale.
+fn snippet_is_stale(live: &SourceSnippetModel, scanned: &ScannedSnippetWindow) -> bool {
+    let live_line = snippet_focus_text(&live.lines, live.start_line, live.focus_line);
+    let scanned_line = snippet_focus_text(&scanned.lines, scanned.start_line, scanned.focus_line);
+    match (live_line, scanned_line) {
+        (Some(live_line), Some(scanned_line)) => {
+            normalized_snippet_line(&live_line) != normalized_snippet_line(&scanned_line)
+        }
+        _ => false,
+    }
+}
+
+fn snippet_focus_text(lines: &[String], start_line: usize, focus_line: usize) -> Option<String> {
+    lines.get(focus_line.checked_sub(start_line)?).cloned()
+}
+
+fn normalized_snippet_line(line: &str) -> String {
+    line.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn scanned_snippet_fallback_model(
+    app: &ShellApp,
+    finding: &Finding,
+    window: ScannedSnippetWindow,
+) -> SourceSnippetModel {
+    let sha = scanned_revision_sha(app, finding);
+    SourceSnippetModel {
+        start_line: window.start_line,
+        focus_line: window.focus_line,
+        lines: window
+            .lines
+            .iter()
+            .map(|line| line.replace('\t', "  "))
+            .collect(),
+        note: Some(format!(
+            "as scanned @ {sha} — live source missing or changed"
+        )),
+    }
+}
+
+fn scanned_revision_sha(app: &ShellApp, finding: &Finding) -> String {
+    let runs = run_summary_index(app);
+    finding
+        .scan_id
+        .as_deref()
+        .and_then(|run_id| runs.get(run_id))
+        .and_then(|summary| summary.target_git.as_ref())
+        .map(|git| compact_git_sha(&git.sha))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn append_snippet_note(mut snippet: SourceSnippetModel, suffix: &str) -> SourceSnippetModel {
+    snippet.note = Some(match snippet.note.take() {
+        Some(note) => format!("{note} · {suffix}"),
+        None => suffix.to_string(),
+    });
+    snippet
 }
 
 fn finding_source_path(app: &ShellApp, finding: &Finding) -> Option<std::path::PathBuf> {
@@ -1190,6 +1303,7 @@ fn proof_tier_marker(tier: ProofTier) -> &'static str {
 struct FindingRunProvenance {
     run_label: String,
     revision_label: String,
+    branch_label: String,
     status_label: String,
     tool_label: String,
     model_label: String,
@@ -1225,6 +1339,7 @@ fn finding_run_provenance(
         revision_label: summary
             .and_then(run_revision_label)
             .unwrap_or_else(|| "rev:unknown".to_string()),
+        branch_label: run_branch_label(summary),
         status_label: run_status_label(summary),
         tool_label: run_tool_label(summary),
         model_label: run_model_label(summary),
@@ -1237,6 +1352,7 @@ fn missing_run_provenance() -> FindingRunProvenance {
     FindingRunProvenance {
         run_label: "run:unknown".to_string(),
         revision_label: "rev:unknown".to_string(),
+        branch_label: "branch:unknown".to_string(),
         status_label: "-".to_string(),
         tool_label: "-".to_string(),
         model_label: "-".to_string(),
@@ -1247,6 +1363,17 @@ fn missing_run_provenance() -> FindingRunProvenance {
 
 fn run_revision_label(summary: &RunSummary) -> Option<String> {
     summary.target_git.as_ref().map(target_git_revision_label)
+}
+
+/// Branch of the *target* repository at scan time. `RunSummary.git_branch`
+/// is the Kuzushi build's own branch, so only `target_git` may supply this.
+fn run_branch_label(summary: Option<&RunSummary>) -> String {
+    summary
+        .and_then(|summary| summary.target_git.as_ref())
+        .and_then(|git| git.branch.as_deref())
+        .filter(|branch| !branch.is_empty())
+        .map(|branch| format!("branch:{branch}"))
+        .unwrap_or_else(|| "branch:unknown".to_string())
 }
 
 fn run_status_label(summary: Option<&RunSummary>) -> String {
@@ -1360,6 +1487,7 @@ impl FindingDetailModel {
             location: relativize_location(projection.location, base),
             rule: projection.rule,
             tool: projection.tool,
+            vuln_source_label: vuln_source_label(finding),
             source_signature: source_signature_label(finding),
             corroboration: corroboration_label(finding),
             source_count: finding_unique_source_count(finding),
@@ -1380,6 +1508,7 @@ impl FindingDetailModel {
         self.run_runtime = provenance.runtime_label;
         self.run_kuzushi_version = provenance.kuzushi_version_label;
         self.revision_label = provenance.revision_label;
+        self.branch_label = provenance.branch_label;
     }
 
     fn apply_proof_fields(&mut self, finding: &Finding, proof: ProofBadge) {
@@ -1661,6 +1790,14 @@ fn source_signature_label(finding: &Finding) -> String {
     finding
         .source_signature
         .clone()
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn vuln_source_label(finding: &Finding) -> String {
+    finding
+        .vuln_source
+        .map(VulnSource::as_str)
+        .map(str::to_string)
         .unwrap_or_else(|| "-".to_string())
 }
 

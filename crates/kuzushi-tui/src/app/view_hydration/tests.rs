@@ -67,6 +67,9 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
         ViewHydrationKey::FindingPatchTruth { .. } => {
             ViewHydrationValue::FindingPatchTruth(FindingPatchTruthState::Missing)
         }
+        ViewHydrationKey::ScannedSnippet { .. } => {
+            ViewHydrationValue::ScannedSnippet(ScannedSnippetState::Missing)
+        }
         ViewHydrationKey::SourceFile { .. } => {
             ViewHydrationValue::SourceFile(Err("missing fixture source".to_string()))
         }

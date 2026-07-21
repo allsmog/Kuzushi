@@ -45,7 +45,7 @@ fn prioritize_phase_controls(
     // Preserve the phase-native controls before secondary cursor shortcuts at
     // compact widths. This changes presentation order only.
     const PHASE_KEYS: [&str; 8] = ["Shift+Tab", "1..5", "Tab", "[", "]", "Z", "z", "Enter"];
-    const REVIEW_KEYS: [&str; 15] = [
+    const REVIEW_KEYS: [&str; 16] = [
         "Shift+Tab",
         "q",
         "Enter",
@@ -53,6 +53,7 @@ fn prioritize_phase_controls(
         "v",
         "x",
         "c",
+        "i",
         "n/N",
         "Tab",
         "1..5",

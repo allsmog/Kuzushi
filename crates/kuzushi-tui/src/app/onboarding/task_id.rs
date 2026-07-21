@@ -18,6 +18,9 @@ pub enum PlanningTaskId {
     BuildCodePropertyGraph,
     BuildCodeQlDatabase,
     ThreatIntelCves,
+    /// Author fuzz harnesses for agentic-fuzz-engine workorders (builds the
+    /// instrument, hence Map — like the CodeQL DB).
+    MapFuzzAuthor,
     /// Retained only to decode older saved plans; no longer offered by the
     /// source-security phase picker.
     #[allow(dead_code)]
@@ -30,6 +33,9 @@ pub enum PlanningTaskId {
     HuntTaint,
     HuntThreatModel,
     HuntSystems,
+    /// Run bounded agentic-fuzz-engine campaign rounds and import verified
+    /// crashes (C/C++ targets).
+    ScanFuzz,
     /// Retained only to decode older saved plans; superseded by the supported
     /// systems/dataflow engines and no longer offered by Planning.
     HuntUseAfterFree,
@@ -53,6 +59,7 @@ impl PlanningTaskId {
         PlanningTaskId::BuildCodePropertyGraph,
         PlanningTaskId::BuildCodeQlDatabase,
         PlanningTaskId::ThreatIntelCves,
+        PlanningTaskId::MapFuzzAuthor,
         PlanningTaskId::ScanSecrets,
         PlanningTaskId::ScanSemgrep,
         PlanningTaskId::ScanCodeql,
@@ -60,6 +67,7 @@ impl PlanningTaskId {
         PlanningTaskId::HuntTaint,
         PlanningTaskId::HuntThreatModel,
         PlanningTaskId::HuntSystems,
+        PlanningTaskId::ScanFuzz,
         PlanningTaskId::TriageFindings,
         PlanningTaskId::VerifyFindings,
         PlanningTaskId::PatchFindings,
@@ -87,9 +95,10 @@ impl PlanningTaskId {
             | BuildCodePropertyGraph
             | BuildCodeQlDatabase
             | ThreatIntelCves
+            | MapFuzzAuthor
             | ReverseEngineerBinary => WorkflowPhase::Map,
             ScanSecrets | ScanSemgrep | ScanCodeql | ScanAgenticSast | HuntTaint
-            | HuntThreatModel | HuntSystems | HuntUseAfterFree => WorkflowPhase::Scan,
+            | HuntThreatModel | HuntSystems | ScanFuzz | HuntUseAfterFree => WorkflowPhase::Scan,
             TriageFindings => WorkflowPhase::Review,
             VerifyFindings => WorkflowPhase::Prove,
             PatchFindings | BuildReport => WorkflowPhase::Fix,
@@ -108,6 +117,7 @@ impl PlanningTaskId {
             BuildCodePropertyGraph => "Build code property graph",
             BuildCodeQlDatabase => "Build CodeQL DB",
             ThreatIntelCves => "Threat intel (CVEs)",
+            MapFuzzAuthor => "Author fuzz harnesses (AFE)",
             ReverseEngineerBinary => "Reverse-engineer binary",
             ScanSecrets => "Scan for secrets",
             ScanSemgrep => "Semgrep SAST scan",
@@ -116,6 +126,7 @@ impl PlanningTaskId {
             HuntTaint => "Taint dataflow hunt",
             HuntThreatModel => "Threat-model-driven hunt",
             HuntSystems => "Systems-level semantic hunt",
+            ScanFuzz => "Coverage fuzzing (AFE)",
             HuntUseAfterFree => "Use-after-free hunt (C/C++)",
             TriageFindings => "Triage findings",
             VerifyFindings => "Verify findings",
@@ -137,6 +148,7 @@ impl PlanningTaskId {
             BuildCodePropertyGraph => "cpg:build",
             BuildCodeQlDatabase => "codeql:create-db",
             ThreatIntelCves => "threat-intel:discover",
+            MapFuzzAuthor => "fuzz:author",
             ReverseEngineerBinary => "pwn:reverse",
             ScanSecrets => "secret-scan:scan",
             ScanSemgrep => "semgrep:scan",
@@ -145,6 +157,7 @@ impl PlanningTaskId {
             HuntTaint => "taint-iris-next:hunt",
             HuntThreatModel => "offense-review:threat-hunt",
             HuntSystems => "systems-hunt:systems-hunt",
+            ScanFuzz => "fuzz:run",
             HuntUseAfterFree => "uaf-hunt:hunt",
             TriageFindings => "triage:run",
             VerifyFindings => "verify:finding",
@@ -172,6 +185,7 @@ impl PlanningTaskId {
             BuildXRay
                 | BuildStrideThreatModel
                 | BuildPastaThreatModel
+                | MapFuzzAuthor
                 | ScanAgenticSast
                 | HuntTaint
                 | HuntThreatModel

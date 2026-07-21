@@ -106,6 +106,7 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     append_latest_run_keys(app, keys);
     append_threat_model_key(app, keys);
     append_selected_source_key(app, keys);
+    append_scanned_snippet_key(app, keys);
     append_selected_proof_key(app, keys);
     append_finding_patch_truth_key(app, keys);
     keys.extend([
@@ -187,6 +188,26 @@ fn append_selected_source_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) 
         target.join(reported)
     };
     keys.push(ViewHydrationKey::SourceFile { path });
+}
+
+/// The scanned-time copy of the selected finding's source, for the SOURCE
+/// section's staleness fallback. One cached sqlite+blob read per finding.
+fn append_scanned_snippet_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    let Some((_, finding)) = crate::ui_view_models::current_finding_for_detail(app) else {
+        return;
+    };
+    if finding.start_line == 0 {
+        return;
+    }
+    let stable_fp = finding
+        .identity_id
+        .clone()
+        .unwrap_or_else(|| finding.fingerprint.clone());
+    keys.push(ViewHydrationKey::ScannedSnippet {
+        stable_fp,
+        scan_id: finding.scan_id,
+        focus_line: finding.start_line,
+    });
 }
 
 fn append_selected_proof_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {

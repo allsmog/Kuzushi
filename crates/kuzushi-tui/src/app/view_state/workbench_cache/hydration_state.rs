@@ -265,6 +265,20 @@ impl WorkbenchCache {
                 target_revision,
                 state,
             ),
+            (
+                ViewHydrationKey::ScannedSnippet {
+                    stable_fp,
+                    scan_id,
+                    focus_line,
+                },
+                ViewHydrationValue::ScannedSnippet(state),
+            ) => self.store_scanned_snippet(
+                &target,
+                &stable_fp,
+                scan_id.as_deref(),
+                focus_line,
+                state,
+            ),
             _ => {}
         }
     }
@@ -393,7 +407,8 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         | ViewHydrationKey::ProjectModelDocument { .. }
         | ViewHydrationKey::StrategyQueue
         | ViewHydrationKey::PromptMutations
-        | ViewHydrationKey::FindingPatchTruth { .. } => HydrationGroup::Project,
+        | ViewHydrationKey::FindingPatchTruth { .. }
+        | ViewHydrationKey::ScannedSnippet { .. } => HydrationGroup::Project,
         ViewHydrationKey::SourceFile { .. }
         | ViewHydrationKey::HarnessFile
         | ViewHydrationKey::JsonFile { .. }

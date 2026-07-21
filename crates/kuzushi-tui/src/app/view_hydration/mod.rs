@@ -62,6 +62,13 @@ pub(crate) enum FindingPatchTruthState {
     Failed(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ScannedSnippetState {
+    Ready(ScannedSnippetWindow),
+    Missing,
+    Failed(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum FileCompletionLimit {
     EntryVisits,
@@ -139,6 +146,11 @@ pub(crate) enum ViewHydrationKey {
         finding_scan_id: Option<String>,
         target_revision: Option<String>,
     },
+    ScannedSnippet {
+        stable_fp: String,
+        scan_id: Option<String>,
+        focus_line: u32,
+    },
     SourceFile {
         path: PathBuf,
     },
@@ -184,6 +196,7 @@ pub(crate) enum ViewHydrationValue {
     RunProjection(Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>),
     ScanStageReceipt(ScanStageReceiptState),
     FindingPatchTruth(FindingPatchTruthState),
+    ScannedSnippet(ScannedSnippetState),
     SourceFile(Result<String, String>),
     GitMetadata(Option<RunTargetGitMetadata>),
     ProjectScopeTree(ProjectScopeTreeState),

@@ -149,6 +149,7 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "activity" | "progress" | "a" => Some(ShellCommand::Activity),
         "scene" | "viz" => Some(ShellCommand::Scene),
         "handoff" | "failure" | "failures" => Some(ShellCommand::FailureHandoff),
+        "chat" => Some(ShellCommand::AgentChat),
         _ => None,
     }
 }

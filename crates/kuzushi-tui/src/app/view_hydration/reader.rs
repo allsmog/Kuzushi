@@ -111,6 +111,16 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
             fingerprint,
             finding_scan_id.as_deref(),
         )),
+        ViewHydrationKey::ScannedSnippet {
+            stable_fp,
+            scan_id,
+            focus_line,
+        } => Some(read_scanned_snippet(
+            target,
+            stable_fp,
+            scan_id.as_deref(),
+            *focus_line,
+        )),
         ViewHydrationKey::TargetProfile => Some(ViewHydrationValue::TargetProfile(
             TargetProfile::detect(target),
         )),
@@ -147,6 +157,20 @@ fn read_finding_patch_truth(
         Err(error) => FindingPatchTruthState::Failed(error.to_string()),
     };
     ViewHydrationValue::FindingPatchTruth(state)
+}
+
+fn read_scanned_snippet(
+    target: &Path,
+    stable_fp: &str,
+    scan_id: Option<&str>,
+    focus_line: u32,
+) -> ViewHydrationValue {
+    let state = match scanned_snippet_for_target(target, stable_fp, scan_id, focus_line) {
+        Ok(Some(window)) => ScannedSnippetState::Ready(window),
+        Ok(None) => ScannedSnippetState::Missing,
+        Err(error) => ScannedSnippetState::Failed(error.to_string()),
+    };
+    ViewHydrationValue::ScannedSnippet(state)
 }
 
 fn read_workspace_file_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {

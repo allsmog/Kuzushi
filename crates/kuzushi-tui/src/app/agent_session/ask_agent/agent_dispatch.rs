@@ -98,25 +98,26 @@ impl ShellApp {
         let provider = model.split(':').next().unwrap_or("configured provider");
         if !self.provider_auth_ready_for(provider) {
             let message = format!("ask needs credentials for {provider}. Next: auth");
-            self.set_error_notice("ask", message.clone());
             self.show_agent_question_error(prior, question, message);
             return None;
         }
         Some(model)
     }
 
+    /// Ask never navigates: the refusal lands in the chat state, the notice,
+    /// and the transcript, all readable from whatever view is current.
     fn show_agent_question_error(
         &mut self,
         prior: &AgentChatView,
         question: &str,
         message: String,
     ) {
-        self.set_shell_view(ShellView::AgentChat);
         let mut next = prior.fold_for_next_turn(question.to_string());
         next.failure_context = prior.failure_context.clone();
         next.pending_failure_context = prior.pending_failure_context.clone();
         next.error = Some(message.clone());
         self.set_agent_chat(Some(next));
+        self.set_error_notice("ask", message.clone());
         self.log("error", message);
     }
 
@@ -209,7 +210,10 @@ impl ShellApp {
         self.set_agent_chat(Some(next));
         self.set_agent_artifact_target(Some(dispatch.artifact_target.clone()));
         self.set_agent_cancel(Some(cancel));
-        self.set_shell_view(ShellView::AgentChat);
+        // Deliberately no view change: ask is a fallthrough. The operator
+        // stays on the current view; progress shows in the live-activity
+        // chrome and the answer lands in the transcript. `chat` opens the
+        // conversation surface explicitly.
     }
 
     pub(crate) fn set_pending_failure_context(&mut self, context: FailureToLlmContext) {
