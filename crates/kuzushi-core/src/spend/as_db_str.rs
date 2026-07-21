@@ -8,6 +8,7 @@ pub enum Operation {
     FullModeMulti,
     Patch,
     ThreatModelStaged,
+    FuzzAuthor,
 }
 
 impl Operation {
@@ -19,6 +20,7 @@ impl Operation {
             Self::FullModeMulti => "full_mode_multi",
             Self::Patch => "patch",
             Self::ThreatModelStaged => "threat_model_staged",
+            Self::FuzzAuthor => "fuzz_author",
         }
     }
 
@@ -30,6 +32,7 @@ impl Operation {
             "full_mode_multi" => Some(Self::FullModeMulti),
             "patch" => Some(Self::Patch),
             "threat_model_staged" => Some(Self::ThreatModelStaged),
+            "fuzz_author" => Some(Self::FuzzAuthor),
             _ => None,
         }
     }
@@ -42,6 +45,7 @@ impl Operation {
             Self::FullModeMulti,
             Self::Patch,
             Self::ThreatModelStaged,
+            Self::FuzzAuthor,
         ]
     }
 }

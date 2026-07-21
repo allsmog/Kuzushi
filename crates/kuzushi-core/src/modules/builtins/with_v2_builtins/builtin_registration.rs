@@ -377,6 +377,7 @@ fn register_security_map_modules(registry: &mut ModuleRegistry) {
     registry.register(entry_points_module().with_executor(execute_context_workspace_tool));
     registry.register(cpg_module().with_executor(execute_native_security_tool));
     registry.register(codeql_db_module().with_executor(execute_native_security_tool));
+    registry.register(fuzz_module().with_executor(execute_native_security_tool));
     registry.register(
         threat_leads_module()
             .with_executor(execute_runtime_analysis_tool)

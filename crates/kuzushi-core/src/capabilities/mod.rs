@@ -6,6 +6,7 @@ pub mod chrome_rce;
 pub mod classifier_gate;
 pub mod deep_auditor;
 pub mod full_mode_multi;
+pub mod fuzz_engine;
 pub mod module_recommender;
 pub mod scan_recommender;
 pub mod pack_lint;

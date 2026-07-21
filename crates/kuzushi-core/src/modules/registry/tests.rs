@@ -139,6 +139,60 @@ mod tests {
     }
 
     #[test]
+    fn agentic_sast_scan_accepts_a_hunt_focus_and_canonicalizes_its_aliases() {
+        let registry = ModuleRegistry::with_v2_builtins();
+
+        let explicit = registry
+            .prepare_tool_input(
+                "agentic-sast:scan",
+                json!({"focus": "unchecked length before memcpy"}),
+                None,
+            )
+            .unwrap();
+        let aliased = registry
+            .prepare_tool_input(
+                "agentic-sast:scan",
+                json!({"huntFocus": "unchecked length before memcpy"}),
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(explicit["focus"], json!("unchecked length before memcpy"));
+        assert_eq!(aliased["focus"], json!("unchecked length before memcpy"));
+        assert_eq!(aliased.get("huntFocus"), None);
+    }
+
+    #[test]
+    fn chunked_agentic_sast_scan_rejects_a_hunt_focus_explicitly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = V2Config::default();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let error = dispatch_agentic_security_tool(
+            "agentic-sast:scan",
+            &json!({"strategy": "chunked", "focus": "unchecked length"}),
+            &ctx,
+            None,
+        )
+        .expect("chunked agentic-sast:scan dispatch is handled")
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("focus is not supported with strategy=chunked"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn secret_scan_integer_ranges_reject_silent_rewrites() {
         let registry = ModuleRegistry::with_v2_builtins();
 

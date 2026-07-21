@@ -377,6 +377,10 @@ pub(in crate::modules) fn dispatch_native_security_tool(
         )),
         "cpg:build" => Some(run_cpg_build(input, ctx)),
         "codeql:create-db" => Some(run_codeql_create_db(input, ctx)),
+        "fuzz:run" => Some(run_fuzz_run(input, ctx)),
+        "fuzz:author" => Some(run_fuzz_author(input, ctx, runtime)),
+        "fuzz:import" => Some(run_fuzz_import(input, ctx)),
+        "fuzz:status" => Some(run_fuzz_status(input, ctx)),
         _ => None,
     }
 }
@@ -545,7 +549,7 @@ pub(in crate::modules) fn dispatch_agentic_security_tool(
 ) -> ToolDispatchResult {
     match name {
         "agentic-sast:scan" if agentic_sast_chunked_strategy(input) => {
-            Some(run_full_mode_hunt_tool(input.clone(), ctx, runtime))
+            Some(run_chunked_agentic_sast_tool(input, ctx, runtime))
         }
         "agentic-sast:scan" => Some(run_agentic_sast_tool(input, ctx, runtime)),
         "variant:lift-pattern" => Some(run_variant_lift_pattern(input.clone(), ctx, runtime)),
@@ -580,6 +584,26 @@ fn agentic_sast_chunked_strategy(input: &Value) -> bool {
         .get("strategy")
         .and_then(Value::as_str)
         .is_some_and(|strategy| strategy.trim().eq_ignore_ascii_case("chunked"))
+}
+
+fn run_chunked_agentic_sast_tool(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    if agentic_sast_focus_requested(input) {
+        anyhow::bail!(
+            "agentic-sast:scan option focus is not supported with strategy=chunked; rerun with strategy=standard"
+        );
+    }
+    run_full_mode_hunt_tool(input.clone(), ctx, runtime)
+}
+
+fn agentic_sast_focus_requested(input: &Value) -> bool {
+    input
+        .get("focus")
+        .and_then(Value::as_str)
+        .is_some_and(|focus| !focus.trim().is_empty())
 }
 
 pub(in crate::modules) fn run_agentic_sast_tool(

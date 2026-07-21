@@ -558,6 +558,13 @@ fn agentic_sast_scan_options() -> Vec<OptionSpec> {
         )
         .inline_or_workspace_file()
         .advanced(),
+        opt(
+            "focus",
+            OptionType::String,
+            "Hunt focus: an invariant or vulnerability hypothesis to prioritize; injected into the scan prompt.",
+        )
+        .aliases(&["huntFocus", "hunt_focus"])
+        .advanced(),
     ];
     options.extend(sast_whitebox_options());
     options.extend(agentic_sast_filter_options());

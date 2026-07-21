@@ -139,6 +139,7 @@ pub fn canonical_tool_phase(module_id: &str, kind: ModuleKind, tool_name: &str) 
         | "systems-hunt"
         | "sbom-scan"
         | "shinsa"
+        | "fuzz"
         | "vendor-assessment"
         | "pipeline" => ToolPhase::Scan,
         "findings" | "triage" | "classifier-gate" | "deep-audit" | "threat-leads" => {
@@ -152,7 +153,7 @@ pub fn canonical_tool_phase(module_id: &str, kind: ModuleKind, tool_name: &str) 
 
 fn tool_phase_override(tool_name: &str) -> Option<ToolPhase> {
     match tool_name {
-        "codeql:create-db" | "pwn:reverse" => Some(ToolPhase::Map),
+        "codeql:create-db" | "pwn:reverse" | "fuzz:author" => Some(ToolPhase::Map),
         "recon:import" | "bounty:import-har" | "bounty:import-burp" => Some(ToolPhase::Scan),
         _ => None,
     }

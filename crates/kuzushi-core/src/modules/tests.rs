@@ -891,6 +891,8 @@ OUT
                 total_tokens: 3,
             },
             chunks_dispatched: 1,
+            chunks_from_cache: 0,
+            prefiltered_chunks: Vec::new(),
             chunks_failed: 0,
             failed_chunk_errors: Vec::new(),
             cost_usd: Some(0.0),
