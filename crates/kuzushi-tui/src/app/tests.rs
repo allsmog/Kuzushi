@@ -12106,7 +12106,11 @@ fn external_state_artifacts_keep_workspace_file_caches_warm() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.workbench_cache()
         .borrow_mut()
-        .git_metadata(Some(workspace.root()));
+        .apply_view_hydration(super::view_hydration::ViewHydrationResult {
+            target: workspace.root().to_path_buf(),
+            key: super::view_hydration::ViewHydrationKey::GitMetadata,
+            value: super::view_hydration::ViewHydrationValue::GitMetadata(None),
+        });
     let generations_before = app.workbench_cache().borrow().completion_generations();
 
     app.apply_external_workspace_state_change(&[PathBuf::from(

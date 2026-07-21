@@ -368,23 +368,6 @@ impl WorkbenchCache {
         state
     }
 
-    pub(crate) fn git_metadata(&mut self, target: Option<&Path>) -> Option<RunTargetGitMetadata> {
-        let target = target?;
-        if let Some(cache) = self
-            .git_metadata
-            .as_ref()
-            .filter(|cache| cache.target == target)
-        {
-            return cache.metadata.clone();
-        }
-        let metadata = kuzushi_core::workspace::target_git_metadata(target);
-        self.git_metadata = Some(GitMetadataCache {
-            target: target.to_path_buf(),
-            metadata: metadata.clone(),
-        });
-        metadata
-    }
-
     pub(crate) fn invalidate_workspace_files(&mut self) {
         self.source_file = None;
         self.git_metadata = None;
