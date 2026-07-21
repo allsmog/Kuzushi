@@ -219,7 +219,10 @@ fn contains_word_case_insensitive(text: &str, word: &str) -> bool {
                 .chars()
                 .next_back()
                 .is_some_and(char::is_alphanumeric);
-        let right_ok = !lower[end..].chars().next().is_some_and(char::is_alphanumeric);
+        let right_ok = !lower[end..]
+            .chars()
+            .next()
+            .is_some_and(char::is_alphanumeric);
         if left_ok && right_ok {
             return true;
         }
@@ -244,9 +247,7 @@ fn is_schema_version_token(token: &str) -> bool {
     !prefix.is_empty()
         && !version.is_empty()
         && version.chars().all(|c| c.is_ascii_digit())
-        && prefix
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c == '-')
+        && prefix.chars().all(|c| c.is_ascii_lowercase() || c == '-')
 }
 
 // ── L2: duplication ─────────────────────────────────────────────────────────
@@ -288,7 +289,11 @@ pub(crate) fn lint_duplication(corpus: &[SurfaceLine]) -> Vec<Violation> {
 /// Decorative rows (borders, rules, whitespace) legitimately repeat; only
 /// lines with real words participate in the adjacent-duplicate check.
 fn is_content_bearing(trimmed: &str) -> bool {
-    trimmed.chars().filter(|c| c.is_ascii_alphanumeric()).count() >= 8
+    trimmed
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .count()
+        >= 8
 }
 
 fn repeated_adjacent_segment(text: &str) -> Option<String> {
@@ -319,7 +324,11 @@ const EDGE_PUNCTUATION: &[char] = &['.', ',', ':', ';', '!', '?', '…', ')'];
 
 fn leading_word(segment: &str) -> String {
     let stripped = segment.trim_start_matches(|c: char| EDGE_PUNCTUATION.contains(&c) || c == '(');
-    if !stripped.chars().next().is_some_and(|c| c.is_ascii_alphanumeric()) {
+    if !stripped
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphanumeric())
+    {
         return String::new();
     }
     stripped
@@ -330,7 +339,11 @@ fn leading_word(segment: &str) -> String {
 
 fn trailing_word(segment: &str) -> String {
     let stripped = segment.trim_end_matches(|c: char| EDGE_PUNCTUATION.contains(&c));
-    if !stripped.chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric()) {
+    if !stripped
+        .chars()
+        .next_back()
+        .is_some_and(|c| c.is_ascii_alphanumeric())
+    {
         return String::new();
     }
     let reversed: String = stripped
@@ -355,7 +368,10 @@ pub(crate) fn lint_separators_and_truncation(corpus: &[SurfaceLine]) -> Vec<Viol
             });
         };
         if line.text.contains("· ·") || line.text.contains("··") {
-            flag("separator-collision", format!("`· ·`: {}", line.text.trim()));
+            flag(
+                "separator-collision",
+                format!("`· ·`: {}", line.text.trim()),
+            );
         }
         for cell in line.text.split('│') {
             let cell = cell.trim_end();
@@ -536,7 +552,11 @@ fn card_budget_matcher_hits_its_shape() {
             text: format!("receipt row {number}"),
         });
     }
-    assert_eq!(lint_decision_card_budgets(&corpus).len(), 1, "12 rows, no disclosure");
+    assert_eq!(
+        lint_decision_card_budgets(&corpus).len(),
+        1,
+        "12 rows, no disclosure"
+    );
 
     corpus[12].text = "… 9 more rows · logs to inspect".into();
     assert!(
@@ -593,12 +613,10 @@ fn duplication_and_truncation_matchers_hit_their_shapes() {
         None,
         "repeated-char rules are decorative"
     );
-    assert!(
-        unbroken_long_token(
-            "id kzfinding4f9a2c81b0e77d3aa91c4f2b8d6e5a0c1b2d3e4f5a6b7c8d9e0f1a2b"
-        )
-        .is_some()
-    );
+    assert!(unbroken_long_token(
+        "id kzfinding4f9a2c81b0e77d3aa91c4f2b8d6e5a0c1b2d3e4f5a6b7c8d9e0f1a2b"
+    )
+    .is_some());
 }
 
 #[test]
@@ -607,7 +625,10 @@ fn jargon_matchers_hit_their_shapes() {
     assert!(!is_uuid("not-a-uuid"));
     assert_eq!(seq_counter("watcher seq 423 ready"), Some("seq 423".into()));
     assert_eq!(seq_counter("sequence of steps"), None);
-    assert!(contains_word_case_insensitive("state Projection ready", "projection"));
+    assert!(contains_word_case_insensitive(
+        "state Projection ready",
+        "projection"
+    ));
     assert!(!contains_word_case_insensitive("projections", "projection"));
     assert!(is_schema_version_token("cockpit-spine-v1"));
     assert!(!is_schema_version_token("TLSv1"));

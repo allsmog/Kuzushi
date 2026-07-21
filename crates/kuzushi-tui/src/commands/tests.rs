@@ -975,7 +975,7 @@ mod tests {
             ShellCommand::Recommend => "recommend",
             ShellCommand::Tools(_) => "tools",
             ShellCommand::FavoriteTool(_) => "favorite-tool",
-            ShellCommand::Workbench(_) => "workbench",
+            ShellCommand::Workbench => "workbench",
             ShellCommand::Aim(_) => "aim",
             ShellCommand::Findings => "findings",
             ShellCommand::FindingsFilter(_) => "findings-filter",

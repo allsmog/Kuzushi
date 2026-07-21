@@ -1,5 +1,5 @@
 use super::PhaseCockpitBody;
-use crate::app::WorkbenchPane;
+use crate::app::WorkbenchPage;
 use ratatui::layout::Rect;
 
 mod surface_specs;
@@ -21,7 +21,7 @@ pub(crate) enum AttentionMode {
     ResultReady,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum PhaseSurfaceId {
     MapReadiness,
     MapAttackSurface,
@@ -44,6 +44,28 @@ pub(crate) enum PhaseSurfaceId {
 }
 
 impl PhaseSurfaceId {
+    /// The Workbench page that owns this surface. Focus, zoom, and scroll are
+    /// keyed by surface id; this reverse edge lets a stored focus from another
+    /// page fall back to the rendered page's default instead of aliasing onto
+    /// an unrelated surface.
+    pub(crate) const fn page(self) -> WorkbenchPage {
+        match self {
+            Self::MapReadiness | Self::MapAttackSurface | Self::MapHotModules | Self::MapDfd => {
+                WorkbenchPage::Map
+            }
+            Self::ScanEngines | Self::ScanReceipt | Self::ScanDelta | Self::ScanScope => {
+                WorkbenchPage::Scan
+            }
+            Self::ReviewQueue | Self::ReviewDetail => WorkbenchPage::Review,
+            Self::ProveStatus | Self::ProveEvidence | Self::ProveLadder | Self::ProveReceipt => {
+                WorkbenchPage::Prove
+            }
+            Self::FixRemediation | Self::FixCandidate | Self::FixAttackTree | Self::FixDfd => {
+                WorkbenchPage::Fix
+            }
+        }
+    }
+
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Self::MapReadiness => "Project Context",
@@ -88,7 +110,6 @@ pub(crate) enum SurfaceInteraction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PhaseSurfaceSpec {
     pub(crate) id: PhaseSurfaceId,
-    pub(crate) legacy_slot: WorkbenchPane,
     pub(crate) state: SurfaceState,
     pub(crate) interaction: SurfaceInteraction,
 }
@@ -96,7 +117,6 @@ pub(crate) struct PhaseSurfaceSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PlannedPhaseSurface {
     pub(crate) id: PhaseSurfaceId,
-    pub(crate) legacy_slot: WorkbenchPane,
     pub(crate) state: SurfaceState,
     pub(crate) interaction: SurfaceInteraction,
     pub(crate) rect: Rect,
@@ -121,24 +141,18 @@ impl PhasePresentationPlan {
             .iter()
             .find(|surface| rect_contains(surface.rect, column, row))
     }
-
-    pub(crate) fn effective_slot(&self) -> WorkbenchPane {
-        self.surface(self.effective_focus)
-            .map(|surface| surface.legacy_slot)
-            .unwrap_or(WorkbenchPane::Source)
-    }
 }
 
 pub(crate) fn phase_presentation_plan(
     body: &PhaseCockpitBody,
     area: Rect,
-    stored_focus: Option<WorkbenchPane>,
-    focused_slot: Option<WorkbenchPane>,
+    stored_focus: Option<PhaseSurfaceId>,
+    zoomed: Option<PhaseSurfaceId>,
     attention: AttentionMode,
 ) -> PhasePresentationPlan {
     let specs = phase_surface_specs(body);
     let primary = specs[0].id;
-    let (density, visible) = visible_specs(&specs, area, focused_slot, attention);
+    let (density, visible) = visible_specs(&specs, area, zoomed, attention);
     let planned_area = if density == LayoutDensity::Guided {
         Rect {
             height: area.height.min(5),
@@ -166,16 +180,16 @@ pub(crate) fn phase_presentation_plan(
 fn visible_specs<'a>(
     specs: &'a [PhaseSurfaceSpec],
     area: Rect,
-    focused_slot: Option<WorkbenchPane>,
+    zoomed: Option<PhaseSurfaceId>,
     attention: AttentionMode,
 ) -> (LayoutDensity, Vec<&'a PhaseSurfaceSpec>) {
     if attention != AttentionMode::Normal {
         return (LayoutDensity::Guided, vec![&specs[0]]);
     }
-    if let Some(focused) = focused_slot {
+    if let Some(zoomed) = zoomed {
         let selected = specs
             .iter()
-            .find(|spec| spec.legacy_slot == focused)
+            .find(|spec| spec.id == zoomed)
             .unwrap_or(&specs[0]);
         return (LayoutDensity::Focused, vec![selected]);
     }
@@ -225,11 +239,11 @@ fn split_columns(area: Rect, percentages: &[u16]) -> Vec<Rect> {
 
 fn effective_focus(
     surfaces: &[PlannedPhaseSurface],
-    stored_focus: Option<WorkbenchPane>,
+    stored_focus: Option<PhaseSurfaceId>,
     primary: PhaseSurfaceId,
 ) -> PhaseSurfaceId {
     stored_focus
-        .and_then(|slot| surfaces.iter().find(|surface| surface.legacy_slot == slot))
+        .and_then(|id| surfaces.iter().find(|surface| surface.id == id))
         .map(|surface| surface.id)
         .unwrap_or(primary)
 }
@@ -237,7 +251,6 @@ fn effective_focus(
 fn planned_surface(spec: PhaseSurfaceSpec, rect: Rect) -> PlannedPhaseSurface {
     PlannedPhaseSurface {
         id: spec.id,
-        legacy_slot: spec.legacy_slot,
         state: spec.state,
         interaction: spec.interaction,
         rect,

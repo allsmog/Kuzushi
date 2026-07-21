@@ -13,7 +13,7 @@ pub enum ShellCommand {
     /// Open the Workbench command center with the given pane focused. The
     /// shell's default landing surface; `findings` and `open` also route here
     /// with the appropriate pane focus / selection.
-    Workbench(WorkbenchPane),
+    Workbench,
     Report,
     Aim(Option<String>),
     Findings,

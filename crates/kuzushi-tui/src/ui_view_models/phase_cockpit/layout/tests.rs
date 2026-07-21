@@ -1,9 +1,8 @@
 use super::*;
 
-fn test_spec(id: PhaseSurfaceId, slot: WorkbenchPane) -> PhaseSurfaceSpec {
+fn test_spec(id: PhaseSurfaceId) -> PhaseSurfaceSpec {
     PhaseSurfaceSpec {
         id,
-        legacy_slot: slot,
         state: SurfaceState::Available,
         interaction: SurfaceInteraction::Scrollable,
     }
@@ -11,10 +10,10 @@ fn test_spec(id: PhaseSurfaceId, slot: WorkbenchPane) -> PhaseSurfaceSpec {
 
 fn test_specs() -> Vec<PhaseSurfaceSpec> {
     vec![
-        test_spec(PhaseSurfaceId::FixRemediation, WorkbenchPane::Findings),
-        test_spec(PhaseSurfaceId::FixCandidate, WorkbenchPane::Source),
-        test_spec(PhaseSurfaceId::FixAttackTree, WorkbenchPane::Center),
-        test_spec(PhaseSurfaceId::FixDfd, WorkbenchPane::Details),
+        test_spec(PhaseSurfaceId::FixRemediation),
+        test_spec(PhaseSurfaceId::FixCandidate),
+        test_spec(PhaseSurfaceId::FixAttackTree),
+        test_spec(PhaseSurfaceId::FixDfd),
     ]
 }
 
@@ -36,7 +35,7 @@ fn phase_presentation_plan_uses_visible_fallback_without_mutating_stored_focus()
         .map(|spec| planned_surface(*spec, Rect::new(0, 0, 40, 12)))
         .collect::<Vec<_>>();
     assert_eq!(
-        effective_focus(&compact, Some(WorkbenchPane::Details), specs[0].id),
+        effective_focus(&compact, Some(PhaseSurfaceId::FixDfd), specs[0].id),
         PhaseSurfaceId::FixRemediation
     );
     let (_, wide) = automatic_specs(&specs, Rect::new(0, 0, 160, 48));

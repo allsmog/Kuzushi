@@ -20,7 +20,7 @@ pub(super) fn render(
     model: &ScanPhaseModel,
     state: PhaseRenderState,
 ) {
-    if let Some(pane) = state.zoom {
+    if let Some(pane) = state.surface {
         render_scan_pane(frame, area, model, state, pane);
         return;
     }
@@ -108,7 +108,7 @@ fn render_combined(
         area,
         "SCAN · recorded result",
         compact_summary_lines(model, width),
-        WorkbenchPane::Center,
+        PhaseSurfaceId::ScanEngines,
         state,
     );
 }
@@ -118,12 +118,13 @@ fn render_scan_pane(
     area: Rect,
     model: &ScanPhaseModel,
     state: PhaseRenderState,
-    pane: WorkbenchPane,
+    surface: PhaseSurfaceId,
 ) {
-    match pane {
-        WorkbenchPane::Source => render_scope(frame, area, model, state),
-        WorkbenchPane::Center => render_engines(frame, area, model, state),
-        WorkbenchPane::Findings => render_findings(frame, area, model, state),
-        WorkbenchPane::Details => render_receipt(frame, area, model, state),
+    match surface {
+        PhaseSurfaceId::ScanScope => render_scope(frame, area, model, state),
+        PhaseSurfaceId::ScanEngines => render_engines(frame, area, model, state),
+        PhaseSurfaceId::ScanDelta => render_findings(frame, area, model, state),
+        PhaseSurfaceId::ScanReceipt => render_receipt(frame, area, model, state),
+        _ => render_engines(frame, area, model, state),
     }
 }

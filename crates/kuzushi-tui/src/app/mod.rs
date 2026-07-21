@@ -70,10 +70,10 @@ mod attention;
 mod autonomy;
 mod background_events;
 mod campaign;
-mod coverage;
 mod catalog;
 mod command_palette;
 mod command_router;
+mod coverage;
 mod editor_state;
 mod effect_runtime;
 mod effects;
@@ -211,7 +211,7 @@ pub use view_state::{
     PlanChange, PlanProposal, PromptDocumentMode, PromptDocumentState, PromptsAction, PwnView,
     ReconSnapshot, RecordedTraceEvent, SastTasksFooter, SastTasksSnapshot, SastTasksStatus,
     ScanPanelState, SetupEditor, SetupRouteState, SetupRowId, ShellView, SubsystemAggregate,
-    ThreatPatch, ThreatView, ThrottleAdvisory, TuneAction, WorkbenchPage, WorkbenchPane,
-    WorkbenchPaneScroll, WorkspaceView,
+    ThreatPatch, ThreatView, ThrottleAdvisory, TuneAction, WorkbenchPage, WorkbenchPaneScroll,
+    WorkspaceView,
 };
 pub(crate) use view_state::{SastTaskMode, SastTaskRow};

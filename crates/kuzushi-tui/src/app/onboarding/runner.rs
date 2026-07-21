@@ -757,7 +757,7 @@ impl ShellApp {
         self.engagement.clear_planning_queue();
         self.log("planning", "planning complete");
         if !self.foreground_run_focus_owns_activity() && !self.run_focus_is_background_owned() {
-            self.open_workbench(crate::app::WorkbenchPane::Findings);
+            self.open_workbench();
         }
         self.log(
             "recommend",

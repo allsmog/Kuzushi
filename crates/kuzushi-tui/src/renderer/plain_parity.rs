@@ -12,8 +12,7 @@
 use super::render_plain_app;
 use crate::app::{ShellApp, ShellView};
 use kuzushi_core::workflow_attempts::{
-    append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome,
-    PhaseTargetSnapshot,
+    append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseTargetSnapshot,
 };
 use kuzushi_core::{Finding, Severity, V2Config, WorkflowPhase, WorkspaceTarget};
 use strum::IntoEnumIterator;

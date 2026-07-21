@@ -246,7 +246,10 @@ impl ShellApp {
         // A reload invalidates a pending X-X bulk-defer confirmation: the
         // second press must defer exactly the set whose count the arm
         // message showed, so new data means re-arming with a fresh count.
-        self.router.workbench_mut().review_mut().backlog_confirm_bulk = false;
+        self.router
+            .workbench_mut()
+            .review_mut()
+            .backlog_confirm_bulk = false;
         if announce {
             let count = self.findings().len();
             self.log("findings", findings_loaded_message(count, total_count));

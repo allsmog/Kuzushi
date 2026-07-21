@@ -428,7 +428,7 @@ impl ShellApp {
         if self.workspace_is_fresh_for_auto_planner() {
             self.open_setup();
         } else {
-            self.open_workbench(WorkbenchPane::Findings);
+            self.open_workbench();
         }
     }
 

@@ -5,8 +5,8 @@ use cache_entries::{
     DirectoryListingCache, FileCompletionValuesCache, GitMetadataCache, JsonFileCache,
     LatestRunPointerCache, PathStateCache, ProjectModelDocumentCache, PromptMutationsCache,
     RunArtifactTextCache, RunProjectionCache, RunSummaryEntriesCache, RunTraceCache,
-    ScanRecommendationsCache, ScopeTreeCache, SourceFileCache, StrategyQueueCache,
-    TargetBaseCache, TargetProfileCache,
+    ScanRecommendationsCache, ScopeTreeCache, SourceFileCache, StrategyQueueCache, TargetBaseCache,
+    TargetProfileCache,
 };
 #[cfg(test)]
 use cache_entries::{read_json_file, RunSummaryCache, RunSummaryCacheKey};

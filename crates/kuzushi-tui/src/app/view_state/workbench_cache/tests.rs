@@ -76,7 +76,12 @@ fn settled_scan_receipts_survive_cache_invalidation() {
     let target = PathBuf::from("/tmp/receipt-cache-target");
     let mut cache = WorkbenchCache::default();
     seed_scan_receipt(&mut cache, &target, "run-ready", ready_receipt_state());
-    seed_scan_receipt(&mut cache, &target, "run-missing", ScanStageReceiptState::Missing);
+    seed_scan_receipt(
+        &mut cache,
+        &target,
+        "run-missing",
+        ScanStageReceiptState::Missing,
+    );
 
     cache.invalidate_state_artifact_paths(
         &target,
@@ -93,7 +98,12 @@ fn settled_scan_receipts_survive_cache_invalidation() {
         .cached_scan_stage_receipt(&target, "run-missing")
         .is_not_requested());
 
-    seed_scan_receipt(&mut cache, &target, "run-missing", ScanStageReceiptState::Missing);
+    seed_scan_receipt(
+        &mut cache,
+        &target,
+        "run-missing",
+        ScanStageReceiptState::Missing,
+    );
     cache.invalidate_state_artifact_paths(&target, &[PathBuf::from(".kuzushi/v3")]);
     cache.invalidate_workspace_files();
     cache.invalidate_run_summaries();
@@ -118,18 +128,13 @@ fn stale_run_summary_entries_serve_until_rehydrated() {
         run_id: "scan-run".to_string(),
         path: target.join(".kuzushi/v3/runs/scan-run/summary.json"),
         state: kuzushi_core::RunSummaryEntryState::Ready(RunSummary::running(
-            "scan-run",
-            "scan",
-            None,
-            "target",
+            "scan-run", "scan", None, "target",
         )),
     };
     cache.apply_view_hydration(ViewHydrationResult {
         target: target.clone(),
         key: ViewHydrationKey::RunSummaryEntries,
-        value: ViewHydrationValue::RunSummaryEntries(RunSummaryEntriesState::Ready(vec![
-            entry,
-        ])),
+        value: ViewHydrationValue::RunSummaryEntries(RunSummaryEntriesState::Ready(vec![entry])),
     });
     assert!(!cache.run_summary_entries_need_refresh(&target));
 

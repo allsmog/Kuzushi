@@ -96,7 +96,11 @@ fn matrix_header(visible: usize) -> Line<'static> {
 
 fn matrix_row(row: &CoverageRow, visible: usize) -> Line<'static> {
     let mut spans = vec![Span::styled(
-        format!("  {:<width$}", fit(&row.shard, SHARD_COLUMN_WIDTH), width = SHARD_COLUMN_WIDTH),
+        format!(
+            "  {:<width$}",
+            fit(&row.shard, SHARD_COLUMN_WIDTH),
+            width = SHARD_COLUMN_WIDTH
+        ),
         theme::primary(),
     )];
     for cell in row.cells.iter().take(visible) {

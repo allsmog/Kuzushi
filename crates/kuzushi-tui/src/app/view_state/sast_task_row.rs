@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::PhaseSurfaceId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SastTaskRow {
@@ -245,41 +246,6 @@ pub enum ThreatView {
     Summary,
 }
 
-/// Which pane the operator's keyboard focus is on inside the Workbench command
-/// center. `Tab` cycles `Source → Center → Findings → Details → Source`; `j`/`k`
-/// move within the focused pane; `Enter` opens the cursored finding when
-/// `Findings` is focused. Defaults to `Findings` — the list is the primary
-/// interaction, and opening a finding moves focus to `Details` for reading.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorkbenchPane {
-    Source,
-    Center,
-    Findings,
-    Details,
-}
-
-impl WorkbenchPane {
-    /// Advance focus to the next pane in `Source → Center → Findings → Details` order.
-    pub fn next(self) -> Self {
-        match self {
-            WorkbenchPane::Source => WorkbenchPane::Center,
-            WorkbenchPane::Center => WorkbenchPane::Findings,
-            WorkbenchPane::Findings => WorkbenchPane::Details,
-            WorkbenchPane::Details => WorkbenchPane::Source,
-        }
-    }
-
-    /// Move focus to the previous pane in `Source ← Center ← Findings ← Details` order.
-    pub fn prev(self) -> Self {
-        match self {
-            WorkbenchPane::Source => WorkbenchPane::Details,
-            WorkbenchPane::Center => WorkbenchPane::Source,
-            WorkbenchPane::Findings => WorkbenchPane::Center,
-            WorkbenchPane::Details => WorkbenchPane::Findings,
-        }
-    }
-}
-
 /// Durable operator screens for the five engagement phases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkbenchPage {
@@ -348,110 +314,41 @@ impl WorkbenchPage {
         Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
     }
 
-    /// Logical pane order for the phase-native cockpit.
-    ///
-    /// The renderer may stack these panes at compact widths, but their focus
-    /// order stays stable so Tab never lands on content that is not visible on
-    /// the active page.
-    #[cfg(test)]
-    pub fn pane_order(self) -> &'static [WorkbenchPane] {
+    /// The surface focused when the operator lands on this page. Matches the
+    /// first row each page's surface-spec builder emits, so the stored focus
+    /// and the plan's `primary` fallback agree.
+    pub fn primary_surface(self) -> PhaseSurfaceId {
         match self {
-            Self::Map => &[
-                WorkbenchPane::Source,
-                WorkbenchPane::Center,
-                WorkbenchPane::Findings,
-                WorkbenchPane::Details,
-            ],
-            Self::Scan => &[
-                WorkbenchPane::Source,
-                WorkbenchPane::Center,
-                WorkbenchPane::Findings,
-                WorkbenchPane::Details,
-            ],
-            Self::Review => &[WorkbenchPane::Findings, WorkbenchPane::Details],
-            Self::Prove => &[
-                WorkbenchPane::Source,
-                WorkbenchPane::Center,
-                WorkbenchPane::Findings,
-                WorkbenchPane::Details,
-            ],
-            Self::Fix => &[
-                WorkbenchPane::Source,
-                WorkbenchPane::Center,
-                WorkbenchPane::Details,
-                WorkbenchPane::Findings,
-            ],
+            Self::Map => PhaseSurfaceId::MapReadiness,
+            Self::Scan => PhaseSurfaceId::ScanEngines,
+            Self::Review => PhaseSurfaceId::ReviewQueue,
+            Self::Prove => PhaseSurfaceId::ProveEvidence,
+            Self::Fix => PhaseSurfaceId::FixRemediation,
         }
     }
 
-    #[cfg(test)]
-    pub fn pane_order_for_viewport(self, columns: u16, rows: u16) -> &'static [WorkbenchPane] {
-        if self == Self::Scan
-            && (columns < Self::SCAN_GRID_MIN_COLUMNS || rows < Self::SCAN_GRID_MIN_ROWS)
-        {
-            return &[WorkbenchPane::Center];
-        }
-        if self == Self::Fix
-            && (columns < Self::FIX_GRID_MIN_COLUMNS || rows < Self::FIX_GRID_MIN_ROWS)
-        {
-            return &[WorkbenchPane::Center];
-        }
-        self.pane_order()
-    }
-
-    /// Panes the active phase-native composition actually paints and can focus.
-    #[cfg(test)]
-    pub fn interactive_panes_for_viewport(
-        self,
-        columns: u16,
-        rows: u16,
-    ) -> &'static [WorkbenchPane] {
-        self.pane_order_for_viewport(columns, rows)
-    }
-
-    pub fn primary_pane(self) -> WorkbenchPane {
+    /// The finding-list-role surface — the default keyboard focus when no
+    /// focus has been stored for this page.
+    pub fn findings_surface(self) -> PhaseSurfaceId {
         match self {
-            Self::Review => WorkbenchPane::Findings,
-            Self::Map => WorkbenchPane::Source,
-            Self::Scan | Self::Prove => WorkbenchPane::Center,
-            Self::Fix => WorkbenchPane::Findings,
+            Self::Map => PhaseSurfaceId::MapHotModules,
+            Self::Scan => PhaseSurfaceId::ScanDelta,
+            Self::Review => PhaseSurfaceId::ReviewQueue,
+            Self::Prove => PhaseSurfaceId::ProveLadder,
+            Self::Fix => PhaseSurfaceId::FixRemediation,
         }
     }
 
-    #[cfg(test)]
-    pub fn next_pane_for_viewport(
-        self,
-        current: WorkbenchPane,
-        reverse: bool,
-        columns: u16,
-        rows: u16,
-    ) -> WorkbenchPane {
-        self.next_pane_in(
-            self.pane_order_for_viewport(columns, rows),
-            current,
-            reverse,
-        )
-    }
-
-    #[cfg(test)]
-    fn next_pane_in(
-        self,
-        panes: &[WorkbenchPane],
-        current: WorkbenchPane,
-        reverse: bool,
-    ) -> WorkbenchPane {
-        let Some(current_index) = panes.iter().position(|pane| *pane == current) else {
-            return panes
-                .first()
-                .copied()
-                .unwrap_or_else(|| self.primary_pane());
-        };
-        let next_index = if reverse {
-            (current_index + panes.len() - 1) % panes.len()
-        } else {
-            (current_index + 1) % panes.len()
-        };
-        panes[next_index]
+    /// The reading-detail-role surface targeted when a finding or receipt is
+    /// opened for reading.
+    pub fn detail_surface(self) -> PhaseSurfaceId {
+        match self {
+            Self::Map => PhaseSurfaceId::MapDfd,
+            Self::Scan => PhaseSurfaceId::ScanReceipt,
+            Self::Review => PhaseSurfaceId::ReviewDetail,
+            Self::Prove => PhaseSurfaceId::ProveReceipt,
+            Self::Fix => PhaseSurfaceId::FixDfd,
+        }
     }
 
     fn index(self) -> usize {
@@ -459,47 +356,34 @@ impl WorkbenchPage {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Per-surface scroll offsets for the Workbench. Keyed by `PhaseSurfaceId`,
+/// so an offset never leaks across pages the way the retired four-pane slots
+/// shared scroll state between phases.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorkbenchPaneScroll {
-    pub source: u16,
-    pub center: u16,
-    pub findings: u16,
-    pub details: u16,
+    offsets: std::collections::BTreeMap<PhaseSurfaceId, u16>,
 }
 
 impl WorkbenchPaneScroll {
-    pub fn get(self, pane: WorkbenchPane) -> u16 {
-        match pane {
-            WorkbenchPane::Source => self.source,
-            WorkbenchPane::Center => self.center,
-            WorkbenchPane::Findings => self.findings,
-            WorkbenchPane::Details => self.details,
-        }
+    pub fn get(&self, surface: PhaseSurfaceId) -> u16 {
+        self.offsets.get(&surface).copied().unwrap_or(0)
     }
 
-    pub fn shift(&mut self, pane: WorkbenchPane, amount: i32) {
-        let Some(scroll) = self.scroll_mut(pane) else {
-            return;
-        };
-        *scroll = if amount.is_negative() {
-            scroll.saturating_sub(amount.unsigned_abs().min(u16::MAX as u32) as u16)
+    pub fn shift(&mut self, surface: PhaseSurfaceId, amount: i32) {
+        let current = self.get(surface);
+        let next = if amount.is_negative() {
+            current.saturating_sub(amount.unsigned_abs().min(u16::MAX as u32) as u16)
         } else {
-            scroll.saturating_add(amount.min(u16::MAX as i32) as u16)
+            current.saturating_add(amount.min(u16::MAX as i32) as u16)
         };
+        self.set(surface, next);
     }
 
-    pub fn set(&mut self, pane: WorkbenchPane, value: u16) {
-        if let Some(scroll) = self.scroll_mut(pane) {
-            *scroll = value;
-        }
-    }
-
-    fn scroll_mut(&mut self, pane: WorkbenchPane) -> Option<&mut u16> {
-        match pane {
-            WorkbenchPane::Source => Some(&mut self.source),
-            WorkbenchPane::Center => Some(&mut self.center),
-            WorkbenchPane::Findings => Some(&mut self.findings),
-            WorkbenchPane::Details => Some(&mut self.details),
+    pub fn set(&mut self, surface: PhaseSurfaceId, value: u16) {
+        if value == 0 {
+            self.offsets.remove(&surface);
+        } else {
+            self.offsets.insert(surface, value);
         }
     }
 }
@@ -524,40 +408,32 @@ mod workbench_page_tests {
     use super::*;
 
     #[test]
-    fn phase_pages_cycle_only_their_visible_panes() {
+    fn each_phase_names_its_role_surfaces() {
         assert_eq!(
-            WorkbenchPage::Map.next_pane_for_viewport(WorkbenchPane::Center, false, 160, 40,),
-            WorkbenchPane::Findings
+            WorkbenchPage::Map.primary_surface(),
+            PhaseSurfaceId::MapReadiness
         );
         assert_eq!(
-            WorkbenchPage::Review.next_pane_for_viewport(WorkbenchPane::Findings, false, 160, 40,),
-            WorkbenchPane::Details
+            WorkbenchPage::Scan.primary_surface(),
+            PhaseSurfaceId::ScanEngines
         );
         assert_eq!(
-            WorkbenchPage::Prove.next_pane_for_viewport(WorkbenchPane::Center, true, 160, 40,),
-            WorkbenchPane::Source
+            WorkbenchPage::Review.primary_surface(),
+            PhaseSurfaceId::ReviewQueue
         );
         assert_eq!(
-            WorkbenchPage::Fix.next_pane_for_viewport(WorkbenchPane::Details, false, 160, 40,),
-            WorkbenchPane::Findings
+            WorkbenchPage::Prove.primary_surface(),
+            PhaseSurfaceId::ProveEvidence
         );
         assert_eq!(
-            WorkbenchPage::Fix.next_pane_for_viewport(WorkbenchPane::Details, false, 60, 20,),
-            WorkbenchPane::Center,
-            "compact Fix normalizes a stale hidden-pane focus"
+            WorkbenchPage::Fix.primary_surface(),
+            PhaseSurfaceId::FixRemediation
         );
-    }
-
-    #[test]
-    fn each_phase_names_its_primary_pane() {
-        assert_eq!(WorkbenchPage::Map.primary_pane(), WorkbenchPane::Source);
-        assert_eq!(WorkbenchPage::Scan.primary_pane(), WorkbenchPane::Center);
-        assert_eq!(
-            WorkbenchPage::Review.primary_pane(),
-            WorkbenchPane::Findings
-        );
-        assert_eq!(WorkbenchPage::Prove.primary_pane(), WorkbenchPane::Center);
-        assert_eq!(WorkbenchPage::Fix.primary_pane(), WorkbenchPane::Findings);
+        for page in WorkbenchPage::ALL {
+            assert_eq!(page.primary_surface().page(), page);
+            assert_eq!(page.findings_surface().page(), page);
+            assert_eq!(page.detail_surface().page(), page);
+        }
     }
 
     #[test]
@@ -574,78 +450,15 @@ mod workbench_page_tests {
     }
 
     #[test]
-    fn narrow_scan_uses_one_truthful_combined_pane() {
-        for viewport in [(40, 12), (60, 20)] {
-            assert_eq!(
-                WorkbenchPage::Scan.pane_order_for_viewport(viewport.0, viewport.1),
-                &[WorkbenchPane::Center]
-            );
-            assert_eq!(
-                WorkbenchPage::Scan.next_pane_for_viewport(
-                    WorkbenchPane::Center,
-                    false,
-                    viewport.0,
-                    viewport.1,
-                ),
-                WorkbenchPane::Center
-            );
-        }
-        assert_eq!(
-            WorkbenchPage::Scan.pane_order_for_viewport(80, 24),
-            WorkbenchPage::Scan.pane_order()
-        );
-    }
-
-    #[test]
-    fn compact_fix_cycles_only_the_combined_center_pane() {
-        for (columns, rows) in [(60, 20), (80, 24)] {
-            assert_eq!(
-                WorkbenchPage::Fix.next_pane_for_viewport(
-                    WorkbenchPane::Center,
-                    false,
-                    columns,
-                    rows,
-                ),
-                WorkbenchPane::Center
-            );
-            assert_eq!(
-                WorkbenchPage::Fix.pane_order_for_viewport(columns, rows),
-                &[WorkbenchPane::Center]
-            );
-        }
-        assert_eq!(
-            WorkbenchPage::Fix.next_pane_for_viewport(WorkbenchPane::Center, false, 120, 36,),
-            WorkbenchPane::Details
-        );
-    }
-
-    #[test]
-    fn prove_and_fix_expose_every_rendered_reference_pane() {
-        assert_eq!(
-            WorkbenchPage::Prove.pane_order_for_viewport(120, 36),
-            &[
-                WorkbenchPane::Source,
-                WorkbenchPane::Center,
-                WorkbenchPane::Findings,
-                WorkbenchPane::Details,
-            ]
-        );
-        assert_eq!(
-            WorkbenchPage::Fix.pane_order_for_viewport(120, 36),
-            &[
-                WorkbenchPane::Source,
-                WorkbenchPane::Center,
-                WorkbenchPane::Details,
-                WorkbenchPane::Findings,
-            ]
-        );
-    }
-
-    #[test]
-    fn contextual_visualizations_never_hide_phase_panes() {
-        assert_eq!(
-            WorkbenchPage::Prove.interactive_panes_for_viewport(150, 34),
-            WorkbenchPage::Prove.pane_order()
-        );
+    fn surface_scroll_is_keyed_per_surface() {
+        let mut scroll = WorkbenchPaneScroll::default();
+        scroll.shift(PhaseSurfaceId::ReviewQueue, 3);
+        scroll.shift(PhaseSurfaceId::FixRemediation, 5);
+        assert_eq!(scroll.get(PhaseSurfaceId::ReviewQueue), 3);
+        assert_eq!(scroll.get(PhaseSurfaceId::FixRemediation), 5);
+        scroll.shift(PhaseSurfaceId::ReviewQueue, -10);
+        assert_eq!(scroll.get(PhaseSurfaceId::ReviewQueue), 0);
+        scroll.set(PhaseSurfaceId::MapDfd, 7);
+        assert_eq!(scroll.get(PhaseSurfaceId::MapDfd), 7);
     }
 }

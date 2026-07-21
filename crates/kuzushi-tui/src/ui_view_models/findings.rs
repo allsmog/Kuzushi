@@ -273,7 +273,11 @@ fn findings_reconciliation_header(
         }
     }
     let review = if backlog.active { "open" } else { "all" };
-    let sort = if backlog.active { "severity" } else { "priority" };
+    let sort = if backlog.active {
+        "severity"
+    } else {
+        "priority"
+    };
     format!("showing {total} of {loaded} · filters:{filters} · review:{review} · sorted by {sort}")
 }
 
@@ -538,7 +542,9 @@ fn snippet_from_content(content: &str, focus_line: usize) -> SourceSnippetModel 
         );
     }
     let start_line = focus_line.saturating_sub(SNIPPET_CONTEXT_BEFORE).max(1);
-    let end_line = focus_line.saturating_add(SNIPPET_CONTEXT_AFTER).min(all.len());
+    let end_line = focus_line
+        .saturating_add(SNIPPET_CONTEXT_AFTER)
+        .min(all.len());
     SourceSnippetModel {
         start_line,
         focus_line,
@@ -702,10 +708,8 @@ fn backlog_open_only_finding_alias_indices(
         .filter(|(_, index)| {
             app.findings().get(*index).is_some_and(|finding| {
                 let decision = review_index.effective_decision_for(finding);
-                !super::review_state::effective_review_decision_complete(
-                    finding,
-                    decision.as_ref(),
-                ) && backlog_filters_match(finding, severity_filter, tool_filter.as_deref())
+                !super::review_state::effective_review_decision_complete(finding, decision.as_ref())
+                    && backlog_filters_match(finding, severity_filter, tool_filter.as_deref())
             })
         })
         .collect()

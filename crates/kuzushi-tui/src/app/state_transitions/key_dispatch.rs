@@ -1101,8 +1101,7 @@ impl ShellApp {
         // only fires on an empty prompt.
         match self.input_mode() {
             InputMode::Prompt => {
-                if self.input().is_empty()
-                    && self.default_composer_action_enabled("navigate_mode")
+                if self.input().is_empty() && self.default_composer_action_enabled("navigate_mode")
                 {
                     self.enter_navigate_mode();
                     return true;
@@ -1149,7 +1148,10 @@ impl ShellApp {
 
     fn enter_prompt_mode(&mut self) {
         self.set_input_mode(InputMode::Prompt);
-        self.log("input", "prompt mode — Esc on an empty prompt returns to navigation");
+        self.log(
+            "input",
+            "prompt mode — Esc on an empty prompt returns to navigation",
+        );
     }
 
     fn handle_unhandled_navigation_key(

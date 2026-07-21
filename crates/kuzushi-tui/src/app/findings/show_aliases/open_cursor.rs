@@ -22,13 +22,9 @@ impl ShellApp {
 
     fn focus_workbench_details_for_opened_finding(&mut self) {
         self.set_shell_view(ShellView::Workbench);
-        self.router
-            .workbench_mut()
-            .set_focus(crate::app::WorkbenchPane::Details);
-        self.router
-            .workbench_mut()
-            .scroll_mut()
-            .set(crate::app::WorkbenchPane::Details, 0);
+        let detail = crate::ui_view_models::active_workbench_page(self).detail_surface();
+        self.router.workbench_mut().set_focus(detail);
+        self.router.workbench_mut().scroll_mut().set(detail, 0);
     }
 
     fn log_cursor_finding_opened(&mut self, alias: &str, finding: Finding) {

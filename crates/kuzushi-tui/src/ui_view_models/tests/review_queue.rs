@@ -1,7 +1,8 @@
 use super::*;
-use crate::app::{Msg, ShellEffect, TermEvent, WorkbenchPage, WorkbenchPane};
+use crate::app::{Msg, ShellEffect, TermEvent, WorkbenchPage};
 use crate::commands::ReviewDecisionCommand;
 use crate::ui_view_models::findings::projected_visible_finding_pairs;
+use crate::ui_view_models::PhaseSurfaceId;
 use crate::ui_view_models::{
     current_finding_for_detail, phase_cockpit_model_for_phase, PhaseCockpitBody,
 };
@@ -219,7 +220,7 @@ fn repeated_j_crosses_workflow_group_boundary_without_identity_drift() {
         .set_page(Some(crate::app::WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(crate::WorkbenchPane::Findings);
+        .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewQueue);
     app.set_input_mode(crate::InputMode::Navigate);
 
     let model = review_queue_model(&app, ReviewQueueMode::All);
@@ -426,7 +427,7 @@ fn prepare_prove_navigation(app: &mut ShellApp) {
         .set_page(Some(WorkbenchPage::Prove));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ProveLadder);
     app.set_input_mode(InputMode::Navigate);
 }
 

@@ -197,7 +197,7 @@ impl ShellApp {
             }
             KeyCode::Enter => self.activate_setup_row(),
             KeyCode::Esc | KeyCode::Char('q') => {
-                self.open_workbench(WorkbenchPane::Findings);
+                self.open_workbench();
                 InputUpdate::handled()
             }
             _ => InputUpdate::ignored(),
@@ -478,7 +478,7 @@ impl ShellApp {
         if self.router.setup().editor() == Some(SetupEditor::Model) {
             self.return_to_setup_from_editor();
         } else {
-            self.open_workbench(WorkbenchPane::Findings);
+            self.open_workbench();
         }
     }
 
@@ -704,7 +704,7 @@ impl ShellApp {
         if self.router.setup().editor() == Some(SetupEditor::Credentials) {
             self.return_to_setup_from_editor();
         } else {
-            self.open_workbench(WorkbenchPane::Findings);
+            self.open_workbench();
         }
     }
 
@@ -1185,7 +1185,7 @@ impl ShellApp {
             .map(|phase| phase.label())
             .unwrap_or("planning");
         self.log("phase", format!("closed {phase} picker"));
-        self.open_workbench(WorkbenchPane::Findings);
+        self.open_workbench();
     }
 }
 

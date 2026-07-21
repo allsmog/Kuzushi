@@ -117,11 +117,15 @@ impl FixtureLine {
 
 fn machine_checked_fixture_lines() -> Vec<FixtureLine> {
     let mut lines = journey_check_lines();
-    lines.extend(snapshot_fixture_lines().into_iter().map(|line| FixtureLine {
-        source: format!("{}:{}", line.source, line.number),
-        text: line.text,
-        case_insensitive: false,
-    }));
+    lines.extend(
+        snapshot_fixture_lines()
+            .into_iter()
+            .map(|line| FixtureLine {
+                source: format!("{}:{}", line.source, line.number),
+                text: line.text,
+                case_insensitive: false,
+            }),
+    );
     lines
 }
 

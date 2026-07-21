@@ -3,7 +3,12 @@ use super::*;
 
 pub(super) fn campaign_keybindings() -> Vec<ViewKeybinding> {
     let mut bindings = vec![
-        bind_char('k', "j/k", "cursor", ViewHotkeyAction::CampaignCursorPrevious),
+        bind_char(
+            'k',
+            "j/k",
+            "cursor",
+            ViewHotkeyAction::CampaignCursorPrevious,
+        ),
         bind_char('j', "j/k", "cursor", ViewHotkeyAction::CampaignCursorNext),
         bind(
             HotkeyTrigger::Up,
@@ -23,10 +28,20 @@ pub(super) fn campaign_keybindings() -> Vec<ViewKeybinding> {
             "open jobs",
             ViewHotkeyAction::CampaignOpenDetail,
         ),
-        bind_char('q', "q", "campaign list", ViewHotkeyAction::CampaignBackToList),
+        bind_char(
+            'q',
+            "q",
+            "campaign list",
+            ViewHotkeyAction::CampaignBackToList,
+        ),
     ];
     bindings.extend([
-        bind_char('x', "x", "include/exclude", ViewHotkeyAction::CampaignToggleExclude),
+        bind_char(
+            'x',
+            "x",
+            "include/exclude",
+            ViewHotkeyAction::CampaignToggleExclude,
+        ),
         bind_char('w', "w", "workers", ViewHotkeyAction::CampaignCycleWorkers),
         bind_char('L', "L", "launch", ViewHotkeyAction::CampaignLaunch),
         bind_char('K', "K", "kill dispatcher", ViewHotkeyAction::CampaignKill),

@@ -125,7 +125,7 @@ fn parse_catalog_command(verb: &str) -> Option<ShellCommand> {
 
 fn parse_session_command(verb: &str) -> Option<ShellCommand> {
     match verb {
-        "workbench" => Some(ShellCommand::Workbench(WorkbenchPane::Findings)),
+        "workbench" => Some(ShellCommand::Workbench),
         "report" => Some(ShellCommand::Report),
         "doctor" | "health" => Some(ShellCommand::Health),
         "cost" => Some(ShellCommand::Cost),

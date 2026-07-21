@@ -83,7 +83,7 @@ fn reference_app(
     app.set_input_mode(InputMode::Navigate);
     app.set_shell_view(ShellView::Workbench);
     app.router.workbench_mut().set_page(Some(page));
-    app.router.workbench_mut().set_focus(page.primary_pane());
+    app.router.workbench_mut().set_focus(page.primary_surface());
     app
 }
 

@@ -156,8 +156,8 @@ impl ShellApp {
         if self.workbench_foreground_attention_is_active() {
             return self.shell_view() == ShellView::Workbench;
         }
-        if let Some((pane, _)) = self.workbench_surface_for_mouse(column, row) {
-            self.router.workbench_mut().set_focus(pane);
+        if let Some((surface, _)) = self.workbench_surface_for_mouse(column, row) {
+            self.router.workbench_mut().set_focus(surface);
             return true;
         }
         if let (Some(focus), Some(_)) = (self.activity_pane_for_mouse(column, row), self.activity())
@@ -216,10 +216,8 @@ impl ShellApp {
         self.router
             .findings_mut()
             .step_direction(amount as isize, len);
-        self.router
-            .workbench_mut()
-            .scroll_mut()
-            .set(crate::app::WorkbenchPane::Details, 0);
+        let detail = crate::ui_view_models::active_workbench_page(self).detail_surface();
+        self.router.workbench_mut().scroll_mut().set(detail, 0);
     }
 
     fn workbench_surface_for_mouse(
@@ -227,7 +225,7 @@ impl ShellApp {
         column: u16,
         row: u16,
     ) -> Option<(
-        crate::app::WorkbenchPane,
+        crate::ui_view_models::PhaseSurfaceId,
         crate::ui_view_models::SurfaceInteraction,
     )> {
         let viewport = self.viewport();
@@ -236,7 +234,7 @@ impl ShellApp {
             ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
         )?;
         plan.hit_test(column, row)
-            .map(|surface| (surface.legacy_slot, surface.interaction))
+            .map(|surface| (surface.id, surface.interaction))
     }
 
     fn activity_pane_for_mouse(&self, column: u16, row: u16) -> Option<crate::app::PaneFocus> {

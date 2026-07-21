@@ -1,8 +1,9 @@
 use super::*;
-use crate::app::{WorkbenchPage, WorkbenchPane};
+use crate::app::WorkbenchPage;
 use crate::ui_view_models::{
     phase_presentation_plan, workbench_presentation_snapshot, AttentionMode, EngagementHeaderModel,
-    JourneyPhaseStatus, PhaseCockpitModel, WorkbenchChromeModel, WorkbenchHint, WorkbenchTopBar,
+    JourneyPhaseStatus, PhaseCockpitModel, PhaseSurfaceId, WorkbenchChromeModel, WorkbenchHint,
+    WorkbenchTopBar,
 };
 use ratatui::layout::Rect;
 use ratatui::prelude::{Frame, Line, Span};
@@ -39,7 +40,7 @@ pub(crate) fn workbench_phase_plan_for_app(
         area.width as usize,
         area.height as usize,
     );
-    let displayed_zoom = displayed_zoom(area, lines.len(), app.router.workbench().zoom().pane());
+    let displayed_zoom = displayed_zoom(area, lines.len(), app.router.workbench().zoom().surface());
     let header_rows = lines.len() + usize::from(displayed_zoom.is_some());
     let body = workbench_body_area(area, header_rows);
     workbench_body_is_visible(body).then(|| {
@@ -47,8 +48,8 @@ pub(crate) fn workbench_phase_plan_for_app(
         phase_presentation_plan(
             &phase.body,
             body,
-            Some(route.focus()),
-            route.zoom().pane(),
+            Some(route.focus_for(chrome.page)),
+            route.zoom().surface(),
             phase_attention_mode(question_visible, &phase),
         )
     })
@@ -63,12 +64,12 @@ fn render_phase_presentation(
 ) {
     let question_visible = app.guided_scan_question_model().is_some();
     let top_lines = presentation_header_lines(area, app, chrome, phase, question_visible);
-    let requested_zoom = app.router.workbench().zoom().pane();
+    let requested_zoom = app.router.workbench().zoom().surface();
     let displayed_zoom = displayed_zoom(area, top_lines.len(), requested_zoom);
     let header_rows = top_lines.len() + usize::from(displayed_zoom.is_some());
     let planned_body = workbench_body_area(area, header_rows);
     if !workbench_body_is_visible(planned_body) {
-        render_workbench_header(frame, area, chrome.page, top_lines, None);
+        render_workbench_header(frame, area, top_lines, None);
         return;
     }
     let attention = phase_attention_mode(question_visible, phase);
@@ -76,12 +77,12 @@ fn render_phase_presentation(
     let plan = phase_presentation_plan(
         &phase.body,
         planned_body,
-        Some(route.focus()),
+        Some(route.focus_for(chrome.page)),
         requested_zoom,
         attention,
     );
-    let displayed_zoom = displayed_zoom.map(|_| plan.effective_slot());
-    let body = render_workbench_header(frame, area, chrome.page, top_lines, displayed_zoom);
+    let displayed_zoom = displayed_zoom.map(|_| plan.effective_focus);
+    let body = render_workbench_header(frame, area, top_lines, displayed_zoom);
     if !workbench_body_is_visible(body) {
         return;
     }
@@ -112,8 +113,8 @@ fn presentation_header_lines(
 fn displayed_zoom(
     area: Rect,
     header_line_count: usize,
-    requested_zoom: Option<WorkbenchPane>,
-) -> Option<WorkbenchPane> {
+    requested_zoom: Option<PhaseSurfaceId>,
+) -> Option<PhaseSurfaceId> {
     requested_zoom.filter(|_| {
         area.height
             .saturating_sub(header_line_count as u16)
@@ -139,14 +140,13 @@ fn workbench_body_is_visible(area: Rect) -> bool {
 fn render_workbench_header(
     frame: &mut Frame<'_>,
     area: Rect,
-    page: WorkbenchPage,
     mut top_lines: Vec<Line<'static>>,
-    displayed_zoom: Option<WorkbenchPane>,
+    displayed_zoom: Option<PhaseSurfaceId>,
 ) -> Rect {
     paint_cinematic_background(frame.buffer_mut(), area);
     paint_cinematic_scanlines(frame.buffer_mut(), area);
-    if let Some(pane) = displayed_zoom {
-        top_lines.push(zoom_status_line(page, pane));
+    if let Some(surface) = displayed_zoom {
+        top_lines.push(zoom_status_line(surface));
     }
     let body = workbench_body_area(area, top_lines.len());
     let header = Rect::new(area.x, area.y, area.width, body.y.saturating_sub(area.y));
@@ -177,41 +177,33 @@ fn workbench_header_lines(
     super::phase_pages::phase_header_lines(phase_header, &chrome.command_bar_hints, width, height)
 }
 
-fn zoom_status_line(page: WorkbenchPage, pane: WorkbenchPane) -> Line<'static> {
+fn zoom_status_line(surface: PhaseSurfaceId) -> Line<'static> {
     Line::from(vec![
         Span::styled(" ▸ ZOOM ", theme::warn()),
-        Span::styled(phase_pane_label(page, pane), theme::primary()),
+        Span::styled(phase_surface_zoom_label(surface), theme::primary()),
         Span::styled(" · Tab pane · Z restore cockpit", theme::muted()),
     ])
 }
 
-fn phase_pane_label(page: WorkbenchPage, pane: WorkbenchPane) -> &'static str {
-    const MAP: [&str; 4] = ["PROJECT CONTEXT", "ATTACK SURFACE", "HOT MODULES", "DFD"];
-    const SCAN: [&str; 4] = [
-        "SCOPE / PLAN",
-        "ENGINE OUTCOMES",
-        "FINDING DELTA",
-        "SCAN RECEIPT",
-    ];
-    const REVIEW: [&str; 4] = ["FINDINGS", "FINDINGS", "FINDINGS", "SELECTED FINDING"];
-    const PROVE: [&str; 4] = ["STATUS / NEXT", "EVIDENCE", "PROOF LADDER", "PROOF"];
-    const FIX: [&str; 4] = ["FIX STATUS", "ATTACK TREE", "REMEDIATION", "DFD"];
-    let labels = match page {
-        WorkbenchPage::Map => MAP,
-        WorkbenchPage::Scan => SCAN,
-        WorkbenchPage::Review => REVIEW,
-        WorkbenchPage::Prove => PROVE,
-        WorkbenchPage::Fix => FIX,
-    };
-    labels[pane_index(pane)]
-}
-
-fn pane_index(pane: WorkbenchPane) -> usize {
-    match pane {
-        WorkbenchPane::Source => 0,
-        WorkbenchPane::Center => 1,
-        WorkbenchPane::Findings => 2,
-        WorkbenchPane::Details => 3,
+fn phase_surface_zoom_label(surface: PhaseSurfaceId) -> &'static str {
+    match surface {
+        PhaseSurfaceId::MapReadiness => "PROJECT CONTEXT",
+        PhaseSurfaceId::MapAttackSurface => "ATTACK SURFACE",
+        PhaseSurfaceId::MapHotModules => "HOT MODULES",
+        PhaseSurfaceId::MapDfd | PhaseSurfaceId::FixDfd => "DFD",
+        PhaseSurfaceId::ScanScope => "SCOPE / PLAN",
+        PhaseSurfaceId::ScanEngines => "ENGINE OUTCOMES",
+        PhaseSurfaceId::ScanDelta => "FINDING DELTA",
+        PhaseSurfaceId::ScanReceipt => "SCAN RECEIPT",
+        PhaseSurfaceId::ReviewQueue => "FINDINGS",
+        PhaseSurfaceId::ReviewDetail => "SELECTED FINDING",
+        PhaseSurfaceId::ProveStatus => "STATUS / NEXT",
+        PhaseSurfaceId::ProveEvidence => "EVIDENCE",
+        PhaseSurfaceId::ProveLadder => "PROOF LADDER",
+        PhaseSurfaceId::ProveReceipt => "PROOF",
+        PhaseSurfaceId::FixCandidate => "FIX STATUS",
+        PhaseSurfaceId::FixAttackTree => "ATTACK TREE",
+        PhaseSurfaceId::FixRemediation => "REMEDIATION",
     }
 }
 
@@ -438,18 +430,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn phase_zoom_status_uses_the_visible_pane_name() {
+    fn phase_zoom_status_uses_the_visible_surface_name() {
         assert_eq!(
-            phase_pane_label(WorkbenchPage::Prove, WorkbenchPane::Source),
+            phase_surface_zoom_label(PhaseSurfaceId::ProveStatus),
             "STATUS / NEXT"
         );
         assert_eq!(
-            phase_pane_label(WorkbenchPage::Prove, WorkbenchPane::Findings),
+            phase_surface_zoom_label(PhaseSurfaceId::ProveLadder),
             "PROOF LADDER"
         );
-        assert_eq!(
-            phase_pane_label(WorkbenchPage::Map, WorkbenchPane::Details),
-            "DFD"
-        );
+        assert_eq!(phase_surface_zoom_label(PhaseSurfaceId::MapDfd), "DFD");
     }
 }

@@ -299,7 +299,7 @@ impl ShellApp {
             self.set_shell_view(ShellView::Workbench);
             self.router
                 .workbench_mut()
-                .set_focus(WorkbenchPane::Findings);
+                .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewQueue);
             self.clamp_findings_cursor();
         }
     }
@@ -459,20 +459,20 @@ impl ShellApp {
                 "component",
                 "select a component path or id; use `recommend` to inspect candidates",
             );
-            return self.open_workbench_effects(crate::app::WorkbenchPane::Findings);
+            return self.open_workbench_effects();
         };
         if matches!(raw, "all" | "clear" | "root" | ".") {
             self.set_active_scope(None);
             self.router.findings_mut().reset();
             self.log("component", "cleared component filter");
-            return self.open_workbench_effects(crate::app::WorkbenchPane::Findings);
+            return self.open_workbench_effects();
         }
         let Some(scope) = self.find_component_scope(target.as_deref(), raw) else {
             self.log(
                 "component",
                 format!("no component matches {raw:?}; run `recommend` or `project`"),
             );
-            return self.open_workbench_effects(crate::app::WorkbenchPane::Findings);
+            return self.open_workbench_effects();
         };
         self.set_active_scope(Some(scope.clone()));
         self.router.findings_mut().reset();
@@ -484,7 +484,7 @@ impl ShellApp {
                 scope.kind.label()
             ),
         );
-        self.open_workbench_effects(crate::app::WorkbenchPane::Findings)
+        self.open_workbench_effects()
     }
 
     fn find_component_scope(

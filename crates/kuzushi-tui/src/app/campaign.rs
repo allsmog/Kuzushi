@@ -66,8 +66,8 @@ impl ShellApp {
             .selected_campaign
             .min(deck.campaigns.len().saturating_sub(1));
         deck.selected_job = deck.selected_job.min(deck.detail_job_ceiling());
-        deck.notice = (unreadable > 0)
-            .then(|| format!("{unreadable} campaign dir(s) had no readable plan"));
+        deck.notice =
+            (unreadable > 0).then(|| format!("{unreadable} campaign dir(s) had no readable plan"));
     }
 
     /// Recompute only the workspace trend (the Report route renders the same
@@ -126,10 +126,7 @@ impl ShellApp {
         }
     }
 
-    fn campaign_deck_edit(
-        &mut self,
-        edit: impl FnOnce(&mut CampaignRouteState),
-    ) -> InputUpdate {
+    fn campaign_deck_edit(&mut self, edit: impl FnOnce(&mut CampaignRouteState)) -> InputUpdate {
         edit(self.router.campaign_mut());
         InputUpdate::handled()
     }
@@ -346,15 +343,13 @@ mod tests {
                 {"jobId": "j2", "tool": "sast:scan", "shard": "src/api", "priority": 30, "input": {}},
             ],
         });
-        let plan_path =
-            kuzushi_core::capabilities::campaign::campaign_plan_path(root, "camp1");
+        let plan_path = kuzushi_core::capabilities::campaign::campaign_plan_path(root, "camp1");
         std::fs::create_dir_all(plan_path.parent().unwrap()).unwrap();
         std::fs::write(&plan_path, serde_json::to_vec_pretty(&plan).unwrap()).unwrap();
         let queue = serde_json::json!({
             "jobs": { "j1": { "state": "completed", "costUsd": 0.25, "attempts": 1, "exitCode": 0 } }
         });
-        let queue_path =
-            kuzushi_core::capabilities::campaign::campaign_queue_path(root, "camp1");
+        let queue_path = kuzushi_core::capabilities::campaign::campaign_queue_path(root, "camp1");
         std::fs::write(&queue_path, serde_json::to_vec_pretty(&queue).unwrap()).unwrap();
     }
 
@@ -433,7 +428,10 @@ mod tests {
 
         let notice = kill_and_reap_dispatcher(child, pid);
 
-        assert!(notice.contains("killed dispatcher process group"), "{notice}");
+        assert!(
+            notice.contains("killed dispatcher process group"),
+            "{notice}"
+        );
         // Reaped: the pid slot is free or at least no longer our zombie.
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"));
         assert!(
@@ -506,7 +504,10 @@ mod tests {
         let notice = deck.notice.as_deref().unwrap_or_default();
         assert!(notice.contains("still running"), "{notice}");
         // The held handle still belongs to the first dispatcher; clean up.
-        let held = app.runtime_state.take_dispatcher_child().expect("handle kept");
+        let held = app
+            .runtime_state
+            .take_dispatcher_child()
+            .expect("handle kept");
         assert_eq!(held.id(), pid, "handle must not be replaced");
         kill_and_reap_dispatcher(held, pid);
     }
@@ -536,6 +537,10 @@ mod tests {
 
         let deck = app.router.campaign();
         assert!(deck.campaigns.is_empty());
-        assert!(deck.notice.as_deref().unwrap_or_default().contains("target"));
+        assert!(deck
+            .notice
+            .as_deref()
+            .unwrap_or_default()
+            .contains("target"));
     }
 }

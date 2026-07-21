@@ -413,7 +413,7 @@ pub(crate) struct FilteredFindingMovementNotice {
 }
 
 pub(crate) struct WorkbenchOpenFinalize {
-    pub(crate) pane: WorkbenchPane,
+    pub(crate) focus: crate::ui_view_models::PhaseSurfaceId,
 }
 
 pub(crate) struct OpenFindingReference {
@@ -817,7 +817,7 @@ impl ShellApp {
             .set_page(Some(crate::app::WorkbenchPage::Fix));
         self.router
             .workbench_mut()
-            .set_focus(crate::app::WorkbenchPane::Findings);
+            .set_focus(crate::ui_view_models::PhaseSurfaceId::FixRemediation);
         self.log(
             "patch",
             applied_patch_message(alias, &report, &saga.record.application_id),

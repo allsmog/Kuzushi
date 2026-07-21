@@ -4,7 +4,7 @@ impl ShellApp {
     pub fn scroll_up(&mut self, amount: u16) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.scroll_active_activity_pane(-(amount as isize)),
-            ScrollTarget::WorkbenchPane(focus) => {
+            ScrollTarget::WorkbenchSurface(focus) => {
                 self.router
                     .workbench_mut()
                     .scroll_mut()
@@ -18,7 +18,7 @@ impl ShellApp {
     pub fn scroll_down(&mut self, amount: u16) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.scroll_active_activity_pane(amount as isize),
-            ScrollTarget::WorkbenchPane(focus) => {
+            ScrollTarget::WorkbenchSurface(focus) => {
                 self.router
                     .workbench_mut()
                     .scroll_mut()
@@ -36,7 +36,7 @@ impl ShellApp {
                     focused_pane_to_top(session, self.router.activity_mut());
                 }
             }
-            ScrollTarget::WorkbenchPane(focus) => {
+            ScrollTarget::WorkbenchSurface(focus) => {
                 self.router.workbench_mut().scroll_mut().set(focus, 0);
             }
             ScrollTarget::Logs => self.router.logs_mut().open(),
@@ -47,7 +47,7 @@ impl ShellApp {
     pub fn scroll_to_bottom(&mut self) {
         match self.scroll_target() {
             ScrollTarget::Activity => self.focused_activity_pane_to_bottom(),
-            ScrollTarget::WorkbenchPane(focus) => {
+            ScrollTarget::WorkbenchSurface(focus) => {
                 self.router
                     .workbench_mut()
                     .scroll_mut()
@@ -94,15 +94,15 @@ impl ShellApp {
         match self.shell_view() {
             ShellView::Activity => ScrollTarget::Activity,
             ShellView::Workbench => self
-                .scrollable_workbench_slot()
-                .map(ScrollTarget::WorkbenchPane)
+                .scrollable_workbench_surface()
+                .map(ScrollTarget::WorkbenchSurface)
                 .unwrap_or(ScrollTarget::Default),
             ShellView::Logs => ScrollTarget::Logs,
             _ => ScrollTarget::Default,
         }
     }
 
-    fn scrollable_workbench_slot(&self) -> Option<WorkbenchPane> {
+    fn scrollable_workbench_surface(&self) -> Option<crate::ui_view_models::PhaseSurfaceId> {
         let viewport = self.viewport();
         let plan = crate::renderer::workbench_phase_plan_for_app(
             self,
@@ -110,7 +110,7 @@ impl ShellApp {
         )?;
         let surface = plan.surface(plan.effective_focus)?;
         (surface.interaction == crate::ui_view_models::SurfaceInteraction::Scrollable)
-            .then_some(surface.legacy_slot)
+            .then_some(surface.id)
     }
 
     pub(crate) fn sync_view_change(&mut self) -> bool {
@@ -130,7 +130,7 @@ impl ShellApp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScrollTarget {
     Activity,
-    WorkbenchPane(WorkbenchPane),
+    WorkbenchSurface(crate::ui_view_models::PhaseSurfaceId),
     Logs,
     Default,
 }

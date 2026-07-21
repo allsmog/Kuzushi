@@ -11,7 +11,7 @@ pub(super) fn render(
     model: &ReviewPhaseModel,
     state: PhaseRenderState,
 ) {
-    if let Some(pane) = state.zoom {
+    if let Some(pane) = state.surface {
         render_review_pane(frame, area, model, state, pane);
         return;
     }
@@ -45,14 +45,11 @@ fn render_review_pane(
     area: Rect,
     model: &ReviewPhaseModel,
     state: PhaseRenderState,
-    pane: WorkbenchPane,
+    surface: PhaseSurfaceId,
 ) {
-    match pane {
-        WorkbenchPane::Findings => render_review_list(frame, area, model, state),
-        WorkbenchPane::Details => render_review_detail(frame, area, model, state),
-        WorkbenchPane::Source | WorkbenchPane::Center => {
-            render_review_list(frame, area, model, state)
-        }
+    match surface {
+        PhaseSurfaceId::ReviewDetail => render_review_detail(frame, area, model, state),
+        _ => render_review_list(frame, area, model, state),
     }
 }
 
@@ -71,7 +68,7 @@ fn render_review_list(
             area.width.saturating_sub(2) as usize,
             area.height.saturating_sub(2),
         ),
-        WorkbenchPane::Findings,
+        PhaseSurfaceId::ReviewQueue,
         state,
     );
 }
@@ -102,7 +99,7 @@ fn render_review_detail(
         area,
         "SELECTED FINDING · Enter prove · z heatmap",
         review_detail_lines(model, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Details,
+        PhaseSurfaceId::ReviewDetail,
         state,
     );
 }

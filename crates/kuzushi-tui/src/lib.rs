@@ -42,7 +42,7 @@ pub use app::{
     QuitConfirmSnapshot, QuitConfirmStatus, ReconSnapshot, SastTasksFooter, SastTasksSnapshot,
     SastTasksStatus, ScanPanelState, ShellApp, ShellLaunchContext, ShellTargetSource, ShellView,
     ThemePaletteRow, ThemePickerFooter, ThemePickerSnapshot, ThemePickerStatus, ThreatView,
-    UpdateAvailableFooter, UpdateAvailableSnapshot, UpdateAvailableStatus, WorkbenchPane,
+    UpdateAvailableFooter, UpdateAvailableSnapshot, UpdateAvailableStatus,
 };
 pub use build_provenance::{
     build_provenance, build_summary, build_version, build_version_static, BuildProvenance,

@@ -1,7 +1,7 @@
 use super::*;
-use crate::app::{WorkbenchPane, WorkbenchPaneScroll};
+use crate::app::WorkbenchPaneScroll;
 use crate::ui_view_models::{
-    LayoutDensity, PhaseCockpitBody, PhaseCockpitModel, PhasePresentationPlan,
+    LayoutDensity, PhaseCockpitBody, PhaseCockpitModel, PhasePresentationPlan, PhaseSurfaceId,
 };
 use ratatui::layout::Rect;
 use ratatui::prelude::{Frame, Line, Span};
@@ -17,30 +17,32 @@ mod scan;
 pub(in crate::renderer::views) use header::phase_header_lines;
 
 #[derive(Debug, Clone, Copy)]
-pub(in crate::renderer::views) struct PhaseRenderState {
-    pub(super) focus: Option<WorkbenchPane>,
-    pub(super) zoom: Option<WorkbenchPane>,
-    pub(super) scroll: WorkbenchPaneScroll,
+pub(in crate::renderer::views) struct PhaseRenderState<'a> {
+    pub(super) focus: Option<PhaseSurfaceId>,
+    /// When set, the page renderer paints exactly this surface into the given
+    /// rect; when `None`, the page falls back to its own internal grid.
+    pub(super) surface: Option<PhaseSurfaceId>,
+    pub(super) scroll: &'a WorkbenchPaneScroll,
     pub(super) density: LayoutDensity,
 }
 
-impl PhaseRenderState {
-    pub(super) fn workbench(app: &ShellApp, plan: &PhasePresentationPlan) -> Self {
+impl<'a> PhaseRenderState<'a> {
+    pub(super) fn workbench(app: &'a ShellApp, plan: &PhasePresentationPlan) -> Self {
         let route = app.router.workbench();
         Self {
-            focus: (plan.density != LayoutDensity::Guided).then(|| plan.effective_slot()),
-            zoom: route.zoom().pane(),
+            focus: (plan.density != LayoutDensity::Guided).then_some(plan.effective_focus),
+            surface: route.zoom().surface(),
             scroll: route.scroll(),
             density: plan.density,
         }
     }
 
-    pub(super) fn focused(self, pane: WorkbenchPane) -> bool {
-        self.focus == Some(pane)
+    pub(super) fn focused(self, surface: PhaseSurfaceId) -> bool {
+        self.focus == Some(surface)
     }
 
-    pub(super) fn scroll(self, pane: WorkbenchPane) -> u16 {
-        self.scroll.get(pane)
+    pub(super) fn scroll(self, surface: PhaseSurfaceId) -> u16 {
+        self.scroll.get(surface)
     }
 }
 
@@ -55,7 +57,7 @@ pub(in crate::renderer::views) fn render_phase_cockpit_body(
     let _ = area;
     for surface in &plan.surfaces {
         let surface_state = PhaseRenderState {
-            zoom: Some(surface.legacy_slot),
+            surface: Some(surface.id),
             ..state
         };
         match &model.body {
@@ -92,10 +94,10 @@ pub(super) fn render_lines_pane(
     area: Rect,
     title: impl Into<String>,
     lines: Vec<Line<'static>>,
-    pane: WorkbenchPane,
+    surface: PhaseSurfaceId,
     state: PhaseRenderState,
 ) {
-    let focused = state.focused(pane);
+    let focused = state.focused(surface);
     let block = cockpit_pane_block(
         Line::from(Span::styled(title.into(), cockpit_title_style(focused))),
         focused,
@@ -104,7 +106,7 @@ pub(super) fn render_lines_pane(
     frame.render_widget(block, area);
     let visual_rows = wrapped_line_count(&lines, inner.width);
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    let scroll = clamped_scroll(state.scroll(pane), visual_rows, inner.height);
+    let scroll = clamped_scroll(state.scroll(surface), visual_rows, inner.height);
     frame.render_widget(paragraph.scroll((scroll, 0)), inner);
 }
 
@@ -112,11 +114,11 @@ pub(super) fn render_diagram_pane(
     frame: &mut Frame<'_>,
     area: Rect,
     title: &'static str,
-    pane: WorkbenchPane,
+    surface: PhaseSurfaceId,
     state: PhaseRenderState,
     diagram: impl Widget,
 ) {
-    let focused = state.focused(pane);
+    let focused = state.focused(surface);
     let block = cockpit_pane_block(
         Line::from(Span::styled(title, cockpit_title_style(focused))),
         focused,

@@ -378,7 +378,7 @@ impl ShellApp {
             ShellCommand::Findings => {
                 self.set_active_findings_filter(None);
                 self.prepare_findings_list_view();
-                Some(self.open_workbench_effects(crate::app::WorkbenchPane::Findings))
+                Some(self.open_workbench_effects())
             }
             ShellCommand::FindingsFilter(expression) => {
                 Some(self.reduce_open_filtered_findings(expression))
@@ -424,9 +424,7 @@ impl ShellApp {
                 run_id: self.current_activity_run_id(),
             })]),
             ShellCommand::Demo => Some(vec![ShellEffect::StartOfflineDemoFixtureScan]),
-            ShellCommand::Workbench(pane) => {
-                Some(self.open_reality_derived_workbench_effects(*pane))
-            }
+            ShellCommand::Workbench => Some(self.open_reality_derived_workbench_effects()),
             ShellCommand::Report => Some(self.open_report_view()),
             _ => None,
         }
@@ -578,7 +576,7 @@ impl ShellApp {
     fn open_home_view(&mut self) {
         self.clear_focused_module();
         self.router.catalog_mut().collapse();
-        self.open_cached_workbench(WorkbenchPane::Findings);
+        self.open_cached_workbench();
         self.log("home", "showing the phase cockpit");
     }
 
@@ -1045,7 +1043,7 @@ impl ShellApp {
             .set_page(Some(crate::app::WorkbenchPage::Map));
         self.router
             .workbench_mut()
-            .set_focus(crate::app::WorkbenchPane::Center);
+            .set_focus(crate::ui_view_models::PhaseSurfaceId::MapAttackSurface);
         if self.target().is_none() {
             self.log(
                 "aim",

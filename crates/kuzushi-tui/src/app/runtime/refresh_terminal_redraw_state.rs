@@ -144,8 +144,7 @@ pub(crate) fn deferred_frame_timeout(
     let Some(last_draw) = last_draw else {
         return view_timeout;
     };
-    let remaining =
-        MIN_FRAME_INTERVAL.saturating_sub(now.saturating_duration_since(last_draw));
+    let remaining = MIN_FRAME_INTERVAL.saturating_sub(now.saturating_duration_since(last_draw));
     view_timeout.min(remaining.max(Duration::from_millis(1)))
 }
 

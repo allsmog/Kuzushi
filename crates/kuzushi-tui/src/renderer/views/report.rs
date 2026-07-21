@@ -152,11 +152,9 @@ mod tests {
     #[test]
     fn report_header_carries_the_workspace_trend_strip_when_folded() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.router.campaign_mut().trend =
-            Some(kuzushi_core::capabilities::campaign::trend::trend_metrics(
-                &[],
-                8.0,
-            ));
+        app.router.campaign_mut().trend = Some(
+            kuzushi_core::capabilities::campaign::trend::trend_metrics(&[], 8.0),
+        );
         let text = report_lines(&app, Rect::new(0, 0, 120, 30))
             .iter()
             .flat_map(|line| line.spans.iter())

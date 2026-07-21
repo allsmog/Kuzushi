@@ -1,7 +1,13 @@
 use super::*;
+use crate::ui_view_models::PhaseSurfaceId;
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use kuzushi_core::V2Config;
 
+fn wb_focus(app: &ShellApp) -> crate::ui_view_models::PhaseSurfaceId {
+    app.router
+        .workbench()
+        .focus_for(crate::ui_view_models::active_workbench_page(app))
+}
 #[test]
 fn update_routes_terminal_key_events() {
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -232,7 +238,7 @@ fn update_terminal_mouse_uses_recorded_viewport_for_hit_testing() {
     );
 
     assert!(result.changed);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewDetail);
 }
 
 fn review_detail_hit_test_fixture() -> (ShellApp, u16, u16) {
@@ -250,7 +256,9 @@ fn review_detail_hit_test_fixture() -> (ShellApp, u16, u16) {
         kuzushi_core::Severity::High,
         "viewport hit-test fixture",
     )]);
-    app.router.workbench_mut().set_focus(WorkbenchPane::Source);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     update(
         &mut app,
         Msg::Term(TermEvent::Resize {

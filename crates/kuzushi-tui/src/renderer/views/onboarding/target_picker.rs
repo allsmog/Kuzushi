@@ -281,11 +281,7 @@ fn target_picker_list_footer(width: u16) -> Vec<Line<'static>> {
             ("Enter", "select"),
             ("Esc/q", "browse without a target"),
         ],
-        &[
-            ("↑/↓", "move"),
-            ("Enter", "select"),
-            ("Esc", "browse"),
-        ],
+        &[("↑/↓", "move"), ("Enter", "select"), ("Esc", "browse")],
     ));
     lines
 }

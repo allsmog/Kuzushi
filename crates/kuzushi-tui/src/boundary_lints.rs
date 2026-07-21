@@ -13,10 +13,10 @@ use std::path::{Path, PathBuf};
 /// Audited 2026-07-21 (wave-4 X1). Relative to `src/`.
 const AUDITED_ENV_READ_FILES: &[&str] = &[
     // Terminal / accessibility / presentation mode.
-    "app/runtime/run_shell.rs",                    // KUZUSHI_PLAIN/SCREEN_READER/LOW_BANDWIDTH
+    "app/runtime/run_shell.rs", // KUZUSHI_PLAIN/SCREEN_READER/LOW_BANDWIDTH
     "app/runtime/render_plain_scripted_session.rs", // KUZUSHI_MOUSE_CAPTURE
-    "ui_view_models/prompt.rs",                    // KUZUSHI_CLI_NAME branding compat
-    "app/onboarding/initial_view.rs",              // KUZUSHI_SKIP_ONBOARDING presentation toggle
+    "ui_view_models/prompt.rs", // KUZUSHI_CLI_NAME branding compat
+    "app/onboarding/initial_view.rs", // KUZUSHI_SKIP_ONBOARDING presentation toggle
     // Credential presence probes (is_some only; values never surface).
     "app/settings/handle_model_command/auth_login.rs",
     "app/settings/normalize_thinking_level/oauth_status.rs", // HOME for oauth path
@@ -28,9 +28,9 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     // Compatibility adapter reads (documented in CLAUDE.md).
     "app/shell_lifecycle/construction.rs", // ui.auto_open_viz compat value
     // Test / devex hooks.
-    "app/devex_phase_fixture/mod.rs",              // DEVEX_PHASE_FIXTURE_ENV
-    "app/onboarding/target_candidates.rs",         // cfg!(test)-gated history hook
-    "app/view_hydration/reader.rs",                // KUZUSHI_* hydration test hooks
+    "app/devex_phase_fixture/mod.rs",      // DEVEX_PHASE_FIXTURE_ENV
+    "app/onboarding/target_candidates.rs", // cfg!(test)-gated history hook
+    "app/view_hydration/reader.rs",        // KUZUSHI_* hydration test hooks
     "renderer/phase_composition_contract/snapshots.rs", // KUZUSHI_PHASE_SNAPSHOT_OUT regen
 ];
 
@@ -175,8 +175,7 @@ mod tests {
              with a category comment."
         );
 
-        let found: std::collections::BTreeSet<&str> =
-            found.iter().map(String::as_str).collect();
+        let found: std::collections::BTreeSet<&str> = found.iter().map(String::as_str).collect();
         let stale: Vec<&&str> = AUDITED_ENV_READ_FILES
             .iter()
             .filter(|file| !found.contains(**file))
@@ -208,9 +207,9 @@ mod tests {
                     {
                         continue;
                     }
-                    let audited = AUDITED_PANIC_SITES.iter().position(|(file, needle)| {
-                        *file == relative && line.contains(needle)
-                    });
+                    let audited = AUDITED_PANIC_SITES
+                        .iter()
+                        .position(|(file, needle)| *file == relative && line.contains(needle));
                     match audited {
                         Some(index) => matched[index] = true,
                         None => violations.push(format!("{relative}: {}", line.trim())),

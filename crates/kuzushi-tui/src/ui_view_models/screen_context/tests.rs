@@ -1,5 +1,6 @@
 use super::*;
-use crate::app::{ScanPanelState, WorkbenchPane};
+use crate::app::ScanPanelState;
+use crate::ui_view_models::PhaseSurfaceId;
 use kuzushi_core::{
     Finding, FindingEvidence, PersistedProofVerdict, PersistedSandboxBackend,
     PersistedVerification, Severity, StaticProofState, TriageOutcome, TriageVerdict, V2Config,
@@ -57,7 +58,9 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
     *app.findings_mut() = vec![finding.clone()];
     *app.selected_finding_mut() = Some(finding);
     app.set_shell_view(ShellView::Workbench);
-    app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewDetail);
     app.set_scan_panel(Some(ScanPanelState {
         run_id: Some("scan-run-1".to_string()),
         target: PathBuf::from("."),

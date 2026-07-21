@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use crate::ui_view_models::PhaseSurfaceId;
     use crossterm::event::{
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
@@ -11,6 +12,11 @@ mod tests {
     };
     use std::sync::mpsc;
 
+    fn wb_focus(app: &ShellApp) -> crate::ui_view_models::PhaseSurfaceId {
+        app.router
+            .workbench()
+            .focus_for(crate::ui_view_models::active_workbench_page(app))
+    }
     struct CursorQueryTrackingBackend {
         inner: TestBackend,
         cursor_queries: usize,
@@ -125,7 +131,9 @@ mod tests {
         app.router
             .workbench_mut()
             .set_page(Some(WorkbenchPage::Review));
-        app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+        app.router
+            .workbench_mut()
+            .set_focus(PhaseSurfaceId::ReviewDetail);
         let viewport = app.viewport();
         let plan = crate::renderer::workbench_phase_plan_for_app(
             &app,
@@ -144,7 +152,7 @@ mod tests {
                 modifiers: KeyModifiers::NONE,
             })
         ));
-        assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+        assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
         assert!(!apply_terminal_event(&mut app, Event::FocusGained));
     }
 
@@ -165,7 +173,7 @@ mod tests {
         assert!(apply_launch_start_view(&mut app));
 
         assert_eq!(app.shell_view(), ShellView::Workbench);
-        assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+        assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
     }
 
     #[test]
@@ -366,7 +374,11 @@ mod tests {
         assert!(should_draw_frame(true, None, base));
         assert!(should_draw_frame(true, long_ago, base));
         assert!(!should_draw_frame(true, just_drawn, base));
-        assert!(should_draw_frame(true, just_drawn, base + MIN_FRAME_INTERVAL));
+        assert!(should_draw_frame(
+            true,
+            just_drawn,
+            base + MIN_FRAME_INTERVAL
+        ));
 
         // Timeout capping: an idle 250ms wait shrinks to the remaining frame
         // interval while a deferred frame is pending, and only then.

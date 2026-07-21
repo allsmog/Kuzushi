@@ -132,11 +132,7 @@ fn push_next_section(
     }
 }
 
-fn push_source_section(
-    lines: &mut Vec<Line<'static>>,
-    detail: &FindingDetailModel,
-    budget: usize,
-) {
+fn push_source_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, budget: usize) {
     let Some(snippet) = detail.source_snippet.as_ref() else {
         return;
     };
@@ -147,7 +143,13 @@ fn push_source_section(
     }
     let number_width = snippet_number_width(snippet);
     for (offset, text) in snippet.lines.iter().enumerate() {
-        lines.push(snippet_code_line(snippet, offset, text, number_width, budget));
+        lines.push(snippet_code_line(
+            snippet,
+            offset,
+            text,
+            number_width,
+            budget,
+        ));
     }
 }
 
@@ -702,7 +704,10 @@ mod tests {
 
         assert!(text.contains("SOURCE"), "{text}");
         assert!(text.contains("src/app.rs:42"), "{text}");
-        assert!(text.contains("    40 │ fn handler(req: Request) {"), "{text}");
+        assert!(
+            text.contains("    40 │ fn handler(req: Request) {"),
+            "{text}"
+        );
         assert!(
             text.contains("  ▶ 42 │     db.query(&format!(\"SELECT {name}\"));"),
             "{text}"

@@ -27,10 +27,12 @@ fn finding_identity_line(finding: &FindingDetailModel, width: usize) -> Line<'st
     );
     let mut spans = vec![
         Span::styled(format!("{alias}  "), theme::label()),
-        Span::styled(format!("{severity}  "), theme::severity_tone(finding.severity_tone)),
+        Span::styled(
+            format!("{severity}  "),
+            theme::severity_tone(finding.severity_tone),
+        ),
     ];
-    let tail_budget =
-        width.saturating_sub(display_width(alias) + display_width(&severity) + 4);
+    let tail_budget = width.saturating_sub(display_width(alias) + display_width(&severity) + 4);
     if display_width(&proof) + 2 <= tail_budget {
         let lifecycle_budget = tail_budget - display_width(&proof) - 2;
         spans.push(Span::styled(

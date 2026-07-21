@@ -3,7 +3,7 @@
 use super::phase_cockpit::phase_cockpit_model_for_phase_with_journey;
 use super::{
     journey_model, journey_phase_segment, threat_model_doc, FindingDetailModel, JourneyModel,
-    JourneyPhaseStatus, PhaseCockpitModel, ReviewQueueMode,
+    JourneyPhaseStatus, PhaseCockpitModel, PhaseSurfaceId, ReviewQueueMode,
 };
 use crate::app::{WorkbenchPage, WorkflowPhase};
 use crate::ShellApp;
@@ -69,7 +69,7 @@ pub(crate) struct WorkbenchChromeModel {
     pub(crate) page: WorkbenchPage,
     pub(crate) top_bar: WorkbenchTopBar,
     pub(crate) command_bar_hints: Vec<WorkbenchHint>,
-    pub(crate) zoom: Option<crate::app::WorkbenchPane>,
+    pub(crate) zoom: Option<PhaseSurfaceId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,7 +164,14 @@ fn workbench_chrome_model_for_selection_with_journey(
     let state = workbench_state(app, journey);
     let mode = active_review_queue_mode(app);
     let report_cta = report_cta(state, super::visible_findings_len(app), mode);
-    chrome_model(app, page, report_cta, has_detail, finding_reference, journey)
+    chrome_model(
+        app,
+        page,
+        report_cta,
+        has_detail,
+        finding_reference,
+        journey,
+    )
 }
 
 fn chrome_model(
@@ -179,7 +186,7 @@ fn chrome_model(
         page,
         top_bar: top_bar_model(app, page, journey),
         command_bar_hints: command_bar_hints(app, page, report_cta, has_detail, finding_reference),
-        zoom: app.router.workbench().zoom().pane(),
+        zoom: app.router.workbench().zoom().surface(),
     }
 }
 

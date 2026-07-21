@@ -259,7 +259,7 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewQueue);
 }
 
 pub(crate) fn terminal_shell_loop(

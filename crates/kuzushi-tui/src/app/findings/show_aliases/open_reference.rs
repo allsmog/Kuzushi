@@ -97,11 +97,11 @@ impl ShellApp {
             .set_page(Some(crate::app::WorkbenchPage::Review));
         self.router
             .workbench_mut()
-            .set_focus(crate::app::WorkbenchPane::Details);
+            .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewDetail);
         self.router
             .workbench_mut()
             .scroll_mut()
-            .set(crate::app::WorkbenchPane::Details, 0);
+            .set(crate::ui_view_models::PhaseSurfaceId::ReviewDetail, 0);
         self.log_opened_finding(&finding);
     }
 
@@ -214,7 +214,7 @@ mod tests {
             .set_page(Some(crate::app::WorkbenchPage::Review));
         app.router
             .workbench_mut()
-            .set_focus(crate::app::WorkbenchPane::Findings);
+            .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewQueue);
 
         app.finalize_open_finding_effect(OpenFindingFinalize {
             reference: "F-0001".to_string(),
@@ -226,8 +226,10 @@ mod tests {
             Some(crate::app::WorkbenchPage::Review)
         );
         assert_eq!(
-            app.router.workbench().focus(),
-            crate::app::WorkbenchPane::Details
+            app.router
+                .workbench()
+                .focus_for(crate::app::WorkbenchPage::Review),
+            crate::ui_view_models::PhaseSurfaceId::ReviewDetail
         );
         let model = crate::ui_view_models::phase_cockpit_model_for_phase(
             &app,

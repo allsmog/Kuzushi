@@ -160,9 +160,7 @@ impl SessionState {
     ) -> bool {
         self.announced_scope_tree
             .as_ref()
-            .is_some_and(|(announced_root, announced)| {
-                announced_root == root && announced == tree
-            })
+            .is_some_and(|(announced_root, announced)| announced_root == root && announced == tree)
     }
 
     pub(crate) fn record_scope_tree_announcement(

@@ -139,10 +139,7 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
 /// reports burn-down progress instead of open/complete split. Active
 /// severity/tool filter chips render inline so the operator always sees
 /// what the one-key and bulk actions will hit.
-fn backlog_header(
-    visible_count: usize,
-    review: &crate::app::WorkbenchReviewState,
-) -> String {
+fn backlog_header(visible_count: usize, review: &crate::app::WorkbenchReviewState) -> String {
     let mut chips = String::new();
     if let Some(severity) = review.backlog_severity {
         chips.push_str(&format!(" - sev:{severity}"));
@@ -151,7 +148,9 @@ fn backlog_header(
         chips.push_str(&format!(" - tool:{tool}"));
     }
     if review.backlog_confirm_bulk {
-        chips.push_str(&format!(" - CONFIRM defer-all {visible_count}? press X again"));
+        chips.push_str(&format!(
+            " - CONFIRM defer-all {visible_count}? press X again"
+        ));
     }
     format!(
         "REVIEW BACKLOG - {visible_count} untriaged, severity-first{chips} - {} decided this session - c confirm - f reject-FP - d defer - w needs-review - s/t filter - X defer-all - u undo",

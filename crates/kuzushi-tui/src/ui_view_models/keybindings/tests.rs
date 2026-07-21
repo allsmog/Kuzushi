@@ -1,5 +1,6 @@
 use super::*;
 use crate::scene3d::VizPage;
+use crate::ui_view_models::PhaseSurfaceId;
 use crate::ui_view_models::WORKBENCH_REPORT_COMMAND;
 use crate::{ScanPanelState, ShellView};
 use kuzushi_core::V2Config;
@@ -86,7 +87,7 @@ fn workbench_footer_separates_prompt_commands_from_navigation_keys() {
         .set_page(Some(crate::app::WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(crate::app::WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     let prompt = footer_keybindings(&app);
     assert!(prompt.contains(&bind("Tab", "complete")));
     assert!(prompt.contains(&bind("Shift+Tab", "mode")));
@@ -123,7 +124,7 @@ fn workbench_navigation_controls_follow_the_active_page_and_focus() {
         .set_page(Some(crate::app::WorkbenchPage::Map));
     app.router
         .workbench_mut()
-        .set_focus(crate::app::WorkbenchPane::Center);
+        .set_focus(PhaseSurfaceId::MapAttackSurface);
     assert!(footer_keybindings(&app)
         .iter()
         .all(|binding| binding.key != "Tab"));
@@ -138,7 +139,7 @@ fn workbench_navigation_controls_follow_the_active_page_and_focus() {
         .set_page(Some(crate::app::WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(crate::app::WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     assert!(footer_keybindings(&app)
         .iter()
         .any(|binding| binding.key == "Tab"));
@@ -149,7 +150,7 @@ fn workbench_navigation_controls_follow_the_active_page_and_focus() {
 
     app.router
         .workbench_mut()
-        .set_focus(crate::app::WorkbenchPane::Details);
+        .set_focus(PhaseSurfaceId::ReviewDetail);
     assert!(footer_keybindings(&app)
         .iter()
         .any(|binding| binding.key == "q"));
@@ -159,7 +160,7 @@ fn workbench_navigation_controls_follow_the_active_page_and_focus() {
         .set_page(Some(crate::app::WorkbenchPage::Prove));
     app.router
         .workbench_mut()
-        .set_focus(crate::app::WorkbenchPane::Source);
+        .set_focus(PhaseSurfaceId::ProveStatus);
     let prove = footer_keybindings(&app);
     for key in ["v", "x", "c"] {
         assert!(prove.iter().any(|binding| binding.key == key), "{prove:?}");
@@ -196,7 +197,7 @@ fn workbench_footer_only_advertises_enter_for_an_actionable_findings_pane() {
         .set_page(Some(crate::app::WorkbenchPage::Map));
     app.router
         .workbench_mut()
-        .set_focus(crate::app::WorkbenchPane::Center);
+        .set_focus(PhaseSurfaceId::MapAttackSurface);
     assert!(footer_keybindings(&app)
         .iter()
         .all(|binding| binding.key != "Enter"));
@@ -207,7 +208,7 @@ fn workbench_footer_only_advertises_enter_for_an_actionable_findings_pane() {
         .set_page(Some(crate::app::WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(crate::app::WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     assert!(footer_keybindings(&app).contains(&bind("Enter", "review")));
 
     app.router
@@ -228,7 +229,10 @@ fn prompt_esc_label_teaches_the_findings_flow_only_where_it_exists() {
         .workbench_mut()
         .set_page(Some(crate::app::WorkbenchPage::Scan));
     let scan_page = footer_keybindings(&app);
-    assert!(scan_page.contains(&bind("Esc", "nav mode")), "{scan_page:?}");
+    assert!(
+        scan_page.contains(&bind("Esc", "nav mode")),
+        "{scan_page:?}"
+    );
 
     app.router
         .workbench_mut()
@@ -336,7 +340,7 @@ fn findings_navigation_precedes_secondary_workbench_controls() {
     )];
     app.router
         .workbench_mut()
-        .set_focus(crate::app::WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
 
     let bindings = footer_keybindings(&app);
     let move_index = bindings

@@ -79,17 +79,13 @@ impl ShellApp {
                 return Some(self.draft_workbench_invariant_hunt())
             }
             ViewHotkeyAction::WorkbenchOrderChain => return Some(self.draft_workbench_chain()),
-            ViewHotkeyAction::WorkbenchChainFold => {
-                return Some(self.draft_workbench_chain_fold())
-            }
+            ViewHotkeyAction::WorkbenchChainFold => return Some(self.draft_workbench_chain_fold()),
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
             ViewHotkeyAction::WorkbenchBacklogToggle => self.toggle_review_backlog_preset(),
             ViewHotkeyAction::WorkbenchBacklogDecide(verdict) => {
                 return Some(self.apply_backlog_one_key_decision(verdict))
             }
-            ViewHotkeyAction::WorkbenchBacklogSeverityCycle => {
-                self.cycle_backlog_severity_filter()
-            }
+            ViewHotkeyAction::WorkbenchBacklogSeverityCycle => self.cycle_backlog_severity_filter(),
             ViewHotkeyAction::WorkbenchBacklogToolCycle => self.cycle_backlog_tool_filter(),
             ViewHotkeyAction::WorkbenchBacklogBulkDefer => {
                 return Some(self.apply_backlog_bulk_defer())
@@ -104,8 +100,8 @@ impl ShellApp {
     pub(super) fn set_workbench_page(&mut self, page: WorkbenchPage) {
         let workbench = self.router.workbench_mut();
         workbench.set_page(Some(page));
-        workbench.scroll_mut().set(WorkbenchPane::Center, 0);
-        workbench.set_focus(page.primary_pane());
+        workbench.scroll_mut().set(page.primary_surface(), 0);
+        workbench.set_focus(page.primary_surface());
         self.set_shell_view(ShellView::Workbench);
     }
 
@@ -118,11 +114,12 @@ impl ShellApp {
         let Some(plan) = current_phase_plan(self) else {
             return;
         };
-        let stored_focus = self.router.workbench().focus();
+        let page = crate::ui_view_models::active_workbench_page(self);
+        let stored_focus = self.router.workbench().focus_for(page);
         let current = plan
             .available_surfaces
             .iter()
-            .position(|surface| surface.legacy_slot == stored_focus)
+            .position(|surface| surface.id == stored_focus)
             .unwrap_or_default();
         let next = cycle_index(current, plan.available_surfaces.len(), reverse);
         let next_surface = plan.available_surfaces[next];
@@ -130,11 +127,9 @@ impl ShellApp {
         if hidden {
             self.router
                 .workbench_mut()
-                .show_zoomed_focus(next_surface.legacy_slot);
+                .show_zoomed_focus(next_surface.id);
         } else {
-            self.router
-                .workbench_mut()
-                .set_focus(next_surface.legacy_slot);
+            self.router.workbench_mut().set_focus(next_surface.id);
         }
     }
 
@@ -171,14 +166,13 @@ impl ShellApp {
 
     fn toggle_workbench_pane_zoom(&mut self) {
         let focus = self.normalize_workbench_focus();
-        self.router.workbench_mut().set_focus(focus);
-        self.router.workbench_mut().toggle_zoom();
+        self.router.workbench_mut().toggle_zoom(focus);
     }
 
-    fn normalize_workbench_focus(&mut self) -> WorkbenchPane {
+    fn normalize_workbench_focus(&mut self) -> crate::ui_view_models::PhaseSurfaceId {
         current_phase_plan(self)
-            .map(|plan| plan.effective_slot())
-            .unwrap_or_else(|| crate::ui_view_models::active_workbench_page(self).primary_pane())
+            .map(|plan| plan.effective_focus)
+            .unwrap_or_else(|| crate::ui_view_models::active_workbench_page(self).primary_surface())
     }
 
     fn focus_workbench_findings_before_back(&mut self) -> bool {
@@ -190,8 +184,9 @@ impl ShellApp {
             return false;
         }
         let page = crate::ui_view_models::active_workbench_page(self);
-        let focus = page.primary_pane();
-        self.router.workbench_mut().set_focus(focus);
+        self.router
+            .workbench_mut()
+            .set_focus(page.primary_surface());
         self.log(
             "workbench",
             format!(
@@ -212,7 +207,7 @@ impl ShellApp {
             }
             crate::ui_view_models::SurfaceInteraction::Scrollable => {
                 self.router.workbench_mut().scroll_mut().shift(
-                    surface.legacy_slot,
+                    surface.id,
                     delta.clamp(i32::MIN as isize, i32::MAX as isize) as i32,
                 );
             }
@@ -241,7 +236,7 @@ impl ShellApp {
                 self.router
                     .workbench_mut()
                     .scroll_mut()
-                    .set(surface.legacy_slot, if to_start { 0 } else { u16::MAX });
+                    .set(surface.id, if to_start { 0 } else { u16::MAX });
             }
             crate::ui_view_models::SurfaceInteraction::Static
             | crate::ui_view_models::SurfaceInteraction::Diagram => {}
@@ -249,21 +244,25 @@ impl ShellApp {
     }
 
     fn workbench_open_focused(&mut self) {
+        use crate::ui_view_models::PhaseSurfaceId;
         let page = crate::ui_view_models::active_workbench_page(self);
         match self.normalize_workbench_focus() {
-            WorkbenchPane::Center => self.open_workbench_focused_viz(),
-            WorkbenchPane::Findings if page == WorkbenchPage::Review => {
+            PhaseSurfaceId::ReviewQueue if page == WorkbenchPage::Review => {
                 let can_open = crate::ui_view_models::visible_finding_at_cursor(self).is_some();
                 if can_open {
                     self.set_workbench_page(WorkbenchPage::Prove);
                 }
                 // Open after the page transition so finding detail remains
                 // focused; otherwise `set_workbench_page` resets focus to the
-                // Confirm composition's primary CENTER pane.
+                // Confirm composition's primary Evidence surface.
                 self.open_workbench_finding_or_log();
             }
-            WorkbenchPane::Findings => self.open_workbench_finding_or_log(),
-            WorkbenchPane::Source | WorkbenchPane::Details => {}
+            focus if focus == page.findings_surface() => self.open_workbench_finding_or_log(),
+            PhaseSurfaceId::MapAttackSurface
+            | PhaseSurfaceId::ScanEngines
+            | PhaseSurfaceId::ProveEvidence
+            | PhaseSurfaceId::FixAttackTree => self.open_workbench_focused_viz(),
+            _ => {}
         }
     }
 
@@ -364,10 +363,8 @@ impl ShellApp {
     }
 
     fn reset_workbench_detail_scroll(&mut self) {
-        self.router
-            .workbench_mut()
-            .scroll_mut()
-            .set(WorkbenchPane::Details, 0);
+        let detail = crate::ui_view_models::active_workbench_page(self).detail_surface();
+        self.router.workbench_mut().scroll_mut().set(detail, 0);
     }
 
     fn draft_workbench_chain(&mut self) -> InputUpdate {
@@ -432,14 +429,16 @@ impl ShellApp {
             return InputUpdate::handled();
         }
         self.remember_backlog_batch_for_cursored_finding();
-        self.router.workbench_mut().review_mut().backlog_confirm_bulk = false;
+        self.router
+            .workbench_mut()
+            .review_mut()
+            .backlog_confirm_bulk = false;
         let reason = format!("backlog one-key {verdict} by operator");
-        let effects = self.reduce_review_decision_command(
-            &crate::commands::ReviewDecisionCommand::Record {
+        let effects =
+            self.reduce_review_decision_command(&crate::commands::ReviewDecisionCommand::Record {
                 verdict: verdict.to_string(),
                 reason,
-            },
-        );
+            });
         InputUpdate {
             handled: true,
             effects,
@@ -514,7 +513,10 @@ impl ShellApp {
             return InputUpdate::handled();
         }
         if !self.router.workbench().review().backlog_confirm_bulk {
-            self.router.workbench_mut().review_mut().backlog_confirm_bulk = true;
+            self.router
+                .workbench_mut()
+                .review_mut()
+                .backlog_confirm_bulk = true;
             self.log(
                 "review",
                 format!(
@@ -524,7 +526,10 @@ impl ShellApp {
             );
             return InputUpdate::handled();
         }
-        self.router.workbench_mut().review_mut().backlog_confirm_bulk = false;
+        self.router
+            .workbench_mut()
+            .review_mut()
+            .backlog_confirm_bulk = false;
         let mut effects = Vec::new();
         let mut undo_batch = Vec::new();
         for (alias, finding) in batch {
@@ -563,7 +568,10 @@ impl ShellApp {
         if !self.router.workbench().review().backlog {
             return InputUpdate::handled();
         }
-        self.router.workbench_mut().review_mut().backlog_confirm_bulk = false;
+        self.router
+            .workbench_mut()
+            .review_mut()
+            .backlog_confirm_bulk = false;
         let batch =
             std::mem::take(&mut self.router.workbench_mut().review_mut().backlog_last_batch);
         if batch.is_empty() {
@@ -585,7 +593,11 @@ impl ShellApp {
                 dismiss_reason: None,
                 actor: None,
             };
-            effects.push(self.current_finding_decision_effect(entry.alias, entry.finding, decision));
+            effects.push(self.current_finding_decision_effect(
+                entry.alias,
+                entry.finding,
+                decision,
+            ));
             restored += 1;
         }
         self.log(

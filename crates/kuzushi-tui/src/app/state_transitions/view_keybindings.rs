@@ -1,7 +1,7 @@
 use super::view_keybinding_groups::{
-    activity_keybindings, actor_detail_keybindings, campaign_keybindings, catalog_keybindings, home_keybindings,
-    prompts_editor_keybindings, recommend_keybindings, threat_keybindings, tune_keybindings,
-    workbench_keybindings,
+    activity_keybindings, actor_detail_keybindings, campaign_keybindings, catalog_keybindings,
+    home_keybindings, prompts_editor_keybindings, recommend_keybindings, threat_keybindings,
+    tune_keybindings, workbench_keybindings,
 };
 use super::view_keybinding_helpers::{
     back_keybinding, bind, pause_scan_keybindings, resume_scan_keybindings, scroll_keybindings,
@@ -124,10 +124,10 @@ impl ShellApp {
 
 #[cfg(test)]
 mod keymap_collision_tests {
+    use super::super::view_keybinding_groups::activity_keybindings;
     use super::super::view_keybinding_helpers::{
         pause_scan_keybindings, resume_scan_keybindings, scroll_keybindings,
     };
-    use super::super::view_keybinding_groups::activity_keybindings;
     use super::*;
     use kuzushi_core::V2Config;
 

@@ -388,7 +388,10 @@ fn identity_atoms(header: &EngagementHeaderModel) -> Vec<IdentityAtom> {
             theme::warn(),
         ));
     } else if header.cost_usd > 0.0 {
-        atoms.push(atom(format!("cost ${:.2}", header.cost_usd), theme::primary()));
+        atoms.push(atom(
+            format!("cost ${:.2}", header.cost_usd),
+            theme::primary(),
+        ));
     }
     atoms.push(atom(header.context.clone(), context_style(&header.context)));
     atoms.push(atom(format!("model {}", header.model), theme::muted()));
@@ -436,9 +439,7 @@ fn context_style(context: &str) -> ratatui::style::Style {
     }
 }
 
-fn live_atom(
-    liveness: crate::ui_view_models::WorkLiveness,
-) -> (String, ratatui::style::Style) {
+fn live_atom(liveness: crate::ui_view_models::WorkLiveness) -> (String, ratatui::style::Style) {
     match liveness {
         crate::ui_view_models::WorkLiveness::Idle => ("○ idle".to_string(), theme::subtle()),
         // External writers are updating workspace state — real activity the

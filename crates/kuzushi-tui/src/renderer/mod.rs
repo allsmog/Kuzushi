@@ -22,13 +22,13 @@ pub(crate) mod shared;
 mod views;
 
 #[cfg(test)]
-mod phase_composition_contract;
-mod render_app;
-mod section_slot;
-#[cfg(test)]
 mod failure_coverage;
 #[cfg(test)]
+mod phase_composition_contract;
+#[cfg(test)]
 mod plain_parity;
+mod render_app;
+mod section_slot;
 #[cfg(test)]
 mod surface_lints;
 #[cfg(test)]

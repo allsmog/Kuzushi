@@ -146,7 +146,7 @@ impl ShellApp {
             .set_page(Some(WorkbenchPage::Fix));
         self.router
             .workbench_mut()
-            .set_focus(WorkbenchPane::Findings);
+            .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewQueue);
         self.set_input_mode(InputMode::Navigate);
     }
 
@@ -959,7 +959,9 @@ impl ShellApp {
         // hydration. Refilling here ran `git status` on the UI thread for
         // every watcher-reported source change, which stalls input for
         // seconds on large targets.
-        self.workbench_cache().borrow_mut().invalidate_workspace_files();
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_workspace_files();
     }
 
     pub(crate) fn apply_external_workspace_state_change(
@@ -1268,7 +1270,9 @@ mod tests {
         app.router
             .workbench_mut()
             .set_page(Some(WorkbenchPage::Prove));
-        app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+        app.router
+            .workbench_mut()
+            .set_focus(crate::ui_view_models::PhaseSurfaceId::ProveReceipt);
         app.set_input_mode(InputMode::Prompt);
 
         app.set_shell_view(ShellView::Help);
@@ -1282,7 +1286,10 @@ mod tests {
         assert_eq!(app.shell_view(), ShellView::Workbench);
         assert_eq!(app.input_mode(), InputMode::Prompt);
         assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Prove));
-        assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+        assert_eq!(
+            app.router.workbench().focus_for(WorkbenchPage::Prove),
+            crate::ui_view_models::PhaseSurfaceId::ProveReceipt
+        );
     }
 
     #[test]

@@ -17,7 +17,7 @@ pub(super) fn render_scope(
         area,
         "SCOPE / PLAN",
         scope_lines(model, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Source,
+        PhaseSurfaceId::ScanScope,
         state,
     );
 }
@@ -44,7 +44,7 @@ pub(super) fn render_engines(
         area,
         "RECORDED ENGINE OUTCOMES",
         engine_lines(model, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Center,
+        PhaseSurfaceId::ScanEngines,
         state,
     );
 }
@@ -120,7 +120,7 @@ pub(super) fn render_findings(
         area,
         "FINDING / ARTIFACT DELTA",
         finding_delta_lines(model, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Findings,
+        PhaseSurfaceId::ScanDelta,
         state,
     );
 }
@@ -260,7 +260,7 @@ pub(super) fn render_receipt(
         area,
         "SCAN RECEIPT",
         receipt_lines(model, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Details,
+        PhaseSurfaceId::ScanReceipt,
         state,
     );
 }

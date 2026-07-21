@@ -1,3 +1,4 @@
+use crate::ui_view_models::PhaseSurfaceId;
 use kuzushi_core::findings::TriageAuthor;
 use kuzushi_core::{
     Finding, FindingEvidence, OptionScope, OptionTarget, RunSummary, ScanCancellation, Severity,
@@ -7,6 +8,11 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 
+fn wb_focus(app: &ShellApp) -> crate::ui_view_models::PhaseSurfaceId {
+    app.router
+        .workbench()
+        .focus_for(crate::ui_view_models::active_workbench_page(app))
+}
 use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCategory};
 use crate::ui_view_models::{
     catalog_model, context_snapshot_relative_path, prompt_text, threat_model_relative_path,
@@ -164,10 +170,7 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
         rendered.contains("Resuming"),
         "prior-state banner: {rendered}"
     );
-    assert!(
-        rendered.contains("Map"),
-        "phase rail shows map: {rendered}"
-    );
+    assert!(rendered.contains("Map"), "phase rail shows map: {rendered}");
     assert!(
         rendered.contains("Scan"),
         "phase rail shows Scan: {rendered}"
@@ -2961,7 +2964,7 @@ fn workbench_findings_pane_windows_cursor_into_view() {
     app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     app.router.findings_mut().set_cursor(29);
     *app.findings_mut() = (0..30)
         .map(|index| {
@@ -2998,7 +3001,7 @@ fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
         .set_page(Some(WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     app.set_input_mode(crate::InputMode::Navigate);
     *app.findings_mut() = vec![Finding::new_semgrep(
         "demo.rule",
@@ -3318,7 +3321,10 @@ fn renders_shell_module_plan_and_run_routing_modes() {
             rendered.contains("target:"),
             "missing target chip in {rendered}"
         );
-        assert!(rendered.contains("context"), "missing context chip in {rendered}");
+        assert!(
+            rendered.contains("context"),
+            "missing context chip in {rendered}"
+        );
         assert!(
             rendered.contains("model:"),
             "missing model chip in {rendered}"
@@ -4396,10 +4402,7 @@ fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     assert!(rendered.contains("Review"), "rail shows Review phase");
     assert!(rendered.contains("Prove"), "rail shows Prove phase");
     assert!(rendered.contains("Fix"), "rail shows fix phase");
-    assert!(
-        !rendered.contains("Hunt"),
-        "legacy Hunt label is retired"
-    );
+    assert!(!rendered.contains("Hunt"), "legacy Hunt label is retired");
     assert!(
         !rendered.contains("Confirm"),
         "legacy Confirm label is retired"
@@ -5689,7 +5692,15 @@ fn views_survive_degenerate_geometry_with_unicode_content() {
         ShellView::BootSplash,
         ShellView::QuitConfirm,
     ];
-    let sizes = [(1u16, 1u16), (2, 2), (5, 3), (80, 1), (1, 40), (33, 6), (120, 40)];
+    let sizes = [
+        (1u16, 1u16),
+        (2, 2),
+        (5, 3),
+        (80, 1),
+        (1, 40),
+        (33, 6),
+        (120, 40),
+    ];
     for view in views {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_error_notice("工具", "扫描失败 🚨 café ẍ 深いパス/评估.rs:42");
@@ -5855,7 +5866,7 @@ fn workbench_latency_app() -> ShellApp {
         .set_page(Some(WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     app.set_input_mode(crate::InputMode::Navigate);
     app.set_findings(
         (0..400)
@@ -5904,7 +5915,7 @@ fn phase_native_workbench_fixture(page: WorkbenchPage) -> (tempfile::TempDir, Sh
     app.set_target(Some(target.path().to_path_buf()));
     app.set_shell_view(ShellView::Workbench);
     app.router.workbench_mut().set_page(Some(page));
-    app.router.workbench_mut().set_focus(page.primary_pane());
+    app.router.workbench_mut().set_focus(page.primary_surface());
 
     if page != WorkbenchPage::Map {
         let mut finding = Finding::new_tool(
@@ -5947,9 +5958,9 @@ fn render_phase_app(app: &ShellApp, width: u16, height: u16) -> String {
     rendered_buffer_rows(terminal.backend().buffer()).join("\n")
 }
 
-fn render_zoomed_phase_pane(page: WorkbenchPage, pane: WorkbenchPane) -> String {
+fn render_zoomed_phase_pane(page: WorkbenchPage, surface: PhaseSurfaceId) -> String {
     let (_target, app) = phase_native_workbench_fixture(page);
-    render_zoomed_phase_app(app, pane)
+    render_zoomed_phase_app(app, surface)
 }
 
 #[test]
@@ -5962,8 +5973,9 @@ fn ultra_compact_prove_keeps_status_next_and_proof_visible() {
 #[test]
 fn ultra_compact_zoomed_prove_keeps_status_and_next_visible() {
     let (_target, mut app) = phase_native_workbench_fixture(WorkbenchPage::Prove);
-    app.router.workbench_mut().set_focus(WorkbenchPane::Source);
-    app.router.workbench_mut().toggle_zoom();
+    app.router
+        .workbench_mut()
+        .toggle_zoom(PhaseSurfaceId::ProveStatus);
 
     let rendered = render_phase_app(&app, 40, 12);
 
@@ -6012,9 +6024,8 @@ fn assert_compact_prove_status(rendered: &str) {
     assert!(status_pos < next_pos, "{rendered}");
 }
 
-fn render_zoomed_phase_app(mut app: ShellApp, pane: WorkbenchPane) -> String {
-    app.router.workbench_mut().set_focus(pane);
-    app.router.workbench_mut().toggle_zoom();
+fn render_zoomed_phase_app(mut app: ShellApp, surface: PhaseSurfaceId) -> String {
+    app.router.workbench_mut().toggle_zoom(surface);
     render_phase_app(&app, 120, 36)
 }
 
@@ -6101,7 +6112,7 @@ fn render_missing_verification_trace() -> String {
     finding.verification = Some(verification_without_trace());
     *app.findings_mut() = vec![finding.clone()];
     *app.selected_finding_mut() = Some(finding);
-    render_zoomed_phase_app(app, WorkbenchPane::Details)
+    render_zoomed_phase_app(app, PhaseSurfaceId::ProveReceipt)
 }
 
 fn verification_without_trace() -> kuzushi_core::PersistedVerification {
@@ -6129,19 +6140,31 @@ fn render_missing_fix_diagrams() -> String {
 #[test]
 fn prove_and_fix_zoom_reach_every_reference_pane() {
     let cases = [
-        (WorkbenchPage::Prove, WorkbenchPane::Source, "STATUS / NEXT"),
-        (WorkbenchPage::Prove, WorkbenchPane::Center, "EVIDENCE"),
         (
             WorkbenchPage::Prove,
-            WorkbenchPane::Findings,
+            PhaseSurfaceId::ProveStatus,
+            "STATUS / NEXT",
+        ),
+        (
+            WorkbenchPage::Prove,
+            PhaseSurfaceId::ProveEvidence,
+            "EVIDENCE",
+        ),
+        (
+            WorkbenchPage::Prove,
+            PhaseSurfaceId::ProveLadder,
             "PROOF LADDER",
         ),
         (
             WorkbenchPage::Fix,
-            WorkbenchPane::Source,
+            PhaseSurfaceId::FixCandidate,
             "BREAKDOWN REPORT",
         ),
-        (WorkbenchPage::Fix, WorkbenchPane::Findings, "REMEDIATION"),
+        (
+            WorkbenchPage::Fix,
+            PhaseSurfaceId::FixRemediation,
+            "REMEDIATION",
+        ),
     ];
 
     for (page, pane, marker) in cases {
@@ -6155,18 +6178,18 @@ fn prove_and_fix_zoom_reach_every_reference_pane() {
 
 #[test]
 fn unavailable_zoom_target_falls_back_to_truthful_primary_surface() {
-    let prove = render_zoomed_phase_pane(WorkbenchPage::Prove, WorkbenchPane::Details);
+    let prove = render_zoomed_phase_pane(WorkbenchPage::Prove, PhaseSurfaceId::ProveReceipt);
     assert!(prove.contains("ZOOM STATUS / NEXT"), "{prove}");
     assert!(!prove.contains("ZOOM PROOF"), "{prove}");
 
-    let fix = render_zoomed_phase_pane(WorkbenchPage::Fix, WorkbenchPane::Details);
+    let fix = render_zoomed_phase_pane(WorkbenchPage::Fix, PhaseSurfaceId::FixDfd);
     assert!(fix.contains("ZOOM REMEDIATION"), "{fix}");
     assert!(!fix.contains("ZOOM DFD"), "{fix}");
 }
 
 #[test]
 fn prove_finding_zoom_keeps_selected_finding_header() {
-    let rendered = render_zoomed_phase_pane(WorkbenchPage::Prove, WorkbenchPane::Source);
+    let rendered = render_zoomed_phase_pane(WorkbenchPage::Prove, PhaseSurfaceId::ProveStatus);
 
     assert!(rendered.contains("F-0001  HIGH"), "{rendered}");
     assert!(
@@ -6715,7 +6738,9 @@ fn prove_selected_finding_keeps_evidence_and_proof_readable() {
     finding.triaged_by = Some(TriageAuthor::Human);
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Workbench);
-    app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewDetail);
     app.set_viewport(TerminalViewport::new(180, 64));
     app.set_target(Some(temp.path().to_path_buf()));
     *app.findings_mut() = vec![finding.clone()];
@@ -6805,7 +6830,9 @@ fn contextual_dfd_deck_renders_artifact_and_restores_workbench() {
     app.router
         .workbench_mut()
         .set_page(Some(WorkbenchPage::Prove));
-    app.router.workbench_mut().set_focus(WorkbenchPane::Center);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ProveEvidence);
     app.set_input_mode(crate::InputMode::Navigate);
     app.hydrate_active_view_blocking();
     app.open_scene_to_page(crate::scene3d::VizPage::Dfd);
@@ -6827,7 +6854,7 @@ fn contextual_dfd_deck_renders_artifact_and_restores_workbench() {
         ),
     );
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Center);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ProveEvidence);
     assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Prove));
     assert_eq!(app.input_mode(), crate::InputMode::Navigate);
 }

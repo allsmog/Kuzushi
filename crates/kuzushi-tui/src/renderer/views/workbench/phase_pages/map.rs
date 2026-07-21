@@ -15,7 +15,7 @@ pub(super) fn render(
     _header: &EngagementHeaderModel,
     state: PhaseRenderState,
 ) {
-    if let Some(pane) = state.zoom {
+    if let Some(pane) = state.surface {
         render_map_pane(frame, area, model, state, pane);
         return;
     }
@@ -88,7 +88,7 @@ fn render_compact(
         area,
         "MAP · Tab focus · z visualize",
         lines,
-        state.focus.unwrap_or(WorkbenchPane::Source),
+        state.focus.unwrap_or(PhaseSurfaceId::MapReadiness),
         state,
     );
 }
@@ -98,13 +98,14 @@ fn render_map_pane(
     area: Rect,
     model: &MapPhaseModel,
     state: PhaseRenderState,
-    pane: WorkbenchPane,
+    surface: PhaseSurfaceId,
 ) {
-    match pane {
-        WorkbenchPane::Source => render_context(frame, area, model, state),
-        WorkbenchPane::Center => render_attack_surface(frame, area, model, state),
-        WorkbenchPane::Findings => render_hot_modules(frame, area, model, state),
-        WorkbenchPane::Details => render_dfd_readiness(frame, area, model, state),
+    match surface {
+        PhaseSurfaceId::MapReadiness => render_context(frame, area, model, state),
+        PhaseSurfaceId::MapAttackSurface => render_attack_surface(frame, area, model, state),
+        PhaseSurfaceId::MapHotModules => render_hot_modules(frame, area, model, state),
+        PhaseSurfaceId::MapDfd => render_dfd_readiness(frame, area, model, state),
+        _ => render_context(frame, area, model, state),
     }
 }
 
@@ -119,7 +120,7 @@ fn render_context(
         area,
         "PROJECT CONTEXT",
         context_lines(model, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Source,
+        PhaseSurfaceId::MapReadiness,
         state,
     );
 }
@@ -198,7 +199,7 @@ fn render_attack_surface(
             model.attack_surface.as_ref(),
             area.width.saturating_sub(2) as usize,
         ),
-        WorkbenchPane::Center,
+        PhaseSurfaceId::MapAttackSurface,
         state,
     );
 }
@@ -248,7 +249,7 @@ fn render_hot_modules(
         area,
         "HOT MODULES · z heatmap",
         hot_modules_pane_lines(model, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Findings,
+        PhaseSurfaceId::MapHotModules,
         state,
     );
 }
@@ -341,7 +342,7 @@ fn render_dfd_readiness(
         area,
         "THREAT MODEL / DFD · z open",
         dfd_readiness_lines(&model.dfd, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Details,
+        PhaseSurfaceId::MapDfd,
         state,
     );
 }

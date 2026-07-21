@@ -1,4 +1,10 @@
+fn wb_focus(app: &ShellApp) -> crate::ui_view_models::PhaseSurfaceId {
+    app.router
+        .workbench()
+        .focus_for(crate::ui_view_models::active_workbench_page(app))
+}
 use super::*;
+use crate::ui_view_models::PhaseSurfaceId;
 use kuzushi_core::modules::OptionType;
 use kuzushi_core::workflow_attempts::{
     append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseTargetSnapshot,
@@ -654,13 +660,11 @@ fn guided_attention_preserves_body_focus_and_scroll_from_mouse_input() {
     app.engagement
         .set_guided_scan(GuidedScanFlow::new(GuidedScanStage::MapRoute));
     app.show_guided_phase(WorkflowPhase::Map);
-    app.router
-        .workbench_mut()
-        .set_focus(crate::app::WorkbenchPane::Details);
+    app.router.workbench_mut().set_focus(PhaseSurfaceId::MapDfd);
     app.router
         .workbench_mut()
         .scroll_mut()
-        .set(crate::app::WorkbenchPane::Details, 7);
+        .set(PhaseSurfaceId::MapDfd, 7);
 
     for kind in [
         crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -675,15 +679,9 @@ fn guided_attention_preserves_body_focus_and_scroll_from_mouse_input() {
         assert!(update.handled);
     }
 
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::MapDfd);
     assert_eq!(
-        app.router.workbench().focus(),
-        crate::app::WorkbenchPane::Details
-    );
-    assert_eq!(
-        app.router
-            .workbench()
-            .scroll()
-            .get(crate::app::WorkbenchPane::Details),
+        app.router.workbench().scroll().get(PhaseSurfaceId::MapDfd),
         7
     );
 }
@@ -703,9 +701,7 @@ fn result_ready_attention_consumes_body_navigation_keys() {
     app.refresh_phase_attempt_projection();
     app.show_guided_phase(WorkflowPhase::Map);
     app.set_input_mode(crate::InputMode::Navigate);
-    app.router
-        .workbench_mut()
-        .set_focus(crate::app::WorkbenchPane::Details);
+    app.router.workbench_mut().set_focus(PhaseSurfaceId::MapDfd);
     let page = app.router.workbench().page();
 
     for key in [
@@ -722,10 +718,7 @@ fn result_ready_attention_consumes_body_navigation_keys() {
     }
 
     assert_eq!(app.router.workbench().page(), page);
-    assert_eq!(
-        app.router.workbench().focus(),
-        crate::app::WorkbenchPane::Details
-    );
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::MapDfd);
 }
 
 #[test]

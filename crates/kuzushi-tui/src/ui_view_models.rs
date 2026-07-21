@@ -163,10 +163,10 @@ pub(crate) use findings::{
     current_finding_for_detail, finding_detail_model_for_projection, findings_model,
     review_backlog_active, selected_finding_detail_model, visible_finding_at_cursor,
     visible_finding_at_index, visible_finding_position_for, visible_findings_len,
-    visible_sorted_finding_alias_indices,
-    CleanScanEmptyState, FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow,
-    FindingListRow, FindingsEmptyState, FindingsModel, ProofTier, SourceSnippetModel,
-    TriageSummaryModel, SNIPPET_CONTEXT_AFTER, SNIPPET_CONTEXT_BEFORE,
+    visible_sorted_finding_alias_indices, CleanScanEmptyState, FilteredFindingsEmptyState,
+    FindingDetailModel, FindingEvidenceRow, FindingListRow, FindingsEmptyState, FindingsModel,
+    ProofTier, SourceSnippetModel, TriageSummaryModel, SNIPPET_CONTEXT_AFTER,
+    SNIPPET_CONTEXT_BEFORE,
 };
 pub(crate) use health::{
     health_display_model, health_model, HealthDisplayModel, HealthModel, HealthRow, HealthTone,
@@ -224,12 +224,11 @@ pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
     phase_cockpit_model_for_phase, phase_presentation_plan, phase_surface_specs, AttentionMode,
     EngagementHeaderModel, FixPhaseModel, LayoutDensity, MapPhaseModel, NextScanRow,
-    NextScansState, PhaseCockpitBody,
-    PhaseCockpitModel, PhasePresentationPlan, PhaseResultCardModel, PhaseSurfaceId,
-    PlannedPhaseSurface, ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel,
-    RemediationLifecycleStage, RemediationLoadState, ReviewPhaseModel, ScanAttemptModel,
-    ScanEngineOutcomeModel, ScanPhaseModel, SelectionDisclosureModel, SurfaceInteraction,
-    SurfaceState,
+    NextScansState, PhaseCockpitBody, PhaseCockpitModel, PhasePresentationPlan,
+    PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface, ProofReplayModel, ProvePhaseModel,
+    RemediationLifecycleModel, RemediationLifecycleStage, RemediationLoadState, ReviewPhaseModel,
+    ScanAttemptModel, ScanEngineOutcomeModel, ScanPhaseModel, SelectionDisclosureModel,
+    SurfaceInteraction, SurfaceState,
 };
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use planning_overview::{

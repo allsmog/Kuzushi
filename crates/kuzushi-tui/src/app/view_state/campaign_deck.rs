@@ -59,7 +59,9 @@ impl CampaignRouteState {
         self.campaigns.get(self.selected_campaign)
     }
 
-    pub(crate) fn selected_job(&self) -> Option<&kuzushi_core::capabilities::campaign::snapshot::CampaignJobSnapshot> {
+    pub(crate) fn selected_job(
+        &self,
+    ) -> Option<&kuzushi_core::capabilities::campaign::snapshot::CampaignJobSnapshot> {
         self.selected_campaign()?.jobs.get(self.selected_job)
     }
 
@@ -153,7 +155,15 @@ mod tests {
         let args = dispatcher_args("camp1", target, 3, &all, 2);
         assert_eq!(
             args,
-            vec!["--target", "/tmp/ws", "campaign", "run", "camp1", "--workers", "3"]
+            vec![
+                "--target",
+                "/tmp/ws",
+                "campaign",
+                "run",
+                "camp1",
+                "--workers",
+                "3"
+            ]
         );
 
         let subset = ["j2".to_string()];

@@ -1,41 +1,41 @@
-use super::WorkbenchPane;
+use crate::ui_view_models::PhaseSurfaceId;
 
-/// Transient full-body projection of one Workbench pane.
+/// Transient full-body projection of one Workbench surface.
 ///
-/// The focused pane remains the source of truth. While zoom is active, Tab
+/// The focused surface remains the source of truth. While zoom is active, Tab
 /// changes focus and the zoom follows it so navigation never changes the
 /// underlying cockpit geometry.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WorkbenchZoom {
     #[default]
     Off,
-    Pane(WorkbenchPane),
+    Surface(PhaseSurfaceId),
 }
 
 impl WorkbenchZoom {
-    pub(crate) fn pane(self) -> Option<WorkbenchPane> {
+    pub(crate) fn surface(self) -> Option<PhaseSurfaceId> {
         match self {
             Self::Off => None,
-            Self::Pane(pane) => Some(pane),
+            Self::Surface(surface) => Some(surface),
         }
     }
 
-    pub(crate) fn toggle(&mut self, focus: WorkbenchPane) {
-        *self = if self.pane().is_some() {
+    pub(crate) fn toggle(&mut self, focus: PhaseSurfaceId) {
+        *self = if self.surface().is_some() {
             Self::Off
         } else {
-            Self::Pane(focus)
+            Self::Surface(focus)
         };
     }
 
-    pub(crate) fn follow_focus(&mut self, focus: WorkbenchPane) {
-        if self.pane().is_some() {
-            *self = Self::Pane(focus);
+    pub(crate) fn follow_focus(&mut self, focus: PhaseSurfaceId) {
+        if self.surface().is_some() {
+            *self = Self::Surface(focus);
         }
     }
 
-    pub(crate) fn show(&mut self, focus: WorkbenchPane) {
-        *self = Self::Pane(focus);
+    pub(crate) fn show(&mut self, focus: PhaseSurfaceId) {
+        *self = Self::Surface(focus);
     }
 
     pub(crate) fn clear(&mut self) {
@@ -50,12 +50,23 @@ mod tests {
     #[test]
     fn active_zoom_follows_focus_until_toggled_off() {
         let mut zoom = WorkbenchZoom::default();
-        zoom.toggle(WorkbenchPane::Findings);
-        zoom.follow_focus(WorkbenchPane::Details);
-        assert_eq!(zoom.pane(), Some(WorkbenchPane::Details));
+        zoom.toggle(PhaseSurfaceId::ReviewQueue);
+        zoom.follow_focus(PhaseSurfaceId::ReviewDetail);
+        assert_eq!(zoom.surface(), Some(PhaseSurfaceId::ReviewDetail));
 
-        zoom.toggle(WorkbenchPane::Details);
-        zoom.follow_focus(WorkbenchPane::Source);
-        assert_eq!(zoom.pane(), None);
+        zoom.toggle(PhaseSurfaceId::ReviewDetail);
+        zoom.follow_focus(PhaseSurfaceId::MapReadiness);
+        assert_eq!(zoom.surface(), None);
+    }
+
+    #[test]
+    fn show_and_clear_are_idempotent_projections() {
+        let mut zoom = WorkbenchZoom::default();
+        zoom.show(PhaseSurfaceId::FixAttackTree);
+        zoom.show(PhaseSurfaceId::FixAttackTree);
+        assert_eq!(zoom.surface(), Some(PhaseSurfaceId::FixAttackTree));
+        zoom.clear();
+        zoom.clear();
+        assert_eq!(zoom.surface(), None);
     }
 }

@@ -730,7 +730,7 @@ pub struct ReportReceipt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkbenchRouteState {
-    focus: crate::app::WorkbenchPane,
+    focus: Option<crate::ui_view_models::PhaseSurfaceId>,
     zoom: crate::app::WorkbenchZoom,
     page: Option<crate::app::WorkbenchPage>,
     scroll: crate::app::WorkbenchPaneScroll,
@@ -740,7 +740,7 @@ pub struct WorkbenchRouteState {
 impl Default for WorkbenchRouteState {
     fn default() -> Self {
         Self {
-            focus: crate::app::WorkbenchPane::Findings,
+            focus: None,
             zoom: crate::app::WorkbenchZoom::default(),
             page: None,
             scroll: crate::app::WorkbenchPaneScroll::default(),
@@ -754,12 +754,20 @@ impl WorkbenchRouteState {
         *self = Self::default();
     }
 
-    pub(crate) fn focus(&self) -> crate::app::WorkbenchPane {
+    /// The focused surface for `page`. A focus stored while another page was
+    /// active falls back to this page's finding-list-role surface, so phase
+    /// changes never alias focus onto an unrelated surface.
+    pub(crate) fn focus_for(
+        &self,
+        page: crate::app::WorkbenchPage,
+    ) -> crate::ui_view_models::PhaseSurfaceId {
         self.focus
+            .filter(|surface| surface.page() == page)
+            .unwrap_or_else(|| page.findings_surface())
     }
 
-    pub(crate) fn set_focus(&mut self, focus: crate::app::WorkbenchPane) {
-        self.focus = focus;
+    pub(crate) fn set_focus(&mut self, focus: crate::ui_view_models::PhaseSurfaceId) {
+        self.focus = Some(focus);
         self.zoom.follow_focus(focus);
     }
 
@@ -767,12 +775,13 @@ impl WorkbenchRouteState {
         self.zoom
     }
 
-    pub(crate) fn toggle_zoom(&mut self) {
-        self.zoom.toggle(self.focus);
+    pub(crate) fn toggle_zoom(&mut self, focus: crate::ui_view_models::PhaseSurfaceId) {
+        self.focus = Some(focus);
+        self.zoom.toggle(focus);
     }
 
-    pub(crate) fn show_zoomed_focus(&mut self, focus: crate::app::WorkbenchPane) {
-        self.focus = focus;
+    pub(crate) fn show_zoomed_focus(&mut self, focus: crate::ui_view_models::PhaseSurfaceId) {
+        self.focus = Some(focus);
         self.zoom.show(focus);
     }
 
@@ -788,8 +797,8 @@ impl WorkbenchRouteState {
         self.page = page;
     }
 
-    pub(crate) fn scroll(&self) -> crate::app::WorkbenchPaneScroll {
-        self.scroll
+    pub(crate) fn scroll(&self) -> &crate::app::WorkbenchPaneScroll {
+        &self.scroll
     }
 
     pub(crate) fn scroll_mut(&mut self) -> &mut crate::app::WorkbenchPaneScroll {

@@ -13,13 +13,13 @@ impl ShellApp {
             Some(ShellView::Home) => {
                 self.clear_focused_module();
                 self.router.catalog_mut().collapse();
-                self.open_workbench(WorkbenchPane::Findings);
+                self.open_workbench();
             }
             Some(target) => {
                 self.set_shell_view(target);
             }
             None => {
-                self.open_workbench(WorkbenchPane::Findings);
+                self.open_workbench();
             }
         }
         let destination = self.shell_view();

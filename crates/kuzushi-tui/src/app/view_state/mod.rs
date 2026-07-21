@@ -15,12 +15,12 @@ mod activity;
 mod auth_screen;
 mod boot_splash;
 mod campaign_deck;
-mod coverage_deck;
 mod command_palette;
 mod config_screen;
 mod confirm_dialog;
 mod context_screen;
 mod cost_screen;
+mod coverage_deck;
 mod engagement;
 mod health;
 mod help_screen;
@@ -60,14 +60,14 @@ pub use activity::ACTIVITY_FEED_RING_CAPACITY;
 pub use activity::{RunFocusOrigin, RunFocusReceipt, RunFocusSteerEditor};
 pub use auth_screen::{AuthScreenFooter, AuthScreenSnapshot, AuthScreenStatus};
 pub use boot_splash::{BootSplashCheck, BootSplashCheckState, BootSplashSnapshot};
-pub use campaign_deck::CampaignRouteState;
-pub use coverage_deck::CoverageRouteState;
 pub(crate) use campaign_deck::dispatcher_args;
+pub use campaign_deck::CampaignRouteState;
 pub use command_palette::{CommandPaletteFooter, CommandPaletteSnapshot, CommandPaletteStatus};
 pub use config_screen::{ConfigScreenFooter, ConfigScreenSnapshot, ConfigScreenStatus};
 pub use confirm_dialog::{ConfirmDialogFooter, ConfirmDialogSnapshot, ConfirmDialogStatus};
 pub use context_screen::{ContextScreenFooter, ContextScreenSnapshot, ContextScreenStatus};
 pub use cost_screen::{CostScreenFooter, CostScreenSnapshot, CostScreenStatus};
+pub use coverage_deck::CoverageRouteState;
 pub use engagement::EngagementState;
 pub use health::{HealthFooter, HealthSnapshot, HealthStatus};
 pub use help_screen::{HelpScreenFooter, HelpScreenSnapshot, HelpScreenStatus};
@@ -116,7 +116,6 @@ pub(crate) use sast_task_row::SastTaskRow;
 pub use sast_task_row::ShellView;
 pub use sast_task_row::ThreatView;
 pub use sast_task_row::WorkbenchPage;
-pub use sast_task_row::WorkbenchPane;
 pub use sast_task_row::WorkbenchPaneScroll;
 pub use sast_task_row::WorkspaceView;
 pub use sast_tasks_snapshot::{SastTasksFooter, SastTasksSnapshot, SastTasksStatus};
@@ -132,5 +131,7 @@ pub(crate) use workbench_cache::{
 };
 #[cfg(test)]
 pub use workbench_review_state::ReviewCommand;
-pub use workbench_review_state::{BacklogUndoEntry, PendingDecision, ReviewMode, ReviewRow, WorkbenchReviewState};
+pub use workbench_review_state::{
+    BacklogUndoEntry, PendingDecision, ReviewMode, ReviewRow, WorkbenchReviewState,
+};
 pub use workbench_zoom::WorkbenchZoom;

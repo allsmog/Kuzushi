@@ -1,5 +1,11 @@
 use super::*;
+use crate::ui_view_models::PhaseSurfaceId;
 
+fn wb_focus(app: &ShellApp) -> crate::ui_view_models::PhaseSurfaceId {
+    app.router
+        .workbench()
+        .focus_for(crate::ui_view_models::active_workbench_page(app))
+}
 #[path = "../ui_view_models/tests/run_lifecycle_semantic_equivalence.rs"]
 mod run_lifecycle_semantic_equivalence_tests;
 
@@ -206,7 +212,7 @@ fn assert_effective_workbench_surface(
 fn open_workbench_page_for_test(app: &mut ShellApp, page: WorkbenchPage) {
     app.router.workbench_mut().set_page(Some(page));
     app.set_shell_view(ShellView::Workbench);
-    let focus = workbench_phase_plan(app).available_surfaces[0].legacy_slot;
+    let focus = workbench_phase_plan(app).available_surfaces[0].id;
     app.router.workbench_mut().set_focus(focus);
 }
 
@@ -2656,7 +2662,7 @@ fn command_effect_reducer_routes_stateful_command_families() {
         ShellCommand::Tools(None),
         ShellCommand::Tune,
         ShellCommand::Use("sast".to_string()),
-        ShellCommand::Workbench(WorkbenchPane::Findings),
+        ShellCommand::Workbench,
         ShellCommand::Strategy(StrategyCommand::Show),
         ShellCommand::Pwn(PwnCommand::Show),
         ShellCommand::Empty,
@@ -2713,7 +2719,7 @@ fn findings_command_returns_refresh_then_finalize_effects_without_inline_reload(
         "reload is an effect runtime concern"
     );
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
     assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Review));
     assert!(app.selected_finding().is_none());
     assert!(matches!(
@@ -2724,7 +2730,7 @@ fn findings_command_returns_refresh_then_finalize_effects_without_inline_reload(
                 filter: None
             }),
             ShellEffect::FinalizeWorkbenchOpen(WorkbenchOpenFinalize {
-                pane: WorkbenchPane::Findings
+                focus: PhaseSurfaceId::ReviewQueue
             })
         ]
     ));
@@ -2738,7 +2744,7 @@ fn workbench_command_discards_an_explicit_page_override() {
         .set_page(Some(WorkbenchPage::Fix));
 
     let effects = app
-        .reduce_command_effects(&ShellCommand::Workbench(WorkbenchPane::Findings))
+        .reduce_command_effects(&ShellCommand::Workbench)
         .expect("workbench command is effect-routed");
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
@@ -2763,7 +2769,7 @@ fn show_aliases_routes_to_the_review_page() {
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Review));
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
 }
 
 #[test]
@@ -3510,7 +3516,7 @@ fn patch_apply_effect_applies_reviewed_diff_and_updates_view_state() {
     assert!(app.engagement.pending_patch().is_none());
     assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Fix));
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::FixRemediation);
     assert!(app
         .log_lines()
         .iter()
@@ -3951,10 +3957,7 @@ fn effect_routed_command_fixtures() -> Vec<(&'static str, ShellCommand)> {
         ("tools", ShellCommand::Tools(None)),
         ("tune", ShellCommand::Tune),
         ("use", ShellCommand::Use("sast".to_string())),
-        (
-            "workbench",
-            ShellCommand::Workbench(WorkbenchPane::Findings),
-        ),
+        ("workbench", ShellCommand::Workbench),
         ("demo", ShellCommand::Demo),
         ("recommend", ShellCommand::Recommend),
         ("aim", ShellCommand::Aim(Some("auth".to_string()))),
@@ -4468,7 +4471,7 @@ fn findings_command_loads_store_rows() {
     assert_eq!(app.findings().len(), 1);
     // `findings` now lands on the Workbench command center (FINDINGS pane).
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
 }
 
 #[test]
@@ -4495,7 +4498,7 @@ fn open_command_accepts_deterministic_finding_alias() {
     // A selected finding now reads in the Workbench DETAILS pane.
     assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Review));
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewDetail);
     assert_eq!(
         app.selected_finding()
             .as_ref()
@@ -9003,7 +9006,7 @@ fn findings_filter_command_loads_filtered_rows_into_workbench() {
 
     assert!(result.changed);
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
     assert_eq!(
         app.findings().len(),
         initial_findings_count,
@@ -9094,7 +9097,7 @@ fn findings_filter_command_matches_run_revision_metadata() {
     );
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
     assert_eq!(app.findings().len(), 1);
     assert_eq!(app.findings()[0].rule_id, "demo.sql");
     assert!(app
@@ -9111,7 +9114,7 @@ fn since_ref_scopes_findings_list() {
     run_command(&mut app, ShellCommand::Since("main".to_string()));
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
     assert_eq!(app.findings().len(), 1);
     assert_eq!(app.findings()[0].rule_id, "demo.sql");
     assert!(app.log_lines().iter().any(|line| {
@@ -9795,7 +9798,7 @@ fn empty_back_stack_returns_to_workbench() {
     app.go_back();
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
 }
 
 #[test]
@@ -10093,7 +10096,7 @@ fn enter_on_empty_findings_logs_guidance() {
         .set_page(Some(WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     app.set_input_mode(crate::InputMode::Navigate);
     assert!(app.findings().is_empty());
 
@@ -10117,7 +10120,7 @@ fn open_start_view_lands_on_the_workbench_by_default() {
     app.set_shell_view(ShellView::Catalog);
     open_start_view(&mut app);
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
 }
 
 #[test]
@@ -10201,7 +10204,10 @@ fn returning_target_lands_on_workbench_instead_of_phase_picker() {
     app.open_fresh_planner_or_workbench();
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(
+        wb_focus(&app),
+        crate::ui_view_models::active_workbench_page(&app).findings_surface()
+    );
 }
 
 #[test]
@@ -10215,7 +10221,10 @@ fn target_with_persisted_findings_lands_on_workbench_instead_of_phase_picker() {
     app.open_fresh_planner_or_workbench();
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(
+        wb_focus(&app),
+        crate::ui_view_models::active_workbench_page(&app).findings_surface()
+    );
 }
 
 #[test]
@@ -10233,7 +10242,10 @@ fn shell_start_with_persisted_findings_lands_on_workbench() {
     open_start_view(&mut app);
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(
+        wb_focus(&app),
+        crate::ui_view_models::active_workbench_page(&app).findings_surface()
+    );
 }
 
 #[test]
@@ -10606,7 +10618,9 @@ fn report_escape_and_q_restore_the_exact_scan_origin() {
         app.router
             .workbench_mut()
             .set_page(Some(WorkbenchPage::Scan));
-        app.router.workbench_mut().set_focus(WorkbenchPane::Center);
+        app.router
+            .workbench_mut()
+            .set_focus(PhaseSurfaceId::ScanEngines);
         app.set_input_mode(InputMode::Prompt);
 
         run_command(&mut app, ShellCommand::Report);
@@ -10617,7 +10631,7 @@ fn report_escape_and_q_restore_the_exact_scan_origin() {
 
         assert_eq!(app.shell_view(), ShellView::Workbench);
         assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Scan));
-        assert_eq!(app.router.workbench().focus(), WorkbenchPane::Center);
+        assert_eq!(wb_focus(&app), PhaseSurfaceId::ScanEngines);
         assert_eq!(app.input_mode(), InputMode::Prompt);
     }
 }
@@ -11409,7 +11423,7 @@ fn app_with_findings(count: usize) -> ShellApp {
         .set_page(Some(WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     *app.findings_mut() = (0..count)
         .map(|i| make_finding(Severity::High, &format!("fp-{i:04}"), "x"))
         .collect();
@@ -12168,18 +12182,16 @@ fn external_state_artifacts_keep_workspace_file_caches_warm() {
     let target = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(target.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.workbench_cache()
-        .borrow_mut()
-        .apply_view_hydration(super::view_hydration::ViewHydrationResult {
+    app.workbench_cache().borrow_mut().apply_view_hydration(
+        super::view_hydration::ViewHydrationResult {
             target: workspace.root().to_path_buf(),
             key: super::view_hydration::ViewHydrationKey::GitMetadata,
             value: super::view_hydration::ViewHydrationValue::GitMetadata(None),
-        });
+        },
+    );
     let generations_before = app.workbench_cache().borrow().completion_generations();
 
-    app.apply_external_workspace_state_change(&[PathBuf::from(
-        ".kuzushi/v3/runs/run-1/done.json",
-    )]);
+    app.apply_external_workspace_state_change(&[PathBuf::from(".kuzushi/v3/runs/run-1/done.json")]);
 
     let cache = app.workbench_cache().borrow();
     assert!(
@@ -12727,7 +12739,7 @@ fn vi_cursor_navigates_findings_list() {
         .set_page(Some(WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     app.set_input_mode(crate::InputMode::Navigate);
     *app.findings_mut() = vec![
         make_finding(Severity::High, "f1", "a"),
@@ -12851,7 +12863,9 @@ fn mouse_wheel_moves_findings_cursor_without_empty_underflow() {
 #[test]
 fn mouse_wheel_scrolls_focused_workbench_pane_by_one_line() {
     let mut app = app_with_findings(5);
-    app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewDetail);
 
     mouse_event(
         &mut app,
@@ -12862,7 +12876,13 @@ fn mouse_wheel_scrolls_focused_workbench_pane_by_one_line() {
             modifiers: KeyModifiers::empty(),
         },
     );
-    assert_eq!(app.router.workbench().scroll().details, 1);
+    assert_eq!(
+        app.router
+            .workbench()
+            .scroll()
+            .get(PhaseSurfaceId::ReviewDetail),
+        1
+    );
 
     mouse_event(
         &mut app,
@@ -12873,7 +12893,13 @@ fn mouse_wheel_scrolls_focused_workbench_pane_by_one_line() {
             modifiers: KeyModifiers::empty(),
         },
     );
-    assert_eq!(app.router.workbench().scroll().details, 0);
+    assert_eq!(
+        app.router
+            .workbench()
+            .scroll()
+            .get(PhaseSurfaceId::ReviewDetail),
+        0
+    );
 }
 
 #[test]
@@ -13224,7 +13250,7 @@ fn pgdown_pgup_paginate_findings_cursor() {
     app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     *app.findings_mut() = (0..25)
         .map(|i| make_finding(Severity::High, &format!("fp-{i}"), "x"))
         .collect();
@@ -13259,7 +13285,7 @@ fn viewport_enter_opens_cursor_finding_from_visible_list() {
         .set_page(Some(WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     app.set_input_mode(crate::InputMode::Navigate);
     *app.findings_mut() = vec![
         make_finding(Severity::High, "fp-0000", "first"),
@@ -13272,9 +13298,9 @@ fn viewport_enter_opens_cursor_finding_from_visible_list() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    // Enter selects the cursored finding; the Workbench DETAILS pane shows it.
+    // Enter selects the cursored finding; the Prove detail surface shows it.
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ProveReceipt);
     assert_eq!(
         app.selected_finding()
             .as_ref()
@@ -13292,7 +13318,7 @@ fn viewport_enter_opens_projected_cursor_finding_after_duplicate_group() {
         .set_page(Some(WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     app.set_input_mode(crate::InputMode::Navigate);
     *app.findings_mut() = vec![
         make_projected_duplicate(Severity::Medium, "fp-duplicate-medium", "duplicate medium"),
@@ -13307,7 +13333,7 @@ fn viewport_enter_opens_projected_cursor_finding_after_duplicate_group() {
     );
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ProveReceipt);
     assert_eq!(
         app.selected_finding()
             .as_ref()
@@ -13320,13 +13346,15 @@ fn viewport_enter_opens_projected_cursor_finding_after_duplicate_group() {
 fn workbench_esc_returns_from_navigate_to_prompt_without_leaving() {
     let mut app = app_with_findings(2);
     app.push_nav_history(ShellView::Catalog);
-    app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewDetail);
     app.set_input_mode(crate::InputMode::Navigate);
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewDetail);
     assert_eq!(app.input_mode(), crate::InputMode::Prompt);
 }
 
@@ -13339,7 +13367,9 @@ fn compact_fix_tab_routes_only_to_real_semantic_surfaces() {
         app.router
             .workbench_mut()
             .set_page(Some(WorkbenchPage::Fix));
-        app.router.workbench_mut().set_focus(WorkbenchPane::Center);
+        app.router
+            .workbench_mut()
+            .set_focus(PhaseSurfaceId::FixAttackTree);
         let viewport = app.viewport();
         let plan_before = crate::renderer::workbench_phase_plan_for_app(
             &app,
@@ -13349,14 +13379,14 @@ fn compact_fix_tab_routes_only_to_real_semantic_surfaces() {
         let current = plan_before
             .available_surfaces
             .iter()
-            .position(|surface| surface.legacy_slot == app.router.workbench().focus())
+            .position(|surface| surface.id == wb_focus(&app))
             .unwrap_or_default();
         let expected =
             plan_before.available_surfaces[(current + 1) % plan_before.available_surfaces.len()];
 
         press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
 
-        assert_eq!(app.router.workbench().focus(), expected.legacy_slot);
+        assert_eq!(wb_focus(&app), expected.id);
         let plan_after = crate::renderer::workbench_phase_plan_for_app(
             &app,
             ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
@@ -13375,7 +13405,9 @@ fn wide_fix_tab_cycles_only_meaningful_rendered_surfaces() {
     app.router
         .workbench_mut()
         .set_page(Some(WorkbenchPage::Fix));
-    app.router.workbench_mut().set_focus(WorkbenchPane::Source);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::FixCandidate);
     let viewport = app.viewport();
     let initial = crate::renderer::workbench_phase_plan_for_app(
         &app,
@@ -13385,13 +13417,13 @@ fn wide_fix_tab_cycles_only_meaningful_rendered_surfaces() {
     let available = initial.available_surfaces;
     let start = available
         .iter()
-        .position(|surface| surface.legacy_slot == app.router.workbench().focus())
+        .position(|surface| surface.id == wb_focus(&app))
         .expect("focused Fix surface");
 
     for offset in 1..=available.len() {
         let expected = available[(start + offset) % available.len()];
         press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
-        assert_eq!(app.router.workbench().focus(), expected.legacy_slot);
+        assert_eq!(wb_focus(&app), expected.id);
         let plan = crate::renderer::workbench_phase_plan_for_app(
             &app,
             ratatui::layout::Rect::new(0, 0, viewport.columns, viewport.rows),
@@ -13422,7 +13454,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
         .set_page(Some(WorkbenchPage::Prove));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ProveLadder);
     let review = app.view_keybindings();
     for hint in ["v", "x", "c"] {
         assert!(review.iter().any(|binding| binding.hint == hint));
@@ -13439,11 +13471,11 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
         match binding.action {
             ViewHotkeyAction::WorkbenchCyclePane => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+                assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewDetail);
             }
             ViewHotkeyAction::WorkbenchCyclePanePrev => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+                assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewDetail);
             }
             ViewHotkeyAction::WorkbenchScrollNext => {
                 app.router
@@ -13451,7 +13483,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                     .set_page(Some(WorkbenchPage::Review));
                 app.router
                     .workbench_mut()
-                    .set_focus(WorkbenchPane::Findings);
+                    .set_focus(PhaseSurfaceId::ReviewQueue);
                 app.router.findings_mut().set_cursor(0);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.findings().cursor(), 1);
@@ -13462,7 +13494,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                     .set_page(Some(WorkbenchPage::Review));
                 app.router
                     .workbench_mut()
-                    .set_focus(WorkbenchPane::Findings);
+                    .set_focus(PhaseSurfaceId::ReviewQueue);
                 app.router.findings_mut().set_cursor(1);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.findings().cursor(), 0);
@@ -13473,7 +13505,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                     .set_page(Some(WorkbenchPage::Review));
                 app.router
                     .workbench_mut()
-                    .set_focus(WorkbenchPane::Findings);
+                    .set_focus(PhaseSurfaceId::ReviewQueue);
                 app.router.findings_mut().set_cursor(7);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.findings().cursor(), 0);
@@ -13484,7 +13516,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                     .set_page(Some(WorkbenchPage::Review));
                 app.router
                     .workbench_mut()
-                    .set_focus(WorkbenchPane::Findings);
+                    .set_focus(PhaseSurfaceId::ReviewQueue);
                 app.router.findings_mut().set_cursor(7);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.findings().cursor(), 24);
@@ -13492,17 +13524,19 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
             ViewHotkeyAction::WorkbenchOpenFocusedVisualization => {
                 use crate::scene3d::VizPage;
 
-                app.router.workbench_mut().set_focus(WorkbenchPane::Center);
+                app.router
+                    .workbench_mut()
+                    .set_focus(PhaseSurfaceId::ReviewQueue);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.shell_view(), ShellView::Scene);
                 assert_eq!(app.router.scene().page(), VizPage::Heatmap);
             }
             ViewHotkeyAction::WorkbenchTogglePaneZoom => {
-                assert_eq!(app.router.workbench().zoom().pane(), None);
+                assert_eq!(app.router.workbench().zoom().surface(), None);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(
-                    app.router.workbench().zoom().pane(),
-                    Some(WorkbenchPane::Findings)
+                    app.router.workbench().zoom().surface(),
+                    Some(PhaseSurfaceId::ReviewQueue)
                 );
             }
             ViewHotkeyAction::WorkbenchOpen => {
@@ -13511,12 +13545,12 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                     .set_page(Some(WorkbenchPage::Review));
                 app.router
                     .workbench_mut()
-                    .set_focus(WorkbenchPane::Findings);
+                    .set_focus(PhaseSurfaceId::ReviewQueue);
                 app.router.findings_mut().set_cursor(2);
                 let expected = app.findings()[2].fingerprint.clone();
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.shell_view(), ShellView::Workbench);
-                assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+                assert_eq!(wb_focus(&app), PhaseSurfaceId::ProveReceipt);
                 assert_eq!(
                     app.selected_finding()
                         .as_ref()
@@ -13525,11 +13559,17 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 );
             }
             ViewHotkeyAction::WorkbenchPage(page) => {
-                app.router.workbench_mut().scroll_mut().center = 7;
+                app.router
+                    .workbench_mut()
+                    .scroll_mut()
+                    .set(page.primary_surface(), 7);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.workbench().page(), Some(page));
-                assert_eq!(app.router.workbench().scroll().center, 0);
-                assert_eq!(app.router.workbench().focus(), page.primary_pane());
+                assert_eq!(
+                    app.router.workbench().scroll().get(page.primary_surface()),
+                    0
+                );
+                assert_eq!(wb_focus(&app), page.primary_surface());
             }
             ViewHotkeyAction::WorkbenchPageNext => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
@@ -13623,28 +13663,28 @@ fn workbench_zoom_follows_tab_and_resets_on_exit() {
         .set_page(Some(WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
 
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('Z'), KeyModifiers::SHIFT),
     );
     assert_eq!(
-        app.router.workbench().zoom().pane(),
-        Some(WorkbenchPane::Findings)
+        app.router.workbench().zoom().surface(),
+        Some(PhaseSurfaceId::ReviewQueue)
     );
 
     press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewDetail);
     assert_eq!(
-        app.router.workbench().zoom().pane(),
-        Some(WorkbenchPane::Details)
+        app.router.workbench().zoom().surface(),
+        Some(PhaseSurfaceId::ReviewDetail)
     );
 
     app.set_shell_view(ShellView::Catalog);
     assert_eq!(
-        app.router.workbench().zoom().pane(),
-        Some(WorkbenchPane::Details)
+        app.router.workbench().zoom().surface(),
+        Some(PhaseSurfaceId::ReviewDetail)
     );
 }
 
@@ -13657,17 +13697,19 @@ fn phase_pages_keep_tab_focus_on_visible_panes() {
         .set_page(Some(WorkbenchPage::Review));
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
 
     press_key(&mut app, key_event_for_trigger(HotkeyTrigger::Tab));
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewDetail);
 
-    app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewDetail);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('['), KeyModifiers::empty()),
     );
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
 }
 
 #[test]
@@ -13691,7 +13733,9 @@ fn dense_prove_can_open_its_hidden_fourth_surface_as_a_focused_deck() {
     app.router
         .workbench_mut()
         .set_page(Some(WorkbenchPage::Prove));
-    app.router.workbench_mut().set_focus(WorkbenchPane::Source);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ProveStatus);
     let viewport = app.viewport();
     let initial_plan = crate::renderer::workbench_phase_plan_for_app(
         &app,
@@ -13716,10 +13760,10 @@ fn dense_prove_can_open_its_hidden_fourth_surface_as_a_focused_deck() {
         press_key(&mut app, key_event_for_trigger(HotkeyTrigger::Tab));
     }
 
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
+    assert_eq!(wb_focus(&app), PhaseSurfaceId::ProveReceipt);
     assert_eq!(
-        app.router.workbench().zoom().pane(),
-        Some(WorkbenchPane::Details)
+        app.router.workbench().zoom().surface(),
+        Some(PhaseSurfaceId::ProveReceipt)
     );
     let plan = crate::renderer::workbench_phase_plan_for_app(
         &app,
@@ -13816,7 +13860,9 @@ fn lowercase_z_is_phase_aware_and_navigate_only() {
     app.clear_input();
     app.set_cursor(0);
     app.set_input_mode(crate::InputMode::Navigate);
-    app.router.workbench_mut().set_focus(WorkbenchPane::Source);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('z'), KeyModifiers::empty()),
@@ -14008,7 +14054,9 @@ fn prove_z_opens_its_persisted_replay() {
     app.router
         .workbench_mut()
         .set_page(Some(WorkbenchPage::Prove));
-    app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ProveReceipt);
     app.hydrate_active_view_blocking();
 
     press_key(
@@ -17747,9 +17795,10 @@ fn deferred_visualization_without_artifact_restores_origin_instead_of_empty_deck
     assert!(app.run_background_maintenance());
 
     assert_eq!(app.shell_view(), ShellView::Home);
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "scene" && line.body.contains("artifact still hydrating")
-    }));
+    assert!(app
+        .log_lines()
+        .iter()
+        .any(|line| { line.prefix == "scene" && line.body.contains("artifact still hydrating") }));
 }
 
 fn write_concrete_threat_model_dfd(root: &std::path::Path) {
@@ -18957,7 +19006,10 @@ fn planning_completion_returns_to_workbench_without_auto_recommender() {
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
     assert!(effects.is_empty());
-    assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
+    assert_eq!(
+        wb_focus(&app),
+        crate::ui_view_models::active_workbench_page(&app).findings_surface()
+    );
     assert_eq!(app.running_tool_name(), None);
     assert!(
         !app.log_lines()
@@ -19926,7 +19978,10 @@ fn backlog_one_key_decision_saves_through_the_existing_decision_path() {
         kuzushi_core::findings::ReviewDecisionVerdict::Confirmed
     );
     assert!(
-        latest.decision.rationale.contains("backlog one-key confirmed"),
+        latest
+            .decision
+            .rationale
+            .contains("backlog one-key confirmed"),
         "{}",
         latest.decision.rationale
     );
@@ -19935,9 +19990,33 @@ fn backlog_one_key_decision_saves_through_the_existing_decision_path() {
 
 fn backlog_v2_fixture_findings() -> Vec<Finding> {
     vec![
-        Finding::new_tool("semgrep", "r-high", "src/a.rs", 1, None, Severity::High, "high a"),
-        Finding::new_tool("semgrep", "r-low", "src/b.rs", 2, None, Severity::Low, "low b"),
-        Finding::new_tool("systems-hunt", "r-high-2", "src/c.rs", 3, None, Severity::High, "high c"),
+        Finding::new_tool(
+            "semgrep",
+            "r-high",
+            "src/a.rs",
+            1,
+            None,
+            Severity::High,
+            "high a",
+        ),
+        Finding::new_tool(
+            "semgrep",
+            "r-low",
+            "src/b.rs",
+            2,
+            None,
+            Severity::Low,
+            "low b",
+        ),
+        Finding::new_tool(
+            "systems-hunt",
+            "r-high-2",
+            "src/c.rs",
+            3,
+            None,
+            Severity::High,
+            "high c",
+        ),
     ]
 }
 
@@ -19953,7 +20032,10 @@ fn backlog_severity_and_tool_filters_cycle_and_narrow_the_queue() {
     app.router.workbench_mut().review_mut().backlog = true;
 
     // Severity cycle: critical (0 visible) → high (2 visible).
-    press_key(&mut app, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()),
+    );
     assert_eq!(
         app.router.workbench().review().backlog_severity,
         Some("critical")
@@ -19963,8 +20045,14 @@ fn backlog_severity_and_tool_filters_cycle_and_narrow_the_queue() {
         crate::ui_view_models::ReviewQueueMode::All,
     );
     assert_eq!(model.visible_count, 0, "{}", model.header);
-    press_key(&mut app, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
-    assert_eq!(app.router.workbench().review().backlog_severity, Some("high"));
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()),
+    );
+    assert_eq!(
+        app.router.workbench().review().backlog_severity,
+        Some("high")
+    );
     let model = crate::ui_view_models::review_queue_model(
         &app,
         crate::ui_view_models::ReviewQueueMode::All,
@@ -19973,7 +20061,10 @@ fn backlog_severity_and_tool_filters_cycle_and_narrow_the_queue() {
     assert!(model.header.contains("sev:high"), "{}", model.header);
 
     // Tool cycle narrows further; tools cycle in sorted order.
-    press_key(&mut app, KeyEvent::new(KeyCode::Char('t'), KeyModifiers::empty()));
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::empty()),
+    );
     assert_eq!(
         app.router.workbench().review().backlog_tool.as_deref(),
         Some("semgrep")
@@ -19987,7 +20078,10 @@ fn backlog_severity_and_tool_filters_cycle_and_narrow_the_queue() {
 
     // Cycling severity past low returns to unfiltered.
     for _ in 0..3 {
-        press_key(&mut app, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
+        press_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()),
+        );
     }
     assert_eq!(app.router.workbench().review().backlog_severity, None);
 }
@@ -20016,14 +20110,15 @@ fn backlog_bulk_defer_requires_confirm_and_undo_restores_the_trend_fold() {
     app.set_input_mode(crate::InputMode::Navigate);
     app.router.workbench_mut().review_mut().backlog = true;
 
-    let fp_rate_before = kuzushi_core::capabilities::campaign::trend::trend_metrics(
-        app.review_decisions(),
-        0.0,
-    )
-    .fp_rate();
+    let fp_rate_before =
+        kuzushi_core::capabilities::campaign::trend::trend_metrics(app.review_decisions(), 0.0)
+            .fp_rate();
 
     // First X only arms the confirmation — nothing recorded yet.
-    press_key(&mut app, KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT),
+    );
     assert!(app.router.workbench().review().backlog_confirm_bulk);
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let all = store.list_all_findings().unwrap();
@@ -20034,7 +20129,10 @@ fn backlog_bulk_defer_requires_confirm_and_undo_restores_the_trend_fold() {
     drop(store);
 
     // Second X bulk-defers every visible finding.
-    press_key(&mut app, KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT),
+    );
     assert!(!app.router.workbench().review().backlog_confirm_bulk);
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let records = store.list_review_decisions_for_findings(&all).unwrap();
@@ -20048,7 +20146,10 @@ fn backlog_bulk_defer_requires_confirm_and_undo_restores_the_trend_fold() {
 
     // Undo appends inverse (needs_review) records — never deletes history —
     // and the latest-decision-wins trend fold returns to the pre-defer state.
-    press_key(&mut app, KeyEvent::new(KeyCode::Char('u'), KeyModifiers::empty()));
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('u'), KeyModifiers::empty()),
+    );
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let records = store.list_review_decisions_for_findings(&all).unwrap();
     assert_eq!(
@@ -20062,8 +20163,16 @@ fn backlog_bulk_defer_requires_confirm_and_undo_restores_the_trend_fold() {
     );
     let metrics_after = kuzushi_core::capabilities::campaign::trend::trend_metrics(&records, 0.0);
     assert_eq!(metrics_after.fp_rate(), fp_rate_before);
-    assert_eq!(metrics_after.decided_findings, 0, "all restored to undecided");
-    assert!(app.router.workbench().review().backlog_last_batch.is_empty());
+    assert_eq!(
+        metrics_after.decided_findings, 0,
+        "all restored to undecided"
+    );
+    assert!(app
+        .router
+        .workbench()
+        .review()
+        .backlog_last_batch
+        .is_empty());
 }
 
 /// Perf baseline for the shell-side folds (task queue #38): backlog
@@ -20095,7 +20204,11 @@ fn perf_baseline_backlog_and_deck_folds() {
     let mut record_id = 0i64;
     for index in 0..10_000i64 {
         let mut finding = Finding::new_tool(
-            if index % 2 == 0 { "semgrep" } else { "systems-hunt" },
+            if index % 2 == 0 {
+                "semgrep"
+            } else {
+                "systems-hunt"
+            },
             format!("perf-rule-{}", index % 40),
             format!("src/mod{}/file{}.c", index % 20, index % 200),
             (index % 900) as u32 + 1,
@@ -20133,21 +20246,36 @@ fn perf_baseline_backlog_and_deck_folds() {
 
     let timer = Instant::now();
     let visible = crate::ui_view_models::visible_sorted_finding_alias_indices(&app);
-    eprintln!("PERF backlog projection (cold) over 10k/30k: {:?} ({} visible)", timer.elapsed(), visible.len());
+    eprintln!(
+        "PERF backlog projection (cold) over 10k/30k: {:?} ({} visible)",
+        timer.elapsed(),
+        visible.len()
+    );
     let timer = Instant::now();
     let visible = crate::ui_view_models::visible_sorted_finding_alias_indices(&app);
-    eprintln!("PERF backlog projection (warm cache): {:?} ({} visible)", timer.elapsed(), visible.len());
+    eprintln!(
+        "PERF backlog projection (warm cache): {:?} ({} visible)",
+        timer.elapsed(),
+        visible.len()
+    );
 
     let timer = Instant::now();
     let model = crate::ui_view_models::review_queue_model(
         &app,
         crate::ui_view_models::ReviewQueueMode::All,
     );
-    eprintln!("PERF review_queue_model (backlog): {:?} ({} rows)", timer.elapsed(), model.visible_count);
+    eprintln!(
+        "PERF review_queue_model (backlog): {:?} ({} rows)",
+        timer.elapsed(),
+        model.visible_count
+    );
 
     let timer = Instant::now();
     app.refresh_campaign_deck();
-    eprintln!("PERF refresh_campaign_deck (incl trend + history IO): {:?}", timer.elapsed());
+    eprintln!(
+        "PERF refresh_campaign_deck (incl trend + history IO): {:?}",
+        timer.elapsed()
+    );
     let timer = Instant::now();
     app.refresh_workspace_trend();
     eprintln!("PERF refresh_workspace_trend: {:?}", timer.elapsed());

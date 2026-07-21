@@ -1,6 +1,7 @@
 use super::agent_prompt::{agent_question_with_context, agent_question_with_failure_context};
 use crate::ui_view_models::screen_context_model;
-use crate::{ShellApp, ShellView, WorkbenchPane};
+use crate::ui_view_models::PhaseSurfaceId;
+use crate::{ShellApp, ShellView};
 use kuzushi_core::run_artifacts::{FailureToLlmContext, RunArtifact};
 use kuzushi_core::{Finding, Severity, V2Config};
 use std::path::Path;
@@ -58,7 +59,7 @@ fn screen_context_is_injected_as_untrusted_data_before_operator_question() {
     app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
-        .set_focus(WorkbenchPane::Findings);
+        .set_focus(PhaseSurfaceId::ReviewQueue);
     *app.findings_mut() = vec![Finding::new_tool(
         "demo",
         "demo.rule",

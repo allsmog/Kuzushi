@@ -20,7 +20,7 @@ pub(super) fn render(
     model: &FixPhaseModel,
     state: PhaseRenderState,
 ) {
-    if let Some(pane) = state.zoom {
+    if let Some(pane) = state.surface {
         render_zoomed(frame, area, model, state, pane);
         return;
     }
@@ -101,7 +101,7 @@ fn render_compact(
         area,
         "FIX · BREAKDOWN REPORT",
         compact_lines(model, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Center,
+        PhaseSurfaceId::FixAttackTree,
         state,
     );
 }
@@ -139,20 +139,21 @@ fn render_zoomed(
     area: Rect,
     model: &FixPhaseModel,
     state: PhaseRenderState,
-    pane: WorkbenchPane,
+    surface: PhaseSurfaceId,
 ) {
-    match pane {
-        WorkbenchPane::Center => render_attack_tree(frame, area, model, state),
-        WorkbenchPane::Details => render_dfd(frame, area, model, state),
-        WorkbenchPane::Findings => render_remediation(frame, area, model, state),
-        WorkbenchPane::Source => render_lines_pane(
+    match surface {
+        PhaseSurfaceId::FixAttackTree => render_attack_tree(frame, area, model, state),
+        PhaseSurfaceId::FixDfd => render_dfd(frame, area, model, state),
+        PhaseSurfaceId::FixRemediation => render_remediation(frame, area, model, state),
+        PhaseSurfaceId::FixCandidate => render_lines_pane(
             frame,
             area,
             "KUZUSHI · BREAKDOWN REPORT",
             breakdown_lines(model, area.width.saturating_sub(2) as usize),
-            WorkbenchPane::Source,
+            PhaseSurfaceId::FixCandidate,
             state,
         ),
+        _ => render_remediation(frame, area, model, state),
     }
 }
 
@@ -167,7 +168,7 @@ fn render_breakdown(
         area,
         "KUZUSHI · BREAKDOWN REPORT",
         breakdown_lines(model, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Source,
+        PhaseSurfaceId::FixCandidate,
         state,
     );
 }
@@ -182,7 +183,7 @@ fn render_attack_tree(
         frame,
         area,
         "ATTACK TREE",
-        WorkbenchPane::Center,
+        PhaseSurfaceId::FixAttackTree,
         state,
         TreeDiagram {
             model: model.attack_tree.clone(),
@@ -195,7 +196,7 @@ fn render_dfd(frame: &mut Frame<'_>, area: Rect, model: &FixPhaseModel, state: P
         frame,
         area,
         "DFD",
-        WorkbenchPane::Details,
+        PhaseSurfaceId::FixDfd,
         state,
         DfdDiagram {
             model: model.dfd.clone(),
@@ -214,7 +215,7 @@ fn render_remediation(
         area,
         "REMEDIATION",
         remediation_lines(model, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Findings,
+        PhaseSurfaceId::FixRemediation,
         state,
     );
 }

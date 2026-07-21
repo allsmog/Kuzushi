@@ -204,7 +204,9 @@ impl RuntimeState {
     /// a defunct dispatcher was just collected (callers then clear the pid).
     pub(crate) fn reap_exited_dispatcher(&mut self) -> bool {
         let exited = matches!(
-            self.dispatcher_child.as_mut().map(std::process::Child::try_wait),
+            self.dispatcher_child
+                .as_mut()
+                .map(std::process::Child::try_wait),
             Some(Ok(Some(_)))
         );
         if exited {

@@ -460,8 +460,7 @@ mod tests {
         // Drain the whole burst the way the terminal loop would: every
         // in-window drain defers (no refresh applied).
         loop {
-            let outcome =
-                apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime));
+            let outcome = apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime));
             assert!(!outcome.changed, "refresh applied inside debounce window");
             if !outcome.tail_may_remain {
                 break;

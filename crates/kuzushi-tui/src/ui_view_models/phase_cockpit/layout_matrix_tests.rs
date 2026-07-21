@@ -1,5 +1,4 @@
 use super::*;
-use crate::app::WorkbenchPane;
 use kuzushi_core::WorkflowPhase;
 use ratatui::layout::Rect;
 
@@ -141,7 +140,7 @@ fn assert_focus_restoration_for_state(phase: WorkflowPhase, state: SemanticFixtu
     let Some(secondary) = specs.get(1) else {
         return;
     };
-    let focus = secondary.legacy_slot;
+    let focus = secondary.id;
     let compact = phase_presentation_plan(
         &body,
         Rect::new(0, 0, 40, 12),
@@ -166,7 +165,7 @@ fn assert_focus_restoration_for_state(phase: WorkflowPhase, state: SemanticFixtu
         wide.effective_focus, secondary.id,
         "{cell}: stored focus was not restored"
     );
-    assert_eq!(wide.effective_slot(), focus, "{cell}: restored slot");
+    assert_eq!(wide.effective_focus, focus, "{cell}: restored slot");
 }
 
 #[test]
@@ -184,7 +183,7 @@ fn assert_attention_release_restores_focus(phase: WorkflowPhase, attention: Atte
     let Some(secondary) = specs.get(1) else {
         return;
     };
-    let focus = Some(secondary.legacy_slot);
+    let focus = Some(secondary.id);
     let area = Rect::new(0, 0, 160, 48);
     let owned = phase_presentation_plan(&body, area, focus, None, attention);
     let released = phase_presentation_plan(&body, area, focus, None, AttentionMode::Normal);

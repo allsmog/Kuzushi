@@ -24,7 +24,7 @@ pub(super) fn render(
         render_critical_compact(frame, area, model, finding, state);
         return;
     }
-    if let Some(pane) = state.zoom {
+    if let Some(pane) = state.surface {
         render_zoomed(frame, area, model, state, pane);
         return;
     }
@@ -62,7 +62,7 @@ fn uses_critical_compact_status(area: Rect, state: PhaseRenderState) -> bool {
     matches!(
         state.density,
         LayoutDensity::Sparse | LayoutDensity::Focused | LayoutDensity::Guided
-    ) && state.zoom == Some(WorkbenchPane::Source)
+    ) && state.surface == Some(PhaseSurfaceId::ProveStatus)
         && (area.width < 50 || area.height < 10)
 }
 
@@ -78,7 +78,7 @@ fn render_critical_compact(
         area,
         compact_status_title(state),
         critical_compact_lines(model, finding, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Source,
+        PhaseSurfaceId::ProveStatus,
         state,
     );
 }
@@ -202,7 +202,7 @@ fn render_empty(
         area,
         "STATUS / NEXT",
         empty_selection_lines(model),
-        WorkbenchPane::Source,
+        PhaseSurfaceId::ProveStatus,
         state,
     );
 }
@@ -227,7 +227,7 @@ fn render_status(
         area,
         "STATUS / NEXT",
         status_lines(model, finding, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Source,
+        PhaseSurfaceId::ProveStatus,
         state,
     );
 }
@@ -293,7 +293,7 @@ fn render_compact_body(
         area,
         "EVIDENCE / PROOF · z attack path",
         lines,
-        WorkbenchPane::Center,
+        PhaseSurfaceId::ProveEvidence,
         state,
     );
 }
@@ -303,17 +303,18 @@ fn render_zoomed(
     area: Rect,
     model: &ProvePhaseModel,
     state: PhaseRenderState,
-    pane: WorkbenchPane,
+    surface: PhaseSurfaceId,
 ) {
     let Some(finding) = model.finding.as_ref() else {
         render_empty(frame, area, model, state);
         return;
     };
-    match pane {
-        WorkbenchPane::Source => render_status(frame, area, model, finding, state),
-        WorkbenchPane::Center => render_evidence(frame, area, finding, state),
-        WorkbenchPane::Findings => render_ladder(frame, area, model, finding, state),
-        WorkbenchPane::Details => render_runtime_proof(frame, area, model, finding, state),
+    match surface {
+        PhaseSurfaceId::ProveStatus => render_status(frame, area, model, finding, state),
+        PhaseSurfaceId::ProveEvidence => render_evidence(frame, area, finding, state),
+        PhaseSurfaceId::ProveLadder => render_ladder(frame, area, model, finding, state),
+        PhaseSurfaceId::ProveReceipt => render_runtime_proof(frame, area, model, finding, state),
+        _ => render_status(frame, area, model, finding, state),
     }
 }
 
@@ -328,7 +329,7 @@ fn render_evidence(
         area,
         "EVIDENCE · z attack path",
         evidence_lines(finding, area.width.saturating_sub(2) as usize),
-        WorkbenchPane::Center,
+        PhaseSurfaceId::ProveEvidence,
         state,
     );
 }
@@ -404,7 +405,7 @@ fn render_ladder(
             model.proof.as_ref(),
             area.width.saturating_sub(2) as usize,
         ),
-        WorkbenchPane::Findings,
+        PhaseSurfaceId::ProveLadder,
         state,
     );
 }
@@ -425,7 +426,7 @@ fn render_runtime_proof(
             finding,
             area.width.saturating_sub(2) as usize,
         ),
-        WorkbenchPane::Details,
+        PhaseSurfaceId::ProveReceipt,
         state,
     );
 }

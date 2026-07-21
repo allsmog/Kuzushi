@@ -551,7 +551,7 @@ fn active_cursor_row(app: &ShellApp) -> usize {
             .map(|surface| match surface.interaction {
                 super::SurfaceInteraction::Selectable => app.router.findings().cursor(),
                 super::SurfaceInteraction::Scrollable => {
-                    app.router.workbench().scroll().get(surface.legacy_slot) as usize
+                    app.router.workbench().scroll().get(surface.id) as usize
                 }
                 super::SurfaceInteraction::Static | super::SurfaceInteraction::Diagram => 0,
             })

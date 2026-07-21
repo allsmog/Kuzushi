@@ -1,5 +1,4 @@
 use super::{PhaseSurfaceId, PhaseSurfaceSpec, SurfaceInteraction, SurfaceState};
-use crate::app::WorkbenchPane;
 use crate::ui_view_models::phase_cockpit::{
     FixPhaseModel, MapPhaseModel, PhaseCockpitBody, ProvePhaseModel, RemediationLifecycleStage,
     RemediationLoadState, ReviewPhaseModel, ScanPhaseModel,
@@ -18,23 +17,22 @@ pub(crate) fn phase_surface_specs(body: &PhaseCockpitBody) -> Vec<PhaseSurfaceSp
 fn map_specs(model: &MapPhaseModel) -> Vec<PhaseSurfaceSpec> {
     let mut specs = vec![scrollable_with_state(
         PhaseSurfaceId::MapReadiness,
-        WorkbenchPane::Source,
         map_readiness_state(model),
     )];
     push_if(
         &mut specs,
         model.attack_surface.is_some(),
-        scrollable(PhaseSurfaceId::MapAttackSurface, WorkbenchPane::Center),
+        scrollable(PhaseSurfaceId::MapAttackSurface),
     );
     push_if(
         &mut specs,
         !model.hot_modules.modules.is_empty(),
-        scrollable(PhaseSurfaceId::MapHotModules, WorkbenchPane::Findings),
+        scrollable(PhaseSurfaceId::MapHotModules),
     );
     push_if(
         &mut specs,
         model.dfd.empty_hint.is_none(),
-        diagram(PhaseSurfaceId::MapDfd, WorkbenchPane::Details),
+        diagram(PhaseSurfaceId::MapDfd),
     );
     specs
 }
@@ -63,18 +61,18 @@ fn scan_specs(model: &ScanPhaseModel) -> Vec<PhaseSurfaceSpec> {
     push_if(
         &mut specs,
         model.attempt.is_some(),
-        scrollable(PhaseSurfaceId::ScanReceipt, WorkbenchPane::Details),
+        scrollable(PhaseSurfaceId::ScanReceipt),
     );
     push_if(
         &mut specs,
         scan_has_delta(model),
-        scrollable(PhaseSurfaceId::ScanDelta, WorkbenchPane::Findings),
+        scrollable(PhaseSurfaceId::ScanDelta),
     );
     let needs_scope = specs[0].id != PhaseSurfaceId::ScanScope;
     push_if(
         &mut specs,
         needs_scope,
-        static_surface(PhaseSurfaceId::ScanScope, WorkbenchPane::Source),
+        static_surface(PhaseSurfaceId::ScanScope),
     );
     specs
 }
@@ -83,7 +81,6 @@ fn scan_primary_spec(model: &ScanPhaseModel) -> PhaseSurfaceSpec {
     if model.engine_outcomes.is_empty() {
         return spec(
             PhaseSurfaceId::ScanScope,
-            WorkbenchPane::Source,
             scan_scope_state(model),
             SurfaceInteraction::Static,
         );
@@ -97,7 +94,7 @@ fn scan_primary_spec(model: &ScanPhaseModel) -> PhaseSurfaceSpec {
     } else {
         SurfaceState::Available
     };
-    scrollable_with_state(PhaseSurfaceId::ScanEngines, WorkbenchPane::Center, state)
+    scrollable_with_state(PhaseSurfaceId::ScanEngines, state)
 }
 
 fn scan_scope_state(model: &ScanPhaseModel) -> SurfaceState {
@@ -112,18 +109,17 @@ fn review_specs(model: &ReviewPhaseModel) -> Vec<PhaseSurfaceSpec> {
     let queue = if model.review.total_count == 0 {
         spec(
             PhaseSurfaceId::ReviewQueue,
-            WorkbenchPane::Findings,
             SurfaceState::Missing,
             SurfaceInteraction::Static,
         )
     } else {
-        selectable(PhaseSurfaceId::ReviewQueue, WorkbenchPane::Findings)
+        selectable(PhaseSurfaceId::ReviewQueue)
     };
     let mut specs = vec![queue];
     push_if(
         &mut specs,
         model.finding.is_some(),
-        scrollable(PhaseSurfaceId::ReviewDetail, WorkbenchPane::Details),
+        scrollable(PhaseSurfaceId::ReviewDetail),
     );
     specs
 }
@@ -131,24 +127,22 @@ fn review_specs(model: &ReviewPhaseModel) -> Vec<PhaseSurfaceSpec> {
 fn prove_specs(model: &ProvePhaseModel) -> Vec<PhaseSurfaceSpec> {
     let mut specs = vec![scrollable_with_state(
         PhaseSurfaceId::ProveStatus,
-        WorkbenchPane::Source,
         presence_state(model.finding.is_some()),
     )];
     let has_evidence = prove_has_evidence(model);
     push_if(
         &mut specs,
         has_evidence,
-        scrollable(PhaseSurfaceId::ProveEvidence, WorkbenchPane::Center),
+        scrollable(PhaseSurfaceId::ProveEvidence),
     );
     push_if(
         &mut specs,
         model.finding.is_some() && has_evidence,
-        static_surface(PhaseSurfaceId::ProveLadder, WorkbenchPane::Findings),
+        static_surface(PhaseSurfaceId::ProveLadder),
     );
     if let Some(proof) = model.proof.as_ref() {
         specs.push(scrollable_with_state(
             PhaseSurfaceId::ProveReceipt,
-            WorkbenchPane::Details,
             proof_state(proof.requires_revalidation),
         ));
     }
@@ -158,21 +152,17 @@ fn prove_specs(model: &ProvePhaseModel) -> Vec<PhaseSurfaceSpec> {
 fn fix_specs(model: &FixPhaseModel) -> Vec<PhaseSurfaceSpec> {
     let mut specs = vec![scrollable_with_state(
         PhaseSurfaceId::FixRemediation,
-        WorkbenchPane::Findings,
         remediation_state(model),
     )];
     push_if(
         &mut specs,
         fix_has_candidate(model),
-        scrollable(PhaseSurfaceId::FixCandidate, WorkbenchPane::Source),
+        scrollable(PhaseSurfaceId::FixCandidate),
     );
     if !model.attack_tree.chains.is_empty() {
-        specs.push(diagram(
-            PhaseSurfaceId::FixAttackTree,
-            WorkbenchPane::Center,
-        ));
+        specs.push(diagram(PhaseSurfaceId::FixAttackTree));
     } else if model.dfd.empty_hint.is_none() {
-        specs.push(diagram(PhaseSurfaceId::FixDfd, WorkbenchPane::Details));
+        specs.push(diagram(PhaseSurfaceId::FixDfd));
     }
     specs
 }
@@ -237,49 +227,33 @@ fn push_if(specs: &mut Vec<PhaseSurfaceSpec>, condition: bool, surface: PhaseSur
     }
 }
 
-const fn scrollable(id: PhaseSurfaceId, slot: WorkbenchPane) -> PhaseSurfaceSpec {
-    scrollable_with_state(id, slot, SurfaceState::Available)
+const fn scrollable(id: PhaseSurfaceId) -> PhaseSurfaceSpec {
+    scrollable_with_state(id, SurfaceState::Available)
 }
 
-const fn scrollable_with_state(
-    id: PhaseSurfaceId,
-    slot: WorkbenchPane,
-    state: SurfaceState,
-) -> PhaseSurfaceSpec {
-    spec(id, slot, state, SurfaceInteraction::Scrollable)
+const fn scrollable_with_state(id: PhaseSurfaceId, state: SurfaceState) -> PhaseSurfaceSpec {
+    spec(id, state, SurfaceInteraction::Scrollable)
 }
 
-const fn selectable(id: PhaseSurfaceId, slot: WorkbenchPane) -> PhaseSurfaceSpec {
-    spec(
-        id,
-        slot,
-        SurfaceState::Available,
-        SurfaceInteraction::Selectable,
-    )
+const fn selectable(id: PhaseSurfaceId) -> PhaseSurfaceSpec {
+    spec(id, SurfaceState::Available, SurfaceInteraction::Selectable)
 }
 
-const fn static_surface(id: PhaseSurfaceId, slot: WorkbenchPane) -> PhaseSurfaceSpec {
-    spec(id, slot, SurfaceState::Status, SurfaceInteraction::Static)
+const fn static_surface(id: PhaseSurfaceId) -> PhaseSurfaceSpec {
+    spec(id, SurfaceState::Status, SurfaceInteraction::Static)
 }
 
-const fn diagram(id: PhaseSurfaceId, slot: WorkbenchPane) -> PhaseSurfaceSpec {
-    spec(
-        id,
-        slot,
-        SurfaceState::Available,
-        SurfaceInteraction::Diagram,
-    )
+const fn diagram(id: PhaseSurfaceId) -> PhaseSurfaceSpec {
+    spec(id, SurfaceState::Available, SurfaceInteraction::Diagram)
 }
 
 const fn spec(
     id: PhaseSurfaceId,
-    legacy_slot: WorkbenchPane,
     state: SurfaceState,
     interaction: SurfaceInteraction,
 ) -> PhaseSurfaceSpec {
     PhaseSurfaceSpec {
         id,
-        legacy_slot,
         state,
         interaction,
     }
