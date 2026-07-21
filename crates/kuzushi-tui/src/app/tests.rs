@@ -13554,6 +13554,17 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 assert!(app.input().ends_with(" --reason "), "{}", app.input());
                 assert_eq!(app.input_mode(), crate::InputMode::Prompt);
             }
+            ViewHotkeyAction::WorkbenchInvariantHunt => {
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert!(
+                    app.input().starts_with("run agentic-sast:scan {"),
+                    "{}",
+                    app.input()
+                );
+                assert!(app.input().contains("\"focus\""), "{}", app.input());
+                assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+                assert!(!app.tool_is_running());
+            }
             ViewHotkeyAction::WorkbenchOrderChain => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.input(), "run exploit-chain:scan {}");
