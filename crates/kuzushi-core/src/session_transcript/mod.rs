@@ -7,11 +7,15 @@ pub mod lint;
 mod model;
 mod process_identity;
 pub(crate) mod redaction;
+mod session_lint;
 mod store;
 mod time;
 mod writer;
 
 pub use lint::{lint_transcript, TranscriptLintReport};
+pub use session_lint::{
+    lint_session_records, SessionLintFinding, SessionLintKind, SessionLintOptions,
+};
 pub use model::*;
 pub use store::{default_sessions_root, render_session_markdown, SessionTranscriptStore};
 pub use writer::SessionRecorder;
