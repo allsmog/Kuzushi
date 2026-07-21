@@ -8,6 +8,7 @@ mod finding_lists;
 mod finding_lookup;
 mod finding_sources;
 mod finding_writes;
+mod observation_reads;
 mod patch_results;
 mod patch_lifecycle;
 mod rescan_reconciliation;
@@ -20,5 +21,6 @@ mod v3_commit_target;
 mod v3_finding_reads;
 
 pub(in crate::findings::persistence::open) use finding_identities::FindingIdentityAssignment;
+pub use observation_reads::ObservationSourceRef;
 pub use suppression_events::SuppressionLifecycleEvent;
 pub(in crate::findings::persistence::open) use v3_commit_target::cost_usd_to_micros;

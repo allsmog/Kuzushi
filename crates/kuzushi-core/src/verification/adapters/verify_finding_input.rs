@@ -13,6 +13,11 @@ pub(in crate::verification::adapters) struct VerifyFindingInput {
     pub(in crate::verification::adapters) passes: u32,
     pub(in crate::verification::adapters) mcps: bool,
     pub(in crate::verification::adapters) mcp_tool_timeout_ms: Option<u64>,
+    /// Optional cheap-tier plausibility gate: one pass with this model runs
+    /// first, and only its REJECTION is trusted — it can kill obvious noise
+    /// for a fraction of the cost, but an exploitable verdict always
+    /// escalates to the configured full-strength passes.
+    pub(in crate::verification::adapters) gate_model: Option<String>,
 }
 
 /// Upper bound on independent verifier passes. Beyond this the marginal
@@ -44,6 +49,7 @@ impl VerifyFindingInput {
         let passes = parse_verify_passes(input)?;
         let mcps = parse_verify_mcps(input)?;
         let mcp_tool_timeout_ms = parse_mcp_tool_timeout_ms(input)?;
+        let gate_model = parse_gate_model(input)?;
 
         Ok(Self {
             fingerprint,
@@ -51,7 +57,21 @@ impl VerifyFindingInput {
             passes,
             mcps,
             mcp_tool_timeout_ms,
+            gate_model,
         })
+    }
+}
+
+fn parse_gate_model(input: &Value) -> Result<Option<String>> {
+    match input.get("gateModel") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => {
+            let model = value.trim().to_string();
+            crate::runtime::validate_model_spec(&model)
+                .context("verify:finding gateModel is not a valid model spec")?;
+            Ok(Some(model))
+        }
+        Some(_) => anyhow::bail!("verify:finding gateModel must be a non-empty model spec string"),
     }
 }
 

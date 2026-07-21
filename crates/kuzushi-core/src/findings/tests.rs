@@ -843,6 +843,65 @@ mod tests {
         assert_eq!(rebuilt_identity_count, identity_count);
     }
 
+    #[test]
+    fn observation_source_round_trips_the_scanned_file_through_the_blob_store() {
+        const SOURCE: &str = "fn handler(term: &str) {\n    db.query(term);\n}\n";
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let source_path = temp.path().join("src/app.rs");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, SOURCE).unwrap();
+        let store = FindingStore::open(&db_path).unwrap();
+        let run_id = "run-observation-read";
+        store
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "semgrep",
+            "rules.cwe-89",
+            "src/app.rs",
+            2,
+            Some(2),
+            Severity::High,
+            "SQL injection reaches query builder, CWE-89",
+        );
+        store.insert_finding(run_id, &finding).unwrap();
+        let stored = store.list_findings_for_scan_id(run_id).unwrap();
+        let stable_fp = stored[0].identity_id.as_deref().unwrap();
+
+        let scoped = store
+            .latest_observation_source(stable_fp, Some(run_id))
+            .unwrap()
+            .expect("run-scoped observation source");
+        assert_eq!(scoped.run_id, run_id);
+        assert_eq!(scoped.display_path.as_deref(), Some("src/app.rs"));
+        assert_eq!(scoped.display_line, Some(2));
+
+        // A representative scan_id from another run still resolves the blob.
+        let fallback = store
+            .latest_observation_source(stable_fp, Some("run-that-stored-no-blob"))
+            .unwrap()
+            .expect("stable-fp fallback observation source");
+        assert_eq!(fallback.blob_hash, scoped.blob_hash);
+
+        let bytes = store
+            .read_observation_blob(&scoped.blob_hash)
+            .unwrap()
+            .expect("blob bytes");
+        assert_eq!(bytes, SOURCE.as_bytes());
+
+        let missing = store
+            .read_observation_blob(&"0".repeat(64))
+            .unwrap();
+        assert_eq!(missing, None);
+        assert_eq!(
+            store
+                .latest_observation_source("unknown-identity", None)
+                .unwrap(),
+            None
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn file_backed_insert_omits_provenance_for_outside_symlink() {

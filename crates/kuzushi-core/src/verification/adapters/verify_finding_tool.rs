@@ -4,9 +4,7 @@ use super::{
 };
 use crate::findings::FindingStore;
 use crate::runtime::{AgentQueryRequest, AgentRuntime, RuntimeCost, RuntimeCostReport};
-use crate::structured_output::{
-    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
-};
+use crate::structured_output::{CostedStructuredJson, StructuredJsonContract};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::path::Path;
@@ -21,7 +19,10 @@ pub(crate) struct VerifyFindingToolRequest<'a> {
 
 pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> Result<Value> {
     let input = VerifyFindingInput::from_tool_input(&request.input, request.workspace_root)?;
-    let Some(finding) = request.store.get_finding_by_operator_reference(&input.fingerprint)? else {
+    let Some(finding) = request
+        .store
+        .get_finding_by_operator_reference(&input.fingerprint)?
+    else {
         return Ok(missing_finding_response(&input.fingerprint));
     };
     // Require a triage verdict to exist before spending a verify pass, but
@@ -35,6 +36,34 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
     let runtime = require_verify_finding_runtime(request.runtime)?;
     let model = verify_finding_model(&request.input, request.configured_model)?;
     let prompt = build_verify_prompt(&finding, input.prompt_template.as_deref())?;
+
+    // Optional staged gauntlet: one cheap-tier pass runs first, and only
+    // its rejection is final — most false positives die here for a fraction
+    // of the full-pass cost. An exploitable verdict from the cheap model is
+    // never trusted as confirmation; it escalates to the panel below.
+    let mut gate_cost = RuntimeCostReport::known(RuntimeCost::ZERO);
+    if let Some(gate_model) = &input.gate_model {
+        let gate_pass = run_one_verify_pass(
+            runtime,
+            gate_model,
+            request.workspace_root,
+            &prompt,
+            &finding.fingerprint,
+            &input,
+        )?;
+        gate_cost = gate_cost.checked_add(gate_pass.cost_report()?, "verification gate cost")?;
+        let exploitable = gate_pass
+            .value
+            .get("exploitable")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !exploitable {
+            let mut result = gate_pass.value;
+            annotate_gate_stage(&mut result, gate_model, false);
+            return bind_verification_result(result, &finding)
+                .and_then(|result| verify_finding_response(result, gate_cost));
+        }
+    }
 
     // Each pass is an independent adversarial verifier with no shared
     // context; a strict majority must agree before a finding is confirmed
@@ -51,16 +80,34 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
             &input,
         )?);
     }
-    let cost = passes.iter().try_fold(
-        RuntimeCostReport::known(RuntimeCost::ZERO),
-        |total, pass| total.checked_add(pass.cost_report()?, "verification consensus cost"),
-    )?;
-    let result = super::verify_consensus::combine_verify_passes(
+    let cost = passes.iter().try_fold(gate_cost, |total, pass| {
+        total.checked_add(pass.cost_report()?, "verification consensus cost")
+    })?;
+    let mut result = super::verify_consensus::combine_verify_passes(
         passes.into_iter().map(|pass| pass.value).collect(),
     )?;
+    if let Some(gate_model) = &input.gate_model {
+        annotate_gate_stage(&mut result, gate_model, true);
+    }
 
     bind_verification_result(result, &finding)
         .and_then(|result| verify_finding_response(result, cost))
+}
+
+/// The gate's involvement must stay visible in the result: a rejection that
+/// never reached the full-strength panel reads differently from one that
+/// did, and the operator can rerun without `gateModel` to override it.
+fn annotate_gate_stage(result: &mut Value, gate_model: &str, escalated: bool) {
+    if let Some(object) = result.as_object_mut() {
+        object.insert(
+            "gate".to_string(),
+            json!({
+                "stage": "plausibility",
+                "model": gate_model,
+                "escalated": escalated,
+            }),
+        );
+    }
 }
 
 fn bind_verification_result(
@@ -100,7 +147,12 @@ fn run_one_verify_pass(
     fingerprint: &str,
     input: &VerifyFindingInput,
 ) -> Result<CostedStructuredJson<Value>> {
-    query_required_structured_json_with_cost(
+    // Closed-world verify passes replay for free when the finding and its
+    // embedded evidence are unchanged; `mcps` runs carry a tool policy and
+    // the cached wrapper routes those live automatically.
+    let cache = crate::semantic_cache::SemanticCache::open_for_target(workspace_root);
+    crate::structured_output::query_cached_structured_json_with_cost(
+        cache.as_ref(),
         runtime,
         verify_agent_query_request(model, workspace_root, prompt, input),
         StructuredJsonContract::new(
@@ -110,6 +162,7 @@ fn run_one_verify_pass(
         ),
         |raw| normalize_verification_result(raw, fingerprint),
     )
+    .map(|cached| cached.costed)
 }
 
 fn verify_agent_query_request(
@@ -397,6 +450,7 @@ mod tests {
             passes: 1,
             mcps: true,
             mcp_tool_timeout_ms: Some(12_345),
+            gate_model: None,
         };
 
         let request = verify_agent_query_request("model", temp.path(), "prompt", &input);
@@ -415,6 +469,48 @@ mod tests {
     }
 
     #[test]
+    fn gate_rejection_is_annotated_and_never_marked_escalated() {
+        let mut result = json!({"fingerprint": "fp", "exploitable": false});
+        annotate_gate_stage(&mut result, "anthropic:claude-haiku-4-5", false);
+
+        assert_eq!(result["gate"]["stage"], json!("plausibility"));
+        assert_eq!(result["gate"]["model"], json!("anthropic:claude-haiku-4-5"));
+        assert_eq!(result["gate"]["escalated"], json!(false));
+    }
+
+    #[test]
+    fn escalated_panel_results_keep_the_gate_marker() {
+        let mut result = json!({"fingerprint": "fp", "exploitable": true});
+        annotate_gate_stage(&mut result, "anthropic:claude-haiku-4-5", true);
+
+        assert_eq!(result["gate"]["escalated"], json!(true));
+    }
+
+    #[test]
+    fn gate_model_input_is_validated_and_optional() {
+        let with_gate = VerifyFindingInput::from_tool_input(
+            &json!({"fingerprint": "F-1", "gateModel": "anthropic:claude-haiku-4-5"}),
+            Path::new("."),
+        )
+        .unwrap();
+        assert_eq!(
+            with_gate.gate_model.as_deref(),
+            Some("anthropic:claude-haiku-4-5")
+        );
+
+        let without_gate =
+            VerifyFindingInput::from_tool_input(&json!({"fingerprint": "F-1"}), Path::new("."))
+                .unwrap();
+        assert_eq!(without_gate.gate_model, None);
+
+        let invalid = VerifyFindingInput::from_tool_input(
+            &json!({"fingerprint": "F-1", "gateModel": "not a model spec"}),
+            Path::new("."),
+        );
+        assert!(invalid.is_err());
+    }
+
+    #[test]
     fn verify_request_can_disable_mcp_policy() {
         let input = VerifyFindingInput {
             fingerprint: "F-1".to_string(),
@@ -422,6 +518,7 @@ mod tests {
             passes: 1,
             mcps: false,
             mcp_tool_timeout_ms: None,
+            gate_model: None,
         };
 
         let request = verify_agent_query_request("model", Path::new("."), "prompt", &input);

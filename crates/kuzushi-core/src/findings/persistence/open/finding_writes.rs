@@ -324,7 +324,7 @@ impl FindingStore {
         Some(state_root.parent()?.to_path_buf())
     }
 
-    fn v3_objects_dir(&self) -> Option<PathBuf> {
+    pub(in crate::findings::persistence::open) fn v3_objects_dir(&self) -> Option<PathBuf> {
         Some(self.db_path.as_ref()?.parent()?.join("objects"))
     }
 }
