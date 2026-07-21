@@ -10,6 +10,7 @@
 
 pub mod coverage;
 mod plan;
+mod prior_runs;
 mod shards;
 pub mod snapshot;
 mod status;

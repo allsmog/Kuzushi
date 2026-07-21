@@ -69,8 +69,11 @@ pub fn execute_campaign_plan(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
         request.max_jobs,
         covered.as_ref(),
     );
+    let prior_overlaps =
+        super::prior_runs::prior_scan_overlaps(&root, &request.tool, &job_shard_axis(&jobs));
     let mut plan =
         plan_document(&root, &request, &jobs, &dropped, skipped_covered, threats.len())?;
+    plan["priorScanOverlaps"] = prior_overlaps_json(&prior_overlaps);
     if threats.is_empty() && !documents.is_empty() {
         // allowUnseasoned bypassed the empty-document guard; the plan must
         // name the documents that steered nothing so nobody assumes seasoning.
@@ -86,7 +89,33 @@ pub fn execute_campaign_plan(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
         &dropped,
         skipped_covered,
         &plan,
+        &prior_overlaps,
     ))
+}
+
+/// Unique (shard, paths) pairs across the kept jobs — the axis the prior-run
+/// overlap check runs against.
+fn job_shard_axis(jobs: &[PlannedJob]) -> Vec<(String, Vec<String>)> {
+    let mut axis: Vec<(String, Vec<String>)> = Vec::new();
+    for job in jobs {
+        if !axis.iter().any(|(name, _)| *name == job.shard.name) {
+            axis.push((job.shard.name.clone(), job.shard.paths.clone()));
+        }
+    }
+    axis
+}
+
+fn prior_overlaps_json(overlaps: &[super::prior_runs::PriorScanOverlap]) -> Value {
+    json!(overlaps
+        .iter()
+        .map(|overlap| {
+            json!({
+                "shard": overlap.shard,
+                "runId": overlap.run_id,
+                "completedAtUnix": overlap.completed_at_unix,
+            })
+        })
+        .collect::<Vec<_>>())
 }
 
 fn parse_plan_request(input: &Value) -> Result<PlanRequest> {
@@ -649,6 +678,7 @@ fn plan_result(
     dropped: &[PlannedJob],
     skipped_covered: usize,
     plan: &Value,
+    prior_overlaps: &[super::prior_runs::PriorScanOverlap],
 ) -> Value {
     let gap_note = if request.fill_gaps {
         format!(", {skipped_covered} covered cell(s) skipped by fillGaps")
@@ -665,12 +695,16 @@ fn plan_result(
         None => "0 dropped by maxJobs".to_string(),
     };
     let seasoning_note = seasoning_note(plan);
-    let output = format!(
+    let warnings = prior_overlap_warnings(prior_overlaps);
+    let mut output = format!(
         "campaign:plan wrote {} job(s) ({dropped_note}{gap_note}{seasoning_note}) to {}",
         job_count,
         plan_path.display()
     );
-    crate::module_result::completed_output_result(
+    for warning in &warnings {
+        output.push_str(&format!("\n  WARNING: {warning}"));
+    }
+    let mut result = crate::module_result::completed_output_result(
         output.clone(),
         output,
         json!({
@@ -682,5 +716,22 @@ fn plan_result(
             "skippedCoveredCells": skipped_covered,
             "plan": plan,
         }),
-    )
+    );
+    result["warnings"] = json!(warnings);
+    result
+}
+
+/// Direct runs never mark coverage cells, so a plan over their scope is a
+/// paid duplicate unless the operator meant to re-scan. Warn per shard.
+fn prior_overlap_warnings(overlaps: &[super::prior_runs::PriorScanOverlap]) -> Vec<String> {
+    overlaps
+        .iter()
+        .map(|overlap| {
+            format!(
+                "shard {:?} scope was already scanned by completed non-campaign run {} \
+                 (coverage does not track direct runs); dispatching this job repeats that spend",
+                overlap.shard, overlap.run_id
+            )
+        })
+        .collect()
 }
