@@ -11,12 +11,11 @@ For vocabulary and dependency rules, see
 | Rust CLI command, flags, exit behavior | `crates/kuzushi-cli/src/main.rs`, `crates/kuzushi-cli/tests/` | `cargo test -p kuzushi-cli cutover_cli` |
 | Rust TUI command/reducer behavior | `crates/kuzushi-tui/src/app/`, `crates/kuzushi-tui/src/commands/` | `cargo test -p kuzushi-tui app::tests` |
 | Rust TUI rendering/plain output | `crates/kuzushi-tui/src/renderer/`, `crates/kuzushi-tui/src/renderer/plain/`, `crates/kuzushi-tui/src/theme/mod.rs` | `cargo test -p kuzushi-tui renderer::tests` |
-| Module/tool registry | `crates/kuzushi-core/src/modules/`, `src/modules/*` for retained SDK contracts | `cargo test -p kuzushi-core modules` |
+| Module/tool registry | `crates/kuzushi-core/src/modules/` | `cargo test -p kuzushi-core modules` |
 | Findings persistence/reporting | `crates/kuzushi-core/src/findings/`, `crates/kuzushi-core/src/findings/presentation/`, CLI findings paths | `cargo test -p kuzushi-core findings`; `cargo test -p kuzushi-cli cutover_cli` |
 | Scan orchestration | `crates/kuzushi-core/src/scan/`, `crates/kuzushi-core/src/modules/application/sast_scan/`, `crates/kuzushi-cli/src/main.rs` | `cargo test -p kuzushi-core scan`; `bash tests/e2e/run-smoke.sh` |
 | Verify/sandbox | `crates/kuzushi-core/src/verify.rs`, `crates/kuzushi-sandbox`, verification tests | `cargo test -p kuzushi-core verify` |
 | Agent runtime/model enforcement | `crates/kuzushi-core/src/runtime/policy/no_silent_fallback.rs`, `crates/kuzushi-core/src/agent_router/`, Rust runtime bridge call sites | `node scripts/check-model-safety.mjs`; focused Rust no-fallback tests |
-| Retained TypeScript helpers | `src/modules`, `src/testing`, SDK entry points under `src/` | `pnpm typecheck`; `pnpm test -- --run` when behavior changes |
 | Docs/evals/public examples | `README.md`, `docs/`, `examples/`, `.github/workflows/kuzushi-reference.yml`, `scripts/check-doc-command-drift.mjs` | `pnpm check:docs`; run any example script touched |
 
 ## Architectural Invariants

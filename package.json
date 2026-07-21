@@ -12,20 +12,7 @@
     "url": "https://github.com/allsmog/Kuzushi/issues"
   },
   "type": "module",
-  "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./modules": {
-      "types": "./dist/modules/index.d.ts",
-      "default": "./dist/modules/index.js"
-    },
-    "./testing": {
-      "types": "./dist/testing/index.d.ts",
-      "default": "./dist/testing/index.js"
-    },
     "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
@@ -46,21 +33,12 @@
     "dev:rust": "cargo run -p kuzushi-cli",
     "link:local": "node scripts/link-local.mjs",
     "link:local:restore": "node scripts/link-local.mjs --restore",
-    "clean:dist": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "tsc",
     "build:rust": "cargo build --workspace",
     "build:native": "node scripts/build-native-runtime.mjs",
-    "build:clean": "pnpm clean:dist && tsc",
-    "prepack": "pnpm build:clean && pnpm build:native",
-    "check:types": "node scripts/typecheck-all.mjs",
-    "typecheck": "tsc --noEmit",
-    "typecheck:all": "node scripts/typecheck-all.mjs",
-    "typecheck:benchmarks": "tsc -p benchmarks/tsconfig.json --noEmit",
-    "typecheck:perf": "tsc -p perf/tsconfig.json --noEmit",
-    "test": "vitest run && node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs scripts/setup-contract.test.mjs",
+    "prepack": "pnpm build:native",
+    "test": "node --test scripts/setup-contract.test.mjs",
     "test:rust": "cargo test --workspace",
     "test:e2e": "bash tests/e2e/run-smoke.sh",
-    "test:coverage": "vitest run --coverage && node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs scripts/setup-contract.test.mjs",
     "quality:crap-risk": "node --test scripts/crap-risk-test-mapping.test.mjs && node scripts/crap-risk-gate.mjs",
     "quality:identity": "node scripts/check-public-identity.mjs",
     "quality:architecture": "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-env-discipline.mjs && node scripts/check-dispatch-boundary-contract.mjs && node scripts/check-run-lifecycle-boundary.mjs && node scripts/check-workspace-state-writes.mjs && node scripts/check-validated-wording.mjs",
@@ -70,20 +48,6 @@
     "publish:npm": "bash scripts/publish-npm.sh",
     "publish:npm:dry": "bash scripts/publish-npm.sh",
     "publish:npm:go": "bash scripts/publish-npm.sh --publish",
-    "benchmark": "tsx benchmarks/harness.ts",
-    "benchmark:freeze": "tsx benchmarks/freeze-baseline.ts",
-    "benchmark:diff": "tsx benchmarks/sarif-diff.ts",
-    "benchmark:regression": "tsx benchmarks/regression-check.ts",
-    "benchmark:regression:test": "node --test benchmarks/regression-check.test.mjs",
-    "benchmark:scoreboard": "tsx benchmarks/scoreboard.ts",
-    "eval:kuzushi-whitebox-static": "node --import tsx evals/kuzushi-whitebox-static/run.ts",
-    "perf": "tsx perf/harness.ts",
-    "check:circular": "madge --ts-config tsconfig.json --extensions ts --circular src/",
-    "complexity": "node scripts/cyclomatic.mjs src --top 30 --min 20",
-    "complexity:logic": "node scripts/cyclomatic.mjs src --top 30 --min 20 --logic-only",
-    "codegen": "tsx scripts/codegen/index.ts",
-    "codegen:check": "tsx scripts/codegen/check.ts",
-    "typecheck:codegen": "tsc -p scripts/codegen/tsconfig.json --noEmit",
     "lint": "biome lint .",
     "format": "biome format .",
     "check": "biome check .",
@@ -91,11 +55,6 @@
     "fix:unsafe": "biome check --write --unsafe ."
   },
   "files": [
-    "dist",
-    "!dist/cli",
-    "!dist/cli.d.ts",
-    "!dist/cli.js",
-    "!dist/cli.js.map",
     "bin",
     "native",
     "scripts/langgraph-bridge.mjs",
@@ -126,15 +85,9 @@
     "@cfworker/json-schema": "^4.1.1",
     "@commitlint/cli": "^21.2.0",
     "@commitlint/config-conventional": "^21.2.0",
-    "@types/node": "^22.13.4",
-    "@vitest/coverage-v8": "^3.2.7",
     "chalk": "^5.4.1",
     "husky": "^9.1.7",
-    "lint-staged": "^17.0.8",
-    "madge": "^8.0.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.3",
-    "vitest": "^3.2.7"
+    "lint-staged": "^17.0.8"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

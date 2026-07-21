@@ -9,13 +9,10 @@
   },
   "files": {
     "includes": [
-      "src/**",
       "tests/**",
       "benchmarks/**",
-      "perf/**",
       "scripts/**",
       "*.json",
-      "*.ts",
       "!**/node_modules",
       "!**/dist",
       "!**/dist-benchmarks",
@@ -79,7 +76,7 @@
   },
   "overrides": [
     {
-      "includes": ["scripts/**", "benchmarks/**", "perf/**", "tests/**"],
+      "includes": ["scripts/**", "benchmarks/**", "tests/**"],
       "linter": {
         "rules": {
           "suspicious": {
@@ -89,7 +86,7 @@
       }
     },
     {
-      "includes": ["tests/**", "benchmarks/**", "perf/**"],
+      "includes": ["tests/**", "benchmarks/**"],
       "linter": {
         "rules": {
           "suspicious": {

@@ -71,8 +71,8 @@ runtime and compatibility contracts. The short version:
    preparation/dispatch boundary used by scan, shell, and run modes.
 3. Add focused descriptor, option-validation, executor, and cross-mode tests.
 
-The TypeScript files under `src/modules/` are the compatibility SDK for
-third-party module authors; they are not the live built-in runtime.
+There is no TypeScript SDK in this repository; third-party module authors
+target `schemas/module.manifest.schema.json` and the KWP worker protocol.
 
 ## Reporting Bugs
 

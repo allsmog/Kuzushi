@@ -35,7 +35,7 @@ const retiredUiPaths = [
   "src/ui/setup.ts",
   "src/ui/shell-keybinds.ts",
 ];
-const retiredRuntimePaths = ["scripts/claude-cli-bridge.mjs", "src/copilot/print.ts"];
+const retiredRuntimePaths = ["src/copilot/print.ts"];
 const retiredUiDependencies = ["ink", "react", "react-dom", "@types/react", "@types/react-dom"];
 const retiredUiRuntimePackages = new Set(["ink", "react", "react-dom"]);
 const deletedClaudeCliRuntimePackages = new Set(["@anthropic-ai/claude-agent-sdk"]);

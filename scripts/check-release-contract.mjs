@@ -26,11 +26,7 @@ if (!rustToolchainSatisfiesMsrv(cargoRustVersion, toolchainChannel)) {
   );
 }
 
-for (const workflow of [
-  ".github/workflows/ci.yml",
-  ".github/workflows/release.yml",
-  ".github/workflows/benchmark-regression.yml",
-]) {
+for (const workflow of [".github/workflows/ci.yml", ".github/workflows/release.yml"]) {
   checkWorkflowUsesToolchainFile(workflow);
 }
 checkNativeRuntimeContract();

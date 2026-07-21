@@ -2,6 +2,7 @@ node_modules/
 .pnpm-store/
 dist/
 target/
+target-dev/
 native/
 .env
 .env.*
@@ -81,3 +82,4 @@ plans/artifacts/
 
 # Scratch space (screenshots, live-audit captures) — never tracked.
 /tmp/
+package-lock.json

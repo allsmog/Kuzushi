@@ -34,10 +34,10 @@ canonical input surface for user-facing knobs and aliases. DAG descriptors are
 currently scan/progress metadata unless the owning executor consumes them
 explicitly; do not assume `depends_on` alone changes execution order.
 
-The TypeScript `src/modules` SDK remains as a compatibility/export surface for
-third-party module authors and tests. It is not the runtime for built-in shell,
-scan, or run behavior. When changing live product behavior, edit the Rust
-descriptor/executor path first.
+The repository ships no TypeScript SDK. Third-party module authors target the
+published `schemas/module.manifest.schema.json` contract and the brokered KWP
+Node worker protocol directly. When changing live product behavior, edit the
+Rust descriptor/executor path first.
 
 ### Key files
 
@@ -62,8 +62,6 @@ descriptor/executor path first.
 - `crates/kuzushi-tui/src/ui_view_models/` and
   `crates/kuzushi-tui/src/renderer/` — presentation DTOs and Ratatui/plain
   rendering.
-- `src/modules/types.ts`, `src/modules/define.ts`, and `src/testing/index.ts`
-  — retained TypeScript SDK/testing surface for external module authors.
 - `schemas/module.manifest.schema.json` — published module manifest schema.
 
 ### Rust-native MCP servers (agent-callable)
@@ -105,9 +103,9 @@ with `KUZUSHI_AGENT_MCPS=1`. Useful env vars when debugging:
 
 ### Load specifiers
 
-The retained TypeScript SDK exposes `parseModuleSpecifier()` for
-`builtin:<id>`, `file://<abs-path>`, `package:<npm-name>`, and
-`mcp:<server-spec>` forms. Rust built-ins are loaded from the Rust registry;
+Module specifiers take the `builtin:<id>`, `file://<abs-path>`,
+`package:<npm-name>`, and `mcp:<server-spec>` forms, parsed by the Rust
+dynamic loader. Rust built-ins are loaded from the Rust registry;
 local `file://`/path modules go through digest-pinned `kuzushi.lock` approval
 and the brokered KWP Node worker, while `package:` remains a trusted
 compatibility path through the Rust dynamic loader and host script. Test both
@@ -745,8 +743,8 @@ result to `PatchStatus::Verified`.
 ### Plain And CI Output
 
 Plain output for the Rust shell belongs in `crates/kuzushi-tui/src/renderer/plain/`.
-Retained TypeScript files under `src/modules` and `src/testing` are SDK and
-testing compatibility surfaces. They must not grow a second interactive TUI.
+The repository contains no TypeScript runtime or SDK surfaces; do not
+reintroduce one, and do not grow a second interactive TUI in JavaScript.
 
 ### Adding A Shell View
 

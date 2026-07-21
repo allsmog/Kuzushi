@@ -6,7 +6,7 @@
 #   - Working tree must be clean
 #   - Current HEAD must be on main
 #   - The tag v<version> must exist and point at HEAD
-#   - typecheck + tests + clean JS/native build + package verification must pass
+#   - tests + native build + package verification must pass
 #
 # Dry-run by default. Pass --publish to actually publish.
 #
@@ -112,21 +112,15 @@ ok "version is unpublished"
 
 # ── Build + verify ───────────────────────────────────────────────────────────
 
-log "Typechecking"
-pnpm exec tsc --noEmit
-ok "types clean"
-
 if [ "${SKIP_TESTS:-0}" != "1" ]; then
-  log "Running full test suite"
-  pnpm exec vitest run
+  log "Running node contract tests"
+  pnpm run test
+  log "Running Rust test suite"
+  pnpm run test:rust
   ok "tests green"
 else
   warn "SKIP_TESTS=1 — skipping tests"
 fi
-
-log "Clean build"
-pnpm run build:clean
-ok "dist/ rebuilt"
 
 log "Building native Rust package binaries"
 pnpm run build:native

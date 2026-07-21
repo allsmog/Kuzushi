@@ -37,11 +37,6 @@ const requiredPackageFiles = [
   ...canonicalRunSchemaFiles,
 ];
 const allowedPackageEntries = [
-  "dist",
-  "!dist/cli",
-  "!dist/cli.d.ts",
-  "!dist/cli.js",
-  "!dist/cli.js.map",
   "bin",
   "native",
   "scripts/langgraph-bridge.mjs",
@@ -62,7 +57,7 @@ const expectedPackageBin = {
 };
 const allowedLifecycleScripts = {};
 const requiredReleaseScripts = {
-  prepack: "pnpm build:clean && pnpm build:native",
+  prepack: "pnpm build:native",
   "verify:pack": "node scripts/verify-pack.mjs && node scripts/smoke-packed-runtime.mjs",
   "publish:npm": "bash scripts/publish-npm.sh",
   "publish:npm:dry": "bash scripts/publish-npm.sh",
@@ -82,22 +77,12 @@ const expectedPackageScripts = {
   "dev:rust": "cargo run -p kuzushi-cli",
   "link:local": "node scripts/link-local.mjs",
   "link:local:restore": "node scripts/link-local.mjs --restore",
-  "clean:dist": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-  build: "tsc",
   "build:rust": "cargo build --workspace",
   "build:native": "node scripts/build-native-runtime.mjs",
-  "build:clean": "pnpm clean:dist && tsc",
-  prepack: "pnpm build:clean && pnpm build:native",
-  "check:types": "node scripts/typecheck-all.mjs",
-  typecheck: "tsc --noEmit",
-  "typecheck:all": "node scripts/typecheck-all.mjs",
-  "typecheck:benchmarks": "tsc -p benchmarks/tsconfig.json --noEmit",
-  "typecheck:perf": "tsc -p perf/tsconfig.json --noEmit",
-  test: "vitest run && node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs scripts/setup-contract.test.mjs",
+  prepack: "pnpm build:native",
+  test: "node --test scripts/setup-contract.test.mjs",
   "test:rust": "cargo test --workspace",
   "test:e2e": "bash tests/e2e/run-smoke.sh",
-  "test:coverage":
-    "vitest run --coverage && node --test benchmarks/regression-check.test.mjs scripts/typecheck-all.test.mjs scripts/setup-contract.test.mjs",
   "quality:crap-risk":
     "node --test scripts/crap-risk-test-mapping.test.mjs && node scripts/crap-risk-gate.mjs",
   "quality:identity": "node scripts/check-public-identity.mjs",
@@ -109,20 +94,6 @@ const expectedPackageScripts = {
   "publish:npm": "bash scripts/publish-npm.sh",
   "publish:npm:dry": "bash scripts/publish-npm.sh",
   "publish:npm:go": "bash scripts/publish-npm.sh --publish",
-  benchmark: "tsx benchmarks/harness.ts",
-  "benchmark:freeze": "tsx benchmarks/freeze-baseline.ts",
-  "benchmark:diff": "tsx benchmarks/sarif-diff.ts",
-  "benchmark:regression": "tsx benchmarks/regression-check.ts",
-  "benchmark:regression:test": "node --test benchmarks/regression-check.test.mjs",
-  "benchmark:scoreboard": "tsx benchmarks/scoreboard.ts",
-  "eval:kuzushi-whitebox-static": "node --import tsx evals/kuzushi-whitebox-static/run.ts",
-  perf: "tsx perf/harness.ts",
-  "check:circular": "madge --ts-config tsconfig.json --extensions ts --circular src/",
-  complexity: "node scripts/cyclomatic.mjs src --top 30 --min 20",
-  "complexity:logic": "node scripts/cyclomatic.mjs src --top 30 --min 20 --logic-only",
-  codegen: "tsx scripts/codegen/index.ts",
-  "codegen:check": "tsx scripts/codegen/check.ts",
-  "typecheck:codegen": "tsc -p scripts/codegen/tsconfig.json --noEmit",
   lint: "biome lint .",
   format: "biome format .",
   check: "biome check .",
@@ -133,7 +104,6 @@ const expectedPackageMetadata = {
   name: "kuzushi",
   description: "Kuzushi — security-native code agent for evidence-backed repository scans",
   type: "module",
-  types: "./dist/index.d.ts",
   repositoryType: "git",
   repositoryUrl: "https://github.com/allsmog/Kuzushi.git",
   homepage: "https://github.com/allsmog/Kuzushi",
@@ -169,16 +139,9 @@ const expectedPnpmLockfileRootDependencyVersions = {
     "@cfworker/json-schema": "4.1.1",
     "@commitlint/cli": "21.2.0(@types/node@22.19.11)(typescript@5.9.3)",
     "@commitlint/config-conventional": "21.2.0",
-    "@types/node": "22.19.11",
-    "@vitest/coverage-v8":
-      "3.2.7(vitest@3.2.7(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0))",
     chalk: "5.6.2",
     husky: "9.1.7",
     "lint-staged": "17.0.8",
-    madge: "8.0.0(typescript@5.9.3)",
-    tsx: "4.22.4",
-    typescript: "5.9.3",
-    vitest: "3.2.7(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.22.4)(yaml@2.9.0)",
   },
   optionalDependencies: {},
 };
@@ -187,20 +150,11 @@ const expectedPackageDevDependencies = {
   "@cfworker/json-schema": "^4.1.1",
   "@commitlint/cli": "^21.2.0",
   "@commitlint/config-conventional": "^21.2.0",
-  "@types/node": "^22.13.4",
-  "@vitest/coverage-v8": "^3.2.7",
   chalk: "^5.4.1",
   husky: "^9.1.7",
   "lint-staged": "^17.0.8",
-  madge: "^8.0.0",
-  tsx: "^4.19.2",
-  typescript: "^5.7.3",
-  vitest: "^3.2.7",
 };
 const expectedPackageExports = {
-  ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
-  "./modules": { types: "./dist/modules/index.d.ts", default: "./dist/modules/index.js" },
-  "./testing": { types: "./dist/testing/index.d.ts", default: "./dist/testing/index.js" },
   "./schemas/*": "./schemas/*",
   "./package.json": "./package.json",
 };
@@ -286,7 +240,7 @@ const deniedPathFixtures = [
   "assets/native/linux-x64/codex",
 ];
 const exportPolicyFixtures = {
-  allowed: ["dist/index.d.ts", "dist/modules/index.d.ts"],
+  allowed: ["schemas/module.manifest.schema.json", "package.json"],
   denied: [
     "src/index.ts",
     "src/ui/App.tsx",
@@ -296,8 +250,8 @@ const exportPolicyFixtures = {
   ],
 };
 const packageTypesPolicyFixtures = {
-  allowed: ["./dist/index.d.ts", "dist/modules/index.d.ts"],
-  denied: ["src/index.ts", "src/ui/App.tsx", "dist/cli.d.ts", "README.md", 42],
+  allowed: [undefined],
+  denied: ["./dist/index.d.ts", "src/index.ts", "src/ui/App.tsx", "README.md", 42],
 };
 const packageBinSurfaceFixtures = {
   allowed: [{ ...expectedPackageBin }],
@@ -310,9 +264,8 @@ const packageBinSurfaceFixtures = {
 const packageScriptRuntimePolicyFixtures = {
   allowed: [
     "cargo run -p kuzushi-cli",
-    "pnpm build:clean && pnpm build:native",
+    "pnpm build:native",
     "node scripts/build-native-runtime.mjs",
-    "tsx benchmarks/harness.ts",
     "node scripts/check-retired-ts-runtime.mjs",
   ],
   denied: [
@@ -857,7 +810,7 @@ function publishWrapperContentFailures() {
   const content = readPackageContractText("scripts/publish-npm.sh");
   const source = content.source;
   const required = [
-    "typecheck + tests + clean JS/native build + package verification must pass",
+    "tests + native build + package verification must pass",
     "git diff --quiet",
     "git diff --cached --quiet",
     "git rev-parse --abbrev-ref HEAD",
@@ -867,10 +820,9 @@ function publishWrapperContentFailures() {
     'git ls-remote --tags origin "refs/tags/${TAG}"',
     "npm whoami",
     'npm view "${PUB_NAME}@${VERSION}" version',
-    "pnpm exec tsc --noEmit",
-    "pnpm exec vitest run",
+    "pnpm run test",
+    "pnpm run test:rust",
     "SKIP_TESTS:-0",
-    "pnpm run build:clean",
     "pnpm run build:native",
     "pnpm run verify:pack",
     "npm pack --dry-run --ignore-scripts",
@@ -925,13 +877,9 @@ function packageMetadataFailures(packageManifest) {
 }
 
 function packageTypesRuntimePolicyFailures(types) {
-  if (typeof types !== "string") return ["package types must be a string"];
-  const target = normalizeExportTarget(types);
-  return target.startsWith("dist/") &&
-    target.endsWith(".d.ts") &&
-    !exportTargetViolatesRuntimePolicy(target)
+  return types === undefined
     ? []
-    : [`package types must stay on built declaration runtime surface: ${target}`];
+    : ["package types must be absent; the npm package ships no TypeScript library surface"];
 }
 
 function packageTypesPolicyFixtureFailures(fixtures) {

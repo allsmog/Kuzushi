@@ -77,38 +77,6 @@ jobs:
       - run: pnpm check:docs
       - run: pnpm check
 
-  # ── Codegen drift check (parallel after install) ──────────────────────────
-  codegen-check:
-    name: codegen-check
-    needs: install
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm codegen:check
-
-  # ── Type-check (parallel after install) ───────────────────────────────────
-  typecheck:
-    name: typecheck
-    needs: install
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm check:types
-
   # ── Rust lint: clippy as a hard gate ─────────────────────────────────────
   # clippy is hard-blocking via the workspace `[workspace.lints.clippy]`
   # baseline in Cargo.toml. Formatting is also hard-blocking: the workspace is
@@ -203,13 +171,10 @@ jobs:
           name: native-linux-x64
           path: native/
       - run: chmod -R +x native/
-      - run: pnpm check:types
       - run: pnpm test
-      - run: pnpm build
       - run: pnpm verify:pack
 
-  # ── Tests with coverage inline (parallel after install) ──────────────────
-  # `test:coverage` is a superset of `test` — we do not run both.
+  # ── Node contract tests (parallel after install) ─────────────────────────
   test:
     name: test
     needs: install
@@ -223,43 +188,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:coverage
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: coverage/
-          if-no-files-found: ignore
-          retention-days: 7
+      - run: pnpm test
 
-  # ── Build and publish dist/ as artifact for downstream jobs ───────────────
-  build:
-    name: build
-    needs: install
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - name: Upload dist artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: dist
-          path: dist/
-          if-no-files-found: error
-          retention-days: 7
-
-  # ── Verify the packed tarball is consistent (after build) ────────────────
+  # ── Verify the packed tarball is consistent (after native build) ─────────
   verify-pack:
     name: verify-pack
-    needs: [build, rust-cli]
+    needs: [rust-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -270,11 +204,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Download dist artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
       - name: Download native artifact
         uses: actions/download-artifact@v8
         with:
@@ -311,7 +240,7 @@ jobs:
   # path — do not re-add `continue-on-error` (field-test issue #54).
   e2e:
     name: e2e
-    needs: [build, rust-cli]
+    needs: [rust-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -329,11 +258,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install semgrep (pip, cached)
         run: python -m pip install --upgrade pip && pip install -r .github/requirements-ci.txt
-      - name: Download dist artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
       - name: Download native artifact
         uses: actions/download-artifact@v8
         with:

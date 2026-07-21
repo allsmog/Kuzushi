@@ -262,7 +262,6 @@ fi
 
 section "Bootstrap complete"
 printf "%sNext:%s  pnpm doctor     # re-verify env\n" "$BOLD" "$RESET"
-printf "       pnpm typecheck:all   # type-check all TypeScript projects\n"
-printf "       pnpm test            # run TypeScript unit tests\n"
+printf "       pnpm test            # run node contract tests\n"
 printf "       cargo test --workspace  # run native Rust tests\n"
 printf "       pnpm dev -- --help  # run the native CLI in dev mode\n"

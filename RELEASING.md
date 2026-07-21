@@ -20,10 +20,8 @@ pnpm quality:architecture
 pnpm quality:model-safety
 pnpm quality:crap-risk
 pnpm test
-pnpm check:types
 cargo check --workspace
 cargo test --workspace
-pnpm build:clean
 pnpm build:native
 pnpm verify:pack
 

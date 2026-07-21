@@ -48,8 +48,7 @@ running Semgrep, selecting scan tasks, prompting a model, applying patches.
 ## Module / Tool Domain
 
 Owner files:
-`crates/kuzushi-core/src/modules/`, `src/modules/types.ts`,
-`src/modules/define.ts`, `src/modules/loader.ts`, and `src/modules/registry.ts`.
+`crates/kuzushi-core/src/modules/`.
 
 Vocabulary:
 `CopilotModule`, `ModuleTool`, `DagTool`, `ExecutionContext`,
