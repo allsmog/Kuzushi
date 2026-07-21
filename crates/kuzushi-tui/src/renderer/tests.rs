@@ -211,7 +211,7 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
 }
 
 #[test]
-fn guided_scan_question_replaces_the_bottom_composer_below_the_cockpit() {
+fn guided_scan_question_is_hosted_as_the_dominant_body_card() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
     let target = tempfile::tempdir().unwrap();
@@ -228,12 +228,15 @@ fn guided_scan_question_replaces_the_bottom_composer_below_the_cockpit() {
 
     assert!(
         question_row > cockpit_row,
-        "question must sit below cockpit"
+        "question must sit below the guided context strip"
     );
-    assert!(question_row > 18, "question should remain bottom anchored");
     assert!(
-        question_footer_row >= 34,
-        "question input footer should occupy the composer edge; row was {question_footer_row}"
+        question_row <= 18,
+        "question card should be hosted in the body, not bottom anchored; row was {question_row}"
+    );
+    assert!(
+        question_footer_row < 34,
+        "the composer edge belongs to the prompt line when the card is hosted; footer row was {question_footer_row}"
     );
 }
 

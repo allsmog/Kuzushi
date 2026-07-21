@@ -7,6 +7,49 @@ use ratatui::prelude::{Frame, Line, Span};
 use ratatui::style::Modifier;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
+/// Below this viewport the question keeps its legacy bottom-strip placement;
+/// at or above it, the card is hosted centered in the Workbench body and the
+/// input surface stays a plain prompt line.
+pub(in crate::renderer) const QUESTION_CARD_IN_BODY_MIN_ROWS: u16 = 18;
+pub(in crate::renderer) const QUESTION_CARD_IN_BODY_MIN_COLUMNS: u16 = 60;
+
+pub(in crate::renderer) fn guided_question_hosted_in_body(
+    viewport_columns: u16,
+    viewport_rows: u16,
+) -> bool {
+    viewport_rows >= QUESTION_CARD_IN_BODY_MIN_ROWS
+        && viewport_columns >= QUESTION_CARD_IN_BODY_MIN_COLUMNS
+}
+
+/// Render the Clarify question as the dominant centered card inside the
+/// Workbench body (the `QuestionCard` composition). The card claims at most
+/// the content height it needs, top-aligned in the remaining body.
+pub(in crate::renderer) fn render_guided_question_card(
+    frame: &mut Frame<'_>,
+    body: Rect,
+    page: WorkbenchPage,
+    model: &GuidedScanQuestionModel,
+) {
+    if body.width < 4 || body.height < 3 {
+        return;
+    }
+    let composition = crate::ui_view_models::Composition::QuestionCard(page.primary_surface());
+    let Some((_, centered)) = composition.solve(body).into_iter().next() else {
+        return;
+    };
+    let desired = model.options.len() as u16
+        + 5
+        + model.detail_lines.len() as u16
+        + u16::from(model.other_open)
+        + u16::from(model.acknowledgement.is_some())
+        + u16::from(model.error.is_some());
+    let card = Rect {
+        height: desired.min(centered.height),
+        ..centered
+    };
+    render_guided_question(frame, card, page, model);
+}
+
 pub(in crate::renderer) fn guided_question_height(
     area: Rect,
     model: &GuidedScanQuestionModel,

@@ -7,7 +7,10 @@ mod panes;
 mod phase_pages;
 mod render_workbench_view;
 
-pub(in crate::renderer) use guided_scan::{guided_question_height, render_guided_question};
+pub(in crate::renderer) use guided_scan::{
+    guided_question_height, guided_question_hosted_in_body, render_guided_question,
+    render_guided_question_card,
+};
 pub(in crate::renderer::views) use phase_pages::{
     phase_cockpit_plain_lines, phase_header_lines, render_phase_cockpit_body, PhaseRenderState,
 };

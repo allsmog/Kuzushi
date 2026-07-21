@@ -88,6 +88,40 @@ fn render_phase_presentation(
     }
     let phase_state = super::phase_pages::PhaseRenderState::workbench(app, &plan);
     super::phase_pages::render_phase_cockpit_body(frame, body, app, phase, &plan, phase_state);
+    render_hosted_guided_question(frame, body, app, &plan);
+}
+
+/// The Clarify composition: with room, the guided question renders as the
+/// dominant centered card in the body below the Guided context strip, and the
+/// input surface keeps its plain prompt line.
+fn render_hosted_guided_question(
+    frame: &mut Frame<'_>,
+    body: Rect,
+    app: &ShellApp,
+    plan: &crate::ui_view_models::PhasePresentationPlan,
+) {
+    let Some(question) = app.guided_scan_question_model() else {
+        return;
+    };
+    let full = frame.area();
+    if !super::guided_question_hosted_in_body(full.width, full.height) {
+        return;
+    }
+    let strip_bottom = plan
+        .surfaces
+        .iter()
+        .map(|surface| surface.rect.bottom())
+        .max()
+        .unwrap_or(body.y);
+    let card_area = Rect::new(
+        body.x,
+        strip_bottom.saturating_add(1).min(body.bottom()),
+        body.width,
+        body.bottom()
+            .saturating_sub(strip_bottom.saturating_add(1).min(body.bottom())),
+    );
+    let page = crate::ui_view_models::active_workbench_page(app);
+    super::render_guided_question_card(frame, card_area, page, &question);
 }
 
 fn presentation_header_lines(

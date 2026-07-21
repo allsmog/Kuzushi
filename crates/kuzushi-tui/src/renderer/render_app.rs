@@ -120,9 +120,12 @@ fn render_lower_chrome(
 
 fn render_input_surface(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if let Some(question) = app.guided_scan_question_model() {
-        let page = crate::ui_view_models::active_workbench_page(app);
-        crate::renderer::render_guided_question(frame, area, page, &question);
-        return;
+        let full = frame.area();
+        if !crate::renderer::guided_question_hosted_in_body(full.width, full.height) {
+            let page = crate::ui_view_models::active_workbench_page(app);
+            crate::renderer::render_guided_question(frame, area, page, &question);
+            return;
+        }
     }
     if render_operator_question_input(frame, area, app) {
         return;
@@ -217,7 +220,10 @@ pub(crate) const PROMPT_HEIGHT: u16 = 1;
 
 fn prompt_height(app: &ShellApp, area: Rect) -> u16 {
     if let Some(question) = app.guided_scan_question_model() {
-        return crate::renderer::guided_question_height(area, &question);
+        if !crate::renderer::guided_question_hosted_in_body(area.width, area.height) {
+            return crate::renderer::guided_question_height(area, &question);
+        }
+        return PROMPT_HEIGHT;
     }
     if let Some(height) = operator_question_input_height(app, area) {
         return height;
