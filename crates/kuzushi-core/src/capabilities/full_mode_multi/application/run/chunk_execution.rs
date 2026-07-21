@@ -5,9 +5,10 @@ use crate::capabilities::full_mode_multi::application::chunk_prompt::{
 use crate::capabilities::full_mode_multi::domain::{ChunkPlan, FullModeConfig};
 use crate::findings::Finding;
 use crate::runtime::{AgentQueryRequest, RuntimeCostReport};
+use crate::semantic_cache::SemanticCache;
 use crate::spend::{Operation, SpendLimiter, SpendTicket};
 use crate::structured_output::{
-    query_required_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
+    query_cached_structured_json_with_cost, CostedStructuredJson, StructuredJsonContract,
     StructuredOutputError,
 };
 use anyhow::{Context, Result};
@@ -17,6 +18,9 @@ pub(super) struct FullModeChunkResult {
     pub(super) findings: Vec<Finding>,
     pub(super) cost_usd: Option<f64>,
     pub(super) observed_cost_usd: f64,
+    /// True when the semantic cache replayed a previous run's response for
+    /// this exact chunk content, so no provider call was made.
+    pub(super) from_cache: bool,
     /// Full anyhow chain string for a failed chunk. `None` for successes.
     /// The dispatcher keeps the first one and surfaces it to the operator
     /// so we don't repeat the "27 chunks failed, no diagnostic info" trap.
@@ -30,10 +34,11 @@ pub(super) fn run_full_mode_chunk(
     chunk: &ChunkPlan,
     model: &str,
     system_prompt: &str,
+    cache: Option<&SemanticCache>,
 ) -> Result<FullModeChunkResult> {
     let prompt = render_chunk_prompt(&cfg.workspace_root, chunk)?;
     let ticket = reserve_full_mode_chunk_budget(spend, cfg.deposit_usd_per_chunk)?;
-    let result = query_full_mode_chunk(runtime, cfg, model, system_prompt, prompt);
+    let result = query_full_mode_chunk(runtime, cfg, model, system_prompt, prompt, cache);
     let cost = chunk_cost_report(&result)?;
     settle_full_mode_chunk_budget(spend, ticket, cost.exact_usd())?;
     let mut chunk_result = chunk_result_from_query(result, cost);
@@ -86,7 +91,8 @@ fn query_full_mode_chunk(
     model: &str,
     system_prompt: &str,
     prompt: String,
-) -> Result<CostedStructuredJson<Vec<Finding>>> {
+    cache: Option<&SemanticCache>,
+) -> Result<(CostedStructuredJson<Vec<Finding>>, bool)> {
     let request = AgentQueryRequest::new(
         model.to_string(),
         cfg.workspace_root.clone(),
@@ -94,7 +100,8 @@ fn query_full_mode_chunk(
         prompt,
     );
 
-    query_required_structured_json_with_cost(
+    query_cached_structured_json_with_cost(
+        cache,
         runtime,
         request,
         StructuredJsonContract::new(
@@ -104,13 +111,14 @@ fn query_full_mode_chunk(
         ),
         parse_chunk_value,
     )
+    .map(|cached| (cached.costed, cached.from_cache))
 }
 
 fn chunk_cost_report(
-    result: &Result<CostedStructuredJson<Vec<Finding>>>,
+    result: &Result<(CostedStructuredJson<Vec<Finding>>, bool)>,
 ) -> Result<RuntimeCostReport> {
     match result {
-        Ok(costed) => costed.cost_report(),
+        Ok((costed, _)) => costed.cost_report(),
         Err(error) => Ok(error
             .downcast_ref::<StructuredOutputError>()
             .map(StructuredOutputError::cost_report)
@@ -130,15 +138,16 @@ fn settle_full_mode_chunk_budget(
 }
 
 fn chunk_result_from_query(
-    result: Result<CostedStructuredJson<Vec<Finding>>>,
+    result: Result<(CostedStructuredJson<Vec<Finding>>, bool)>,
     cost: RuntimeCostReport,
 ) -> FullModeChunkResult {
     match result {
-        Ok(costed) => FullModeChunkResult {
+        Ok((costed, from_cache)) => FullModeChunkResult {
             succeeded: true,
             findings: costed.value,
             cost_usd: cost.exact_usd(),
             observed_cost_usd: cost.observed_usd(),
+            from_cache,
             error: None,
         },
         Err(error) => FullModeChunkResult {
@@ -146,6 +155,7 @@ fn chunk_result_from_query(
             findings: Vec::new(),
             cost_usd: cost.exact_usd(),
             observed_cost_usd: cost.observed_usd(),
+            from_cache: false,
             // `{:#}` walks the full anyhow chain so the dispatcher's
             // operator-facing summary keeps the bridge / provider cause
             // (e.g. "Anthropic API 429" or "Cannot find package

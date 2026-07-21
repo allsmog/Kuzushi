@@ -421,6 +421,150 @@ mod tests {
         assert_eq!(report.chunks_dispatched, 0);
     }
 
+    #[test]
+    fn rerunning_an_unchanged_scan_replays_every_chunk_from_cache() {
+        let _lock = crate::test_env::semantic_cache_env_lock();
+        let body = "// padding\n".repeat(2_000);
+        let tmp = make_workspace(&[("src/a.c", &body), ("src/b.c", &body)]);
+        // Enough scripted responses for the FIRST run only: a second live
+        // call on any chunk would exhaust the script and fail the chunk.
+        let runtime_inner = ScriptedRuntimeMixed::new(vec![
+            ScriptedItem::Costed("[]".to_string(), 0.4),
+            ScriptedItem::Costed(
+                r#"[{"file":"src/b.c","line":7,"function":"g","severity":"high","cwe":[],"title":"t","rationale":"r"}]"#.to_string(),
+                0.4,
+            ),
+        ]);
+        let runtime = RoutedRuntime::new(
+            runtime_inner as Arc<dyn AgentRuntime>,
+            Arc::new(router_with_full_mode_role("anthropic:claude-haiku-4-5")),
+            None,
+        );
+        let cfg = FullModeConfig {
+            workspace_root: tmp.path().to_path_buf(),
+            max_tokens_per_chunk: 4_000,
+            ..Default::default()
+        };
+
+        let first = run(&runtime, None, &cfg).unwrap();
+        assert_eq!(first.chunks_from_cache, 0);
+        assert!((first.observed_cost_usd - 0.8).abs() < 1e-9);
+
+        let second = run(&runtime, None, &cfg).unwrap();
+
+        assert_eq!(second.chunks_dispatched, first.chunks_dispatched);
+        assert_eq!(second.chunks_from_cache, second.chunks_dispatched);
+        assert_eq!(second.chunks_failed, 0);
+        assert_eq!(second.findings.len(), first.findings.len());
+        assert_eq!(second.cost_usd, Some(0.0));
+        let summary = report_to_tool_json(&second)["summary"].as_str().unwrap().to_string();
+        assert!(summary.contains("replayed from cache"), "{summary}");
+    }
+
+    #[test]
+    fn editing_one_file_only_pays_for_the_chunks_the_edit_touched() {
+        let _lock = crate::test_env::semantic_cache_env_lock();
+        let body = "// padding\n".repeat(2_000);
+        let tmp = make_workspace(&[("src/a.c", &body), ("src/b.c", &body)]);
+        // First run: two chunks. Second run: only the edited chunk goes live.
+        let runtime_inner = ScriptedRuntimeMixed::new(vec![
+            ScriptedItem::Ok("[]".to_string()),
+            ScriptedItem::Ok("[]".to_string()),
+            ScriptedItem::Ok(
+                r#"[{"file":"src/b.c","line":1,"function":"f","severity":"low","cwe":[],"title":"new","rationale":"r"}]"#.to_string(),
+            ),
+        ]);
+        let runtime = RoutedRuntime::new(
+            runtime_inner as Arc<dyn AgentRuntime>,
+            Arc::new(router_with_full_mode_role("anthropic:claude-haiku-4-5")),
+            None,
+        );
+        let cfg = FullModeConfig {
+            workspace_root: tmp.path().to_path_buf(),
+            max_tokens_per_chunk: 4_000,
+            ..Default::default()
+        };
+        let first = run(&runtime, None, &cfg).unwrap();
+        assert_eq!(first.chunks_dispatched, 2);
+
+        fs::write(tmp.path().join("src/b.c"), format!("{body}// edited\n")).unwrap();
+        let second = run(&runtime, None, &cfg).unwrap();
+
+        assert_eq!(second.chunks_dispatched, 2);
+        assert_eq!(second.chunks_from_cache, 1);
+        assert_eq!(second.findings.len(), 1);
+        assert_eq!(second.findings[0].file_path, "src/b.c");
+    }
+
+    #[test]
+    fn prefilter_routes_low_risk_chunks_away_from_the_deep_scan() {
+        let _lock = crate::test_env::semantic_cache_env_lock();
+        let body = "// padding\n".repeat(2_000);
+        let tmp = make_workspace(&[("src/a.c", &body), ("src/b.c", &body)]);
+        // Call order: chunk 0 prefilter (low -> skip), chunk 1 prefilter
+        // (high), chunk 1 deep scan.
+        let runtime_inner = ScriptedRuntimeMixed::new(vec![
+            ScriptedItem::Costed(r#"{"score": 1, "reason": "pure padding"}"#.to_string(), 0.01),
+            ScriptedItem::Costed(r#"{"score": 9, "reason": "parses input"}"#.to_string(), 0.01),
+            ScriptedItem::Costed(
+                r#"[{"file":"src/b.c","line":2,"function":"f","severity":"high","cwe":[],"title":"t","rationale":"r"}]"#.to_string(),
+                0.5,
+            ),
+        ]);
+        let runtime = RoutedRuntime::new(
+            runtime_inner as Arc<dyn AgentRuntime>,
+            Arc::new(router_with_full_mode_role("anthropic:claude-haiku-4-5")),
+            None,
+        );
+        let cfg = FullModeConfig {
+            workspace_root: tmp.path().to_path_buf(),
+            max_tokens_per_chunk: 4_000,
+            prefilter_model: Some("anthropic:claude-haiku-4-5".to_string()),
+            ..Default::default()
+        };
+
+        let report = run(&runtime, None, &cfg).unwrap();
+
+        assert_eq!(report.chunks_dispatched, 1);
+        assert_eq!(report.prefiltered_chunks.len(), 1);
+        assert_eq!(report.prefiltered_chunks[0].score, 1);
+        assert_eq!(report.prefiltered_chunks[0].reason, "pure padding");
+        assert_eq!(report.chunks_failed, 0);
+        assert_eq!(report.findings.len(), 1);
+        // Prefilter spend still lands in the run total.
+        assert!((report.observed_cost_usd - 0.52).abs() < 1e-9);
+        let summary = report_to_tool_json(&report)["summary"].as_str().unwrap().to_string();
+        assert!(summary.contains("1 chunk prefiltered out"), "{summary}");
+    }
+
+    #[test]
+    fn legacy_report_json_without_cache_fields_still_deserializes() {
+        let legacy = serde_json::json!({
+            "findings": [],
+            "plan": {"chunks": [], "total_files": 0, "total_bytes": 0, "total_tokens": 0},
+            "chunks_dispatched": 3,
+            "chunks_failed": 0,
+            "dry_run": false
+        });
+        let report: FullModeReport = serde_json::from_value(legacy).unwrap();
+        assert_eq!(report.chunks_from_cache, 0);
+        assert!(report.prefiltered_chunks.is_empty());
+    }
+
+    #[test]
+    fn legacy_config_json_defaults_to_reusing_cached_chunks() {
+        let legacy = serde_json::json!({
+            "workspace_root": ".",
+            "max_tokens_per_chunk": 12000,
+            "deposit_usd_per_chunk": 2.0,
+            "language": "c",
+            "dry_run": false
+        });
+        let cfg: FullModeConfig = serde_json::from_value(legacy).unwrap();
+        assert!(cfg.reuse_cached_chunks);
+        assert_eq!(cfg.prefilter_model, None);
+    }
+
     // -- Test runtime helpers ------------------------------------------------
 
     struct PanickingRuntime;

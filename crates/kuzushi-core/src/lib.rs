@@ -14,7 +14,7 @@ public_modules!(
     license_scan, modules, offense, options, patch, plugin_sandbox, pr_comment, prompt_stack, prompts, proof, query, recon,
     remediation, report, repository_inventory, run_artifacts, run_lifecycle,
     session_transcript,
-    run_trace, runbooks, runtime, sbom_scan, scan, scanners, secret_scan, semgrep_rule_synthesis, source_span, spend, static_context,
+    run_trace, runbooks, runtime, sbom_scan, scan, scanners, secret_scan, semantic_cache, semgrep_rule_synthesis, source_span, spend, static_context,
     static_evidence, static_narrative, static_proof_validator, static_ranking, static_registry, storage_v3,
     strategy, suppressions, systems_hunt, text, threat_leads, threat_model, triage, variant_ndiff, verification, verify,
     workflow_attempts,

@@ -13,7 +13,11 @@ pub(crate) fn run_x_ray(
     emit_x_ray_progress(ctx, parent_step, "prompt · build repository x-ray request");
     let prompt = build_x_ray_prompt(&input);
     let _agent_scope = begin_x_ray_agent_scope(ctx, parent_step);
-    let content = query_required_structured_json_with_cost(
+    // The x-ray prompt embeds the whole inventory it reasons over, so an
+    // unchanged repository replays the understanding pass for free.
+    let cache = crate::semantic_cache::SemanticCache::open_for_target(&input.target);
+    let content = crate::structured_output::query_cached_structured_json_with_cost(
+        cache.as_ref(),
         runtime,
         AgentQueryRequest::new(
             input.model.clone(),
@@ -23,7 +27,8 @@ pub(crate) fn run_x_ray(
         ),
         StructuredJsonContract::new("x-ray:run", "XRayArtifactContent", x_ray_artifact_schema()),
         XRayArtifactContent::from_value_owned,
-    )?;
+    )?
+    .costed;
     drop(_agent_scope);
     let cost = content.cost_report()?;
     finish_x_ray_run(&input, ctx, parent_step, content.value, cost)

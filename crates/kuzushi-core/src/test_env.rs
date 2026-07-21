@@ -25,6 +25,15 @@ pub(crate) fn mcp_clang_env_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|error| error.into_inner())
 }
 
+/// One lock for `KUZUSHI_SEMANTIC_CACHE`: the kill-switch test flips it
+/// process-wide, and every cache-consuming test must not observe the flip.
+pub(crate) fn semantic_cache_env_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
 /// One lock for the config-bootstrap env family (`KUZUSHI_*` overrides,
 /// `HOME`): `load_config` reads these on many parallel test threads, so
 /// mutators must not interleave.

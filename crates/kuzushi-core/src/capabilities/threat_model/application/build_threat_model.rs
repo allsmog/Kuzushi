@@ -383,7 +383,11 @@ pub(crate) fn query_threat_model_document(
     prompt: String,
 ) -> Result<crate::structured_output::CostedStructuredJson<Value>> {
     let _llm_scope = begin_threat_model_llm_scope(ctx, verb);
-    let costed = crate::structured_output::query_required_structured_json_with_cost(
+    // The prompt embeds every input (source bundle, grounding, previous
+    // document), so an unchanged workspace replays the synthesis for free.
+    let cache = crate::semantic_cache::SemanticCache::open_for_target(&input.target);
+    let costed = crate::structured_output::query_cached_structured_json_with_cost(
+        cache.as_ref(),
         runtime,
         AgentQueryRequest::new(
             input.model.clone(),
@@ -397,7 +401,8 @@ pub(crate) fn query_threat_model_document(
             threat_model_document_schema(),
         ),
         |raw| validate_threat_model_raw(raw, &input.methodology),
-    )?;
+    )?
+    .costed;
     drop(_llm_scope);
     Ok(costed)
 }

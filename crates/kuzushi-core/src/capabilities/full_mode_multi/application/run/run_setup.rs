@@ -13,6 +13,8 @@ pub(super) fn dry_run_report(plan: FullModePlan) -> FullModeReport {
         plan,
         chunks_dispatched: 0,
         chunks_failed: 0,
+        chunks_from_cache: 0,
+        prefiltered_chunks: Vec::new(),
         failed_chunk_errors: Vec::new(),
         cost_usd: Some(0.0),
         observed_cost_usd: 0.0,

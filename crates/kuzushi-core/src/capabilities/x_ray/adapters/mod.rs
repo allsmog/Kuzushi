@@ -11,7 +11,7 @@ use crate::capabilities::x_ray::application::*;
 use crate::capabilities::x_ray::domain::*;
 use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::structured_output::{query_required_structured_json_with_cost, StructuredJsonContract};
+use crate::structured_output::StructuredJsonContract;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::fs;

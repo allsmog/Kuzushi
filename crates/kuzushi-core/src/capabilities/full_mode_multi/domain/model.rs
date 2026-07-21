@@ -86,7 +86,34 @@ pub struct FullModeConfig {
     /// lifetime ledger ceilings rather than per-run ones.
     #[serde(default)]
     pub run_budget_usd: Option<f64>,
+    /// Replay a chunk's stored response when its exact content, prompts,
+    /// schema, and model were scanned before (semantic cache). Re-running a
+    /// scan after a small diff then only pays for the chunks the diff
+    /// touched. Set false to force every chunk live.
+    #[serde(default = "default_reuse_cached_chunks")]
+    pub reuse_cached_chunks: bool,
+    /// Optional cheap-tier router: before dispatching a chunk to the
+    /// full-strength model, ask this model to score the chunk's security
+    /// relevance 0–10; chunks scoring below `prefilter_skip_below` are
+    /// recorded in `prefiltered_chunks` instead of deep-read. Off when
+    /// unset.
+    #[serde(default)]
+    pub prefilter_model: Option<String>,
+    /// Score threshold for the prefilter (default
+    /// [`DEFAULT_PREFILTER_SKIP_BELOW`]): chunks scoring strictly below it
+    /// skip the deep scan.
+    #[serde(default)]
+    pub prefilter_skip_below: Option<u8>,
 }
+
+fn default_reuse_cached_chunks() -> bool {
+    true
+}
+
+pub const DEFAULT_PREFILTER_SKIP_BELOW: u8 = 3;
+
+/// Per-chunk budget reserved for one cheap-tier prefilter call.
+pub const DEFAULT_PREFILTER_DEPOSIT_USD: f64 = 0.25;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -110,6 +137,9 @@ impl Default for FullModeConfig {
             auto_triage_max_steps: None,
             auto_triage_deposit_usd: None,
             run_budget_usd: None,
+            reuse_cached_chunks: true,
+            prefilter_model: None,
+            prefilter_skip_below: None,
         }
     }
 }
@@ -176,12 +206,30 @@ pub struct FullModePlan {
     pub total_tokens: usize,
 }
 
+/// A chunk the cheap-tier router scored below the deep-scan threshold.
+/// Kept in the report so skipped coverage is visible, auditable, and
+/// re-scannable (`failedChunkIds`-style) rather than silent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrefilteredChunk {
+    pub chunk_id: u32,
+    pub score: u8,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FullModeReport {
     pub findings: Vec<Finding>,
     pub plan: FullModePlan,
     pub chunks_dispatched: u32,
     pub chunks_failed: u32,
+    /// How many dispatched chunks were served from the semantic cache
+    /// instead of a paid model call.
+    #[serde(default)]
+    pub chunks_from_cache: u32,
+    /// Chunks the prefilter routed away from the deep scan. Empty when the
+    /// prefilter is off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prefiltered_chunks: Vec<PrefilteredChunk>,
     #[serde(default)]
     pub failed_chunk_errors: Vec<FailedChunkError>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

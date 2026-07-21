@@ -34,7 +34,11 @@ fn query_gap_fill(
     prompt: String,
 ) -> Result<crate::structured_output::CostedStructuredJson<Value>> {
     let _scope = begin_gap_fill_scope(ctx, verb, gap_count);
-    crate::structured_output::query_required_structured_json_with_cost(
+    // The prompt embeds the full gap list, so an unchanged coverage state
+    // replays the STRIDE pass for free.
+    let cache = crate::semantic_cache::SemanticCache::open_for_target(&input.target);
+    crate::structured_output::query_cached_structured_json_with_cost(
+        cache.as_ref(),
         runtime,
         AgentQueryRequest::new(
             input.model.clone(),
@@ -45,6 +49,7 @@ fn query_gap_fill(
         StructuredJsonContract::new("threat-model:build", "ThreatModelGapFill", gap_fill_schema()),
         Ok,
     )
+    .map(|cached| cached.costed)
 }
 
 fn begin_gap_fill_scope(

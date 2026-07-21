@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 #[cfg(test)]
 mod bounded_tests;
+mod cached_query;
 mod diagnostics;
 mod finding_output;
 mod parse_json_value_from_agent_text;
@@ -11,6 +12,7 @@ mod structured_json_contract;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use cached_query::{query_cached_structured_json_with_cost, CachedStructuredJson};
 use diagnostics::{build_repair_prompt, repair_failure_error, truncation_error};
 #[cfg(test)]
 use diagnostics::{MAX_REPAIR_PROMPT_BYTES, MAX_STRUCTURED_DIAGNOSTIC_BYTES};

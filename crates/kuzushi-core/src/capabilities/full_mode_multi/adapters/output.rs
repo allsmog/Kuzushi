@@ -10,6 +10,8 @@ pub fn report_to_tool_json(report: &FullModeReport) -> serde_json::Value {
         "plan": report.plan,
         "chunksDispatched": report.chunks_dispatched,
         "chunksFailed": report.chunks_failed,
+        "chunksFromCache": report.chunks_from_cache,
+        "prefilteredChunks": report.prefiltered_chunks,
         "failedChunkErrors": report.failed_chunk_errors,
         "dryRun": report.dry_run,
         "firstChunkError": report.first_chunk_error,
@@ -48,8 +50,33 @@ fn cost_claim(report: &FullModeReport) -> serde_json::Map<String, serde_json::Va
 fn full_mode_summary_text(report: &FullModeReport) -> String {
     let mut parts = vec![geometry_phrase(report)];
     parts.extend(findings_phrase(report));
+    parts.extend(cached_chunks_phrase(report));
+    parts.extend(prefiltered_chunks_phrase(report));
     parts.extend(failed_chunks_phrase(report));
     parts.join(" · ")
+}
+
+/// Cache replays change what the run cost, so the operator sees them.
+fn cached_chunks_phrase(report: &FullModeReport) -> Option<String> {
+    if report.dry_run || report.chunks_from_cache == 0 {
+        return None;
+    }
+    let plural = if report.chunks_from_cache == 1 { "" } else { "s" };
+    Some(format!(
+        "{} chunk{plural} replayed from cache",
+        report.chunks_from_cache
+    ))
+}
+
+/// Prefiltered chunks are skipped coverage — a visible routing decision,
+/// never silent state.
+fn prefiltered_chunks_phrase(report: &FullModeReport) -> Option<String> {
+    if report.dry_run || report.prefiltered_chunks.is_empty() {
+        return None;
+    }
+    let count = report.prefiltered_chunks.len();
+    let plural = if count == 1 { "" } else { "s" };
+    Some(format!("{count} chunk{plural} prefiltered out"))
 }
 
 fn geometry_phrase(report: &FullModeReport) -> String {
@@ -178,6 +205,8 @@ fn full_mode_summary(report: &FullModeReport) -> serde_json::Value {
         "severityCounts": severity_counts_json(&report.findings),
         "chunksDispatched": report.chunks_dispatched,
         "chunksFailed": report.chunks_failed,
+        "chunksFromCache": report.chunks_from_cache,
+        "prefilteredChunks": report.prefiltered_chunks,
         "failedChunkErrors": report.failed_chunk_errors,
         "costUsd": report.cost_usd,
         "observedCostUsd": report.observed_cost_usd,
@@ -203,6 +232,8 @@ mod tests {
                 total_tokens: 32,
             },
             chunks_dispatched: 0,
+            chunks_from_cache: 0,
+            prefiltered_chunks: Vec::new(),
             chunks_failed: 0,
             failed_chunk_errors: Vec::new(),
             cost_usd: Some(0.0),
@@ -386,6 +417,8 @@ mod tests {
                 total_tokens: 32,
             },
             chunks_dispatched: 7,
+            chunks_from_cache: 0,
+            prefiltered_chunks: Vec::new(),
             chunks_failed: 0,
             failed_chunk_errors: Vec::new(),
             cost_usd: Some(0.0),

@@ -42,6 +42,7 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "code_nav/ripgrep/ripgrep_binary.rs", // KUZUSHI_RIPGREP_BIN
     "modules/builtins/with_v2_builtins/builtin_registration.rs", // adapter env presence probe
     "modules/plugin_resolution/mod.rs",  // plugin-root env; tool input outranks
+    "semantic_cache/mod.rs", // KUZUSHI_SEMANTIC_CACHE kill switch (debug toggle)
     // Provenance / characterization.
     "run_artifacts/run_reproducibility_metadata.rs", // env fingerprint on run summaries
     "run_lifecycle/persistence/writer_characterization.rs", // ignored-test baseline input

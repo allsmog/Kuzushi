@@ -23,7 +23,26 @@ pub(crate) fn full_mode_config_from_input(
             .map(|v| v as u32),
         auto_triage_deposit_usd: input.get("autoTriageDepositUsd").and_then(Value::as_f64),
         run_budget_usd: full_mode_run_budget(input)?,
+        reuse_cached_chunks: input
+            .get("reuseCachedChunks")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        prefilter_model: input
+            .get("prefilterModel")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        prefilter_skip_below: full_mode_prefilter_skip_below(input)?,
     })
+}
+
+fn full_mode_prefilter_skip_below(input: &Value) -> Result<Option<u8>> {
+    let Some(raw) = input.get("prefilterSkipBelow") else {
+        return Ok(None);
+    };
+    let threshold = raw.as_u64().filter(|value| *value <= 10).ok_or_else(|| {
+        anyhow::anyhow!("full-mode:hunt prefilterSkipBelow must be an integer 0-10, got {raw}")
+    })?;
+    Ok(Some(threshold as u8))
 }
 
 fn full_mode_run_budget(input: &Value) -> Result<Option<f64>> {

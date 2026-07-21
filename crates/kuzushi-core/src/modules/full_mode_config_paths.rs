@@ -255,6 +255,8 @@ mod persist_full_mode_report_tests {
                 total_tokens: 16,
             },
             chunks_dispatched: 1,
+            chunks_from_cache: 0,
+            prefiltered_chunks: Vec::new(),
             chunks_failed: 0,
             failed_chunk_errors: Vec::new(),
             cost_usd: Some(0.0),

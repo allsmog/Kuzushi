@@ -1,15 +1,17 @@
 use super::plan::plan;
 use crate::agent_router::RoutedRuntime;
 use crate::capabilities::full_mode_multi::domain::{
-    FailedChunkError, FullModeConfig, FullModePlan, FullModeReport,
+    FailedChunkError, FullModeConfig, FullModePlan, FullModeReport, PrefilteredChunk,
 };
 use crate::runtime::RuntimeCost;
+use crate::semantic_cache::SemanticCache;
 use crate::spend::SpendLimiter;
 use anyhow::{Context, Result};
 
 mod chunk_execution;
 #[cfg(test)]
 pub(crate) use chunk_execution::restore_absolute_lines;
+mod prefilter;
 mod run_setup;
 
 pub fn run(
@@ -24,8 +26,25 @@ pub fn run(
     }
 
     let model = run_setup::resolve_full_mode_model(runtime)?;
+    if let Some(prefilter_model) = &cfg.prefilter_model {
+        crate::runtime::validate_model_spec(prefilter_model)
+            .context("full_mode_multi: invalid prefilter model")?;
+    }
     let system_prompt = run_setup::system_prompt_for_language(cfg.language);
-    dispatch_full_mode_chunks(runtime, spend, cfg, plan, &model, &system_prompt)
+    // Cache trouble degrades to every-chunk-live, never to a failed scan.
+    let cache = cfg
+        .reuse_cached_chunks
+        .then(|| SemanticCache::open_for_target(&cfg.workspace_root))
+        .flatten();
+    dispatch_full_mode_chunks(
+        runtime,
+        spend,
+        cfg,
+        plan,
+        &model,
+        &system_prompt,
+        cache.as_ref(),
+    )
 }
 
 fn dispatch_full_mode_chunks(
@@ -35,6 +54,7 @@ fn dispatch_full_mode_chunks(
     plan: FullModePlan,
     model: &str,
     system_prompt: &str,
+    cache: Option<&SemanticCache>,
 ) -> Result<FullModeReport> {
     let mut chunks = FullModeChunkAccumulator::default();
     // Once set, no further chunk is dispatched; every remaining chunk is
@@ -52,8 +72,40 @@ fn dispatch_full_mode_chunks(
             chunks.record_failure(chunk.id, Some(reason.clone()));
             continue;
         }
-        match chunk_execution::run_full_mode_chunk(runtime, spend, cfg, chunk, model, system_prompt)
-        {
+        if let Some(prefilter_model) = &cfg.prefilter_model {
+            match prefilter::prefilter_full_mode_chunk(
+                runtime,
+                spend,
+                cfg,
+                chunk,
+                prefilter_model,
+                cache,
+            ) {
+                Ok(outcome) => {
+                    chunks.record_ancillary_cost(outcome.cost_usd, outcome.observed_cost_usd)?;
+                    if let Some(skipped) = outcome.skip {
+                        chunks.record_prefiltered(skipped);
+                        continue;
+                    }
+                }
+                Err(error) if is_spend_cap_exhausted(&error) => {
+                    let reason = format!("not dispatched: {error:#}");
+                    chunks.record_failure(chunk.id, Some(reason.clone()));
+                    stop_reason = Some(reason);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        match chunk_execution::run_full_mode_chunk(
+            runtime,
+            spend,
+            cfg,
+            chunk,
+            model,
+            system_prompt,
+            cache,
+        ) {
             Ok(chunk_result) => chunks.record(chunk.id, chunk_result)?,
             Err(error) if is_spend_cap_exhausted(&error) => {
                 let reason = format!("not dispatched: {error:#}");
@@ -111,7 +163,10 @@ mod graceful_stop_tests {
 
     #[test]
     fn no_budget_never_stops() {
-        assert_eq!(run_budget_stop_reason(&config_with_budget(None), 999.0), None);
+        assert_eq!(
+            run_budget_stop_reason(&config_with_budget(None), 999.0),
+            None
+        );
     }
 
     #[test]
@@ -126,8 +181,14 @@ mod graceful_stop_tests {
     fn crossing_the_budget_stops_with_an_actionable_reason() {
         let reason = run_budget_stop_reason(&config_with_budget(Some(2.5)), 2.61)
             .expect("crossing the run budget must stop dispatch");
-        assert!(reason.contains("$2.50"), "reason should name the budget: {reason}");
-        assert!(reason.contains("$2.61"), "reason should name observed cost: {reason}");
+        assert!(
+            reason.contains("$2.50"),
+            "reason should name the budget: {reason}"
+        );
+        assert!(
+            reason.contains("$2.61"),
+            "reason should name observed cost: {reason}"
+        );
     }
 
     #[test]
@@ -153,6 +214,8 @@ struct FullModeChunkAccumulator {
     findings: Vec<crate::findings::Finding>,
     dispatched: u32,
     failed: u32,
+    from_cache: u32,
+    prefiltered: Vec<PrefilteredChunk>,
     failed_chunk_errors: Vec<FailedChunkError>,
     cost_usd: f64,
     unresolved_provider_spend: bool,
@@ -160,13 +223,12 @@ struct FullModeChunkAccumulator {
 }
 
 impl FullModeChunkAccumulator {
-    fn record(&mut self, chunk_id: u32, result: chunk_execution::FullModeChunkResult) -> Result<()> {
-        self.cost_usd = RuntimeCost::checked_sum(
-            [self.cost_usd, result.observed_cost_usd],
-            "full-mode observed chunk fan-out cost",
-        )?
-        .usd();
-        self.unresolved_provider_spend |= result.cost_usd.is_none();
+    fn record(
+        &mut self,
+        chunk_id: u32,
+        result: chunk_execution::FullModeChunkResult,
+    ) -> Result<()> {
+        self.record_ancillary_cost(result.cost_usd, result.observed_cost_usd)?;
         if result.succeeded {
             self.record_success(result);
             return Ok(());
@@ -176,9 +238,33 @@ impl FullModeChunkAccumulator {
         Ok(())
     }
 
+    /// Folds a call's cost into the run total without recording a chunk
+    /// outcome — used directly for prefilter calls, whose spend must count
+    /// toward the run budget even when the chunk never deep-scans.
+    fn record_ancillary_cost(
+        &mut self,
+        cost_usd: Option<f64>,
+        observed_cost_usd: f64,
+    ) -> Result<()> {
+        self.cost_usd = RuntimeCost::checked_sum(
+            [self.cost_usd, observed_cost_usd],
+            "full-mode observed chunk fan-out cost",
+        )?
+        .usd();
+        self.unresolved_provider_spend |= cost_usd.is_none();
+        Ok(())
+    }
+
     fn record_success(&mut self, result: chunk_execution::FullModeChunkResult) {
         self.dispatched += 1;
+        if result.from_cache {
+            self.from_cache += 1;
+        }
         self.findings.extend(result.findings);
+    }
+
+    fn record_prefiltered(&mut self, skipped: PrefilteredChunk) {
+        self.prefiltered.push(skipped);
     }
 
     fn record_failure(&mut self, chunk_id: u32, error: Option<String>) {
@@ -194,6 +280,8 @@ impl FullModeChunkAccumulator {
             findings: self.findings,
             chunks_dispatched: self.dispatched,
             chunks_failed: self.failed,
+            chunks_from_cache: self.from_cache,
+            prefiltered_chunks: self.prefiltered,
             failed_chunk_errors: self.failed_chunk_errors,
             cost_usd: (!self.unresolved_provider_spend).then_some(self.cost_usd),
             observed_cost_usd: self.cost_usd,
